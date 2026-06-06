@@ -1,0 +1,1 @@
+{"id": "golden-1", "desc": "簡單人物一致性檢查", "input": "角色夜星在第十九章的狀態應與 data/canon_db/active_engine.md 保持一致", "expected": "一致"}

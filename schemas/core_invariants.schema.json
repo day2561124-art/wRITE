@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Core Invariants",
+  "type": "object",
+  "properties": {
+    "single_source_of_truth": { "type": "boolean" },
+    "active_engine_locked": { "type": "boolean" },
+    "snapshot_required_before_high_risk_write": { "type": "boolean" },
+    "transaction_lock_required": { "type": "boolean" }
+  },
+  "required": ["single_source_of_truth", "snapshot_required_before_high_risk_write"]
+}

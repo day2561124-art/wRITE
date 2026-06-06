@@ -1,0 +1,1 @@
+{"id": "golden-2", "desc": "正式階段單源裁定測試", "input": "檢查角色正式階段是否遵循 docs/core_invariants.md 中裁定", "expected": "遵循"}
