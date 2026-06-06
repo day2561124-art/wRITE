@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "armed-academy-fiction-engine": {
+      "command": "node",
+      "args": [
+        "<PROJECT_ROOT>\\server\\src\\mcp-server.mjs"
+      ],
+      "cwd": "<PROJECT_ROOT>"
+    }
+  }
+}
