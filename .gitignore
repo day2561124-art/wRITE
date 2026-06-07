@@ -1,0 +1,3 @@
+# Ignore generated outputs and runtime logs
+outputs/
+data/outputs/logs/
