@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>武裝學院工作台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">武</div>
+          <div>
+            <strong>武裝學院</strong>
+            <span>創作工作台</span>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="主要工作區">
+          <button class="nav-item is-active" data-view="overview" type="button">
+            <span class="nav-symbol" aria-hidden="true">⌂</span>
+            <span>總覽</span>
+          </button>
+          <button class="nav-item" data-view="compose" type="button">
+            <span class="nav-symbol" aria-hidden="true">✎</span>
+            <span>起稿</span>
+          </button>
+          <button class="nav-item" data-view="review" type="button">
+            <span class="nav-symbol" aria-hidden="true">✓</span>
+            <span>驗稿</span>
+          </button>
+          <button class="nav-item" data-view="library" type="button">
+            <span class="nav-symbol" aria-hidden="true">▤</span>
+            <span>資料庫</span>
+          </button>
+          <button class="nav-item" data-view="activity" type="button">
+            <span class="nav-symbol" aria-hidden="true">≡</span>
+            <span>紀錄</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span>本機模式</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">ARMED ACADEMY</p>
+            <h1 id="view-title">總覽</h1>
+          </div>
+          <div class="topbar-actions">
+            <span id="last-sync" class="last-sync">尚未同步</span>
+            <button id="refresh-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">
+              <span aria-hidden="true">↻</span>
+            </button>
+            <button id="validate-button" class="button secondary" type="button">執行檢查</button>
+          </div>
+        </header>
+
+        <div id="loading-bar" class="loading-bar" hidden></div>
+
+        <section class="view is-active" data-view-panel="overview">
+          <div class="source-status-band">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">SOURCE STATUS</p>
+                <h2>正式資料</h2>
+              </div>
+              <span id="source-summary" class="status-summary">載入中</span>
+            </div>
+            <div id="source-grid" class="source-grid"></div>
+          </div>
+
+          <div class="overview-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>快速操作</h2>
+              </div>
+              <div class="quick-actions">
+                <button class="quick-action" data-go-view="compose" type="button">
+                  <span class="quick-symbol" aria-hidden="true">✎</span>
+                  <strong>準備起稿</strong>
+                  <span>下一章正文</span>
+                </button>
+                <button class="quick-action" data-go-view="review" type="button">
+                  <span class="quick-symbol" aria-hidden="true">✓</span>
+                  <strong>正式驗稿</strong>
+                  <span>候選稿檢查</span>
+                </button>
+                <button class="quick-action" data-action="build-context" type="button">
+                  <span class="quick-symbol" aria-hidden="true">↻</span>
+                  <strong>重建上下文</strong>
+                  <span>更新資料包</span>
+                </button>
+                <button class="quick-action" data-go-view="library" type="button">
+                  <span class="quick-symbol" aria-hidden="true">▤</span>
+                  <strong>檢視資料</strong>
+                  <span>正式來源</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>最新產物</h2>
+              </div>
+              <div id="output-list" class="output-list"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>資料累積</h2>
+            </div>
+            <div id="count-strip" class="count-strip"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="compose">
+          <div class="workspace-grid">
+            <form id="pipeline-form" class="form-surface">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">PIPELINE</p>
+                  <h2>任務提示</h2>
+                </div>
+                <div id="mode-control" class="segmented-control" aria-label="任務模式">
+                  <button class="is-active" data-mode="next-chapter" type="button">起稿</button>
+                  <button data-mode="proofread" type="button">驗稿</button>
+                  <button data-mode="settle" type="button">結算</button>
+                  <button data-mode="debug" type="button">除錯</button>
+                </div>
+              </div>
+              <input id="pipeline-mode" type="hidden" value="next-chapter">
+
+              <label class="field">
+                <span>檢索關鍵字</span>
+                <input id="pipeline-query" name="query" type="text" maxlength="10000" value="朝日奈千夜 九逃 醫療後座" required>
+              </label>
+
+              <label class="field">
+                <span>本次任務</span>
+                <textarea id="pipeline-task" name="task" rows="8" maxlength="100000" required>下一章正文候選：承接第十九章正式選拔第一場結束後的醫療後座，保護未成立邊界並準備正文候選。</textarea>
+              </label>
+
+              <label class="field compact-field">
+                <span>檢索筆數</span>
+                <input id="pipeline-top" name="top" type="number" min="1" max="100" value="12">
+              </label>
+
+              <div class="form-actions">
+                <button class="button primary" type="submit">執行流水線</button>
+                <button id="search-only-button" class="button secondary" type="button">只做檢索</button>
+              </div>
+            </form>
+
+            <section class="result-surface">
+              <div class="panel-heading">
+                <div class="result-tabs" role="tablist" aria-label="產物預覽">
+                  <button class="is-active" data-result-file="data/outputs/task_prompt.md" type="button">任務提示</button>
+                  <button data-result-file="data/outputs/retrieval_context.md" type="button">檢索結果</button>
+                  <button data-result-file="data/outputs/generation_context.md" type="button">生成上下文</button>
+                </div>
+                <button id="copy-result-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
+              </div>
+              <pre id="compose-result" class="document-viewer">尚未載入產物。</pre>
+            </section>
+          </div>
+
+          <form id="draft-form" class="panel form-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">CANDIDATE</p>
+                <h2>保存候選稿</h2>
+              </div>
+              <label class="toggle">
+                <input id="draft-dry-run" type="checkbox" checked>
+                <span>僅預覽</span>
+              </label>
+            </div>
+            <div class="form-row">
+              <label class="field">
+                <span>標題</span>
+                <input id="draft-title" type="text" maxlength="500" placeholder="第二十章候選稿 A" required>
+              </label>
+              <label class="field">
+                <span>章節</span>
+                <input id="draft-chapter" type="text" maxlength="500" placeholder="第二十章">
+              </label>
+            </div>
+            <label class="field">
+              <span>正文</span>
+              <textarea id="draft-text" rows="14" maxlength="1000000" required></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="button primary" type="submit">保存候選稿</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="view" data-view-panel="review">
+          <div class="workspace-grid review-grid">
+            <section class="form-surface">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">DRAFT</p>
+                  <h2>候選稿</h2>
+                </div>
+                <select id="draft-select" aria-label="選擇候選稿">
+                  <option value="">選擇候選稿</option>
+                </select>
+              </div>
+              <pre id="draft-preview" class="document-viewer review-document">尚未選擇候選稿。</pre>
+              <div class="form-actions">
+                <button id="prepare-proof-button" class="button primary" type="button">準備驗稿提示</button>
+                <button id="copy-draft-button" class="button secondary" type="button">複製候選稿</button>
+              </div>
+            </section>
+
+            <form id="proof-form" class="form-surface">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">PROOF REPORT</p>
+                  <h2>驗稿結果</h2>
+                </div>
+                <label class="toggle">
+                  <input id="proof-dry-run" type="checkbox" checked>
+                  <span>僅預覽</span>
+                </label>
+              </div>
+              <label class="field">
+                <span>標題</span>
+                <input id="proof-title" type="text" maxlength="500" placeholder="第二十章候選稿 A 驗稿" required>
+              </label>
+              <div class="form-row">
+                <label class="field">
+                  <span>判定</span>
+                  <select id="proof-verdict">
+                    <option value="pass">通過</option>
+                    <option value="needs_rewrite" selected>需要重寫</option>
+                    <option value="reject">退稿</option>
+                    <option value="stop">停止</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>嚴重度</span>
+                  <select id="proof-severity">
+                    <option value="P0">P0</option>
+                    <option value="P1">P1</option>
+                    <option value="P2" selected>P2</option>
+                    <option value="P3">P3</option>
+                    <option value="P4">P4</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">
+                <span>驗稿內容</span>
+                <textarea id="proof-text" rows="16" maxlength="1000000" required></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="button primary" type="submit">保存驗稿報告</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="library">
+          <div class="library-layout">
+            <aside class="library-sidebar">
+              <div class="panel-heading">
+                <h2>正式來源</h2>
+              </div>
+              <div id="library-source-list" class="library-list"></div>
+              <div class="panel-heading subheading">
+                <h2>產物</h2>
+              </div>
+              <div id="library-output-list" class="library-list"></div>
+            </aside>
+            <section class="library-reader">
+              <div class="reader-heading">
+                <div>
+                  <p id="reader-path" class="eyebrow">尚未選擇</p>
+                  <h2 id="reader-title">資料檢視</h2>
+                </div>
+                <button id="copy-library-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
+              </div>
+              <pre id="library-content" class="document-viewer">選擇左側資料。</pre>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="activity">
+          <div class="activity-grid">
+            <form id="feedback-form" class="form-surface">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">FEEDBACK</p>
+                  <h2>記錄回饋</h2>
+                </div>
+                <label class="toggle">
+                  <input id="feedback-dry-run" type="checkbox" checked>
+                  <span>僅預覽</span>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="field">
+                  <span>類型</span>
+                  <select id="feedback-type">
+                    <option value="rejected">退稿</option>
+                    <option value="accepted">採用</option>
+                    <option value="revision">修訂</option>
+                    <option value="preference">偏好</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>嚴重度</span>
+                  <select id="feedback-severity">
+                    <option value="">自動判定</option>
+                    <option value="P0">P0</option>
+                    <option value="P1">P1</option>
+                    <option value="P2">P2</option>
+                    <option value="P3">P3</option>
+                    <option value="P4">P4</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">
+                <span>章節</span>
+                <input id="feedback-chapter" type="text" maxlength="500">
+              </label>
+              <label class="field">
+                <span>回饋</span>
+                <textarea id="feedback-text" rows="9" maxlength="100000" required></textarea>
+              </label>
+              <div class="form-row">
+                <label class="field">
+                  <span>角色</span>
+                  <input id="feedback-characters" type="text" maxlength="2000">
+                </label>
+                <label class="field">
+                  <span>場景標籤</span>
+                  <input id="feedback-scene" type="text" maxlength="2000">
+                </label>
+              </div>
+              <label class="toggle inline-toggle">
+                <input id="feedback-no-candidate" type="checkbox">
+                <span>不建立錯誤候選</span>
+              </label>
+              <div class="form-actions">
+                <button class="button primary" type="submit">記錄回饋</button>
+              </div>
+            </form>
+
+            <section class="result-surface">
+              <div class="panel-heading">
+                <h2>執行結果</h2>
+                <button id="clear-console-button" class="icon-button" type="button" title="清除" aria-label="清除">×</button>
+              </div>
+              <pre id="action-console" class="document-viewer console-viewer">等待操作。</pre>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading activity-tabs">
+              <div class="result-tabs">
+                <button class="is-active" data-activity-list="drafts" type="button">候選稿</button>
+                <button data-activity-list="proofReports" type="button">驗稿報告</button>
+                <button data-activity-list="settlements" type="button">結算提案</button>
+              </div>
+            </div>
+            <div id="activity-table" class="table-wrap"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="confirm-dialog">
+      <form method="dialog" class="dialog-body">
+        <div>
+          <p class="eyebrow">WRITE CONFIRMATION</p>
+          <h2>確認寫入</h2>
+        </div>
+        <p id="confirm-message">這項操作會寫入專案資料。</p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">取消</button>
+          <button class="button danger" value="confirm">確認寫入</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -11,6 +11,7 @@ const steps = [
   ["Strict JSONL validation", ["server/src/tools/validate-jsonl.mjs", "--all", "--strict"]],
   ["Source trust validation", ["server/src/tools/source-trust-checker.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
+  ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 ];
 

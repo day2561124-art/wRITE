@@ -33,6 +33,14 @@
 - Made MCP contract tests restore `mcp_tool_audit.jsonl` byte-for-byte after validating temporary audit records.
 - Added source-trust validation to the complete test runner and Canon trust evidence to golden retrieval fixtures.
 
+## Local user interface
+
+- Added a dependency-free local web workspace with overview, compose, review, library, and activity views.
+- Added a localhost-only Node server that exposes allowlisted project reads and exact tool actions without shell interpolation.
+- Added dry-run defaults and explicit confirmation before draft, proof-report, or feedback writes.
+- Added responsive desktop and mobile layouts, synchronized hash routing, and a one-command Windows launcher.
+- Added UI server contract tests for static delivery, source state, allowlisted reads, traversal rejection, action validation, and side-effect-free draft dry-runs.
+
 ## Final data status
 
 - The user-provided formal proofing card was imported as Proofing Policy DB v1.1; its source, active file, and version copy are retained and golden-tested for equality.

@@ -6,7 +6,24 @@
 
 ## 快速開始
 
-最常用的一條指令：
+推薦直接啟動本機使用者介面：
+
+```powershell
+.\start-ui.cmd
+```
+
+介面會在瀏覽器開啟 `http://127.0.0.1:4173/`，提供：
+
+- 正式母檔與來源信任狀態總覽。
+- 起稿、檢索與任務提示流水線。
+- 候選稿保存、驗稿提示與驗稿報告。
+- 正史、寫作卡、驗稿卡、長線骨架與產物閱讀器。
+- 草稿、驗稿、回饋與 MCP 稽核紀錄。
+- 一鍵執行完整驗證。
+
+候選稿、驗稿報告與回饋預設為「僅預覽」；取消勾選後，介面仍會在實際寫入前要求確認。伺服器只監聽本機 `127.0.0.1`。
+
+若偏好命令列，最常用的一條指令是：
 
 ```powershell
 node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後座" --task "下一章正文候選：承接第十九章正式選拔第一場結束後的醫療後座，先保護未成立邊界，再準備正文候選。" --top 12
@@ -640,9 +657,9 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 node tests/run-all.mjs
 ```
 
-完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、7 個 Canon golden fixtures，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查只允許尚無正式錯誤報告的壓縮規則以 `T8` 警告存在，不允許登錄來源缺檔或 metadata 不完整。
+完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、7 個 Canon golden fixtures、UI 伺服器與路由契約，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查只允許尚無正式錯誤報告的壓縮規則以 `T8` 警告存在，不允許登錄來源缺檔或 metadata 不完整。
 
-這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、7 個 Canon golden tests，以及完整 MCP contract smoke。
+這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、來源信任檢查、7 個 Canon golden tests、UI server contract tests，以及完整 MCP contract smoke。
 5. 起稿前先檢查 Canon Guard 風險。
 6. 候選正文完成後仍不得寫入正史。
 
