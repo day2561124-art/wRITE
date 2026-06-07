@@ -33,6 +33,9 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 - Canon DB 版本：`data/canon_db/versions/engine_v5.0.12.md`
 - Writing Policy DB：`data/writing_policy_db/active_writing_card.md`
 - Writing Policy DB 版本：`data/writing_policy_db/versions/writing_card_v2.8.md`
+- Longline DB：`data/longline_db/active_longline.md`
+- Longline DB 版本：`data/longline_db/versions/longline_v1.0.md`
+- Longline 來源轉錄：`data/longline_db/sources/longline_part1_national_representative_arc_v1.0.md`
 
 已建立但尚未正式填入完整資料：
 
@@ -41,9 +44,7 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 - `data/feedback_db/*.jsonl`
 - `data/memory_store/*.json`
 
-已建立為缺檔保護卡：
-
-- `data/longline_db/active_longline.md`：目前不是正式長線骨架，只保存長線缺檔時的防越界規則。
+正式長線骨架已由使用者提供圖片轉錄並於 2026-06-07 匯入；原圖副本、轉錄母檔、active 與 v1.0 版本均保留可追溯關聯。原圖第五篇章第二項有一小段遭浮動按鈕遮擋，該缺字維持未推定狀態。
 
 注意：空白或 placeholder 檔案不是授權 AI 自行補設定。若資料不足，AI 必須標記缺口，不得把推測寫成正史。
 
@@ -637,9 +638,9 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 node tests/run-all.mjs
 ```
 
-完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、5 個 Canon golden fixtures，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查允許三個已知占位來源以 `T8` 警告存在，但不允許登錄來源缺檔或 metadata 不完整。
+完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、6 個 Canon golden fixtures，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查允許驗稿卡與錯誤壓縮規則兩個已知占位來源以 `T8` 警告存在，但不允許登錄來源缺檔或 metadata 不完整。
 
-這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、5 個 Canon golden tests，以及完整 MCP contract smoke。
+這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、6 個 Canon golden tests，以及完整 MCP contract smoke。
 5. 起稿前先檢查 Canon Guard 風險。
 6. 候選正文完成後仍不得寫入正史。
 
@@ -729,5 +730,5 @@ prompts/
 建議順序：
 
 1. 補正式 `active_proofing_card.md`。
-2. 取得正式長線骨架母檔後，用 `import-policy-file.mjs --kind longline --dry-run` 檢查，再加 `--confirm IMPORT_POLICY` 匯入。
-本機工程、contract tests、golden tests 與 CI gate 已完成。剩餘工作僅保留上述兩份外部正式母檔匯入。
+2. 若取得原圖遮擋處的完整文字，更新長線來源轉錄並建立下一版本。
+本機工程、正式長線匯入、contract tests、golden tests 與 CI gate 已完成。外部正式母檔僅剩驗稿卡。

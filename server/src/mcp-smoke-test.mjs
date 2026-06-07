@@ -97,14 +97,17 @@ const watchedFiles = [
   path.join(rootDir, "data", "error_report_db", "compressed_rules.md"),
 ];
 
+const protectedRuntimePaths = [
+  path.join(rootDir, "data", "outputs", "logs", "policy_import_backups"),
+  path.join(rootDir, "data", "outputs", "logs", "policy_imports.jsonl"),
+];
+
 const forbiddenCreatedPaths = [
   path.join(rootDir, "server", "src", "tools", "activate_engine_version.mjs"),
   path.join(rootDir, "server", "src", "tools", "build-generation-context.mjs"),
   path.join(rootDir, "outputs", "current_prompt.md"),
   path.join(rootDir, "outputs", "retrieval_debug_report.json"),
   path.join(rootDir, "data", "proofing_policy_db", "versions", "proofing_card_v999.999.md"),
-  path.join(rootDir, "data", "outputs", "logs", "policy_import_backups"),
-  path.join(rootDir, "data", "outputs", "logs", "policy_imports.jsonl"),
   path.join(rootDir, "data", "outputs", "logs", "engine_activation_backups"),
   path.join(rootDir, "data", "outputs", "logs", "engine_activations.jsonl"),
   path.join(rootDir, "data", "outputs", "logs", "compressed_rule_updates.jsonl"),
@@ -1760,6 +1763,43 @@ async function snapshotWatchedFiles() {
   return new Map(entries);
 }
 
+async function snapshotPathTree(targetPath) {
+  try {
+    const stats = await stat(targetPath);
+    if (stats.isFile()) {
+      const bytes = await readFile(targetPath);
+      return [{
+        path: normalizePath(targetPath),
+        kind: "file",
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      }];
+    }
+
+    const entries = await readdir(targetPath, { withFileTypes: true });
+    const children = [];
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      children.push(...await snapshotPathTree(path.join(targetPath, entry.name)));
+    }
+    return [{
+      path: normalizePath(targetPath),
+      kind: "directory",
+    }, ...children];
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [{
+        path: normalizePath(targetPath),
+        kind: "missing",
+      }];
+    }
+    throw error;
+  }
+}
+
+async function snapshotProtectedRuntimePaths() {
+  const snapshots = await Promise.all(protectedRuntimePaths.map(snapshotPathTree));
+  return snapshots.flat();
+}
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -2697,6 +2737,7 @@ function recordResponse(responses, message) {
 async function runSmokeTest(options) {
   const checkedToolScripts = await checkToolScripts();
   const before = await snapshotWatchedFiles();
+  const protectedRuntimeBefore = await snapshotProtectedRuntimePaths();
   const auditCountBefore = await countJsonlRecords(auditLogPath);
   const eofTruncationResults = [];
   for (const fixture of eofTruncationFixtures) {
@@ -4885,6 +4926,15 @@ async function runSmokeTest(options) {
     assert(afterHash === beforeHash, `${filePath} hash changed: ${beforeHash} -> ${afterHash}`);
   }
 
+  const protectedRuntimeAfter = await snapshotProtectedRuntimePaths();
+  assert(
+    JSON.stringify(protectedRuntimeAfter) === JSON.stringify(protectedRuntimeBefore),
+    `Protected runtime paths changed: ${JSON.stringify({
+      before: protectedRuntimeBefore,
+      after: protectedRuntimeAfter,
+    })}`,
+  );
+
   for (const filePath of forbiddenCreatedPaths) {
     assert(!(await pathExists(filePath)), `${normalizePath(filePath)} was unexpectedly created.`);
   }
@@ -5643,6 +5693,7 @@ async function runSmokeTest(options) {
       + backpressureEofResults.truncated.writes
     ),
     watched_files: [...before.keys()],
+    protected_runtime_paths: protectedRuntimePaths.map(normalizePath),
     forbidden_paths: forbiddenCreatedPaths.map(normalizePath),
     audit_records_added: auditRecordsAdded,
     audit_log: normalizePath(auditLogPath),
@@ -5776,6 +5827,7 @@ async function main() {
   console.log(`- Delayed backpressure EOF read checked (ms): ${result.backpressure_eof_delayed_read_ms}`);
   console.log(`- Writes used for backpressure EOF fixtures: ${result.backpressure_eof_writes}`);
   console.log(`- Watched files unchanged: ${result.watched_files.join(", ")}`);
+  console.log(`- Protected runtime paths unchanged: ${result.protected_runtime_paths.join(", ")}`);
   console.log(`- Forbidden paths absent: ${result.forbidden_paths.join(", ")}`);
   console.log(`- MCP audit records exercised: ${result.audit_records_added} (${result.audit_log})`);
   console.log("- MCP audit log restored byte-for-byte: yes");

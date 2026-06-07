@@ -119,6 +119,24 @@ async function runFixture(fixture, tempDir) {
     return;
   }
 
+  if (fixture.kind === "files_equal") {
+    assert(
+      Array.isArray(fixture.files) && fixture.files.length > 1,
+      `${fixture.id} requires at least two files.`,
+    );
+    const texts = await Promise.all(
+      fixture.files.map((file) => readFile(path.join(rootDir, file), "utf8")),
+    );
+    for (let index = 1; index < texts.length; index += 1) {
+      assert(
+        texts[index] === texts[0],
+        `${fixture.id} file content drifted: ${fixture.files[0]} != ${fixture.files[index]}`,
+      );
+    }
+    assertFragments(fixture, texts[0]);
+    return;
+  }
+
   if (fixture.kind === "json_codeblocks") {
     const output = await runNode(["server/src/tools/validate-json-codeblocks.mjs"]);
     assertFragments(fixture, output);
@@ -130,7 +148,7 @@ async function runFixture(fixture, tempDir) {
 
 async function main() {
   const fixtures = await loadFixtures();
-  assert(fixtures.length === 5, `Expected 5 golden fixtures, found ${fixtures.length}.`);
+  assert(fixtures.length === 6, `Expected 6 golden fixtures, found ${fixtures.length}.`);
   const ids = new Set(fixtures.map((fixture) => fixture.id));
   assert(ids.size === fixtures.length, "Golden fixture ids must be unique.");
 

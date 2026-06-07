@@ -36,5 +36,6 @@
 ## Remaining external inputs
 
 - A formal proofing policy mother file is still required before replacing the current proofing placeholder.
-- A formal longline mother file is still required before replacing the current longline placeholder.
+- The user-provided national representative arc image was transcribed and formally imported as Longline DB v1.0; the source image, transcription, active file, and version copy are retained.
+- One fragment in the fifth arc's second item is obscured in the source image and remains explicitly non-inferable until the user supplies the missing text.
 - The compressed-rule placeholder is not an external-file blocker: it remains T8 until formal error reports exist, and must not be populated by inference.
