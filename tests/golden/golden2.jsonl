@@ -1,1 +1,1 @@
-{"id": "golden-2", "desc": "正式階段單源裁定測試", "input": "檢查角色正式階段是否遵循 docs/core_invariants.md 中裁定", "expected": "遵循"}
+{"id":"golden-2","desc":"正式階段與 Canon 寫入鎖必須保留單一來源裁定","kind":"file_contains","files":["docs/core_invariants.md"],"required_fragments":["formal_phase_source","唯一母源文件","canon_write_lock","CI gate 通過時，才允許覆寫 `data/canon_db/active_engine.md`"]}

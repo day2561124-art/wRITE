@@ -1,10 +1,17 @@
-Golden tests placeholder
+# Canon Golden Tests
 
-This directory will contain canonical example fixtures and golden tests that must pass before activation.
+Run:
 
-- Place canonical fixtures under `tests/golden/fixtures/`.
-- Implement tests such as `tests/golden/canon_golden.test.js` that assert canonical queries always return expected canon fragments.
+```text
+node tests/golden/canon-golden.test.mjs
+```
 
-P0 failures in these tests must block activation.
+The five JSONL fixtures verify:
 
-Included: placeholder golden fixtures `golden1.jsonl` .. `golden5.jsonl` for initial CI skeleton.
+- Canon retrieval preserves 夜星's formal stage from `active_engine.md`.
+- Formal-stage and Canon-write locks remain in `docs/core_invariants.md`.
+- Candidate prose cannot become Canon before adoption and settlement.
+- Repository JSON/JSONL code blocks remain parseable.
+- CI continues to run the complete local test suite.
+
+Any failure blocks CI and engine activation.

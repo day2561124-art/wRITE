@@ -1,1 +1,1 @@
-{"id": "golden-1", "desc": "簡單人物一致性檢查", "input": "角色夜星在第十九章的狀態應與 data/canon_db/active_engine.md 保持一致", "expected": "一致"}
+{"id":"golden-1","desc":"夜星正式階段必須由 active_engine 檢索結果一致承接","kind":"retrieval","query":"夜星 成熟者 正式階段","top":20,"required_fragments":["Source: `data/canon_db/active_engine.md`","夜星（夜星武裝學院院長） | 成熟者","正式階段"],"forbidden_fragments":["No matching chunks found."]}

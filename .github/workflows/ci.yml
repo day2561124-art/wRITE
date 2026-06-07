@@ -12,5 +12,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - name: Run JSON codeblock validator
-        run: node server/src/tools/validate-json-codeblocks.mjs
+      - name: Run complete test suite
+        run: node tests/run-all.mjs

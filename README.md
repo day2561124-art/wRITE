@@ -469,7 +469,7 @@ node server/src/mcp-smoke-test.mjs --verbose
 目前支援：
 
 - MCP methods：`initialize`、`tools/list`、`tools/call`、`ping`、`resources/list`、`resources/read`、`prompts/list`、`prompts/get`。
-- Transport：newline-delimited JSON 與 `Content-Length` framing；header body 以 UTF-8 位元組長度解析。
+- Transport：newline-delimited JSON 與 `Content-Length` framing；header body 以 UTF-8 位元組長度解析。單一 JSON-RPC message body 上限為 16 MiB，`Content-Length` header 上限為 8 KiB。
 - 只讀工具：`get_current_project_state`、`get_active_engine`、`get_active_writing_card`、`validate_jsonl`、`query_mcp_audit`。
 - 低風險寫入：`add_feedback_raw`、`save_draft`、`save_proof_report`。
 - 生成輸出工具：`build_generation_context`、`search_context`、`build_task_prompt`、`run_pipeline`。
@@ -480,6 +480,20 @@ node server/src/mcp-smoke-test.mjs --verbose
 - MCP server 只會呼叫白名單工具，不接受任意 shell 指令。
 - 高風險工具仍需原工具的確認碼，例如 `IMPORT_POLICY`、`COMMIT`、`UPDATE_RULES`、`ACTIVATE`。
 - `import_policy_file`、`compress_error_rules` 與 `activate_engine_version` 經 MCP 呼叫時預設 dry-run。
+- Server 會在驗證原始 arguments 後，依 `inputSchema.default` 集中補值；cross-field guard、confirmation guard、handler 與 audit 共用同一組實際 arguments。
+- 每個工具都會在 `inputSchema.x-null-normalization` 公開 null 契約：required 為 `reject`、optional with default 為 `applyDefault`、optional without default 為 `preserveNull`。Server 的驗證與補值流程直接讀取同一份 metadata。
+- Optional argument 收到 `null` 時，有 `inputSchema.default` 的欄位會補成 default；沒有 default 的欄位保留 `null`，交由 handler 視為未指定。Required argument 的 `null` 仍會先被拒絕。
+- 每個工具也會在 `inputSchema.x-empty-string-normalization` 公開 blank-string 契約：required 為 `rejectBlank`、optional with default 為 `applyDefault`、optional without default 為 `omit`、cross-field presence 為 `trimmedNonEmpty`。`""` 與純空白字串採相同語意。
+- 每個工具會在 `inputSchema.x-string-array-normalization` 公開字串陣列契約：blank item 為 `rejectBlank`，非空白元素為 `preserve`。陣列可為空，但不得包含 `""` 或純空白元素。
+- 所有字串欄位都會在標準 JSON Schema `maxLength` 公開上限：一般字串 4,096、`query` 8,192、任務／回饋／錯誤描述 65,536、完整 `text` 1,000,000 個 Unicode 字元。
+- 所有字串陣列都會公開 `maxItems` 與 item `maxLength`：一般陣列最多 100 項、每項 16,384 字元；`files` 最多 256 項、每個路徑 4,096 字元。
+- 所有正整數欄位都會公開標準 JSON Schema `maximum`：`query_mcp_audit.limit` 最多 1,000，`search_context.top` 與 `run_pipeline.top` 最多 100，`compress_error_rules.top` 與 `minCount` 最多 1,000。
+- Transport 會在 JSON parse 與 schema 驗證前拒絕超過 16 MiB 的 message body；超大的 `Content-Length` body、newline frame 與超過 8 KiB 的 header 會回傳 `-32700`，串流丟棄該 frame 後繼續處理同一連線的後續請求。
+- stdin 若在 newline frame、`Content-Length` header 或宣告長度尚未收滿的 body 中途結束，server 會在既有 pending responses 之後回傳對應 framing 的 `-32700`，不會靜默丟棄半個 request；已回報過的超限 frame 不會在 EOF 重複報錯。
+- `Content-Length` header 只允許一份十進位非負安全整數；同值重複、不同值衝突、數字後尾隨垃圾、負值與超過 `Number.MAX_SAFE_INTEGER` 的宣告都會在讀取 body 前回傳 header-framed `-32700`。
+- 尚未完成 dispatch 的 JSON-RPC messages 最多 256 個，包含 requests 與 notifications；超額 request 立即以原 framing 回傳 `-32000`，超額 notification 依 JSON-RPC 規則靜默丟棄。佇列下降後可繼續接收，不會永久鎖死連線。
+- 所有 response 經同一個 stdout writer 依序送出；`process.stdout.write()` 回傳 `false` 時會同時等待 write callback 與 `drain`。待送 response 達 256 時暫停 stdin 與 frame parser，降到 128 後才解析既有 buffer 並恢復 stdin，避免慢速接收端造成無界記憶體增長。
+- stdin 若在 stdout backpressure 暫停 parser 時結束，server 會先等 response queue 降水位、處理完 `inputBuffer` 中所有完整 frames，再做唯一一次 EOF 截斷判定；完整尾幀不會誤報，真正半幀的 `-32700` 會排在所有前序 responses 之後。
 - 非只讀 MCP tool 會追加統一審計紀錄到 `data/outputs/logs/mcp_tool_audit.jsonl`。
 
 MCP resources：
@@ -544,8 +558,27 @@ Smoke test 會檢查：
 - 17 個預期工具都有暴露。
 - 未知工具、非物件 params、缺少工具 name 都必須回傳 JSON-RPC `-32602`，且 server 隨後仍可回應 `ping`。
 - 已知只讀工具的無效 arguments 會回傳 `result.isError` 與 content 錯誤訊息，不會誤用 JSON-RPC protocol error。
+- 17 個工具都會由 server 實際拒絕未宣告 arguments，落實 `inputSchema.additionalProperties: false`；非讀取工具另須留下零副作用的 `tool_error` audit。
+- 所有 `inputSchema.enum` 欄位都會由 server 實際拒絕非法值；非讀取工具會留下零副作用的 `tool_error` audit，且型別錯誤仍保留原有型別訊息。
+- Server 會集中驗證 `inputSchema` 的字串、布林、正整數及其 `minimum`／`maximum`、陣列與字串陣列元素；錯誤不會進入工具程式，非讀取工具仍留下零副作用 audit。
+- 所有 `inputSchema.required` 欄位會由 server 集中驗證；缺少、`null` 或空字串都會在工具執行前被拒絕，非讀取工具留下零副作用 audit。
+- Activation 的 `version`／`candidate`、settlement 的 `draftId`／`sourceFile`／`text` 必須恰好一項；commit 必須使用無 selector 的 `list=true`，或在 `errorId`／`feedbackId`／`latest` 中恰選一項。這些規則會公開在 `inputSchema.x-cross-field-constraints` 並由 server 執行。
+- Smoke test 會直接讀取 `tools/list`，確認 17 個工具的 `additionalProperties`、type、array items、minimum、maximum、maxLength、maxItems、enum、required、default、null normalization、empty-string normalization、string-array normalization 與 cross-field metadata，並核對 enum／required／maximum／cross-field fixtures 沒有漏欄位。
+- 目前 34 個 schema defaults 會逐項核對型別、enum／minimum／maximum 合法性與預期值；`validate_jsonl.all` 不宣告靜態 default，保留「未指定 files 時才驗證全部」的條件式行為。
+- 17 個工具的 `x-null-normalization` 必須逐一符合統一契約；required-null、optional applyDefault 與 optional preserveNull 三種策略都有行為 fixture。
+- 17 個工具的 `x-empty-string-normalization` 也必須逐一符合統一契約；required blank、optional applyDefault、optional omit 與 cross-field trimmed presence 四種策略都有行為 fixture。
+- 17 個工具的 `x-string-array-normalization` 必須逐一符合統一契約；`files`、`established`、`unsettled`、`reminders`、`notes` 五個字串陣列欄位都有 blank-item fixture。
+- 70 個字串欄位、5 個字串陣列與 5 個陣列 item 限制會逐一核對；8 個超限 fixtures 覆蓋四級字串、兩級 `maxItems` 與兩級 item `maxLength`，約 1 MB 的正文也必須在 handler 前被拒絕。
+- 5 個正整數欄位的 `maximum` 會逐一核對；5 個超限 fixtures 必須收到精確錯誤訊息，4 個非只讀工具另須留下零副作用的 `tool_error` audit。
+- 五個高風險工具會在 `inputSchema.x-confirmation` 公開 real-write 條件、確認欄位、必要值與錯誤訊息；server guard 直接讀取同一份 metadata，smoke test 再與缺碼 fixtures 交叉核對。
+- Smoke test 會檢查 5 筆 default application audit；其中 commit 與 settlement 省略 `dryRun: false` 後仍須由 server 補值並在進入工具前觸發 confirmation guard。
+- Smoke test 另含 6 個 optional `null` fixtures 與 4 筆 audit：default 欄位必須補值，無 default 欄位必須保留 `null`，所有呼叫都不得改動受保護檔案。
+- 五個高風險工具的型別錯誤與必要條件缺漏會回傳 `result.isError`；audit 必須是 `tool_error`、`confirmation_id: null`、`affected_paths: []`。Settlement 的重複文字欄位也會拒絕非字串陣列或非字串元素。
 - 五個高風險工具在 `dryRun: false` 但缺少各自 confirmation 時，會回傳 `result.isError`；audit 必須是 `tool_error`、`confirmation_id: null`、`affected_paths: []`。
 - 四個字串 token 高風險工具在收到錯誤 token 時仍會拒絕；audit 會保留實際錯誤 token，但仍是 `tool_error` 且沒有 affected paths。
+- 五個高風險工具在收到正確 confirmation 且 `dryRun: true` 時，必須完成計畫輸出；audit 為 `completed`、保留正確 `confirmation_id`，且 `affected_paths: []`。
+- `import_policy_file` 與 `activate_engine_version` 在收到正確 confirmation、`dryRun: false`，但來源內容已完全一致時，必須完成 no-op；不得建立備份或操作紀錄，audit 為 `completed` 且 `affected_paths: []`。
+- `activate_engine_version` 在正確確認下若 `requiredCurrentSha` 與 active engine 不符，必須回傳 `result.isError`；audit 為 `tool_error`、保留 `ACTIVATE`，且不得產生任何寫入。
 - `resources/list` 會列出預期資源。
 - `resources/read` 可讀取 `compressed_rules.md`。
 - 未知 resource URI、非物件 params、缺少 URI 都必須回傳 JSON-RPC `-32602`，且 server 隨後仍可回應 `ping`。
@@ -560,9 +593,17 @@ Smoke test 會檢查：
 - 一個 newline frame 與一個 `Content-Length` frame 也會以反向順序串接在單次 write 中，確認 parser 可由 line 分支切回 header 分支。
 - 非數字 `Content-Length` 會回傳 header-framed `-32700`；同一 write 中緊接的合法 newline request 仍可正常處理。
 - 正確 `Content-Length` 包住無效 JSON body 時，也會回傳 header-framed `-32700`，並從 body 結尾正確處理後續 newline request。
+- `Content-Length` 與 newline body 超過 16 MiB 時，必須分別回傳 header-framed 與 line-framed `-32700`；測試以 517 次分塊 write 跨過上限，丟棄超限 frame 後仍須正常回應 recovery ping。
+- `Content-Length` header 超過 8 KiB 時，必須回傳 header-framed `-32700`；header/body 分隔符即使跨 chunk，後續 newline recovery ping 仍須成功。
+- 三個獨立 server process 會分別以 2、2、3 次 write 傳入未換行 JSON、未完成 header、未收滿的 `Content-Length` body，再關閉 stdin；必須得到 1 個 line-framed 與 2 個 header-framed `-32700`，且每個 process 都自行以 exit code 0 結束。
+- 5 個非法 `Content-Length` fixtures 覆蓋同值重複、不同值衝突、尾隨垃圾、負值與超安全整數；每個錯誤都必須 header-framed，且同一 write 緊接的 newline recovery ping 必須成功。
+- Dispatch queue 壓力 fixture 會以一個唯讀工具請求壓住隊首，再送入 255 個 ping、1 個超額 notification 與 2 個超額 request；前 256 個 request 必須完成、2 個 request 必須收到 `-32000`、notification 不得產生 response，drain 後 recovery ping 必須成功。
+- Stdout backpressure fixture 會先暫停讀取 child stdout，再以單次 write 傳入 1,024 個壞 JSON frame 與 1 個 recovery ping；延遲 100 ms 後恢復讀取，必須完整收到 1,024 個 `-32700` 與 recovery response，且不得留下半個 response。
+- 兩個 backpressure/EOF 交錯 fixtures 各排入 1,024 個 parse errors 後立即關閉 stdin：完整 ping 尾幀必須成功且不得誤報截斷；半個 JSON 尾幀必須等前序 1,024 個 errors 全部送出後，最後才回 EOF `-32700`。
 - `validate_jsonl` 可單檔檢查。
 - `query_mcp_audit` 可查到 `import_policy_file` 審計紀錄。
 - `import_policy_file`、`compress_error_rules` 與 `activate_engine_version` 維持 dry-run 預設。
+- Smoke test 會核對 `server/src/tools/` 的 15 支正式腳本清單並逐支執行 `node --check`；過期底線版 activation、錯位 context builder 與根目錄 `outputs/` 產物必須保持不存在。
 - MCP 寫入審計至少追加 3 筆紀錄。
 - `active_engine.md`、`active_writing_card.md`、`active_proofing_card.md`、`active_longline.md` 與 `compressed_rules.md` hash 不變。
 
@@ -598,6 +639,16 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 2. 跑 `run-pipeline.mjs`。
 3. 打開 `data/outputs/task_prompt.md`。
 4. 將 `task_prompt.md` 交給 AI 起稿。
+
+## 測試
+
+完整本機與 CI gate：
+
+```powershell
+node tests/run-all.mjs
+```
+
+這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、5 個 Canon golden tests，以及完整 MCP contract smoke。
 5. 起稿前先檢查 Canon Guard 風險。
 6. 候選正文完成後仍不得寫入正史。
 
@@ -670,6 +721,7 @@ server/src/
     save-proof-report.mjs
     create-settlement-proposal.mjs
     activate-engine-version.mjs
+    validate-json-codeblocks.mjs
 
 prompts/
   generate_chapter.md
@@ -685,4 +737,4 @@ prompts/
 
 1. 補正式 `active_proofing_card.md`。
 2. 取得正式長線骨架母檔後，用 `import-policy-file.mjs --kind longline --dry-run` 檢查，再加 `--confirm IMPORT_POLICY` 匯入。
-3. 補 confirmed-dry-run smoke test，確認正確 confirmation 搭配 `dryRun: true` 時仍只產生計畫與 audit，不得寫入正式檔。
+本機工程、contract tests、golden tests 與 CI gate 已完成。剩餘工作僅保留上述兩份外部正式母檔匯入。

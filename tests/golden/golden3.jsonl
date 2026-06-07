@@ -1,1 +1,1 @@
-{"id": "golden-3", "desc": "Canon 污染檢測測試", "input": "候選稿不得覆寫 canon_db 中已成立的正文", "expected": "不覆寫"}
+{"id":"golden-3","desc":"候選正文不得在採用與結算前升格為正史","kind":"file_contains","files":["SKILL.md","server/src/tools/build-current-prompt.mjs"],"required_fragments":["候選正文未正式採用與結算前不成正史","不得承接未正式採用稿","Error Report 只能作為避錯與修正規則，不能改寫正式設定"]}

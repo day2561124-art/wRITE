@@ -1,10 +1,9 @@
-Tool contract tests placeholder
+# MCP Tool Contract Tests
 
-This directory should host tests verifying MCP tool contracts (input/output schema, permission checks, snapshot/lock behavior, prompt-injection resilience).
+Run:
 
-Suggested test files:
-- tests/tools/get_active_engine.test.ts
-- tests/tools/build_generation_context.test.ts
-- tests/tools/commit_error_report.test.ts
+```text
+node tests/tools/mcp-contract.test.mjs
+```
 
-Each test should assert the tool respects permission_level and produces trace logs on success/failure.
+The entrypoint executes `server/src/mcp-smoke-test.mjs`, which verifies the public tool inventory, schemas, normalization, permission and confirmation guards, audit records, protected-file hashes, transport framing, queue limits, backpressure, EOF handling, and tool-script syntax.

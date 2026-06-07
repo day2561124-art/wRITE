@@ -64,6 +64,27 @@ const memorySpecs = [
   ["working_memory", path.join(rootDir, "data", "memory_store", "working_memory.json")],
 ];
 
+function usage() {
+  return [
+    "Usage:",
+    "  node server/src/tools/build-current-prompt.mjs",
+    "",
+    "Builds:",
+    "  data/outputs/current_prompt.md",
+    "  data/outputs/generation_context.md",
+  ].join("\n");
+}
+
+function parseArgs(argv) {
+  if (argv.length === 0) {
+    return { help: false };
+  }
+  if (argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h")) {
+    return { help: true };
+  }
+  throw new Error(`Unknown argument: ${argv[0]}`);
+}
+
 function normalizePath(filePath) {
   return path.relative(rootDir, filePath).replaceAll(path.sep, "/");
 }
@@ -548,6 +569,12 @@ function buildGenerationContext({ sources, jsonlSources, memorySources, generate
 }
 
 async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    console.log(usage());
+    return;
+  }
+
   const generatedAt = new Date().toISOString();
   const [sources, jsonlSources, memorySources] = await Promise.all([
     Promise.all(sourceSpecs.map(readSource)),
@@ -584,6 +611,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error(error.message);
+  console.error("");
+  console.error(usage());
   process.exitCode = 1;
 });

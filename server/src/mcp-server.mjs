@@ -263,6 +263,9 @@ function usage() {
     "",
     "Transport:",
     "  JSON-RPC 2.0 over stdio. Supports newline-delimited JSON and Content-Length framing.",
+    "  Maximum message body: 16 MiB. Maximum Content-Length header: 8 KiB.",
+    "  Maximum messages awaiting dispatch: 256.",
+    "  Maximum responses awaiting stdout: 256; input resumes at 128.",
     "",
     "Supported MCP methods:",
     "  initialize",
@@ -363,15 +366,19 @@ function pushFlag(argv, flag, value) {
   }
 }
 
-function pushRepeated(argv, flag, values) {
-  if (values === undefined || values === null || values === "") {
+function pushRepeated(argv, flag, values, field) {
+  if (values === undefined || values === null) {
     return;
   }
 
-  const list = Array.isArray(values) ? values : [values];
+  if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) {
+    throw new Error(`${field} must be an array of strings.`);
+  }
+
+  const list = values;
   for (const value of list) {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      argv.push(flag, String(value));
+    if (value.trim()) {
+      argv.push(flag, value);
     }
   }
 }
@@ -576,45 +583,21 @@ function confirmationId(args) {
 }
 
 function confirmationGuardError(tool, args) {
-  if (tool.name === "import_policy_file" && args.dryRun === false && args.confirm !== "IMPORT_POLICY") {
-    return "Confirmation required: import_policy_file real writes require confirm=IMPORT_POLICY.";
+  const metadata = tool.inputSchema?.["x-confirmation"];
+  if (!metadata) {
+    return "";
   }
 
-  if (
-    tool.name === "commit_error_report"
-    && args.dryRun === false
-    && args.list !== true
-    && args.confirm !== "COMMIT"
-  ) {
-    return "Confirmation required: commit_error_report real writes require confirm=COMMIT.";
+  const whenMatches = Object.entries(metadata.when ?? {})
+    .every(([field, value]) => args[field] === value);
+  const unlessMatches = Object.entries(metadata.unless ?? {})
+    .every(([field, value]) => args[field] === value);
+
+  if (!whenMatches || (Object.keys(metadata.unless ?? {}).length > 0 && unlessMatches)) {
+    return "";
   }
 
-  if (
-    tool.name === "compress_error_rules"
-    && args.dryRun === false
-    && args.updateActive === true
-    && args.confirm !== "UPDATE_RULES"
-  ) {
-    return "Confirmation required: compress_error_rules active updates require confirm=UPDATE_RULES.";
-  }
-
-  if (
-    tool.name === "create_settlement_proposal"
-    && args.dryRun === false
-    && args.confirmAdopted !== true
-  ) {
-    return "Confirmation required: create_settlement_proposal real writes require confirmAdopted=true.";
-  }
-
-  if (
-    tool.name === "activate_engine_version"
-    && args.dryRun === false
-    && args.confirm !== "ACTIVATE"
-  ) {
-    return "Confirmation required: activate_engine_version real writes require confirm=ACTIVATE.";
-  }
-
-  return "";
+  return args[metadata.field] === metadata.requiredValue ? "" : metadata.message;
 }
 
 function auditOutputSummary(result) {
@@ -641,13 +624,15 @@ async function auditedToolCall(tool, args, actor) {
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
   let result;
+  let effectiveArgs = args;
 
   try {
-    const guardError = confirmationGuardError(tool, args);
+    effectiveArgs = prepareToolArguments(tool, args);
+    const guardError = confirmationGuardError(tool, effectiveArgs);
     if (guardError) {
       throw new Error(guardError);
     }
-    result = await tool.handler(args);
+    result = await tool.handler(effectiveArgs);
   } catch (error) {
     result = {
       isError: true,
@@ -669,11 +654,11 @@ async function auditedToolCall(tool, args, actor) {
     tool_name: tool.name,
     risk: tool.risk,
     actor,
-    input_summary: summarizeToolArguments(args),
+    input_summary: summarizeToolArguments(effectiveArgs),
     affected_paths: changed.map((item) => item.path),
     previous_version: Object.fromEntries(changed.map((item) => [item.path, item.previous])),
     new_version: Object.fromEntries(changed.map((item) => [item.path, item.current])),
-    confirmation_id: confirmationId(args),
+    confirmation_id: confirmationId(effectiveArgs),
     result: auditOutputSummary(result),
   });
 
@@ -726,13 +711,361 @@ async function getCurrentProjectState(args) {
   };
 }
 
-function baseSchema(properties = {}, required = []) {
+const defaultNullNormalization = Object.freeze({
+  required: "reject",
+  optionalWithDefault: "applyDefault",
+  optionalWithoutDefault: "preserveNull",
+});
+
+const defaultEmptyStringNormalization = Object.freeze({
+  required: "rejectBlank",
+  optionalWithDefault: "applyDefault",
+  optionalWithoutDefault: "omit",
+  crossFieldPresence: "trimmedNonEmpty",
+});
+
+const defaultStringArrayNormalization = Object.freeze({
+  blankItems: "rejectBlank",
+  nonBlankItems: "preserve",
+});
+
+const defaultInputLimits = Object.freeze({
+  stringMaxLength: 4096,
+  queryMaxLength: 8192,
+  contentMaxLength: 65536,
+  textMaxLength: 1000000,
+  arrayMaxItems: 100,
+  fileArrayMaxItems: 256,
+  arrayItemMaxLength: 16384,
+  fileItemMaxLength: 4096,
+});
+
+const contentStringFields = new Set([
+  "task",
+  "feedback",
+  "badPattern",
+  "whyBad",
+  "fixRule",
+]);
+
+function stringMaxLengthFor(field) {
+  if (field === "text") {
+    return defaultInputLimits.textMaxLength;
+  }
+  if (field === "query") {
+    return defaultInputLimits.queryMaxLength;
+  }
+  if (contentStringFields.has(field)) {
+    return defaultInputLimits.contentMaxLength;
+  }
+  return defaultInputLimits.stringMaxLength;
+}
+
+function applySchemaInputLimits(properties) {
+  return Object.fromEntries(
+    Object.entries(properties).map(([field, schema]) => {
+      if (schema.type === "string") {
+        return [field, {
+          ...schema,
+          maxLength: schema.maxLength ?? stringMaxLengthFor(field),
+        }];
+      }
+      if (schema.type === "array" && schema.items?.type === "string") {
+        return [field, {
+          ...schema,
+          maxItems: schema.maxItems
+            ?? (field === "files"
+              ? defaultInputLimits.fileArrayMaxItems
+              : defaultInputLimits.arrayMaxItems),
+          items: {
+            ...schema.items,
+            maxLength: schema.items.maxLength
+              ?? (field === "files"
+                ? defaultInputLimits.fileItemMaxLength
+                : defaultInputLimits.arrayItemMaxLength),
+          },
+        }];
+      }
+      return [field, schema];
+    }),
+  );
+}
+
+function baseSchema(
+  properties = {},
+  required = [],
+  crossFieldConstraints = [],
+  confirmation = null,
+) {
+  const limitedProperties = applySchemaInputLimits(properties);
   return {
     type: "object",
-    properties,
+    properties: limitedProperties,
     required,
     additionalProperties: false,
+    "x-null-normalization": defaultNullNormalization,
+    "x-empty-string-normalization": defaultEmptyStringNormalization,
+    "x-string-array-normalization": defaultStringArrayNormalization,
+    ...(crossFieldConstraints.length > 0
+      ? { "x-cross-field-constraints": crossFieldConstraints }
+      : {}),
+    ...(confirmation ? { "x-confirmation": confirmation } : {}),
   };
+}
+
+function isPresentArgument(value, emptyStringNormalization) {
+  if (typeof value === "string") {
+    if (emptyStringNormalization.crossFieldPresence !== "trimmedNonEmpty") {
+      throw new Error("Unsupported cross-field empty-string presence policy.");
+    }
+    return value.trim().length > 0;
+  }
+  return value === true;
+}
+
+function getNullNormalization(tool) {
+  const metadata = tool.inputSchema?.["x-null-normalization"];
+  if (
+    metadata?.required !== defaultNullNormalization.required
+    || metadata?.optionalWithDefault !== defaultNullNormalization.optionalWithDefault
+    || metadata?.optionalWithoutDefault !== defaultNullNormalization.optionalWithoutDefault
+  ) {
+    throw new Error(`${tool.name} exposes unsupported x-null-normalization metadata.`);
+  }
+  return metadata;
+}
+
+function getEmptyStringNormalization(tool) {
+  const metadata = tool.inputSchema?.["x-empty-string-normalization"];
+  if (
+    metadata?.required !== defaultEmptyStringNormalization.required
+    || metadata?.optionalWithDefault !== defaultEmptyStringNormalization.optionalWithDefault
+    || metadata?.optionalWithoutDefault !== defaultEmptyStringNormalization.optionalWithoutDefault
+    || metadata?.crossFieldPresence !== defaultEmptyStringNormalization.crossFieldPresence
+  ) {
+    throw new Error(`${tool.name} exposes unsupported x-empty-string-normalization metadata.`);
+  }
+  return metadata;
+}
+
+function getStringArrayNormalization(tool) {
+  const metadata = tool.inputSchema?.["x-string-array-normalization"];
+  if (
+    metadata?.blankItems !== defaultStringArrayNormalization.blankItems
+    || metadata?.nonBlankItems !== defaultStringArrayNormalization.nonBlankItems
+  ) {
+    throw new Error(`${tool.name} exposes unsupported x-string-array-normalization metadata.`);
+  }
+  return metadata;
+}
+
+function validateCrossFieldArguments(tool, args) {
+  const constraints = tool.inputSchema?.["x-cross-field-constraints"] ?? [];
+  const emptyStringNormalization = getEmptyStringNormalization(tool);
+
+  for (const constraint of constraints) {
+    if (constraint.type === "exactlyOne") {
+      const count = constraint.fields
+        .filter((field) => isPresentArgument(args[field], emptyStringNormalization))
+        .length;
+      if (count !== 1) {
+        throw new Error(constraint.message);
+      }
+      continue;
+    }
+
+    if (constraint.type === "selectorOrList") {
+      const listEnabled = args[constraint.listField] === true;
+      const selectorCount = constraint.selectorFields
+        .filter((field) => isPresentArgument(args[field], emptyStringNormalization))
+        .length;
+      if ((listEnabled && selectorCount !== 0) || (!listEnabled && selectorCount !== 1)) {
+        throw new Error(constraint.message);
+      }
+    }
+  }
+}
+
+function validateToolArguments(tool, args) {
+  const properties = tool.inputSchema?.properties ?? {};
+  const nullNormalization = getNullNormalization(tool);
+  const emptyStringNormalization = getEmptyStringNormalization(tool);
+  const stringArrayNormalization = getStringArrayNormalization(tool);
+  const allowed = new Set(Object.keys(properties));
+  const unknown = Object.keys(args)
+    .filter((key) => !allowed.has(key))
+    .sort();
+
+  if (unknown.length > 0) {
+    const noun = unknown.length === 1 ? "argument" : "arguments";
+    throw new Error(`Unknown ${noun} for ${tool.name}: ${unknown.join(", ")}.`);
+  }
+
+  for (const field of tool.inputSchema?.required ?? []) {
+    const value = args[field];
+    if (
+      value === undefined
+      || (
+        typeof value === "string"
+        && value.trim() === ""
+        && emptyStringNormalization.required === "rejectBlank"
+      )
+      || (value === null && nullNormalization.required === "reject")
+    ) {
+      throw new Error(`${field} is required.`);
+    }
+  }
+
+  for (const [field, schema] of Object.entries(properties)) {
+    const value = args[field];
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    if (schema.type === "string" && typeof value !== "string") {
+      throw new Error(`${field} must be a string.`);
+    }
+
+    if (
+      schema.type === "string"
+      && typeof value === "string"
+      && Array.from(value).length > schema.maxLength
+    ) {
+      throw new Error(`${field} must be at most ${schema.maxLength} characters.`);
+    }
+
+    if (schema.type === "boolean" && typeof value !== "boolean") {
+      throw new Error(`${field} must be a boolean.`);
+    }
+
+    if (
+      schema.type === "integer"
+      && (!Number.isInteger(value) || (schema.minimum !== undefined && value < schema.minimum))
+    ) {
+      if (schema.minimum === 1) {
+        throw new Error(`${field} must be a positive integer.`);
+      }
+      throw new Error(`${field} must be an integer greater than or equal to ${schema.minimum}.`);
+    }
+
+    if (
+      schema.type === "integer"
+      && schema.maximum !== undefined
+      && value > schema.maximum
+    ) {
+      throw new Error(`${field} must be an integer less than or equal to ${schema.maximum}.`);
+    }
+
+    if (schema.type === "array") {
+      if (!Array.isArray(value)) {
+        throw new Error(`${field} must be an array.`);
+      }
+      if (value.length > schema.maxItems) {
+        throw new Error(`${field} must contain at most ${schema.maxItems} items.`);
+      }
+      if (
+        schema.items?.type === "string"
+        && value.some((item) => typeof item !== "string")
+      ) {
+        throw new Error(`${field} must be an array of strings.`);
+      }
+      if (
+        schema.items?.type === "string"
+        && value.some((item) => Array.from(item).length > schema.items.maxLength)
+      ) {
+        throw new Error(`${field} items must be at most ${schema.items.maxLength} characters.`);
+      }
+      if (
+        schema.items?.type === "string"
+        && stringArrayNormalization.blankItems === "rejectBlank"
+        && value.some((item) => item.trim() === "")
+      ) {
+        throw new Error(`${field} must not contain blank strings.`);
+      }
+    }
+
+    if (
+      Array.isArray(schema.enum)
+      && !(typeof value === "string" && value.trim() === "")
+      && !schema.enum.includes(value)
+    ) {
+      throw new Error(`${field} must be one of: ${schema.enum.join(", ")}.`);
+    }
+  }
+
+}
+
+function applyEmptyStringNormalization(tool, args) {
+  const normalized = { ...args };
+  const properties = tool.inputSchema?.properties ?? {};
+  const required = new Set(tool.inputSchema?.required ?? []);
+  const emptyStringNormalization = getEmptyStringNormalization(tool);
+
+  for (const [field, schema] of Object.entries(properties)) {
+    if (
+      schema.type !== "string"
+      || required.has(field)
+      || typeof normalized[field] !== "string"
+      || normalized[field].trim() !== ""
+    ) {
+      continue;
+    }
+
+    if (
+      Object.hasOwn(schema, "default")
+      && emptyStringNormalization.optionalWithDefault === "applyDefault"
+    ) {
+      normalized[field] = schema.default;
+      continue;
+    }
+
+    if (
+      !Object.hasOwn(schema, "default")
+      && emptyStringNormalization.optionalWithoutDefault === "omit"
+    ) {
+      delete normalized[field];
+    }
+  }
+
+  return normalized;
+}
+
+function applyToolDefaults(tool, args) {
+  const normalized = { ...args };
+  const properties = tool.inputSchema?.properties ?? {};
+  const nullNormalization = getNullNormalization(tool);
+
+  for (const [field, schema] of Object.entries(properties)) {
+    if (
+      normalized[field] === null
+      && !Object.hasOwn(schema, "default")
+      && nullNormalization.optionalWithoutDefault === "preserveNull"
+    ) {
+      continue;
+    }
+    if (
+      (
+        normalized[field] === undefined
+        || (
+          normalized[field] === null
+          && nullNormalization.optionalWithDefault === "applyDefault"
+        )
+      )
+      && Object.hasOwn(schema, "default")
+    ) {
+      normalized[field] = schema.default;
+    }
+  }
+
+  return normalized;
+}
+
+function prepareToolArguments(tool, args) {
+  validateToolArguments(tool, args);
+  const emptyStringNormalized = applyEmptyStringNormalization(tool, args);
+  const normalized = applyToolDefaults(tool, emptyStringNormalized);
+  validateCrossFieldArguments(tool, normalized);
+  return normalized;
 }
 
 const toolDefinitions = [
@@ -778,7 +1111,7 @@ const toolDefinitions = [
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
-      all: { type: "boolean", default: true },
+      all: { type: "boolean" },
       files: { type: "array", items: { type: "string" } },
       schema: { type: "string", enum: ["error_report", "feedback", "generic_pair"] },
       strict: { type: "boolean", default: false },
@@ -811,7 +1144,7 @@ const toolDefinitions = [
       confirmationId: { type: "string" },
       affectedPath: { type: "string" },
       query: { type: "string" },
-      limit: { type: "integer", minimum: 1, default: 20 },
+      limit: { type: "integer", minimum: 1, maximum: 1000, default: 20 },
       oldest: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       showJson: { type: "boolean", default: false },
@@ -848,7 +1181,7 @@ const toolDefinitions = [
     risk: "generated-output",
     inputSchema: baseSchema({
       query: { type: "string" },
-      top: { type: "integer", minimum: 1, default: 8 },
+      top: { type: "integer", minimum: 1, maximum: 100, default: 8 },
       output: { type: "string" },
     }, ["query"]),
     handler: async (args) => {
@@ -887,7 +1220,7 @@ const toolDefinitions = [
       query: { type: "string" },
       task: { type: "string" },
       mode: { type: "string", enum: ["next-chapter", "proofread", "settle", "debug"], default: "next-chapter" },
-      top: { type: "integer", minimum: 1, default: 12 },
+      top: { type: "integer", minimum: 1, maximum: 100, default: 12 },
       retrievalOutput: { type: "string" },
       taskOutput: { type: "string" },
     }, ["query", "task"]),
@@ -1019,7 +1352,12 @@ const toolDefinitions = [
       force: { type: "boolean", default: false },
       dryRun: { type: "boolean", default: true },
       confirm: { type: "string" },
-    }, ["kind", "source"]),
+    }, ["kind", "source"], [], {
+      field: "confirm",
+      requiredValue: "IMPORT_POLICY",
+      when: { dryRun: false },
+      message: "Confirmation required: import_policy_file real writes require confirm=IMPORT_POLICY.",
+    }),
     handler: async (args) => {
       assertObject(args);
       const argv = [
@@ -1048,6 +1386,17 @@ const toolDefinitions = [
       list: { type: "boolean", default: false },
       dryRun: { type: "boolean", default: false },
       confirm: { type: "string" },
+    }, [], [{
+      type: "selectorOrList",
+      listField: "list",
+      selectorFields: ["errorId", "feedbackId", "latest"],
+      message: "Use --list without selectors, or choose exactly one selector: --error-id, --feedback-id or --latest.",
+    }], {
+      field: "confirm",
+      requiredValue: "COMMIT",
+      when: { dryRun: false },
+      unless: { list: true },
+      message: "Confirmation required: commit_error_report real writes require confirm=COMMIT.",
     }),
     handler: async (args) => {
       assertObject(args);
@@ -1068,8 +1417,8 @@ const toolDefinitions = [
     description: "Compress formal active Error Report DB entries into candidate or active compressed_rules.md. Active update requires confirm=UPDATE_RULES.",
     risk: "high-risk-write",
     inputSchema: baseSchema({
-      top: { type: "integer", minimum: 1, default: 24 },
-      minCount: { type: "integer", minimum: 1, default: 1 },
+      top: { type: "integer", minimum: 1, maximum: 1000, default: 24 },
+      minCount: { type: "integer", minimum: 1, maximum: 1000, default: 1 },
       includeArchived: { type: "boolean", default: false },
       candidateOutput: { type: "string" },
       writeCandidate: { type: "boolean", default: false },
@@ -1077,6 +1426,11 @@ const toolDefinitions = [
       confirm: { type: "string" },
       allowEmpty: { type: "boolean", default: false },
       dryRun: { type: "boolean", default: true },
+    }, [], [], {
+      field: "confirm",
+      requiredValue: "UPDATE_RULES",
+      when: { dryRun: false, updateActive: true },
+      message: "Confirmation required: compress_error_rules active updates require confirm=UPDATE_RULES.",
     }),
     handler: async (args) => {
       assertObject(args);
@@ -1113,7 +1467,16 @@ const toolDefinitions = [
       notes: { type: "array", items: { type: "string" } },
       confirmAdopted: { type: "boolean", default: false },
       dryRun: { type: "boolean", default: false },
-    }, ["chapter", "title"]),
+    }, ["chapter", "title"], [{
+      type: "exactlyOne",
+      fields: ["draftId", "sourceFile", "text"],
+      message: "Provide exactly one input source: --draft-id, --source-file or --text.",
+    }], {
+      field: "confirmAdopted",
+      requiredValue: true,
+      when: { dryRun: false },
+      message: "Confirmation required: create_settlement_proposal real writes require confirmAdopted=true.",
+    }),
     handler: async (args) => {
       assertObject(args);
       const argv = [
@@ -1126,10 +1489,10 @@ const toolDefinitions = [
       pushValue(argv, "--source-file", optionalString(args.sourceFile, "sourceFile"));
       pushValue(argv, "--text", optionalString(args.text, "text"));
       pushValue(argv, "--task-prompt", optionalString(args.taskPrompt, "taskPrompt"));
-      pushRepeated(argv, "--established", args.established);
-      pushRepeated(argv, "--unsettled", args.unsettled);
-      pushRepeated(argv, "--reminder", args.reminders);
-      pushRepeated(argv, "--note", args.notes);
+      pushRepeated(argv, "--established", args.established, "established");
+      pushRepeated(argv, "--unsettled", args.unsettled, "unsettled");
+      pushRepeated(argv, "--reminder", args.reminders, "reminders");
+      pushRepeated(argv, "--note", args.notes, "notes");
       pushFlag(argv, "--confirm-adopted", optionalBoolean(args.confirmAdopted, "confirmAdopted"));
       pushFlag(argv, "--dry-run", optionalBoolean(args.dryRun, "dryRun"));
       return textContent(await runNodeTool("create-settlement-proposal.mjs", argv));
@@ -1147,6 +1510,15 @@ const toolDefinitions = [
       reason: { type: "string" },
       dryRun: { type: "boolean", default: true },
       confirm: { type: "string" },
+    }, [], [{
+      type: "exactlyOne",
+      fields: ["version", "candidate"],
+      message: "Provide exactly one candidate source: --version or --candidate.",
+    }], {
+      field: "confirm",
+      requiredValue: "ACTIVATE",
+      when: { dryRun: false },
+      message: "Confirmation required: activate_engine_version real writes require confirm=ACTIVATE.",
     }),
     handler: async (args) => {
       assertObject(args);
@@ -1305,13 +1677,96 @@ function makeResult(id, result) {
   };
 }
 
-function writeMessage(message, framing = "line") {
+const maxPendingResponseMessages = 256;
+const responseResumeLowWaterMark = 128;
+let pendingResponseMessages = 0;
+let responseWriteChain = Promise.resolve();
+let inputPausedForResponseBackpressure = false;
+let inputEnded = false;
+let inputEndFinalized = false;
+
+function encodeMessage(message, framing) {
   const json = JSON.stringify(message);
   if (framing === "header") {
-    process.stdout.write(`Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n${json}`);
+    return (
+      `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n${json}`
+    );
+  }
+  return `${json}\n`;
+}
+
+function writeStdoutFrame(frame) {
+  return new Promise((resolve, reject) => {
+    let callbackComplete = false;
+    let drainComplete = true;
+
+    const finish = () => {
+      if (callbackComplete && drainComplete) {
+        resolve();
+      }
+    };
+    const accepted = process.stdout.write(frame, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      callbackComplete = true;
+      finish();
+    });
+    if (!accepted) {
+      drainComplete = false;
+      process.stdout.once("drain", () => {
+        drainComplete = true;
+        finish();
+      });
+    }
+  });
+}
+
+function pauseInputForResponseBackpressure() {
+  if (inputPausedForResponseBackpressure) {
     return;
   }
-  process.stdout.write(`${json}\n`);
+  inputPausedForResponseBackpressure = true;
+  process.stdin.pause();
+}
+
+function resumeInputAfterResponseBackpressure() {
+  if (
+    !inputPausedForResponseBackpressure
+    || pendingResponseMessages > responseResumeLowWaterMark
+  ) {
+    return;
+  }
+  inputPausedForResponseBackpressure = false;
+  queueMicrotask(() => {
+    processInputBuffer();
+    if (inputEnded) {
+      maybeFinalizeEndOfInput();
+    } else if (!inputPausedForResponseBackpressure) {
+      process.stdin.resume();
+    }
+  });
+}
+
+function writeMessage(message, framing = "line") {
+  const frame = encodeMessage(message, framing);
+  pendingResponseMessages += 1;
+  if (pendingResponseMessages >= maxPendingResponseMessages) {
+    pauseInputForResponseBackpressure();
+  }
+
+  responseWriteChain = responseWriteChain
+    .then(() => writeStdoutFrame(frame))
+    .catch((error) => {
+      process.exitCode = 1;
+      console.error(`MCP stdout write failed: ${error.message}`);
+    })
+    .finally(() => {
+      pendingResponseMessages -= 1;
+      resumeInputAfterResponseBackpressure();
+    });
+  return responseWriteChain;
 }
 
 async function callTool(params) {
@@ -1335,7 +1790,8 @@ async function callTool(params) {
   }
 
   try {
-    return await tool.handler(args);
+    const effectiveArgs = prepareToolArguments(tool, args);
+    return await tool.handler(effectiveArgs);
   } catch (error) {
     return {
       isError: true,
@@ -1424,42 +1880,170 @@ async function dispatch(message) {
   return makeError(message.id, -32601, `Method not found: ${message.method}`);
 }
 
+const maxPendingDispatchMessages = 256;
+const dispatchQueueOverloadMessage = (
+  `Server overloaded: dispatch queue limit of ${maxPendingDispatchMessages} messages reached.`
+);
+
 let pending = Promise.resolve();
+let pendingDispatchMessages = 0;
 
 function enqueueMessage(message, framing) {
+  if (pendingDispatchMessages >= maxPendingDispatchMessages) {
+    if (isObject(message) && Object.hasOwn(message, "id")) {
+      writeMessage(
+        makeError(message.id ?? null, -32000, dispatchQueueOverloadMessage),
+        framing,
+      );
+    }
+    return false;
+  }
+
+  pendingDispatchMessages += 1;
   pending = pending
     .then(async () => {
       const response = await dispatch(message);
       if (response) {
-        writeMessage(response, framing);
+        await writeMessage(response, framing);
       }
     })
-    .catch((error) => {
-      writeMessage(makeError(message?.id ?? null, -32603, error.message), framing);
+    .catch(async (error) => {
+      await writeMessage(
+        makeError(message?.id ?? null, -32603, error.message),
+        framing,
+      );
+    })
+    .finally(() => {
+      pendingDispatchMessages -= 1;
     });
+  return true;
 }
 
+const maxJsonRpcMessageBytes = 16 * 1024 * 1024;
+const maxContentLengthHeaderBytes = 8 * 1024;
+const headerSeparator = Buffer.from("\r\n\r\n");
+const messageTooLargeError = (
+  `Parse error: JSON-RPC message exceeds ${maxJsonRpcMessageBytes} bytes.`
+);
+const headerTooLargeError = (
+  `Parse error: Content-Length header exceeds ${maxContentLengthHeaderBytes} bytes.`
+);
+
 let inputBuffer = Buffer.alloc(0);
+let oversizedBodyBytesRemaining = 0;
+let discardingOversizedLine = false;
+let discardingOversizedHeader = false;
+let oversizedHeaderDiscardTail = Buffer.alloc(0);
+let oversizedHeaderDeclaredBodyBytes = null;
+
+function parseDeclaredContentLengthPrefix(buffer) {
+  const prefix = buffer.subarray(0, Math.min(buffer.length, 256)).toString("ascii");
+  const firstLineEnd = prefix.indexOf("\r\n");
+  const firstLine = firstLineEnd === -1 ? prefix : prefix.slice(0, firstLineEnd);
+  const match = firstLine.match(/^Content-Length:\s*(\d+)\s*$/i);
+  if (!match) {
+    return null;
+  }
+  const length = Number(match[1]);
+  return Number.isSafeInteger(length) ? length : null;
+}
+
+function parseContentLengthHeader(header) {
+  const contentLengthValues = header
+    .split("\r\n")
+    .filter((line) => /^Content-Length:/i.test(line))
+    .map((line) => line.slice(line.indexOf(":") + 1).trim());
+
+  if (contentLengthValues.length === 0) {
+    return { error: "Parse error: missing Content-Length" };
+  }
+
+  if (contentLengthValues.length > 1) {
+    const uniqueValues = new Set(contentLengthValues);
+    return {
+      error: uniqueValues.size === 1
+        ? "Parse error: duplicate Content-Length headers are not allowed."
+        : "Parse error: conflicting Content-Length headers are not allowed.",
+    };
+  }
+
+  const [rawValue] = contentLengthValues;
+  if (/^\d+$/.test(rawValue)) {
+    const length = Number(rawValue);
+    if (!Number.isSafeInteger(length)) {
+      return {
+        error: "Parse error: Content-Length exceeds JavaScript safe integer range.",
+      };
+    }
+    return { length };
+  }
+  if (/^-\d+$/.test(rawValue)) {
+    return { error: "Parse error: Content-Length must not be negative." };
+  }
+  if (/^\d/.test(rawValue)) {
+    return { error: "Parse error: Content-Length must contain decimal digits only." };
+  }
+  return { error: "Parse error: missing Content-Length" };
+}
 
 function processInputBuffer() {
-  while (inputBuffer.length > 0) {
+  while (
+    inputBuffer.length > 0
+    && pendingResponseMessages < maxPendingResponseMessages
+  ) {
     const prefix = inputBuffer.subarray(0, 32).toString("ascii");
     if (/^Content-Length:/i.test(prefix)) {
-      const headerEnd = inputBuffer.indexOf(Buffer.from("\r\n\r\n"));
+      const headerEnd = inputBuffer.indexOf(headerSeparator);
       if (headerEnd === -1) {
+        if (inputBuffer.length > maxContentLengthHeaderBytes) {
+          writeMessage(makeError(null, -32700, headerTooLargeError), "header");
+          oversizedHeaderDeclaredBodyBytes = parseDeclaredContentLengthPrefix(inputBuffer);
+          oversizedHeaderDiscardTail = Buffer.from(
+            inputBuffer.subarray(Math.max(0, inputBuffer.length - headerSeparator.length + 1)),
+          );
+          inputBuffer = Buffer.alloc(0);
+          discardingOversizedHeader = true;
+        }
         return;
       }
 
-      const header = inputBuffer.subarray(0, headerEnd).toString("ascii");
-      const match = header.match(/Content-Length:\s*(\d+)/i);
-      if (!match) {
-        writeMessage(makeError(null, -32700, "Parse error: missing Content-Length"), "header");
-        inputBuffer = inputBuffer.subarray(headerEnd + 4);
+      if (headerEnd > maxContentLengthHeaderBytes) {
+        writeMessage(makeError(null, -32700, headerTooLargeError), "header");
+        const declaredBodyBytes = parseDeclaredContentLengthPrefix(inputBuffer);
+        inputBuffer = inputBuffer.subarray(headerEnd + headerSeparator.length);
+        if (declaredBodyBytes !== null) {
+          const discardedBodyBytes = Math.min(declaredBodyBytes, inputBuffer.length);
+          inputBuffer = inputBuffer.subarray(discardedBodyBytes);
+          oversizedBodyBytesRemaining = declaredBodyBytes - discardedBodyBytes;
+          if (oversizedBodyBytesRemaining > 0) {
+            return;
+          }
+        }
         continue;
       }
 
-      const length = Number.parseInt(match[1], 10);
-      const bodyStart = headerEnd + 4;
+      const header = inputBuffer.subarray(0, headerEnd).toString("ascii");
+      const parsedHeader = parseContentLengthHeader(header);
+      if (parsedHeader.error) {
+        writeMessage(makeError(null, -32700, parsedHeader.error), "header");
+        inputBuffer = inputBuffer.subarray(headerEnd + headerSeparator.length);
+        continue;
+      }
+
+      const { length } = parsedHeader;
+      const bodyStart = headerEnd + headerSeparator.length;
+      if (length > maxJsonRpcMessageBytes) {
+        writeMessage(makeError(null, -32700, messageTooLargeError), "header");
+        const availableBodyBytes = inputBuffer.length - bodyStart;
+        const discardedBodyBytes = Math.min(length, availableBodyBytes);
+        inputBuffer = inputBuffer.subarray(bodyStart + discardedBodyBytes);
+        oversizedBodyBytesRemaining = length - discardedBodyBytes;
+        if (oversizedBodyBytesRemaining > 0) {
+          return;
+        }
+        continue;
+      }
+
       if (inputBuffer.length < bodyStart + length) {
         return;
       }
@@ -1476,10 +2060,24 @@ function processInputBuffer() {
 
     const newlineIndex = inputBuffer.indexOf(0x0a);
     if (newlineIndex === -1) {
+      if (inputBuffer.length > maxJsonRpcMessageBytes) {
+        writeMessage(makeError(null, -32700, messageTooLargeError), "line");
+        inputBuffer = Buffer.alloc(0);
+        discardingOversizedLine = true;
+      }
       return;
     }
 
-    const line = inputBuffer.subarray(0, newlineIndex).toString("utf8").trim();
+    const lineEnd = newlineIndex > 0 && inputBuffer[newlineIndex - 1] === 0x0d
+      ? newlineIndex - 1
+      : newlineIndex;
+    if (lineEnd > maxJsonRpcMessageBytes) {
+      writeMessage(makeError(null, -32700, messageTooLargeError), "line");
+      inputBuffer = inputBuffer.subarray(newlineIndex + 1);
+      continue;
+    }
+
+    const line = inputBuffer.subarray(0, lineEnd).toString("utf8").trim();
     inputBuffer = inputBuffer.subarray(newlineIndex + 1);
     if (!line) {
       continue;
@@ -1493,18 +2091,147 @@ function processInputBuffer() {
   }
 }
 
+function acceptInputChunk(chunk) {
+  let incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+
+  while (incoming.length > 0) {
+    if (oversizedBodyBytesRemaining > 0) {
+      const discardedBytes = Math.min(oversizedBodyBytesRemaining, incoming.length);
+      oversizedBodyBytesRemaining -= discardedBytes;
+      incoming = incoming.subarray(discardedBytes);
+      continue;
+    }
+
+    if (discardingOversizedLine) {
+      const newlineIndex = incoming.indexOf(0x0a);
+      if (newlineIndex === -1) {
+        return;
+      }
+      discardingOversizedLine = false;
+      incoming = incoming.subarray(newlineIndex + 1);
+      continue;
+    }
+
+    if (discardingOversizedHeader) {
+      const combined = oversizedHeaderDiscardTail.length > 0
+        ? Buffer.concat([oversizedHeaderDiscardTail, incoming])
+        : incoming;
+      const headerEnd = combined.indexOf(headerSeparator);
+      if (headerEnd === -1) {
+        oversizedHeaderDiscardTail = Buffer.from(
+          combined.subarray(Math.max(0, combined.length - headerSeparator.length + 1)),
+        );
+        return;
+      }
+      discardingOversizedHeader = false;
+      oversizedHeaderDiscardTail = Buffer.alloc(0);
+      incoming = combined.subarray(headerEnd + headerSeparator.length);
+      if (oversizedHeaderDeclaredBodyBytes !== null) {
+        const discardedBodyBytes = Math.min(
+          oversizedHeaderDeclaredBodyBytes,
+          incoming.length,
+        );
+        oversizedBodyBytesRemaining = (
+          oversizedHeaderDeclaredBodyBytes - discardedBodyBytes
+        );
+        oversizedHeaderDeclaredBodyBytes = null;
+        incoming = incoming.subarray(discardedBodyBytes);
+      }
+      continue;
+    }
+
+    inputBuffer = Buffer.concat([inputBuffer, incoming]);
+    processInputBuffer();
+    return;
+  }
+}
+
+function getEndOfInputParseError() {
+  if (
+    oversizedBodyBytesRemaining > 0
+    || discardingOversizedLine
+    || discardingOversizedHeader
+  ) {
+    return null;
+  }
+
+  if (inputBuffer.length === 0 || inputBuffer.toString("utf8").trim() === "") {
+    return null;
+  }
+
+  const prefix = inputBuffer.subarray(0, 32).toString("ascii");
+  if (/^Content-Length:/i.test(prefix)) {
+    const headerEnd = inputBuffer.indexOf(headerSeparator);
+    if (headerEnd === -1) {
+      return {
+        framing: "header",
+        message: "Parse error: incomplete Content-Length header at end of input.",
+      };
+    }
+
+    const header = inputBuffer.subarray(0, headerEnd).toString("ascii");
+    const parsedHeader = parseContentLengthHeader(header);
+    if (parsedHeader.length !== undefined) {
+      const expectedBytes = parsedHeader.length;
+      const receivedBytes = inputBuffer.length - headerEnd - headerSeparator.length;
+      if (receivedBytes < expectedBytes) {
+        return {
+          framing: "header",
+          message: (
+            "Parse error: incomplete Content-Length body at end of input: "
+            + `expected ${expectedBytes} bytes, received ${receivedBytes}.`
+          ),
+        };
+      }
+    }
+  }
+
+  return {
+    framing: "line",
+    message: "Parse error: incomplete newline-delimited JSON at end of input.",
+  };
+}
+
+function maybeFinalizeEndOfInput() {
+  if (
+    !inputEnded
+    || inputEndFinalized
+    || inputPausedForResponseBackpressure
+    || pendingResponseMessages >= maxPendingResponseMessages
+  ) {
+    return;
+  }
+
+  processInputBuffer();
+  if (
+    inputPausedForResponseBackpressure
+    || pendingResponseMessages >= maxPendingResponseMessages
+  ) {
+    return;
+  }
+
+  inputEndFinalized = true;
+  const parseError = getEndOfInputParseError();
+  if (parseError) {
+    pending = pending.then(async () => {
+      await writeMessage(
+        makeError(null, -32700, parseError.message),
+        parseError.framing,
+      );
+    });
+  }
+  pending.catch(() => {});
+}
+
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log(usage());
   process.exit(0);
 }
 
 process.stdin.on("data", (chunk) => {
-  inputBuffer = Buffer.concat([
-    inputBuffer,
-    Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
-  ]);
-  processInputBuffer();
+  acceptInputChunk(chunk);
 });
 process.stdin.on("end", () => {
-  pending.catch(() => {});
+  inputEnded = true;
+  maybeFinalizeEndOfInput();
 });

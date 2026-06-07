@@ -1,6 +1,23 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 
+function usage() {
+  return [
+    'Usage:',
+    '  node server/src/tools/validate-json-codeblocks.mjs',
+    '',
+    'Validates JSON/JSONL fenced code blocks and every repository JSONL file.',
+  ].join('\n');
+}
+
+function parseArgs(argv) {
+  if (argv.length === 0) return { help: false };
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
+    return { help: true };
+  }
+  throw new Error(`Unknown argument: ${argv[0]}`);
+}
+
 async function collectFiles(dir, exts = ['.md', '.jsonl']) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   let files = [];
@@ -69,6 +86,12 @@ async function validateJsonlFile(path) {
 }
 
 async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    console.log(usage());
+    return;
+  }
+
   const root = process.cwd();
   const files = await collectFiles(root, ['.md', '.jsonl']);
   let allProblems = [];
@@ -95,5 +118,10 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] && process.argv[1].endsWith('validate-json-codeblocks.mjs')) {
-  main().catch(err => { console.error(err); process.exit(3); });
+  main().catch(err => {
+    console.error(err.message);
+    console.error('');
+    console.error(usage());
+    process.exit(3);
+  });
 }

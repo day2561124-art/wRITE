@@ -1,1 +1,1 @@
-{"id": "golden-4", "desc": "Trace 標準化測試", "input": "Trace 範例必須為合法 JSON 或標示為示意 text", "expected": "合法或標示"}
+{"id":"golden-4","desc":"Trace 與 fenced JSON 必須通過 repository validator","kind":"json_codeblocks","required_fragments":["OK: no JSON/codeblock parsing errors found"]}

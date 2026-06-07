@@ -1,1 +1,1 @@
-{"id": "golden-5", "desc": "CI gate 包含 JSON lint 測試", "input": "CI 檢查 json 代碼區塊是否合法", "expected": "CI 失敗或標示錯誤"}
+{"id":"golden-5","desc":"CI gate 必須執行完整本機測試 runner","kind":"file_contains","files":[".github/workflows/ci.yml"],"required_fragments":["node tests/run-all.mjs"]}
