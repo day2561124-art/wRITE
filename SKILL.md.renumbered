@@ -416,6 +416,8 @@ commit_error_report()
 ↓
 build_generation_context()
 ↓
+（註：原本對應的工具腳本 `server/src/tools/build-generation-context.mjs` 已移除；該功能之實作已重構或移轉，詳見 changelog/ENGINEERING-20260607.md。）
+↓
 AI 根據錯誤報告避錯與重寫
 ```
 

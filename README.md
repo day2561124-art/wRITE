@@ -397,21 +397,10 @@ node server/src/tools/create-settlement-proposal.mjs --chapter "第二十章" --
 
 啟用前先 dry-run，確認候選版本、目前 active SHA 與備份位置：
 
-```powershell
-node server/src/tools/activate-engine-version.mjs --version v5.0.12 --dry-run
-```
+> 已移除：本專案中的本地腳本 `server/src/tools/activate-engine-version.mjs` 已於近期重構時移除。
+>
+> 若需啟用新版本的 engine，請參閱 [changelog/ENGINEERING-20260607.md](changelog/ENGINEERING-20260607.md) 以了解替代流程與安全建議。
 
-也可以指定候選檔案：
-
-```powershell
-node server/src/tools/activate-engine-version.mjs --candidate data/canon_db/versions/engine_v5.0.13.md --dry-run
-```
-
-真正啟用新版 engine 時，建議加上目前 active 的 SHA 保護：
-
-```powershell
-node server/src/tools/activate-engine-version.mjs --candidate data/canon_db/versions/engine_v5.0.13.md --required-current-sha <sha> --reason "第二十章正式結算後更新" --confirm ACTIVATE
-```
 
 注意：
 
@@ -720,7 +709,7 @@ server/src/
     save-draft.mjs
     save-proof-report.mjs
     create-settlement-proposal.mjs
-    activate-engine-version.mjs
+    activate-engine-version.mjs  (removed)
     validate-json-codeblocks.mjs
 
 prompts/
