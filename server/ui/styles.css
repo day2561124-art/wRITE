@@ -257,6 +257,10 @@ textarea:disabled {
   border: 1px solid transparent;
 }
 
+.button.full-width {
+  width: 100%;
+}
+
 .button.primary {
   color: #ffffff;
   background: var(--accent);
@@ -903,6 +907,21 @@ textarea:disabled {
   border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 760;
+}
+
+.visual-upload-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 4px;
+}
+
+.visual-upload-panel .field {
+  gap: 5px;
+}
+
+.visual-upload-panel textarea {
+  min-height: 82px;
 }
 
 .visual-reader {

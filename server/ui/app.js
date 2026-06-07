@@ -32,6 +32,8 @@ const sourceIcons = {
   compressed_error_rules: "E",
 };
 
+const maxVisualUploadBytes = 8 * 1024 * 1024;
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -253,6 +255,17 @@ function syncVisualFilters(visuals) {
   };
 }
 
+function syncVisualUploadCategories(visuals) {
+  const select = $("#visual-upload-category");
+  const current = select.value || "character_design";
+  select.innerHTML = (visuals.categories ?? []).map((category) => `
+    <option value="${escapeHtml(category.key)}">${escapeHtml(category.label)}</option>
+  `).join("");
+  select.value = [...select.options].some((option) => option.value === current)
+    ? current
+    : "character_design";
+}
+
 function visualMatchesFilters(item) {
   const filters = state.visualFilters;
   return (
@@ -299,6 +312,7 @@ function renderVisuals() {
     warningCount: 0,
   };
   syncVisualFilters(visuals);
+  syncVisualUploadCategories(visuals);
   const items = (visuals.items ?? []).filter(visualMatchesFilters);
   $("#visual-summary").textContent = visuals.errorCount || visuals.warningCount
     ? `${items.length}/${visuals.count} 張 · ${visuals.errorCount} 錯誤 · ${visuals.warningCount} 注意`
@@ -589,6 +603,53 @@ async function runValidation() {
   }
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("讀取圖片失敗")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleVisualUpload(event) {
+  event.preventDefault();
+  const fileInput = $("#visual-upload-file");
+  const file = fileInput.files?.[0];
+  if (!file) {
+    toast("請先選擇圖片", true);
+    return;
+  }
+  if (file.size > maxVisualUploadBytes) {
+    toast("圖片不可超過 8 MB", true);
+    return;
+  }
+
+  try {
+    const payload = await api("/api/visuals/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        mimeType: file.type,
+        dataBase64: await readFileAsDataUrl(file),
+        character: $("#visual-upload-character").value,
+        title: $("#visual-upload-title").value,
+        category: $("#visual-upload-category").value,
+        tags: $("#visual-upload-tags").value,
+        notes: $("#visual-upload-notes").value,
+      }),
+    });
+    state.data.visuals = payload.visuals;
+    state.visualFilters = { character: "", category: "", status: "" };
+    state.activeVisualId = payload.upload.record.visual_id;
+    $("#visual-upload-form").reset();
+    renderVisuals();
+    toast("人設圖已上傳");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function bindEvents() {
   window.addEventListener("hashchange", () => {
     switchView(window.location.hash.slice(1) || "overview");
@@ -629,6 +690,12 @@ function bindEvents() {
   $("#copy-draft-button").addEventListener("click", () => copyText(state.currentDraftText, "候選稿"));
   $("#proof-form").addEventListener("submit", handleSaveProof);
   $("#feedback-form").addEventListener("submit", handleFeedback);
+  $("#visual-upload-form").addEventListener("submit", handleVisualUpload);
+  $("#visual-upload-file").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file || $("#visual-upload-title").value.trim()) return;
+    $("#visual-upload-title").value = file.name.replace(/\.[^.]+$/u, "");
+  });
   $("#clear-console-button").addEventListener("click", () => {
     $("#action-console").textContent = "等待操作。";
   });

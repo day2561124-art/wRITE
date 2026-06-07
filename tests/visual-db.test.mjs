@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import {
   isVisualAssetProjectPath,
   validateVisualRecord,
+  visualCategoryAssetDirectories,
   visualCategorySpecs,
 } from "../server/src/visual-db.mjs";
 
@@ -45,6 +46,11 @@ async function main() {
   );
 
   assert(visualCategorySpecs.length >= 4, "Visual category registry is unexpectedly small.");
+  assert(
+    visualCategoryAssetDirectories.character_design === "characters"
+      && visualCategoryAssetDirectories.armed_form === "armed_forms",
+    "Visual category asset directory mapping is incomplete.",
+  );
   const indexStats = await stat("data/visual_db/visual_index.jsonl");
   assert(indexStats.isFile(), "visual_index.jsonl is missing.");
 

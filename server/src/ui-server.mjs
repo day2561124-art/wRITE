@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -20,6 +20,7 @@ import { sourceSpecsFor } from "./source-registry.mjs";
 import {
   allowedVisualImageExtensions,
   validateVisualRecord,
+  visualCategoryAssetDirectories,
   visualCategoryLabels,
   visualCategorySpecs,
 } from "./visual-db.mjs";
@@ -29,8 +30,10 @@ const uiDir = path.join(rootDir, "server", "ui");
 const toolsDir = path.join(rootDir, "server", "src", "tools");
 const defaultHost = "127.0.0.1";
 const defaultPort = 4173;
-const maxBodyBytes = 2 * 1024 * 1024;
+const maxJsonBodyBytes = 2 * 1024 * 1024;
+const maxVisualUploadBodyBytes = 12 * 1024 * 1024;
 const maxToolOutputBytes = 4 * 1024 * 1024;
+const maxVisualImageBytes = 8 * 1024 * 1024;
 const activeChildren = new Set();
 const visualAssetsDir = projectPaths.visualAssets;
 const visualIndexPath = projectPaths.visualIndex;
@@ -81,6 +84,14 @@ const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+const visualUploadMimeTypes = {
   ".gif": "image/gif",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -426,6 +437,187 @@ function enumValue(value, field, values, fallback) {
   return normalized;
 }
 
+function optionalStringArray(value, field, maxItems = 20, maxLength = 80) {
+  if (value === undefined || value === null || value === "") return [];
+  const rawItems = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,，、\n]/u)
+      : null;
+  if (!rawItems) throw new Error(`${field} must be a string or an array of strings.`);
+  if (rawItems.length > maxItems) throw new Error(`${field} must contain at most ${maxItems} items.`);
+  const items = rawItems
+    .map((item) => {
+      if (typeof item !== "string") throw new Error(`${field} must contain only strings.`);
+      return item.trim();
+    })
+    .filter(Boolean);
+  if (items.some((item) => item.length > maxLength)) {
+    throw new Error(`${field} items must be at most ${maxLength} characters.`);
+  }
+  return [...new Set(items)];
+}
+
+function safeFileStem(...values) {
+  const stem = values
+    .join(" ")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 64);
+  return stem || "visual";
+}
+
+function decodeBase64Image(value) {
+  const raw = requireString(value, "dataBase64", Math.ceil(maxVisualImageBytes * 1.4) + 128);
+  const dataUrlMatch = raw.match(/^data:([^;,]+);base64,(.+)$/isu);
+  const mimeFromDataUrl = dataUrlMatch?.[1]?.toLowerCase() ?? "";
+  const base64 = (dataUrlMatch?.[2] ?? raw).replace(/\s+/gu, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(base64) || base64.length % 4 === 1) {
+    throw new Error("dataBase64 must contain valid base64 image data.");
+  }
+  const buffer = Buffer.from(base64, "base64");
+  if (buffer.length === 0) throw new Error("image file is empty.");
+  if (buffer.length > maxVisualImageBytes) {
+    throw new Error(`image file exceeds ${Math.round(maxVisualImageBytes / (1024 * 1024))} MB.`);
+  }
+  return { buffer, mimeFromDataUrl };
+}
+
+function detectImageExtension(buffer) {
+  if (
+    buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a
+  ) {
+    return ".png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return ".jpg";
+  }
+  if (
+    buffer.length >= 6
+    && (buffer.subarray(0, 6).toString("ascii") === "GIF87a"
+      || buffer.subarray(0, 6).toString("ascii") === "GIF89a")
+  ) {
+    return ".gif";
+  }
+  if (
+    buffer.length >= 12
+    && buffer.subarray(0, 4).toString("ascii") === "RIFF"
+    && buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return ".webp";
+  }
+  return "";
+}
+
+function extensionsMatch(requested, detected) {
+  if (requested === detected) return true;
+  return detected === ".jpg" && requested === ".jpeg";
+}
+
+function buildVisualUpload(input) {
+  const now = new Date().toISOString();
+  const title = requireString(input.title, "title", 200);
+  const character = requireString(input.character, "character", 120);
+  const category = enumValue(
+    input.category,
+    "category",
+    Object.keys(visualCategoryAssetDirectories),
+    "character_design",
+  );
+  const canonStatus = enumValue(input.canonStatus, "canonStatus", ["reference", "candidate"], "reference");
+  const originalFilename = requireString(input.filename, "filename", 255);
+  const requestedExtension = path.extname(path.basename(originalFilename)).toLowerCase();
+  if (!allowedVisualImageExtensions.has(requestedExtension)) {
+    throw new Error("filename must use an allowed image extension: png, jpg, jpeg, webp, gif.");
+  }
+
+  const mimeType = optionalString(input.mimeType, "mimeType", 100).toLowerCase();
+  if (mimeType && mimeType !== visualUploadMimeTypes[requestedExtension]) {
+    throw new Error("mimeType does not match the filename extension.");
+  }
+
+  const { buffer, mimeFromDataUrl } = decodeBase64Image(input.dataBase64);
+  if (mimeFromDataUrl && mimeFromDataUrl !== visualUploadMimeTypes[requestedExtension]) {
+    throw new Error("data URL mime type does not match the filename extension.");
+  }
+  const detectedExtension = detectImageExtension(buffer);
+  if (!detectedExtension || !extensionsMatch(requestedExtension, detectedExtension)) {
+    throw new Error("image bytes do not match the filename extension.");
+  }
+
+  const directoryName = visualCategoryAssetDirectories[category];
+  const token = `${now.replace(/\D/gu, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+  const fileStem = safeFileStem(character, title, path.basename(originalFilename, requestedExtension));
+  const projectPath = `data/visual_db/assets/${directoryName}/${fileStem}-${token}${requestedExtension}`;
+  const notes = optionalString(input.notes, "notes", 4_000)
+    || "Uploaded visual reference only; does not establish canon facts, ability mechanics, relationships, ranks, or timeline events.";
+  const record = {
+    visual_id: `VIS-UPLOAD-${token.toUpperCase()}`,
+    created_at: now,
+    character,
+    category,
+    title,
+    canon_status: canonStatus,
+    trust_level: "T7",
+    source: "user_imported",
+    path: projectPath,
+    notes,
+    description: optionalString(input.description, "description", 4_000),
+    ability_state: optionalString(input.abilityState, "abilityState", 200) || "visual_only",
+    tags: optionalStringArray(input.tags, "tags"),
+  };
+  const validation = validateVisualRecord(record);
+  if (validation.errors.length > 0) {
+    throw new Error(`Visual upload record is invalid: ${validation.errors.join("; ")}`);
+  }
+
+  return {
+    buffer,
+    filePath: resolveProjectPath(projectPath, "visual upload path"),
+    record,
+    warnings: validation.warnings,
+  };
+}
+
+async function saveVisualUpload(input) {
+  const dryRun = optionalBoolean(input.dryRun, "dryRun", false);
+  const upload = buildVisualUpload(input);
+  if (dryRun) {
+    return {
+      dryRun: true,
+      record: upload.record,
+      warnings: upload.warnings,
+    };
+  }
+
+  await mkdir(path.dirname(upload.filePath), { recursive: true });
+  await writeFile(upload.filePath, upload.buffer, { flag: "wx" });
+  try {
+    const existingIndex = await readOptionalText(visualIndexPath);
+    const separator = existingIndex && !existingIndex.endsWith("\n") ? "\n" : "";
+    await appendFile(visualIndexPath, `${separator}${JSON.stringify(upload.record)}\n`, "utf8");
+  } catch (error) {
+    await rm(upload.filePath, { force: true });
+    throw error;
+  }
+
+  return {
+    dryRun: false,
+    record: upload.record,
+    warnings: upload.warnings,
+  };
+}
+
 function pushValue(argv, flag, value) {
   if (value) argv.push(flag, value);
 }
@@ -607,12 +799,12 @@ function runNode({ tool, file, argv, timeout }) {
   });
 }
 
-async function parseBody(request) {
+async function parseBody(request, maxBytes = maxJsonBodyBytes) {
   const chunks = [];
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > maxBodyBytes) throw new Error("Request body is too large.");
+    if (bytes > maxBytes) throw new Error("Request body is too large.");
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
@@ -786,6 +978,32 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && rawPathname.startsWith("/visual-assets/")) {
     await serveVisualAsset(response, rawPathname.slice("/visual-assets/".length));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/visuals/upload") {
+    const origin = request.headers.origin;
+    if (origin && new URL(origin).host !== request.headers.host) {
+      sendError(response, 403, new Error("Cross-origin visual uploads are not allowed."));
+      return;
+    }
+    let input;
+    try {
+      input = await parseBody(request, maxVisualUploadBodyBytes);
+    } catch (error) {
+      sendError(response, 400, error);
+      return;
+    }
+    try {
+      const upload = await saveVisualUpload(input);
+      sendJson(response, 200, {
+        ok: true,
+        upload,
+        visuals: await visualPayload(),
+      });
+    } catch (error) {
+      sendError(response, 400, error);
+    }
     return;
   }
 

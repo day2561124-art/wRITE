@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createConnection, createServer } from "node:net";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
@@ -11,6 +11,8 @@ const rootDir = path.resolve(__dirname, "..", "..");
 const serverPath = path.join(rootDir, "server", "src", "ui-server.mjs");
 const draftIndexPath = path.join(rootDir, "data", "outputs", "logs", "draft_index.jsonl");
 const draftsDir = path.join(rootDir, "data", "outputs", "drafts");
+const visualIndexPath = path.join(rootDir, "data", "visual_db", "visual_index.jsonl");
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -97,6 +99,8 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${port}`;
   const beforeIndex = await readOptionalText(draftIndexPath);
   const beforeDraftFiles = await readOptionalDirectory(draftsDir);
+  const beforeVisualIndex = await readOptionalText(visualIndexPath);
+  const createdVisualAssetPaths = [];
   const stderrBuffer = { value: "" };
   const child = spawn(process.execPath, [
     serverPath,
@@ -123,10 +127,12 @@ async function main() {
     assert(indexText.includes("武裝學院工作台"), "UI index is missing the application title.");
     assert(indexText.includes('data-view-panel="compose"'), "UI index is missing the compose workspace.");
     assert(indexText.includes('data-view-panel="visuals"'), "UI index is missing the visual gallery workspace.");
+    assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
     assert(appResponse.ok && appText.includes("handlePipeline"), "UI app.js was not served.");
+    assert(appText.includes("handleVisualUpload"), "UI app.js is missing the visual upload handler.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
@@ -187,6 +193,74 @@ async function main() {
     const visualTypeResult = await readJson(await fetch(`${baseUrl}/visual-assets/characters/not-image.txt`));
     assert(visualTypeResult.response.status === 403, "Visual asset type restriction was not enforced.");
 
+    const dryRunVisualUpload = await readJson(await fetch(`${baseUrl}/api/visuals/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "ui-upload-dry-run.png",
+        mimeType: "image/png",
+        dataBase64: tinyPngBase64,
+        character: "UI測試角色",
+        title: "UI contract dry-run visual",
+        category: "character_design",
+        tags: "測試, 人設",
+        dryRun: true,
+      }),
+    }));
+    assert(dryRunVisualUpload.response.ok, "Visual upload dry-run failed.");
+    assert(dryRunVisualUpload.payload.upload.dryRun === true, "Visual upload dry-run did not report dryRun=true.");
+    assert(
+      dryRunVisualUpload.payload.upload.record.path.startsWith("data/visual_db/assets/characters/"),
+      "Visual upload dry-run chose the wrong asset folder.",
+    );
+
+    const visualUpload = await readJson(await fetch(`${baseUrl}/api/visuals/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "ui-upload.png",
+        mimeType: "image/png",
+        dataBase64: tinyPngBase64,
+        character: "UI測試角色",
+        title: "UI contract uploaded visual",
+        category: "armed_form",
+        notes: "Visual-only test upload; does not establish ability mechanics.",
+        tags: ["測試", "異能武裝"],
+      }),
+    }));
+    assert(visualUpload.response.ok, "Visual upload failed.");
+    const uploadedRecord = visualUpload.payload.upload.record;
+    createdVisualAssetPaths.push(uploadedRecord.path);
+    assert(uploadedRecord.canon_status === "reference", "Visual upload must default to reference status.");
+    assert(uploadedRecord.trust_level === "T7", "Visual upload must default to T7 trust.");
+    assert(uploadedRecord.source === "user_imported", "Visual upload source must be user_imported.");
+    assert(
+      (await readOptionalText(visualIndexPath)).includes(uploadedRecord.visual_id),
+      "Visual upload did not append to visual_index.jsonl.",
+    );
+    const uploadedItem = visualUpload.payload.visuals.items.find((item) => item.visual_id === uploadedRecord.visual_id);
+    assert(uploadedItem?.assetUrl, "Visual upload response did not expose an asset URL.");
+    const uploadedAssetResponse = await fetch(`${baseUrl}${uploadedItem.assetUrl}`);
+    assert(uploadedAssetResponse.ok, "Uploaded visual asset was not served.");
+    assert(
+      uploadedAssetResponse.headers.get("content-type")?.startsWith("image/png"),
+      "Uploaded visual asset used the wrong content type.",
+    );
+
+    const invalidVisualUpload = await readJson(await fetch(`${baseUrl}/api/visuals/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: "ui-upload.png",
+        mimeType: "image/png",
+        dataBase64: "not-valid-image-data",
+        character: "UI測試角色",
+        title: "Invalid visual",
+        category: "character_design",
+      }),
+    }));
+    assert(invalidVisualUpload.response.status === 400, "Invalid visual upload was not rejected.");
+
     const unknownResult = await readJson(await fetch(`${baseUrl}/api/actions/not-real`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -240,11 +314,16 @@ async function main() {
     console.log(`- Visual gallery records checked: ${visuals.items.length}`);
     console.log("- Allowed project file read checked: yes");
     console.log("- Path traversal rejected: yes");
+    console.log("- Visual upload checked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
     console.log("- Draft dry-run side effects: none");
   } finally {
+    await writeFile(visualIndexPath, beforeVisualIndex, "utf8");
+    await Promise.all(createdVisualAssetPaths.map((projectPath) => (
+      rm(path.join(rootDir, projectPath), { force: true })
+    )));
     terminateProcessTree(child);
   }
 }

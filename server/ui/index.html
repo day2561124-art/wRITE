@@ -335,6 +335,43 @@
                   <option value="deprecated">停用</option>
                 </select>
               </label>
+              <form id="visual-upload-form" class="visual-upload-panel">
+                <div class="panel-heading subheading">
+                  <h2>上傳人設圖</h2>
+                </div>
+                <label class="field">
+                  <span>圖片</span>
+                  <input id="visual-upload-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required>
+                </label>
+                <label class="field">
+                  <span>角色</span>
+                  <input id="visual-upload-character" type="text" maxlength="120" placeholder="朝日奈千夜" required>
+                </label>
+                <label class="field">
+                  <span>標題</span>
+                  <input id="visual-upload-title" type="text" maxlength="200" placeholder="正式選拔期人設參考" required>
+                </label>
+                <label class="field">
+                  <span>分類</span>
+                  <select id="visual-upload-category">
+                    <option value="character_design">人設</option>
+                    <option value="armed_form">異能武裝</option>
+                    <option value="outfit">服裝</option>
+                    <option value="ability">異能演出</option>
+                    <option value="expression">表情</option>
+                    <option value="scene_reference">場景參考</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>標籤</span>
+                  <input id="visual-upload-tags" type="text" maxlength="500" placeholder="千夜, 制服, 武裝">
+                </label>
+                <label class="field">
+                  <span>備註</span>
+                  <textarea id="visual-upload-notes" rows="3" maxlength="4000" placeholder="僅作視覺參考，不成立新的能力機制。"></textarea>
+                </label>
+                <button class="button primary full-width" type="submit">上傳</button>
+              </form>
             </aside>
 
             <section class="library-reader visual-reader">

@@ -11,6 +11,14 @@ export const visualCategorySpecs = [
 
 export const visualCategories = new Set(visualCategorySpecs.map(([key]) => key));
 export const visualCategoryLabels = Object.fromEntries(visualCategorySpecs);
+export const visualCategoryAssetDirectories = {
+  character_design: "characters",
+  armed_form: "armed_forms",
+  outfit: "outfits",
+  ability: "abilities",
+  expression: "expressions",
+  scene_reference: "scenes",
+};
 export const visualCanonStatusValues = new Set([
   "reference",
   "candidate",

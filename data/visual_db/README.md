@@ -7,6 +7,7 @@ Rules:
 - Images are visual references only. They do not create canon facts, ability mechanics, relationships, ranks, or timeline events by themselves.
 - Put image files under `data/visual_db/assets/`.
 - Add one JSONL record per image in `data/visual_db/visual_index.jsonl`.
+- The local UI can upload PNG, JPG, WEBP, or GIF files up to 8 MB and will create the asset file plus JSONL index record automatically.
 - Use `canon_status=approved_visual` and `trust_level=T3` only after the user explicitly approves the visual as stable reference.
 - Armed-form images should include `notes` that separate appearance from established ability facts.
 
