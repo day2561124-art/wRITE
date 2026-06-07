@@ -34,8 +34,8 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 - Writing Policy DB：`data/writing_policy_db/active_writing_card.md`
 - Writing Policy DB 版本：`data/writing_policy_db/versions/writing_card_v2.8.md`
 - Longline DB：`data/longline_db/active_longline.md`
-- Longline DB 版本：`data/longline_db/versions/longline_v1.0.md`
-- Longline 來源轉錄：`data/longline_db/sources/longline_part1_national_representative_arc_v1.0.md`
+- Longline DB 版本：`data/longline_db/versions/longline_v1.1.md`
+- Longline 來源轉錄：`data/longline_db/sources/longline_part1_national_representative_arc_v1.1.md`
 
 已建立但尚未正式填入完整資料：
 
@@ -44,7 +44,7 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 - `data/feedback_db/*.jsonl`
 - `data/memory_store/*.json`
 
-正式長線骨架已由使用者提供圖片轉錄並於 2026-06-07 匯入；原圖副本、轉錄母檔、active 與 v1.0 版本均保留可追溯關聯。原圖第五篇章第二項有一小段遭浮動按鈕遮擋，該缺字維持未推定狀態。
+正式長線骨架已由使用者提供圖片轉錄並於 2026-06-07 匯入；原圖副本、`v1.0` 初始轉錄與 `v1.1` 使用者補字版本均保留可追溯關聯。第五篇章第二項原先遭遮擋的文字已由使用者確認為「達成場上目的」。
 
 注意：空白或 placeholder 檔案不是授權 AI 自行補設定。若資料不足，AI 必須標記缺口，不得把推測寫成正史。
 
@@ -730,5 +730,5 @@ prompts/
 建議順序：
 
 1. 補正式 `active_proofing_card.md`。
-2. 若取得原圖遮擋處的完整文字，更新長線來源轉錄並建立下一版本。
+2. 按 `active_longline.md` 的篇章方向持續承接，但不得把未發生長線提前寫成 Canon。
 本機工程、正式長線匯入、contract tests、golden tests 與 CI gate 已完成。外部正式母檔僅剩驗稿卡。

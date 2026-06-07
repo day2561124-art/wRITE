@@ -37,5 +37,6 @@
 
 - A formal proofing policy mother file is still required before replacing the current proofing placeholder.
 - The user-provided national representative arc image was transcribed and formally imported as Longline DB v1.0; the source image, transcription, active file, and version copy are retained.
-- One fragment in the fifth arc's second item is obscured in the source image and remains explicitly non-inferable until the user supplies the missing text.
+- The user supplied the obscured fragment directly; Longline DB v1.1 now records the complete objective as holding the competition, protecting others, and achieving the on-field objective.
+- Longline DB v1.0 remains preserved as the pre-supplement transcription history.
 - The compressed-rule placeholder is not an external-file blocker: it remains T8 until formal error reports exist, and must not be populated by inference.
