@@ -6,13 +6,24 @@
 
 ## 快速開始
 
-推薦直接啟動本機使用者介面：
+推薦直接啟動本機工作台啟動器：
 
 ```powershell
-.\start-ui.cmd
+.\launcher.cmd
 ```
 
-不需要開啟 VS Code；也可以直接在檔案總管雙擊 `start-ui.cmd`。需要 Node.js 18 以上版本。
+不需要開啟 VS Code；也可以直接在檔案總管雙擊 `launcher.cmd`。需要 Node.js 18 以上版本。
+
+啟動器提供：
+
+- 啟動或重啟 UI。
+- 在瀏覽器開啟 UI。
+- 開啟人設圖庫素材資料夾。
+- 執行完整驗證。
+- 建立桌面捷徑。
+- 停止 UI。
+
+若只想直接開 UI，也可以雙擊 `start-ui.cmd`。
 
 介面會在瀏覽器開啟 `http://127.0.0.1:4173/`，提供：
 
@@ -722,6 +733,10 @@ npm.cmd test
 ## 專案結構
 
 ```text
+launcher.cmd
+launcher.ps1
+start-ui.cmd
+
 data/
   canon_db/
     active_engine.md

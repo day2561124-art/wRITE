@@ -7,5 +7,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-node server\src\ui-server.mjs --open
+node server\src\ui-server.mjs --host 127.0.0.1 --port 4173 --open
 pause

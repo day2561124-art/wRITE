@@ -73,3 +73,9 @@
 - Added a Minimal Tech visual gallery view in the local UI with character/category/status filters and metadata details.
 - Added a locked `/visual-assets/` route that only serves allowed image files under `data/visual_db/assets/`.
 - Visual records remain references by default and do not establish Canon facts or ability mechanics without explicit approval.
+
+## Windows launcher
+
+- Added `launcher.cmd` and `launcher.ps1` as the no-VS-Code entrypoint for the local workbench.
+- Launcher actions cover UI start/restart, browser open, visual asset folder open, full validation, desktop shortcut creation, and UI stop.
+- Updated `start-ui.cmd` to remain a direct UI-only shortcut pinned to `127.0.0.1:4173`.
