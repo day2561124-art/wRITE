@@ -3,6 +3,12 @@ const state = {
   activeView: "overview",
   activeResultPath: "data/outputs/task_prompt.md",
   activeActivityList: "drafts",
+  activeVisualId: "",
+  visualFilters: {
+    character: "",
+    category: "",
+    status: "",
+  },
   currentComposeText: "",
   currentLibraryText: "",
   currentDraftText: "",
@@ -14,6 +20,7 @@ const titles = {
   compose: "起稿",
   review: "驗稿",
   library: "資料庫",
+  visuals: "圖庫",
   activity: "紀錄",
 };
 
@@ -53,6 +60,16 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function visualStatusLabel(value) {
+  return {
+    approved_visual: "已核可視覺",
+    reference: "參考",
+    candidate: "候選",
+    deprecated: "停用",
+    invalid: "錯誤",
+  }[value] ?? value ?? "";
 }
 
 function setBusy(busy) {
@@ -199,6 +216,123 @@ function renderLibrary() {
   `).join("");
 }
 
+function syncVisualFilters(visuals) {
+  const characterSelect = $("#visual-character-filter");
+  const categorySelect = $("#visual-category-filter");
+  const statusSelect = $("#visual-status-filter");
+  const currentCharacter = state.visualFilters.character || characterSelect.value;
+  const currentCategory = state.visualFilters.category || categorySelect.value;
+  const currentStatus = state.visualFilters.status || statusSelect.value;
+
+  characterSelect.innerHTML = [
+    '<option value="">全部角色</option>',
+    ...(visuals.characters ?? []).map((character) => `
+      <option value="${escapeHtml(character)}">${escapeHtml(character)}</option>
+    `),
+  ].join("");
+  categorySelect.innerHTML = [
+    '<option value="">全部分類</option>',
+    ...(visuals.categories ?? []).map((category) => `
+      <option value="${escapeHtml(category.key)}">${escapeHtml(category.label)}</option>
+    `),
+  ].join("");
+
+  if ([...characterSelect.options].some((option) => option.value === currentCharacter)) {
+    characterSelect.value = currentCharacter;
+  }
+  if ([...categorySelect.options].some((option) => option.value === currentCategory)) {
+    categorySelect.value = currentCategory;
+  }
+  statusSelect.value = [...statusSelect.options].some((option) => option.value === currentStatus)
+    ? currentStatus
+    : "";
+  state.visualFilters = {
+    character: characterSelect.value,
+    category: categorySelect.value,
+    status: statusSelect.value,
+  };
+}
+
+function visualMatchesFilters(item) {
+  const filters = state.visualFilters;
+  return (
+    (!filters.character || item.character === filters.character)
+    && (!filters.category || item.category === filters.category)
+    && (!filters.status || item.canon_status === filters.status)
+  );
+}
+
+function renderVisualDetail(item) {
+  if (!item) {
+    $("#visual-detail-path").textContent = "VISUAL REFERENCE";
+    $("#visual-detail-title").textContent = "人設圖庫";
+    $("#visual-detail").innerHTML = '<div class="empty-state">尚無圖像紀錄</div>';
+    return;
+  }
+  $("#visual-detail-path").textContent = item.path || item.visual_id;
+  $("#visual-detail-title").textContent = item.title || item.visual_id;
+  const flags = [...(item.errors ?? []), ...(item.warnings ?? [])];
+  $("#visual-detail").innerHTML = `
+    <dl class="visual-facts">
+      <div><dt>ID</dt><dd>${escapeHtml(item.visual_id)}</dd></div>
+      <div><dt>角色</dt><dd>${escapeHtml(item.character)}</dd></div>
+      <div><dt>分類</dt><dd>${escapeHtml(item.categoryLabel)}</dd></div>
+      <div><dt>狀態</dt><dd>${escapeHtml(visualStatusLabel(item.canon_status))}</dd></div>
+      <div><dt>信任</dt><dd>${escapeHtml(item.trust_level)}</dd></div>
+      <div><dt>來源</dt><dd>${escapeHtml(item.source)}</dd></div>
+      <div><dt>檔案</dt><dd>${item.exists ? `${formatBytes(item.bytes)} · ${formatDate(item.modifiedAt)}` : "缺少"}</dd></div>
+    </dl>
+    ${item.description ? `<p class="visual-notes">${escapeHtml(item.description)}</p>` : ""}
+    ${item.notes ? `<p class="visual-notes">${escapeHtml(item.notes)}</p>` : ""}
+    ${(item.tags ?? []).length ? `<div class="visual-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    ${flags.length ? `<div class="visual-flags">${flags.map((flag) => `<span>${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+  `;
+}
+
+function renderVisuals() {
+  const visuals = state.data?.visuals ?? {
+    items: [],
+    characters: [],
+    categories: [],
+    count: 0,
+    errorCount: 0,
+    warningCount: 0,
+  };
+  syncVisualFilters(visuals);
+  const items = (visuals.items ?? []).filter(visualMatchesFilters);
+  $("#visual-summary").textContent = visuals.errorCount || visuals.warningCount
+    ? `${items.length}/${visuals.count} 張 · ${visuals.errorCount} 錯誤 · ${visuals.warningCount} 注意`
+    : `${items.length}/${visuals.count} 張`;
+
+  if (!items.some((item) => item.visual_id === state.activeVisualId)) {
+    state.activeVisualId = items[0]?.visual_id ?? "";
+  }
+
+  $("#visual-grid").innerHTML = items.length
+    ? items.map((item) => {
+      const flagClass = item.errors?.length
+        ? " is-error"
+        : item.warnings?.length
+          ? " is-warning"
+          : "";
+      return `
+        <button class="visual-card${state.activeVisualId === item.visual_id ? " is-active" : ""}" type="button" data-visual-id="${escapeHtml(item.visual_id)}">
+          <span class="visual-thumb">
+            ${item.assetUrl && item.exists
+              ? `<img src="${escapeHtml(item.assetUrl)}" alt="${escapeHtml(item.title)}">`
+              : `<span aria-hidden="true">◇</span>`}
+          </span>
+          <span class="trust-badge${flagClass}">${escapeHtml(item.trust_level || "N/A")}</span>
+          <strong>${escapeHtml(item.title)}</strong>
+          <span>${escapeHtml(item.character || "未指定")} · ${escapeHtml(item.categoryLabel)}</span>
+        </button>
+      `;
+    }).join("")
+    : '<div class="empty-state">尚無圖像紀錄</div>';
+
+  renderVisualDetail(items.find((item) => item.visual_id === state.activeVisualId));
+}
+
 function renderDraftSelect() {
   const drafts = state.data?.drafts ?? [];
   const select = $("#draft-select");
@@ -254,6 +388,7 @@ function renderAll() {
   renderOutputs();
   renderCounts();
   renderLibrary();
+  renderVisuals();
   renderDraftSelect();
   renderActivityTable();
 }
@@ -517,6 +652,12 @@ function bindEvents() {
       openLibraryFile(libraryFile.dataset.libraryFile, libraryFile.dataset.libraryTitle);
       return;
     }
+    const visualCard = event.target.closest("[data-visual-id]");
+    if (visualCard) {
+      state.activeVisualId = visualCard.dataset.visualId;
+      renderVisuals();
+      return;
+    }
     const activityButton = event.target.closest("[data-activity-list]");
     if (activityButton) {
       state.activeActivityList = activityButton.dataset.activityList;
@@ -525,6 +666,22 @@ function bindEvents() {
       });
       renderActivityTable();
     }
+  });
+
+  $("#visual-character-filter").addEventListener("change", (event) => {
+    state.visualFilters.character = event.target.value;
+    state.activeVisualId = "";
+    renderVisuals();
+  });
+  $("#visual-category-filter").addEventListener("change", (event) => {
+    state.visualFilters.category = event.target.value;
+    state.activeVisualId = "";
+    renderVisuals();
+  });
+  $("#visual-status-filter").addEventListener("change", (event) => {
+    state.visualFilters.status = event.target.value;
+    state.activeVisualId = "";
+    renderVisuals();
   });
 }
 

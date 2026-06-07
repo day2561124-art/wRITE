@@ -11,7 +11,14 @@ import {
   validateSourceTrustMetadata,
 } from "./source-trust.mjs";
 import { terminateProcessTree } from "./process-control.mjs";
+import { projectPaths } from "./project-paths.mjs";
 import { sourceSpecsFor } from "./source-registry.mjs";
+import {
+  allowedVisualImageExtensions,
+  validateVisualRecord,
+  visualCategoryLabels,
+  visualCategorySpecs,
+} from "./visual-db.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +30,8 @@ const defaultPort = 4173;
 const maxBodyBytes = 2 * 1024 * 1024;
 const maxToolOutputBytes = 4 * 1024 * 1024;
 const activeChildren = new Set();
+const visualAssetsDir = projectPaths.visualAssets;
+const visualIndexPath = projectPaths.visualIndex;
 
 const sourceSpecs = sourceSpecsFor("ui").map((entry) => ({
   key: entry.source_id,
@@ -55,6 +64,8 @@ const countSpecs = [
 const readableExactPaths = new Set([
   ...sourceSpecs.map((source) => source.path),
   ...outputSpecs.map(([, , filePath]) => filePath),
+  "data/visual_db/README.md",
+  "data/visual_db/visual_index.jsonl",
 ]);
 
 const readableDirectoryPaths = [
@@ -68,7 +79,11 @@ const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
   ".png": "image/png",
+  ".webp": "image/webp",
 };
 
 function normalizePath(filePath) {
@@ -238,8 +253,112 @@ async function readJsonl(projectPath, limit = 100) {
   return { count: lines.length, records: records.reverse() };
 }
 
+function visualAssetUrl(projectPath) {
+  const filePath = resolveProjectPath(projectPath);
+  const relative = path.relative(visualAssetsDir, filePath).replaceAll(path.sep, "/");
+  return `/visual-assets/${relative.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function visualAssetState(record) {
+  const validation = validateVisualRecord(record);
+  const result = {
+    ...record,
+    categoryLabel: visualCategoryLabels[record.category] ?? record.category ?? "未分類",
+    assetUrl: "",
+    exists: false,
+    bytes: 0,
+    modifiedAt: "",
+    errors: [...validation.errors],
+    warnings: [...validation.warnings],
+  };
+  if (validation.errors.length > 0) return result;
+
+  const filePath = resolveProjectPath(record.path);
+  const relative = path.relative(visualAssetsDir, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    result.errors.push("path must stay under data/visual_db/assets/.");
+    return result;
+  }
+  if (!allowedVisualImageExtensions.has(path.extname(filePath).toLowerCase())) {
+    result.errors.push("image extension is not allowed.");
+    return result;
+  }
+
+  try {
+    const stats = await stat(filePath);
+    if (!stats.isFile()) {
+      result.errors.push("path is not a file.");
+      return result;
+    }
+    result.exists = true;
+    result.bytes = stats.size;
+    result.modifiedAt = stats.mtime.toISOString();
+    result.assetUrl = visualAssetUrl(record.path);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      result.warnings.push("image file is missing.");
+      return result;
+    }
+    throw error;
+  }
+
+  return result;
+}
+
+async function visualPayload() {
+  const text = await readOptionalText(visualIndexPath);
+  const lines = text.split(/\r?\n/u);
+  const items = [];
+  for (const [index, raw] of lines.entries()) {
+    const line = raw.trim();
+    if (!line) continue;
+    try {
+      const record = JSON.parse(line);
+      items.push({
+        lineNumber: index + 1,
+        ...await visualAssetState(record),
+      });
+    } catch (error) {
+      items.push({
+        lineNumber: index + 1,
+        visual_id: `INVALID-L${index + 1}`,
+        character: "",
+        category: "invalid",
+        categoryLabel: "Invalid",
+        title: `Invalid JSON line ${index + 1}`,
+        canon_status: "invalid",
+        trust_level: "",
+        source: "",
+        path: "",
+        tags: [],
+        notes: "",
+        description: "",
+        assetUrl: "",
+        exists: false,
+        bytes: 0,
+        modifiedAt: "",
+        errors: [`invalid JSON: ${error.message}`],
+        warnings: [],
+      });
+    }
+  }
+  const characters = [...new Set(items.map((item) => item.character).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, "zh-Hant"),
+  );
+  return {
+    indexPath: "data/visual_db/visual_index.jsonl",
+    assetsPath: "data/visual_db/assets",
+    items,
+    count: items.length,
+    characters,
+    categories: visualCategorySpecs.map(([key, label]) => ({ key, label })),
+    errorCount: items.reduce((total, item) => total + item.errors.length, 0),
+    warningCount: items.reduce((total, item) => total + item.warnings.length, 0),
+  };
+}
+
 async function statePayload() {
-  const [sources, outputs, counts, drafts, proofReports, settlements] = await Promise.all([
+  const [sources, outputs, counts, drafts, proofReports, settlements, visuals] = await Promise.all([
     Promise.all(sourceSpecs.map(sourceState)),
     Promise.all(outputSpecs.map(async ([key, label, filePath]) => ({
       key,
@@ -254,6 +373,7 @@ async function statePayload() {
     readJsonl("data/outputs/logs/draft_index.jsonl", 100),
     readJsonl("data/outputs/logs/proof_report_index.jsonl", 100),
     readJsonl("data/outputs/logs/settlement_proposal_index.jsonl", 100),
+    visualPayload(),
   ]);
 
   return {
@@ -264,6 +384,7 @@ async function statePayload() {
     drafts: drafts.records,
     proofReports: proofReports.records,
     settlements: settlements.records,
+    visuals,
   };
 }
 
@@ -547,6 +668,52 @@ async function serveProjectFile(response, projectPath) {
   });
 }
 
+function decodeAssetPath(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new Error("Visual asset path is not valid URL encoding.");
+  }
+}
+
+async function serveVisualAsset(response, relativePath) {
+  const decoded = decodeAssetPath(relativePath);
+  const filePath = path.resolve(visualAssetsDir, decoded);
+  const relative = path.relative(visualAssetsDir, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    sendError(response, 403, new Error("Visual asset path must stay inside the visual asset library."));
+    return;
+  }
+  const extension = path.extname(filePath).toLowerCase();
+  if (!allowedVisualImageExtensions.has(extension)) {
+    sendError(response, 403, new Error("Visual asset type is not allowed."));
+    return;
+  }
+
+  let stats;
+  try {
+    stats = await stat(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      sendError(response, 404, new Error("Visual asset not found."));
+      return;
+    }
+    throw error;
+  }
+  if (!stats.isFile()) {
+    sendError(response, 404, new Error("Visual asset not found."));
+    return;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": mimeTypes[extension] ?? "application/octet-stream",
+    "Content-Length": stats.size,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  createReadStream(filePath).pipe(response);
+}
+
 async function serveStatic(response, pathname) {
   const relative = pathname === "/" ? "index.html" : pathname.slice(1);
   const filePath = path.resolve(uiDir, relative);
@@ -579,6 +746,7 @@ async function serveStatic(response, pathname) {
 }
 
 async function handleRequest(request, response) {
+  const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
@@ -595,9 +763,19 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/visuals") {
+    sendJson(response, 200, { ok: true, visuals: await visualPayload() });
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/file") {
     const projectPath = url.searchParams.get("path") ?? "";
     await serveProjectFile(response, projectPath);
+    return;
+  }
+
+  if (request.method === "GET" && rawPathname.startsWith("/visual-assets/")) {
+    await serveVisualAsset(response, rawPathname.slice("/visual-assets/".length));
     return;
   }
 

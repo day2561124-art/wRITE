@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Visual Reference Index Record",
+  "type": "object",
+  "properties": {
+    "visual_id": { "type": "string", "pattern": "^VIS-" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "character": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": ["character_design", "armed_form", "outfit", "ability", "expression", "scene_reference"]
+    },
+    "title": { "type": "string" },
+    "canon_status": {
+      "type": "string",
+      "enum": ["reference", "candidate", "approved_visual", "deprecated"]
+    },
+    "trust_level": {
+      "type": "string",
+      "enum": ["T3", "T7", "T8"]
+    },
+    "source": {
+      "type": "string",
+      "enum": ["user_imported", "ai_generated_reference", "external_reference", "repository_fixture"]
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^data/visual_db/assets/.+\\.(png|jpg|jpeg|webp|gif)$"
+    },
+    "notes": { "type": "string" },
+    "description": { "type": "string" },
+    "ability_state": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": [
+    "visual_id",
+    "created_at",
+    "character",
+    "category",
+    "title",
+    "canon_status",
+    "trust_level",
+    "source",
+    "path",
+    "tags"
+  ],
+  "additionalProperties": false
+}

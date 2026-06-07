@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,28 @@ async function readJson(response) {
   return { response, payload };
 }
 
+function rawHttpStatus(port, pathName) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write([
+        `GET ${pathName} HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n"));
+    });
+    let data = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { data += chunk; });
+    socket.on("end", () => {
+      const status = Number.parseInt(data.match(/^HTTP\/1\.1 (\d+)/u)?.[1] ?? "", 10);
+      resolve({ status, raw: data });
+    });
+    socket.on("error", reject);
+  });
+}
+
 async function readOptionalText(filePath) {
   try {
     return await readFile(filePath, "utf8");
@@ -100,6 +122,7 @@ async function main() {
     assert(indexResponse.ok, "UI index did not return 200.");
     assert(indexText.includes("武裝學院工作台"), "UI index is missing the application title.");
     assert(indexText.includes('data-view-panel="compose"'), "UI index is missing the compose workspace.");
+    assert(indexText.includes('data-view-panel="visuals"'), "UI index is missing the visual gallery workspace.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -118,6 +141,17 @@ async function main() {
       sources.find((source) => source.key === "active_longline")?.trust === "T3",
       "Longline source was not exposed as T3.",
     );
+    const visuals = stateResult.payload.state.visuals;
+    assert(visuals && visuals.indexPath === "data/visual_db/visual_index.jsonl", "State API did not expose visual index metadata.");
+    assert(Array.isArray(visuals.items), "State API visual items are not an array.");
+    assert(visuals.categories.length >= 4, "State API visual categories were not exposed.");
+
+    const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));
+    assert(visualsResult.response.ok && visualsResult.payload.ok, "Visuals API failed.");
+    assert(
+      visualsResult.payload.visuals.indexPath === "data/visual_db/visual_index.jsonl",
+      "Visuals API returned the wrong index path.",
+    );
 
     const proofingResult = await readJson(await fetch(
       `${baseUrl}/api/file?path=${encodeURIComponent("data/proofing_policy_db/active_proofing_card.md")}`,
@@ -128,10 +162,25 @@ async function main() {
       "Allowed proofing file read returned unexpected content.",
     );
 
+    const visualReadmeResult = await readJson(await fetch(
+      `${baseUrl}/api/file?path=${encodeURIComponent("data/visual_db/README.md")}`,
+    ));
+    assert(visualReadmeResult.response.ok, "Allowed visual DB README read failed.");
+    assert(
+      visualReadmeResult.payload.file.text.includes("Visual Reference DB"),
+      "Allowed visual DB README returned unexpected content.",
+    );
+
     const traversalResult = await readJson(await fetch(
       `${baseUrl}/api/file?path=${encodeURIComponent("data/outputs/drafts/../../../SKILL.md")}`,
     ));
     assert(traversalResult.response.status === 403, "Path traversal was not rejected.");
+
+    const visualTraversalResult = await rawHttpStatus(port, "/visual-assets/%2e%2e/README.md");
+    assert(visualTraversalResult.status === 403, "Visual asset traversal was not rejected.");
+
+    const visualTypeResult = await readJson(await fetch(`${baseUrl}/visual-assets/characters/not-image.txt`));
+    assert(visualTypeResult.response.status === 403, "Visual asset type restriction was not enforced.");
 
     const unknownResult = await readJson(await fetch(`${baseUrl}/api/actions/not-real`, {
       method: "POST",
@@ -183,6 +232,7 @@ async function main() {
     console.log("UI server contract tests passed.");
     console.log(`- Static application served: yes`);
     console.log(`- Source status cards checked: ${sources.length}`);
+    console.log(`- Visual gallery records checked: ${visuals.items.length}`);
     console.log("- Allowed project file read checked: yes");
     console.log("- Path traversal rejected: yes");
     console.log("- Unknown action rejected: yes");

@@ -473,7 +473,7 @@ textarea:disabled {
 
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
   margin-top: 16px;
 }
@@ -818,6 +818,13 @@ textarea:disabled {
   gap: 18px;
 }
 
+.visual-layout {
+  min-height: calc(100vh - 145px);
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+}
+
 .library-sidebar {
   padding: 16px;
 }
@@ -880,6 +887,181 @@ textarea:disabled {
 .library-reader .document-viewer {
   min-height: calc(100vh - 225px);
   max-height: calc(100vh - 225px);
+}
+
+.visual-meta-strip {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0 16px;
+  padding: 8px 10px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.visual-reader {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+}
+
+.visual-grid {
+  min-height: 360px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  align-content: start;
+  gap: 12px;
+}
+
+.visual-card {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  color: var(--ink);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.visual-card:hover,
+.visual-card.is-active {
+  background: var(--accent-soft);
+  border-color: #9acbd1;
+}
+
+.visual-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--accent);
+  background: #eef3f7;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 32px;
+}
+
+.visual-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.visual-card strong,
+.visual-card > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-card strong {
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.visual-card > span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.visual-detail {
+  min-height: 150px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.visual-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.visual-facts div {
+  min-width: 0;
+  padding: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.visual-facts dt {
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.visual-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-notes {
+  margin: 12px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.visual-tags,
+.visual-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.visual-tags span,
+.visual-flags span {
+  max-width: 100%;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-tags span {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border: 1px solid #b7dde1;
+}
+
+.visual-flags span {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border: 1px solid #f0d49e;
+}
+
+.empty-state {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .activity-grid {
@@ -1053,7 +1235,7 @@ dialog::backdrop {
     min-width: 0;
     height: 100%;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 2px;
   }
 
@@ -1167,6 +1349,19 @@ dialog::backdrop {
 
   .library-layout {
     min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .visual-layout {
+    min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .visual-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .visual-facts {
     grid-template-columns: 1fr;
   }
 

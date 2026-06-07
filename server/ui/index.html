@@ -35,6 +35,10 @@
             <span class="nav-symbol" aria-hidden="true">▤</span>
             <span>資料庫</span>
           </button>
+          <button class="nav-item" data-view="visuals" type="button">
+            <span class="nav-symbol" aria-hidden="true">◇</span>
+            <span>圖庫</span>
+          </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>紀錄</span>
@@ -101,6 +105,11 @@
                   <span class="quick-symbol" aria-hidden="true">▤</span>
                   <strong>檢視資料</strong>
                   <span>正式來源</span>
+                </button>
+                <button class="quick-action" data-go-view="visuals" type="button">
+                  <span class="quick-symbol" aria-hidden="true">◇</span>
+                  <strong>人設圖庫</strong>
+                  <span>視覺參考</span>
                 </button>
               </div>
             </section>
@@ -290,6 +299,53 @@
                 <button id="copy-library-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
               </div>
               <pre id="library-content" class="document-viewer">選擇左側資料。</pre>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="visuals">
+          <div class="visual-layout">
+            <aside class="library-sidebar">
+              <div class="panel-heading">
+                <h2>視覺資料</h2>
+              </div>
+              <div class="visual-meta-strip">
+                <span id="visual-summary">0 張</span>
+                <button class="text-button" type="button" data-open-file="data/visual_db/visual_index.jsonl">索引</button>
+              </div>
+              <label class="field">
+                <span>角色</span>
+                <select id="visual-character-filter">
+                  <option value="">全部角色</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>分類</span>
+                <select id="visual-category-filter">
+                  <option value="">全部分類</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>狀態</span>
+                <select id="visual-status-filter">
+                  <option value="">全部狀態</option>
+                  <option value="approved_visual">已核可視覺</option>
+                  <option value="reference">參考</option>
+                  <option value="candidate">候選</option>
+                  <option value="deprecated">停用</option>
+                </select>
+              </label>
+            </aside>
+
+            <section class="library-reader visual-reader">
+              <div class="reader-heading">
+                <div>
+                  <p id="visual-detail-path" class="eyebrow">VISUAL REFERENCE</p>
+                  <h2 id="visual-detail-title">人設圖庫</h2>
+                </div>
+              </div>
+              <div id="visual-grid" class="visual-grid"></div>
+              <div id="visual-detail" class="visual-detail"></div>
             </section>
           </div>
         </section>

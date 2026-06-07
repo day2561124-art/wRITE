@@ -65,3 +65,11 @@
 - Added streaming JSONL counts in the UI, duplicate-submit protection, and shared Windows process-tree cleanup.
 - Added standard `npm` scripts and a cross-platform GitHub Actions matrix for Ubuntu and Windows.
 - Added security, rollback, atomic-pipeline, and source-registry contract tests.
+
+## Visual reference library
+
+- Added `data/visual_db/` for character designs, outfits, armed-form appearances, ability visuals, expressions, and scene references.
+- Added `visual_index.jsonl` with strict validation, image path allowlisting, trust levels, and Canon status boundaries.
+- Added a Minimal Tech visual gallery view in the local UI with character/category/status filters and metadata details.
+- Added a locked `/visual-assets/` route that only serves allowed image files under `data/visual_db/assets/`.
+- Visual records remain references by default and do not establish Canon facts or ability mechanics without explicit approval.

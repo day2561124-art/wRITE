@@ -12,6 +12,7 @@ const steps = [
   ["Strict JSONL validation", ["server/src/tools/validate-jsonl.mjs", "--all", "--strict"]],
   ["Source trust validation", ["server/src/tools/source-trust-checker.mjs"]],
   ["Source registry contract", ["tests/source-registry.test.mjs"]],
+  ["Visual DB contract", ["tests/visual-db.test.mjs"]],
   ["Path policy security", ["tests/security/path-policy.test.mjs"]],
   ["File transaction rollback", ["tests/transactions/file-transactions.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],

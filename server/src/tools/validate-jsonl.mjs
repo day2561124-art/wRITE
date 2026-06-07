@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateVisualRecord } from "../visual-db.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +23,7 @@ const fileSpecs = [
   ["proof_report_index", "data/outputs/logs/proof_report_index.jsonl"],
   ["settlement_index", "data/outputs/logs/settlement_proposal_index.jsonl"],
   ["mcp_audit", "data/outputs/logs/mcp_tool_audit.jsonl"],
+  ["visual_index", "data/visual_db/visual_index.jsonl"],
 ];
 
 const schemaByPath = new Map(fileSpecs.map(([schema, filePath]) => [normalizePath(resolvePath(filePath)), schema]));
@@ -37,9 +39,9 @@ function usage() {
     "  node server/src/tools/validate-jsonl.mjs [--all] [--file <path> ...] [--strict]",
     "",
     "Options:",
-    "  --all            Validate all known feedback and error-report JSONL files. Default when no --file is provided.",
+    "  --all            Validate all known repository JSONL files. Default when no --file is provided.",
     "  --file <path>    Validate one JSONL file. Can be repeated.",
-    "  --schema <name>  Override schema for --file: error_report|feedback|generic_pair.",
+    "  --schema <name>  Override schema for --file: error_report|feedback|generic_pair|visual_index.",
     "  --strict         Treat generic_pair records without created_at/status as errors instead of warnings.",
     "",
     "Examples:",
@@ -89,8 +91,8 @@ function parseArgs(argv) {
 
     if (arg === "--schema") {
       const value = argv[index + 1];
-      if (!["error_report", "feedback", "generic_pair"].includes(value)) {
-        throw new Error("--schema must be one of: error_report, feedback, generic_pair.");
+      if (!["error_report", "feedback", "generic_pair", "visual_index"].includes(value)) {
+        throw new Error("--schema must be one of: error_report, feedback, generic_pair, visual_index.");
       }
       options.schemaOverride = value;
       index += 1;
@@ -421,6 +423,10 @@ function validateBySchema(schema, record, strict) {
 
   if (schema === "mcp_audit") {
     return validateMcpAudit(record);
+  }
+
+  if (schema === "visual_index") {
+    return validateVisualRecord(record);
   }
 
   return validateGenericPair(record, strict);
