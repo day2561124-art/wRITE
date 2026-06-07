@@ -7,5 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher.ps1"
-if errorlevel 1 pause
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher.ps1" %*
+set "exitCode=%errorlevel%"
+if not "%exitCode%"=="0" if "%~1"=="" pause
+exit /b %exitCode%

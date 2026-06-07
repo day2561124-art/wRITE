@@ -79,3 +79,7 @@
 - Added `launcher.cmd` and `launcher.ps1` as the no-VS-Code entrypoint for the local workbench.
 - Launcher actions cover UI start/restart, browser open, visual asset folder open, full validation, desktop shortcut creation, and UI stop.
 - Updated `start-ui.cmd` to remain a direct UI-only shortcut pinned to `127.0.0.1:4173`.
+- Hardened process ownership checks to match this project's absolute UI script path before stopping or restarting a listener.
+- Added reliable command exit codes, startup-failure cleanup, port-release waits, optional browser suppression, and Windows runtime contract tests.
+- Unified `start-ui.cmd` with the launcher process model and forwarded command-line arguments through `launcher.cmd`.
+- Preserved launcher failures through the `.cmd` wrappers without blocking parameterized automation on `pause`.

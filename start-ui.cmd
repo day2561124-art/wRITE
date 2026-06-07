@@ -1,11 +1,13 @@
 @echo off
 title Armed Academy Workbench
 cd /d "%~dp0"
-where node >nul 2>nul
+where powershell >nul 2>nul
 if errorlevel 1 (
-  echo Node.js was not found. Install Node.js 18 or newer, then run this file again.
+  echo PowerShell was not found on this system.
   pause
   exit /b 1
 )
-node server\src\ui-server.mjs --host 127.0.0.1 --port 4173 --open
-pause
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher.ps1" -StartUi
+set "exitCode=%errorlevel%"
+if not "%exitCode%"=="0" pause
+exit /b %exitCode%

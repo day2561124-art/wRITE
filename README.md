@@ -25,6 +25,15 @@
 
 若只想直接開 UI，也可以雙擊 `start-ui.cmd`。
 
+啟動器亦支援命令列模式，並以 exit code 回報成功或失敗：
+
+```powershell
+.\launcher.ps1 -Status
+.\launcher.ps1 -StartUi -NoOpen
+.\launcher.ps1 -RunTests
+.\launcher.ps1 -StopUi
+```
+
 介面會在瀏覽器開啟 `http://127.0.0.1:4173/`，提供：
 
 - 正式母檔與來源信任狀態總覽。
