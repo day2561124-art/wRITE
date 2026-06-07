@@ -1,7 +1,11 @@
-import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -363,11 +367,6 @@ function buildPendingErrorCandidate({ options, now, feedbackRecord }) {
   };
 }
 
-async function appendJsonl(filePath, record) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -376,12 +375,15 @@ async function main() {
   }
 
   const now = new Date().toISOString();
+  const transactionId = createTransactionId();
   const draft = await draftMetadata(options.draftFile);
   const feedbackId = timestampId("FB", now, options.feedback);
   const feedbackRecord = buildFeedbackRecord({ options, now, feedbackId, draft });
+  feedbackRecord.transaction_id = transactionId;
   const pendingCandidate = options.makeCandidate
     ? buildPendingErrorCandidate({ options, now, feedbackRecord })
     : null;
+  if (pendingCandidate) pendingCandidate.transaction_id = transactionId;
 
   console.log("Feedback record:");
   console.log(JSON.stringify(feedbackRecord, null, 2));
@@ -397,10 +399,22 @@ async function main() {
     return;
   }
 
-  await appendJsonl(feedbackTargets[options.type], feedbackRecord);
+  const operations = [{
+    type: "append",
+    filePath: feedbackTargets[options.type],
+    content: `${JSON.stringify(feedbackRecord)}\n`,
+  }];
   if (pendingCandidate) {
-    await appendJsonl(pendingErrorPath, pendingCandidate);
+    operations.push({
+      type: "append",
+      filePath: pendingErrorPath,
+      content: `${JSON.stringify(pendingCandidate)}\n`,
+    });
   }
+  await commitFileTransaction("add-feedback", operations, {
+    transaction_id: transactionId,
+    feedback_id: feedbackId,
+  });
 
   console.log("");
   console.log("Write complete.");
@@ -408,6 +422,7 @@ async function main() {
   if (pendingCandidate) {
     console.log(`- Pending candidate: ${path.relative(rootDir, pendingErrorPath).replaceAll(path.sep, "/")}`);
   }
+  console.log(`- Transaction: ${transactionId}`);
 }
 
 main().catch((error) => {

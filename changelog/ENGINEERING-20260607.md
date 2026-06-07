@@ -49,3 +49,19 @@
 - Longline DB v1.0 remains preserved as the pre-supplement transcription history.
 - The compressed-rule placeholder is not an external-file blocker: it remains T8 until formal error reports exist, and must not be populated by inference.
 - No external formal mother-file blockers remain.
+
+## Reliability and security hardening
+
+- Added a centralized project path policy that rejects traversal, symbolic-link escape, Canon overwrite attempts, and generated outputs outside `data/outputs/`.
+- Added project-wide file transactions with locking, staging, rollback, and transaction manifests.
+- Changed the generation pipeline to build in an isolated run directory and publish all four outputs atomically only after every stage succeeds.
+- Added MCP audit intents so interrupted non-read calls remain diagnosable, while completed calls commit the audit and clear the intent together.
+- Added strict JSONL schemas for draft, proof, settlement, and MCP audit indexes.
+
+## Retrieval and maintainability
+
+- Replaced duplicated source lists with one 15-source registry shared by prompt building, retrieval, trust checks, MCP resources, and the UI.
+- Upgraded retrieval ranking with exact matching, Chinese n-grams, BM25, source authority, and trust-aware penalties.
+- Added streaming JSONL counts in the UI, duplicate-submit protection, and shared Windows process-tree cleanup.
+- Added standard `npm` scripts and a cross-platform GitHub Actions matrix for Ubuntu and Windows.
+- Added security, rollback, atomic-pipeline, and source-registry contract tests.

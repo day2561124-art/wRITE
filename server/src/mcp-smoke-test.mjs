@@ -101,6 +101,20 @@ const protectedRuntimePaths = [
   path.join(rootDir, "data", "outputs", "logs", "policy_import_backups"),
   path.join(rootDir, "data", "outputs", "logs", "policy_imports.jsonl"),
 ];
+const transactionRuntimePath = path.join(
+  rootDir,
+  "data",
+  "outputs",
+  "logs",
+  "transactions",
+);
+const auditIntentRuntimePath = path.join(
+  rootDir,
+  "data",
+  "outputs",
+  "logs",
+  "mcp_audit_intents",
+);
 
 const forbiddenCreatedPaths = [
   path.join(rootDir, "server", "src", "tools", "activate_engine_version.mjs"),
@@ -1727,6 +1741,40 @@ async function restoreFileSnapshot(filePath, snapshot) {
     restored.equals(snapshot.bytes),
     `${normalizePath(filePath)} was not restored byte-for-byte after smoke.`,
   );
+}
+
+async function snapshotDirectoryEntries(dirPath) {
+  try {
+    return {
+      exists: true,
+      names: new Set(await readdir(dirPath)),
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        exists: false,
+        names: new Set(),
+      };
+    }
+    throw error;
+  }
+}
+
+async function restoreDirectoryEntries(dirPath, snapshot) {
+  let currentNames = [];
+  try {
+    currentNames = await readdir(dirPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  for (const name of currentNames) {
+    if (!snapshot.names.has(name)) {
+      await rm(path.join(dirPath, name), { recursive: true, force: true });
+    }
+  }
+  if (!snapshot.exists) {
+    await rm(dirPath, { recursive: true, force: true });
+  }
 }
 
 async function countJsonlRecords(filePath) {
@@ -5708,11 +5756,15 @@ async function main() {
   }
 
   const auditSnapshot = await snapshotFile(auditLogPath);
+  const transactionSnapshot = await snapshotDirectoryEntries(transactionRuntimePath);
+  const auditIntentSnapshot = await snapshotDirectoryEntries(auditIntentRuntimePath);
   let result;
   try {
     result = await runSmokeTest(options);
   } finally {
     await restoreFileSnapshot(auditLogPath, auditSnapshot);
+    await restoreDirectoryEntries(transactionRuntimePath, transactionSnapshot);
+    await restoreDirectoryEntries(auditIntentRuntimePath, auditIntentSnapshot);
   }
   console.log("MCP smoke test passed.");
   console.log(`- Tool scripts syntax checked: ${result.tool_scripts_syntax_checked}`);

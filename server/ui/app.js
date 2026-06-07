@@ -56,9 +56,21 @@ function escapeHtml(value) {
 }
 
 function setBusy(busy) {
+  const wasBusy = state.busyCount > 0;
   state.busyCount += busy ? 1 : -1;
   state.busyCount = Math.max(0, state.busyCount);
   $("#loading-bar").hidden = state.busyCount === 0;
+  const isBusy = state.busyCount > 0;
+  if (wasBusy === isBusy) return;
+  $$("form button, [data-action], #validate-button, #refresh-button").forEach((button) => {
+    if (isBusy) {
+      button.dataset.busyState = button.disabled ? "preserve" : "temporary";
+      button.disabled = true;
+    } else {
+      if (button.dataset.busyState === "temporary") button.disabled = false;
+      delete button.dataset.busyState;
+    }
+  });
 }
 
 function toast(message, error = false) {

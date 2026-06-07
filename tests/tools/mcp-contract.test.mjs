@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +17,7 @@ let settled = false;
 const timer = setTimeout(() => {
   if (settled) return;
   settled = true;
-  child.kill();
+  terminateProcessTree(child);
   console.error("MCP contract test timed out after 180 seconds.");
   process.exitCode = 1;
 }, 180_000);

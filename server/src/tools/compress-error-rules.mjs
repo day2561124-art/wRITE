@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCandidateMarkdownPath } from "../project-paths.mjs";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,7 +143,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--candidate-output requires a path.");
       }
-      options.candidateOutputPath = resolvePath(value);
+      options.candidateOutputPath = resolveCandidateMarkdownPath(value, "--candidate-output");
       index += 1;
       continue;
     }
@@ -502,14 +507,6 @@ function renderMarkdown({ sourceSummaries, includedRecords, selectedGroups, allG
   ].join("\n");
 }
 
-async function appendJsonl(filePath, entry) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
-}
-
 async function readTextIfExists(filePath) {
   try {
     return await readFile(filePath, "utf8");
@@ -577,10 +574,10 @@ async function main() {
   }
 
   if (options.writeCandidate) {
-    await mkdir(path.dirname(candidateOutputPath), { recursive: true });
-    await writeFile(candidateOutputPath, markdown, "utf8");
-    await appendJsonl(candidateIndexPath, {
+    const candidateTransactionId = createTransactionId();
+    const candidateRecord = {
       run_id: runId,
+      transaction_id: candidateTransactionId,
       created_at: now.toISOString(),
       status: "candidate",
       path: normalizePath(candidateOutputPath),
@@ -588,11 +585,20 @@ async function main() {
       included_records: includedRecords.length,
       selected_rules: selectedGroups.length,
       active_updated: false,
-    });
+    };
+    await commitFileTransaction("compress-error-rules-candidate", [
+      { type: "write", filePath: candidateOutputPath, content: markdown },
+      {
+        type: "append",
+        filePath: candidateIndexPath,
+        content: `${JSON.stringify(candidateRecord)}\n`,
+      },
+    ], { transaction_id: candidateTransactionId, run_id: runId });
 
     console.log("");
     console.log(`Wrote candidate: ${normalizePath(candidateOutputPath)}`);
     console.log(`Appended candidate index: ${normalizePath(candidateIndexPath)}`);
+    console.log(`Candidate transaction: ${candidateTransactionId}`);
   }
 
   if (!options.updateActive) {
@@ -620,11 +626,10 @@ async function main() {
   }
 
   const backupPath = path.join(backupDir, `${timestampForFile(now)}_compressed_rules_before_update.md`);
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, currentActiveText, "utf8");
-  await writeFile(activeCompressedRulesPath, markdown, "utf8");
-  await appendJsonl(updateLogPath, {
+  const activeTransactionId = createTransactionId();
+  const updateRecord = {
     run_id: runId,
+    transaction_id: activeTransactionId,
     updated_at: now.toISOString(),
     status: "active_updated",
     active_path: normalizePath(activeCompressedRulesPath),
@@ -633,13 +638,23 @@ async function main() {
     new_sha256: markdownSha256,
     included_records: includedRecords.length,
     selected_rules: selectedGroups.length,
-  });
+  };
+  await commitFileTransaction("compress-error-rules-active", [
+    { type: "write", filePath: backupPath, content: currentActiveText },
+    { type: "write", filePath: activeCompressedRulesPath, content: markdown },
+    {
+      type: "append",
+      filePath: updateLogPath,
+      content: `${JSON.stringify(updateRecord)}\n`,
+    },
+  ], { transaction_id: activeTransactionId, run_id: runId });
 
   console.log("");
   console.log("Active compressed rules updated.");
   console.log(`- Backup: ${normalizePath(backupPath)}`);
   console.log(`- Active: ${normalizePath(activeCompressedRulesPath)}`);
   console.log(`- Update log: ${normalizePath(updateLogPath)}`);
+  console.log(`- Transaction: ${activeTransactionId}`);
 }
 
 main().catch((error) => {

@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,14 +202,6 @@ async function readOptionalText(filePath) {
   }
 }
 
-async function appendLog(entry) {
-  await mkdir(path.dirname(importLogPath), { recursive: true });
-  await writeFile(importLogPath, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -244,6 +240,7 @@ async function main() {
   const activeNeedsWrite = activeSha256 !== sourceSha256;
   const versionNeedsWrite = !versionExists || existingVersionSha256 !== sourceSha256;
   const now = new Date();
+  const transactionId = createTransactionId();
   const backupPath = path.join(
     backupDir,
     `${timestampForFile(now)}_${options.kind}_active_before_import_${slugify(version)}.md`,
@@ -265,6 +262,7 @@ async function main() {
     backup: activeSnapshot.exists && activeNeedsWrite ? normalizePath(backupPath) : null,
     dry_run: options.dryRun,
     force: options.force,
+    transaction_id: transactionId,
   };
 
   console.log("Import plan:");
@@ -300,25 +298,34 @@ async function main() {
     return;
   }
 
-  await mkdir(spec.versionsDir, { recursive: true });
+  const operations = [];
   if (activeNeedsWrite && activeSnapshot.exists) {
-    await mkdir(path.dirname(backupPath), { recursive: true });
-    await writeFile(backupPath, activeSnapshot.text, "utf8");
+    operations.push({ type: "write", filePath: backupPath, content: activeSnapshot.text });
   }
 
   if (activeNeedsWrite) {
-    await writeFile(spec.activePath, sourceText, "utf8");
+    operations.push({ type: "write", filePath: spec.activePath, content: sourceText });
   }
 
   if (versionNeedsWrite) {
-    await writeFile(versionPath, sourceText, "utf8");
+    operations.push({ type: "write", filePath: versionPath, content: sourceText });
   }
 
-  await appendLog({
+  const importRecord = {
     imported_at: now.toISOString(),
     ...summary,
     wrote_active: activeNeedsWrite,
     wrote_version: versionNeedsWrite,
+  };
+  operations.push({
+    type: "append",
+    filePath: importLogPath,
+    content: `${JSON.stringify(importRecord)}\n`,
+  });
+  await commitFileTransaction("import-policy-file", operations, {
+    transaction_id: transactionId,
+    kind: options.kind,
+    version,
   });
 
   console.log("");
@@ -333,6 +340,7 @@ async function main() {
     console.log(`- Wrote backup ${summary.backup}`);
   }
   console.log(`- Logged ${normalizePath(importLogPath)}`);
+  console.log(`- Transaction ${transactionId}`);
 }
 
 main().catch((error) => {

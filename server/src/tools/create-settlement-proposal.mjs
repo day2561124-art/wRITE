@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -355,6 +359,7 @@ async function main() {
   const proposalId = `SETTLE-${timestampForFile(createdAt)}-${hashText(seed).slice(0, 8).toUpperCase()}`;
   const proposalText = buildProposalText({ options, createdAt, proposalId, adopted, activeEngine, taskPrompt });
   const proposalSha256 = hashText(proposalText);
+  const transactionId = createTransactionId();
   const outputPath = path.join(proposalsDir, `${timestampForFile(createdAt)}_${slugify(options.title)}.md`);
   const record = {
     settlement_proposal_id: proposalId,
@@ -372,6 +377,7 @@ async function main() {
     task_prompt: taskPrompt,
     established_count: options.established.filter((item) => item.trim()).length,
     unsettled_count: options.unsettled.filter((item) => item.trim()).length,
+    transaction_id: transactionId,
   };
 
   console.log("Settlement proposal plan:");
@@ -389,18 +395,16 @@ async function main() {
     return;
   }
 
-  await mkdir(proposalsDir, { recursive: true });
-  await mkdir(path.dirname(indexPath), { recursive: true });
-  await writeFile(outputPath, proposalText, "utf8");
-  await writeFile(indexPath, `${JSON.stringify(record)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
+  await commitFileTransaction("create-settlement-proposal", [
+    { type: "write", filePath: outputPath, content: proposalText },
+    { type: "append", filePath: indexPath, content: `${JSON.stringify(record)}\n` },
+  ], { transaction_id: transactionId, settlement_proposal_id: proposalId });
 
   console.log("");
   console.log("Settlement proposal saved.");
   console.log(`- Wrote ${normalizePath(outputPath)}`);
   console.log(`- Indexed ${normalizePath(indexPath)}`);
+  console.log(`- Transaction ${transactionId}`);
 }
 
 main().catch((error) => {

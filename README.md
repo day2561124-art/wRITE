@@ -12,6 +12,8 @@
 .\start-ui.cmd
 ```
 
+不需要開啟 VS Code；也可以直接在檔案總管雙擊 `start-ui.cmd`。需要 Node.js 18 以上版本。
+
 介面會在瀏覽器開啟 `http://127.0.0.1:4173/`，提供：
 
 - 正式母檔與來源信任狀態總覽。
@@ -35,12 +37,16 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 2. 依關鍵字檢索相關段落。
 3. 組裝本次任務可用的 `task_prompt.md`。
 
+每次流水線會先在 `data/outputs/runs/<run_id>/` 建立隔離產物與 `manifest.json`。三個步驟全部成功後，才會用單一交易發布四份正式輸出；若中途失敗，既有正式輸出保持不變。
+
 主要輸出：
 
 - `data/outputs/current_prompt.md`：全文母包，包含完整創作引擎與正文寫作卡。
 - `data/outputs/generation_context.md`：摘要上下文，適合長期常駐或起稿前先讀。
 - `data/outputs/retrieval_context.md`：本次任務的關鍵字檢索結果。
 - `data/outputs/task_prompt.md`：真正交給 AI 起稿、驗稿或除錯的任務提示。
+
+所有可指定的生成輸出都被限制在 `data/outputs/` 內；MCP 或 CLI 不得把生成內容覆寫到 Canon、政策或正式資料庫。
 
 ## 目前資料狀態
 
@@ -138,6 +144,8 @@ node server/src/tools/run-pipeline.mjs --query "朝日奈千夜 九逃 醫療後
 用途：
 
 - 一次跑完 `build-current-prompt.mjs`、`search-context.mjs` 與 `build-task-prompt.mjs`。
+- 檢索排名結合精確詞、中文 n-gram、BM25、來源權威與信任層級。
+- 各步驟先寫入獨立 run 目錄，完成後才交易式發布正式輸出。
 - 這是目前推薦的日常入口。
 
 查詢用法：
@@ -648,6 +656,8 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 2. 跑 `run-pipeline.mjs`。
 3. 打開 `data/outputs/task_prompt.md`。
 4. 將 `task_prompt.md` 交給 AI 起稿。
+5. 起稿前先檢查 Canon Guard 風險。
+6. 候選正文完成後仍不得寫入正史。
 
 ## 測試
 
@@ -657,11 +667,13 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 node tests/run-all.mjs
 ```
 
-完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、7 個 Canon golden fixtures、UI 伺服器與路由契約，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查只允許尚無正式錯誤報告的壓縮規則以 `T8` 警告存在，不允許登錄來源缺檔或 metadata 不完整。
+也可以使用標準指令：
 
-這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、來源信任檢查、7 個 Canon golden tests、UI server contract tests，以及完整 MCP contract smoke。
-5. 起稿前先檢查 Canon Guard 風險。
-6. 候選正文完成後仍不得寫入正史。
+```powershell
+npm.cmd test
+```
+
+完整測試會依序檢查 JSON/JSONL、15 個來源登錄與信任紀錄、路徑越界防護、交易回滾、管線失敗原子性、7 個 Canon golden fixtures、UI 伺服器與路由契約，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。CI 同時在 Ubuntu Node 18、Windows Node 18 與 Ubuntu Node 24 執行。
 
 ### 正式採用前驗稿
 
@@ -707,9 +719,12 @@ data/
     generation_context.md
     retrieval_context.md
     task_prompt.md
+    runs/
+      <run_id>/manifest.json
     compressed_rule_candidates/
     logs/
       mcp_tool_audit.jsonl
+      transactions/
 
 config/
   README.md
@@ -717,8 +732,12 @@ config/
   mcp-client.windows-local.example.json
 
 server/src/
+  file-transactions.mjs
   mcp-server.mjs
   mcp-smoke-test.mjs
+  process-control.mjs
+  project-paths.mjs
+  source-registry.mjs
   source-trust.mjs
   tools/
     build-current-prompt.mjs
@@ -738,6 +757,14 @@ server/src/
     source-trust-checker.mjs
     validate-json-codeblocks.mjs
 
+tests/
+  pipeline/
+  security/
+  transactions/
+  golden/
+  tools/
+  ui/
+
 prompts/
   generate_chapter.md
   proofread_draft.md
@@ -754,4 +781,4 @@ prompts/
 2. 按 `active_longline.md` 的篇章方向持續承接，但不得把未發生長線提前寫成 Canon。
 3. 錯誤壓縮規則須等待正式錯誤報告累積，不得由 AI 自行生成高權重規則。
 
-本機工程、正式政策匯入、contract tests、golden tests 與 CI gate 均已完成；目前沒有外部正式母檔阻塞。
+本機工程、交易式寫入、隔離式流水線、混合檢索、正式政策匯入、contract tests、golden tests 與跨平台 CI gate 均已完成；目前沒有外部正式母檔阻塞。

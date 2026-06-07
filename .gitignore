@@ -1,3 +1,6 @@
 # Ignore generated outputs and runtime logs
 outputs/
 data/outputs/logs/
+data/outputs/runs/
+data/outputs/.golden-test-*/
+data/outputs/.transaction-test/

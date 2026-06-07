@@ -1,72 +1,45 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   sourceTrustFor,
   validateSourceTrustMetadata,
 } from "../source-trust.mjs";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
+import { resolveGeneratedMarkdownPath } from "../project-paths.mjs";
+import {
+  sourceFilePath,
+  sourceSpecsFor,
+} from "../source-registry.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..", "..");
 
-const fullOutputPath = path.join(rootDir, "data", "outputs", "current_prompt.md");
-const compactOutputPath = path.join(rootDir, "data", "outputs", "generation_context.md");
+const defaultFullOutputPath = path.join(rootDir, "data", "outputs", "current_prompt.md");
+const defaultCompactOutputPath = path.join(rootDir, "data", "outputs", "generation_context.md");
 
-const sourceSpecs = [
-  {
-    key: "active_engine",
-    title: "Canon DB｜active_engine.md",
-    required: true,
-    authority: "P0 highest authority",
-    filePath: path.join(rootDir, "data", "canon_db", "active_engine.md"),
-  },
-  {
-    key: "active_writing_card",
-    title: "Writing Policy DB｜active_writing_card.md",
-    required: true,
-    authority: "Writing policy, cannot override canon",
-    filePath: path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md"),
-  },
-  {
-    key: "active_proofing_card",
-    title: "Proofing Policy DB｜active_proofing_card.md",
-    required: false,
-    authority: "Proofing policy, cannot override canon",
-    filePath: path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md"),
-  },
-  {
-    key: "active_longline",
-    title: "Longline DB｜active_longline.md",
-    required: false,
-    authority: "Longline boundary index, cannot become canon by itself",
-    filePath: path.join(rootDir, "data", "longline_db", "active_longline.md"),
-  },
-  {
-    key: "compressed_error_rules",
-    title: "Error Report DB｜compressed_rules.md",
-    required: false,
-    authority: "Error avoidance rule, cannot rewrite canon",
-    filePath: path.join(rootDir, "data", "error_report_db", "compressed_rules.md"),
-  },
-];
+const sourceSpecs = sourceSpecsFor("stable").map((entry) => ({
+  key: entry.source_id,
+  title: entry.title,
+  required: entry.required_in_generation,
+  authority: entry.authority,
+  filePath: sourceFilePath(entry),
+}));
 
-const jsonlSpecs = [
-  ["canon_errors", path.join(rootDir, "data", "error_report_db", "canon_errors.jsonl")],
-  ["character_errors", path.join(rootDir, "data", "error_report_db", "character_errors.jsonl")],
-  ["dialogue_errors", path.join(rootDir, "data", "error_report_db", "dialogue_errors.jsonl")],
-  ["pacing_errors", path.join(rootDir, "data", "error_report_db", "pacing_errors.jsonl")],
-  ["battle_errors", path.join(rootDir, "data", "error_report_db", "battle_errors.jsonl")],
-  ["preference_errors", path.join(rootDir, "data", "error_report_db", "preference_errors.jsonl")],
-  ["pending_error_reports", path.join(rootDir, "data", "feedback_db", "pending_error_reports.jsonl")],
-];
+const jsonlSpecs = sourceSpecsFor("jsonl").map((entry) => [
+  entry.source_id,
+  sourceFilePath(entry),
+]);
 
-const memorySpecs = [
-  ["canon_memory", path.join(rootDir, "data", "memory_store", "canon_memory.json")],
-  ["preference_memory", path.join(rootDir, "data", "memory_store", "preference_memory.json")],
-  ["working_memory", path.join(rootDir, "data", "memory_store", "working_memory.json")],
-];
+const memorySpecs = sourceSpecsFor("memory").map((entry) => [
+  entry.source_id,
+  sourceFilePath(entry),
+]);
 
 function usage() {
   return [
@@ -76,17 +49,44 @@ function usage() {
     "Builds:",
     "  data/outputs/current_prompt.md",
     "  data/outputs/generation_context.md",
+    "",
+    "Options:",
+    "  --full-output <path>       Override current_prompt.md under data/outputs/",
+    "  --compact-output <path>    Override generation_context.md under data/outputs/",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  if (argv.length === 0) {
-    return { help: false };
+  const options = {
+    fullOutputPath: defaultFullOutputPath,
+    compactOutputPath: defaultCompactOutputPath,
+    help: false,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+      return options;
+    }
+    if (arg === "--full-output") {
+      options.fullOutputPath = resolveGeneratedMarkdownPath(
+        argv[index + 1] ?? "",
+        "--full-output",
+      );
+      index += 1;
+      continue;
+    }
+    if (arg === "--compact-output") {
+      options.compactOutputPath = resolveGeneratedMarkdownPath(
+        argv[index + 1] ?? "",
+        "--compact-output",
+      );
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
   }
-  if (argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h")) {
-    return { help: true };
-  }
-  throw new Error(`Unknown argument: ${argv[0]}`);
+  return options;
 }
 
 function normalizePath(filePath) {
@@ -626,20 +626,20 @@ async function main() {
 
   const prompt = buildPrompt({ sources, jsonlSources, memorySources, generatedAt });
   const generationContext = buildGenerationContext({ sources, jsonlSources, memorySources, generatedAt });
-  await mkdir(path.dirname(fullOutputPath), { recursive: true });
-  await Promise.all([
-    writeFile(fullOutputPath, `${prompt}\n`, "utf8"),
-    writeFile(compactOutputPath, `${generationContext}\n`, "utf8"),
-  ]);
-
   const missingRequired = sources.filter((source) => source.required && !source.exists);
-  console.log(`Wrote ${normalizePath(fullOutputPath)}`);
-  console.log(`Wrote ${normalizePath(compactOutputPath)}`);
-  console.log(`Sources: ${sources.length}, JSONL: ${jsonlSources.length}, memory: ${memorySources.length}`);
   if (missingRequired.length > 0) {
-    console.error(`Missing required sources: ${missingRequired.map((source) => normalizePath(source.filePath)).join(", ")}`);
-    process.exitCode = 1;
+    throw new Error(`Missing required sources: ${missingRequired.map((source) => normalizePath(source.filePath)).join(", ")}`);
   }
+  const transactionId = createTransactionId();
+  await commitFileTransaction("build-current-prompt", [
+    { type: "write", filePath: options.fullOutputPath, content: `${prompt}\n` },
+    { type: "write", filePath: options.compactOutputPath, content: `${generationContext}\n` },
+  ], { transaction_id: transactionId, generated_at: generatedAt });
+
+  console.log(`Wrote ${normalizePath(options.fullOutputPath)}`);
+  console.log(`Wrote ${normalizePath(options.compactOutputPath)}`);
+  console.log(`Sources: ${sources.length}, JSONL: ${jsonlSources.length}, memory: ${memorySources.length}`);
+  console.log(`Transaction: ${transactionId}`);
 }
 
 main().catch((error) => {

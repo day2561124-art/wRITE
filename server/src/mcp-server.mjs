@@ -1,9 +1,22 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import {
+  assertExactPath,
+  assertPathInside,
+  projectPaths,
+  resolveCandidateMarkdownPath,
+  resolveGeneratedMarkdownPath,
+  resolveProjectPath,
+} from "./project-paths.mjs";
+import {
+  atomicWriteFile,
+  commitFileTransaction,
+} from "./file-transactions.mjs";
+import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,13 +34,14 @@ const defaultProtocolVersion = "2024-11-05";
 const maxChildOutputBytes = 20 * 1024 * 1024;
 const defaultTimeoutMs = 120_000;
 const mcpAuditLogPath = path.join(rootDir, "data", "outputs", "logs", "mcp_tool_audit.jsonl");
+const mcpAuditIntentDir = path.join(rootDir, "data", "outputs", "logs", "mcp_audit_intents");
 
 const dataPaths = {
-  activeEngine: path.join(rootDir, "data", "canon_db", "active_engine.md"),
-  activeWritingCard: path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md"),
-  activeProofingCard: path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md"),
-  activeLongline: path.join(rootDir, "data", "longline_db", "active_longline.md"),
-  compressedRules: path.join(rootDir, "data", "error_report_db", "compressed_rules.md"),
+  activeEngine: sourceFilePath("active_engine"),
+  activeWritingCard: sourceFilePath("active_writing_card"),
+  activeProofingCard: sourceFilePath("active_proofing_card"),
+  activeLongline: sourceFilePath("active_longline"),
+  compressedRules: sourceFilePath("compressed_error_rules"),
 };
 
 const jsonlStatePaths = [
@@ -611,20 +625,26 @@ function auditOutputSummary(result) {
   };
 }
 
-async function appendAuditLog(entry) {
-  await mkdir(path.dirname(mcpAuditLogPath), { recursive: true });
-  await writeFile(mcpAuditLogPath, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
-}
-
 async function auditedToolCall(tool, args, actor) {
   const before = await auditSnapshotMap();
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
+  const auditIntentPath = path.join(mcpAuditIntentDir, `${auditId}.json`);
   let result;
   let effectiveArgs = args;
+
+  await atomicWriteFile(auditIntentPath, `${JSON.stringify({
+    audit_id: auditId,
+    created_at: calledAt.toISOString(),
+    status: "started",
+    tool_name: tool.name,
+    risk: tool.risk,
+    actor,
+    input_summary: summarizeToolArguments(args),
+  }, null, 2)}\n`, {
+    tool: "mcp-audit-intent",
+    audit_id: auditId,
+  });
 
   try {
     effectiveArgs = prepareToolArguments(tool, args);
@@ -647,7 +667,7 @@ async function auditedToolCall(tool, args, actor) {
 
   const after = await auditSnapshotMap();
   const changed = diffAuditSnapshots(before, after);
-  await appendAuditLog({
+  const auditRecord = {
     audit_id: auditId,
     created_at: calledAt.toISOString(),
     status: result?.isError === true ? "tool_error" : "completed",
@@ -660,7 +680,15 @@ async function auditedToolCall(tool, args, actor) {
     new_version: Object.fromEntries(changed.map((item) => [item.path, item.current])),
     confirmation_id: confirmationId(effectiveArgs),
     result: auditOutputSummary(result),
-  });
+  };
+  await commitFileTransaction("mcp-audit-complete", [
+    {
+      type: "append",
+      filePath: mcpAuditLogPath,
+      content: `${JSON.stringify(auditRecord)}\n`,
+    },
+    { type: "delete", filePath: auditIntentPath },
+  ], { audit_id: auditId, tool_name: tool.name });
 
   return result;
 }
@@ -1065,7 +1093,102 @@ function prepareToolArguments(tool, args) {
   const emptyStringNormalized = applyEmptyStringNormalization(tool, args);
   const normalized = applyToolDefaults(tool, emptyStringNormalized);
   validateCrossFieldArguments(tool, normalized);
+  validateToolPathArguments(tool.name, normalized);
   return normalized;
+}
+
+function validateOptionalProjectPath(value, field) {
+  if (typeof value === "string" && value.trim()) {
+    resolveProjectPath(value, field);
+  }
+}
+
+function validateOptionalOutputPath(value, field) {
+  if (typeof value === "string" && value.trim()) {
+    resolveGeneratedMarkdownPath(value, field);
+  }
+}
+
+function validateToolPathArguments(toolName, args) {
+  if (toolName === "validate_jsonl") {
+    for (const file of args.files ?? []) resolveProjectPath(file, "files");
+    return;
+  }
+  if (toolName === "search_context") {
+    validateOptionalOutputPath(args.output, "output");
+    return;
+  }
+  if (toolName === "build_task_prompt") {
+    if (args.retrieval) assertPathInside(args.retrieval, projectPaths.outputs, "retrieval");
+    validateOptionalOutputPath(args.output, "output");
+    return;
+  }
+  if (toolName === "run_pipeline") {
+    validateOptionalOutputPath(args.retrievalOutput, "retrievalOutput");
+    validateOptionalOutputPath(args.taskOutput, "taskOutput");
+    return;
+  }
+  if (toolName === "add_feedback_raw") {
+    if (args.draftFile) assertPathInside(args.draftFile, projectPaths.outputs, "draftFile");
+    return;
+  }
+  if (toolName === "save_draft" || toolName === "save_proof_report") {
+    if (args.taskPrompt) assertPathInside(args.taskPrompt, projectPaths.outputs, "taskPrompt");
+    if (args.sourceFile) assertPathInside(args.sourceFile, projectPaths.outputs, "sourceFile");
+    return;
+  }
+  if (toolName === "commit_error_report") {
+    if (args.pending) {
+      const pendingPath = resolveProjectPath(args.pending, "pending");
+      if (path.extname(pendingPath).toLowerCase() !== ".jsonl") {
+        throw new Error("pending must be a JSONL file inside the project.");
+      }
+      if (!args.dryRun && !args.list) {
+        assertExactPath(pendingPath, projectPaths.pendingErrorReports, "pending");
+      }
+    }
+    return;
+  }
+  if (toolName === "compress_error_rules") {
+    if (args.candidateOutput) {
+      resolveCandidateMarkdownPath(args.candidateOutput, "candidateOutput");
+    }
+    return;
+  }
+  if (toolName === "create_settlement_proposal") {
+    if (args.sourceFile) assertPathInside(args.sourceFile, projectPaths.outputs, "sourceFile");
+    if (args.taskPrompt) assertPathInside(args.taskPrompt, projectPaths.outputs, "taskPrompt");
+    return;
+  }
+  if (toolName === "activate_engine_version") {
+    if (args.active) assertExactPath(args.active, projectPaths.activeEngine, "active");
+    if (args.candidate) {
+      const candidate = resolveProjectPath(args.candidate, "candidate");
+      const inVersions = (() => {
+        try {
+          assertPathInside(candidate, projectPaths.engineVersions, "candidate");
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      const inOutputs = (() => {
+        try {
+          assertPathInside(candidate, projectPaths.outputs, "candidate");
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      if (!inVersions && !inOutputs) {
+        throw new Error("candidate must be under data/canon_db/versions or data/outputs.");
+      }
+    }
+    return;
+  }
+  if (toolName !== "import_policy_file" && toolName !== "query_mcp_audit") {
+    validateOptionalProjectPath(args.source, "source");
+  }
 }
 
 const toolDefinitions = [

@@ -1,125 +1,30 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  registeredSources,
+} from "./source-registry.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 export const rootDir = path.resolve(__dirname, "..", "..");
 
-const source = (
-  sourceId,
-  sourceType,
-  sourceTrustLevel,
-  sourcePath,
-  canonStatus,
-  capabilities = {},
-  placeholderPatterns = [],
-) => ({
-  source_id: sourceId,
-  source_type: sourceType,
-  source_trust_level: sourceTrustLevel,
-  source_path: sourcePath,
-  canon_status: canonStatus,
+const source = (entry) => ({
+  source_id: entry.source_id,
+  source_type: entry.source_type,
+  source_trust_level: entry.source_trust_level,
+  source_path: entry.source_path,
+  canon_status: entry.canon_status,
   created_by: "repository",
-  approved_by_user: sourceTrustLevel === "T1" || sourceTrustLevel === "T3",
-  can_be_used_for_canon: false,
-  can_be_used_for_style: false,
-  can_be_used_for_error_learning: false,
-  can_be_used_for_retrieval: true,
+  approved_by_user: entry.source_trust_level === "T1" || entry.source_trust_level === "T3",
+  can_be_used_for_canon: entry.can_be_used_for_canon,
+  can_be_used_for_style: entry.can_be_used_for_style,
+  can_be_used_for_error_learning: entry.can_be_used_for_error_learning,
+  can_be_used_for_retrieval: entry.can_be_used_for_retrieval,
   forbidden_reason: "",
-  ...capabilities,
-  placeholder_patterns: placeholderPatterns,
+  placeholder_patterns: entry.placeholder_patterns,
 });
 
-export const sourceTrustCatalog = [
-  source(
-    "active_engine",
-    "canon_database",
-    "T1",
-    "data/canon_db/active_engine.md",
-    "canon",
-    { can_be_used_for_canon: true },
-  ),
-  source(
-    "active_writing_card",
-    "writing_policy",
-    "T3",
-    "data/writing_policy_db/active_writing_card.md",
-    "policy",
-    { can_be_used_for_style: true },
-  ),
-  source(
-    "active_proofing_card",
-    "proofing_policy",
-    "T3",
-    "data/proofing_policy_db/active_proofing_card.md",
-    "policy",
-    { can_be_used_for_style: true },
-    [/尚未建立正式版本/u, /尚未匯入正式驗稿卡/u],
-  ),
-  source(
-    "active_longline",
-    "longline_policy",
-    "T3",
-    "data/longline_db/active_longline.md",
-    "policy",
-    {},
-    [/缺檔保護卡/u, /尚未匯入正式長線骨架/u],
-  ),
-  source(
-    "compressed_error_rules",
-    "compressed_error_rules",
-    "T5",
-    "data/error_report_db/compressed_rules.md",
-    "derived_rule",
-    { can_be_used_for_error_learning: true },
-    [/尚未建立正式版本/u, /尚未建立正式錯誤壓縮規則/u],
-  ),
-  ...[
-    "canon_errors",
-    "character_errors",
-    "dialogue_errors",
-    "pacing_errors",
-    "battle_errors",
-    "preference_errors",
-  ].map((sourceId) =>
-    source(
-      sourceId,
-      "error_report",
-      "T5",
-      `data/error_report_db/${sourceId}.jsonl`,
-      "error_report",
-      { can_be_used_for_error_learning: true },
-    )),
-  source(
-    "pending_error_reports",
-    "pending_error_candidate",
-    "T7",
-    "data/feedback_db/pending_error_reports.jsonl",
-    "candidate",
-  ),
-  source(
-    "canon_memory",
-    "memory_cache",
-    "T6",
-    "data/memory_store/canon_memory.json",
-    "memory",
-  ),
-  source(
-    "preference_memory",
-    "preference_memory",
-    "T6",
-    "data/memory_store/preference_memory.json",
-    "memory",
-    { can_be_used_for_style: true },
-  ),
-  source(
-    "working_memory",
-    "working_memory",
-    "T8",
-    "data/memory_store/working_memory.json",
-    "working",
-  ),
-];
+export const sourceTrustCatalog = registeredSources.map(source);
 
 const catalogById = new Map(sourceTrustCatalog.map((entry) => [entry.source_id, entry]));
 const requiredFields = [
@@ -157,14 +62,20 @@ export function sourceTrustFor(
   } = {},
 ) {
   const registered = catalogById.get(sourceId);
-  const entry = registered ?? source(
-    sourceId,
-    "unknown",
-    "T8",
-    "",
-    "unknown",
-    { can_be_used_for_retrieval: false },
-  );
+  const entry = registered ?? {
+    ...source({
+      source_id: sourceId,
+      source_type: "unknown",
+      source_trust_level: "T8",
+      source_path: "",
+      canon_status: "unknown",
+      can_be_used_for_canon: false,
+      can_be_used_for_style: false,
+      can_be_used_for_error_learning: false,
+      can_be_used_for_retrieval: false,
+      placeholder_patterns: [],
+    }),
+  };
   const placeholder = exists && registered ? isPlaceholder(entry, text) : false;
   const missing = !exists;
   const downgraded = placeholder || missing || !registered;

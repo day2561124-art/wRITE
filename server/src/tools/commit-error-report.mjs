@@ -1,7 +1,16 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertExactPath,
+  projectPaths,
+  resolveProjectPath,
+} from "../project-paths.mjs";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,10 +52,6 @@ function usage() {
   ].join("\n");
 }
 
-function resolvePath(value) {
-  return path.isAbsolute(value) ? value : path.join(rootDir, value);
-}
-
 function parseArgs(argv) {
   const options = {
     pendingPath: defaultPendingPath,
@@ -72,7 +77,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--pending requires a path.");
       }
-      options.pendingPath = resolvePath(value);
+      options.pendingPath = resolveProjectPath(value, "--pending");
       index += 1;
       continue;
     }
@@ -121,6 +126,16 @@ function parseArgs(argv) {
 
   if (options.target && !targetFiles[options.target]) {
     throw new Error("--target must be one of: canon, character, dialogue, pacing, battle, preference.");
+  }
+  if (path.extname(options.pendingPath).toLowerCase() !== ".jsonl") {
+    throw new Error("--pending must be a JSONL file inside the project.");
+  }
+  if (!options.dryRun && !options.list) {
+    options.pendingPath = assertExactPath(
+      options.pendingPath,
+      projectPaths.pendingErrorReports,
+      "--pending",
+    );
   }
 
   const selectorCount = [options.errorId, options.feedbackId, options.latest].filter(Boolean).length;
@@ -293,11 +308,6 @@ function writeJsonlRecords(records) {
   return records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
 }
 
-async function appendJsonl(filePath, record) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -316,7 +326,9 @@ async function main() {
   const targetKey = routeTarget(selected.record, options.target);
   const targetPath = targetFiles[targetKey];
   const committedAt = new Date().toISOString();
+  const transactionId = createTransactionId();
   const formalRecord = buildFormalRecord(selected.record, committedAt);
+  formalRecord.transaction_id = transactionId;
   const pendingAfter = updatePendingRecord(pending.records, selected, committedAt, targetKey);
   const pendingAfterText = writeJsonlRecords(pendingAfter);
   const auditRecord = {
@@ -329,6 +341,7 @@ async function main() {
     target: normalizePath(targetPath),
     pending_before_sha256: hashText(pending.text),
     pending_after_sha256: hashText(pendingAfterText),
+    transaction_id: transactionId,
   };
 
   console.log("Commit plan:");
@@ -352,15 +365,18 @@ async function main() {
     return;
   }
 
-  await appendJsonl(targetPath, formalRecord);
-  await writeFile(options.pendingPath, pendingAfterText, "utf8");
-  await appendJsonl(auditLogPath, auditRecord);
+  await commitFileTransaction("commit-error-report", [
+    { type: "append", filePath: targetPath, content: `${JSON.stringify(formalRecord)}\n` },
+    { type: "write", filePath: options.pendingPath, content: pendingAfterText },
+    { type: "append", filePath: auditLogPath, content: `${JSON.stringify(auditRecord)}\n` },
+  ], { transaction_id: transactionId, error_id: formalRecord.error_id });
 
   console.log("");
   console.log("Commit complete.");
   console.log(`- Appended ${normalizePath(targetPath)}`);
   console.log(`- Updated ${normalizePath(options.pendingPath)}`);
   console.log(`- Logged ${normalizePath(auditLogPath)}`);
+  console.log(`- Transaction ${transactionId}`);
 }
 
 main().catch((error) => {

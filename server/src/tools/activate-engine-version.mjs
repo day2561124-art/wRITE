@@ -1,7 +1,17 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertExactPath,
+  assertPathInside,
+  projectPaths,
+  resolveProjectPath,
+} from "../project-paths.mjs";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,7 +85,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--active requires a path.");
       }
-      options.activePath = resolvePath(value);
+      options.activePath = assertExactPath(value, activeEnginePath, "--active");
       index += 1;
       continue;
     }
@@ -85,7 +95,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--candidate requires a path.");
       }
-      options.candidatePath = resolvePath(value);
+      options.candidatePath = resolveProjectPath(value, "--candidate");
       index += 1;
       continue;
     }
@@ -129,6 +139,26 @@ function parseArgs(argv) {
 
   if (!options.candidatePath) {
     options.candidatePath = versionToCandidatePath(options.version);
+  }
+
+  const candidateInVersions = (() => {
+    try {
+      assertPathInside(options.candidatePath, projectPaths.engineVersions, "--candidate");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const candidateInOutputs = (() => {
+    try {
+      assertPathInside(options.candidatePath, projectPaths.outputs, "--candidate");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  if (!candidateInVersions && !candidateInOutputs) {
+    throw new Error("--candidate must be under data/canon_db/versions or data/outputs.");
   }
 
   if (options.requiredCurrentSha && !/^[a-f0-9]{64}$/.test(options.requiredCurrentSha)) {
@@ -187,14 +217,6 @@ async function fileSnapshot(filePath) {
   };
 }
 
-async function appendActivationLog(entry) {
-  await mkdir(path.dirname(activationLogPath), { recursive: true });
-  await writeFile(activationLogPath, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -220,6 +242,7 @@ async function main() {
     `${timestamp}_active_engine_before_${slugify(candidateVersion)}.md`,
   );
   const activationId = `ENGINE-ACT-${timestamp}-${candidate.sha256.slice(0, 8).toUpperCase()}`;
+  const transactionId = createTransactionId();
 
   console.log("Engine activation plan:");
   console.log(`- Active target: ${normalizePath(options.activePath)}`);
@@ -256,11 +279,9 @@ async function main() {
     return;
   }
 
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, active.text, "utf8");
-  await writeFile(options.activePath, candidate.text, "utf8");
-  await appendActivationLog({
+  const activationRecord = {
     activation_id: activationId,
+    transaction_id: transactionId,
     activated_at: now.toISOString(),
     active: normalizePath(options.activePath),
     candidate: normalizePath(options.candidatePath),
@@ -270,7 +291,16 @@ async function main() {
     backup: normalizePath(backupPath),
     required_current_sha: options.requiredCurrentSha || null,
     reason: options.reason || null,
-  });
+  };
+  await commitFileTransaction("activate-engine-version", [
+    { type: "write", filePath: backupPath, content: active.text },
+    { type: "write", filePath: options.activePath, content: candidate.text },
+    {
+      type: "append",
+      filePath: activationLogPath,
+      content: `${JSON.stringify(activationRecord)}\n`,
+    },
+  ], { transaction_id: transactionId, activation_id: activationId });
 
   console.log("");
   console.log("Activation complete.");
@@ -278,6 +308,7 @@ async function main() {
   console.log(`- Wrote backup: ${normalizePath(backupPath)}`);
   console.log(`- Replaced active engine: ${normalizePath(options.activePath)}`);
   console.log(`- Appended log: ${normalizePath(activationLogPath)}`);
+  console.log(`- Transaction: ${transactionId}`);
 }
 
 main().catch((error) => {

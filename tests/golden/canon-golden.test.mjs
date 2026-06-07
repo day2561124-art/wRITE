@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
+const outputsDir = path.join(rootDir, "data", "outputs");
+const transactionDir = path.join(outputsDir, "logs", "transactions");
 
 function assert(condition, message) {
   if (!condition) {
@@ -26,7 +28,7 @@ function runNode(args) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      terminateProcessTree(child);
       reject(new Error(`Command timed out: node ${args.join(" ")}`));
     }, 60_000);
     child.stdout.setEncoding("utf8");
@@ -73,6 +75,21 @@ async function loadFixtures() {
     }
   }
   return fixtures;
+}
+
+async function optionalNames(dirPath) {
+  try {
+    return new Set(await readdir(dirPath));
+  } catch (error) {
+    if (error.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
+async function removeNewEntries(dirPath, before) {
+  for (const name of await optionalNames(dirPath)) {
+    if (!before.has(name)) await rm(path.join(dirPath, name), { recursive: true, force: true });
+  }
 }
 
 function assertFragments(fixture, text) {
@@ -152,7 +169,8 @@ async function main() {
   const ids = new Set(fixtures.map((fixture) => fixture.id));
   assert(ids.size === fixtures.length, "Golden fixture ids must be unique.");
 
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "armed-academy-golden-"));
+  const transactionsBefore = await optionalNames(transactionDir);
+  const tempDir = await mkdtemp(path.join(outputsDir, ".golden-test-"));
   try {
     for (const fixture of fixtures) {
       await runFixture(fixture, tempDir);
@@ -160,6 +178,7 @@ async function main() {
     }
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+    await removeNewEntries(transactionDir, transactionsBefore);
   }
 
   console.log(`Golden tests passed: ${fixtures.length}`);

@@ -1,0 +1,16 @@
+{
+  "name": "armed-academy-story-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/src/ui-server.mjs --open",
+    "ui": "node server/src/ui-server.mjs --open",
+    "test": "node tests/run-all.mjs",
+    "test:data": "node server/src/tools/validate-json-codeblocks.mjs && node server/src/tools/validate-jsonl.mjs --all --strict",
+    "test:mcp": "node tests/tools/mcp-contract.test.mjs"
+  }
+}

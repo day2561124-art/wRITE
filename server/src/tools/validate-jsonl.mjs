@@ -18,10 +18,10 @@ const fileSpecs = [
   ["feedback", "data/feedback_db/rejected_drafts.jsonl"],
   ["generic_pair", "data/feedback_db/revision_pairs.jsonl"],
   ["generic_pair", "data/feedback_db/preference_pairs.jsonl"],
-  ["generic_pair", "data/outputs/logs/draft_index.jsonl"],
-  ["generic_pair", "data/outputs/logs/proof_report_index.jsonl"],
-  ["generic_pair", "data/outputs/logs/settlement_proposal_index.jsonl"],
-  ["generic_pair", "data/outputs/logs/mcp_tool_audit.jsonl"],
+  ["draft_index", "data/outputs/logs/draft_index.jsonl"],
+  ["proof_report_index", "data/outputs/logs/proof_report_index.jsonl"],
+  ["settlement_index", "data/outputs/logs/settlement_proposal_index.jsonl"],
+  ["mcp_audit", "data/outputs/logs/mcp_tool_audit.jsonl"],
 ];
 
 const schemaByPath = new Map(fileSpecs.map(([schema, filePath]) => [normalizePath(resolvePath(filePath)), schema]));
@@ -273,6 +273,132 @@ function validateGenericPair(record, strict) {
   return { errors, warnings };
 }
 
+function requireFields(errors, record, fields) {
+  for (const field of fields) {
+    if (!(field in record)) errors.push(`missing required field: ${field}.`);
+  }
+}
+
+function requireNonNegativeInteger(errors, record, field) {
+  if (!Number.isInteger(record[field]) || record[field] < 0) {
+    errors.push(`${field} must be a non-negative integer.`);
+  }
+}
+
+function requireSha256(errors, record, field) {
+  if (typeof record[field] !== "string" || !/^[a-f0-9]{64}$/u.test(record[field])) {
+    errors.push(`${field} must be a lowercase SHA-256 hex digest.`);
+  }
+}
+
+function validateArtifactIndex(record, kind) {
+  const errors = [];
+  const warnings = [];
+  const specs = {
+    draft_index: {
+      id: "draft_id",
+      prefix: "DRAFT-",
+      source: "save-draft",
+      status: "candidate",
+      pathPrefix: "data/outputs/drafts/",
+      extra: ["task_type"],
+    },
+    proof_report_index: {
+      id: "proof_report_id",
+      prefix: "PROOF-",
+      source: "save-proof-report",
+      status: "recorded",
+      pathPrefix: "data/outputs/proof_reports/",
+      extra: ["verdict", "severity"],
+    },
+    settlement_index: {
+      id: "settlement_proposal_id",
+      prefix: "SETTLE-",
+      source: "create-settlement-proposal",
+      status: "proposal",
+      pathPrefix: "data/outputs/settlement_proposals/",
+      extra: ["adoption_confirmed"],
+    },
+  };
+  const spec = specs[kind];
+  requireFields(errors, record, [
+    spec.id,
+    "created_at",
+    "source",
+    "chapter",
+    "title",
+    "status",
+    "path",
+    "bytes",
+    "sha256",
+    ...spec.extra,
+  ]);
+  for (const field of [spec.id, "created_at", "source", "chapter", "title", "status", "path"]) {
+    if (field in record) requireString(errors, record, field);
+  }
+  if ("created_at" in record && !isIsoDate(record.created_at)) {
+    errors.push("created_at must be a valid ISO date string.");
+  }
+  if (!String(record[spec.id] ?? "").startsWith(spec.prefix)) {
+    errors.push(`${spec.id} must start with ${spec.prefix}.`);
+  }
+  if (record.source !== spec.source) errors.push(`source must be ${spec.source}.`);
+  if (record.status !== spec.status) errors.push(`status must be ${spec.status}.`);
+  if (!String(record.path ?? "").startsWith(spec.pathPrefix)) {
+    errors.push(`path must stay under ${spec.pathPrefix}.`);
+  }
+  if ("bytes" in record) requireNonNegativeInteger(errors, record, "bytes");
+  if ("sha256" in record) requireSha256(errors, record, "sha256");
+  if (kind === "proof_report_index") {
+    if (!["pass", "needs_rewrite", "reject", "stop"].includes(record.verdict)) {
+      errors.push("verdict is invalid.");
+    }
+    if (!severityValues.has(record.severity)) errors.push("severity is invalid.");
+  }
+  if (kind === "settlement_index" && typeof record.adoption_confirmed !== "boolean") {
+    errors.push("adoption_confirmed must be boolean.");
+  }
+  if (!("transaction_id" in record)) {
+    warnings.push("transaction_id is absent on a legacy record.");
+  }
+  return { errors, warnings };
+}
+
+function validateMcpAudit(record) {
+  const errors = [];
+  const warnings = [];
+  requireFields(errors, record, [
+    "audit_id",
+    "created_at",
+    "status",
+    "tool_name",
+    "risk",
+    "actor",
+    "input_summary",
+    "affected_paths",
+    "previous_version",
+    "new_version",
+    "result",
+  ]);
+  for (const field of ["audit_id", "created_at", "status", "tool_name", "risk", "actor"]) {
+    if (field in record) requireString(errors, record, field);
+  }
+  if ("created_at" in record && !isIsoDate(record.created_at)) {
+    errors.push("created_at must be a valid ISO date string.");
+  }
+  if (!String(record.audit_id ?? "").startsWith("MCP-AUDIT-")) {
+    errors.push("audit_id must start with MCP-AUDIT-.");
+  }
+  if (!["completed", "tool_error"].includes(record.status)) {
+    errors.push("status must be completed or tool_error.");
+  }
+  if (!Array.isArray(record.affected_paths)) errors.push("affected_paths must be an array.");
+  for (const field of ["input_summary", "previous_version", "new_version", "result"]) {
+    if (field in record && !isObject(record[field])) errors.push(`${field} must be an object.`);
+  }
+  return { errors, warnings };
+}
+
 function validateBySchema(schema, record, strict) {
   if (!isObject(record)) {
     return {
@@ -287,6 +413,14 @@ function validateBySchema(schema, record, strict) {
 
   if (schema === "feedback") {
     return validateFeedback(record);
+  }
+
+  if (["draft_index", "proof_report_index", "settlement_index"].includes(schema)) {
+    return validateArtifactIndex(record, schema);
+  }
+
+  if (schema === "mcp_audit") {
+    return validateMcpAudit(record);
   }
 
   return validateGenericPair(record, strict);

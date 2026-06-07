@@ -1,10 +1,25 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  normalizeProjectPath,
+  projectPaths,
+  resolveGeneratedMarkdownPath,
+} from "../project-paths.mjs";
+import {
+  atomicWriteFile,
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..", "..");
+const currentPromptPath = path.join(projectPaths.outputs, "current_prompt.md");
+const generationContextPath = path.join(projectPaths.outputs, "generation_context.md");
+const runsDir = path.join(projectPaths.outputs, "runs");
 
 const toolPaths = {
   buildCurrentPrompt: path.join(rootDir, "server", "src", "tools", "build-current-prompt.mjs"),
@@ -98,7 +113,9 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--retrieval-output requires a path.");
       }
-      options.retrievalOutput = value;
+      options.retrievalOutput = normalizeProjectPath(
+        resolveGeneratedMarkdownPath(value, "--retrieval-output"),
+      );
       index += 1;
       continue;
     }
@@ -108,7 +125,9 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--task-output requires a path.");
       }
-      options.taskOutput = value;
+      options.taskOutput = normalizeProjectPath(
+        resolveGeneratedMarkdownPath(value, "--task-output"),
+      );
       index += 1;
       continue;
     }
@@ -122,6 +141,13 @@ function parseArgs(argv) {
 
   if (!options.query) {
     throw new Error("Provide retrieval keywords with --query or positional keywords.");
+  }
+
+  const retrievalPath = resolveGeneratedMarkdownPath(options.retrievalOutput, "--retrieval-output");
+  const taskPath = resolveGeneratedMarkdownPath(options.taskOutput, "--task-output");
+  const publishPaths = [currentPromptPath, generationContextPath, retrievalPath, taskPath];
+  if (new Set(publishPaths).size !== publishPaths.length) {
+    throw new Error("Pipeline output paths must be distinct from each other and from current_prompt.md/generation_context.md.");
   }
 
   return options;
@@ -163,8 +189,45 @@ async function main() {
   }
 
   const queryTerms = options.query.split(/[\s,，、]+/).filter(Boolean);
+  const startedAt = new Date();
+  const runId = `RUN-${startedAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const runDir = path.join(runsDir, runId);
+  const runCurrentPrompt = path.join(runDir, "current_prompt.md");
+  const runGenerationContext = path.join(runDir, "generation_context.md");
+  const runRetrievalContext = path.join(runDir, "retrieval_context.md");
+  const runTaskPrompt = path.join(runDir, "task_prompt.md");
+  const runManifest = path.join(runDir, "manifest.json");
+  const baseManifest = {
+    run_id: runId,
+    started_at: startedAt.toISOString(),
+    status: "running",
+    inputs: {
+      query: options.query,
+      task: options.task,
+      mode: options.mode,
+      top: options.top,
+    },
+    isolated_outputs: {
+      current_prompt: normalizePath(runCurrentPrompt),
+      generation_context: normalizePath(runGenerationContext),
+      retrieval_context: normalizePath(runRetrievalContext),
+      task_prompt: normalizePath(runTaskPrompt),
+    },
+    publish_targets: {
+      current_prompt: normalizePath(currentPromptPath),
+      generation_context: normalizePath(generationContextPath),
+      retrieval_context: options.retrievalOutput,
+      task_prompt: options.taskOutput,
+    },
+  };
+  await atomicWriteFile(runManifest, `${JSON.stringify(baseManifest, null, 2)}\n`, {
+    tool: "run-pipeline",
+    run_id: runId,
+    status: "running",
+  });
 
   console.log("Pipeline inputs:");
+  console.log(`- Run ID: ${runId}`);
   console.log(`- Query: ${options.query}`);
   console.log(`- Task: ${options.task}`);
   console.log(`- Mode: ${options.mode}`);
@@ -172,30 +235,84 @@ async function main() {
   console.log(`- Retrieval output: ${options.retrievalOutput}`);
   console.log(`- Task output: ${options.taskOutput}`);
 
-  await runNodeStep("Build current prompt", toolPaths.buildCurrentPrompt, []);
-  await runNodeStep("Search retrieval context", toolPaths.searchContext, [
-    ...queryTerms,
-    "--top",
-    String(options.top),
-    "--output",
-    options.retrievalOutput,
-  ]);
-  await runNodeStep("Build task prompt", toolPaths.buildTaskPrompt, [
-    "--mode",
-    options.mode,
-    "--task",
-    options.task,
-    "--retrieval",
-    options.retrievalOutput,
-    "--output",
-    options.taskOutput,
-  ]);
+  try {
+    await runNodeStep("Build current prompt", toolPaths.buildCurrentPrompt, [
+      "--full-output",
+      normalizePath(runCurrentPrompt),
+      "--compact-output",
+      normalizePath(runGenerationContext),
+    ]);
+    await runNodeStep("Search retrieval context", toolPaths.searchContext, [
+      ...queryTerms,
+      "--top",
+      String(options.top),
+      "--output",
+      normalizePath(runRetrievalContext),
+    ]);
+    if (process.env.PIPELINE_TEST_FAIL_AFTER === "search") {
+      throw new Error("Injected pipeline failure after search.");
+    }
+    await runNodeStep("Build task prompt", toolPaths.buildTaskPrompt, [
+      "--mode",
+      options.mode,
+      "--task",
+      options.task,
+      "--generation",
+      normalizePath(runGenerationContext),
+      "--retrieval",
+      normalizePath(runRetrievalContext),
+      "--output",
+      normalizePath(runTaskPrompt),
+    ]);
+
+    const [currentPrompt, generationContext, retrievalContext, taskPrompt] = await Promise.all([
+      readFile(runCurrentPrompt),
+      readFile(runGenerationContext),
+      readFile(runRetrievalContext),
+      readFile(runTaskPrompt),
+    ]);
+    const transactionId = createTransactionId();
+    const completedManifest = {
+      ...baseManifest,
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      publish_transaction_id: transactionId,
+    };
+    await commitFileTransaction("publish-pipeline-run", [
+      { type: "write", filePath: currentPromptPath, content: currentPrompt },
+      { type: "write", filePath: generationContextPath, content: generationContext },
+      {
+        type: "write",
+        filePath: resolveGeneratedMarkdownPath(options.retrievalOutput, "--retrieval-output"),
+        content: retrievalContext,
+      },
+      {
+        type: "write",
+        filePath: resolveGeneratedMarkdownPath(options.taskOutput, "--task-output"),
+        content: taskPrompt,
+      },
+      { type: "write", filePath: runManifest, content: `${JSON.stringify(completedManifest, null, 2)}\n` },
+    ], { transaction_id: transactionId, run_id: runId });
+  } catch (error) {
+    await atomicWriteFile(runManifest, `${JSON.stringify({
+      ...baseManifest,
+      status: "failed",
+      completed_at: new Date().toISOString(),
+      error: error.message,
+    }, null, 2)}\n`, {
+      tool: "run-pipeline",
+      run_id: runId,
+      status: "failed",
+    });
+    throw error;
+  }
 
   console.log("");
   console.log("Pipeline complete.");
   console.log(`- Generation context: data/outputs/generation_context.md`);
   console.log(`- Retrieval context: ${options.retrievalOutput}`);
   console.log(`- Task prompt: ${options.taskOutput}`);
+  console.log(`- Run manifest: ${normalizePath(runManifest)}`);
 }
 
 main().catch((error) => {

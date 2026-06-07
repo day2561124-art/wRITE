@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,6 +202,7 @@ async function main() {
   const content = await readContent(options);
   const draftBody = buildDraftText({ options, createdAt, content });
   const draftSha256 = hashText(draftBody);
+  const transactionId = createTransactionId();
   const draftId = `DRAFT-${timestampForFile(createdAt)}-${draftSha256.slice(0, 8).toUpperCase()}`;
   const outputPath = path.join(draftsDir, `${timestampForFile(createdAt)}_${slugify(options.title)}.md`);
   const taskPrompt = await fileMetadata(options.taskPromptPath);
@@ -215,6 +220,7 @@ async function main() {
     sha256: draftSha256,
     task_prompt: taskPrompt,
     source_file: content.source,
+    transaction_id: transactionId,
   };
 
   console.log("Draft save plan:");
@@ -226,18 +232,16 @@ async function main() {
     return;
   }
 
-  await mkdir(draftsDir, { recursive: true });
-  await mkdir(path.dirname(indexPath), { recursive: true });
-  await writeFile(outputPath, draftBody, "utf8");
-  await writeFile(indexPath, `${JSON.stringify(record)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
+  await commitFileTransaction("save-draft", [
+    { type: "write", filePath: outputPath, content: draftBody },
+    { type: "append", filePath: indexPath, content: `${JSON.stringify(record)}\n` },
+  ], { transaction_id: transactionId, draft_id: draftId });
 
   console.log("");
   console.log("Draft saved.");
   console.log(`- Wrote ${normalizePath(outputPath)}`);
   console.log(`- Indexed ${normalizePath(indexPath)}`);
+  console.log(`- Transaction ${transactionId}`);
 }
 
 main().catch((error) => {

@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertPathInside,
+  projectPaths,
+  resolveGeneratedMarkdownPath,
+} from "../project-paths.mjs";
+import { atomicWriteFile } from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,7 +75,7 @@ function usage() {
 }
 
 function resolvePath(value) {
-  return path.isAbsolute(value) ? value : path.join(rootDir, value);
+  return assertPathInside(value, projectPaths.outputs, "context path");
 }
 
 function parseArgs(argv) {
@@ -136,7 +142,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--output requires a path.");
       }
-      options.outputPath = resolvePath(value);
+      options.outputPath = resolveGeneratedMarkdownPath(value, "--output");
       index += 1;
       continue;
     }
@@ -279,8 +285,10 @@ async function main() {
     generatedAt,
   });
 
-  await mkdir(path.dirname(options.outputPath), { recursive: true });
-  await writeFile(options.outputPath, `${taskPrompt}\n`, "utf8");
+  await atomicWriteFile(options.outputPath, `${taskPrompt}\n`, {
+    tool: "build-task-prompt",
+    mode: options.mode,
+  });
 
   console.log(`Wrote ${normalizePath(options.outputPath)}`);
   console.log(`Mode: ${taskModes[options.mode].label}`);

@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   sourceTrustFor,
   validateSourceTrustMetadata,
 } from "../source-trust.mjs";
+import { resolveGeneratedMarkdownPath } from "../project-paths.mjs";
+import { atomicWriteFile } from "../file-transactions.mjs";
+import {
+  sourceFilePath,
+  sourceSpecsFor,
+} from "../source-registry.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,128 +19,14 @@ const rootDir = path.resolve(__dirname, "..", "..", "..");
 
 const defaultOutputPath = path.join(rootDir, "data", "outputs", "retrieval_context.md");
 
-const sourceSpecs = [
-  {
-    key: "active_engine",
-    title: "Canon DB｜active_engine.md",
-    authority: "P0 highest authority",
-    authorityRank: 100,
-    type: "markdown",
-    filePath: path.join(rootDir, "data", "canon_db", "active_engine.md"),
-  },
-  {
-    key: "active_writing_card",
-    title: "Writing Policy DB｜active_writing_card.md",
-    authority: "Writing policy, cannot override canon",
-    authorityRank: 80,
-    type: "markdown",
-    filePath: path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md"),
-  },
-  {
-    key: "active_proofing_card",
-    title: "Proofing Policy DB｜active_proofing_card.md",
-    authority: "Proofing policy, cannot override canon",
-    authorityRank: 70,
-    type: "markdown",
-    filePath: path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md"),
-  },
-  {
-    key: "active_longline",
-    title: "Longline DB｜active_longline.md",
-    authority: "Longline boundary index, cannot become canon by itself",
-    authorityRank: 75,
-    type: "markdown",
-    filePath: path.join(rootDir, "data", "longline_db", "active_longline.md"),
-  },
-  {
-    key: "compressed_error_rules",
-    title: "Error Report DB｜compressed_rules.md",
-    authority: "Error avoidance rule, cannot rewrite canon",
-    authorityRank: 65,
-    type: "markdown",
-    filePath: path.join(rootDir, "data", "error_report_db", "compressed_rules.md"),
-  },
-  {
-    key: "canon_errors",
-    title: "Error Report DB｜canon_errors.jsonl",
-    authority: "Canon error report, cannot rewrite canon",
-    authorityRank: 60,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "canon_errors.jsonl"),
-  },
-  {
-    key: "character_errors",
-    title: "Error Report DB｜character_errors.jsonl",
-    authority: "Character error report",
-    authorityRank: 55,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "character_errors.jsonl"),
-  },
-  {
-    key: "dialogue_errors",
-    title: "Error Report DB｜dialogue_errors.jsonl",
-    authority: "Dialogue error report",
-    authorityRank: 55,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "dialogue_errors.jsonl"),
-  },
-  {
-    key: "pacing_errors",
-    title: "Error Report DB｜pacing_errors.jsonl",
-    authority: "Pacing error report",
-    authorityRank: 55,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "pacing_errors.jsonl"),
-  },
-  {
-    key: "battle_errors",
-    title: "Error Report DB｜battle_errors.jsonl",
-    authority: "Battle error report",
-    authorityRank: 55,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "battle_errors.jsonl"),
-  },
-  {
-    key: "preference_errors",
-    title: "Error Report DB｜preference_errors.jsonl",
-    authority: "Preference error report",
-    authorityRank: 50,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "error_report_db", "preference_errors.jsonl"),
-  },
-  {
-    key: "pending_error_reports",
-    title: "Feedback DB｜pending_error_reports.jsonl",
-    authority: "Pending feedback-derived error candidates",
-    authorityRank: 45,
-    type: "jsonl",
-    filePath: path.join(rootDir, "data", "feedback_db", "pending_error_reports.jsonl"),
-  },
-  {
-    key: "canon_memory",
-    title: "Memory Store｜canon_memory.json",
-    authority: "Memory cache, cannot override Canon DB",
-    authorityRank: 40,
-    type: "json",
-    filePath: path.join(rootDir, "data", "memory_store", "canon_memory.json"),
-  },
-  {
-    key: "preference_memory",
-    title: "Memory Store｜preference_memory.json",
-    authority: "Preference memory, cannot become canon",
-    authorityRank: 35,
-    type: "json",
-    filePath: path.join(rootDir, "data", "memory_store", "preference_memory.json"),
-  },
-  {
-    key: "working_memory",
-    title: "Memory Store｜working_memory.json",
-    authority: "Working memory for current task only",
-    authorityRank: 30,
-    type: "json",
-    filePath: path.join(rootDir, "data", "memory_store", "working_memory.json"),
-  },
-];
+const sourceSpecs = sourceSpecsFor("retrieval").map((entry) => ({
+  key: entry.source_id,
+  title: entry.title,
+  authority: entry.authority,
+  authorityRank: entry.authority_rank,
+  type: entry.data_type,
+  filePath: sourceFilePath(entry),
+}));
 
 function normalizePath(filePath) {
   return path.relative(rootDir, filePath).replaceAll(path.sep, "/");
@@ -146,6 +38,75 @@ function hashText(text) {
 
 function normalizeText(text) {
   return text.normalize("NFKC").toLocaleLowerCase();
+}
+
+const wordSegmenter = new Intl.Segmenter("zh-TW", { granularity: "word" });
+
+function retrievalTokens(text) {
+  const normalized = normalizeText(text);
+  const tokens = [];
+  for (const part of wordSegmenter.segment(normalized)) {
+    const token = part.segment.trim();
+    if (part.isWordLike && token.length > 0) tokens.push(token);
+  }
+  for (const run of normalized.match(/\p{Script=Han}+/gu) ?? []) {
+    for (let size = 2; size <= 3; size += 1) {
+      for (let index = 0; index <= run.length - size; index += 1) {
+        tokens.push(run.slice(index, index + size));
+      }
+    }
+  }
+  return tokens;
+}
+
+function tokenCounts(tokens) {
+  const counts = new Map();
+  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+  return counts;
+}
+
+function buildCorpusStats(chunks) {
+  const documents = new Map();
+  const documentFrequency = new Map();
+  let totalLength = 0;
+  for (const chunk of chunks) {
+    const counts = tokenCounts(retrievalTokens(`${chunk.headings.join(" ")}\n${chunk.text}`));
+    const length = [...counts.values()].reduce((total, count) => total + count, 0);
+    documents.set(chunk.paragraphId, { counts, length });
+    totalLength += length;
+    for (const token of counts.keys()) {
+      documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+    }
+  }
+  return {
+    documents,
+    documentFrequency,
+    documentCount: chunks.length,
+    averageLength: chunks.length > 0 ? totalLength / chunks.length : 1,
+  };
+}
+
+function bm25Score(chunk, queryTokens, corpus) {
+  const document = corpus.documents.get(chunk.paragraphId);
+  if (!document || document.length === 0) return 0;
+  const k1 = 1.2;
+  const b = 0.75;
+  let score = 0;
+  for (const token of new Set(queryTokens)) {
+    const frequency = document.counts.get(token) ?? 0;
+    if (frequency === 0) continue;
+    const documentFrequency = corpus.documentFrequency.get(token) ?? 0;
+    const inverseDocumentFrequency = Math.log(
+      1 + (corpus.documentCount - documentFrequency + 0.5) / (documentFrequency + 0.5),
+    );
+    const lengthNormalization = k1 * (
+      1 - b + b * document.length / Math.max(1, corpus.averageLength)
+    );
+    score += inverseDocumentFrequency * (
+      frequency * (k1 + 1) / (frequency + lengthNormalization)
+    );
+  }
+  return score;
 }
 
 function escapeCell(value) {
@@ -189,7 +150,7 @@ function parseArgs(argv) {
       if (!value) {
         throw new Error("--output requires a path.");
       }
-      outputPath = path.isAbsolute(value) ? value : path.join(rootDir, value);
+      outputPath = resolveGeneratedMarkdownPath(value, "--output");
       index += 1;
       continue;
     }
@@ -401,7 +362,7 @@ function lineSpan(lineRange) {
   return Math.max(1, end - start + 1);
 }
 
-function scoreChunk(chunk, terms, fullQuery) {
+function scoreChunk(chunk, terms, fullQuery, queryTokens, corpus) {
   const normalizedText = normalizeText(chunk.text);
   const normalizedHeading = normalizeText(chunk.headings.join(" "));
   const normalizedQuery = normalizeText(fullQuery);
@@ -435,9 +396,17 @@ function scoreChunk(chunk, terms, fullQuery) {
     hits.push("exact_query:1");
   }
 
+  const lexicalScore = bm25Score(chunk, queryTokens, corpus);
+  if (lexicalScore > 0) {
+    score += lexicalScore * 2.5;
+    hits.push(`bm25:${lexicalScore.toFixed(2)}`);
+  }
+
   if (score > 0) {
     score += chunk.source.authorityRank / 100;
     score -= Math.min(8, Math.max(0, lineSpan(chunk.lineRange) - 12) * 0.2);
+    if (!chunk.source.trust.approved_by_user) score *= 0.85;
+    if (chunk.source.trust.source_trust_level === "T8") score *= 0.7;
   }
 
   return { score, hits };
@@ -520,6 +489,7 @@ function buildRetrievalContext({ query, terms, top, sources, results, generatedA
     "## Retrieval Rules",
     "",
     "- Results preserve source path, version, paragraph ID and line range.",
+    "- Ranking combines exact keyword hits, Chinese word/character n-grams, BM25 and source authority.",
     "- Canon DB outranks writing policy, error reports, feedback and memory.",
     "- Retrieved material is evidence for the current task, not a Canon DB update.",
     "- If sources conflict, follow the authority order in `data/outputs/generation_context.md`.",
@@ -545,9 +515,11 @@ async function main() {
   const generatedAt = new Date().toISOString();
   const sources = await Promise.all(sourceSpecs.map(readSource));
   const chunks = sources.flatMap(chunksForSource);
+  const corpus = buildCorpusStats(chunks);
+  const queryTokens = retrievalTokens(`${options.query} ${options.terms.join(" ")}`);
   const results = chunks
     .map((chunk) => {
-      const scored = scoreChunk(chunk, options.terms, options.query);
+      const scored = scoreChunk(chunk, options.terms, options.query, queryTokens, corpus);
       return {
         chunk,
         ...scored,
@@ -566,8 +538,10 @@ async function main() {
     generatedAt,
   });
 
-  await mkdir(path.dirname(options.outputPath), { recursive: true });
-  await writeFile(options.outputPath, `${markdown}\n`, "utf8");
+  await atomicWriteFile(options.outputPath, `${markdown}\n`, {
+    tool: "search-context",
+    query: options.query,
+  });
 
   console.log(`Wrote ${normalizePath(options.outputPath)}`);
   console.log(`Query: ${options.query}`);

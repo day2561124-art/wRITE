@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateProcessTree } from "../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,10 @@ const steps = [
   ["JSON/codeblock validation", ["server/src/tools/validate-json-codeblocks.mjs"]],
   ["Strict JSONL validation", ["server/src/tools/validate-jsonl.mjs", "--all", "--strict"]],
   ["Source trust validation", ["server/src/tools/source-trust-checker.mjs"]],
+  ["Source registry contract", ["tests/source-registry.test.mjs"]],
+  ["Path policy security", ["tests/security/path-policy.test.mjs"]],
+  ["File transaction rollback", ["tests/transactions/file-transactions.test.mjs"]],
+  ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
@@ -27,7 +32,7 @@ function runStep(label, args) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      terminateProcessTree(child);
       reject(new Error(`${label} timed out after 240 seconds.`));
     }, 240_000);
     child.on("error", (error) => {

@@ -4,11 +4,14 @@ import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   sourceTrustFor,
   validateSourceTrustMetadata,
 } from "./source-trust.mjs";
+import { terminateProcessTree } from "./process-control.mjs";
+import { sourceSpecsFor } from "./source-registry.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,34 +22,13 @@ const defaultHost = "127.0.0.1";
 const defaultPort = 4173;
 const maxBodyBytes = 2 * 1024 * 1024;
 const maxToolOutputBytes = 4 * 1024 * 1024;
+const activeChildren = new Set();
 
-const sourceSpecs = [
-  {
-    key: "active_engine",
-    label: "Canon DB",
-    path: "data/canon_db/active_engine.md",
-  },
-  {
-    key: "active_writing_card",
-    label: "正文寫作卡",
-    path: "data/writing_policy_db/active_writing_card.md",
-  },
-  {
-    key: "active_proofing_card",
-    label: "正式驗稿卡",
-    path: "data/proofing_policy_db/active_proofing_card.md",
-  },
-  {
-    key: "active_longline",
-    label: "長線骨架",
-    path: "data/longline_db/active_longline.md",
-  },
-  {
-    key: "compressed_error_rules",
-    label: "錯誤壓縮規則",
-    path: "data/error_report_db/compressed_rules.md",
-  },
-];
+const sourceSpecs = sourceSpecsFor("ui").map((entry) => ({
+  key: entry.source_id,
+  label: entry.ui_label,
+  path: entry.source_path,
+}));
 
 const outputSpecs = [
   ["current_prompt", "完整上下文", "data/outputs/current_prompt.md"],
@@ -229,6 +211,20 @@ async function sourceState(spec) {
 }
 
 async function readJsonl(projectPath, limit = 100) {
+  if (limit <= 0) {
+    const filePath = resolveProjectPath(projectPath);
+    let count = 0;
+    try {
+      const input = createReadStream(filePath, { encoding: "utf8" });
+      const lines = createInterface({ input, crlfDelay: Infinity });
+      for await (const line of lines) {
+        if (line.trim()) count += 1;
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    return { count, records: [] };
+  }
   const text = await readOptionalText(resolveProjectPath(projectPath));
   const lines = text.split(/\r?\n/u).filter((line) => line.trim());
   const records = [];
@@ -440,6 +436,7 @@ function runNode({ tool, file, argv, timeout }) {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
+    activeChildren.add(child);
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
@@ -447,7 +444,7 @@ function runNode({ tool, file, argv, timeout }) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      terminateProcessTree(child);
       reject(new Error(`Action timed out after ${Math.round(timeout / 1000)} seconds.`));
     }, timeout);
 
@@ -457,7 +454,7 @@ function runNode({ tool, file, argv, timeout }) {
       if (outputBytes > maxToolOutputBytes) {
         settled = true;
         clearTimeout(timer);
-        child.kill();
+        terminateProcessTree(child);
         reject(new Error("Tool output exceeded the UI capture limit."));
         return;
       }
@@ -476,6 +473,7 @@ function runNode({ tool, file, argv, timeout }) {
       reject(error);
     });
     child.on("close", (code) => {
+      activeChildren.delete(child);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -674,6 +672,15 @@ async function main() {
       sendError(response, 500, error);
     });
   });
+
+  const shutdown = () => {
+    for (const child of activeChildren) terminateProcessTree(child);
+    server.close(() => {
+      process.exitCode = 0;
+    });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   server.listen(options.port, options.host, () => {
     const url = `http://${options.host}:${options.port}`;

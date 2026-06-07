@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commitFileTransaction,
+  createTransactionId,
+} from "../file-transactions.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -217,6 +221,7 @@ async function main() {
   const content = await readContent(options);
   const reportBody = buildReportText({ options, createdAt, content });
   const reportSha256 = hashText(reportBody);
+  const transactionId = createTransactionId();
   const reportId = `PROOF-${timestampForFile(createdAt)}-${reportSha256.slice(0, 8).toUpperCase()}`;
   const outputPath = path.join(reportsDir, `${timestampForFile(createdAt)}_${slugify(options.title)}.md`);
   const taskPrompt = await fileMetadata(options.taskPromptPath);
@@ -236,6 +241,7 @@ async function main() {
     sha256: reportSha256,
     task_prompt: taskPrompt,
     source_file: content.source,
+    transaction_id: transactionId,
   };
 
   console.log("Proof report save plan:");
@@ -247,18 +253,16 @@ async function main() {
     return;
   }
 
-  await mkdir(reportsDir, { recursive: true });
-  await mkdir(path.dirname(indexPath), { recursive: true });
-  await writeFile(outputPath, reportBody, "utf8");
-  await writeFile(indexPath, `${JSON.stringify(record)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
+  await commitFileTransaction("save-proof-report", [
+    { type: "write", filePath: outputPath, content: reportBody },
+    { type: "append", filePath: indexPath, content: `${JSON.stringify(record)}\n` },
+  ], { transaction_id: transactionId, proof_report_id: reportId });
 
   console.log("");
   console.log("Proof report saved.");
   console.log(`- Wrote ${normalizePath(outputPath)}`);
   console.log(`- Indexed ${normalizePath(indexPath)}`);
+  console.log(`- Transaction ${transactionId}`);
 }
 
 main().catch((error) => {

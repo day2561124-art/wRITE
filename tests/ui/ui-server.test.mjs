@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,11 +52,29 @@ async function readJson(response) {
   return { response, payload };
 }
 
+async function readOptionalText(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function readOptionalDirectory(dirPath) {
+  try {
+    return (await readdir(dirPath)).sort();
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 async function main() {
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const beforeIndex = await readFile(draftIndexPath, "utf8");
-  const beforeDraftFiles = (await readdir(draftsDir)).sort();
+  const beforeIndex = await readOptionalText(draftIndexPath);
+  const beforeDraftFiles = await readOptionalDirectory(draftsDir);
   const stderrBuffer = { value: "" };
   const child = spawn(process.execPath, [
     serverPath,
@@ -153,8 +172,8 @@ async function main() {
       "Draft dry-run UI action did not report dry-run completion.",
     );
 
-    const afterIndex = await readFile(draftIndexPath, "utf8");
-    const afterDraftFiles = (await readdir(draftsDir)).sort();
+    const afterIndex = await readOptionalText(draftIndexPath);
+    const afterDraftFiles = await readOptionalDirectory(draftsDir);
     assert(afterIndex === beforeIndex, "Draft dry-run changed draft_index.jsonl.");
     assert(
       JSON.stringify(afterDraftFiles) === JSON.stringify(beforeDraftFiles),
@@ -171,7 +190,7 @@ async function main() {
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
     console.log("- Draft dry-run side effects: none");
   } finally {
-    child.kill();
+    terminateProcessTree(child);
   }
 }
 

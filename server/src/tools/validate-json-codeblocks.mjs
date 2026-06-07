@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { extname, join } from 'path';
 
 function usage() {
   return [
@@ -26,7 +26,7 @@ async function collectFiles(dir, exts = ['.md', '.jsonl']) {
     if (e.isDirectory()) {
       if (e.name === 'node_modules' || e.name === '.git') continue;
       files = files.concat(await collectFiles(p, exts));
-    } else if (exts.includes(p.slice(-3)) || exts.includes(p.slice(-4))) {
+    } else if (exts.includes(extname(p).toLowerCase())) {
       files.push(p);
     }
   }
