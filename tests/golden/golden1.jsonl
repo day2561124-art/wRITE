@@ -1,1 +1,1 @@
-{"id":"golden-1","desc":"夜星正式階段必須由 active_engine 檢索結果一致承接","kind":"retrieval","query":"夜星 成熟者 正式階段","top":20,"required_fragments":["Source: `data/canon_db/active_engine.md`","夜星（夜星武裝學院院長） | 成熟者","正式階段"],"forbidden_fragments":["No matching chunks found."]}
+{"id":"golden-1","desc":"夜星正式階段必須由 active_engine 檢索結果一致承接","kind":"retrieval","query":"夜星 成熟者 正式階段","top":20,"required_fragments":["Source: `data/canon_db/active_engine.md`","Source Trust: `T1`","Canon Status: `canon`","夜星（夜星武裝學院院長） | 成熟者","正式階段"],"forbidden_fragments":["No matching chunks found."]}

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -124,6 +124,7 @@ const expectedToolScripts = [
   "save-draft.mjs",
   "save-proof-report.mjs",
   "search-context.mjs",
+  "source-trust-checker.mjs",
   "validate-json-codeblocks.mjs",
   "validate-jsonl.mjs",
 ];
@@ -155,6 +156,42 @@ const readOnlyTools = new Set([
   "validate_jsonl",
   "query_mcp_audit",
 ]);
+
+const backupRequiredTools = new Set([
+  "import_policy_file",
+  "compress_error_rules",
+  "activate_engine_version",
+]);
+
+const activeEngineModifierTools = new Set([
+  "import_policy_file",
+  "activate_engine_version",
+]);
+
+const highRiskTools = new Set([
+  "import_policy_file",
+  "commit_error_report",
+  "compress_error_rules",
+  "create_settlement_proposal",
+  "activate_engine_version",
+]);
+
+const permissionMetadataFields = [
+  "tool_name",
+  "permission_level",
+  "read_or_write",
+  "risk_level",
+  "requires_user_confirmation",
+  "requires_backup_before_write",
+  "allowed_sources",
+  "forbidden_sources",
+  "can_modify_canon",
+  "can_modify_active_engine",
+  "can_modify_story_graph",
+  "can_modify_memory",
+  "can_commit_error_report",
+  "log_required",
+];
 
 const unknownArgumentFixtures = expectedTools.map((name) => ({
   name,
@@ -1604,7 +1641,7 @@ function usage() {
     "  - Verifies stdout backpressure preserves 1,024 queued errors and a recovery response.",
     "  - Verifies EOF during stdout backpressure drains complete frames before truncation checks.",
     "  - Verifies import_policy_file, activate_engine_version, and compress_error_rules stay dry-run by default.",
-    "  - Verifies MCP write audit records are appended.",
+    "  - Verifies MCP write audit records, then restores the audit log byte-for-byte.",
     "  - Verifies active policy files and compressed_rules.md hashes are unchanged.",
   ].join("\n");
 }
@@ -1655,6 +1692,38 @@ async function pathExists(filePath) {
     }
     throw error;
   }
+}
+
+async function snapshotFile(filePath) {
+  try {
+    return {
+      exists: true,
+      bytes: await readFile(filePath),
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        exists: false,
+        bytes: Buffer.alloc(0),
+      };
+    }
+    throw error;
+  }
+}
+
+async function restoreFileSnapshot(filePath, snapshot) {
+  if (!snapshot.exists) {
+    await rm(filePath, { force: true });
+    assert(!(await pathExists(filePath)), `${normalizePath(filePath)} was not removed after smoke.`);
+    return;
+  }
+
+  await writeFile(filePath, snapshot.bytes);
+  const restored = await readFile(filePath);
+  assert(
+    restored.equals(snapshot.bytes),
+    `${normalizePath(filePath)} was not restored byte-for-byte after smoke.`,
+  );
 }
 
 async function countJsonlRecords(filePath) {
@@ -3677,9 +3746,76 @@ async function runSmokeTest(options) {
   let stringArrayNormalizationMetadataCount = 0;
   let crossFieldMetadataCount = 0;
   let confirmationMetadataCount = 0;
+  let permissionMetadataCount = 0;
 
   for (const expectedTool of expectedTools) {
     const tool = publicToolMap.get(expectedTool);
+    const permission = tool?._meta?.["armed-academy/permission"];
+    assert(
+      permission && typeof permission === "object" && !Array.isArray(permission),
+      `${expectedTool} did not expose armed-academy permission metadata.`,
+    );
+    for (const field of permissionMetadataFields) {
+      assert(field in permission, `${expectedTool} permission metadata is missing ${field}.`);
+    }
+    const expectedRisk = readOnlyTools.has(expectedTool)
+      ? "read"
+      : highRiskTools.has(expectedTool)
+        ? "high-risk-write"
+        : tool.description.startsWith("[generated-output]")
+          ? "generated-output"
+          : "low-risk-write";
+    const expectedPermissionLevel = readOnlyTools.has(expectedTool)
+      ? "read_only"
+      : highRiskTools.has(expectedTool)
+        ? "write_high_risk"
+        : "write_low_risk";
+    assert(permission.tool_name === expectedTool, `${expectedTool} permission tool_name drifted.`);
+    assert(
+      permission.permission_level === expectedPermissionLevel,
+      `${expectedTool} permission_level was ${permission.permission_level}.`,
+    );
+    assert(
+      permission.read_or_write === (readOnlyTools.has(expectedTool) ? "read" : "write"),
+      `${expectedTool} read_or_write drifted.`,
+    );
+    assert(permission.risk_level === expectedRisk, `${expectedTool} risk_level drifted.`);
+    assert(
+      permission.requires_user_confirmation === highRiskTools.has(expectedTool),
+      `${expectedTool} confirmation permission drifted.`,
+    );
+    assert(
+      permission.requires_backup_before_write === backupRequiredTools.has(expectedTool),
+      `${expectedTool} backup permission drifted.`,
+    );
+    assert(
+      Array.isArray(permission.allowed_sources) && permission.allowed_sources.length > 0,
+      `${expectedTool} allowed_sources must be a non-empty array.`,
+    );
+    assert(
+      Array.isArray(permission.forbidden_sources) && permission.forbidden_sources.length > 0,
+      `${expectedTool} forbidden_sources must be a non-empty array.`,
+    );
+    assert(
+      permission.can_modify_canon === activeEngineModifierTools.has(expectedTool),
+      `${expectedTool} can_modify_canon drifted.`,
+    );
+    assert(
+      permission.can_modify_active_engine === activeEngineModifierTools.has(expectedTool),
+      `${expectedTool} can_modify_active_engine drifted.`,
+    );
+    assert(permission.can_modify_story_graph === false, `${expectedTool} can_modify_story_graph drifted.`);
+    assert(permission.can_modify_memory === false, `${expectedTool} can_modify_memory drifted.`);
+    assert(
+      permission.can_commit_error_report === (expectedTool === "commit_error_report"),
+      `${expectedTool} can_commit_error_report drifted.`,
+    );
+    assert(
+      permission.log_required === !readOnlyTools.has(expectedTool),
+      `${expectedTool} log_required drifted.`,
+    );
+    permissionMetadataCount += 1;
+
     const schema = tool?.inputSchema;
     assert(schema?.type === "object", `${expectedTool} inputSchema type was not object.`);
     assert(
@@ -5373,6 +5509,7 @@ async function runSmokeTest(options) {
     tool_scripts_syntax_checked: checkedToolScripts.length,
     tools: toolNames.size,
     checked_tools: expectedTools.length,
+    permission_metadata_tools: permissionMetadataCount,
     schema_metadata_tools: publicToolMap.size,
     schema_metadata_properties: schemaPropertyCount,
     schema_metadata_enum_fields: enumMetadataKeys.size,
@@ -5519,7 +5656,13 @@ async function main() {
     return;
   }
 
-  const result = await runSmokeTest(options);
+  const auditSnapshot = await snapshotFile(auditLogPath);
+  let result;
+  try {
+    result = await runSmokeTest(options);
+  } finally {
+    await restoreFileSnapshot(auditLogPath, auditSnapshot);
+  }
   console.log("MCP smoke test passed.");
   console.log(`- Tool scripts syntax checked: ${result.tool_scripts_syntax_checked}`);
   console.log(`- Tools exposed: ${result.tools}`);
@@ -5530,6 +5673,7 @@ async function main() {
   console.log(`- Schema metadata required fields checked: ${result.schema_metadata_required_fields}`);
   console.log(`- Schema metadata defaults checked: ${result.schema_metadata_defaults}`);
   console.log(`- Schema metadata string maxLength fields checked: ${result.schema_metadata_string_max_lengths}`);
+  console.log(`- Permission metadata contracts checked: ${result.permission_metadata_tools}`);
   console.log(`- Schema metadata array maxItems fields checked: ${result.schema_metadata_array_max_items}`);
   console.log(`- Schema metadata array item maxLength fields checked: ${result.schema_metadata_array_item_max_lengths}`);
   console.log(`- Schema metadata integer maximum fields checked: ${result.schema_metadata_integer_maximums}`);
@@ -5633,7 +5777,8 @@ async function main() {
   console.log(`- Writes used for backpressure EOF fixtures: ${result.backpressure_eof_writes}`);
   console.log(`- Watched files unchanged: ${result.watched_files.join(", ")}`);
   console.log(`- Forbidden paths absent: ${result.forbidden_paths.join(", ")}`);
-  console.log(`- MCP audit records added: ${result.audit_records_added} (${result.audit_log})`);
+  console.log(`- MCP audit records exercised: ${result.audit_records_added} (${result.audit_log})`);
+  console.log("- MCP audit log restored byte-for-byte: yes");
 }
 
 main().catch((error) => {

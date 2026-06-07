@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  sourceTrustFor,
+  validateSourceTrustMetadata,
+} from "../source-trust.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -100,6 +104,18 @@ function escapeCell(value) {
 async function readSource(spec) {
   try {
     const [text, stats] = await Promise.all([readFile(spec.filePath, "utf8"), stat(spec.filePath)]);
+    const versionMatch = text.slice(0, 1200).match(/v\d+(?:\.\d+)+/i) ?? spec.filePath.match(/v\d+(?:\.\d+)+/i);
+    const version = versionMatch ? versionMatch[0] : "active";
+    const trust = sourceTrustFor(spec.key, text, {
+      sourceVersion: version,
+      createdAt: stats.birthtime.toISOString(),
+      updatedAt: stats.mtime.toISOString(),
+      exists: true,
+    });
+    const trustErrors = validateSourceTrustMetadata(trust);
+    if (trustErrors.length > 0) {
+      throw new Error(`${spec.key} source trust metadata is invalid: ${trustErrors.join("; ")}`);
+    }
     return {
       ...spec,
       exists: true,
@@ -108,8 +124,14 @@ async function readSource(spec) {
       modifiedAt: stats.mtime.toISOString(),
       sha256: hashText(text),
       empty: text.trim().length === 0,
+      version,
+      trust,
     };
   } catch (error) {
+    const trust = sourceTrustFor(spec.key, "", {
+      sourceVersion: "missing",
+      exists: false,
+    });
     return {
       ...spec,
       exists: false,
@@ -118,6 +140,8 @@ async function readSource(spec) {
       modifiedAt: "",
       sha256: "",
       empty: true,
+      version: "missing",
+      trust,
       error: error.message,
     };
   }
@@ -146,8 +170,8 @@ async function readJsonl([key, filePath]) {
 
 function manifestTable(sources) {
   const rows = [
-    "| Key | Path | Required | Status | Bytes | Modified | SHA-256 |",
-    "| --- | --- | --- | --- | ---: | --- | --- |",
+    "| Key | Path | Version | Trust | Canon Status | Required | Status | Bytes | Modified | SHA-256 |",
+    "| --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- |",
   ];
 
   for (const source of sources) {
@@ -156,6 +180,9 @@ function manifestTable(sources) {
       [
         source.key,
         normalizePath(source.filePath),
+        source.version,
+        source.trust.source_trust_level,
+        source.trust.canon_status,
         source.required ? "yes" : "no",
         status,
         source.bytes,
@@ -180,6 +207,11 @@ function riskSummary(sources, jsonlSources) {
       warnings.push(`- 缺少必要檔案：\`${normalizePath(source.filePath)}\``);
     } else if (!source.exists) {
       warnings.push(`- 尚未建立可選檔案：\`${normalizePath(source.filePath)}\``);
+    } else if (source.trust.source_trust_level === "T8" && source.trust.forbidden_reason) {
+      warnings.push(
+        `- Source trust downgraded to T8: \`${normalizePath(source.filePath)}\` `
+          + `(${source.trust.forbidden_reason}).`,
+      );
     } else if (source.empty) {
       warnings.push(`- 檔案目前為空：\`${normalizePath(source.filePath)}\``);
     }

@@ -1537,12 +1537,71 @@ const toolDefinitions = [
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
+const permissionSources = {
+  get_current_project_state: ["repository"],
+  get_active_engine: ["canon_db"],
+  get_active_writing_card: ["writing_policy_db"],
+  validate_jsonl: ["feedback_db", "error_report_db"],
+  query_mcp_audit: ["mcp_audit_log"],
+  build_generation_context: ["source_trust_catalog", "registered_project_sources"],
+  search_context: ["source_trust_catalog", "registered_project_sources"],
+  build_task_prompt: ["generated_context", "retrieval_context", "user_input"],
+  run_pipeline: ["source_trust_catalog", "registered_project_sources", "user_input"],
+  add_feedback_raw: ["user_input", "candidate_draft"],
+  save_draft: ["user_input", "candidate_source"],
+  save_proof_report: ["user_input", "candidate_draft"],
+  import_policy_file: ["user_confirmed_external_file", "repository_version_file"],
+  commit_error_report: ["pending_error_reports"],
+  compress_error_rules: ["formal_error_report_db"],
+  create_settlement_proposal: ["adopted_candidate_draft", "user_input"],
+  activate_engine_version: ["canon_version_file", "reviewed_candidate_file"],
+};
+
+const backupRequiredTools = new Set([
+  "import_policy_file",
+  "compress_error_rules",
+  "activate_engine_version",
+]);
+
+function permissionMetadata(tool) {
+  const isRead = tool.risk === "read";
+  const isHighRisk = tool.risk === "high-risk-write";
+  const canModifyActiveEngine = [
+    "import_policy_file",
+    "activate_engine_version",
+  ].includes(tool.name);
+
+  return {
+    tool_name: tool.name,
+    permission_level: isRead
+      ? "read_only"
+      : isHighRisk
+        ? "write_high_risk"
+        : "write_low_risk",
+    read_or_write: isRead ? "read" : "write",
+    risk_level: tool.risk,
+    requires_user_confirmation: isHighRisk,
+    requires_backup_before_write: backupRequiredTools.has(tool.name),
+    allowed_sources: permissionSources[tool.name] ?? [],
+    forbidden_sources: ["unregistered_external_source", "rejected_or_deprecated_source"],
+    can_modify_canon: canModifyActiveEngine,
+    can_modify_active_engine: canModifyActiveEngine,
+    can_modify_story_graph: false,
+    can_modify_memory: false,
+    can_commit_error_report: tool.name === "commit_error_report",
+    log_required: !isRead,
+  };
+}
+
 function publicToolDefinition(tool) {
   return {
     name: tool.name,
     description: `[${tool.risk}] ${tool.description}`,
     inputSchema: tool.inputSchema,
     annotations: tool.annotations,
+    _meta: {
+      "armed-academy/permission": permissionMetadata(tool),
+    },
   };
 }
 

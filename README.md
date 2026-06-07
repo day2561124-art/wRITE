@@ -483,7 +483,7 @@ node server/src/mcp-smoke-test.mjs --verbose
 - 尚未完成 dispatch 的 JSON-RPC messages 最多 256 個，包含 requests 與 notifications；超額 request 立即以原 framing 回傳 `-32000`，超額 notification 依 JSON-RPC 規則靜默丟棄。佇列下降後可繼續接收，不會永久鎖死連線。
 - 所有 response 經同一個 stdout writer 依序送出；`process.stdout.write()` 回傳 `false` 時會同時等待 write callback 與 `drain`。待送 response 達 256 時暫停 stdin 與 frame parser，降到 128 後才解析既有 buffer 並恢復 stdin，避免慢速接收端造成無界記憶體增長。
 - stdin 若在 stdout backpressure 暫停 parser 時結束，server 會先等 response queue 降水位、處理完 `inputBuffer` 中所有完整 frames，再做唯一一次 EOF 截斷判定；完整尾幀不會誤報，真正半幀的 `-32700` 會排在所有前序 responses 之後。
-- 非只讀 MCP tool 會追加統一審計紀錄到 `data/outputs/logs/mcp_tool_audit.jsonl`。
+- 非只讀 MCP tool 會追加統一審計紀錄到 `data/outputs/logs/mcp_tool_audit.jsonl`；smoke test 會先驗證新增紀錄，再於結束時逐位元組恢復原始 audit log。
 
 MCP resources：
 
@@ -593,7 +593,7 @@ Smoke test 會檢查：
 - `query_mcp_audit` 可查到 `import_policy_file` 審計紀錄。
 - `import_policy_file`、`compress_error_rules` 與 `activate_engine_version` 維持 dry-run 預設。
 - Smoke test 會核對 `server/src/tools/` 的 15 支正式腳本清單並逐支執行 `node --check`；過期底線版 activation、錯位 context builder 與根目錄 `outputs/` 產物必須保持不存在。
-- MCP 寫入審計至少追加 3 筆紀錄。
+- Smoke test 期間會產生並驗證 MCP 寫入審計，成功或失敗後都必須逐位元組恢復原始 audit log，不得留下測試紀錄。
 - `active_engine.md`、`active_writing_card.md`、`active_proofing_card.md`、`active_longline.md` 與 `compressed_rules.md` hash 不變。
 
 ## 資料權限順序
@@ -636,6 +636,8 @@ Canon DB > 正式結算資料 > Writing Policy DB > Error Report DB > Feedback D
 ```powershell
 node tests/run-all.mjs
 ```
+
+完整測試會依序檢查 JSON/JSONL、15 個來源信任紀錄、5 個 Canon golden fixtures，以及 17 個 MCP 工具的 schema、權限、稽核與傳輸契約。來源信任檢查允許三個已知占位來源以 `T8` 警告存在，但不允許登錄來源缺檔或 metadata 不完整。
 
 這會依序執行 JSON/codeblock 驗證、全域 JSONL strict 驗證、5 個 Canon golden tests，以及完整 MCP contract smoke。
 5. 起稿前先檢查 Canon Guard 風險。
@@ -695,6 +697,7 @@ config/
 server/src/
   mcp-server.mjs
   mcp-smoke-test.mjs
+  source-trust.mjs
   tools/
     build-current-prompt.mjs
     search-context.mjs
@@ -709,7 +712,8 @@ server/src/
     save-draft.mjs
     save-proof-report.mjs
     create-settlement-proposal.mjs
-    activate-engine-version.mjs  (removed)
+    activate-engine-version.mjs
+    source-trust-checker.mjs
     validate-json-codeblocks.mjs
 
 prompts/

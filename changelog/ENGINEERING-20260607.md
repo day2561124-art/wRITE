@@ -12,8 +12,16 @@
 - Removed the obsolete `build-generation-context.mjs` path and its root-level `outputs/` artifacts.
 - Removed the duplicated legacy implementation from `save-draft.mjs`.
 - Added a real `save_draft` dry-run execution fixture.
-- Added a locked 15-script tool inventory and `node --check` coverage to the MCP smoke suite.
+- Added a locked 16-script tool inventory and `node --check` coverage to the MCP smoke suite.
 - Added consistent `--help` and unknown-argument handling to the remaining standalone CLIs.
+
+## Source trust and permissions
+
+- Added a centralized 15-source trust catalog with the complete provenance metadata required by `policies/source_trust.md`.
+- Integrated trust level, Canon status, Canon eligibility, and confirmation state into retrieval output and generated source manifests.
+- Added a CI source-trust checker; formal sources pass, while the proofing, longline, and compressed-rule placeholders are explicitly downgraded to T8 warnings.
+- Exposed the complete permission contract for every MCP tool through `tools/list` metadata.
+- Added smoke assertions for permission level, read/write scope, confirmation, backup, Canon mutation, error-report commit, and audit requirements across all 17 tools.
 
 ## Tests and CI
 
@@ -22,8 +30,11 @@
 - Added `tests/tools/mcp-contract.test.mjs`.
 - Added `tests/run-all.mjs` with bounded subprocess timeouts.
 - Updated GitHub Actions to run the complete suite.
+- Made MCP contract tests restore `mcp_tool_audit.jsonl` byte-for-byte after validating temporary audit records.
+- Added source-trust validation to the complete test runner and Canon trust evidence to golden retrieval fixtures.
 
 ## Remaining external inputs
 
 - A formal proofing policy mother file is still required before replacing the current proofing placeholder.
 - A formal longline mother file is still required before replacing the current longline placeholder.
+- The compressed-rule placeholder is not an external-file blocker: it remains T8 until formal error reports exist, and must not be populated by inference.

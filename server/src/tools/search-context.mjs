@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  sourceTrustFor,
+  validateSourceTrustMetadata,
+} from "../source-trust.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -210,6 +214,17 @@ async function readSource(spec) {
   try {
     const [text, stats] = await Promise.all([readFile(spec.filePath, "utf8"), stat(spec.filePath)]);
     const versionMatch = text.slice(0, 1200).match(/v\d+(?:\.\d+)+/i) ?? spec.filePath.match(/v\d+(?:\.\d+)+/i);
+    const version = versionMatch ? versionMatch[0] : "active";
+    const trust = sourceTrustFor(spec.key, text, {
+      sourceVersion: version,
+      createdAt: stats.birthtime.toISOString(),
+      updatedAt: stats.mtime.toISOString(),
+      exists: true,
+    });
+    const trustErrors = validateSourceTrustMetadata(trust);
+    if (trustErrors.length > 0) {
+      throw new Error(`${spec.key} source trust metadata is invalid: ${trustErrors.join("; ")}`);
+    }
     return {
       ...spec,
       exists: true,
@@ -217,9 +232,14 @@ async function readSource(spec) {
       bytes: stats.size,
       modifiedAt: stats.mtime.toISOString(),
       sha256: hashText(text),
-      version: versionMatch ? versionMatch[0] : "active",
+      version,
+      trust,
     };
   } catch (error) {
+    const trust = sourceTrustFor(spec.key, "", {
+      sourceVersion: "missing",
+      exists: false,
+    });
     return {
       ...spec,
       exists: false,
@@ -228,6 +248,7 @@ async function readSource(spec) {
       modifiedAt: "",
       sha256: "",
       version: "missing",
+      trust,
       error: error.message,
     };
   }
@@ -432,8 +453,8 @@ function clipText(text, maxChars = 1800) {
 
 function manifestTable(sources) {
   const rows = [
-    "| Key | Path | Version | Status | Bytes | Modified | SHA-256 |",
-    "| --- | --- | --- | --- | ---: | --- | --- |",
+    "| Key | Path | Version | Trust | Canon Status | Status | Bytes | Modified | SHA-256 |",
+    "| --- | --- | --- | --- | --- | --- | ---: | --- | --- |",
   ];
 
   for (const source of sources) {
@@ -442,6 +463,8 @@ function manifestTable(sources) {
         source.key,
         normalizePath(source.filePath),
         source.version,
+        source.trust.source_trust_level,
+        source.trust.canon_status,
         source.exists ? "ready" : "missing",
         source.bytes,
         source.modifiedAt,
@@ -469,6 +492,10 @@ function resultSection(result, index) {
     `Paragraph ID: \`${chunk.paragraphId}\``,
     `Lines: \`${chunk.lineRange}\``,
     `Authority: ${source.authority}`,
+    `Source Trust: \`${source.trust.source_trust_level}\``,
+    `Canon Status: \`${source.trust.canon_status}\``,
+    `Can Use For Canon: \`${source.trust.can_be_used_for_canon}\``,
+    `Requires User Confirmation: \`${!source.trust.approved_by_user}\``,
     `Score: ${result.score.toFixed(2)}`,
     `Hits: ${result.hits.join(", ")}`,
     "",
