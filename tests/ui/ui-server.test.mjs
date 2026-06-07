@@ -176,6 +176,11 @@ async function main() {
     ));
     assert(traversalResult.response.status === 403, "Path traversal was not rejected.");
 
+    const directTraversalResult = await readJson(await fetch(
+      `${baseUrl}/api/file?path=${encodeURIComponent("../README.md")}`,
+    ));
+    assert(directTraversalResult.response.status === 403, "Direct project escape was not rejected.");
+
     const visualTraversalResult = await rawHttpStatus(port, "/visual-assets/%2e%2e/README.md");
     assert(visualTraversalResult.status === 403, "Visual asset traversal was not rejected.");
 

@@ -5,13 +5,17 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import {
   sourceTrustFor,
   validateSourceTrustMetadata,
 } from "./source-trust.mjs";
 import { terminateProcessTree } from "./process-control.mjs";
-import { projectPaths } from "./project-paths.mjs";
+import {
+  assertPathInside,
+  projectPaths,
+  projectRoot,
+  resolveProjectPath as resolveSafeProjectPath,
+} from "./project-paths.mjs";
 import { sourceSpecsFor } from "./source-registry.mjs";
 import {
   allowedVisualImageExtensions,
@@ -20,9 +24,7 @@ import {
   visualCategorySpecs,
 } from "./visual-db.mjs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..");
+const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
 const toolsDir = path.join(rootDir, "server", "src", "tools");
 const defaultHost = "127.0.0.1";
@@ -90,20 +92,15 @@ function normalizePath(filePath) {
   return path.relative(rootDir, filePath).replaceAll(path.sep, "/");
 }
 
-function resolveProjectPath(value) {
-  const resolved = path.resolve(rootDir, value);
-  const relative = path.relative(rootDir, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Path must stay inside the project.");
-  }
-  return resolved;
+function resolveProjectPath(value, label = "path") {
+  return resolveSafeProjectPath(value, label);
 }
 
 function canonicalProjectPath(value) {
   if (typeof value !== "string" || !value) {
     throw new Error("A project path is required.");
   }
-  return normalizePath(resolveProjectPath(value));
+  return normalizePath(resolveProjectPath(value, "project path"));
 }
 
 function parseArgs(argv) {
@@ -273,10 +270,11 @@ async function visualAssetState(record) {
   };
   if (validation.errors.length > 0) return result;
 
-  const filePath = resolveProjectPath(record.path);
-  const relative = path.relative(visualAssetsDir, filePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    result.errors.push("path must stay under data/visual_db/assets/.");
+  let filePath;
+  try {
+    filePath = assertPathInside(record.path, visualAssetsDir, "visual asset");
+  } catch (error) {
+    result.errors.push(error.message);
     return result;
   }
   if (!allowedVisualImageExtensions.has(path.extname(filePath).toLowerCase())) {
@@ -308,18 +306,18 @@ async function visualAssetState(record) {
 async function visualPayload() {
   const text = await readOptionalText(visualIndexPath);
   const lines = text.split(/\r?\n/u);
-  const items = [];
+  const itemTasks = [];
   for (const [index, raw] of lines.entries()) {
     const line = raw.trim();
     if (!line) continue;
     try {
       const record = JSON.parse(line);
-      items.push({
+      itemTasks.push((async () => ({
         lineNumber: index + 1,
         ...await visualAssetState(record),
-      });
+      }))());
     } catch (error) {
-      items.push({
+      itemTasks.push(Promise.resolve({
         lineNumber: index + 1,
         visual_id: `INVALID-L${index + 1}`,
         character: "",
@@ -339,9 +337,10 @@ async function visualPayload() {
         modifiedAt: "",
         errors: [`invalid JSON: ${error.message}`],
         warnings: [],
-      });
+      }));
     }
   }
+  const items = await Promise.all(itemTasks);
   const characters = [...new Set(items.map((item) => item.character).filter(Boolean))].sort(
     (a, b) => a.localeCompare(b, "zh-Hant"),
   );
@@ -651,7 +650,13 @@ function isReadableProjectPath(projectPath) {
 }
 
 async function serveProjectFile(response, projectPath) {
-  const canonicalPath = canonicalProjectPath(projectPath);
+  let canonicalPath;
+  try {
+    canonicalPath = canonicalProjectPath(projectPath);
+  } catch (error) {
+    sendError(response, 403, error);
+    return;
+  }
   if (!isReadableProjectPath(canonicalPath)) {
     sendError(response, 403, new Error("File is outside the UI read allowlist."));
     return;
@@ -678,10 +683,15 @@ function decodeAssetPath(value) {
 
 async function serveVisualAsset(response, relativePath) {
   const decoded = decodeAssetPath(relativePath);
-  const filePath = path.resolve(visualAssetsDir, decoded);
-  const relative = path.relative(visualAssetsDir, filePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    sendError(response, 403, new Error("Visual asset path must stay inside the visual asset library."));
+  let filePath;
+  try {
+    filePath = assertPathInside(
+      path.resolve(visualAssetsDir, decoded),
+      visualAssetsDir,
+      "visual asset",
+    );
+  } catch (error) {
+    sendError(response, 403, error);
     return;
   }
   const extension = path.extname(filePath).toLowerCase();
