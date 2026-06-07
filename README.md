@@ -334,7 +334,7 @@ node server/src/tools/validate-jsonl.mjs --file data/outputs/logs/sample.jsonl -
 data/visual_db/assets/
 ```
 
-也可以在本機 UI 的「圖庫」頁直接上傳 PNG、JPG、WEBP 或 GIF；系統會自動存入對應子資料夾並追加索引紀錄。單張圖片上限 8 MB。
+也可以在本機 UI 的「圖庫」頁直接上傳 PNG、JPG、WEBP 或 GIF；系統會自動存入對應子資料夾並追加索引紀錄。單張圖片上限 8 MB。圖庫詳情頁提供刪除功能，確認後會移除索引紀錄與圖片檔。
 
 索引檔：
 

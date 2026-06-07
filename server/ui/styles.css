@@ -1070,6 +1070,13 @@ textarea:disabled {
   border: 1px solid #f0d49e;
 }
 
+.visual-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 16px;
+}
+
 .empty-state {
   min-height: 120px;
   display: grid;

@@ -81,7 +81,7 @@ function setBusy(busy) {
   $("#loading-bar").hidden = state.busyCount === 0;
   const isBusy = state.busyCount > 0;
   if (wasBusy === isBusy) return;
-  $$("form button, [data-action], #validate-button, #refresh-button").forEach((button) => {
+  $$("form button, [data-action], [data-visual-delete], #validate-button, #refresh-button").forEach((button) => {
     if (isBusy) {
       button.dataset.busyState = button.disabled ? "preserve" : "temporary";
       button.disabled = true;
@@ -299,6 +299,11 @@ function renderVisualDetail(item) {
     ${item.notes ? `<p class="visual-notes">${escapeHtml(item.notes)}</p>` : ""}
     ${(item.tags ?? []).length ? `<div class="visual-tags">${item.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
     ${flags.length ? `<div class="visual-flags">${flags.map((flag) => `<span>${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+    ${item.canon_status !== "invalid" ? `
+      <div class="visual-detail-actions">
+        <button class="button danger" type="button" data-visual-delete="${escapeHtml(item.visual_id)}">刪除圖像</button>
+      </div>
+    ` : ""}
   `;
 }
 
@@ -650,6 +655,33 @@ async function handleVisualUpload(event) {
   }
 }
 
+async function handleVisualDelete(visualId) {
+  const item = (state.data?.visuals?.items ?? []).find((visual) => visual.visual_id === visualId);
+  if (!item) {
+    toast("找不到要刪除的圖像紀錄", true);
+    return;
+  }
+  const confirmed = window.confirm(`刪除「${item.title || item.visual_id}」？\n\n這會移除索引紀錄與圖片檔，且不會改動正史。`);
+  if (!confirmed) return;
+
+  try {
+    const payload = await api("/api/visuals/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        visualId,
+        deleteAsset: true,
+        confirmDelete: true,
+      }),
+    });
+    state.data.visuals = payload.visuals;
+    state.activeVisualId = "";
+    renderVisuals();
+    toast(payload.deleted.assetDeleted ? "圖像已刪除" : "索引已刪除，圖片檔已略過");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function bindEvents() {
   window.addEventListener("hashchange", () => {
     switchView(window.location.hash.slice(1) || "overview");
@@ -717,6 +749,11 @@ function bindEvents() {
     const libraryFile = event.target.closest("[data-library-file]");
     if (libraryFile) {
       openLibraryFile(libraryFile.dataset.libraryFile, libraryFile.dataset.libraryTitle);
+      return;
+    }
+    const visualDelete = event.target.closest("[data-visual-delete]");
+    if (visualDelete) {
+      handleVisualDelete(visualDelete.dataset.visualDelete);
       return;
     }
     const visualCard = event.target.closest("[data-visual-id]");

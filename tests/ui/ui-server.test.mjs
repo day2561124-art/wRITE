@@ -133,6 +133,7 @@ async function main() {
     const appText = await appResponse.text();
     assert(appResponse.ok && appText.includes("handlePipeline"), "UI app.js was not served.");
     assert(appText.includes("handleVisualUpload"), "UI app.js is missing the visual upload handler.");
+    assert(appText.includes("handleVisualDelete"), "UI app.js is missing the visual delete handler.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
@@ -247,6 +248,39 @@ async function main() {
       "Uploaded visual asset used the wrong content type.",
     );
 
+    const unconfirmedVisualDelete = await readJson(await fetch(`${baseUrl}/api/visuals/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        visualId: uploadedRecord.visual_id,
+        deleteAsset: true,
+        confirmDelete: false,
+      }),
+    }));
+    assert(unconfirmedVisualDelete.response.status === 400, "Unconfirmed visual delete was not rejected.");
+
+    const visualDelete = await readJson(await fetch(`${baseUrl}/api/visuals/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        visualId: uploadedRecord.visual_id,
+        deleteAsset: true,
+        confirmDelete: true,
+      }),
+    }));
+    assert(visualDelete.response.ok, "Visual delete failed.");
+    assert(visualDelete.payload.deleted.assetDeleted === true, "Visual delete did not remove the asset file.");
+    assert(
+      !(await readOptionalText(visualIndexPath)).includes(uploadedRecord.visual_id),
+      "Visual delete did not remove the index record.",
+    );
+    assert(
+      !visualDelete.payload.visuals.items.some((item) => item.visual_id === uploadedRecord.visual_id),
+      "Visual delete response still included the deleted record.",
+    );
+    const deletedAssetResponse = await fetch(`${baseUrl}${uploadedItem.assetUrl}`);
+    assert(deletedAssetResponse.status === 404, "Deleted visual asset was still served.");
+
     const invalidVisualUpload = await readJson(await fetch(`${baseUrl}/api/visuals/upload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -315,6 +349,7 @@ async function main() {
     console.log("- Allowed project file read checked: yes");
     console.log("- Path traversal rejected: yes");
     console.log("- Visual upload checked: yes");
+    console.log("- Visual delete checked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);

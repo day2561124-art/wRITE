@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -618,6 +618,101 @@ async function saveVisualUpload(input) {
   };
 }
 
+async function writeVisualIndex(text) {
+  const tmpPath = `${visualIndexPath}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tmpPath, text, "utf8");
+  try {
+    await rename(tmpPath, visualIndexPath);
+  } catch (error) {
+    await rm(tmpPath, { force: true });
+    throw error;
+  }
+}
+
+function visualIndexLines(text) {
+  return text
+    .split(/\r?\n/u)
+    .map((raw) => raw.trim())
+    .filter(Boolean);
+}
+
+function resolveDeletableVisualAsset(record) {
+  const validation = validateVisualRecord(record);
+  if (validation.errors.length > 0) {
+    return { filePath: "", skipped: `record is invalid: ${validation.errors.join("; ")}` };
+  }
+  const extension = path.extname(record.path).toLowerCase();
+  if (!allowedVisualImageExtensions.has(extension)) {
+    return { filePath: "", skipped: "asset extension is not allowed." };
+  }
+  try {
+    return {
+      filePath: assertPathInside(record.path, visualAssetsDir, "visual delete asset"),
+      skipped: "",
+    };
+  } catch (error) {
+    return { filePath: "", skipped: error.message };
+  }
+}
+
+async function deleteVisualReference(input) {
+  const visualId = requireString(input.visualId, "visualId", 200);
+  const confirmDelete = optionalBoolean(input.confirmDelete, "confirmDelete", false);
+  if (!confirmDelete) {
+    throw new Error("confirmDelete must be true to delete a visual reference.");
+  }
+  const deleteAsset = optionalBoolean(input.deleteAsset, "deleteAsset", true);
+  const text = await readOptionalText(visualIndexPath);
+  const keptLines = [];
+  const matches = [];
+
+  for (const [index, line] of visualIndexLines(text).entries()) {
+    try {
+      const record = JSON.parse(line);
+      if (record?.visual_id === visualId) {
+        matches.push({ lineNumber: index + 1, line, record });
+        continue;
+      }
+    } catch {
+      // Preserve invalid lines; the user can repair or remove them manually.
+    }
+    keptLines.push(line);
+  }
+
+  if (matches.length === 0) {
+    const error = new Error(`Visual reference not found: ${visualId}`);
+    error.statusCode = 404;
+    throw error;
+  }
+  if (matches.length > 1) {
+    throw new Error(`Visual reference id is duplicated and was not deleted: ${visualId}`);
+  }
+
+  const [match] = matches;
+  const nextIndex = keptLines.length ? `${keptLines.join("\n")}\n` : "";
+  await writeVisualIndex(nextIndex);
+
+  let assetDeleted = false;
+  let assetDeleteSkipped = "";
+  if (deleteAsset) {
+    const asset = resolveDeletableVisualAsset(match.record);
+    if (asset.filePath) {
+      await rm(asset.filePath, { force: true });
+      assetDeleted = true;
+    } else {
+      assetDeleteSkipped = asset.skipped;
+    }
+  }
+
+  return {
+    visualId,
+    record: match.record,
+    deletedLineNumber: match.lineNumber,
+    assetDeleted,
+    assetDeleteSkipped,
+  };
+}
+
 function pushValue(argv, flag, value) {
   if (value) argv.push(flag, value);
 }
@@ -1003,6 +1098,32 @@ async function handleRequest(request, response) {
       });
     } catch (error) {
       sendError(response, 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/visuals/delete") {
+    const origin = request.headers.origin;
+    if (origin && new URL(origin).host !== request.headers.host) {
+      sendError(response, 403, new Error("Cross-origin visual deletes are not allowed."));
+      return;
+    }
+    let input;
+    try {
+      input = await parseBody(request);
+    } catch (error) {
+      sendError(response, 400, error);
+      return;
+    }
+    try {
+      const deleted = await deleteVisualReference(input);
+      sendJson(response, 200, {
+        ok: true,
+        deleted,
+        visuals: await visualPayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
     }
     return;
   }
