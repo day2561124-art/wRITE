@@ -148,7 +148,7 @@ async function runFixture(fixture, tempDir) {
 
 async function main() {
   const fixtures = await loadFixtures();
-  assert(fixtures.length === 6, `Expected 6 golden fixtures, found ${fixtures.length}.`);
+  assert(fixtures.length === 7, `Expected 7 golden fixtures, found ${fixtures.length}.`);
   const ids = new Set(fixtures.map((fixture) => fixture.id));
   assert(ids.size === fixtures.length, "Golden fixture ids must be unique.");
 

@@ -19,7 +19,7 @@
 
 - Added a centralized 15-source trust catalog with the complete provenance metadata required by `policies/source_trust.md`.
 - Integrated trust level, Canon status, Canon eligibility, and confirmation state into retrieval output and generated source manifests.
-- Added a CI source-trust checker; formal sources pass, while the proofing, longline, and compressed-rule placeholders are explicitly downgraded to T8 warnings.
+- Added a CI source-trust checker; placeholders are explicitly downgraded to T8 until a formal source is imported.
 - Exposed the complete permission contract for every MCP tool through `tools/list` metadata.
 - Added smoke assertions for permission level, read/write scope, confirmation, backup, Canon mutation, error-report commit, and audit requirements across all 17 tools.
 
@@ -33,10 +33,11 @@
 - Made MCP contract tests restore `mcp_tool_audit.jsonl` byte-for-byte after validating temporary audit records.
 - Added source-trust validation to the complete test runner and Canon trust evidence to golden retrieval fixtures.
 
-## Remaining external inputs
+## Final data status
 
-- A formal proofing policy mother file is still required before replacing the current proofing placeholder.
+- The user-provided formal proofing card was imported as Proofing Policy DB v1.1; its source, active file, and version copy are retained and golden-tested for equality.
 - The user-provided national representative arc image was transcribed and formally imported as Longline DB v1.0; the source image, transcription, active file, and version copy are retained.
 - The user supplied the obscured fragment directly; Longline DB v1.1 now records the complete objective as holding the competition, protecting others, and achieving the on-field objective.
 - Longline DB v1.0 remains preserved as the pre-supplement transcription history.
 - The compressed-rule placeholder is not an external-file blocker: it remains T8 until formal error reports exist, and must not be populated by inference.
+- No external formal mother-file blockers remain.
