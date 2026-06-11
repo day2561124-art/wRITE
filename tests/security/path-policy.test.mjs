@@ -34,6 +34,10 @@ import {
   isSafeSettlementContextId,
   isSafeSettlementReportId,
 } from "../../server/src/settlement-workflow-service.mjs";
+import {
+  assertApprovalItemId,
+  isSafeApprovalItemId,
+} from "../../server/src/approval-queue-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -235,6 +239,32 @@ async function main() {
   assert(
     projectPaths.settlementReports.startsWith(projectPaths.settlementWorkflow),
     "Settlement reports path is outside settlement workflow.",
+  );
+  for (const unsafeId of [
+    "../active_engine.md",
+    "approval_item_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(!isSafeApprovalItemId(unsafeId), `Unsafe approval item id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertApprovalItemId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Approval item traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  assert(
+    projectPaths.approvalItems.startsWith(projectPaths.approvalQueue),
+    "Approval items path is outside approval queue.",
+  );
+  assert(
+    projectPaths.approvalLog.startsWith(projectPaths.approvalLogs),
+    "Approval log path is outside approval logs.",
   );
   assert(
     projectPaths.pendingEngineCandidates.startsWith(projectPaths.canonDb),

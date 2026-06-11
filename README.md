@@ -455,6 +455,20 @@ data/writing_workflow/settlements/reports/
 
 Adopted chapter 狀態依序為 `accepted_pending_settlement`、`settlement_context_created`、`settlement_report_saved`、`settlement_candidate_created`。最後一項仍只代表 pending candidate 已建立，不代表正史已更新。
 
+### 10.5. Approval Queue 確認佇列
+
+Phase 5A 將需要人工決策的項目集中到「確認佇列」頁：
+
+- Pending engine candidate activation。
+- High-risk activation 與二次確認。
+- 使用者明確選擇的 snapshot rollback。
+- 含 P0 / P1 的正文採用。
+- `neural_trace_missing` blocked 項目。
+
+Approval item 保存於 `data/approval_queue/items/`，confirm、reject、defer 與失敗事件追加到 `data/approval_queue/logs/approval_log.jsonl`。同一 `target_type + target_id + action_type` 不會重複建立未結案 item。
+
+確認佇列不直接寫入 `active_engine.md`：activation 與 rollback 仍呼叫 Phase 3 service；P0 / P1 採用仍呼叫 Phase 4A service。High-risk activation 必須勾選二次確認並輸入「確認啟用」；缺少必要 neural success trace 的項目只能拒絕或延後。
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -851,6 +865,13 @@ launcher.ps1
 start-ui.cmd
 
 data/
+  approval_queue/
+    items/
+      <approval_item_id>/
+        item.json
+        status.json
+    logs/
+      approval_log.jsonl
   canon_db/
     active_engine.md
     versions/
@@ -942,6 +963,7 @@ config/
   mcp-client.windows-local.example.json
 
 server/src/
+  approval-queue-service.mjs
   file-transactions.mjs
   mcp-server.mjs
   mcp-smoke-test.mjs

@@ -93,6 +93,19 @@ import {
   listSettlementReports,
   saveSettlementReport,
 } from "./settlement-workflow-service.mjs";
+import {
+  assertApprovalItemId,
+  confirmApprovalItem,
+  createRollbackApprovalItem,
+  deferApprovalItem,
+  ensureApprovalQueueDirectories,
+  getApprovalItem,
+  listApprovalItems,
+  listApprovalLogs,
+  refreshApprovalItem,
+  rejectApprovalItem,
+  scanApprovalQueue,
+} from "./approval-queue-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1183,6 +1196,82 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/approval-queue/scan") {
+    try {
+      assertSameOrigin(request, "Cross-origin approval queue scans are not allowed.");
+      const input = await parseBody(request);
+      const scan = await scanApprovalQueue();
+      let rollbackItem = null;
+      const snapshotId = input.snapshotId ?? input.snapshot_id ?? "";
+      if (snapshotId) rollbackItem = await createRollbackApprovalItem(snapshotId);
+      sendJson(response, 200, { ok: true, scan, rollback_item: rollbackItem });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/approval-queue/items") {
+    sendJson(response, 200, { ok: true, items: await listApprovalItems() });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/approval-queue/logs") {
+    sendJson(response, 200, { ok: true, logs: await listApprovalLogs() });
+    return;
+  }
+
+  const approvalActionMatch = rawPathname.match(
+    /^\/api\/approval-queue\/items\/([^/]+)\/(confirm|reject|defer|refresh)$/u,
+  );
+  if (request.method === "POST" && approvalActionMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin approval actions are not allowed.");
+      const approvalItemId = assertApprovalItemId(
+        decodeApiId(approvalActionMatch[1], "approval_item_id"),
+      );
+      const action = approvalActionMatch[2];
+      const input = await parseBody(request);
+      let result;
+      if (action === "confirm") {
+        result = await confirmApprovalItem(approvalItemId, {
+          confirm: input.confirm === true,
+          secondConfirm: input.secondConfirm === true || input.second_confirm === true,
+          approvalText: input.approvalText ?? input.approval_text ?? "",
+          approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
+        });
+      } else if (action === "reject") {
+        result = await rejectApprovalItem(approvalItemId, { reason: input.reason ?? "" });
+      } else if (action === "defer") {
+        result = await deferApprovalItem(approvalItemId, { reason: input.reason ?? "" });
+      } else {
+        result = await refreshApprovalItem(approvalItemId);
+      }
+      sendJson(response, 200, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const approvalDetailMatch = rawPathname.match(
+    /^\/api\/approval-queue\/items\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && approvalDetailMatch) {
+    try {
+      const approvalItemId = assertApprovalItemId(
+        decodeApiId(approvalDetailMatch[1], "approval_item_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        item: await getApprovalItem(approvalItemId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/workflow/draft-tasks") {
     try {
       assertSameOrigin(request, "Cross-origin draft task creation is not allowed.");
@@ -1802,6 +1891,7 @@ async function main() {
   await ensureEngineCandidateDirectories();
   await ensureWritingWorkflowDirectories();
   await ensureSettlementWorkflowDirectories();
+  await ensureApprovalQueueDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {

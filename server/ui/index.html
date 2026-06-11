@@ -47,6 +47,10 @@
             <span class="nav-symbol" aria-hidden="true">⇄</span>
             <span>結算匯入</span>
           </button>
+          <button class="nav-item" data-view="approval" type="button">
+            <span class="nav-symbol" aria-hidden="true">✓</span>
+            <span>確認佇列</span>
+          </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>紀錄</span>
@@ -694,6 +698,103 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" data-view-panel="approval">
+          <div class="approval-toolbar">
+            <div>
+              <p class="eyebrow">PHASE 5A</p>
+              <h2>Approval Queue｜確認佇列</h2>
+            </div>
+            <div class="form-actions">
+              <button id="scan-approval-queue-button" class="button primary" type="button">掃描待確認項目</button>
+              <button id="refresh-approval-queue-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">↻</button>
+            </div>
+          </div>
+
+          <div class="warning-panel phase-boundary">
+            確認佇列只會呼叫既有安全流程，不會直接寫入 active_engine 或修改候選內容。
+          </div>
+
+          <section class="panel rollback-request-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">ROLLBACK REQUEST</p>
+                <h3>建立回滾確認項目</h3>
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="field">
+                <span>Snapshot</span>
+                <select id="approval-snapshot-select">
+                  <option value="">選擇 snapshot</option>
+                </select>
+              </label>
+              <div class="field approval-inline-action">
+                <span>建立後仍須確認</span>
+                <button id="create-rollback-approval-button" class="button secondary" type="button" disabled>加入確認佇列</button>
+              </div>
+            </div>
+          </section>
+
+          <div class="approval-layout">
+            <aside class="panel approval-list-panel">
+              <div class="panel-heading">
+                <h2>待確認項目</h2>
+                <span id="approval-queue-count" class="workflow-status">0</span>
+              </div>
+              <div id="approval-item-list" class="approval-item-list">
+                <div class="empty-state">尚無 approval item</div>
+              </div>
+            </aside>
+
+            <section class="panel approval-detail-panel">
+              <div class="reader-heading">
+                <div>
+                  <p id="approval-detail-id" class="eyebrow">NO ITEM SELECTED</p>
+                  <h2 id="approval-detail-title">確認項目詳情</h2>
+                </div>
+                <span id="approval-detail-status" class="candidate-status candidate-status-blocked">未選擇</span>
+              </div>
+              <div id="approval-detail-facts" class="approval-detail-facts"></div>
+              <div id="approval-impact-summary" class="approval-impact-summary"></div>
+              <div id="approval-blocked-reason"></div>
+
+              <div id="approval-confirm-panel" class="approval-confirm-panel">
+                <div id="approval-confirm-message" class="warning-panel">
+                  此操作將呼叫既有安全流程，不會直接寫 active_engine。
+                </div>
+                <label class="confirmation-row">
+                  <input id="approval-confirm-checkbox" type="checkbox">
+                  <span>我確認執行此操作</span>
+                </label>
+                <div id="approval-second-confirm-panel" class="second-confirm-panel" hidden>
+                  <label class="confirmation-row">
+                    <input id="approval-second-confirm-checkbox" type="checkbox">
+                    <span>我已確認重大不可逆變更</span>
+                  </label>
+                  <label id="approval-confirm-text-field" class="field">
+                    <span>輸入「確認啟用」</span>
+                    <input id="approval-confirm-text" type="text" autocomplete="off">
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button id="approval-confirm-button" class="button danger" type="button" disabled>確認執行</button>
+                  <button id="approval-reject-button" class="button secondary" type="button" disabled>拒絕</button>
+                  <button id="approval-defer-button" class="button secondary" type="button" disabled>延後</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel approval-log-panel">
+            <div class="panel-heading">
+              <h2>Approval Log</h2>
+            </div>
+            <div id="approval-log-list" class="approval-log-list">
+              <div class="empty-state">尚無 approval log</div>
+            </div>
+          </section>
         </section>
 
         <section class="view" data-view-panel="activity">

@@ -10,6 +10,7 @@ const state = {
   activeAdoptedChapterId: "",
   activeSettlementContextId: "",
   activeSettlementReportId: "",
+  activeApprovalItemId: "",
   workflow: {
     drafts: [],
     proofReports: [],
@@ -29,6 +30,11 @@ const state = {
     candidateDetail: null,
     snapshots: [],
     activationLogs: [],
+  },
+  approval: {
+    items: [],
+    detail: null,
+    logs: [],
   },
   neuralData: {
     runs: [],
@@ -53,6 +59,7 @@ const titles = {
   visuals: "圖庫",
   neural: "神經模組",
   settlement: "結算匯入",
+  approval: "確認佇列",
   activity: "紀錄",
 };
 
@@ -211,6 +218,9 @@ function switchView(viewName) {
       refreshCanonSettlementState(),
       refreshWorkflowSettlementState(),
     ]).catch((error) => toast(error.message, true));
+  }
+  if (viewName === "approval") {
+    refreshApprovalQueue().catch((error) => toast(error.message, true));
   }
   if (["compose", "review"].includes(viewName)) {
     refreshWorkflowState().catch((error) => toast(error.message, true));
@@ -853,6 +863,199 @@ function neuralUsageHtml(usage) {
   `).join("");
 }
 
+function approvalStatusClass(status) {
+  if (status === "blocked") return "candidate-status-blocked";
+  if (status === "rejected") return "candidate-status-rejected";
+  if (status === "resolved" || status === "confirmed") return "candidate-status-activated";
+  return "candidate-status-candidate";
+}
+
+function renderApprovalQueue() {
+  const items = state.approval.items ?? [];
+  $("#approval-queue-count").textContent = String(items.length);
+  $("#approval-item-list").innerHTML = items.length
+    ? items.map((item) => `
+      <button class="approval-item${item.approval_item_id === state.activeApprovalItemId ? " is-active" : ""}${item.risk_level === "high" ? " is-high-risk" : ""}" type="button" data-approval-item-id="${escapeHtml(item.approval_item_id)}">
+        <span>
+          <strong>${escapeHtml(item.title || item.action_type)}</strong>
+          <small>${escapeHtml(item.target_id)}</small>
+        </span>
+        <span>
+          <span class="candidate-status ${approvalStatusClass(item.status.status)}">${escapeHtml(item.status.status)}</span>
+          <small>${escapeHtml(item.risk_level)} · ${escapeHtml(item.neural_status)}</small>
+        </span>
+      </button>
+    `).join("")
+    : '<div class="empty-state">尚無 approval item</div>';
+
+  const snapshotSelect = $("#approval-snapshot-select");
+  const currentSnapshot = snapshotSelect.value;
+  snapshotSelect.innerHTML = [
+    '<option value="">選擇 snapshot</option>',
+    ...(state.canon.snapshots ?? [])
+      .filter((snapshot) => snapshot.rollback_available)
+      .map((snapshot) => `
+        <option value="${escapeHtml(snapshot.snapshot_id)}">
+          ${escapeHtml(snapshot.snapshot_id)} · ${escapeHtml(snapshot.source_chapter || "未指定章節")}
+        </option>
+      `),
+  ].join("");
+  if ([...snapshotSelect.options].some((option) => option.value === currentSnapshot)) {
+    snapshotSelect.value = currentSnapshot;
+  }
+  $("#create-rollback-approval-button").disabled = !snapshotSelect.value;
+
+  const item = state.approval.detail;
+  $("#approval-detail-id").textContent = item?.approval_item_id ?? "NO ITEM SELECTED";
+  $("#approval-detail-title").textContent = item?.title ?? "確認項目詳情";
+  $("#approval-detail-status").textContent = item?.status?.status ?? "未選擇";
+  $("#approval-detail-status").className =
+    `candidate-status ${approvalStatusClass(item?.status?.status ?? "blocked")}`;
+  $("#approval-detail-facts").innerHTML = item
+    ? `
+      <span>action · ${escapeHtml(item.action_type)}</span>
+      <span>target · ${escapeHtml(item.target_type)}</span>
+      <span>id · ${escapeHtml(item.target_id)}</span>
+      <span>chapter · ${escapeHtml(item.source_chapter || "未指定")}</span>
+      <span>risk · ${escapeHtml(item.risk_level)}</span>
+      <span>neural · ${escapeHtml(item.neural_status)}</span>
+    `
+    : "";
+  $("#approval-impact-summary").innerHTML = item
+    ? `
+      <div><strong>Will modify</strong><span>${escapeHtml((item.impact?.will_modify ?? []).join("、") || "none")}</span></div>
+      <div><strong>Will create</strong><span>${escapeHtml((item.impact?.will_create ?? []).join("、") || "none")}</span></div>
+      <div><strong>Rollback</strong><span>${item.impact?.rollback_available ? "available" : "not available"}</span></div>
+    `
+    : "";
+  $("#approval-blocked-reason").innerHTML = item?.blocked_reason
+    ? `<div class="blocked-panel">${escapeHtml(item.blocked_reason)}</div>`
+    : "";
+
+  const blocked = !item
+    || item.status.status === "blocked"
+    || item.action_type === "neural_trace_missing"
+    || Boolean(item.blocked_reason);
+  const resolved = item && ["resolved", "confirmed", "rejected"].includes(item.status.status);
+  const needsSecond = item?.requires_second_confirmation === true;
+  const activationHighRisk = needsSecond && item?.action_type === "activate_engine_candidate";
+  $("#approval-second-confirm-panel").hidden = !needsSecond;
+  $("#approval-confirm-text-field").hidden = !activationHighRisk;
+  $("#approval-confirm-message").textContent = !item
+    ? "此操作將呼叫既有安全流程，不會直接寫 active_engine。"
+    : item.action_type === "neural_trace_missing"
+      ? "缺少必要 neural success trace。此項不可確認，只能延後或拒絕。"
+      : item.action_type === "activate_engine_candidate"
+        ? "這會使用 Phase 3 安全流程：snapshot → archive → active_engine → activation_log。"
+        : item.action_type === "rollback_active_engine"
+          ? "這會回滾 active_engine。系統會先建立 safety snapshot。"
+          : "此驗稿含 P0 / P1，採用前必須再次人工確認。";
+  const baseConfirmed = $("#approval-confirm-checkbox").checked;
+  const secondConfirmed = !needsSecond || $("#approval-second-confirm-checkbox").checked;
+  const textConfirmed = !activationHighRisk || $("#approval-confirm-text").value === "確認啟用";
+  $("#approval-confirm-button").disabled =
+    blocked || resolved || !baseConfirmed || !secondConfirmed || !textConfirmed;
+  $("#approval-reject-button").disabled = !item || resolved;
+  $("#approval-defer-button").disabled = !item || resolved;
+
+  const logs = state.approval.logs ?? [];
+  $("#approval-log-list").innerHTML = logs.length
+    ? logs.map((log) => `
+      <article class="approval-log-item">
+        <strong>${escapeHtml(log.event)}</strong>
+        <span>${escapeHtml(log.action_type)} · ${escapeHtml(log.target_id)}</span>
+        <small>${escapeHtml(formatDate(log.created_at))} · ${escapeHtml(log.result)}</small>
+        ${log.error_message ? `<small>${escapeHtml(log.error_message)}</small>` : ""}
+      </article>
+    `).join("")
+    : '<div class="empty-state">尚無 approval log</div>';
+}
+
+async function loadApprovalItem(approvalItemId) {
+  if (!approvalItemId) {
+    state.activeApprovalItemId = "";
+    state.approval.detail = null;
+    renderApprovalQueue();
+    return;
+  }
+  const payload = await api(`/api/approval-queue/items/${encodeURIComponent(approvalItemId)}`);
+  state.activeApprovalItemId = approvalItemId;
+  state.approval.detail = payload.item;
+  $("#approval-confirm-checkbox").checked = false;
+  $("#approval-second-confirm-checkbox").checked = false;
+  $("#approval-confirm-text").value = "";
+  renderApprovalQueue();
+}
+
+async function refreshApprovalQueue(showToast = false) {
+  const [itemsPayload, logsPayload, snapshotsPayload] = await Promise.all([
+    api("/api/approval-queue/items"),
+    api("/api/approval-queue/logs"),
+    api("/api/canon/snapshots"),
+  ]);
+  state.approval.items = itemsPayload.items ?? [];
+  state.approval.logs = logsPayload.logs ?? [];
+  state.canon.snapshots = snapshotsPayload.snapshots ?? [];
+  if (!state.approval.items.some(
+    (item) => item.approval_item_id === state.activeApprovalItemId,
+  )) {
+    state.activeApprovalItemId = state.approval.items[0]?.approval_item_id ?? "";
+  }
+  renderApprovalQueue();
+  if (state.activeApprovalItemId) await loadApprovalItem(state.activeApprovalItemId);
+  if (showToast) toast("確認佇列已重新整理");
+}
+
+async function handleScanApprovalQueue(snapshotId = "") {
+  try {
+    const payload = await api("/api/approval-queue/scan", {
+      method: "POST",
+      body: JSON.stringify({ snapshotId }),
+    });
+    if (payload.rollback_item?.approval_item_id) {
+      state.activeApprovalItemId = payload.rollback_item.approval_item_id;
+    }
+    await refreshApprovalQueue();
+    toast(snapshotId ? "Rollback item 已加入確認佇列" : "待確認項目掃描完成");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleApprovalDecision(action) {
+  const item = state.approval.detail;
+  if (!item) return;
+  let body = {};
+  if (action === "confirm") {
+    body = {
+      confirm: $("#approval-confirm-checkbox").checked,
+      secondConfirm: $("#approval-second-confirm-checkbox").checked,
+      approvalText: $("#approval-confirm-text").value,
+      approvedBy: "local_user",
+    };
+  } else {
+    const label = action === "reject" ? "拒絕" : "延後";
+    const reason = window.prompt(`${label}原因（可留空）`, "");
+    if (reason === null) return;
+    body = { reason };
+  }
+  try {
+    await api(
+      `/api/approval-queue/items/${encodeURIComponent(item.approval_item_id)}/${action}`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    await Promise.all([
+      refreshApprovalQueue(),
+      refreshCanonSettlementState(),
+      refreshWorkflowState(),
+    ]);
+    toast(action === "confirm" ? "確認項目已由既有安全流程完成" : "確認項目狀態已更新");
+  } catch (error) {
+    await refreshApprovalQueue();
+    toast(error.message, true);
+  }
+}
+
 function renderSettlementWorkflow() {
   const adopted = state.workflow.adoptedChapters ?? [];
   const select = $("#settlement-adopted-select");
@@ -1237,6 +1440,7 @@ function renderAll() {
   renderNeuralStatus();
   renderSettlementPanel();
   renderWorkflow();
+  renderApprovalQueue();
   renderActivityTable();
 }
 
@@ -1632,6 +1836,21 @@ function bindEvents() {
       refreshWorkflowSettlementState(),
     ]).catch((error) => toast(error.message, true))
   ));
+  $("#scan-approval-queue-button").addEventListener("click", () => handleScanApprovalQueue());
+  $("#refresh-approval-queue-button").addEventListener("click", () => (
+    refreshApprovalQueue(true).catch((error) => toast(error.message, true))
+  ));
+  $("#approval-snapshot-select").addEventListener("change", renderApprovalQueue);
+  $("#create-rollback-approval-button").addEventListener("click", () => {
+    const snapshotId = $("#approval-snapshot-select").value;
+    if (snapshotId) handleScanApprovalQueue(snapshotId);
+  });
+  $("#approval-confirm-checkbox").addEventListener("change", renderApprovalQueue);
+  $("#approval-second-confirm-checkbox").addEventListener("change", renderApprovalQueue);
+  $("#approval-confirm-text").addEventListener("input", renderApprovalQueue);
+  $("#approval-confirm-button").addEventListener("click", () => handleApprovalDecision("confirm"));
+  $("#approval-reject-button").addEventListener("click", () => handleApprovalDecision("reject"));
+  $("#approval-defer-button").addEventListener("click", () => handleApprovalDecision("defer"));
   $("#validate-button").addEventListener("click", runValidation);
 
   $("#mode-control").addEventListener("click", (event) => {
@@ -1734,6 +1953,12 @@ function bindEvents() {
           $("#draft-select").value = workflowDraft.dataset.workflowDraftId;
           switchView("review");
         })
+        .catch((error) => toast(error.message, true));
+      return;
+    }
+    const approvalItem = event.target.closest("[data-approval-item-id]");
+    if (approvalItem) {
+      loadApprovalItem(approvalItem.dataset.approvalItemId)
         .catch((error) => toast(error.message, true));
       return;
     }

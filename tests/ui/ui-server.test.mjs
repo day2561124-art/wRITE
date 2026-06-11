@@ -28,6 +28,8 @@ const workflowAdoptedDir = path.join(writingWorkflowDir, "adopted_chapters");
 const workflowContextsDir = path.join(writingWorkflowDir, "context_bundles");
 const workflowSettlementContextsDir = path.join(writingWorkflowDir, "settlements", "contexts");
 const workflowSettlementReportsDir = path.join(writingWorkflowDir, "settlements", "reports");
+const approvalItemsDir = path.join(rootDir, "data", "approval_queue", "items");
+const approvalLogPath = path.join(rootDir, "data", "approval_queue", "logs", "approval_log.jsonl");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -143,6 +145,8 @@ async function main() {
   const workflowSettlementReportsBefore = new Set(
     await readOptionalDirectory(workflowSettlementReportsDir),
   );
+  const approvalItemsBefore = new Set(await readOptionalDirectory(approvalItemsDir));
+  const approvalLogBefore = await readOptionalBuffer(approvalLogPath);
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
@@ -175,6 +179,7 @@ async function main() {
     assert(indexText.includes('data-view-panel="visuals"'), "UI index is missing the visual gallery workspace.");
     assert(indexText.includes('data-view-panel="neural"'), "UI index is missing the neural status workspace.");
     assert(indexText.includes('data-view-panel="settlement"'), "UI index is missing the settlement workspace.");
+    assert(indexText.includes('data-view-panel="approval"'), "UI index is missing the approval workspace.");
     assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
     assert(indexText.includes('id="settlement-import-form"'), "UI index is missing the settlement import form.");
     assert(indexText.includes('id="workflow-task-form"'), "UI index is missing the draft workflow task form.");
@@ -196,6 +201,16 @@ async function main() {
     assert(
       indexText.includes("active_engine 啟用仍需 Phase 3 人工確認"),
       "UI index is missing the Phase 4B activation boundary.",
+    );
+    assert(indexText.includes('id="scan-approval-queue-button"'), "UI index is missing approval scan.");
+    assert(indexText.includes('id="approval-item-list"'), "UI index is missing approval item list.");
+    assert(
+      indexText.includes('id="approval-second-confirm-checkbox"'),
+      "UI index is missing high-risk approval checkbox.",
+    );
+    assert(
+      indexText.includes('id="approval-confirm-text"'),
+      "UI index is missing high-risk approval text.",
     );
     assert(indexText.includes('id="candidate-activate-button"'), "UI index is missing the activation button.");
     assert(indexText.includes('id="candidate-second-confirm-panel"'), "UI index is missing high-risk confirmation.");
@@ -229,6 +244,12 @@ async function main() {
       appText.includes("handleCreateWorkflowPendingCandidate"),
       "UI app.js is missing Phase 4B pending candidate handling.",
     );
+    assert(appText.includes("refreshApprovalQueue"), "UI app.js is missing approval queue loading.");
+    assert(appText.includes("handleApprovalDecision"), "UI app.js is missing approval decisions.");
+    assert(
+      appText.includes('$("#approval-confirm-text").value === "確認啟用"'),
+      "UI app.js does not enforce exact high-risk approval text.",
+    );
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
     const stylesResponse = await fetch(`${baseUrl}/styles.css`);
     const stylesText = await stylesResponse.text();
@@ -240,6 +261,8 @@ async function main() {
       stylesText.includes(".workflow-settlement-panel"),
       "UI styles are missing the Phase 4B workflow panel.",
     );
+    assert(stylesText.includes(".approval-layout"), "UI styles are missing approval layout.");
+    assert(stylesText.includes(".approval-item.is-high-risk"), "UI styles are missing high-risk state.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -610,6 +633,72 @@ async function main() {
       importCandidateResult.payload.candidate.status.can_activate === false,
       "Phase 2 import exposed can_activate=true.",
     );
+    const approvalScan = await readJson(await fetch(`${baseUrl}/api/approval-queue/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }));
+    assert(approvalScan.response.ok, "Approval queue scan API failed.");
+    const candidateApproval = approvalScan.payload.scan.items.find(
+      (item) => item.target_id === apiCandidateId
+        && item.action_type === "activate_engine_candidate",
+    );
+    assert(candidateApproval, "Approval scan omitted pending candidate.");
+    const approvalCount = approvalScan.payload.scan.items.length;
+    const repeatedApprovalScan = await readJson(await fetch(`${baseUrl}/api/approval-queue/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }));
+    assert(
+      repeatedApprovalScan.payload.scan.items.length === approvalCount,
+      "Repeated approval scan created duplicate items.",
+    );
+    const approvalDetail = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}`,
+    ));
+    assert(approvalDetail.response.ok, "Approval item detail API failed.");
+    const unconfirmedApproval = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(unconfirmedApproval.response.status === 409, "Approval item confirmed without checkbox.");
+    const deferredApproval = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/defer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "UI contract defer" }),
+      },
+    ));
+    assert(
+      deferredApproval.response.ok && deferredApproval.payload.result.status.status === "deferred",
+      "Approval defer API failed.",
+    );
+    const rejectedApproval = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "UI contract reject" }),
+      },
+    ));
+    assert(
+      rejectedApproval.response.ok && rejectedApproval.payload.result.status.status === "rejected",
+      "Approval reject API failed.",
+    );
+    const approvalLogs = await readJson(await fetch(`${baseUrl}/api/approval-queue/logs`));
+    assert(
+      approvalLogs.response.ok
+        && approvalLogs.payload.logs.some((log) => log.event === "approval_deferred")
+        && approvalLogs.payload.logs.some((log) => log.event === "approval_rejected")
+        && approvalLogs.payload.logs.some((log) => log.event === "approval_failed"),
+      "Approval log API omitted decision events.",
+    );
 
     const candidatesResult = await readJson(await fetch(`${baseUrl}/api/canon/pending-candidates`));
     assert(
@@ -659,6 +748,16 @@ async function main() {
     const activationResult = confirmedActivation.payload.result;
     assert(activationResult.snapshot_id, "Activation did not return a snapshot id.");
     assert(activationResult.archive_id, "Activation did not return an archive id.");
+    const rollbackApprovalResult = await readJson(await fetch(`${baseUrl}/api/approval-queue/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snapshotId: activationResult.snapshot_id }),
+    }));
+    assert(
+      rollbackApprovalResult.response.ok
+        && rollbackApprovalResult.payload.rollback_item.action_type === "rollback_active_engine",
+      "Explicit snapshot selection did not create rollback approval item.",
+    );
     assert(
       createHash("sha256").update(await readFile(activeEnginePath)).digest("hex")
         === activationResult.active_engine_after_hash,
@@ -794,6 +893,24 @@ async function main() {
     assert(
       unsafePendingCreate.status >= 400 && unsafePendingCreate.status < 500,
       "Unsafe settlement report action path was accepted.",
+    );
+    const unsafeApproval = await rawHttpStatus(
+      port,
+      "/api/approval-queue/items/%2e%2e%2factive_engine.md",
+    );
+    assert(
+      unsafeApproval.status >= 400 && unsafeApproval.status < 500,
+      "Unsafe approval item path was accepted.",
+    );
+    const unsafeApprovalAction = await rawHttpStatus(
+      port,
+      "/api/approval-queue/items/%2e%2e%2factive_engine.md/confirm",
+      "POST",
+      "{}",
+    );
+    assert(
+      unsafeApprovalAction.status >= 400 && unsafeApprovalAction.status < 500,
+      "Unsafe approval action path was accepted.",
     );
 
     const rejectImportResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
@@ -1039,6 +1156,8 @@ async function main() {
     console.log("- Writing workflow active_engine side effects: none");
     console.log("- Settlement context, report, Phase 2 candidate, diff, and risk checked: yes");
     console.log("- Phase 4B direct active_engine activation: none");
+    console.log("- Approval scan, dedupe, detail, reject, defer, rollback request, and logs checked: yes");
+    console.log("- Approval high-risk UI confirmation and path safety checked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
@@ -1078,6 +1197,7 @@ async function main() {
       [workflowContextsDir, workflowContextsBefore],
       [workflowSettlementContextsDir, workflowSettlementContextsBefore],
       [workflowSettlementReportsDir, workflowSettlementReportsBefore],
+      [approvalItemsDir, approvalItemsBefore],
     ]) {
       for (const name of await readOptionalDirectory(directory)) {
         if (!namesBefore.has(name)) {
@@ -1089,6 +1209,8 @@ async function main() {
     else await rm(activationLogPath, { force: true });
     if (rollbackIndexBefore.exists) await writeFile(rollbackIndexPath, rollbackIndexBefore.content);
     else await rm(rollbackIndexPath, { force: true });
+    if (approvalLogBefore.exists) await writeFile(approvalLogPath, approvalLogBefore.content);
+    else await rm(approvalLogPath, { force: true });
     assert(
       createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
       "active_engine.md changed during UI test cleanup.",

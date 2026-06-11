@@ -32,6 +32,128 @@
   --radius-sm: 6px;
 }
 
+.approval-toolbar,
+.approval-layout,
+.approval-detail-facts,
+.approval-impact-summary {
+  display: grid;
+}
+
+.approval-toolbar {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.rollback-request-panel {
+  margin: 16px 0;
+}
+
+.approval-inline-action {
+  justify-content: end;
+}
+
+.approval-layout {
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.approval-item-list,
+.approval-log-list {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.approval-item:hover,
+.approval-item.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.approval-item.is-high-risk {
+  border-left: 3px solid var(--red);
+}
+
+.approval-item > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approval-item > span:last-child {
+  justify-items: end;
+}
+
+.approval-item small,
+.approval-log-item small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.approval-detail-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.approval-detail-facts span,
+.approval-impact-summary div {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+
+.approval-impact-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.approval-impact-summary div,
+.approval-log-item {
+  display: grid;
+  gap: 4px;
+}
+
+.approval-confirm-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.approval-log-panel {
+  margin-top: 16px;
+}
+
+.approval-log-item {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+@media (max-width: 900px) {
+  .approval-toolbar,
+  .approval-layout,
+  .approval-detail-facts,
+  .approval-impact-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

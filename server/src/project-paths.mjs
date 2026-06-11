@@ -41,6 +41,10 @@ export const projectPaths = {
   settlementWorkflow: path.join(projectRoot, "data", "writing_workflow", "settlements"),
   settlementContexts: path.join(projectRoot, "data", "writing_workflow", "settlements", "contexts"),
   settlementReports: path.join(projectRoot, "data", "writing_workflow", "settlements", "reports"),
+  approvalQueue: path.join(projectRoot, "data", "approval_queue"),
+  approvalItems: path.join(projectRoot, "data", "approval_queue", "items"),
+  approvalLogs: path.join(projectRoot, "data", "approval_queue", "logs"),
+  approvalLog: path.join(projectRoot, "data", "approval_queue", "logs", "approval_log.jsonl"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 
