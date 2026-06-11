@@ -10,6 +10,11 @@ import {
   listSnapshots,
   rollbackActiveEngine,
 } from "./engine-candidate-service.mjs";
+import {
+  approveCleanupProposal,
+  executeCleanupProposal,
+  assertCleanupProposalId,
+} from "./cleanup-proposal-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { getAgentRun } from "./agent-run-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
@@ -41,6 +46,8 @@ const allowedActions = new Set([
   "rollback_active_engine",
   "adopt_p0_p1_draft",
   "neural_trace_missing",
+  "approve_cleanup_proposal",
+  "execute_cleanup_proposal",
 ]);
 
 function json(value) {
@@ -88,6 +95,24 @@ function targetOptions(options = {}) {
     ...(options.engineArchive ? { engineArchive: options.engineArchive } : {}),
     ...(options.activationLog ? { activationLog: options.activationLog } : {}),
     ...(options.rollbackIndex ? { rollbackIndex: options.rollbackIndex } : {}),
+  };
+}
+
+function cleanupTargetOptions(options = {}) {
+  return {
+    ...(options.cleanupRoot ? { cleanupRoot: options.cleanupRoot } : {}),
+    ...(options.engineArchive ? { engineArchive: options.engineArchive } : {}),
+    ...(options.rejectedEngineCandidates ? { rejectedEngineCandidates: options.rejectedEngineCandidates } : {}),
+    ...(options.pendingEngineCandidates ? { pendingEngineCandidates: options.pendingEngineCandidates } : {}),
+    ...(options.engineSnapshots ? { engineSnapshots: options.engineSnapshots } : {}),
+    ...(options.rollbackIndex ? { rollbackIndex: options.rollbackIndex } : {}),
+    ...(options.candidateDrafts ? { candidateDrafts: options.candidateDrafts } : {}),
+    ...(options.proofReports ? { proofReports: options.proofReports } : {}),
+    ...(options.adoptedChapters ? { adoptedChapters: options.adoptedChapters } : {}),
+    ...(options.contextBundles ? { contextBundles: options.contextBundles } : {}),
+    ...(options.settlementContexts ? { settlementContexts: options.settlementContexts } : {}),
+    ...(options.settlementReports ? { settlementReports: options.settlementReports } : {}),
+    ...(options.approvalItems ? { approvalItems: options.approvalItems } : {}),
   };
 }
 
@@ -592,6 +617,18 @@ export async function confirmApprovalItem(
         adoptedBy: approvedBy,
         note: "Approved through Phase 5A approval queue.",
       }, targetOptions(options));
+    } else if (item.action_type === "approve_cleanup_proposal") {
+      assertCleanupProposalId(item.target_id);
+      result = await approveCleanupProposal(item.target_id, {
+        confirm: true,
+        approvedBy,
+      }, cleanupTargetOptions(options));
+    } else if (item.action_type === "execute_cleanup_proposal") {
+      assertCleanupProposalId(item.target_id);
+      result = await executeCleanupProposal(item.target_id, {
+        confirm: true,
+        approvedBy,
+      }, cleanupTargetOptions(options));
     } else {
       throw errorWithStatus(`Unsupported confirm action: ${item.action_type}`, 409);
     }

@@ -26,6 +26,7 @@ const steps = [
   ["Full workflow smoke test", ["tests/e2e/full-workflow-smoke.test.mjs"]],
   ["MCP read-only tools", ["tests/mcp/mcp-readonly-tools.test.mjs"]],
   ["MCP write-low-risk tools", ["tests/mcp/mcp-write-low-risk-tools.test.mjs"]],
+  ["MCP approval request tools", ["tests/mcp/mcp-approval-request-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],
