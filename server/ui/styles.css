@@ -145,11 +145,146 @@
   padding: 10px 0;
 }
 
+.cleanup-toolbar,
+.cleanup-layout,
+.cleanup-policy-grid,
+.cleanup-risk-summary {
+  display: grid;
+}
+
+.cleanup-toolbar {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.cleanup-toolbar h2 {
+  margin: 3px 0 0;
+}
+
+.cleanup-policy-panel,
+.cleanup-log-panel {
+  margin-top: 16px;
+}
+
+.cleanup-policy-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cleanup-layout {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.7fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.cleanup-proposal-list,
+.cleanup-item-list,
+.cleanup-log-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cleanup-proposal-item,
+.cleanup-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+
+.cleanup-proposal-item:hover,
+.cleanup-proposal-item.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cleanup-proposal-item > span,
+.cleanup-item > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cleanup-proposal-item > span:last-child,
+.cleanup-item > div:last-child {
+  justify-items: end;
+}
+
+.cleanup-proposal-item small,
+.cleanup-item small,
+.cleanup-log-item small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cleanup-risk-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.cleanup-risk-summary span {
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cleanup-buckets {
+  display: grid;
+  gap: 16px;
+}
+
+.cleanup-buckets h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cleanup-item-eligible_for_cleanup {
+  border-left: 3px solid var(--green);
+}
+
+.cleanup-item-needs_review {
+  border-left: 3px solid var(--amber);
+}
+
+.cleanup-item-blocked_from_cleanup {
+  border-left: 3px solid var(--red);
+}
+
+.cleanup-confirm-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.cleanup-log-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
 @media (max-width: 900px) {
   .approval-toolbar,
   .approval-layout,
   .approval-detail-facts,
-  .approval-impact-summary {
+  .approval-impact-summary,
+  .cleanup-toolbar,
+  .cleanup-layout,
+  .cleanup-policy-grid,
+  .cleanup-risk-summary {
     grid-template-columns: 1fr;
   }
 }
@@ -2186,7 +2321,7 @@ dialog::backdrop {
     min-width: 0;
     height: 100%;
     display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-template-columns: repeat(9, minmax(0, 1fr));
     gap: 2px;
   }
 

@@ -11,6 +11,7 @@ const state = {
   activeSettlementContextId: "",
   activeSettlementReportId: "",
   activeApprovalItemId: "",
+  activeCleanupProposalId: "",
   workflow: {
     drafts: [],
     proofReports: [],
@@ -36,6 +37,12 @@ const state = {
     detail: null,
     logs: [],
   },
+  cleanup: {
+    proposals: [],
+    detail: null,
+    logs: [],
+    scan: null,
+  },
   neuralData: {
     runs: [],
     traces: [],
@@ -60,6 +67,7 @@ const titles = {
   neural: "神經模組",
   settlement: "結算匯入",
   approval: "確認佇列",
+  cleanup: "封存清理",
   activity: "紀錄",
 };
 
@@ -221,6 +229,9 @@ function switchView(viewName) {
   }
   if (viewName === "approval") {
     refreshApprovalQueue().catch((error) => toast(error.message, true));
+  }
+  if (viewName === "cleanup") {
+    refreshCleanup().catch((error) => toast(error.message, true));
   }
   if (["compose", "review"].includes(viewName)) {
     refreshWorkflowState().catch((error) => toast(error.message, true));
@@ -1056,6 +1067,195 @@ async function handleApprovalDecision(action) {
   }
 }
 
+function cleanupPolicyInput() {
+  return {
+    keep_latest_archives: Number($("#cleanup-keep-archives").value),
+    keep_latest_snapshots: Number($("#cleanup-keep-snapshots").value),
+    rejected_candidate_days: Number($("#cleanup-rejected-days").value),
+    failed_candidate_days: Number($("#cleanup-failed-days").value),
+    blocked_candidate_days: Number($("#cleanup-blocked-days").value),
+    trash_retention_days: Number($("#cleanup-trash-days").value),
+  };
+}
+
+function cleanupStatusClass(status) {
+  if (status === "executed" || status === "approved") return "candidate-status-activated";
+  if (status === "rejected" || status === "blocked") return "candidate-status-blocked";
+  if (status === "deferred") return "candidate-status-rejected";
+  return "candidate-status-candidate";
+}
+
+function cleanupItemsHtml(items, emptyText) {
+  if (!items?.length) return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+  return items.map((item) => `
+    <article class="cleanup-item cleanup-item-${escapeHtml(item.status)}">
+      <div>
+        <strong>${escapeHtml(item.item_id)}</strong>
+        <small>${escapeHtml(item.item_type)} · ${escapeHtml(item.source_path)}</small>
+      </div>
+      <div>
+        <span class="risk-${escapeHtml(item.risk_level)}">${escapeHtml(item.risk_level)}</span>
+        <small>${escapeHtml(item.reason)}</small>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderCleanup() {
+  const proposals = state.cleanup.proposals ?? [];
+  $("#cleanup-proposal-count").textContent = String(proposals.length);
+  $("#cleanup-proposal-list").innerHTML = proposals.length
+    ? proposals.map((proposal) => `
+      <button class="cleanup-proposal-item${proposal.cleanup_proposal_id === state.activeCleanupProposalId ? " is-active" : ""}" type="button" data-cleanup-proposal-id="${escapeHtml(proposal.cleanup_proposal_id)}">
+        <span>
+          <strong>${escapeHtml(proposal.title)}</strong>
+          <small>${escapeHtml(proposal.cleanup_proposal_id)}</small>
+        </span>
+        <span>
+          <span class="candidate-status ${cleanupStatusClass(proposal.status.status)}">${escapeHtml(proposal.status.status)}</span>
+          <small>${proposal.risk_summary?.eligible_count ?? 0} eligible</small>
+        </span>
+      </button>
+    `).join("")
+    : '<div class="empty-state">尚無 cleanup proposal</div>';
+
+  const proposal = state.cleanup.detail;
+  $("#cleanup-detail-id").textContent =
+    proposal?.cleanup_proposal_id ?? "NO PROPOSAL SELECTED";
+  $("#cleanup-detail-title").textContent = proposal?.title ?? "清理提案詳情";
+  $("#cleanup-detail-status").textContent = proposal?.status?.status ?? "未選擇";
+  $("#cleanup-detail-status").className =
+    `candidate-status ${cleanupStatusClass(proposal?.status?.status ?? "blocked")}`;
+  $("#cleanup-risk-summary").innerHTML = proposal
+    ? `
+      <span>eligible · ${proposal.risk_summary.eligible_count}</span>
+      <span>high risk · ${proposal.risk_summary.high_risk_count}</span>
+      <span>pinned · ${proposal.risk_summary.pinned_count}</span>
+      <span>rollback required · ${proposal.risk_summary.rollback_required_count}</span>
+    `
+    : "";
+  $("#cleanup-eligible-items").innerHTML =
+    cleanupItemsHtml(proposal?.eligible_items, "沒有 eligible item");
+  $("#cleanup-must-keep-items").innerHTML =
+    cleanupItemsHtml(proposal?.must_keep_items, "沒有 must_keep item");
+  $("#cleanup-review-items").innerHTML =
+    cleanupItemsHtml(proposal?.needs_review_items, "沒有 needs_review item");
+  $("#cleanup-blocked-items").innerHTML =
+    cleanupItemsHtml(proposal?.blocked_items, "沒有 blocked item");
+
+  const confirmed = $("#cleanup-confirm-checkbox").checked;
+  const status = proposal?.status?.status;
+  const hasEligible = (proposal?.eligible_items?.length ?? 0) > 0;
+  $("#cleanup-approve-button").disabled =
+    !proposal || !confirmed || !hasEligible || !["draft", "deferred"].includes(status);
+  $("#cleanup-execute-button").disabled =
+    !proposal || !confirmed || !hasEligible || status !== "approved";
+  $("#cleanup-reject-button").disabled =
+    !proposal || ["approved", "executed", "rejected"].includes(status);
+  $("#cleanup-defer-button").disabled =
+    !proposal || ["approved", "executed", "rejected"].includes(status);
+
+  const logs = state.cleanup.logs ?? [];
+  $("#cleanup-log-list").innerHTML = logs.length
+    ? logs.map((log) => `
+      <article class="cleanup-log-item">
+        <strong>${escapeHtml(log.event)}</strong>
+        <span>${escapeHtml(log.cleanup_proposal_id || "no proposal")} · ${escapeHtml(log.cleanup_trash_id || "no trash item")}</span>
+        <small>${escapeHtml(formatDate(log.created_at))} · ${escapeHtml(log.result)}</small>
+        ${log.error_message ? `<small>${escapeHtml(log.error_message)}</small>` : ""}
+      </article>
+    `).join("")
+    : '<div class="empty-state">尚無 cleanup log</div>';
+}
+
+async function loadCleanupProposal(cleanupProposalId) {
+  if (!cleanupProposalId) {
+    state.activeCleanupProposalId = "";
+    state.cleanup.detail = null;
+    renderCleanup();
+    return;
+  }
+  const payload = await api(
+    `/api/cleanup/proposals/${encodeURIComponent(cleanupProposalId)}`,
+  );
+  state.activeCleanupProposalId = cleanupProposalId;
+  state.cleanup.detail = payload.proposal;
+  $("#cleanup-confirm-checkbox").checked = false;
+  renderCleanup();
+}
+
+async function refreshCleanup(showToast = false) {
+  const [proposalsPayload, logsPayload] = await Promise.all([
+    api("/api/cleanup/proposals"),
+    api("/api/cleanup/logs"),
+  ]);
+  state.cleanup.proposals = proposalsPayload.proposals ?? [];
+  state.cleanup.logs = logsPayload.logs ?? [];
+  if (!state.cleanup.proposals.some(
+    (proposal) => proposal.cleanup_proposal_id === state.activeCleanupProposalId,
+  )) {
+    state.activeCleanupProposalId =
+      state.cleanup.proposals[0]?.cleanup_proposal_id ?? "";
+  }
+  renderCleanup();
+  if (state.activeCleanupProposalId) {
+    await loadCleanupProposal(state.activeCleanupProposalId);
+  }
+  if (showToast) toast("封存清理資料已重新整理");
+}
+
+async function handleCleanupScan(createProposal = false) {
+  try {
+    const endpoint = createProposal ? "/api/cleanup/proposals" : "/api/cleanup/scan";
+    const payload = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({
+        retentionPolicy: cleanupPolicyInput(),
+        createdBy: "local_ui",
+      }),
+    });
+    if (payload.proposal?.cleanup_proposal_id) {
+      state.activeCleanupProposalId = payload.proposal.cleanup_proposal_id;
+      await refreshCleanup();
+      toast("Cleanup proposal 已建立");
+      return;
+    }
+    state.cleanup.scan = payload.scan;
+    toast(`掃描完成：${payload.scan.risk_summary.eligible_count} 個 eligible item`);
+    await refreshCleanup();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleCleanupDecision(action) {
+  const proposal = state.cleanup.detail;
+  if (!proposal) return;
+  let body;
+  if (["approve", "execute"].includes(action)) {
+    body = {
+      confirm: $("#cleanup-confirm-checkbox").checked,
+      approvedBy: "local_user",
+    };
+  } else {
+    const label = action === "reject" ? "拒絕" : "延後";
+    const reason = window.prompt(`${label}原因（可留空）`, "");
+    if (reason === null) return;
+    body = { reason };
+  }
+  try {
+    await api(
+      `/api/cleanup/proposals/${encodeURIComponent(proposal.cleanup_proposal_id)}/${action}`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    await refreshCleanup();
+    toast(action === "execute" ? "Eligible items 已搬入 trash" : "Cleanup proposal 已更新");
+  } catch (error) {
+    await refreshCleanup();
+    toast(error.message, true);
+  }
+}
+
 function renderSettlementWorkflow() {
   const adopted = state.workflow.adoptedChapters ?? [];
   const select = $("#settlement-adopted-select");
@@ -1851,6 +2051,16 @@ function bindEvents() {
   $("#approval-confirm-button").addEventListener("click", () => handleApprovalDecision("confirm"));
   $("#approval-reject-button").addEventListener("click", () => handleApprovalDecision("reject"));
   $("#approval-defer-button").addEventListener("click", () => handleApprovalDecision("defer"));
+  $("#scan-cleanup-button").addEventListener("click", () => handleCleanupScan(false));
+  $("#create-cleanup-proposal-button").addEventListener("click", () => handleCleanupScan(true));
+  $("#refresh-cleanup-button").addEventListener("click", () => (
+    refreshCleanup(true).catch((error) => toast(error.message, true))
+  ));
+  $("#cleanup-confirm-checkbox").addEventListener("change", renderCleanup);
+  $("#cleanup-approve-button").addEventListener("click", () => handleCleanupDecision("approve"));
+  $("#cleanup-execute-button").addEventListener("click", () => handleCleanupDecision("execute"));
+  $("#cleanup-reject-button").addEventListener("click", () => handleCleanupDecision("reject"));
+  $("#cleanup-defer-button").addEventListener("click", () => handleCleanupDecision("defer"));
   $("#validate-button").addEventListener("click", runValidation);
 
   $("#mode-control").addEventListener("click", (event) => {
@@ -1959,6 +2169,12 @@ function bindEvents() {
     const approvalItem = event.target.closest("[data-approval-item-id]");
     if (approvalItem) {
       loadApprovalItem(approvalItem.dataset.approvalItemId)
+        .catch((error) => toast(error.message, true));
+      return;
+    }
+    const cleanupProposal = event.target.closest("[data-cleanup-proposal-id]");
+    if (cleanupProposal) {
+      loadCleanupProposal(cleanupProposal.dataset.cleanupProposalId)
         .catch((error) => toast(error.message, true));
       return;
     }

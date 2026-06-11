@@ -469,6 +469,21 @@ Approval item 保存於 `data/approval_queue/items/`，confirm、reject、defer 
 
 確認佇列不直接寫入 `active_engine.md`：activation 與 rollback 仍呼叫 Phase 3 service；P0 / P1 採用仍呼叫 Phase 4A service。High-risk activation 必須勾選二次確認並輸入「確認啟用」；缺少必要 neural success trace 的項目只能拒絕或延後。
 
+### 10.6. Archive Cleanup Proposal 封存清理提案
+
+Phase 5B 在「封存清理」頁提供掃描、提案、核准、拒絕、延後與執行流程。掃描結果分為：
+
+- `eligible_for_cleanup`
+- `must_keep`
+- `needs_review`
+- `blocked_from_cleanup`
+
+只有核准提案中的 `eligible_for_cleanup` 項目可以執行。核准與執行前都會重新掃描、重新分類並驗證 SHA-256；來源內容或 reference 狀態改變時會停止執行。
+
+執行只會把資料搬入 `data/cleanup/trash/`，同時建立 `trash_metadata.json` 與 `data/cleanup/tombstones/` 記錄，不提供永久刪除。`active_engine.md`、activation log、approval log、neural trace、high-risk archive、pinned archive 與 rollback 必要 snapshot 永遠不會列入可執行項目。
+
+Cleanup proposal 保存於 `data/cleanup/proposals/`，事件追加到 `data/cleanup/logs/cleanup_log.jsonl`。
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -865,6 +880,21 @@ launcher.ps1
 start-ui.cmd
 
 data/
+  cleanup/
+    proposals/
+      <cleanup_proposal_id>/
+        proposal.json
+        status.json
+        scan_report.json
+    logs/
+      cleanup_log.jsonl
+    trash/
+      <cleanup_trash_id>/
+        content/
+        trash_metadata.json
+    staging/
+    tombstones/
+      <cleanup_trash_id>.json
   approval_queue/
     items/
       <approval_item_id>/
@@ -963,6 +993,7 @@ config/
   mcp-client.windows-local.example.json
 
 server/src/
+  cleanup-proposal-service.mjs
   approval-queue-service.mjs
   file-transactions.mjs
   mcp-server.mjs

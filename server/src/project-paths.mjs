@@ -45,6 +45,13 @@ export const projectPaths = {
   approvalItems: path.join(projectRoot, "data", "approval_queue", "items"),
   approvalLogs: path.join(projectRoot, "data", "approval_queue", "logs"),
   approvalLog: path.join(projectRoot, "data", "approval_queue", "logs", "approval_log.jsonl"),
+  cleanupRoot: path.join(projectRoot, "data", "cleanup"),
+  cleanupProposals: path.join(projectRoot, "data", "cleanup", "proposals"),
+  cleanupLogs: path.join(projectRoot, "data", "cleanup", "logs"),
+  cleanupLog: path.join(projectRoot, "data", "cleanup", "logs", "cleanup_log.jsonl"),
+  cleanupTrash: path.join(projectRoot, "data", "cleanup", "trash"),
+  cleanupStaging: path.join(projectRoot, "data", "cleanup", "staging"),
+  cleanupTombstones: path.join(projectRoot, "data", "cleanup", "tombstones"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 

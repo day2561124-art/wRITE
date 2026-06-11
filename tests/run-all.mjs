@@ -22,6 +22,7 @@ const steps = [
   ["Writing workflow service", ["tests/workflow/writing-workflow-service.test.mjs"]],
   ["Settlement workflow service", ["tests/workflow/settlement-workflow-service.test.mjs"]],
   ["Approval queue service", ["tests/approval/approval-queue-service.test.mjs"]],
+  ["Cleanup proposal service", ["tests/cleanup/cleanup-proposal-service.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],

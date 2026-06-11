@@ -38,6 +38,12 @@ import {
   assertApprovalItemId,
   isSafeApprovalItemId,
 } from "../../server/src/approval-queue-service.mjs";
+import {
+  assertCleanupProposalId,
+  assertCleanupTrashId,
+  isSafeCleanupProposalId,
+  isSafeCleanupTrashId,
+} from "../../server/src/cleanup-proposal-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -265,6 +271,58 @@ async function main() {
   assert(
     projectPaths.approvalLog.startsWith(projectPaths.approvalLogs),
     "Approval log path is outside approval logs.",
+  );
+  for (const unsafeId of [
+    "../active_engine.md",
+    "cleanup_proposal_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(!isSafeCleanupProposalId(unsafeId), `Unsafe cleanup proposal id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertCleanupProposalId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Cleanup proposal traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  for (const unsafeId of [
+    "../active_engine.md",
+    "cleanup_trash_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(!isSafeCleanupTrashId(unsafeId), `Unsafe cleanup trash id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertCleanupTrashId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Cleanup trash traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  assert(
+    projectPaths.cleanupProposals.startsWith(projectPaths.cleanupRoot),
+    "Cleanup proposals path is outside cleanup root.",
+  );
+  assert(
+    projectPaths.cleanupLog.startsWith(projectPaths.cleanupLogs),
+    "Cleanup log path is outside cleanup logs.",
+  );
+  assert(
+    projectPaths.cleanupTrash.startsWith(projectPaths.cleanupRoot),
+    "Cleanup trash path is outside cleanup root.",
+  );
+  assert(
+    projectPaths.cleanupTombstones.startsWith(projectPaths.cleanupRoot),
+    "Cleanup tombstones path is outside cleanup root.",
   );
   assert(
     projectPaths.pendingEngineCandidates.startsWith(projectPaths.canonDb),

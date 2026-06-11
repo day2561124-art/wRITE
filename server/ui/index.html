@@ -51,6 +51,10 @@
             <span class="nav-symbol" aria-hidden="true">✓</span>
             <span>確認佇列</span>
           </button>
+          <button class="nav-item" data-view="cleanup" type="button">
+            <span class="nav-symbol" aria-hidden="true">⌫</span>
+            <span>封存清理</span>
+          </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>紀錄</span>
@@ -793,6 +797,103 @@
             </div>
             <div id="approval-log-list" class="approval-log-list">
               <div class="empty-state">尚無 approval log</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="cleanup">
+          <div class="cleanup-toolbar">
+            <div>
+              <p class="eyebrow">PHASE 5B</p>
+              <h2>Archive Cleanup Proposal｜封存清理提案</h2>
+            </div>
+            <div class="form-actions">
+              <button id="scan-cleanup-button" class="button secondary" type="button">掃描候選</button>
+              <button id="create-cleanup-proposal-button" class="button primary" type="button">建立提案</button>
+              <button id="refresh-cleanup-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">↻</button>
+            </div>
+          </div>
+
+          <div class="warning-panel phase-boundary">
+            Phase 5B 只會把核准的 eligible items 搬入 trash，不會永久刪除；active_engine、logs、neural traces、high-risk、pinned 與 rollback 必要資料永遠不會執行清理。
+          </div>
+
+          <section class="panel cleanup-policy-panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">RETENTION POLICY</p>
+                <h3>保留政策</h3>
+              </div>
+            </div>
+            <div class="cleanup-policy-grid">
+              <label class="field"><span>最新 archives</span><input id="cleanup-keep-archives" type="number" min="0" max="10000" value="10"></label>
+              <label class="field"><span>最新 snapshots</span><input id="cleanup-keep-snapshots" type="number" min="0" max="10000" value="10"></label>
+              <label class="field"><span>rejected 保留天數</span><input id="cleanup-rejected-days" type="number" min="0" max="10000" value="90"></label>
+              <label class="field"><span>failed 保留天數</span><input id="cleanup-failed-days" type="number" min="0" max="10000" value="90"></label>
+              <label class="field"><span>blocked 保留天數</span><input id="cleanup-blocked-days" type="number" min="0" max="10000" value="90"></label>
+              <label class="field"><span>trash 保留天數</span><input id="cleanup-trash-days" type="number" min="0" max="10000" value="30"></label>
+            </div>
+          </section>
+
+          <div class="cleanup-layout">
+            <aside class="panel cleanup-list-panel">
+              <div class="panel-heading">
+                <h2>Cleanup Proposals</h2>
+                <span id="cleanup-proposal-count" class="workflow-status">0</span>
+              </div>
+              <div id="cleanup-proposal-list" class="cleanup-proposal-list">
+                <div class="empty-state">尚無 cleanup proposal</div>
+              </div>
+            </aside>
+
+            <section class="panel cleanup-detail-panel">
+              <div class="reader-heading">
+                <div>
+                  <p id="cleanup-detail-id" class="eyebrow">NO PROPOSAL SELECTED</p>
+                  <h2 id="cleanup-detail-title">清理提案詳情</h2>
+                </div>
+                <span id="cleanup-detail-status" class="candidate-status candidate-status-blocked">未選擇</span>
+              </div>
+              <div id="cleanup-risk-summary" class="cleanup-risk-summary"></div>
+              <div class="cleanup-buckets">
+                <section>
+                  <h3>Eligible</h3>
+                  <div id="cleanup-eligible-items" class="cleanup-item-list"></div>
+                </section>
+                <section>
+                  <h3>Must Keep</h3>
+                  <div id="cleanup-must-keep-items" class="cleanup-item-list"></div>
+                </section>
+                <section>
+                  <h3>Needs Review</h3>
+                  <div id="cleanup-review-items" class="cleanup-item-list"></div>
+                </section>
+                <section>
+                  <h3>Blocked</h3>
+                  <div id="cleanup-blocked-items" class="cleanup-item-list"></div>
+                </section>
+              </div>
+              <div class="cleanup-confirm-panel">
+                <label class="confirmation-row">
+                  <input id="cleanup-confirm-checkbox" type="checkbox">
+                  <span>我已確認此提案只會把 eligible items 搬入 trash，不會永久刪除</span>
+                </label>
+                <div class="form-actions">
+                  <button id="cleanup-approve-button" class="button primary" type="button" disabled>核准提案</button>
+                  <button id="cleanup-execute-button" class="button danger" type="button" disabled>執行至 Trash</button>
+                  <button id="cleanup-reject-button" class="button secondary" type="button" disabled>拒絕</button>
+                  <button id="cleanup-defer-button" class="button secondary" type="button" disabled>延後</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel cleanup-log-panel">
+            <div class="panel-heading">
+              <h2>Cleanup Log</h2>
+            </div>
+            <div id="cleanup-log-list" class="cleanup-log-list">
+              <div class="empty-state">尚無 cleanup log</div>
             </div>
           </section>
         </section>

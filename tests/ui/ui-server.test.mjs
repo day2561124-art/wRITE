@@ -30,6 +30,10 @@ const workflowSettlementContextsDir = path.join(writingWorkflowDir, "settlements
 const workflowSettlementReportsDir = path.join(writingWorkflowDir, "settlements", "reports");
 const approvalItemsDir = path.join(rootDir, "data", "approval_queue", "items");
 const approvalLogPath = path.join(rootDir, "data", "approval_queue", "logs", "approval_log.jsonl");
+const cleanupProposalsDir = path.join(rootDir, "data", "cleanup", "proposals");
+const cleanupTrashDir = path.join(rootDir, "data", "cleanup", "trash");
+const cleanupTombstonesDir = path.join(rootDir, "data", "cleanup", "tombstones");
+const cleanupLogPath = path.join(rootDir, "data", "cleanup", "logs", "cleanup_log.jsonl");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -147,6 +151,10 @@ async function main() {
   );
   const approvalItemsBefore = new Set(await readOptionalDirectory(approvalItemsDir));
   const approvalLogBefore = await readOptionalBuffer(approvalLogPath);
+  const cleanupProposalsBefore = new Set(await readOptionalDirectory(cleanupProposalsDir));
+  const cleanupTrashBefore = new Set(await readOptionalDirectory(cleanupTrashDir));
+  const cleanupTombstonesBefore = new Set(await readOptionalDirectory(cleanupTombstonesDir));
+  const cleanupLogBefore = await readOptionalBuffer(cleanupLogPath);
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
@@ -180,6 +188,7 @@ async function main() {
     assert(indexText.includes('data-view-panel="neural"'), "UI index is missing the neural status workspace.");
     assert(indexText.includes('data-view-panel="settlement"'), "UI index is missing the settlement workspace.");
     assert(indexText.includes('data-view-panel="approval"'), "UI index is missing the approval workspace.");
+    assert(indexText.includes('data-view-panel="cleanup"'), "UI index is missing the cleanup workspace.");
     assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
     assert(indexText.includes('id="settlement-import-form"'), "UI index is missing the settlement import form.");
     assert(indexText.includes('id="workflow-task-form"'), "UI index is missing the draft workflow task form.");
@@ -204,6 +213,19 @@ async function main() {
     );
     assert(indexText.includes('id="scan-approval-queue-button"'), "UI index is missing approval scan.");
     assert(indexText.includes('id="approval-item-list"'), "UI index is missing approval item list.");
+    assert(indexText.includes('id="scan-cleanup-button"'), "UI index is missing cleanup scan.");
+    assert(
+      indexText.includes('id="create-cleanup-proposal-button"'),
+      "UI index is missing cleanup proposal creation.",
+    );
+    assert(
+      indexText.includes('id="cleanup-execute-button"'),
+      "UI index is missing cleanup execution control.",
+    );
+    assert(
+      indexText.includes("不會永久刪除"),
+      "UI index is missing the no-permanent-delete boundary.",
+    );
     assert(
       indexText.includes('id="approval-second-confirm-checkbox"'),
       "UI index is missing high-risk approval checkbox.",
@@ -246,6 +268,12 @@ async function main() {
     );
     assert(appText.includes("refreshApprovalQueue"), "UI app.js is missing approval queue loading.");
     assert(appText.includes("handleApprovalDecision"), "UI app.js is missing approval decisions.");
+    assert(appText.includes("refreshCleanup"), "UI app.js is missing cleanup loading.");
+    assert(appText.includes("handleCleanupDecision"), "UI app.js is missing cleanup decisions.");
+    assert(
+      appText.includes('status !== "approved"'),
+      "UI app.js does not restrict cleanup execution to approved proposals.",
+    );
     assert(
       appText.includes('$("#approval-confirm-text").value === "確認啟用"'),
       "UI app.js does not enforce exact high-risk approval text.",
@@ -263,6 +291,11 @@ async function main() {
     );
     assert(stylesText.includes(".approval-layout"), "UI styles are missing approval layout.");
     assert(stylesText.includes(".approval-item.is-high-risk"), "UI styles are missing high-risk state.");
+    assert(stylesText.includes(".cleanup-layout"), "UI styles are missing cleanup layout.");
+    assert(
+      stylesText.includes(".cleanup-item-blocked_from_cleanup"),
+      "UI styles are missing blocked cleanup state.",
+    );
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -700,6 +733,86 @@ async function main() {
       "Approval log API omitted decision events.",
     );
 
+    const cleanupScan = await readJson(await fetch(`${baseUrl}/api/cleanup/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        retentionPolicy: {
+          keep_latest_archives: 10,
+          keep_latest_snapshots: 10,
+          rejected_candidate_days: 90,
+          failed_candidate_days: 90,
+          blocked_candidate_days: 90,
+          trash_retention_days: 30,
+        },
+      }),
+    }));
+    assert(cleanupScan.response.ok, "Cleanup scan API failed.");
+    assert(
+      Array.isArray(cleanupScan.payload.scan.eligible_items)
+        && Array.isArray(cleanupScan.payload.scan.must_keep_items)
+        && Array.isArray(cleanupScan.payload.scan.needs_review_items)
+        && Array.isArray(cleanupScan.payload.scan.blocked_items),
+      "Cleanup scan API omitted classification buckets.",
+    );
+    const cleanupCreate = await readJson(await fetch(`${baseUrl}/api/cleanup/proposals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ createdBy: "ui_contract_test" }),
+    }));
+    assert(cleanupCreate.response.ok, "Cleanup proposal API failed.");
+    const cleanupProposalId = cleanupCreate.payload.proposal.cleanup_proposal_id;
+    const cleanupDetail = await readJson(
+      await fetch(`${baseUrl}/api/cleanup/proposals/${cleanupProposalId}`),
+    );
+    assert(cleanupDetail.response.ok, "Cleanup proposal detail API failed.");
+    const unconfirmedCleanupApproval = await readJson(await fetch(
+      `${baseUrl}/api/cleanup/proposals/${cleanupProposalId}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(
+      unconfirmedCleanupApproval.response.status === 409,
+      "Cleanup proposal approved without confirmation.",
+    );
+    const deferredCleanup = await readJson(await fetch(
+      `${baseUrl}/api/cleanup/proposals/${cleanupProposalId}/defer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "UI contract defer" }),
+      },
+    ));
+    assert(
+      deferredCleanup.response.ok && deferredCleanup.payload.result.status.status === "deferred",
+      "Cleanup defer API failed.",
+    );
+    const rejectedCleanup = await readJson(await fetch(
+      `${baseUrl}/api/cleanup/proposals/${cleanupProposalId}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "UI contract reject" }),
+      },
+    ));
+    assert(
+      rejectedCleanup.response.ok && rejectedCleanup.payload.result.status.status === "rejected",
+      "Cleanup reject API failed.",
+    );
+    const cleanupLogs = await readJson(await fetch(`${baseUrl}/api/cleanup/logs`));
+    assert(
+      cleanupLogs.response.ok
+        && cleanupLogs.payload.logs.some((log) => log.event === "cleanup_scan")
+        && cleanupLogs.payload.logs.some((log) => log.event === "cleanup_proposal_created")
+        && cleanupLogs.payload.logs.some((log) => log.event === "cleanup_proposal_deferred")
+        && cleanupLogs.payload.logs.some((log) => log.event === "cleanup_proposal_rejected")
+        && cleanupLogs.payload.logs.some((log) => log.event === "cleanup_failed"),
+      "Cleanup log API omitted lifecycle events.",
+    );
+
     const candidatesResult = await readJson(await fetch(`${baseUrl}/api/canon/pending-candidates`));
     assert(
       candidatesResult.response.ok
@@ -911,6 +1024,24 @@ async function main() {
     assert(
       unsafeApprovalAction.status >= 400 && unsafeApprovalAction.status < 500,
       "Unsafe approval action path was accepted.",
+    );
+    const unsafeCleanup = await rawHttpStatus(
+      port,
+      "/api/cleanup/proposals/%2e%2e%2factive_engine.md",
+    );
+    assert(
+      unsafeCleanup.status >= 400 && unsafeCleanup.status < 500,
+      "Unsafe cleanup proposal path was accepted.",
+    );
+    const unsafeCleanupAction = await rawHttpStatus(
+      port,
+      "/api/cleanup/proposals/%2e%2e%2factive_engine.md/execute",
+      "POST",
+      JSON.stringify({ confirm: true }),
+    );
+    assert(
+      unsafeCleanupAction.status >= 400 && unsafeCleanupAction.status < 500,
+      "Unsafe cleanup action path was accepted.",
     );
 
     const rejectImportResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
@@ -1158,6 +1289,7 @@ async function main() {
     console.log("- Phase 4B direct active_engine activation: none");
     console.log("- Approval scan, dedupe, detail, reject, defer, rollback request, and logs checked: yes");
     console.log("- Approval high-risk UI confirmation and path safety checked: yes");
+    console.log("- Cleanup scan, proposal, reject, defer, logs, UI, and path safety checked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
@@ -1198,6 +1330,9 @@ async function main() {
       [workflowSettlementContextsDir, workflowSettlementContextsBefore],
       [workflowSettlementReportsDir, workflowSettlementReportsBefore],
       [approvalItemsDir, approvalItemsBefore],
+      [cleanupProposalsDir, cleanupProposalsBefore],
+      [cleanupTrashDir, cleanupTrashBefore],
+      [cleanupTombstonesDir, cleanupTombstonesBefore],
     ]) {
       for (const name of await readOptionalDirectory(directory)) {
         if (!namesBefore.has(name)) {
@@ -1211,6 +1346,8 @@ async function main() {
     else await rm(rollbackIndexPath, { force: true });
     if (approvalLogBefore.exists) await writeFile(approvalLogPath, approvalLogBefore.content);
     else await rm(approvalLogPath, { force: true });
+    if (cleanupLogBefore.exists) await writeFile(cleanupLogPath, cleanupLogBefore.content);
+    else await rm(cleanupLogPath, { force: true });
     assert(
       createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
       "active_engine.md changed during UI test cleanup.",

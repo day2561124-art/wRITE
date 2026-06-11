@@ -106,6 +106,19 @@ import {
   rejectApprovalItem,
   scanApprovalQueue,
 } from "./approval-queue-service.mjs";
+import {
+  approveCleanupProposal,
+  assertCleanupProposalId,
+  createCleanupProposal,
+  deferCleanupProposal,
+  ensureCleanupDirectories,
+  executeCleanupProposal,
+  getCleanupProposal,
+  listCleanupLogs,
+  listCleanupProposals,
+  rejectCleanupProposal,
+  scanCleanupCandidates,
+} from "./cleanup-proposal-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1196,6 +1209,102 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/cleanup/scan") {
+    try {
+      assertSameOrigin(request, "Cross-origin cleanup scans are not allowed.");
+      const input = await parseBody(request);
+      const scan = await scanCleanupCandidates({
+        retentionPolicy: input.retentionPolicy ?? input.retention_policy,
+        actor: input.actor ?? "local_user",
+      });
+      sendJson(response, 200, { ok: true, scan });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/cleanup/proposals") {
+    try {
+      assertSameOrigin(request, "Cross-origin cleanup proposal creation is not allowed.");
+      const input = await parseBody(request);
+      const proposal = await createCleanupProposal({
+        title: input.title,
+        summary: input.summary,
+        createdBy: input.createdBy ?? input.created_by ?? "local_ui",
+        retentionPolicy: input.retentionPolicy ?? input.retention_policy,
+      });
+      sendJson(response, 201, { ok: true, proposal });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/cleanup/proposals") {
+    sendJson(response, 200, { ok: true, proposals: await listCleanupProposals() });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/cleanup/logs") {
+    sendJson(response, 200, { ok: true, logs: await listCleanupLogs() });
+    return;
+  }
+
+  const cleanupActionMatch = rawPathname.match(
+    /^\/api\/cleanup\/proposals\/([^/]+)\/(approve|reject|defer|execute)$/u,
+  );
+  if (request.method === "POST" && cleanupActionMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin cleanup actions are not allowed.");
+      const cleanupProposalId = assertCleanupProposalId(
+        decodeApiId(cleanupActionMatch[1], "cleanup_proposal_id"),
+      );
+      const action = cleanupActionMatch[2];
+      const input = await parseBody(request);
+      let result;
+      if (action === "approve") {
+        result = await approveCleanupProposal(cleanupProposalId, {
+          confirm: input.confirm === true,
+          approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
+        });
+      } else if (action === "execute") {
+        result = await executeCleanupProposal(cleanupProposalId, {
+          confirm: input.confirm === true,
+          approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
+        });
+      } else if (action === "reject") {
+        result = await rejectCleanupProposal(cleanupProposalId, {
+          reason: input.reason ?? "",
+        });
+      } else {
+        result = await deferCleanupProposal(cleanupProposalId, {
+          reason: input.reason ?? "",
+        });
+      }
+      sendJson(response, 200, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const cleanupDetailMatch = rawPathname.match(/^\/api\/cleanup\/proposals\/([^/]+)$/u);
+  if (request.method === "GET" && cleanupDetailMatch) {
+    try {
+      const cleanupProposalId = assertCleanupProposalId(
+        decodeApiId(cleanupDetailMatch[1], "cleanup_proposal_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        proposal: await getCleanupProposal(cleanupProposalId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/approval-queue/scan") {
     try {
       assertSameOrigin(request, "Cross-origin approval queue scans are not allowed.");
@@ -1892,6 +2001,7 @@ async function main() {
   await ensureWritingWorkflowDirectories();
   await ensureSettlementWorkflowDirectories();
   await ensureApprovalQueueDirectories();
+  await ensureCleanupDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {
