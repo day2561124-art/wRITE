@@ -182,6 +182,8 @@ const expectedTools = [
   "request_writing_candidate_adoption",
   "get_writing_candidate_adoption_request",
   "list_writing_candidate_adoption_requests",
+  "get_adopted_writing_detail",
+  "list_adopted_writings",
 ];
 
 const readOnlyTools = new Set([
@@ -202,6 +204,8 @@ const readOnlyTools = new Set([
   "list_proof_reports",
   "get_writing_candidate_adoption_request",
   "list_writing_candidate_adoption_requests",
+  "get_adopted_writing_detail",
+  "list_adopted_writings",
 ]);
 
 const backupRequiredTools = new Set([
@@ -536,6 +540,14 @@ const schemaTypeFixtures = [
 
 const integerMaximumFixtures = [
   {
+    label: "list_adopted_writings limit over maximum",
+    name: "list_adopted_writings",
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: { limit: 101 },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  },
+  {
     label: "list_writing_candidate_adoption_requests limit over maximum",
     name: "list_writing_candidate_adoption_requests",
     field: "limit",
@@ -815,6 +827,13 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "get_adopted_writing_detail missing adoptedChapterId",
+    name: "get_adopted_writing_detail",
+    field: "adoptedChapterId",
+    arguments: {},
+    expectedMessage: "adoptedChapterId is required.",
+  },
   ...[
     ["request_writing_candidate_adoption", "candidateId", {}],
     ["get_writing_candidate_adoption_request", "requestId", {}],
@@ -1250,6 +1269,7 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
   }],
   ["list_writing_candidate_adoption_requests", { limit: 20 }],
+  ["list_adopted_writings", { limit: 20 }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -1268,6 +1288,7 @@ const expectedIntegerMaximumMetadata = new Map([
   ["list_candidate_proofing_contexts:limit", 100],
   ["list_proof_reports:limit", 100],
   ["list_writing_candidate_adoption_requests:limit", 100],
+  ["list_adopted_writings:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {

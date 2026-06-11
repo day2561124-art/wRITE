@@ -44,6 +44,10 @@ import {
   list_writing_candidate_adoption_requests,
   request_writing_candidate_adoption,
 } from "./mcp-candidate-adoption-request-tools.mjs";
+import {
+  get_adopted_writing_detail,
+  list_adopted_writings,
+} from "./mcp-adopted-writing-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1999,6 +2003,27 @@ const toolDefinitions = [
     }),
     handler: async (args) => jsonContent(await list_writing_candidate_adoption_requests(args)),
   },
+  {
+    name: "get_adopted_writing_detail",
+    description: "Read one confirmed adopted writing record and its chapter content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      adoptedChapterId: { type: "string" },
+    }, ["adoptedChapterId"]),
+    handler: async (args) => jsonContent(await get_adopted_writing_detail(args)),
+  },
+  {
+    name: "list_adopted_writings",
+    description: "List confirmed adopted writing summaries without creating settlement state.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_adopted_writings(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -2039,6 +2064,8 @@ const permissionSources = {
   request_writing_candidate_adoption: ["writing_candidate_records", "candidate_proof_report_records", "user_input"],
   get_writing_candidate_adoption_request: ["approval_queue"],
   list_writing_candidate_adoption_requests: ["approval_queue"],
+  get_adopted_writing_detail: ["adopted_writing_records"],
+  list_adopted_writings: ["adopted_writing_records"],
 };
 
 const backupRequiredTools = new Set([

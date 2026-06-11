@@ -28,6 +28,7 @@ import {
   getCandidateDraft,
   listProofReports,
 } from "./writing-workflow-service.mjs";
+import { adoptWritingCandidateAfterApproval } from "./writing-candidate-adoption-service.mjs";
 
 export const approvalItemIdPattern =
   /^approval_item_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -88,6 +89,10 @@ function rootsFor(options = {}) {
 function targetOptions(options = {}) {
   return {
     ...(options.writingWorkflow ? { writingWorkflow: options.writingWorkflow } : {}),
+    ...(options.writingCandidates ? { writingCandidates: options.writingCandidates } : {}),
+    ...(options.proofReports ? { proofReports: options.proofReports } : {}),
+    ...(options.adoptedWritings ? { adoptedWritings: options.adoptedWritings } : {}),
+    ...(options.approvalQueue ? { approvalQueue: options.approvalQueue } : {}),
     ...(options.activeEnginePath ? { activeEnginePath: options.activeEnginePath } : {}),
     ...(options.pendingEngineCandidates
       ? { pendingEngineCandidates: options.pendingEngineCandidates }
@@ -634,6 +639,14 @@ export async function confirmApprovalItem(
         adoptedBy: approvedBy,
         note: "Approved through Phase 5A approval queue.",
       }, targetOptions(options));
+    } else if (item.action_type === "adopt_writing_candidate") {
+      result = await adoptWritingCandidateAfterApproval({
+        approvalItemId,
+        candidateId: item.target_id,
+        proofReportId: item.proof_report_id || item.links?.proof_report_id,
+        confirmedBy: approvedBy,
+        reason: item.reason,
+      }, { ...targetOptions(options), approvalConfirmed: true });
     } else if (item.action_type === "approve_cleanup_proposal") {
       assertCleanupProposalId(item.target_id);
       result = await approveCleanupProposal(item.target_id, {
@@ -658,6 +671,11 @@ export async function confirmApprovalItem(
       confirmed_at: now,
       resolved_at: now,
       reason: null,
+      execution_result: result?.adopted_chapter_id ? {
+        adopted_chapter_id: result.adopted_chapter_id,
+        candidate_id: result.candidate_id,
+        proof_report_id: result.proof_report_id,
+      } : null,
     };
     const logs = ["approval_confirmed", "approval_resolved"].map((event) => ({
       event,
