@@ -32,6 +32,12 @@ export const projectPaths = {
   activationLog: path.join(projectRoot, "data", "canon_db", "activation_logs", "activation_log.jsonl"),
   rollback: path.join(projectRoot, "data", "canon_db", "rollback"),
   rollbackIndex: path.join(projectRoot, "data", "canon_db", "rollback", "rollback_index.json"),
+  writingWorkflow: path.join(projectRoot, "data", "writing_workflow"),
+  candidateDrafts: path.join(projectRoot, "data", "writing_workflow", "candidate_drafts"),
+  workflowProofReports: path.join(projectRoot, "data", "writing_workflow", "proof_reports"),
+  adoptedChapters: path.join(projectRoot, "data", "writing_workflow", "adopted_chapters"),
+  contextBundles: path.join(projectRoot, "data", "writing_workflow", "context_bundles"),
+  workflowLogs: path.join(projectRoot, "data", "writing_workflow", "logs"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 

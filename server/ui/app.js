@@ -6,6 +6,15 @@ const state = {
   activeVisualId: "",
   activeNeuralRunId: "",
   activeCandidateId: "",
+  activeWorkflowDraftId: "",
+  workflow: {
+    drafts: [],
+    proofReports: [],
+    adoptedChapters: [],
+    draftDetail: null,
+    proofDetail: null,
+    context: null,
+  },
   canon: {
     activeEngine: null,
     candidates: [],
@@ -191,6 +200,9 @@ function switchView(viewName) {
   }
   if (viewName === "settlement") {
     refreshCanonSettlementState().catch((error) => toast(error.message, true));
+  }
+  if (["compose", "review"].includes(viewName)) {
+    refreshWorkflowState().catch((error) => toast(error.message, true));
   }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -793,20 +805,142 @@ async function handleRollbackSnapshot(snapshotId) {
 }
 
 function renderDraftSelect() {
-  const drafts = state.data?.drafts ?? [];
+  const drafts = state.workflow.drafts ?? [];
   const select = $("#draft-select");
   const current = select.value;
   select.innerHTML = [
     '<option value="">選擇候選稿</option>',
     ...drafts.map((draft) => `
-      <option value="${escapeHtml(draft.path)}" data-id="${escapeHtml(draft.draft_id)}" data-chapter="${escapeHtml(draft.chapter ?? "")}">
-        ${escapeHtml(draft.title ?? draft.path)}
+      <option value="${escapeHtml(draft.draft_id)}" data-id="${escapeHtml(draft.draft_id)}" data-chapter="${escapeHtml(draft.source_chapter ?? "")}">
+        ${escapeHtml(draft.source_chapter || draft.draft_id)} · ${escapeHtml(candidateStatusLabel(draft.status))}
       </option>
     `),
   ].join("");
   if ([...select.options].some((option) => option.value === current)) {
     select.value = current;
   }
+}
+
+function workflowStatusClass(status) {
+  if (["rejected", "blocked"].includes(status)) return "candidate-status-blocked";
+  if (status === "archived") return "candidate-status-rejected";
+  if (status === "accepted_pending_settlement") return "candidate-status-activated";
+  return "candidate-status-candidate";
+}
+
+function neuralUsageHtml(usage) {
+  if (!usage?.traces?.length) {
+    return '<div class="empty-state">未使用 / 缺少 trace</div>';
+  }
+  return usage.traces.map((trace) => `
+    <article class="workflow-neural-item">
+      <strong>${escapeHtml(trace.module_name)}</strong>
+      <span>${escapeHtml(trace.model_name)} · ${escapeHtml(trace.model_version)}</span>
+      <small>${escapeHtml(trace.trace_id)} · ${escapeHtml(trace.status)} · ${escapeHtml(trace.latency_ms)} ms</small>
+      <small>${escapeHtml((trace.warnings ?? []).join("；") || trace.error_message || "no warnings")}</small>
+    </article>
+  `).join("");
+}
+
+function renderWorkflowDraftList() {
+  const drafts = state.workflow.drafts ?? [];
+  $("#workflow-draft-list").innerHTML = drafts.length
+    ? drafts.map((draft) => `
+      <button class="workflow-draft-item${draft.draft_id === state.activeWorkflowDraftId ? " is-active" : ""}" type="button" data-workflow-draft-id="${escapeHtml(draft.draft_id)}">
+        <span>
+          <strong>${escapeHtml(draft.source_chapter || "未指定章節")}</strong>
+          <small>${escapeHtml(draft.draft_id)}</small>
+        </span>
+        <span>
+          <span class="candidate-status ${workflowStatusClass(draft.status)}">${escapeHtml(draft.status)}</span>
+          <small>${escapeHtml((draft.draft_hash ?? "").slice(0, 12))}</small>
+        </span>
+      </button>
+    `).join("")
+    : '<div class="empty-state">尚無 candidate_draft</div>';
+}
+
+function renderProofSummary(detail) {
+  const summary = detail?.issue_summary;
+  const values = [
+    summary?.p0_count ?? 0,
+    summary?.p1_count ?? 0,
+    summary?.p2_count ?? 0,
+    summary?.p3_count ?? 0,
+    summary?.p4_count ?? 0,
+  ];
+  $$("#proof-level-summary span").forEach((item, index) => {
+    item.querySelector("strong").textContent = values[index];
+    item.classList.toggle("is-severe", index < 2 && values[index] > 0);
+  });
+  $("#proof-report-detail").innerHTML = summary
+    ? `
+      <div class="${summary.can_adopt_recommendation ? "workflow-adopt-ok" : "blocked-panel"}">
+        ${summary.can_adopt_recommendation ? "驗稿建議可採用" : "含 P0 / P1，人工採用前必須再次確認"}
+      </div>
+      ${(summary.issues ?? []).map((issue) => `
+        <article class="proof-issue">
+          <strong>${escapeHtml(issue.level)} · ${escapeHtml(issue.title)}</strong>
+          <span>${escapeHtml(issue.description)}</span>
+          <small>${escapeHtml(issue.suggested_action)}</small>
+        </article>
+      `).join("")}
+    `
+    : '<div class="empty-state">尚無 proof_report</div>';
+}
+
+function renderWorkflow() {
+  renderWorkflowDraftList();
+  renderDraftSelect();
+  const draft = state.workflow.draftDetail;
+  $("#review-draft-neural").innerHTML = draft ? neuralUsageHtml(draft.neural_usage) : "";
+  renderProofSummary(state.workflow.proofDetail);
+  const actionable = draft && !["rejected", "archived", "blocked", "accepted_pending_settlement"].includes(draft.status.status);
+  $("#workflow-adopt-button").disabled = !actionable;
+  $("#workflow-reject-button").disabled = !actionable;
+  $("#workflow-archive-button").disabled = !actionable;
+}
+
+async function loadWorkflowDraft(draftId) {
+  if (!draftId) {
+    state.activeWorkflowDraftId = "";
+    state.workflow.draftDetail = null;
+    state.workflow.proofDetail = null;
+    state.currentDraftText = "";
+    $("#draft-preview").textContent = "尚未選擇候選稿。";
+    renderWorkflow();
+    return;
+  }
+  const payload = await api(`/api/workflow/candidate-drafts/${encodeURIComponent(draftId)}`);
+  state.activeWorkflowDraftId = draftId;
+  state.workflow.draftDetail = payload.draft;
+  state.currentDraftText = payload.draft.draft_text;
+  $("#draft-preview").textContent = payload.draft.draft_text;
+  const proofId = payload.draft.status.proof_report_id;
+  if (proofId) {
+    const proofPayload = await api(`/api/workflow/proof-reports/${encodeURIComponent(proofId)}`);
+    state.workflow.proofDetail = proofPayload.proof_report;
+  } else {
+    state.workflow.proofDetail = null;
+  }
+  renderWorkflow();
+}
+
+async function refreshWorkflowState(showToast = false) {
+  const [draftsPayload, proofsPayload, adoptedPayload] = await Promise.all([
+    api("/api/workflow/candidate-drafts"),
+    api("/api/workflow/proof-reports"),
+    api("/api/workflow/adopted-chapters"),
+  ]);
+  state.workflow.drafts = draftsPayload.drafts ?? [];
+  state.workflow.proofReports = proofsPayload.proof_reports ?? [];
+  state.workflow.adoptedChapters = adoptedPayload.adopted_chapters ?? [];
+  if (!state.workflow.drafts.some((draft) => draft.draft_id === state.activeWorkflowDraftId)) {
+    state.activeWorkflowDraftId = state.workflow.drafts[0]?.draft_id ?? "";
+  }
+  renderWorkflow();
+  if (state.activeWorkflowDraftId) await loadWorkflowDraft(state.activeWorkflowDraftId);
+  if (showToast) toast("正文工作流已重新整理");
 }
 
 function renderActivityTable() {
@@ -850,7 +984,7 @@ function renderAll() {
   renderVisuals();
   renderNeuralStatus();
   renderSettlementPanel();
-  renderDraftSelect();
+  renderWorkflow();
   renderActivityTable();
 }
 
@@ -936,59 +1070,118 @@ async function handleSearchOnly() {
   }
 }
 
+function workflowRequiredModules() {
+  return $("#workflow-required-modules").value
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function renderWorkflowContext(result) {
+  state.workflow.context = result;
+  const bundle = result?.context_bundle;
+  const manifest = result?.source_manifest;
+  $("#workflow-context-status").textContent = bundle
+    ? `${bundle.status} · ${bundle.context_bundle_id}`
+    : "尚未建立 context bundle";
+  $("#workflow-context-facts").innerHTML = manifest
+    ? manifest.sources.map((source) => `
+      <span class="${source.exists ? "is-ready" : "is-missing"}">
+        ${escapeHtml(source.label)} · ${source.exists ? "已讀取" : "缺失"}
+      </span>
+    `).join("")
+    : "";
+  if (bundle?.context_bundle_id) {
+    $("#draft-context-bundle-id").value = bundle.context_bundle_id;
+  }
+}
+
+async function handleWorkflowContext() {
+  try {
+    const payload = await api("/api/workflow/context-bundles/draft", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChapter: $("#workflow-source-chapter").value.trim(),
+        task: $("#workflow-task-text").value,
+      }),
+    });
+    renderWorkflowContext(payload.result);
+    toast("Draft context bundle 已建立");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleWorkflowTask(event) {
+  event.preventDefault();
+  try {
+    const modules = workflowRequiredModules();
+    const payload = await api("/api/workflow/draft-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChapter: $("#workflow-source-chapter").value.trim(),
+        task: $("#workflow-task-text").value,
+        requiresNeuralModules: modules.length > 0,
+        requiredNeuralModules: modules,
+      }),
+    });
+    renderWorkflowContext(payload.result);
+    $("#draft-run-id").value = payload.result.run.run_id;
+    $("#draft-neural-path").value = `data/agent_runs/${payload.result.run.run_id}/neural_modules_used.json`;
+    $("#draft-chapter").value = $("#workflow-source-chapter").value;
+    toast("正文任務與 agent run 已建立");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 async function handleSaveDraft(event) {
   event.preventDefault();
-  const dryRun = $("#draft-dry-run").checked;
-  if (!await ensureWriteConfirmed(dryRun, "保存候選稿")) return;
   try {
-    await runAction("saveDraft", {
-      title: $("#draft-title").value,
-      chapter: $("#draft-chapter").value,
-      text: $("#draft-text").value,
-      dryRun,
+    const payload = await api("/api/workflow/candidate-drafts", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChapter: $("#draft-chapter").value,
+        note: $("#draft-note").value,
+        draftText: $("#draft-text").value,
+        runId: $("#draft-run-id").value.trim(),
+        contextBundleId: $("#draft-context-bundle-id").value.trim(),
+        neuralModulesUsedPath: $("#draft-neural-path").value.trim(),
+      }),
     });
-    await refreshState();
-    toast(dryRun ? "候選稿預覽完成" : "候選稿已保存");
+    state.activeWorkflowDraftId = payload.draft.metadata.draft_id;
+    $("#draft-text").value = "";
+    await refreshWorkflowState();
+    toast("正文候選已保存，尚未成為正史");
   } catch (error) {
     toast(error.message, true);
   }
 }
 
 async function handleDraftSelect() {
-  const projectPath = $("#draft-select").value;
-  if (!projectPath) {
-    state.currentDraftText = "";
-    $("#draft-preview").textContent = "尚未選擇候選稿。";
-    return;
-  }
   try {
-    state.currentDraftText = await loadFile(projectPath);
-    $("#draft-preview").textContent = state.currentDraftText;
-    const option = $("#draft-select").selectedOptions[0];
-    $("#proof-title").value = `${option.textContent.trim()}驗稿`;
+    await loadWorkflowDraft($("#draft-select").value);
   } catch (error) {
     toast(error.message, true);
   }
 }
 
 async function prepareProof() {
-  const selected = $("#draft-select").selectedOptions[0];
-  if (!selected?.value) {
+  const draftId = $("#draft-select").value;
+  if (!draftId) {
     toast("請先選擇候選稿", true);
     return;
   }
   try {
-    const title = selected.textContent.trim();
-    await runAction("pipeline", {
-      query: `${selected.dataset.chapter ?? ""} 正式驗稿 正史 後座`,
-      task: `正式採用前驗稿：檢查候選稿「${title}」是否符合 active_engine、active_writing_card、active_proofing_card 與 active_longline。`,
-      mode: "proofread",
-      top: 16,
+    const payload = await api(`/api/workflow/candidate-drafts/${encodeURIComponent(draftId)}/send-to-proofing`, {
+      method: "POST",
+      body: JSON.stringify({}),
     });
-    await refreshState();
-    await openComposeResult("data/outputs/task_prompt.md");
-    switchView("compose");
-    toast("驗稿提示已準備");
+    $("#proof-run-id").value = payload.result.run.run_id;
+    $("#proof-context-bundle-id").value = payload.result.context_bundle.context_bundle_id;
+    $("#proof-neural-path").value = `data/agent_runs/${payload.result.run.run_id}/neural_modules_used.json`;
+    await refreshWorkflowState();
+    toast("驗稿 context bundle 與 agent run 已建立");
   } catch (error) {
     toast(error.message, true);
   }
@@ -996,21 +1189,54 @@ async function prepareProof() {
 
 async function handleSaveProof(event) {
   event.preventDefault();
-  const dryRun = $("#proof-dry-run").checked;
-  if (!await ensureWriteConfirmed(dryRun, "保存驗稿報告")) return;
-  const selected = $("#draft-select").selectedOptions[0];
+  const draftId = $("#draft-select").value;
+  if (!draftId) {
+    toast("請先選擇 candidate_draft", true);
+    return;
+  }
   try {
-    await runAction("saveProof", {
-      title: $("#proof-title").value,
-      chapter: selected?.dataset.chapter ?? "",
-      draftId: selected?.dataset.id ?? "",
-      verdict: $("#proof-verdict").value,
-      severity: $("#proof-severity").value,
-      text: $("#proof-text").value,
-      dryRun,
+    const payload = await api("/api/workflow/proof-reports", {
+      method: "POST",
+      body: JSON.stringify({
+        draftId,
+        proofText: $("#proof-text").value,
+        runId: $("#proof-run-id").value.trim(),
+        contextBundleId: $("#proof-context-bundle-id").value.trim(),
+        neuralModulesUsedPath: $("#proof-neural-path").value.trim(),
+      }),
     });
-    await refreshState();
-    toast(dryRun ? "驗稿報告預覽完成" : "驗稿報告已保存");
+    state.workflow.proofDetail = payload.proof_report;
+    await refreshWorkflowState();
+    toast("proof_report 已保存");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleWorkflowDraftAction(action) {
+  const draftId = state.activeWorkflowDraftId;
+  if (!draftId) return;
+  const severe = (state.workflow.proofDetail?.issue_summary?.p0_count ?? 0) > 0
+    || (state.workflow.proofDetail?.issue_summary?.p1_count ?? 0) > 0;
+  let body = {};
+  if (action === "adopt") {
+    const message = severe
+      ? "驗稿含 P0 / P1。仍要人工採用並標記 accepted_pending_settlement？"
+      : "採用只會建立 adopted_chapter，不會更新 active_engine。確定採用？";
+    if (!window.confirm(message)) return;
+    body = { confirm: true, adoptedBy: "local_user" };
+  } else {
+    const label = action === "reject" ? "退稿" : "封存";
+    if (!window.confirm(`確定${label}這份 candidate_draft？`)) return;
+    body = { reason: window.prompt(`${label}原因（可留空）`, "") ?? "" };
+  }
+  try {
+    await api(`/api/workflow/candidate-drafts/${encodeURIComponent(draftId)}/${action}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    await refreshWorkflowState();
+    toast(action === "adopt" ? "正文已採用，等待 Phase 4B 結算" : "候選稿狀態已更新");
   } catch (error) {
     toast(error.message, true);
   }
@@ -1163,12 +1389,20 @@ function bindEvents() {
   });
 
   $("#pipeline-form").addEventListener("submit", handlePipeline);
+  $("#workflow-task-form").addEventListener("submit", handleWorkflowTask);
+  $("#workflow-rebuild-context-button").addEventListener("click", handleWorkflowContext);
+  $("#refresh-workflow-button").addEventListener("click", () => (
+    refreshWorkflowState(true).catch((error) => toast(error.message, true))
+  ));
   $("#search-only-button").addEventListener("click", handleSearchOnly);
   $("#draft-form").addEventListener("submit", handleSaveDraft);
   $("#draft-select").addEventListener("change", handleDraftSelect);
   $("#prepare-proof-button").addEventListener("click", prepareProof);
   $("#copy-draft-button").addEventListener("click", () => copyText(state.currentDraftText, "候選稿"));
   $("#proof-form").addEventListener("submit", handleSaveProof);
+  $("#workflow-adopt-button").addEventListener("click", () => handleWorkflowDraftAction("adopt"));
+  $("#workflow-reject-button").addEventListener("click", () => handleWorkflowDraftAction("reject"));
+  $("#workflow-archive-button").addEventListener("click", () => handleWorkflowDraftAction("archive"));
   $("#feedback-form").addEventListener("submit", handleFeedback);
   $("#visual-upload-form").addEventListener("submit", handleVisualUpload);
   $("#settlement-import-form").addEventListener("submit", handleSettlementImport);
@@ -1221,6 +1455,16 @@ function bindEvents() {
     const candidateItem = event.target.closest("[data-candidate-id]");
     if (candidateItem) {
       loadCandidateDetail(candidateItem.dataset.candidateId).catch((error) => toast(error.message, true));
+      return;
+    }
+    const workflowDraft = event.target.closest("[data-workflow-draft-id]");
+    if (workflowDraft) {
+      loadWorkflowDraft(workflowDraft.dataset.workflowDraftId)
+        .then(() => {
+          $("#draft-select").value = workflowDraft.dataset.workflowDraftId;
+          switchView("review");
+        })
+        .catch((error) => toast(error.message, true));
       return;
     }
     const rollbackButton = event.target.closest("[data-rollback-snapshot]");

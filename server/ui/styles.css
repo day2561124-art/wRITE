@@ -1786,6 +1786,166 @@ dialog::backdrop {
   flex-direction: column;
 }
 
+.workflow-task-panel,
+.workflow-list-panel,
+.proof-summary-panel {
+  margin-top: 16px;
+}
+
+.workflow-status {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: #f7f9fb;
+  font-family: var(--mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.workflow-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.workflow-facts span {
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  font-size: 10px;
+}
+
+.workflow-facts .is-ready {
+  color: #28704a;
+  background: #effaf4;
+}
+
+.workflow-facts .is-missing {
+  color: #9a2929;
+  background: #fff2f2;
+}
+
+.workflow-draft-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.workflow-draft-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflow-draft-item:hover,
+.workflow-draft-item.is-active {
+  border-color: #4d769b;
+  background: #f3f7fa;
+}
+
+.workflow-draft-item > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-draft-item > span:last-child {
+  justify-items: end;
+}
+
+.workflow-draft-item small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.workflow-neural-summary {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.workflow-neural-item {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.workflow-neural-item span,
+.workflow-neural-item small {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.proof-level-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.proof-level-summary span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px;
+  border: 1px solid var(--line);
+  background: #f7f9fb;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.proof-level-summary span.is-severe {
+  border-color: #c66d6d;
+  color: #8f2525;
+  background: #fff2f2;
+}
+
+.proof-report-detail {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.workflow-adopt-ok {
+  padding: 10px 12px;
+  border-left: 3px solid #28704a;
+  color: #245f42;
+  background: #effaf4;
+}
+
+.proof-issue {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.proof-issue span,
+.proof-issue small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.adoption-boundary {
+  margin-top: 14px;
+  padding: 11px 13px;
+  font-size: 12px;
+}
+
 @media (max-width: 1120px) {
   .source-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2004,6 +2164,10 @@ dialog::backdrop {
 
   .candidate-facts {
     grid-template-columns: 1fr;
+  }
+
+  .proof-level-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .neural-run-facts,

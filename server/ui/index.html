@@ -189,35 +189,85 @@
             </section>
           </div>
 
+          <form id="workflow-task-form" class="panel form-panel workflow-task-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">DRAFT WORKFLOW</p>
+                <h2>建立正文任務</h2>
+              </div>
+              <span id="workflow-context-status" class="workflow-status">尚未建立 context bundle</span>
+            </div>
+            <div class="form-row">
+              <label class="field">
+                <span>來源章節</span>
+                <input id="workflow-source-chapter" type="text" maxlength="500" placeholder="第二十章｜章名可空">
+              </label>
+              <label class="field">
+                <span>必要 neural modules</span>
+                <input id="workflow-required-modules" type="text" maxlength="500" placeholder="scene_planner, character_simulator">
+              </label>
+            </div>
+            <label class="field">
+              <span>正文任務</span>
+              <textarea id="workflow-task-text" rows="5" maxlength="100000">建立下一章正文候選，不升格正史。</textarea>
+            </label>
+            <div class="form-actions">
+              <button id="workflow-rebuild-context-button" class="button secondary" type="button">重建上下文</button>
+              <button class="button primary" type="submit">建立正文任務</button>
+            </div>
+            <div id="workflow-context-facts" class="workflow-facts"></div>
+          </form>
+
           <form id="draft-form" class="panel form-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">CANDIDATE</p>
-                <h2>保存候選稿</h2>
+                <h2>保存正文候選</h2>
               </div>
-              <label class="toggle">
-                <input id="draft-dry-run" type="checkbox" checked>
-                <span>僅預覽</span>
+              <span class="candidate-status candidate-status-candidate">非正史</span>
+            </div>
+            <div class="form-row">
+              <label class="field">
+                <span>來源章節</span>
+                <input id="draft-chapter" type="text" maxlength="500" placeholder="第二十章">
+              </label>
+              <label class="field">
+                <span>備註</span>
+                <input id="draft-note" type="text" maxlength="5000" placeholder="選填">
               </label>
             </div>
             <div class="form-row">
               <label class="field">
-                <span>標題</span>
-                <input id="draft-title" type="text" maxlength="500" placeholder="第二十章候選稿 A" required>
+                <span>run_id</span>
+                <input id="draft-run-id" type="text" maxlength="100" placeholder="建立正文任務後自動帶入">
               </label>
               <label class="field">
-                <span>章節</span>
-                <input id="draft-chapter" type="text" maxlength="500" placeholder="第二十章">
+                <span>context_bundle_id</span>
+                <input id="draft-context-bundle-id" type="text" maxlength="100" placeholder="建立 context 後自動帶入">
               </label>
             </div>
+            <label class="field">
+              <span>neural_modules_used_path</span>
+              <input id="draft-neural-path" type="text" maxlength="500" placeholder="有 run_id 時可自動推導">
+            </label>
             <label class="field">
               <span>正文</span>
               <textarea id="draft-text" rows="14" maxlength="1000000" required></textarea>
             </label>
             <div class="form-actions">
-              <button class="button primary" type="submit">保存候選稿</button>
+              <button class="button primary" type="submit">保存正文候選</button>
             </div>
           </form>
+
+          <section class="panel workflow-list-panel">
+            <div class="panel-heading">
+              <h2>Candidate Drafts</h2>
+              <button id="refresh-workflow-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">↻</button>
+            </div>
+            <div id="workflow-draft-list" class="workflow-draft-list">
+              <div class="empty-state">尚無 candidate_draft</div>
+            </div>
+          </section>
         </section>
 
         <section class="view" data-view-panel="review">
@@ -234,9 +284,10 @@
               </div>
               <pre id="draft-preview" class="document-viewer review-document">尚未選擇候選稿。</pre>
               <div class="form-actions">
-                <button id="prepare-proof-button" class="button primary" type="button">準備驗稿提示</button>
+                <button id="prepare-proof-button" class="button primary" type="button">建立驗稿 Context</button>
                 <button id="copy-draft-button" class="button secondary" type="button">複製候選稿</button>
               </div>
+              <div id="review-draft-neural" class="workflow-neural-summary"></div>
             </section>
 
             <form id="proof-form" class="form-surface">
@@ -245,36 +296,22 @@
                   <p class="eyebrow">PROOF REPORT</p>
                   <h2>驗稿結果</h2>
                 </div>
-                <label class="toggle">
-                  <input id="proof-dry-run" type="checkbox" checked>
-                  <span>僅預覽</span>
+                <span class="candidate-status candidate-status-candidate">採用前依據</span>
+              </div>
+              <div class="form-row">
+                <label class="field">
+                  <span>run_id</span>
+                  <input id="proof-run-id" type="text" maxlength="100">
+                </label>
+                <label class="field">
+                  <span>context_bundle_id</span>
+                  <input id="proof-context-bundle-id" type="text" maxlength="100">
                 </label>
               </div>
               <label class="field">
-                <span>標題</span>
-                <input id="proof-title" type="text" maxlength="500" placeholder="第二十章候選稿 A 驗稿" required>
+                <span>neural_modules_used_path</span>
+                <input id="proof-neural-path" type="text" maxlength="500">
               </label>
-              <div class="form-row">
-                <label class="field">
-                  <span>判定</span>
-                  <select id="proof-verdict">
-                    <option value="pass">通過</option>
-                    <option value="needs_rewrite" selected>需要重寫</option>
-                    <option value="reject">退稿</option>
-                    <option value="stop">停止</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>嚴重度</span>
-                  <select id="proof-severity">
-                    <option value="P0">P0</option>
-                    <option value="P1">P1</option>
-                    <option value="P2" selected>P2</option>
-                    <option value="P3">P3</option>
-                    <option value="P4">P4</option>
-                  </select>
-                </label>
-              </div>
               <label class="field">
                 <span>驗稿內容</span>
                 <textarea id="proof-text" rows="16" maxlength="1000000" required></textarea>
@@ -284,6 +321,28 @@
               </div>
             </form>
           </div>
+
+          <section class="panel proof-summary-panel">
+            <div class="panel-heading">
+              <h2>Proof Report Summary</h2>
+            </div>
+            <div id="proof-level-summary" class="proof-level-summary">
+              <span>P0 <strong>0</strong></span>
+              <span>P1 <strong>0</strong></span>
+              <span>P2 <strong>0</strong></span>
+              <span>P3 <strong>0</strong></span>
+              <span>P4 <strong>0</strong></span>
+            </div>
+            <div id="proof-report-detail" class="proof-report-detail"></div>
+            <div class="warning-panel adoption-boundary">
+              採用只會建立 adopted_chapter，不會更新 active_engine；仍需 Phase 4B 章節結算。
+            </div>
+            <div class="form-actions">
+              <button id="workflow-adopt-button" class="button primary" type="button" disabled>採用正文</button>
+              <button id="workflow-reject-button" class="button danger" type="button" disabled>退稿</button>
+              <button id="workflow-archive-button" class="button secondary" type="button" disabled>封存</button>
+            </div>
+          </section>
         </section>
 
         <section class="view" data-view-panel="library">

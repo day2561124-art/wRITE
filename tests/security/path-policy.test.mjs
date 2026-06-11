@@ -18,6 +18,16 @@ import {
   isSafeCandidateId,
   isSafeSnapshotId,
 } from "../../server/src/engine-candidate-service.mjs";
+import {
+  assertAdoptedChapterId,
+  assertContextBundleId,
+  assertDraftId,
+  assertProofId,
+  isSafeAdoptedChapterId,
+  isSafeContextBundleId,
+  isSafeDraftId,
+  isSafeProofId,
+} from "../../server/src/writing-workflow-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -213,6 +223,40 @@ async function main() {
   assert(projectPaths.engineSnapshots.startsWith(projectPaths.canonDb), "Snapshot path escaped canon_db.");
   assert(projectPaths.engineArchive.startsWith(projectPaths.canonDb), "Archive path escaped canon_db.");
   assert(projectPaths.rollbackIndex.startsWith(projectPaths.rollback), "Rollback index escaped rollback root.");
+  const workflowIdChecks = [
+    ["draft", isSafeDraftId, assertDraftId],
+    ["proof", isSafeProofId, assertProofId],
+    ["adopted chapter", isSafeAdoptedChapterId, assertAdoptedChapterId],
+    ["context bundle", isSafeContextBundleId, assertContextBundleId],
+  ];
+  for (const [label, isSafe, assertSafe] of workflowIdChecks) {
+    for (const unsafeId of ["../active_engine.md", "%2e%2e%2factive_engine.md", `${label}_../../x`]) {
+      assert(!isSafe(unsafeId), `Unsafe ${label} id was accepted: ${unsafeId}`);
+      assert(
+        (() => {
+          try {
+            assertSafe(unsafeId);
+            return false;
+          } catch {
+            return true;
+          }
+        })(),
+        `${label} traversal id was not rejected: ${unsafeId}`,
+      );
+    }
+  }
+  assert(
+    projectPaths.candidateDrafts.startsWith(projectPaths.writingWorkflow),
+    "Candidate drafts path escaped writing_workflow.",
+  );
+  assert(
+    projectPaths.workflowProofReports.startsWith(projectPaths.writingWorkflow),
+    "Workflow proof reports path escaped writing_workflow.",
+  );
+  assert(
+    projectPaths.adoptedChapters.startsWith(projectPaths.writingWorkflow),
+    "Adopted chapters path escaped writing_workflow.",
+  );
 
   const activeBefore = createHash("sha256").update(await readFile(activeEnginePath)).digest("hex");
   const auditBefore = await optionalBuffer(auditPath);

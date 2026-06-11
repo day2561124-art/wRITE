@@ -21,6 +21,11 @@ const engineSnapshotsDir = path.join(rootDir, "data", "canon_db", "engine_snapsh
 const engineArchiveDir = path.join(rootDir, "data", "canon_db", "archive");
 const activationLogPath = path.join(rootDir, "data", "canon_db", "activation_logs", "activation_log.jsonl");
 const rollbackIndexPath = path.join(rootDir, "data", "canon_db", "rollback", "rollback_index.json");
+const writingWorkflowDir = path.join(rootDir, "data", "writing_workflow");
+const workflowDraftsDir = path.join(writingWorkflowDir, "candidate_drafts");
+const workflowProofsDir = path.join(writingWorkflowDir, "proof_reports");
+const workflowAdoptedDir = path.join(writingWorkflowDir, "adopted_chapters");
+const workflowContextsDir = path.join(writingWorkflowDir, "context_bundles");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -126,6 +131,10 @@ async function main() {
   const archiveBefore = new Set(await readOptionalDirectory(engineArchiveDir));
   const activationLogBefore = await readOptionalBuffer(activationLogPath);
   const rollbackIndexBefore = await readOptionalBuffer(rollbackIndexPath);
+  const workflowDraftsBefore = new Set(await readOptionalDirectory(workflowDraftsDir));
+  const workflowProofsBefore = new Set(await readOptionalDirectory(workflowProofsDir));
+  const workflowAdoptedBefore = new Set(await readOptionalDirectory(workflowAdoptedDir));
+  const workflowContextsBefore = new Set(await readOptionalDirectory(workflowContextsDir));
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
@@ -160,6 +169,10 @@ async function main() {
     assert(indexText.includes('data-view-panel="settlement"'), "UI index is missing the settlement workspace.");
     assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
     assert(indexText.includes('id="settlement-import-form"'), "UI index is missing the settlement import form.");
+    assert(indexText.includes('id="workflow-task-form"'), "UI index is missing the draft workflow task form.");
+    assert(indexText.includes('id="workflow-draft-list"'), "UI index is missing candidate_draft management.");
+    assert(indexText.includes('id="proof-level-summary"'), "UI index is missing P0-P4 proof summary.");
+    assert(indexText.includes('id="workflow-adopt-button"'), "UI index is missing draft adoption.");
     assert(indexText.includes('id="candidate-activate-button"'), "UI index is missing the activation button.");
     assert(indexText.includes('id="candidate-second-confirm-panel"'), "UI index is missing high-risk confirmation.");
     assert(indexText.includes('id="snapshot-list"'), "UI index is missing the snapshot list.");
@@ -177,11 +190,16 @@ async function main() {
     assert(appText.includes("renderDiff"), "UI app.js is missing the diff renderer.");
     assert(appText.includes("handleActivateCandidate"), "UI app.js is missing the activation handler.");
     assert(appText.includes("handleRollbackSnapshot"), "UI app.js is missing the rollback handler.");
+    assert(appText.includes("handleWorkflowTask"), "UI app.js is missing draft task handling.");
+    assert(appText.includes("refreshWorkflowState"), "UI app.js is missing workflow state loading.");
+    assert(appText.includes("renderProofSummary"), "UI app.js is missing P0-P4 rendering.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
     const stylesResponse = await fetch(`${baseUrl}/styles.css`);
     const stylesText = await stylesResponse.text();
     assert(stylesResponse.ok && stylesText.includes(".risk-critical"), "UI styles are missing risk-critical.");
     assert(stylesText.includes(".activation-panel"), "UI styles are missing the activation panel.");
+    assert(stylesText.includes(".workflow-draft-item"), "UI styles are missing workflow draft items.");
+    assert(stylesText.includes(".proof-level-summary"), "UI styles are missing proof level summary.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -269,6 +287,142 @@ async function main() {
     );
     const invalidRunApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs/${encodeURIComponent("../bad")}`));
     assert(invalidRunApiResult.response.status === 400, "Invalid API run_id was not rejected.");
+
+    const draftTaskResult = await readJson(await fetch(`${baseUrl}/api/workflow/draft-tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceChapter: "UI Workflow 測試章",
+        task: "建立正文候選，不升格正史。",
+      }),
+    }));
+    assert(draftTaskResult.response.status === 201, "Draft task API failed.");
+    const workflowRunId = draftTaskResult.payload.result.run.run_id;
+    createdAgentRunIds.push(workflowRunId);
+    const workflowContextId = draftTaskResult.payload.result.context_bundle.context_bundle_id;
+    assert(
+      draftTaskResult.payload.result.context_bundle.status === "ready",
+      "Draft context bundle was not ready.",
+    );
+
+    const workflowDraftResult = await readJson(await fetch(`${baseUrl}/api/workflow/candidate-drafts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceChapter: "UI Workflow 測試章",
+        note: "UI contract",
+        draftText: "UI workflow 正文候選。\n\n此內容不是正史。",
+        runId: workflowRunId,
+        contextBundleId: workflowContextId,
+        neuralModulesUsedPath: `data/agent_runs/${workflowRunId}/neural_modules_used.json`,
+      }),
+    }));
+    assert(workflowDraftResult.response.status === 201, "Candidate draft API failed.");
+    const workflowDraftId = workflowDraftResult.payload.draft.metadata.draft_id;
+    assert(
+      workflowDraftResult.payload.draft.status.status === "candidate",
+      "Candidate draft initial status was not candidate.",
+    );
+    assert(
+      workflowDraftResult.payload.draft.neural_usage.used_neural_network === false,
+      "Draft text incorrectly created neural success.",
+    );
+    const workflowDraftList = await readJson(await fetch(`${baseUrl}/api/workflow/candidate-drafts`));
+    assert(
+      workflowDraftList.response.ok
+        && workflowDraftList.payload.drafts.some((draft) => draft.draft_id === workflowDraftId),
+      "Candidate draft list omitted saved draft.",
+    );
+    const workflowDraftDetail = await readJson(await fetch(
+      `${baseUrl}/api/workflow/candidate-drafts/${workflowDraftId}`,
+    ));
+    assert(workflowDraftDetail.response.ok, "Candidate draft detail API failed.");
+
+    const sendProofResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/candidate-drafts/${workflowDraftId}/send-to-proofing`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(sendProofResult.response.ok, "Send-to-proofing API failed.");
+    const proofRunId = sendProofResult.payload.result.run.run_id;
+    createdAgentRunIds.push(proofRunId);
+    const proofContextId = sendProofResult.payload.result.context_bundle.context_bundle_id;
+
+    const saveProofResult = await readJson(await fetch(`${baseUrl}/api/workflow/proof-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        draftId: workflowDraftId,
+        proofText: "## P0 正史衝突\n\n### P2 節奏問題",
+        runId: proofRunId,
+        contextBundleId: proofContextId,
+        neuralModulesUsedPath: `data/agent_runs/${proofRunId}/neural_modules_used.json`,
+      }),
+    }));
+    assert(saveProofResult.response.status === 201, "Proof report API failed.");
+    const workflowProofId = saveProofResult.payload.proof_report.metadata.proof_id;
+    assert(
+      saveProofResult.payload.proof_report.issue_summary.p0_count === 1
+        && saveProofResult.payload.proof_report.issue_summary.p2_count === 1,
+      "Proof report API returned wrong P0-P4 counts.",
+    );
+    assert(
+      saveProofResult.payload.proof_report.issue_summary.can_adopt_recommendation === false,
+      "P0 proof report recommended adoption.",
+    );
+    const proofListResult = await readJson(await fetch(`${baseUrl}/api/workflow/proof-reports`));
+    assert(
+      proofListResult.response.ok
+        && proofListResult.payload.proof_reports.some((proof) => proof.proof_id === workflowProofId),
+      "Proof report list omitted saved report.",
+    );
+    const proofDetailResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/proof-reports/${workflowProofId}`,
+    ));
+    assert(proofDetailResult.response.ok, "Proof report detail API failed.");
+
+    const unconfirmedAdopt = await readJson(await fetch(
+      `${baseUrl}/api/workflow/candidate-drafts/${workflowDraftId}/adopt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(unconfirmedAdopt.response.status === 409, "Unconfirmed draft adoption was not blocked.");
+    const adoptResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/candidate-drafts/${workflowDraftId}/adopt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, adoptedBy: "ui_contract_test" }),
+      },
+    ));
+    assert(adoptResult.response.ok, "Confirmed draft adoption failed.");
+    const adoptedChapterId = adoptResult.payload.result.metadata.adopted_chapter_id;
+    assert(
+      adoptResult.payload.result.status.status === "accepted_pending_settlement",
+      "Adopted chapter status was not accepted_pending_settlement.",
+    );
+    const adoptedList = await readJson(await fetch(`${baseUrl}/api/workflow/adopted-chapters`));
+    assert(
+      adoptedList.response.ok
+        && adoptedList.payload.adopted_chapters.some(
+          (chapter) => chapter.adopted_chapter_id === adoptedChapterId,
+        ),
+      "Adopted chapter list omitted adopted chapter.",
+    );
+    const adoptedDetail = await readJson(await fetch(
+      `${baseUrl}/api/workflow/adopted-chapters/${adoptedChapterId}`,
+    ));
+    assert(adoptedDetail.response.ok, "Adopted chapter detail API failed.");
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
+      "Writing workflow APIs changed active_engine.md.",
+    );
 
     const activeStatusResult = await readJson(await fetch(`${baseUrl}/api/canon/active-engine/status`));
     assert(activeStatusResult.response.ok, "Active engine status API failed.");
@@ -439,6 +593,27 @@ async function main() {
       "{}",
     );
     assert(unsafeRollback.status >= 400 && unsafeRollback.status < 500, "Unsafe rollback path was accepted.");
+    for (const unsafePath of [
+      "/api/workflow/candidate-drafts/%2e%2e%2factive_engine.md",
+      "/api/workflow/proof-reports/%2e%2e%2factive_engine.md",
+      "/api/workflow/adopted-chapters/%2e%2e%2factive_engine.md",
+    ]) {
+      const unsafeResult = await rawHttpStatus(port, unsafePath);
+      assert(
+        unsafeResult.status >= 400 && unsafeResult.status < 500,
+        `Writing workflow traversal path was not rejected: ${unsafePath}`,
+      );
+    }
+    const unsafeDraftAction = await rawHttpStatus(
+      port,
+      "/api/workflow/candidate-drafts/%2e%2e%2factive_engine.md/adopt",
+      "POST",
+      JSON.stringify({ confirm: true }),
+    );
+    assert(
+      unsafeDraftAction.status >= 400 && unsafeDraftAction.status < 500,
+      "Unsafe writing workflow action path was accepted.",
+    );
 
     const rejectImportResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
       method: "POST",
@@ -679,12 +854,17 @@ async function main() {
     console.log("- Pending candidate import, diff, risk, reparse, and reject APIs checked: yes");
     console.log("- Confirmed activation, snapshot, archive, logs, and rollback checked: yes");
     console.log("- Unconfirmed activation and rollback blocked: yes");
+    console.log("- Writing candidate, proofing, adoption, and workflow path safety checked: yes");
+    console.log("- Writing workflow active_engine side effects: none");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
     console.log("- Draft dry-run side effects: none");
   } finally {
-    await writeFile(activeEnginePath, activeEngineBefore);
+    const activeEngineAfter = await readFile(activeEnginePath);
+    if (!activeEngineAfter.equals(activeEngineBefore)) {
+      await writeFile(activeEnginePath, activeEngineBefore);
+    }
     await writeFile(visualIndexPath, beforeVisualIndex, "utf8");
     await Promise.all(createdVisualAssetPaths.map((projectPath) => (
       rm(path.join(rootDir, projectPath), { force: true })
@@ -706,6 +886,18 @@ async function main() {
     for (const name of await readOptionalDirectory(engineArchiveDir)) {
       if (!archiveBefore.has(name)) {
         await rm(path.join(engineArchiveDir, name), { recursive: true, force: true });
+      }
+    }
+    for (const [directory, namesBefore] of [
+      [workflowDraftsDir, workflowDraftsBefore],
+      [workflowProofsDir, workflowProofsBefore],
+      [workflowAdoptedDir, workflowAdoptedBefore],
+      [workflowContextsDir, workflowContextsBefore],
+    ]) {
+      for (const name of await readOptionalDirectory(directory)) {
+        if (!namesBefore.has(name)) {
+          await rm(path.join(directory, name), { recursive: true, force: true });
+        }
       }
     }
     if (activationLogBefore.exists) await writeFile(activationLogPath, activationLogBefore.content);

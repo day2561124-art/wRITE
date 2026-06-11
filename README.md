@@ -407,6 +407,30 @@ pending candidate status.json
 
 若 candidate metadata 指定 `requires_neural_modules: true`，啟用前會依實際 success traces 檢查必要 neural modules；只存在文字聲明或 skipped/failed trace 時會以 `neural_trace_missing` 阻擋。
 
+### 10.3. 正文候選與驗稿工作流
+
+Phase 4A 在「正文創作」與「驗稿」頁整合候選稿工作流：
+
+1. 建立正文任務與 context bundle。
+2. 儲存 `candidate_draft`，並送交驗稿。
+3. 儲存結構化 `proof_report`，解析 P0 至 P4 問題。
+4. 人工確認後採納為 `adopted_chapter`，或標記 rejected / archived。
+
+工作流資料只寫入：
+
+```text
+data/writing_workflow/
+  candidate_drafts/
+  proof_reports/
+  adopted_chapters/
+  context_bundles/
+  logs/
+```
+
+候選稿狀態包括 `candidate`、`proofing`、`proofed`、`revised`、`accepted_pending_settlement`、`rejected`、`archived` 與 `blocked`。採納只代表正文通過人工驗稿並等待結算，不會修改 `data/canon_db/active_engine.md`、建立 engine candidate，或呼叫 Phase 3 activation / rollback。
+
+神經模組使用狀態只依 agent run 的 success traces 判定；正文或驗稿文字中的自我聲明不會被視為成功證據。
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -852,6 +876,16 @@ data/
       abilities/
       expressions/
       scenes/
+  writing_workflow/
+    candidate_drafts/
+      <draft_id>/
+    proof_reports/
+      <proof_id>/
+    adopted_chapters/
+      <adopted_chapter_id>/
+    context_bundles/
+      <context_bundle_id>/
+    logs/
   agent_runs/
     <run_id>/
       run.json
@@ -887,6 +921,7 @@ server/src/
   source-registry.mjs
   source-trust.mjs
   visual-db.mjs
+  writing-workflow-service.mjs
   tools/
     build-current-prompt.mjs
     search-context.mjs

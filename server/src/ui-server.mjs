@@ -60,6 +60,27 @@ import {
   visualCategoryLabels,
   visualCategorySpecs,
 } from "./visual-db.mjs";
+import {
+  adoptCandidateDraft,
+  archiveCandidateDraft,
+  assertAdoptedChapterId,
+  assertDraftId,
+  assertProofId,
+  buildDraftContextBundle,
+  buildProofingContextBundle,
+  createDraftTask,
+  ensureWritingWorkflowDirectories,
+  getAdoptedChapter,
+  getCandidateDraft,
+  getProofReport,
+  listAdoptedChapters,
+  listCandidateDrafts,
+  listProofReports,
+  rejectCandidateDraft,
+  saveCandidateDraft,
+  saveProofReport,
+  sendDraftToProofing,
+} from "./writing-workflow-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1150,6 +1171,174 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/workflow/draft-tasks") {
+    try {
+      assertSameOrigin(request, "Cross-origin draft task creation is not allowed.");
+      const input = await parseBody(request);
+      const result = await createDraftTask({
+        sourceChapter: input.sourceChapter ?? input.source_chapter,
+        task: input.task,
+        requiresNeuralModules: input.requiresNeuralModules ?? input.requires_neural_modules,
+        requiredNeuralModules: input.requiredNeuralModules ?? input.required_neural_modules,
+      });
+      sendJson(response, 201, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/workflow/context-bundles/draft") {
+    try {
+      assertSameOrigin(request, "Cross-origin context bundle creation is not allowed.");
+      const input = await parseBody(request);
+      const result = await buildDraftContextBundle({
+        sourceChapter: input.sourceChapter ?? input.source_chapter,
+        task: input.task,
+      });
+      sendJson(response, 201, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/workflow/context-bundles/proofing") {
+    try {
+      assertSameOrigin(request, "Cross-origin proofing context creation is not allowed.");
+      const input = await parseBody(request);
+      const draftId = assertDraftId(input.draftId ?? input.draft_id);
+      const result = await buildProofingContextBundle(draftId, input);
+      sendJson(response, 201, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/workflow/candidate-drafts") {
+    sendJson(response, 200, { ok: true, drafts: await listCandidateDrafts() });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/workflow/candidate-drafts") {
+    try {
+      assertSameOrigin(request, "Cross-origin candidate draft creation is not allowed.");
+      const input = await parseBody(request);
+      const draft = await saveCandidateDraft({
+        draftText: input.draftText ?? input.draft_text,
+        sourceChapter: input.sourceChapter ?? input.source_chapter,
+        note: input.note,
+        runId: input.runId ?? input.run_id,
+        contextBundleId: input.contextBundleId ?? input.context_bundle_id,
+        neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,
+      });
+      sendJson(response, 201, { ok: true, draft });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const draftActionMatch = rawPathname.match(
+    /^\/api\/workflow\/candidate-drafts\/([^/]+)\/(send-to-proofing|adopt|reject|archive)$/u,
+  );
+  if (request.method === "POST" && draftActionMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin draft actions are not allowed.");
+      const draftId = assertDraftId(decodeApiId(draftActionMatch[1], "draft_id"));
+      const action = draftActionMatch[2];
+      const input = await parseBody(request);
+      let result;
+      if (action === "send-to-proofing") {
+        result = await sendDraftToProofing(draftId, {
+          requiresNeuralModules: input.requiresNeuralModules ?? input.requires_neural_modules,
+          requiredNeuralModules: input.requiredNeuralModules ?? input.required_neural_modules,
+        });
+      } else if (action === "adopt") {
+        result = await adoptCandidateDraft(draftId, {
+          confirm: input.confirm === true,
+          adoptedBy: input.adoptedBy ?? input.adopted_by ?? "local_user",
+          note: input.note ?? "",
+        });
+      } else if (action === "reject") {
+        result = await rejectCandidateDraft(draftId, { reason: input.reason ?? "" });
+      } else {
+        result = await archiveCandidateDraft(draftId, { reason: input.reason ?? "" });
+      }
+      sendJson(response, 200, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const draftDetailMatch = rawPathname.match(/^\/api\/workflow\/candidate-drafts\/([^/]+)$/u);
+  if (request.method === "GET" && draftDetailMatch) {
+    try {
+      const draftId = assertDraftId(decodeApiId(draftDetailMatch[1], "draft_id"));
+      sendJson(response, 200, { ok: true, draft: await getCandidateDraft(draftId) });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/workflow/proof-reports") {
+    sendJson(response, 200, { ok: true, proof_reports: await listProofReports() });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/workflow/proof-reports") {
+    try {
+      assertSameOrigin(request, "Cross-origin proof report creation is not allowed.");
+      const input = await parseBody(request);
+      const proofReport = await saveProofReport({
+        draftId: input.draftId ?? input.draft_id,
+        proofText: input.proofText ?? input.proof_text,
+        runId: input.runId ?? input.run_id,
+        contextBundleId: input.contextBundleId ?? input.context_bundle_id,
+        neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,
+      });
+      sendJson(response, 201, { ok: true, proof_report: proofReport });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const proofDetailMatch = rawPathname.match(/^\/api\/workflow\/proof-reports\/([^/]+)$/u);
+  if (request.method === "GET" && proofDetailMatch) {
+    try {
+      const proofId = assertProofId(decodeApiId(proofDetailMatch[1], "proof_id"));
+      sendJson(response, 200, { ok: true, proof_report: await getProofReport(proofId) });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/workflow/adopted-chapters") {
+    sendJson(response, 200, { ok: true, adopted_chapters: await listAdoptedChapters() });
+    return;
+  }
+
+  const adoptedDetailMatch = rawPathname.match(/^\/api\/workflow\/adopted-chapters\/([^/]+)$/u);
+  if (request.method === "GET" && adoptedDetailMatch) {
+    try {
+      const adoptedChapterId = assertAdoptedChapterId(
+        decodeApiId(adoptedDetailMatch[1], "adopted_chapter_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        adopted_chapter: await getAdoptedChapter(adoptedChapterId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/canon/active-engine/status") {
     sendJson(response, 200, { ok: true, active_engine: await activeEngineStatus() });
     return;
@@ -1483,6 +1672,7 @@ async function main() {
   }
   await ensureAgentRunDirectories();
   await ensureEngineCandidateDirectories();
+  await ensureWritingWorkflowDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {
