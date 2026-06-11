@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   buildProofingContextBundle,
   getCandidateDraft,
-  getProofReport,
 } from "./writing-workflow-service.mjs";
 import { buildSettlementContext } from "./settlement-workflow-service.mjs";
 import {
@@ -16,6 +15,7 @@ import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
 import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
+import { requestWritingCandidateAdoption } from "./candidate-adoption-request-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -136,6 +136,11 @@ function normalizeInput(input = {}) {
       "proofing_context_id",
       200,
     ),
+    proofReportId: optionalText(
+      input.proof_report_id ?? input.proofReportId,
+      "proof_report_id",
+      200,
+    ),
     proofingMode: optionalText(
       input.proofing_mode ?? input.proofingMode,
       "proofing_mode",
@@ -156,6 +161,13 @@ function normalizeInput(input = {}) {
     verdict: optionalText(input.verdict, "verdict", 100),
     severity: optionalText(input.severity, "severity", 100),
     summary: optionalText(input.summary, "summary", 10_000),
+    requestedBy: optionalText(
+      input.requested_by ?? input.requestedBy,
+      "requested_by",
+      200,
+    ),
+    allowWithoutProof:
+      input.allow_without_proof === true || input.allowWithoutProof === true,
     dryRun: input.dry_run === true || input.dryRun === true,
     reason: optionalText(input.reason, "reason", 5_000),
     status: optionalText(input.status, "status", 100),
@@ -350,68 +362,32 @@ async function proofreadWritingCandidate(input, taskId, options) {
 }
 
 async function requestAdoptWritingCandidate(input, taskId, options) {
-  if (!input.candidateId) throw new Error("candidate_id is required.");
-  const workflow = workflowOptions(options);
-  const draft = await getCandidateDraft(input.candidateId, workflow);
-  const proof = draft.status.proof_report_id
-    ? await getProofReport(draft.status.proof_report_id, workflow)
-    : null;
-  if (input.dryRun) {
-    const response = resultBase(taskId, input.taskType, "dry_run");
-    response.result = {
-      candidate_id: input.candidateId,
-      proof_report_id: proof?.metadata?.proof_id ?? null,
-      would_create_approval_request: true,
-    };
-    return { response, bundle: { draft: draft.metadata, proof: proof?.issue_summary ?? null } };
+  const request = await requestWritingCandidateAdoption({
+    candidateId: input.candidateId,
+    proofReportId: input.proofReportId,
+    reason: input.reason,
+    requestedBy: input.requestedBy || "creative_task_orchestrator",
+    riskLevel: input.riskLevel,
+    allowWithoutProof: input.allowWithoutProof,
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(taskId, input.taskType, request.status);
+  response.result = request;
+  response.warnings.push(...(request.warnings ?? []));
+  if (request.approval_item_created) {
+    response.created.push({
+      label: "approval_item",
+      target_id: request.approval_item_id,
+      canon_status: "approval_required",
+    });
   }
-  const blockedReason = proof ? null : "candidate has no proof report";
-  const item = await createApprovalItem({
-    actionType: "adopt_p0_p1_draft",
-    targetType: "candidate_draft",
-    targetId: input.candidateId,
-    sourceChapter: draft.metadata.source_chapter,
-    title: "Creative task adoption request",
-    summary: input.reason || "Creative task requested review before adopting a writing candidate.",
-    riskLevel: "high",
-    requiresSecondConfirmation: true,
-    neuralStatus: "not_required",
-    blockedReason,
-    status: blockedReason ? "blocked" : "pending",
-    impact: {
-      will_modify: [],
-      will_create: ["adopted_chapter"],
-      rollback_available: false,
-    },
-    links: {
-      draft_id: input.candidateId,
-      proof_report_id: proof?.metadata?.proof_id ?? null,
-    },
-    details: {
-      requested_by: "creative_task_orchestrator",
-      issue_summary: proof?.issue_summary ?? null,
-    },
-  }, approvalOptions(options));
-  const response = resultBase(taskId, input.taskType, item.status.status);
-  response.result = {
-    approval_item_id: item.approval_item_id,
-    action_type: item.action_type,
-    status: item.status.status,
-    risk_level: item.risk_level,
-    target_id: item.target_id,
-  };
-  response.created.push({
-    label: "approval_item",
-    target_id: item.approval_item_id,
-    canon_status: "approval_required",
-  });
-  if (blockedReason) {
+  if (request.blocked) {
     response.ok = false;
     response.status = "blocked";
     response.blocked = true;
-    response.blocked_reason = blockedReason;
+    response.blocked_reason = request.blocked_reason;
   }
-  return { response, bundle: { draft: draft.metadata, proof: proof?.issue_summary ?? null } };
+  return { response, bundle: request };
 }
 
 async function buildSettlementCandidate(input, taskId, options) {

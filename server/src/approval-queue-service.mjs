@@ -45,6 +45,7 @@ const allowedActions = new Set([
   "activate_engine_candidate",
   "rollback_active_engine",
   "adopt_p0_p1_draft",
+  "adopt_writing_candidate",
   "neural_trace_missing",
   "approve_cleanup_proposal",
   "execute_cleanup_proposal",
@@ -275,6 +276,22 @@ export async function createApprovalItem(input = {}, options = {}) {
       input.requiresNeuralSuccess === true || input.requires_neural_success === true,
     neural_status: optionalText(input.neuralStatus ?? input.neural_status, 100) || "not_required",
     blocked_reason: optionalText(input.blockedReason ?? input.blocked_reason, 5_000) || null,
+    candidate_id: input.candidateId ?? input.candidate_id ?? null,
+    candidate_hash: input.candidateHash ?? input.candidate_hash ?? null,
+    candidate_path: input.candidatePath ?? input.candidate_path ?? null,
+    candidate_meta_path: input.candidateMetaPath ?? input.candidate_meta_path ?? null,
+    proof_report_id: input.proofReportId ?? input.proof_report_id ?? null,
+    proof_report_hash: input.proofReportHash ?? input.proof_report_hash ?? null,
+    proof_verdict: input.proofVerdict ?? input.proof_verdict ?? null,
+    proof_severity: input.proofSeverity ?? input.proof_severity ?? null,
+    reason: optionalText(input.reason, 5_000),
+    requires_user_confirmation:
+      input.requiresUserConfirmation === true || input.requires_user_confirmation === true,
+    can_execute_without_user_confirmation:
+      input.canExecuteWithoutUserConfirmation === true
+      || input.can_execute_without_user_confirmation === true,
+    created_by: optionalText(input.createdBy ?? input.created_by, 200),
+    safety: input.safety ?? null,
     impact: input.impact ?? { will_modify: [], will_create: [], rollback_available: false },
     links: {
       candidate_id: input.links?.candidate_id ?? null,

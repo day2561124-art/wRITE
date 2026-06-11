@@ -39,6 +39,11 @@ import {
   list_proof_reports,
   save_chat_output_as_proof_report,
 } from "./mcp-candidate-proofing-tools.mjs";
+import {
+  get_writing_candidate_adoption_request,
+  list_writing_candidate_adoption_requests,
+  request_writing_candidate_adoption,
+} from "./mcp-candidate-adoption-request-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1741,8 +1746,11 @@ const toolDefinitions = [
       includeLongline: { type: "boolean" },
       maxContextChars: { type: "integer", minimum: 1, maximum: 250000 },
       proofReportText: { type: "string" },
+      proofReportId: { type: "string" },
       verdict: { type: "string", enum: ["pass", "needs_revision", "blocked"] },
       severity: { type: "string", enum: ["P0", "P1", "P2", "P3", "none"] },
+      requestedBy: { type: "string" },
+      allowWithoutProof: { type: "boolean", default: false },
     }, ["taskType"]),
     handler: async (args) => jsonContent(await run_creative_task(args)),
   },
@@ -1953,6 +1961,44 @@ const toolDefinitions = [
     }),
     handler: async (args) => jsonContent(await list_proof_reports(args)),
   },
+  {
+    name: "request_writing_candidate_adoption",
+    description: "Create an approval-queue request for a candidate without adopting it directly.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      proofReportId: { type: "string" },
+      reason: { type: "string" },
+      requestedBy: { type: "string" },
+      riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+      allowWithoutProof: { type: "boolean", default: false },
+      dryRun: { type: "boolean", default: false },
+    }, ["candidateId"]),
+    handler: async (args) => jsonContent(await request_writing_candidate_adoption(args)),
+  },
+  {
+    name: "get_writing_candidate_adoption_request",
+    description: "Read one writing candidate adoption request from the approval queue.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      requestId: { type: "string" },
+    }, ["requestId"]),
+    handler: async (args) => jsonContent(await get_writing_candidate_adoption_request(args)),
+  },
+  {
+    name: "list_writing_candidate_adoption_requests",
+    description: "List writing candidate adoption request summaries.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      status: { type: "string" },
+      riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_writing_candidate_adoption_requests(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -1990,6 +2036,9 @@ const permissionSources = {
   save_chat_output_as_proof_report: ["user_input", "writing_candidate_records", "candidate_proofing_context_records"],
   get_proof_report_detail: ["candidate_proof_report_records"],
   list_proof_reports: ["candidate_proof_report_records"],
+  request_writing_candidate_adoption: ["writing_candidate_records", "candidate_proof_report_records", "user_input"],
+  get_writing_candidate_adoption_request: ["approval_queue"],
+  list_writing_candidate_adoption_requests: ["approval_queue"],
 };
 
 const backupRequiredTools = new Set([

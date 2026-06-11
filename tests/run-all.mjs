@@ -37,6 +37,8 @@ const steps = [
   ["Candidate proofing context service", ["tests/creative/candidate-proofing-context-service.test.mjs"]],
   ["Candidate proof report service", ["tests/creative/candidate-proof-report-service.test.mjs"]],
   ["MCP candidate proofing tools", ["tests/mcp/mcp-candidate-proofing-tools.test.mjs"]],
+  ["Candidate adoption request service", ["tests/creative/candidate-adoption-request-service.test.mjs"]],
+  ["MCP candidate adoption request tools", ["tests/mcp/mcp-candidate-adoption-request-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],

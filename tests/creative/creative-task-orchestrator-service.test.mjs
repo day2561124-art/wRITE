@@ -191,11 +191,20 @@ async function main() {
     }, options);
     const adoption = await runCreativeTask({
       task_type: CREATIVE_TASK_TYPES.REQUEST_ADOPT_WRITING_CANDIDATE,
-      candidate_id: draft.metadata.draft_id,
+      candidate_id: intake.result.candidate_id,
+      proof_report_id: candidateProof.result.proof_report_id,
       reason: "Ready for human review.",
     }, options);
     assert(adoption.ok && adoption.status === "pending", "Adoption request was not pending.");
     assert(adoption.result.approval_item_id, "Adoption request did not create approval item.");
+    assert(
+      adoption.result.action_type === "adopt_writing_candidate",
+      "Adoption request used the legacy draft action.",
+    );
+    assert(
+      adoption.result.safety.direct_adoption_performed === false,
+      "Adoption request directly adopted the candidate.",
+    );
     assert(proof.metadata.proof_id, "Proof fixture was not created.");
 
     const settlementDraft = await saveCandidateDraft({

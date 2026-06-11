@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   confirmApprovalItem,
+  createApprovalItem,
   createRollbackApprovalItem,
   deferApprovalItem,
   getApprovalItem,
@@ -156,6 +157,26 @@ async function main() {
     assert(neuralItem?.status.status === "blocked", "Neural-missing item was not blocked.");
     assert(criticalItem?.status.status === "blocked", "Critical item was not blocked.");
     assert(proofItem?.requires_second_confirmation, "P0/P1 item missed second confirmation.");
+    const requestOnlyItem = await createApprovalItem({
+      actionType: "adopt_writing_candidate",
+      targetType: "writing_candidate",
+      targetId: "writing_candidate_20260612-000000-00000000",
+      riskLevel: "medium",
+      requiresUserConfirmation: true,
+      canExecuteWithoutUserConfirmation: false,
+      safety: { approval_only: true, direct_adoption_performed: false },
+    }, options);
+    assert(
+      requestOnlyItem.status.status === "pending",
+      "Request-only adoption action was not accepted by the queue.",
+    );
+    await expectReject(
+      () => confirmApprovalItem(requestOnlyItem.approval_item_id, {
+        confirm: true,
+        approvedBy: "approval_test",
+      }, options),
+      "Request-only adoption action executed directly.",
+    );
 
     const countBeforeRescan = (await listApprovalItems(options)).length;
     await scanApprovalQueue(options);

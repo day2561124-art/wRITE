@@ -179,6 +179,9 @@ const expectedTools = [
   "save_chat_output_as_proof_report",
   "get_proof_report_detail",
   "list_proof_reports",
+  "request_writing_candidate_adoption",
+  "get_writing_candidate_adoption_request",
+  "list_writing_candidate_adoption_requests",
 ];
 
 const readOnlyTools = new Set([
@@ -197,6 +200,8 @@ const readOnlyTools = new Set([
   "list_candidate_proofing_contexts",
   "get_proof_report_detail",
   "list_proof_reports",
+  "get_writing_candidate_adoption_request",
+  "list_writing_candidate_adoption_requests",
 ]);
 
 const backupRequiredTools = new Set([
@@ -327,6 +332,10 @@ const enumConstraintFixtures = [
       candidateId: "writing_candidate_20260612-000000-00000000",
       proofReportText: "fixture",
     }, "chatgpt, gpt, manual_paste"],
+    ["request_writing_candidate_adoption", "riskLevel", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }, "low, medium, high"],
+    ["list_writing_candidate_adoption_requests", "riskLevel", {}, "low, medium, high"],
   ].map(([name, field, baseArguments, values]) => ({
     label: `${name} invalid ${field}`,
     name,
@@ -526,6 +535,14 @@ const schemaTypeFixtures = [
 ];
 
 const integerMaximumFixtures = [
+  {
+    label: "list_writing_candidate_adoption_requests limit over maximum",
+    name: "list_writing_candidate_adoption_requests",
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: { limit: 101 },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  },
   {
     label: "run_creative_task maxContextChars over maximum",
     name: "run_creative_task",
@@ -798,6 +815,16 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  ...[
+    ["request_writing_candidate_adoption", "candidateId", {}],
+    ["get_writing_candidate_adoption_request", "requestId", {}],
+  ].map(([name, field, argumentsValue]) => ({
+    label: `${name} missing ${field}`,
+    name,
+    field,
+    arguments: argumentsValue,
+    expectedMessage: `${field} is required.`,
+  })),
   ...[
     ["build_candidate_proofing_context", "candidateId", {}],
     ["get_candidate_proofing_context", "proofingContextId", {}],
@@ -1180,6 +1207,7 @@ const expectedDefaultMetadata = new Map([
   ["run_creative_task", {
     dryRun: false,
     limit: 20,
+    allowWithoutProof: false,
   }],
   ["build_gpt_writing_context", {
     chapterMode: "next_chapter",
@@ -1217,6 +1245,11 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
   }],
   ["list_proof_reports", { limit: 20 }],
+  ["request_writing_candidate_adoption", {
+    allowWithoutProof: false,
+    dryRun: false,
+  }],
+  ["list_writing_candidate_adoption_requests", { limit: 20 }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -1234,6 +1267,7 @@ const expectedIntegerMaximumMetadata = new Map([
   ["build_candidate_proofing_context:maxContextChars", 250000],
   ["list_candidate_proofing_contexts:limit", 100],
   ["list_proof_reports:limit", 100],
+  ["list_writing_candidate_adoption_requests:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {
