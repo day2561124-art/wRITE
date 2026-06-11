@@ -19,6 +19,26 @@ import {
 } from "./project-paths.mjs";
 import { sourceSpecsFor } from "./source-registry.mjs";
 import {
+  assertAgentRunId,
+  createAgentRun,
+  ensureAgentRunDirectories,
+  getAgentRun,
+  listAgentRuns,
+} from "./agent-run-service.mjs";
+import {
+  assertNeuralTraceId,
+  getNeuralTrace,
+  listNeuralTraces,
+  summarizeNeuralUsageForRun,
+} from "./neural-trace-service.mjs";
+import {
+  run_character_simulator,
+  run_neural_critic,
+  run_over_governance_detector,
+  run_scene_planner,
+  run_style_drift_detector,
+} from "./neural-module-service.mjs";
+import {
   allowedVisualImageExtensions,
   validateVisualRecord,
   visualCategoryAssetDirectories,
@@ -99,6 +119,14 @@ const visualUploadMimeTypes = {
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
+};
+
+const neuralApiModules = {
+  "scene-planner": run_scene_planner,
+  "character-simulator": run_character_simulator,
+  "neural-critic": run_neural_critic,
+  "style-drift-detector": run_style_drift_detector,
+  "over-governance-detector": run_over_governance_detector,
 };
 
 function normalizePath(filePath) {
@@ -953,6 +981,29 @@ function sendError(response, statusCode, error) {
   });
 }
 
+function assertSameOrigin(request, message = "Cross-origin requests are not allowed.") {
+  const origin = request.headers.origin;
+  if (origin && new URL(origin).host !== request.headers.host) {
+    const error = new Error(message);
+    error.statusCode = 403;
+    throw error;
+  }
+}
+
+function decodeApiId(value, label) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new Error(`${label} is not valid URL encoding.`);
+  }
+}
+
+async function agentRunDetails(runId) {
+  const run = await getAgentRun(runId);
+  const usage = await summarizeNeuralUsageForRun(runId);
+  return { ...run, neural_usage: usage };
+}
+
 function isReadableProjectPath(projectPath) {
   if (readableExactPaths.has(projectPath)) return true;
   return readableDirectoryPaths.some(
@@ -1084,6 +1135,105 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/agent/runs") {
+    sendJson(response, 200, { ok: true, runs: await listAgentRuns() });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/agent/runs") {
+    try {
+      assertSameOrigin(request, "Cross-origin agent run creation is not allowed.");
+      const input = await parseBody(request);
+      const run = await createAgentRun(input);
+      sendJson(response, 201, { ok: true, run });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const neuralUsageMatch = rawPathname.match(/^\/api\/agent\/runs\/([^/]+)\/neural-usage$/u);
+  if (request.method === "GET" && neuralUsageMatch) {
+    try {
+      const runId = assertAgentRunId(decodeApiId(neuralUsageMatch[1], "run_id"));
+      sendJson(response, 200, {
+        ok: true,
+        usage: await summarizeNeuralUsageForRun(runId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const agentRunMatch = rawPathname.match(/^\/api\/agent\/runs\/([^/]+)$/u);
+  if (request.method === "GET" && agentRunMatch) {
+    try {
+      const runId = assertAgentRunId(decodeApiId(agentRunMatch[1], "run_id"));
+      sendJson(response, 200, {
+        ok: true,
+        run: await agentRunDetails(runId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/neural/traces") {
+    try {
+      const runId = url.searchParams.get("run_id") ?? "";
+      if (runId) assertAgentRunId(runId);
+      sendJson(response, 200, {
+        ok: true,
+        traces: await listNeuralTraces(runId ? { run_id: runId } : {}),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const neuralTraceMatch = rawPathname.match(/^\/api\/neural\/traces\/([^/]+)$/u);
+  if (request.method === "GET" && neuralTraceMatch) {
+    try {
+      const traceId = assertNeuralTraceId(decodeApiId(neuralTraceMatch[1], "trace_id"));
+      sendJson(response, 200, {
+        ok: true,
+        trace: await getNeuralTrace(traceId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const neuralModuleMatch = rawPathname.match(/^\/api\/neural\/([^/]+)$/u);
+  if (request.method === "POST" && neuralModuleMatch) {
+    const moduleKey = decodeApiId(neuralModuleMatch[1], "neural module");
+    const wrapper = neuralApiModules[moduleKey];
+    if (!wrapper) {
+      sendError(response, 404, new Error(`Unknown neural module: ${moduleKey}`));
+      return;
+    }
+    try {
+      assertSameOrigin(request, "Cross-origin neural module calls are not allowed.");
+      const input = await parseBody(request);
+      const runId = assertAgentRunId(requireString(input.run_id, "run_id", 100));
+      const run = await getAgentRun(runId);
+      const taskType = optionalString(input.task_type, "task_type", 100) || run.task_type;
+      const result = await wrapper(input.input ?? "", {
+        run_id: runId,
+        task_type: taskType,
+        source: "local_ui",
+      });
+      sendJson(response, 200, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/visuals") {
     sendJson(response, 200, { ok: true, visuals: await visualPayload() });
     return;
@@ -1209,6 +1359,7 @@ async function main() {
     console.log(usage());
     return;
   }
+  await ensureAgentRunDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {

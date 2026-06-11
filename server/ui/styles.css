@@ -1077,6 +1077,198 @@ textarea:disabled {
   margin-top: 16px;
 }
 
+.neural-status-header {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.neural-status-header h2 {
+  margin: 3px 0 0;
+  font-size: 20px;
+}
+
+.neural-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.neural-layout {
+  min-height: calc(100vh - 190px);
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.neural-run-panel,
+.neural-detail-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.neural-run-list,
+.neural-trace-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.neural-run-item {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  color: var(--ink);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.neural-run-item:hover,
+.neural-run-item.is-active {
+  background: var(--accent-soft);
+  border-color: #9acbd1;
+}
+
+.neural-run-item strong,
+.neural-run-item small {
+  display: block;
+  min-width: 0;
+}
+
+.neural-run-item strong {
+  font-size: 12px;
+}
+
+.neural-run-item small {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+}
+
+.neural-status-success,
+.neural-status-missing,
+.neural-status-failed,
+.neural-status-skipped,
+.neural-status-warning {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.neural-status-success {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: #acd9c0;
+}
+
+.neural-status-missing {
+  color: var(--muted);
+  background: var(--surface-quiet);
+  border-color: var(--line-strong);
+}
+
+.neural-status-failed {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: #efbcc4;
+}
+
+.neural-status-skipped {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: #f0d49e;
+}
+
+.neural-status-warning {
+  color: #7b4a0b;
+  background: #fff0c9;
+  border-color: #e6bd62;
+}
+
+.neural-run-facts,
+.neural-trace-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.neural-run-facts div,
+.neural-trace-facts div {
+  min-width: 0;
+  padding: 9px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.neural-run-facts dt,
+.neural-trace-facts dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.neural-run-facts dd,
+.neural-trace-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.neural-trace-item {
+  min-width: 0;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.neural-trace-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.neural-trace-heading strong,
+.neural-trace-heading span {
+  display: block;
+}
+
+.neural-trace-heading strong {
+  font-size: 13px;
+}
+
+.neural-trace-heading div > span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .empty-state {
   min-height: 120px;
   display: grid;
@@ -1380,6 +1572,27 @@ dialog::backdrop {
 
   .visual-layout {
     min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .neural-status-header {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 12px 0;
+  }
+
+  .neural-status-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .neural-layout {
+    min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .neural-run-facts,
+  .neural-trace-facts {
     grid-template-columns: 1fr;
   }
 

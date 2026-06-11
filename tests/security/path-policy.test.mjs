@@ -4,9 +4,12 @@ import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  projectPaths,
   resolveGeneratedMarkdownPath,
   resolveProjectPath,
 } from "../../server/src/project-paths.mjs";
+import { assertAgentRunId } from "../../server/src/agent-run-service.mjs";
+import { assertNeuralTraceId } from "../../server/src/neural-trace-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,6 +116,32 @@ async function main() {
       }
     })(),
     "Generated output policy allowed a Canon target.",
+  );
+  assert(
+    projectPaths.agentRuns.startsWith(path.join(rootDir, "data", "agent_runs")),
+    "Agent run path is outside data/agent_runs.",
+  );
+  assert(
+    (() => {
+      try {
+        assertAgentRunId("../active_engine");
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    "Agent run traversal id was not rejected.",
+  );
+  assert(
+    (() => {
+      try {
+        assertNeuralTraceId("../../trace");
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    "Neural trace traversal id was not rejected.",
   );
 
   const activeBefore = createHash("sha256").update(await readFile(activeEnginePath)).digest("hex");

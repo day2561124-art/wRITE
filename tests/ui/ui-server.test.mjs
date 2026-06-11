@@ -12,6 +12,8 @@ const serverPath = path.join(rootDir, "server", "src", "ui-server.mjs");
 const draftIndexPath = path.join(rootDir, "data", "outputs", "logs", "draft_index.jsonl");
 const draftsDir = path.join(rootDir, "data", "outputs", "drafts");
 const visualIndexPath = path.join(rootDir, "data", "visual_db", "visual_index.jsonl");
+const agentRunsDir = path.join(rootDir, "data", "agent_runs");
+const neuralTracesDir = path.join(agentRunsDir, "neural_traces");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -101,6 +103,8 @@ async function main() {
   const beforeDraftFiles = await readOptionalDirectory(draftsDir);
   const beforeVisualIndex = await readOptionalText(visualIndexPath);
   const createdVisualAssetPaths = [];
+  const createdAgentRunIds = [];
+  const createdNeuralTraceIds = [];
   const stderrBuffer = { value: "" };
   const child = spawn(process.execPath, [
     serverPath,
@@ -127,6 +131,8 @@ async function main() {
     assert(indexText.includes("武裝學院工作台"), "UI index is missing the application title.");
     assert(indexText.includes('data-view-panel="compose"'), "UI index is missing the compose workspace.");
     assert(indexText.includes('data-view-panel="visuals"'), "UI index is missing the visual gallery workspace.");
+    assert(indexText.includes('data-view-panel="neural"'), "UI index is missing the neural status workspace.");
+    assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
     assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
@@ -134,6 +140,7 @@ async function main() {
     assert(appResponse.ok && appText.includes("handlePipeline"), "UI app.js was not served.");
     assert(appText.includes("handleVisualUpload"), "UI app.js is missing the visual upload handler.");
     assert(appText.includes("handleVisualDelete"), "UI app.js is missing the visual delete handler.");
+    assert(appText.includes("renderNeuralStatus"), "UI app.js is missing the neural status renderer.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
@@ -159,6 +166,69 @@ async function main() {
       visualsResult.payload.visuals.indexPath === "data/visual_db/visual_index.jsonl",
       "Visuals API returned the wrong index path.",
     );
+
+    const createRunResult = await readJson(await fetch(`${baseUrl}/api/agent/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task_type: "test",
+        requires_neural_modules: true,
+        required_neural_modules: ["scene_planner"],
+        input: "UI API text says 已使用神經網路模型, but no trace exists yet.",
+      }),
+    }));
+    assert(createRunResult.response.status === 201, "Agent run creation API failed.");
+    const apiRunId = createRunResult.payload.run.run_id;
+    createdAgentRunIds.push(apiRunId);
+
+    const runsApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs`));
+    assert(
+      runsApiResult.response.ok && runsApiResult.payload.runs.some((run) => run.run_id === apiRunId),
+      "Agent runs API did not include the created run.",
+    );
+    const runApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs/${apiRunId}`));
+    assert(runApiResult.response.ok, "Agent run detail API failed.");
+    assert(
+      runApiResult.payload.run.neural_usage.used_neural_network === false,
+      "Text-only neural claim incorrectly counted as neural usage.",
+    );
+
+    const neuralCallResult = await readJson(await fetch(`${baseUrl}/api/neural/scene-planner`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        run_id: apiRunId,
+        task_type: "test",
+        input: "Plan a test scene.",
+      }),
+    }));
+    assert(neuralCallResult.response.ok, "Neural wrapper API failed.");
+    const apiTrace = neuralCallResult.payload.result.trace;
+    createdNeuralTraceIds.push(apiTrace.trace_id);
+    assert(apiTrace.status === "skipped", "Missing local adapter was not reported as skipped.");
+    assert(apiTrace.status !== "success", "Missing local adapter produced a false success trace.");
+
+    const tracesApiResult = await readJson(await fetch(`${baseUrl}/api/neural/traces?run_id=${apiRunId}`));
+    assert(
+      tracesApiResult.response.ok
+        && tracesApiResult.payload.traces.some((trace) => trace.trace_id === apiTrace.trace_id),
+      "Neural traces API did not include the wrapper trace.",
+    );
+    const traceApiResult = await readJson(await fetch(`${baseUrl}/api/neural/traces/${apiTrace.trace_id}`));
+    assert(traceApiResult.response.ok, "Neural trace detail API failed.");
+    const usageApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs/${apiRunId}/neural-usage`));
+    assert(usageApiResult.response.ok, "Neural usage API failed.");
+    assert(
+      usageApiResult.payload.usage.used_neural_network === false,
+      "Skipped trace incorrectly counted as neural network usage.",
+    );
+    assert(
+      usageApiResult.payload.usage.warning === true
+        && usageApiResult.payload.usage.missing_required_neural_modules.includes("scene_planner"),
+      "Required module without a success trace was not reported as warning.",
+    );
+    const invalidRunApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs/${encodeURIComponent("../bad")}`));
+    assert(invalidRunApiResult.response.status === 400, "Invalid API run_id was not rejected.");
 
     const proofingResult = await readJson(await fetch(
       `${baseUrl}/api/file?path=${encodeURIComponent("data/proofing_policy_db/active_proofing_card.md")}`,
@@ -358,6 +428,7 @@ async function main() {
     console.log("- Path traversal rejected: yes");
     console.log("- Visual upload checked: yes");
     console.log("- Visual delete checked: yes");
+    console.log("- Agent run and neural trace APIs checked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
@@ -366,6 +437,12 @@ async function main() {
     await writeFile(visualIndexPath, beforeVisualIndex, "utf8");
     await Promise.all(createdVisualAssetPaths.map((projectPath) => (
       rm(path.join(rootDir, projectPath), { force: true })
+    )));
+    await Promise.all(createdAgentRunIds.map((runId) => (
+      rm(path.join(agentRunsDir, runId), { recursive: true, force: true })
+    )));
+    await Promise.all(createdNeuralTraceIds.map((traceId) => (
+      rm(path.join(neuralTracesDir, `${traceId}.json`), { force: true })
     )));
     terminateProcessTree(child);
   }

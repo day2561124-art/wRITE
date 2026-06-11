@@ -39,6 +39,10 @@
             <span class="nav-symbol" aria-hidden="true">◇</span>
             <span>圖庫</span>
           </button>
+          <button class="nav-item" data-view="neural" type="button">
+            <span class="nav-symbol" aria-hidden="true">N</span>
+            <span>神經模組</span>
+          </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>紀錄</span>
@@ -383,6 +387,42 @@
               </div>
               <div id="visual-grid" class="visual-grid"></div>
               <div id="visual-detail" class="visual-detail"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="neural">
+          <div class="neural-status-header">
+            <div>
+              <p class="eyebrow">NEURAL TRACE</p>
+              <h2>神經網路模組狀態</h2>
+            </div>
+            <div class="neural-status-actions">
+              <span id="neural-summary" class="status-summary">尚未載入</span>
+              <button id="refresh-neural-button" class="button secondary" type="button">重新整理</button>
+            </div>
+          </div>
+          <div class="neural-layout">
+            <aside class="panel neural-run-panel">
+              <div class="panel-heading">
+                <h2>Agent Runs</h2>
+              </div>
+              <div id="neural-run-list" class="neural-run-list">
+                <div class="empty-state">尚無 agent run</div>
+              </div>
+            </aside>
+            <section class="panel neural-detail-panel">
+              <div class="reader-heading">
+                <div>
+                  <p id="neural-detail-run-id" class="eyebrow">NO RUN SELECTED</p>
+                  <h2 id="neural-detail-title">神經模組使用證據</h2>
+                </div>
+                <span id="neural-detail-status" class="neural-status-missing">未使用</span>
+              </div>
+              <div id="neural-run-facts" class="neural-run-facts"></div>
+              <div id="neural-trace-list" class="neural-trace-list">
+                <div class="empty-state">選擇左側 run 查看 neural_trace</div>
+              </div>
             </section>
           </div>
         </section>

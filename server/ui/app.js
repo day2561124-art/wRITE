@@ -4,6 +4,11 @@ const state = {
   activeResultPath: "data/outputs/task_prompt.md",
   activeActivityList: "drafts",
   activeVisualId: "",
+  activeNeuralRunId: "",
+  neuralData: {
+    runs: [],
+    traces: [],
+  },
   visualFilters: {
     character: "",
     category: "",
@@ -21,6 +26,7 @@ const titles = {
   review: "驗稿",
   library: "資料庫",
   visuals: "圖庫",
+  neural: "神經模組",
   activity: "紀錄",
 };
 
@@ -72,6 +78,24 @@ function visualStatusLabel(value) {
     deprecated: "停用",
     invalid: "錯誤",
   }[value] ?? value ?? "";
+}
+
+function neuralStatusMeta(run, traces) {
+  const successCount = traces.filter((trace) => trace.status === "success").length;
+  const failedCount = traces.filter((trace) => trace.status === "failed").length;
+  const skippedCount = traces.filter((trace) => trace.status === "skipped").length;
+  const successfulModules = new Set(
+    traces.filter((trace) => trace.status === "success").map((trace) => trace.module_name),
+  );
+  const missingRequired = run?.requires_neural_modules
+    && (run.required_neural_modules ?? []).some((moduleName) => !successfulModules.has(moduleName));
+  if (run?.warning || missingRequired) {
+    return { label: "warning", className: "neural-status-warning" };
+  }
+  if (successCount > 0) return { label: "已使用", className: "neural-status-success" };
+  if (failedCount > 0) return { label: "失敗", className: "neural-status-failed" };
+  if (skippedCount > 0) return { label: "跳過", className: "neural-status-skipped" };
+  return { label: "未使用", className: "neural-status-missing" };
 }
 
 function setBusy(busy) {
@@ -152,6 +176,9 @@ function switchView(viewName) {
   $("#view-title").textContent = titles[viewName] ?? viewName;
   if (window.location.hash !== `#${viewName}`) {
     history.replaceState(null, "", `#${viewName}`);
+  }
+  if (viewName === "neural") {
+    loadNeuralStatus().catch((error) => toast(error.message, true));
   }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -352,6 +379,98 @@ function renderVisuals() {
   renderVisualDetail(items.find((item) => item.visual_id === state.activeVisualId));
 }
 
+function renderNeuralStatus() {
+  const runs = state.neuralData.runs ?? [];
+  const traces = state.neuralData.traces ?? [];
+  const successRuns = runs.filter((run) => (
+    traces.some((trace) => trace.run_id === run.run_id && trace.status === "success")
+  )).length;
+  const warningRuns = runs.filter((run) => run.warning).length;
+  $("#neural-summary").textContent = `${runs.length} runs · ${successRuns} 已使用 · ${warningRuns} warning`;
+
+  if (!runs.some((run) => run.run_id === state.activeNeuralRunId)) {
+    state.activeNeuralRunId = runs[0]?.run_id ?? "";
+  }
+  $("#neural-run-list").innerHTML = runs.length
+    ? runs.map((run) => {
+      const runTraces = traces.filter((trace) => trace.run_id === run.run_id);
+      const status = neuralStatusMeta(run, runTraces);
+      return `
+        <button class="neural-run-item${state.activeNeuralRunId === run.run_id ? " is-active" : ""}" type="button" data-neural-run-id="${escapeHtml(run.run_id)}">
+          <span>
+            <strong>${escapeHtml(run.task_type)}</strong>
+            <small>${escapeHtml(run.run_id)}</small>
+          </span>
+          <span class="${status.className}">${status.label}</span>
+        </button>
+      `;
+    }).join("")
+    : '<div class="empty-state">尚無 agent run</div>';
+
+  const run = runs.find((item) => item.run_id === state.activeNeuralRunId);
+  const runTraces = traces.filter((trace) => trace.run_id === state.activeNeuralRunId);
+  if (!run) {
+    $("#neural-detail-run-id").textContent = "NO RUN SELECTED";
+    $("#neural-detail-title").textContent = "神經模組使用證據";
+    $("#neural-detail-status").className = "neural-status-missing";
+    $("#neural-detail-status").textContent = "未使用";
+    $("#neural-run-facts").innerHTML = "";
+    $("#neural-trace-list").innerHTML = '<div class="empty-state">選擇左側 run 查看 neural_trace</div>';
+    return;
+  }
+
+  const status = neuralStatusMeta(run, runTraces);
+  $("#neural-detail-run-id").textContent = run.run_id;
+  $("#neural-detail-title").textContent = run.task_type;
+  $("#neural-detail-status").className = status.className;
+  $("#neural-detail-status").textContent = status.label;
+  $("#neural-run-facts").innerHTML = `
+    <div><dt>task_type</dt><dd>${escapeHtml(run.task_type)}</dd></div>
+    <div><dt>status</dt><dd>${escapeHtml(run.status)}</dd></div>
+    <div><dt>requires_neural_modules</dt><dd>${run.requires_neural_modules ? "true" : "false"}</dd></div>
+    <div><dt>required_neural_modules</dt><dd>${escapeHtml((run.required_neural_modules ?? []).join(", ") || "none")}</dd></div>
+    <div><dt>input_hash</dt><dd>${escapeHtml(run.input_hash)}</dd></div>
+    <div><dt>output_hash</dt><dd>${escapeHtml(run.output_hash ?? "null")}</dd></div>
+  `;
+  $("#neural-trace-list").innerHTML = runTraces.length
+    ? runTraces.map((trace) => `
+      <article class="neural-trace-item">
+        <div class="neural-trace-heading">
+          <div>
+            <strong>${escapeHtml(trace.module_name)}</strong>
+            <span>${escapeHtml(trace.model_name)} · ${escapeHtml(trace.model_version)}</span>
+          </div>
+          <span class="neural-status-${escapeHtml(trace.status)}">${escapeHtml(trace.status)}</span>
+        </div>
+        <dl class="neural-trace-facts">
+          <div><dt>trace_id</dt><dd>${escapeHtml(trace.trace_id)}</dd></div>
+          <div><dt>called_at</dt><dd>${escapeHtml(trace.called_at)}</dd></div>
+          <div><dt>latency_ms</dt><dd>${escapeHtml(trace.latency_ms)}</dd></div>
+          <div><dt>input_hash</dt><dd>${escapeHtml(trace.input_hash ?? "null")}</dd></div>
+          <div><dt>output_hash</dt><dd>${escapeHtml(trace.output_hash ?? "null")}</dd></div>
+          <div><dt>warnings</dt><dd>${escapeHtml(JSON.stringify(trace.warnings ?? []))}</dd></div>
+          <div><dt>error_message</dt><dd>${escapeHtml(trace.error_message ?? "null")}</dd></div>
+          <div><dt>input_summary</dt><dd>${escapeHtml(JSON.stringify(trace.input_summary ?? {}))}</dd></div>
+          <div><dt>output_summary</dt><dd>${escapeHtml(JSON.stringify(trace.output_summary ?? {}))}</dd></div>
+        </dl>
+      </article>
+    `).join("")
+    : '<div class="empty-state">沒有 neural_trace，因此不得宣稱已使用神經網路模型。</div>';
+}
+
+async function loadNeuralStatus(showToast = false) {
+  const [runsPayload, tracesPayload] = await Promise.all([
+    api("/api/agent/runs"),
+    api("/api/neural/traces"),
+  ]);
+  state.neuralData = {
+    runs: runsPayload.runs ?? [],
+    traces: tracesPayload.traces ?? [],
+  };
+  renderNeuralStatus();
+  if (showToast) toast("神經模組狀態已重新整理");
+}
+
 function renderDraftSelect() {
   const drafts = state.data?.drafts ?? [];
   const select = $("#draft-select");
@@ -408,6 +527,7 @@ function renderAll() {
   renderCounts();
   renderLibrary();
   renderVisuals();
+  renderNeuralStatus();
   renderDraftSelect();
   renderActivityTable();
 }
@@ -703,6 +823,9 @@ function bindEvents() {
     }
   });
   $("#refresh-button").addEventListener("click", () => refreshState(true).catch((error) => toast(error.message, true)));
+  $("#refresh-neural-button").addEventListener("click", () => (
+    loadNeuralStatus(true).catch((error) => toast(error.message, true))
+  ));
   $("#validate-button").addEventListener("click", runValidation);
 
   $("#mode-control").addEventListener("click", (event) => {
@@ -754,6 +877,12 @@ function bindEvents() {
     const visualDelete = event.target.closest("[data-visual-delete]");
     if (visualDelete) {
       handleVisualDelete(visualDelete.dataset.visualDelete);
+      return;
+    }
+    const neuralRun = event.target.closest("[data-neural-run-id]");
+    if (neuralRun) {
+      state.activeNeuralRunId = neuralRun.dataset.neuralRunId;
+      renderNeuralStatus();
       return;
     }
     const visualCard = event.target.closest("[data-visual-id]");

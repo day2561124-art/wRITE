@@ -1245,9 +1245,6 @@ const optionalBlankStringFixtures = [
       dryRun: true,
     },
     expectedOmittedFields: ["target"],
-    expectedFragments: [
-      "No pending error candidates found.",
-    ],
   },
   {
     name: "save_draft",

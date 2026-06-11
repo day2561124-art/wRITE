@@ -4,3 +4,4 @@ data/outputs/logs/
 data/outputs/runs/
 data/outputs/.golden-test-*/
 data/outputs/.transaction-test/
+data/agent_runs/

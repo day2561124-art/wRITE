@@ -13,6 +13,8 @@ const steps = [
   ["Source trust validation", ["server/src/tools/source-trust-checker.mjs"]],
   ["Source registry contract", ["tests/source-registry.test.mjs"]],
   ["Visual DB contract", ["tests/visual-db.test.mjs"]],
+  ["Agent run service", ["tests/agent/agent-run-service.test.mjs"]],
+  ["Neural trace service", ["tests/agent/neural-trace-service.test.mjs"]],
   ["Launcher contract", ["tests/launcher.test.mjs"]],
   ["Path policy security", ["tests/security/path-policy.test.mjs"]],
   ["File transaction rollback", ["tests/transactions/file-transactions.test.mjs"]],
