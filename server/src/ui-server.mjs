@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -10,6 +10,7 @@ import {
   validateSourceTrustMetadata,
 } from "./source-trust.mjs";
 import { terminateProcessTree } from "./process-control.mjs";
+import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
   projectPaths,
@@ -37,6 +38,7 @@ const maxVisualImageBytes = 8 * 1024 * 1024;
 const activeChildren = new Set();
 const visualAssetsDir = projectPaths.visualAssets;
 const visualIndexPath = projectPaths.visualIndex;
+let visualWriteQueue = Promise.resolve();
 
 const sourceSpecs = sourceSpecsFor("ui").map((entry) => ({
   key: entry.source_id,
@@ -524,6 +526,12 @@ function extensionsMatch(requested, detected) {
   return detected === ".jpg" && requested === ".jpeg";
 }
 
+function enqueueVisualWrite(task) {
+  const next = visualWriteQueue.then(task, task);
+  visualWriteQueue = next.catch(() => {});
+  return next;
+}
+
 function buildVisualUpload(input) {
   const now = new Date().toISOString();
   const title = requireString(input.title, "title", 200);
@@ -600,33 +608,24 @@ async function saveVisualUpload(input) {
     };
   }
 
-  await mkdir(path.dirname(upload.filePath), { recursive: true });
-  await writeFile(upload.filePath, upload.buffer, { flag: "wx" });
-  try {
+  const manifest = await enqueueVisualWrite(async () => {
     const existingIndex = await readOptionalText(visualIndexPath);
     const separator = existingIndex && !existingIndex.endsWith("\n") ? "\n" : "";
-    await appendFile(visualIndexPath, `${separator}${JSON.stringify(upload.record)}\n`, "utf8");
-  } catch (error) {
-    await rm(upload.filePath, { force: true });
-    throw error;
-  }
+    return commitFileTransaction("visual-upload", [
+      { type: "write", filePath: upload.filePath, content: upload.buffer },
+      { type: "append", filePath: visualIndexPath, content: `${separator}${JSON.stringify(upload.record)}\n` },
+    ], {
+      visual_id: upload.record.visual_id,
+      asset_path: upload.record.path,
+    });
+  });
 
   return {
     dryRun: false,
     record: upload.record,
     warnings: upload.warnings,
+    transactionId: manifest.transaction_id,
   };
-}
-
-async function writeVisualIndex(text) {
-  const tmpPath = `${visualIndexPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(tmpPath, text, "utf8");
-  try {
-    await rename(tmpPath, visualIndexPath);
-  } catch (error) {
-    await rm(tmpPath, { force: true });
-    throw error;
-  }
 }
 
 function visualIndexLines(text) {
@@ -662,55 +661,80 @@ async function deleteVisualReference(input) {
     throw new Error("confirmDelete must be true to delete a visual reference.");
   }
   const deleteAsset = optionalBoolean(input.deleteAsset, "deleteAsset", true);
-  const text = await readOptionalText(visualIndexPath);
-  const keptLines = [];
-  const matches = [];
 
-  for (const [index, line] of visualIndexLines(text).entries()) {
-    try {
-      const record = JSON.parse(line);
-      if (record?.visual_id === visualId) {
-        matches.push({ lineNumber: index + 1, line, record });
-        continue;
+  return enqueueVisualWrite(async () => {
+    const text = await readOptionalText(visualIndexPath);
+    const keptLines = [];
+    const matches = [];
+
+    for (const [index, line] of visualIndexLines(text).entries()) {
+      try {
+        const record = JSON.parse(line);
+        if (record?.visual_id === visualId) {
+          matches.push({ lineNumber: index + 1, line, record });
+          continue;
+        }
+      } catch {
+        // Preserve invalid lines; the user can repair or remove them manually.
       }
-    } catch {
-      // Preserve invalid lines; the user can repair or remove them manually.
+      keptLines.push(line);
     }
-    keptLines.push(line);
-  }
 
-  if (matches.length === 0) {
-    const error = new Error(`Visual reference not found: ${visualId}`);
-    error.statusCode = 404;
-    throw error;
-  }
-  if (matches.length > 1) {
-    throw new Error(`Visual reference id is duplicated and was not deleted: ${visualId}`);
-  }
-
-  const [match] = matches;
-  const nextIndex = keptLines.length ? `${keptLines.join("\n")}\n` : "";
-  await writeVisualIndex(nextIndex);
-
-  let assetDeleted = false;
-  let assetDeleteSkipped = "";
-  if (deleteAsset) {
-    const asset = resolveDeletableVisualAsset(match.record);
-    if (asset.filePath) {
-      await rm(asset.filePath, { force: true });
-      assetDeleted = true;
-    } else {
-      assetDeleteSkipped = asset.skipped;
+    if (matches.length === 0) {
+      const error = new Error(`Visual reference not found: ${visualId}`);
+      error.statusCode = 404;
+      throw error;
     }
-  }
+    if (matches.length > 1) {
+      throw new Error(`Visual reference id is duplicated and was not deleted: ${visualId}`);
+    }
 
-  return {
-    visualId,
-    record: match.record,
-    deletedLineNumber: match.lineNumber,
-    assetDeleted,
-    assetDeleteSkipped,
-  };
+    const [match] = matches;
+    const nextIndex = keptLines.length ? `${keptLines.join("\n")}\n` : "";
+    const operations = [
+      { type: "write", filePath: visualIndexPath, content: nextIndex },
+    ];
+
+    let assetDeleted = false;
+    let assetDeleteSkipped = "";
+    if (deleteAsset) {
+      const asset = resolveDeletableVisualAsset(match.record);
+      if (asset.filePath) {
+        try {
+          const assetStats = await stat(asset.filePath);
+          if (assetStats.isFile()) {
+            operations.push({ type: "delete", filePath: asset.filePath });
+            assetDeleted = true;
+          } else {
+            assetDeleteSkipped = "asset path is not a file.";
+          }
+        } catch (error) {
+          if (error.code === "ENOENT") {
+            assetDeleteSkipped = "asset file is already missing.";
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        assetDeleteSkipped = asset.skipped;
+      }
+    }
+
+    const manifest = await commitFileTransaction("visual-delete", operations, {
+      visual_id: visualId,
+      asset_path: match.record.path,
+      delete_asset: deleteAsset,
+    });
+
+    return {
+      visualId,
+      record: match.record,
+      deletedLineNumber: match.lineNumber,
+      assetDeleted,
+      assetDeleteSkipped,
+      transactionId: manifest.transaction_id,
+    };
+  });
 }
 
 function pushValue(argv, flag, value) {

@@ -75,6 +75,7 @@
 - Visual records remain references by default and do not establish Canon facts or ability mechanics without explicit approval.
 - Added a UI upload flow for user-imported visual references with image magic-byte validation, 8 MB size limits, automatic asset placement, JSONL indexing, and contract tests.
 - Added confirmed UI/API deletion for visual references, including index removal, asset cleanup, and contract tests.
+- Hardened visual upload/delete writes with UI-side serialization, project file transactions, rollback manifests, and transaction IDs in API responses.
 
 ## Windows launcher
 

@@ -232,6 +232,10 @@ async function main() {
     assert(visualUpload.response.ok, "Visual upload failed.");
     const uploadedRecord = visualUpload.payload.upload.record;
     createdVisualAssetPaths.push(uploadedRecord.path);
+    assert(
+      String(visualUpload.payload.upload.transactionId ?? "").startsWith("TX-"),
+      "Visual upload did not report a transaction id.",
+    );
     assert(uploadedRecord.canon_status === "reference", "Visual upload must default to reference status.");
     assert(uploadedRecord.trust_level === "T7", "Visual upload must default to T7 trust.");
     assert(uploadedRecord.source === "user_imported", "Visual upload source must be user_imported.");
@@ -269,6 +273,10 @@ async function main() {
       }),
     }));
     assert(visualDelete.response.ok, "Visual delete failed.");
+    assert(
+      String(visualDelete.payload.deleted.transactionId ?? "").startsWith("TX-"),
+      "Visual delete did not report a transaction id.",
+    );
     assert(visualDelete.payload.deleted.assetDeleted === true, "Visual delete did not remove the asset file.");
     assert(
       !(await readOptionalText(visualIndexPath)).includes(uploadedRecord.visual_id),
