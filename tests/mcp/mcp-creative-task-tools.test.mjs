@@ -59,7 +59,7 @@ async function main() {
     }
 
     const types = await creativeTaskTools.list_creative_task_types();
-    assert(types.ok && types.task_types.length === 6, "Task type listing failed.");
+    assert(types.ok && types.task_types.length === 7, "Task type listing failed.");
 
     const run = await creativeTaskTools.run_creative_task({
       task_type: "generate_writing_candidate",

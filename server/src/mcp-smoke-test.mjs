@@ -170,6 +170,9 @@ const expectedTools = [
   "build_gpt_writing_context",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
+  "save_chat_output_as_writing_candidate",
+  "get_writing_candidate_detail",
+  "list_writing_candidates",
 ];
 
 const readOnlyTools = new Set([
@@ -182,6 +185,8 @@ const readOnlyTools = new Set([
   "list_creative_task_types",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
+  "get_writing_candidate_detail",
+  "list_writing_candidates",
 ]);
 
 const backupRequiredTools = new Set([
@@ -230,6 +235,27 @@ const unknownArgumentFixtures = expectedTools.map((name) => ({
 
 const enumConstraintFixtures = [
   {
+    label: "run_creative_task invalid source",
+    name: "run_creative_task",
+    field: "source",
+    arguments: {
+      taskType: "save_chat_output_candidate",
+      chatOutputText: "Enum constraint fixture.",
+      source: "invalid-source",
+    },
+    expectedMessage: "source must be one of: chatgpt, gpt, manual_paste.",
+  },
+  {
+    label: "save_chat_output_as_writing_candidate invalid source",
+    name: "save_chat_output_as_writing_candidate",
+    field: "source",
+    arguments: {
+      chatOutputText: "Enum constraint fixture.",
+      source: "invalid-source",
+    },
+    expectedMessage: "source must be one of: chatgpt, gpt, manual_paste.",
+  },
+  {
     label: "build_gpt_writing_context invalid chapterMode",
     name: "build_gpt_writing_context",
     field: "chapterMode",
@@ -256,7 +282,7 @@ const enumConstraintFixtures = [
     arguments: {
       taskType: "invalid-task",
     },
-    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue.",
+    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue, save_chat_output_candidate.",
   },
   {
     label: "validate_jsonl invalid schema",
@@ -450,6 +476,27 @@ const schemaTypeFixtures = [
 ];
 
 const integerMaximumFixtures = [
+  {
+    label: "get_writing_candidate_detail maxContentChars over maximum",
+    name: "get_writing_candidate_detail",
+    field: "maxContentChars",
+    expectedMaximum: 50000,
+    arguments: {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      maxContentChars: 50001,
+    },
+    expectedMessage: "maxContentChars must be an integer less than or equal to 50000.",
+  },
+  {
+    label: "list_writing_candidates limit over maximum",
+    name: "list_writing_candidates",
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: {
+      limit: 101,
+    },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  },
   {
     label: "build_gpt_writing_context maxContextChars over maximum",
     name: "build_gpt_writing_context",
@@ -670,6 +717,20 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "save_chat_output_as_writing_candidate missing chatOutputText",
+    name: "save_chat_output_as_writing_candidate",
+    field: "chatOutputText",
+    arguments: {},
+    expectedMessage: "chatOutputText is required.",
+  },
+  {
+    label: "get_writing_candidate_detail missing candidateId",
+    name: "get_writing_candidate_detail",
+    field: "candidateId",
+    arguments: {},
+    expectedMessage: "candidateId is required.",
+  },
   {
     label: "build_gpt_writing_context missing taskPrompt",
     name: "build_gpt_writing_context",
@@ -1034,6 +1095,15 @@ const expectedDefaultMetadata = new Map([
     maxContextChars: 120000,
   }],
   ["list_gpt_writing_context_bundles", { limit: 20 }],
+  ["save_chat_output_as_writing_candidate", {
+    source: "chatgpt",
+    dryRun: false,
+  }],
+  ["get_writing_candidate_detail", {
+    includeContent: false,
+    maxContentChars: 12000,
+  }],
+  ["list_writing_candidates", { limit: 20 }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -1045,6 +1115,8 @@ const expectedIntegerMaximumMetadata = new Map([
   ["run_creative_task:limit", 100],
   ["build_gpt_writing_context:maxContextChars", 250000],
   ["list_gpt_writing_context_bundles:limit", 100],
+  ["get_writing_candidate_detail:maxContentChars", 50000],
+  ["list_writing_candidates:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {
@@ -1069,6 +1141,7 @@ const expectedInputLimits = {
   stringMaxLength: 4096,
   queryMaxLength: 8192,
   contentMaxLength: 65536,
+  chatOutputMaxLength: 300000,
   textMaxLength: 1000000,
   arrayMaxItems: 100,
   fileArrayMaxItems: 256,
@@ -1085,6 +1158,9 @@ const expectedContentStringFields = new Set([
 ]);
 
 function expectedStringMaxLength(field) {
+  if (field === "chatOutputText") {
+    return expectedInputLimits.chatOutputMaxLength;
+  }
   if (field === "text") {
     return expectedInputLimits.textMaxLength;
   }

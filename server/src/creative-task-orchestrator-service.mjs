@@ -13,6 +13,7 @@ import {
 } from "./approval-queue-service.mjs";
 import { getPendingCandidate } from "./engine-candidate-service.mjs";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
+import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -28,6 +29,7 @@ export const CREATIVE_TASK_TYPES = Object.freeze({
   BUILD_SETTLEMENT_CANDIDATE: "build_settlement_candidate",
   REQUEST_ENGINE_ACTIVATION: "request_engine_activation",
   QUERY_APPROVAL_QUEUE: "query_approval_queue",
+  SAVE_CHAT_OUTPUT_CANDIDATE: "save_chat_output_candidate",
 });
 
 const taskTypes = Object.freeze(Object.values(CREATIVE_TASK_TYPES));
@@ -107,6 +109,24 @@ function normalizeInput(input = {}) {
       200,
     ),
     approvalId: optionalText(input.approval_id ?? input.approvalId, "approval_id", 200),
+    sourceBundleId: optionalText(
+      input.source_bundle_id ?? input.sourceBundleId,
+      "source_bundle_id",
+      200,
+    ),
+    chatOutputText: optionalText(
+      input.chat_output_text ?? input.chatOutputText,
+      "chat_output_text",
+      300_000,
+    ),
+    title: optionalText(input.title, "title", 500),
+    chapterLabel: optionalText(
+      input.chapter_label ?? input.chapterLabel,
+      "chapter_label",
+      500,
+    ),
+    notes: optionalText(input.notes, "notes", 10_000),
+    source: optionalText(input.source, "source", 100),
     dryRun: input.dry_run === true || input.dryRun === true,
     reason: optionalText(input.reason, "reason", 5_000),
     status: optionalText(input.status, "status", 100),
@@ -499,6 +519,38 @@ async function queryApprovalQueue(input, taskId, options) {
   return { response, bundle: response.result };
 }
 
+async function saveChatOutputCandidate(input, taskId, options) {
+  const candidate = await saveChatOutputAsWritingCandidate({
+    sourceBundleId: input.sourceBundleId,
+    chatOutputText: input.chatOutputText,
+    title: input.title,
+    chapterLabel: input.chapterLabel,
+    taskPrompt: input.taskPrompt,
+    notes: input.notes,
+    source: input.source || "chatgpt",
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(
+    taskId,
+    input.taskType,
+    input.dryRun ? "dry_run" : "completed",
+  );
+  response.result = {
+    ...candidate,
+    next_action: "Run proofread_writing_candidate before requesting adoption.",
+  };
+  response.warnings.push(...candidate.warnings);
+  if (!input.dryRun) {
+    response.created.push({
+      label: "chat_output_writing_candidate",
+      target_id: candidate.candidate_id,
+      source_path: candidate.candidate_path,
+      canon_status: "candidate_only",
+    });
+  }
+  return { response, bundle: candidate };
+}
+
 async function executeTask(input, taskId, options) {
   switch (input.taskType) {
     case CREATIVE_TASK_TYPES.GENERATE_WRITING_CANDIDATE:
@@ -513,6 +565,8 @@ async function executeTask(input, taskId, options) {
       return requestEngineActivation(input, taskId, options);
     case CREATIVE_TASK_TYPES.QUERY_APPROVAL_QUEUE:
       return queryApprovalQueue(input, taskId, options);
+    case CREATIVE_TASK_TYPES.SAVE_CHAT_OUTPUT_CANDIDATE:
+      return saveChatOutputCandidate(input, taskId, options);
     default:
       throw new Error(`Unknown task_type: ${input.taskType || "(empty)"}`);
   }

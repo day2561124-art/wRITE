@@ -22,6 +22,7 @@ const fixtureApproval = path.join(projectPaths.approvalQueue, ".creative-task-te
 const fixtureTasks = path.join(projectPaths.creativeTasks, ".creative-task-test");
 const fixtureLog = path.join(projectPaths.outputLogs, ".creative-task-test-runs.jsonl");
 const fixtureGptContexts = path.join(projectPaths.gptWritingContexts, ".creative-task-test");
+const fixtureWritingCandidates = path.join(projectPaths.writingCandidates, ".creative-task-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 
 const options = {
@@ -32,6 +33,7 @@ const options = {
   creativeTasks: fixtureTasks,
   creativeTaskLog: fixtureLog,
   gptWritingContexts: fixtureGptContexts,
+  writingCandidates: fixtureWritingCandidates,
 };
 
 function assert(condition, message) {
@@ -77,6 +79,7 @@ async function main() {
     rm(fixtureTasks, { recursive: true, force: true }),
     rm(fixtureLog, { force: true }),
     rm(fixtureGptContexts, { recursive: true, force: true }),
+    rm(fixtureWritingCandidates, { recursive: true, force: true }),
   ]);
   await mkdir(path.dirname(fixtureActive), { recursive: true });
   await writeFile(fixtureActive, activeText, "utf8");
@@ -119,6 +122,21 @@ async function main() {
     assert(
       (await getCreativeTaskStatus(generated.task_id, options)).task_id === generated.task_id,
       "Creative task status could not be read back.",
+    );
+
+    const intake = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.SAVE_CHAT_OUTPUT_CANDIDATE,
+      source_bundle_id: generated.result.bundle_id,
+      chat_output_text: "# Chat Candidate\n\nSaved from chat.",
+      title: "Chat candidate",
+    }, options);
+    assert(intake.ok && intake.status === "completed", "Chat output intake failed.");
+    assert(intake.result.canon_status === "candidate_only", "Intake canon status was wrong.");
+    assert(intake.result.adopted === false, "Intake candidate was adopted.");
+    assert(intake.result.settled === false, "Intake candidate was settled.");
+    assert(
+      intake.result.next_action.includes("proofread_writing_candidate"),
+      "Intake next action did not direct proofing.",
     );
 
     const draft = await saveCandidateDraft({
@@ -217,6 +235,7 @@ async function main() {
       rm(fixtureTasks, { recursive: true, force: true }),
       rm(fixtureLog, { force: true }),
       rm(fixtureGptContexts, { recursive: true, force: true }),
+      rm(fixtureWritingCandidates, { recursive: true, force: true }),
     ]);
     await removeNew(transactionDir, transactionsBefore);
     assert(

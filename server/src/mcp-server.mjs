@@ -26,6 +26,11 @@ import {
   get_gpt_writing_context_bundle,
   list_gpt_writing_context_bundles,
 } from "./mcp-gpt-writing-context-tools.mjs";
+import {
+  get_writing_candidate_detail,
+  list_writing_candidates,
+  save_chat_output_as_writing_candidate,
+} from "./mcp-chat-output-candidate-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -771,6 +776,7 @@ const defaultInputLimits = Object.freeze({
   stringMaxLength: 4096,
   queryMaxLength: 8192,
   contentMaxLength: 65536,
+  chatOutputMaxLength: 300000,
   textMaxLength: 1000000,
   arrayMaxItems: 100,
   fileArrayMaxItems: 256,
@@ -787,6 +793,9 @@ const contentStringFields = new Set([
 ]);
 
 function stringMaxLengthFor(field) {
+  if (field === "chatOutputText") {
+    return defaultInputLimits.chatOutputMaxLength;
+  }
   if (field === "text") {
     return defaultInputLimits.textMaxLength;
   }
@@ -1685,6 +1694,7 @@ const toolDefinitions = [
         "build_settlement_candidate",
         "request_engine_activation",
         "query_approval_queue",
+        "save_chat_output_candidate",
       ] },
       taskPrompt: { type: "string" },
       generationContext: { type: "object" },
@@ -1699,6 +1709,12 @@ const toolDefinitions = [
       status: { type: "string" },
       riskLevel: { type: "string" },
       limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+      sourceBundleId: { type: "string" },
+      chatOutputText: { type: "string" },
+      title: { type: "string" },
+      chapterLabel: { type: "string" },
+      notes: { type: "string" },
+      source: { type: "string", enum: ["chatgpt", "gpt", "manual_paste"] },
     }, ["taskType"]),
     handler: async (args) => jsonContent(await run_creative_task(args)),
   },
@@ -1766,6 +1782,50 @@ const toolDefinitions = [
     }),
     handler: async (args) => jsonContent(await list_gpt_writing_context_bundles(args)),
   },
+  {
+    name: "save_chat_output_as_writing_candidate",
+    description: "Save pasted GPT/chat output as a candidate-only writing artifact.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      sourceBundleId: { type: "string" },
+      chatOutputText: { type: "string" },
+      title: { type: "string" },
+      chapterLabel: { type: "string" },
+      taskPrompt: { type: "string" },
+      notes: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["chatgpt", "gpt", "manual_paste"],
+        default: "chatgpt",
+      },
+      dryRun: { type: "boolean", default: false },
+    }, ["chatOutputText"]),
+    handler: async (args) => jsonContent(await save_chat_output_as_writing_candidate(args)),
+  },
+  {
+    name: "get_writing_candidate_detail",
+    description: "Read candidate-only metadata and optionally bounded candidate content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      includeContent: { type: "boolean", default: false },
+      maxContentChars: { type: "integer", minimum: 1, maximum: 50000, default: 12000 },
+    }, ["candidateId"]),
+    handler: async (args) => jsonContent(await get_writing_candidate_detail(args)),
+  },
+  {
+    name: "list_writing_candidates",
+    description: "List candidate-only writing artifact summaries without dumping content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+      sourceBundleId: { type: "string" },
+      canonStatus: { type: "string" },
+    }),
+    handler: async (args) => jsonContent(await list_writing_candidates(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -1794,6 +1854,9 @@ const permissionSources = {
   build_gpt_writing_context: ["registered_project_sources", "user_input"],
   get_gpt_writing_context_bundle: ["gpt_writing_context_records"],
   list_gpt_writing_context_bundles: ["gpt_writing_context_records"],
+  save_chat_output_as_writing_candidate: ["user_input", "gpt_writing_context_records"],
+  get_writing_candidate_detail: ["writing_candidate_records"],
+  list_writing_candidates: ["writing_candidate_records"],
 };
 
 const backupRequiredTools = new Set([

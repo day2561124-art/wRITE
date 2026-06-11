@@ -32,6 +32,8 @@ const steps = [
   ["MCP creative task tools", ["tests/mcp/mcp-creative-task-tools.test.mjs"]],
   ["GPT writing context service", ["tests/creative/gpt-writing-context-service.test.mjs"]],
   ["MCP GPT writing context tools", ["tests/mcp/mcp-gpt-writing-context-tools.test.mjs"]],
+  ["Chat output candidate service", ["tests/creative/chat-output-candidate-service.test.mjs"]],
+  ["MCP chat output candidate tools", ["tests/mcp/mcp-chat-output-candidate-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],
