@@ -10,6 +10,10 @@ import {
 } from "../../server/src/project-paths.mjs";
 import { assertAgentRunId } from "../../server/src/agent-run-service.mjs";
 import { assertNeuralTraceId } from "../../server/src/neural-trace-service.mjs";
+import {
+  assertEngineCandidateId,
+  isSafeCandidateId,
+} from "../../server/src/engine-candidate-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -142,6 +146,33 @@ async function main() {
       }
     })(),
     "Neural trace traversal id was not rejected.",
+  );
+  for (const unsafeId of [
+    "../active_engine.md",
+    "engine_candidate_../../active_engine.md",
+    "engine_candidate_20260611-120000-../../x",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(!isSafeCandidateId(unsafeId), `Unsafe candidate id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertEngineCandidateId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Candidate traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  assert(
+    projectPaths.pendingEngineCandidates.startsWith(projectPaths.canonDb),
+    "Pending engine candidates path is outside canon_db.",
+  );
+  assert(
+    projectPaths.rejectedEngineCandidates.startsWith(projectPaths.canonDb),
+    "Rejected engine candidates path is outside canon_db.",
   );
 
   const activeBefore = createHash("sha256").update(await readFile(activeEnginePath)).digest("hex");

@@ -5,3 +5,6 @@ data/outputs/runs/
 data/outputs/.golden-test-*/
 data/outputs/.transaction-test/
 data/agent_runs/
+data/canon_db/pending_engine_candidates/
+data/canon_db/rejected_engine_candidates/
+data/canon_db/activation_logs/

@@ -5,6 +5,12 @@ const state = {
   activeActivityList: "drafts",
   activeVisualId: "",
   activeNeuralRunId: "",
+  activeCandidateId: "",
+  canon: {
+    activeEngine: null,
+    candidates: [],
+    candidateDetail: null,
+  },
   neuralData: {
     runs: [],
     traces: [],
@@ -27,6 +33,7 @@ const titles = {
   library: "資料庫",
   visuals: "圖庫",
   neural: "神經模組",
+  settlement: "結算匯入",
   activity: "紀錄",
 };
 
@@ -105,7 +112,7 @@ function setBusy(busy) {
   $("#loading-bar").hidden = state.busyCount === 0;
   const isBusy = state.busyCount > 0;
   if (wasBusy === isBusy) return;
-  $$("form button, [data-action], [data-visual-delete], #validate-button, #refresh-button").forEach((button) => {
+  $$("form button, [data-action], [data-visual-delete], #validate-button, #refresh-button, #candidate-reparse-button, #candidate-reject-button").forEach((button) => {
     if (isBusy) {
       button.dataset.busyState = button.disabled ? "preserve" : "temporary";
       button.disabled = true;
@@ -179,6 +186,9 @@ function switchView(viewName) {
   }
   if (viewName === "neural") {
     loadNeuralStatus().catch((error) => toast(error.message, true));
+  }
+  if (viewName === "settlement") {
+    refreshCanonSettlementState().catch((error) => toast(error.message, true));
   }
   window.scrollTo({ top: 0, behavior: "auto" });
 }
@@ -471,6 +481,210 @@ async function loadNeuralStatus(showToast = false) {
   if (showToast) toast("神經模組狀態已重新整理");
 }
 
+function candidateStatusLabel(status) {
+  return {
+    candidate: "候選",
+    blocked: "已阻擋",
+    rejected: "已放棄",
+  }[status] ?? status ?? "未知";
+}
+
+function riskLabel(level) {
+  return {
+    low: "低風險",
+    medium: "中風險",
+    high: "高風險，Phase 3 啟用時需要二次確認",
+    critical: "嚴重風險，已 blocked，不得啟用",
+  }[level] ?? level ?? "未評估";
+}
+
+function renderCandidateList(candidates) {
+  const list = candidates ?? [];
+  if (!list.some((candidate) => candidate.candidate_id === state.activeCandidateId)) {
+    state.activeCandidateId = list[0]?.candidate_id ?? "";
+  }
+  $("#pending-candidate-list").innerHTML = list.length
+    ? list.map((candidate) => `
+      <button class="candidate-list-item${candidate.candidate_id === state.activeCandidateId ? " is-active" : ""}" type="button" data-candidate-id="${escapeHtml(candidate.candidate_id)}">
+        <span>
+          <strong>${escapeHtml(candidate.source_chapter || "未指定章節")}</strong>
+          <small>${escapeHtml(candidate.candidate_id)}</small>
+        </span>
+        <span class="candidate-list-meta">
+          <span class="risk-${escapeHtml(candidate.risk_level)}">${escapeHtml(riskLabel(candidate.risk_level))}</span>
+          <span class="candidate-status candidate-status-${escapeHtml(candidate.status)}">${escapeHtml(candidateStatusLabel(candidate.status))}</span>
+        </span>
+      </button>
+    `).join("")
+    : '<div class="empty-state">尚無 pending candidate</div>';
+}
+
+function renderRiskReport(report) {
+  if (!report) {
+    $("#candidate-risk-report").innerHTML = '<div class="empty-state">尚無 risk report</div>';
+    return;
+  }
+  $("#candidate-risk-report").innerHTML = `
+    <div class="risk-heading risk-${escapeHtml(report.risk_level)}">${escapeHtml(riskLabel(report.risk_level))}</div>
+    <dl class="candidate-facts">
+      <div><dt>requires_second_confirmation</dt><dd>${report.requires_second_confirmation ? "true" : "false"}</dd></div>
+      <div><dt>delete_ratio</dt><dd>${escapeHtml(report.delete_ratio)}</dd></div>
+      <div><dt>candidate_length_ratio</dt><dd>${escapeHtml(report.candidate_length_ratio)}</dd></div>
+      <div><dt>matched_keywords</dt><dd>${escapeHtml((report.matched_keywords ?? []).join(", ") || "none")}</dd></div>
+      <div><dt>blocked_terms</dt><dd>${escapeHtml((report.blocked_terms ?? []).join(", ") || "none")}</dd></div>
+      <div><dt>warnings</dt><dd>${escapeHtml((report.warnings ?? []).join("；") || "none")}</dd></div>
+    </dl>
+  `;
+}
+
+function renderDiff(diff) {
+  if (!diff) {
+    $("#candidate-diff-summary").innerHTML = '<div class="empty-state">此候選沒有可顯示的 diff</div>';
+    $("#candidate-raw-diff").textContent = "沒有 diff。";
+    return;
+  }
+  $("#candidate-diff-summary").innerHTML = `
+    <span class="diff-added">新增 ${escapeHtml(diff.summary?.added_count ?? 0)}</span>
+    <span class="diff-deleted">刪除 ${escapeHtml(diff.summary?.deleted_count ?? 0)}</span>
+    <span class="diff-modified">修改 ${escapeHtml(diff.summary?.modified_count ?? 0)}</span>
+  `;
+  $("#candidate-raw-diff").textContent = diff.raw_unified_diff ?? "";
+}
+
+function renderCandidateDetail(detail) {
+  const reparseButton = $("#candidate-reparse-button");
+  const rejectButton = $("#candidate-reject-button");
+  if (!detail) {
+    $("#candidate-detail-id").textContent = "NO CANDIDATE SELECTED";
+    $("#candidate-detail-status").className = "candidate-status candidate-status-blocked";
+    $("#candidate-detail-status").textContent = "未選擇";
+    $("#pending-candidate-detail").innerHTML = "";
+    $("#candidate-blocked-reason").innerHTML = "";
+    $("#candidate-engine-preview").textContent = "";
+    $("#candidate-raw-preview").textContent = "";
+    renderDiff(null);
+    renderRiskReport(null);
+    reparseButton.disabled = true;
+    rejectButton.disabled = true;
+    return;
+  }
+  const { metadata, status, risk_report: riskReport } = detail;
+  $("#candidate-detail-id").textContent = metadata.candidate_id;
+  $("#candidate-detail-status").className = `candidate-status candidate-status-${status.status}`;
+  $("#candidate-detail-status").textContent = candidateStatusLabel(status.status);
+  $("#pending-candidate-detail").innerHTML = `
+    <div><dt>source_chapter</dt><dd>${escapeHtml(metadata.source_chapter || "未指定")}</dd></div>
+    <div><dt>created_at</dt><dd>${escapeHtml(metadata.created_at)}</dd></div>
+    <div><dt>candidate_hash</dt><dd>${escapeHtml(metadata.candidate_hash || "none")}</dd></div>
+    <div><dt>active_engine_hash_at_import</dt><dd>${escapeHtml(metadata.active_engine_hash_at_import || "none")}</dd></div>
+    <div><dt>run_id</dt><dd>${escapeHtml(metadata.run_id || "none")}</dd></div>
+    <div><dt>neural_modules_used_path</dt><dd>${escapeHtml(metadata.neural_modules_used_path || "none")}</dd></div>
+    <div><dt>eligible_for_phase_3_activation</dt><dd>${status.eligible_for_phase_3_activation ? "true" : "false"}</dd></div>
+    <div><dt>note</dt><dd>${escapeHtml(metadata.note || "none")}</dd></div>
+  `;
+  $("#candidate-blocked-reason").innerHTML = status.blocked_reason
+    ? `<div class="blocked-panel"><strong>Blocked</strong><span>${escapeHtml(status.blocked_reason)}</span></div>`
+    : "";
+  $("#candidate-engine-preview").textContent = detail.candidate_preview ?? "";
+  $("#candidate-raw-preview").textContent = detail.raw_import_preview ?? "";
+  renderDiff(detail.diff);
+  renderRiskReport(riskReport);
+  reparseButton.disabled = status.status === "rejected";
+  rejectButton.disabled = status.status === "rejected";
+}
+
+function renderSettlementPanel() {
+  const active = state.canon.activeEngine;
+  if (!active) {
+    $("#active-engine-status").textContent = "尚未讀取 active_engine";
+  } else if (!active.active_engine_exists) {
+    $("#active-engine-status").className = "active-engine-status is-error";
+    $("#active-engine-status").textContent = active.blocked_reason;
+  } else {
+    $("#active-engine-status").className = "active-engine-status";
+    $("#active-engine-status").textContent = `${formatBytes(active.active_engine_size)} · ${active.active_engine_hash.slice(0, 12)}`;
+  }
+  renderCandidateList(state.canon.candidates);
+  renderCandidateDetail(state.canon.candidateDetail);
+}
+
+async function loadCandidateDetail(candidateId) {
+  if (!candidateId) {
+    state.canon.candidateDetail = null;
+    renderSettlementPanel();
+    return;
+  }
+  const payload = await api(`/api/canon/pending-candidates/${encodeURIComponent(candidateId)}`);
+  state.activeCandidateId = candidateId;
+  state.canon.candidateDetail = payload.candidate;
+  renderSettlementPanel();
+}
+
+async function refreshCanonSettlementState(showToast = false) {
+  const [activePayload, candidatesPayload] = await Promise.all([
+    api("/api/canon/active-engine/status"),
+    api("/api/canon/pending-candidates"),
+  ]);
+  state.canon.activeEngine = activePayload.active_engine;
+  state.canon.candidates = candidatesPayload.candidates ?? [];
+  if (!state.canon.candidates.some((candidate) => candidate.candidate_id === state.activeCandidateId)) {
+    state.activeCandidateId = state.canon.candidates[0]?.candidate_id ?? "";
+  }
+  state.canon.candidateDetail = null;
+  renderSettlementPanel();
+  if (state.activeCandidateId) await loadCandidateDetail(state.activeCandidateId);
+  if (showToast) toast("結算候選已重新整理");
+}
+
+async function handleSettlementImport(event) {
+  event.preventDefault();
+  try {
+    const payload = await api("/api/canon/settlement/import", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceChapter: $("#settlement-source-chapter").value.trim(),
+        note: $("#settlement-note").value.trim(),
+        rawText: $("#settlement-raw-text").value,
+      }),
+    });
+    state.activeCandidateId = payload.candidate.metadata.candidate_id;
+    $("#settlement-raw-text").value = "";
+    await refreshCanonSettlementState();
+    toast(payload.candidate.status.status === "blocked" ? "候選已保存，但目前被阻擋" : "Pending candidate 已建立");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleReparseCandidate() {
+  if (!state.activeCandidateId) return;
+  try {
+    await api(`/api/canon/pending-candidates/${encodeURIComponent(state.activeCandidateId)}/reparse`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await refreshCanonSettlementState();
+    toast("候選已重新解析");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleRejectCandidate() {
+  if (!state.activeCandidateId || !window.confirm("確定放棄這個 pending candidate？")) return;
+  const reason = window.prompt("放棄原因（可留空）", "") ?? "";
+  try {
+    await api(`/api/canon/pending-candidates/${encodeURIComponent(state.activeCandidateId)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    await refreshCanonSettlementState();
+    toast("候選已標記為放棄");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function renderDraftSelect() {
   const drafts = state.data?.drafts ?? [];
   const select = $("#draft-select");
@@ -528,6 +742,7 @@ function renderAll() {
   renderLibrary();
   renderVisuals();
   renderNeuralStatus();
+  renderSettlementPanel();
   renderDraftSelect();
   renderActivityTable();
 }
@@ -826,6 +1041,9 @@ function bindEvents() {
   $("#refresh-neural-button").addEventListener("click", () => (
     loadNeuralStatus(true).catch((error) => toast(error.message, true))
   ));
+  $("#refresh-settlement-button").addEventListener("click", () => (
+    refreshCanonSettlementState(true).catch((error) => toast(error.message, true))
+  ));
   $("#validate-button").addEventListener("click", runValidation);
 
   $("#mode-control").addEventListener("click", (event) => {
@@ -846,6 +1064,9 @@ function bindEvents() {
   $("#proof-form").addEventListener("submit", handleSaveProof);
   $("#feedback-form").addEventListener("submit", handleFeedback);
   $("#visual-upload-form").addEventListener("submit", handleVisualUpload);
+  $("#settlement-import-form").addEventListener("submit", handleSettlementImport);
+  $("#candidate-reparse-button").addEventListener("click", handleReparseCandidate);
+  $("#candidate-reject-button").addEventListener("click", handleRejectCandidate);
   $("#visual-upload-file").addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     if (!file || $("#visual-upload-title").value.trim()) return;
@@ -883,6 +1104,11 @@ function bindEvents() {
     if (neuralRun) {
       state.activeNeuralRunId = neuralRun.dataset.neuralRunId;
       renderNeuralStatus();
+      return;
+    }
+    const candidateItem = event.target.closest("[data-candidate-id]");
+    if (candidateItem) {
+      loadCandidateDetail(candidateItem.dataset.candidateId).catch((error) => toast(error.message, true));
       return;
     }
     const visualCard = event.target.closest("[data-visual-id]");

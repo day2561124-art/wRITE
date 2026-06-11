@@ -43,6 +43,10 @@
             <span class="nav-symbol" aria-hidden="true">N</span>
             <span>神經模組</span>
           </button>
+          <button class="nav-item" data-view="settlement" type="button">
+            <span class="nav-symbol" aria-hidden="true">⇄</span>
+            <span>結算匯入</span>
+          </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>紀錄</span>
@@ -422,6 +426,97 @@
               <div id="neural-run-facts" class="neural-run-facts"></div>
               <div id="neural-trace-list" class="neural-trace-list">
                 <div class="empty-state">選擇左側 run 查看 neural_trace</div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="settlement">
+          <div class="settlement-status-bar">
+            <div>
+              <p class="eyebrow">CANON SETTLEMENT</p>
+              <h2>正式章節結算匯入</h2>
+            </div>
+            <div id="active-engine-status" class="active-engine-status">讀取 active_engine 狀態中</div>
+          </div>
+
+          <div class="warning-panel phase-boundary">
+            此階段只建立 pending candidate，不會更新 active_engine。
+          </div>
+
+          <form id="settlement-import-form" class="settlement-import-panel">
+            <div class="form-row">
+              <label class="field">
+                <span>來源章節</span>
+                <input id="settlement-source-chapter" type="text" maxlength="500" placeholder="第十九章｜第一聲鈴">
+              </label>
+              <label class="field">
+                <span>備註</span>
+                <input id="settlement-note" type="text" maxlength="5000" placeholder="選填">
+              </label>
+            </div>
+            <label class="field">
+              <span>正式章節結算結果</span>
+              <textarea id="settlement-raw-text" rows="12" required placeholder="貼上包含「新版完整創作引擎候選」區塊的結算結果"></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="button primary" type="submit">匯入候選</button>
+            </div>
+          </form>
+
+          <div class="settlement-layout">
+            <aside class="panel candidate-list-panel">
+              <div class="panel-heading">
+                <h2>Pending Candidates</h2>
+                <button id="refresh-settlement-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">
+                  <span aria-hidden="true">↻</span>
+                </button>
+              </div>
+              <div id="pending-candidate-list" class="pending-candidate-list">
+                <div class="empty-state">尚無 pending candidate</div>
+              </div>
+            </aside>
+
+            <section class="panel candidate-detail-panel">
+              <div class="reader-heading">
+                <div>
+                  <p id="candidate-detail-id" class="eyebrow">NO CANDIDATE SELECTED</p>
+                  <h2>候選詳情</h2>
+                </div>
+                <span id="candidate-detail-status" class="candidate-status candidate-status-blocked">未選擇</span>
+              </div>
+              <div id="pending-candidate-detail" class="candidate-facts"></div>
+              <div id="candidate-blocked-reason"></div>
+
+              <div class="candidate-section">
+                <div class="section-heading compact">
+                  <h3>Diff 摘要</h3>
+                </div>
+                <div id="candidate-diff-summary" class="diff-summary"></div>
+                <pre id="candidate-raw-diff" class="diff-panel">選擇候選以查看差異</pre>
+              </div>
+
+              <div class="candidate-section">
+                <div class="section-heading compact">
+                  <h3>Risk Report</h3>
+                </div>
+                <div id="candidate-risk-report" class="risk-report"></div>
+              </div>
+
+              <div class="candidate-section candidate-previews">
+                <details>
+                  <summary>Candidate Preview</summary>
+                  <pre id="candidate-engine-preview"></pre>
+                </details>
+                <details>
+                  <summary>Raw Import Preview</summary>
+                  <pre id="candidate-raw-preview"></pre>
+                </details>
+              </div>
+
+              <div class="form-actions candidate-actions">
+                <button id="candidate-reparse-button" class="button secondary" type="button" disabled>重新解析</button>
+                <button id="candidate-reject-button" class="button danger" type="button" disabled>放棄候選</button>
               </div>
             </section>
           </div>

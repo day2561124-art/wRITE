@@ -1390,6 +1390,300 @@ dialog::backdrop {
   display: none !important;
 }
 
+.settlement-status-bar {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settlement-status-bar h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+}
+
+.active-engine-status {
+  max-width: 420px;
+  padding: 8px 10px;
+  border: 1px solid #b7c6d8;
+  color: #27435f;
+  background: #f4f8fb;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.active-engine-status.is-error {
+  border-color: #d9a0a0;
+  color: #8a2525;
+  background: #fff5f5;
+}
+
+.warning-panel,
+.blocked-panel {
+  border-left: 3px solid #b97819;
+  background: #fff8e9;
+  color: #69420d;
+}
+
+.phase-boundary {
+  margin: 18px 0;
+  padding: 11px 14px;
+  font-size: 13px;
+}
+
+.settlement-import-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.settlement-import-panel textarea {
+  min-height: 230px;
+  resize: vertical;
+  font-family: var(--mono);
+}
+
+.settlement-layout {
+  min-height: 640px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.candidate-list-panel,
+.candidate-detail-panel {
+  min-width: 0;
+}
+
+.pending-candidate-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.candidate-list-item {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidate-list-item:hover,
+.candidate-list-item.is-active {
+  border-color: #4d769b;
+  background: #f3f7fa;
+}
+
+.candidate-list-item > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.candidate-list-item strong,
+.candidate-list-item small {
+  overflow-wrap: anywhere;
+}
+
+.candidate-list-item small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.candidate-list-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.candidate-status,
+.risk-low,
+.risk-medium,
+.risk-high,
+.risk-critical {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.candidate-status-candidate,
+.risk-low {
+  color: #28704a;
+  background: #effaf4;
+}
+
+.candidate-status-blocked,
+.risk-critical {
+  color: #9a2929;
+  background: #fff2f2;
+}
+
+.candidate-status-rejected {
+  color: #5f6570;
+  background: #f2f3f5;
+}
+
+.risk-medium {
+  color: #876013;
+  background: #fff8e7;
+}
+
+.risk-high {
+  color: #a04416;
+  background: #fff3eb;
+}
+
+.candidate-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 14px 0 0;
+  background: var(--line);
+}
+
+.candidate-facts > div {
+  min-width: 0;
+  padding: 10px;
+  background: #fff;
+}
+
+.candidate-facts dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.candidate-facts dd {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.blocked-panel {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 11px 13px;
+}
+
+.candidate-section {
+  margin-top: 20px;
+}
+
+.section-heading.compact {
+  min-height: 34px;
+}
+
+.section-heading.compact h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 9px 0;
+}
+
+.diff-added,
+.diff-deleted,
+.diff-modified {
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.diff-added {
+  color: #28704a;
+  background: #effaf4;
+}
+
+.diff-deleted {
+  color: #9a2929;
+  background: #fff2f2;
+}
+
+.diff-modified {
+  color: #876013;
+  background: #fff8e7;
+}
+
+.diff-panel {
+  max-height: 430px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #121921;
+  color: #dbe8f5;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.risk-report {
+  border: 1px solid var(--line);
+}
+
+.risk-heading {
+  margin: 12px 12px 0;
+}
+
+.candidate-previews {
+  display: grid;
+  gap: 8px;
+}
+
+.candidate-previews details {
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.candidate-previews summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.candidate-previews pre {
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.candidate-actions {
+  margin-top: 18px;
+}
+
 @media (max-width: 1120px) {
   .source-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1453,7 +1747,7 @@ dialog::backdrop {
     min-width: 0;
     height: 100%;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(8, minmax(0, 1fr));
     gap: 2px;
   }
 
@@ -1588,6 +1882,21 @@ dialog::backdrop {
 
   .neural-layout {
     min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .settlement-status-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 12px 0;
+  }
+
+  .settlement-layout {
+    min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-facts {
     grid-template-columns: 1fr;
   }
 

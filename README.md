@@ -370,6 +370,24 @@ data/agent_runs/neural_outputs/
 
 Phase 1 提供 scene planner、character simulator、neural critic、style drift detector 與 over-governance detector wrapper。尚未接入真實本地 adapter 時會記錄 `skipped`，不會假裝 `success`。本階段不串 OpenAI API，也不修改 `active_engine.md`。
 
+### 10.1. 正式章節結算匯入
+
+本機 UI 的「結算匯入」頁可接收正式章節結算文字，解析其中的新版完整創作引擎區塊，並保存為 pending candidate：
+
+```text
+data/canon_db/pending_engine_candidates/<candidate_id>/
+  raw_import.txt
+  candidate_engine.md
+  metadata.json
+  diff.json
+  risk_report.json
+  status.json
+```
+
+系統會產生 line-based diff，並以本機規則檢查重大設定變更、污染詞、大量刪除與候選長度異常。解析失敗或 critical risk 會標記為 `blocked`；放棄候選只會將狀態標記為 `rejected`，資料夾仍保留。
+
+Phase 2 的 `can_activate` 永遠為 `false`。啟用路由只回傳 `not_implemented_in_phase_2`，不建立 snapshot、archive、rollback 或 activation log，也不寫入 `data/canon_db/active_engine.md`。
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -769,6 +787,16 @@ data/
   canon_db/
     active_engine.md
     versions/
+    pending_engine_candidates/
+      <candidate_id>/
+        raw_import.txt
+        candidate_engine.md
+        metadata.json
+        diff.json
+        risk_report.json
+        status.json
+    rejected_engine_candidates/
+    activation_logs/
   writing_policy_db/
     active_writing_card.md
     versions/

@@ -39,6 +39,16 @@ import {
   run_style_drift_detector,
 } from "./neural-module-service.mjs";
 import {
+  activeEngineStatus,
+  assertEngineCandidateId,
+  ensureEngineCandidateDirectories,
+  getPendingCandidate,
+  importSettlementResult,
+  listPendingCandidates,
+  rejectPendingCandidate,
+  reparsePendingCandidate,
+} from "./engine-candidate-service.mjs";
+import {
   allowedVisualImageExtensions,
   validateVisualRecord,
   visualCategoryAssetDirectories,
@@ -1135,6 +1145,83 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/canon/active-engine/status") {
+    sendJson(response, 200, { ok: true, active_engine: await activeEngineStatus() });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/canon/settlement/import") {
+    try {
+      assertSameOrigin(request, "Cross-origin settlement imports are not allowed.");
+      const input = await parseBody(request);
+      const candidate = await importSettlementResult({
+        rawText: input.rawText ?? input.raw_text,
+        sourceChapter: input.sourceChapter ?? input.source_chapter,
+        note: input.note,
+        runId: input.runId ?? input.run_id,
+        neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,
+      });
+      sendJson(response, 201, { ok: true, candidate });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/canon/pending-candidates") {
+    sendJson(response, 200, {
+      ok: true,
+      candidates: await listPendingCandidates(),
+    });
+    return;
+  }
+
+  const candidateActionMatch = rawPathname.match(
+    /^\/api\/canon\/pending-candidates\/([^/]+)\/(reparse|reject|activate)$/u,
+  );
+  if (request.method === "POST" && candidateActionMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin candidate actions are not allowed.");
+      const candidateId = assertEngineCandidateId(
+        decodeApiId(candidateActionMatch[1], "candidate_id"),
+      );
+      const action = candidateActionMatch[2];
+      if (action === "activate") {
+        sendJson(response, 501, {
+          ok: false,
+          error: "not_implemented_in_phase_2",
+        });
+        return;
+      }
+      const input = await parseBody(request);
+      const candidate = action === "reparse"
+        ? await reparsePendingCandidate(candidateId)
+        : await rejectPendingCandidate(candidateId, { reason: input.reason ?? "" });
+      sendJson(response, 200, { ok: true, candidate });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const pendingCandidateMatch = rawPathname.match(
+    /^\/api\/canon\/pending-candidates\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && pendingCandidateMatch) {
+    try {
+      const candidateId = assertEngineCandidateId(
+        decodeApiId(pendingCandidateMatch[1], "candidate_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        candidate: await getPendingCandidate(candidateId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/agent/runs") {
     sendJson(response, 200, { ok: true, runs: await listAgentRuns() });
     return;
@@ -1360,6 +1447,7 @@ async function main() {
     return;
   }
   await ensureAgentRunDirectories();
+  await ensureEngineCandidateDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {

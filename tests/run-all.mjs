@@ -18,6 +18,7 @@ const steps = [
   ["Launcher contract", ["tests/launcher.test.mjs"]],
   ["Path policy security", ["tests/security/path-policy.test.mjs"]],
   ["File transaction rollback", ["tests/transactions/file-transactions.test.mjs"]],
+  ["Engine candidate service", ["tests/canon/engine-candidate-service.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],

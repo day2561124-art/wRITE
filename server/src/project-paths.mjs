@@ -21,8 +21,13 @@ export const projectPaths = {
   agentRuns: path.join(projectRoot, "data", "agent_runs"),
   neuralTraces: path.join(projectRoot, "data", "agent_runs", "neural_traces"),
   neuralModuleOutputs: path.join(projectRoot, "data", "agent_runs", "neural_outputs"),
+  canonDb: path.join(projectRoot, "data", "canon_db"),
   activeEngine: path.join(projectRoot, "data", "canon_db", "active_engine.md"),
   engineVersions: path.join(projectRoot, "data", "canon_db", "versions"),
+  pendingEngineCandidates: path.join(projectRoot, "data", "canon_db", "pending_engine_candidates"),
+  rejectedEngineCandidates: path.join(projectRoot, "data", "canon_db", "rejected_engine_candidates"),
+  activationLogs: path.join(projectRoot, "data", "canon_db", "activation_logs"),
+  activationLog: path.join(projectRoot, "data", "canon_db", "activation_logs", "activation_log.jsonl"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 

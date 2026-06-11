@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createConnection, createServer } from "node:net";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +15,8 @@ const draftsDir = path.join(rootDir, "data", "outputs", "drafts");
 const visualIndexPath = path.join(rootDir, "data", "visual_db", "visual_index.jsonl");
 const agentRunsDir = path.join(rootDir, "data", "agent_runs");
 const neuralTracesDir = path.join(agentRunsDir, "neural_traces");
+const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
+const pendingCandidatesDir = path.join(rootDir, "data", "canon_db", "pending_engine_candidates");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -56,15 +59,17 @@ async function readJson(response) {
   return { response, payload };
 }
 
-function rawHttpStatus(port, pathName) {
+function rawHttpStatus(port, pathName, method = "GET", body = "") {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      const bodyBytes = Buffer.byteLength(body);
       socket.write([
-        `GET ${pathName} HTTP/1.1`,
+        `${method} ${pathName} HTTP/1.1`,
         `Host: 127.0.0.1:${port}`,
+        ...(body ? ["Content-Type: application/json", `Content-Length: ${bodyBytes}`] : []),
         "Connection: close",
         "",
-        "",
+        body,
       ].join("\r\n"));
     });
     let data = "";
@@ -102,9 +107,12 @@ async function main() {
   const beforeIndex = await readOptionalText(draftIndexPath);
   const beforeDraftFiles = await readOptionalDirectory(draftsDir);
   const beforeVisualIndex = await readOptionalText(visualIndexPath);
+  const activeEngineBefore = await readFile(activeEnginePath);
+  const activeEngineHashBefore = createHash("sha256").update(activeEngineBefore).digest("hex");
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
+  const createdCandidateIds = [];
   const stderrBuffer = { value: "" };
   const child = spawn(process.execPath, [
     serverPath,
@@ -132,7 +140,9 @@ async function main() {
     assert(indexText.includes('data-view-panel="compose"'), "UI index is missing the compose workspace.");
     assert(indexText.includes('data-view-panel="visuals"'), "UI index is missing the visual gallery workspace.");
     assert(indexText.includes('data-view-panel="neural"'), "UI index is missing the neural status workspace.");
+    assert(indexText.includes('data-view-panel="settlement"'), "UI index is missing the settlement workspace.");
     assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
+    assert(indexText.includes('id="settlement-import-form"'), "UI index is missing the settlement import form.");
     assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
@@ -141,7 +151,13 @@ async function main() {
     assert(appText.includes("handleVisualUpload"), "UI app.js is missing the visual upload handler.");
     assert(appText.includes("handleVisualDelete"), "UI app.js is missing the visual delete handler.");
     assert(appText.includes("renderNeuralStatus"), "UI app.js is missing the neural status renderer.");
+    assert(appText.includes("handleSettlementImport"), "UI app.js is missing the settlement import handler.");
+    assert(appText.includes("renderRiskReport"), "UI app.js is missing the risk report renderer.");
+    assert(appText.includes("renderDiff"), "UI app.js is missing the diff renderer.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
+    const stylesResponse = await fetch(`${baseUrl}/styles.css`);
+    const stylesText = await stylesResponse.text();
+    assert(stylesResponse.ok && stylesText.includes(".risk-critical"), "UI styles are missing risk-critical.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -229,6 +245,124 @@ async function main() {
     );
     const invalidRunApiResult = await readJson(await fetch(`${baseUrl}/api/agent/runs/${encodeURIComponent("../bad")}`));
     assert(invalidRunApiResult.response.status === 400, "Invalid API run_id was not rejected.");
+
+    const activeStatusResult = await readJson(await fetch(`${baseUrl}/api/canon/active-engine/status`));
+    assert(activeStatusResult.response.ok, "Active engine status API failed.");
+    assert(
+      activeStatusResult.payload.active_engine.active_engine_hash === activeEngineHashBefore,
+      "Active engine status API returned the wrong hash.",
+    );
+    const activeText = activeEngineBefore.toString("utf8").replace(/\s+$/u, "");
+    const settlementRaw = [
+      "## 新版完整創作引擎候選",
+      "",
+      "```md",
+      activeText,
+      "UI 合約新增規則：維持正式承接一致。",
+      "```",
+    ].join("\n");
+    const importCandidateResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceChapter: "UI 合約測試章",
+        note: "Phase 2 API fixture",
+        rawText: settlementRaw,
+      }),
+    }));
+    assert(importCandidateResult.response.status === 201, "Settlement import API failed.");
+    const apiCandidateId = importCandidateResult.payload.candidate.metadata.candidate_id;
+    createdCandidateIds.push(apiCandidateId);
+    assert(
+      importCandidateResult.payload.candidate.status.status === "candidate",
+      "Valid settlement import did not create candidate status.",
+    );
+    assert(
+      importCandidateResult.payload.candidate.status.can_activate === false,
+      "Phase 2 import exposed can_activate=true.",
+    );
+
+    const candidatesResult = await readJson(await fetch(`${baseUrl}/api/canon/pending-candidates`));
+    assert(
+      candidatesResult.response.ok
+        && candidatesResult.payload.candidates.some((item) => item.candidate_id === apiCandidateId),
+      "Pending candidate list omitted the imported candidate.",
+    );
+    const candidateDetailResult = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}`,
+    ));
+    assert(candidateDetailResult.response.ok, "Pending candidate detail API failed.");
+    assert(candidateDetailResult.payload.candidate.diff?.raw_unified_diff, "Candidate diff was not returned.");
+
+    const reparseResult = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/reparse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(reparseResult.response.ok, "Candidate reparse API failed.");
+    assert(reparseResult.payload.candidate.metadata.reparsed_at, "Candidate reparse timestamp missing.");
+
+    const activateResult = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/activate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(
+      activateResult.response.status === 501
+        && activateResult.payload.error === "not_implemented_in_phase_2",
+      "Phase 2 activate API was not blocked.",
+    );
+
+    for (const unsafePath of [
+      "/api/canon/pending-candidates/../active_engine.md",
+      "/api/canon/pending-candidates/engine_candidate_../../active_engine.md",
+      "/api/canon/pending-candidates/%2e%2e%2factive_engine.md",
+    ]) {
+      const unsafeResult = await rawHttpStatus(port, unsafePath);
+      assert(
+        unsafeResult.status >= 400 && unsafeResult.status < 500,
+        `Candidate traversal path was not rejected: ${unsafePath}`,
+      );
+    }
+    const unsafeReparse = await rawHttpStatus(
+      port,
+      "/api/canon/pending-candidates/%2e%2e%2factive_engine.md/reparse",
+      "POST",
+      "{}",
+    );
+    assert(unsafeReparse.status >= 400 && unsafeReparse.status < 500, "Unsafe reparse path was accepted.");
+    const unsafeReject = await rawHttpStatus(
+      port,
+      "/api/canon/pending-candidates/%2e%2e%2factive_engine.md/reject",
+      "POST",
+      "{}",
+    );
+    assert(unsafeReject.status >= 400 && unsafeReject.status < 500, "Unsafe reject path was accepted.");
+
+    const rejectResult = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "UI contract complete" }),
+      },
+    ));
+    assert(rejectResult.response.ok, "Candidate reject API failed.");
+    assert(rejectResult.payload.candidate.status.status === "rejected", "Candidate was not rejected.");
+    assert(
+      rejectResult.payload.candidate.status.rejection_reason === "UI contract complete",
+      "Candidate rejection reason was not preserved.",
+    );
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
+      "Canon candidate APIs changed active_engine.md.",
+    );
 
     const proofingResult = await readJson(await fetch(
       `${baseUrl}/api/file?path=${encodeURIComponent("data/proofing_policy_db/active_proofing_card.md")}`,
@@ -429,6 +563,8 @@ async function main() {
     console.log("- Visual upload checked: yes");
     console.log("- Visual delete checked: yes");
     console.log("- Agent run and neural trace APIs checked: yes");
+    console.log("- Pending candidate import, diff, risk, reparse, and reject APIs checked: yes");
+    console.log("- Phase 2 active engine activation blocked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
@@ -444,6 +580,13 @@ async function main() {
     await Promise.all(createdNeuralTraceIds.map((traceId) => (
       rm(path.join(neuralTracesDir, `${traceId}.json`), { force: true })
     )));
+    await Promise.all(createdCandidateIds.map((candidateId) => (
+      rm(path.join(pendingCandidatesDir, candidateId), { recursive: true, force: true })
+    )));
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
+      "active_engine.md changed during UI test cleanup.",
+    );
     terminateProcessTree(child);
   }
 }
