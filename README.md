@@ -528,6 +528,18 @@ get_neural_usage_for_run
 get_cleanup_proposals
 ```
 
+### 10.9. MCP Write-Low-Risk Tools (Phase 7B)
+
+Phase 7B 新增低風險寫入工具（不會修改 active_engine、snapshot、archive、activation logs 或執行 rollback/cleanup）。
+
+已匯出檔案：
+
+```text
+server/src/mcp-write-low-risk-tools.mjs
+```
+
+匯出名稱：`writeLowRiskTools` 與 `writeLowRiskToolMetadata`。
+
 所有工具都回傳統一 envelope：`ok`、`tool_name`、`canon_status`、`blocked`、`blocked_reason`、`data`、`sources`、`warnings`。每個 source metadata 會包含 `source_path`、`exists`、`modified_at`、`hash`、`size` 與 `canon_status`。
 
 安全邊界：
