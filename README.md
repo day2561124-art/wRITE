@@ -386,7 +386,26 @@ data/canon_db/pending_engine_candidates/<candidate_id>/
 
 系統會產生 line-based diff，並以本機規則檢查重大設定變更、污染詞、大量刪除與候選長度異常。解析失敗或 critical risk 會標記為 `blocked`；放棄候選只會將狀態標記為 `rejected`，資料夾仍保留。
 
-Phase 2 的 `can_activate` 永遠為 `false`。啟用路由只回傳 `not_implemented_in_phase_2`，不建立 snapshot、archive、rollback 或 activation log，也不寫入 `data/canon_db/active_engine.md`。
+匯入與重解析本身不會寫入 `data/canon_db/active_engine.md`。候選必須通過 Phase 3 的人工確認啟用流程，才可能升格為 active engine。
+
+### 10.2. 人工確認啟用與回滾
+
+Phase 3 在「結算匯入」頁提供受控啟用與 rollback。一般 candidate 必須勾選人工確認；high risk candidate 還必須勾選重大不可逆變更並輸入「確認啟用」。Blocked、rejected、critical 或 activated candidate 不得啟用。
+
+啟用使用單一檔案交易同時完成：
+
+```text
+data/canon_db/engine_snapshots/<snapshot_id>/
+data/canon_db/archive/<archive_id>/
+data/canon_db/active_engine.md
+data/canon_db/activation_logs/activation_log.jsonl
+data/canon_db/rollback/rollback_index.json
+pending candidate status.json
+```
+
+任何步驟失敗都會回復原 active engine。Rollback 也要求人工確認，並先建立目前 active engine 的 safety snapshot，再於同一交易內還原目標 snapshot、寫入 log 與更新 rollback index。
+
+若 candidate metadata 指定 `requires_neural_modules: true`，啟用前會依實際 success traces 檢查必要 neural modules；只存在文字聲明或 skipped/failed trace 時會以 `neural_trace_missing` 阻擋。
 
 ### 11. 壓縮正式錯誤規則
 
@@ -796,7 +815,18 @@ data/
         risk_report.json
         status.json
     rejected_engine_candidates/
+    engine_snapshots/
+      <snapshot_id>/
+        active_engine_before_activation.md
+        metadata.json
+    archive/
+      <archive_id>/
+        archived_active_engine.md
+        metadata.json
     activation_logs/
+      activation_log.jsonl
+    rollback/
+      rollback_index.json
   writing_policy_db/
     active_writing_card.md
     versions/

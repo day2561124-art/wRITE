@@ -10,6 +10,8 @@ const state = {
     activeEngine: null,
     candidates: [],
     candidateDetail: null,
+    snapshots: [],
+    activationLogs: [],
   },
   neuralData: {
     runs: [],
@@ -112,7 +114,7 @@ function setBusy(busy) {
   $("#loading-bar").hidden = state.busyCount === 0;
   const isBusy = state.busyCount > 0;
   if (wasBusy === isBusy) return;
-  $$("form button, [data-action], [data-visual-delete], #validate-button, #refresh-button, #candidate-reparse-button, #candidate-reject-button").forEach((button) => {
+  $$("form button, [data-action], [data-visual-delete], #validate-button, #refresh-button, #candidate-reparse-button, #candidate-reject-button, #candidate-activate-button, [data-rollback-snapshot]").forEach((button) => {
     if (isBusy) {
       button.dataset.busyState = button.disabled ? "preserve" : "temporary";
       button.disabled = true;
@@ -486,6 +488,7 @@ function candidateStatusLabel(status) {
     candidate: "候選",
     blocked: "已阻擋",
     rejected: "已放棄",
+    activated: "已啟用",
   }[status] ?? status ?? "未知";
 }
 
@@ -554,6 +557,7 @@ function renderDiff(diff) {
 function renderCandidateDetail(detail) {
   const reparseButton = $("#candidate-reparse-button");
   const rejectButton = $("#candidate-reject-button");
+  const activateButton = $("#candidate-activate-button");
   if (!detail) {
     $("#candidate-detail-id").textContent = "NO CANDIDATE SELECTED";
     $("#candidate-detail-status").className = "candidate-status candidate-status-blocked";
@@ -566,6 +570,8 @@ function renderCandidateDetail(detail) {
     renderRiskReport(null);
     reparseButton.disabled = true;
     rejectButton.disabled = true;
+    activateButton.disabled = true;
+    $("#candidate-second-confirm-panel").hidden = true;
     return;
   }
   const { metadata, status, risk_report: riskReport } = detail;
@@ -578,6 +584,7 @@ function renderCandidateDetail(detail) {
     <div><dt>candidate_hash</dt><dd>${escapeHtml(metadata.candidate_hash || "none")}</dd></div>
     <div><dt>active_engine_hash_at_import</dt><dd>${escapeHtml(metadata.active_engine_hash_at_import || "none")}</dd></div>
     <div><dt>run_id</dt><dd>${escapeHtml(metadata.run_id || "none")}</dd></div>
+    <div><dt>requires_neural_modules</dt><dd>${metadata.requires_neural_modules ? "true" : "false"}</dd></div>
     <div><dt>neural_modules_used_path</dt><dd>${escapeHtml(metadata.neural_modules_used_path || "none")}</dd></div>
     <div><dt>eligible_for_phase_3_activation</dt><dd>${status.eligible_for_phase_3_activation ? "true" : "false"}</dd></div>
     <div><dt>note</dt><dd>${escapeHtml(metadata.note || "none")}</dd></div>
@@ -589,8 +596,60 @@ function renderCandidateDetail(detail) {
   $("#candidate-raw-preview").textContent = detail.raw_import_preview ?? "";
   renderDiff(detail.diff);
   renderRiskReport(riskReport);
-  reparseButton.disabled = status.status === "rejected";
-  rejectButton.disabled = status.status === "rejected";
+  const finalStatus = ["rejected", "activated"].includes(status.status);
+  reparseButton.disabled = finalStatus;
+  rejectButton.disabled = finalStatus;
+  $("#candidate-second-confirm-panel").hidden = riskReport?.requires_second_confirmation !== true;
+  updateActivationControls();
+}
+
+function updateActivationControls() {
+  const detail = state.canon.candidateDetail;
+  const button = $("#candidate-activate-button");
+  if (!detail) {
+    button.disabled = true;
+    return;
+  }
+  const validCandidate = detail.status.status === "candidate"
+    && detail.risk_report?.risk_level !== "critical";
+  const baseConfirmed = $("#candidate-activation-confirm").checked;
+  const needsSecond = detail.risk_report?.requires_second_confirmation === true;
+  const secondConfirmed = !needsSecond || (
+    $("#candidate-second-confirm").checked
+    && $("#candidate-second-confirm-text").value.trim() === "確認啟用"
+  );
+  button.disabled = !(validCandidate && baseConfirmed && secondConfirmed);
+}
+
+function renderSnapshots(snapshots) {
+  const rollbackConfirmed = $("#rollback-confirm").checked;
+  $("#snapshot-list").innerHTML = snapshots?.length
+    ? snapshots.map((snapshot) => `
+      <article class="snapshot-item">
+        <div>
+          <strong>${escapeHtml(snapshot.source_chapter || "未指定章節")}</strong>
+          <small>${escapeHtml(snapshot.snapshot_id)}</small>
+          <span>${escapeHtml(formatDate(snapshot.created_at))} · ${escapeHtml((snapshot.active_engine_hash ?? "").slice(0, 12))}</span>
+        </div>
+        <button class="button secondary" type="button" data-rollback-snapshot="${escapeHtml(snapshot.snapshot_id)}" ${rollbackConfirmed && snapshot.rollback_available ? "" : "disabled"}>
+          回滾
+        </button>
+      </article>
+    `).join("")
+    : '<div class="empty-state">尚無 snapshot</div>';
+}
+
+function renderActivationLogs(logs) {
+  $("#activation-log-list").innerHTML = logs?.length
+    ? logs.map((entry) => `
+      <article class="activation-log-item">
+        <strong>${entry.event === "rollback_active_engine" ? "Rollback" : "Activation"}</strong>
+        <span>${escapeHtml(entry.candidate_id || entry.target_snapshot_id || "")}</span>
+        <small>${escapeHtml(entry.activated_at || entry.rollback_at || "")}</small>
+        <code>${escapeHtml(entry.active_engine_after_hash || "")}</code>
+      </article>
+    `).join("")
+    : '<div class="empty-state">尚無 activation log</div>';
 }
 
 function renderSettlementPanel() {
@@ -606,6 +665,8 @@ function renderSettlementPanel() {
   }
   renderCandidateList(state.canon.candidates);
   renderCandidateDetail(state.canon.candidateDetail);
+  renderSnapshots(state.canon.snapshots);
+  renderActivationLogs(state.canon.activationLogs);
 }
 
 async function loadCandidateDetail(candidateId) {
@@ -617,16 +678,23 @@ async function loadCandidateDetail(candidateId) {
   const payload = await api(`/api/canon/pending-candidates/${encodeURIComponent(candidateId)}`);
   state.activeCandidateId = candidateId;
   state.canon.candidateDetail = payload.candidate;
+  $("#candidate-activation-confirm").checked = false;
+  $("#candidate-second-confirm").checked = false;
+  $("#candidate-second-confirm-text").value = "";
   renderSettlementPanel();
 }
 
 async function refreshCanonSettlementState(showToast = false) {
-  const [activePayload, candidatesPayload] = await Promise.all([
+  const [activePayload, candidatesPayload, snapshotsPayload, logsPayload] = await Promise.all([
     api("/api/canon/active-engine/status"),
     api("/api/canon/pending-candidates"),
+    api("/api/canon/snapshots"),
+    api("/api/canon/activation-logs"),
   ]);
   state.canon.activeEngine = activePayload.active_engine;
   state.canon.candidates = candidatesPayload.candidates ?? [];
+  state.canon.snapshots = snapshotsPayload.snapshots ?? [];
+  state.canon.activationLogs = logsPayload.logs ?? [];
   if (!state.canon.candidates.some((candidate) => candidate.candidate_id === state.activeCandidateId)) {
     state.activeCandidateId = state.canon.candidates[0]?.candidate_id ?? "";
   }
@@ -680,6 +748,45 @@ async function handleRejectCandidate() {
     });
     await refreshCanonSettlementState();
     toast("候選已標記為放棄");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleActivateCandidate() {
+  if (!state.activeCandidateId || $("#candidate-activate-button").disabled) return;
+  const needsSecond = state.canon.candidateDetail?.risk_report?.requires_second_confirmation === true;
+  if (!window.confirm("這會更新 active_engine.md。確定繼續啟用？")) return;
+  try {
+    await api(`/api/canon/pending-candidates/${encodeURIComponent(state.activeCandidateId)}/activate`, {
+      method: "POST",
+      body: JSON.stringify({
+        confirm: true,
+        secondConfirm: needsSecond,
+        approvedBy: "local_user",
+      }),
+    });
+    await refreshCanonSettlementState();
+    toast("新版 active_engine 已啟用，snapshot 與 archive 已建立");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleRollbackSnapshot(snapshotId) {
+  if (!$("#rollback-confirm").checked) return;
+  if (!window.confirm(`確定回滾至 ${snapshotId}？目前引擎會先建立 safety snapshot。`)) return;
+  try {
+    await api(`/api/canon/rollback/${encodeURIComponent(snapshotId)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        confirm: true,
+        approvedBy: "local_user",
+      }),
+    });
+    $("#rollback-confirm").checked = false;
+    await refreshCanonSettlementState();
+    toast("active_engine 已完成回滾");
   } catch (error) {
     toast(error.message, true);
   }
@@ -1067,6 +1174,11 @@ function bindEvents() {
   $("#settlement-import-form").addEventListener("submit", handleSettlementImport);
   $("#candidate-reparse-button").addEventListener("click", handleReparseCandidate);
   $("#candidate-reject-button").addEventListener("click", handleRejectCandidate);
+  $("#candidate-activate-button").addEventListener("click", handleActivateCandidate);
+  $("#candidate-activation-confirm").addEventListener("change", updateActivationControls);
+  $("#candidate-second-confirm").addEventListener("change", updateActivationControls);
+  $("#candidate-second-confirm-text").addEventListener("input", updateActivationControls);
+  $("#rollback-confirm").addEventListener("change", () => renderSnapshots(state.canon.snapshots));
   $("#visual-upload-file").addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     if (!file || $("#visual-upload-title").value.trim()) return;
@@ -1109,6 +1221,11 @@ function bindEvents() {
     const candidateItem = event.target.closest("[data-candidate-id]");
     if (candidateItem) {
       loadCandidateDetail(candidateItem.dataset.candidateId).catch((error) => toast(error.message, true));
+      return;
+    }
+    const rollbackButton = event.target.closest("[data-rollback-snapshot]");
+    if (rollbackButton) {
+      handleRollbackSnapshot(rollbackButton.dataset.rollbackSnapshot);
       return;
     }
     const visualCard = event.target.closest("[data-visual-id]");

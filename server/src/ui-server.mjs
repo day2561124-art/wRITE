@@ -39,14 +39,19 @@ import {
   run_style_drift_detector,
 } from "./neural-module-service.mjs";
 import {
+  activatePendingCandidate,
   activeEngineStatus,
   assertEngineCandidateId,
+  assertSnapshotId,
   ensureEngineCandidateDirectories,
   getPendingCandidate,
   importSettlementResult,
+  listActivationLogs,
   listPendingCandidates,
+  listSnapshots,
   rejectPendingCandidate,
   reparsePendingCandidate,
+  rollbackActiveEngine,
 } from "./engine-candidate-service.mjs";
 import {
   allowedVisualImageExtensions,
@@ -1159,6 +1164,7 @@ async function handleRequest(request, response) {
         sourceChapter: input.sourceChapter ?? input.source_chapter,
         note: input.note,
         runId: input.runId ?? input.run_id,
+        requiresNeuralModules: input.requiresNeuralModules ?? input.requires_neural_modules,
         neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,
       });
       sendJson(response, 201, { ok: true, candidate });
@@ -1176,6 +1182,33 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/canon/snapshots") {
+    sendJson(response, 200, { ok: true, snapshots: await listSnapshots() });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/canon/activation-logs") {
+    sendJson(response, 200, { ok: true, logs: await listActivationLogs() });
+    return;
+  }
+
+  const rollbackMatch = rawPathname.match(/^\/api\/canon\/rollback\/([^/]+)$/u);
+  if (request.method === "POST" && rollbackMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin rollbacks are not allowed.");
+      const snapshotId = assertSnapshotId(decodeApiId(rollbackMatch[1], "snapshot_id"));
+      const input = await parseBody(request);
+      const result = await rollbackActiveEngine(snapshotId, {
+        confirm: input.confirm === true,
+        approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
+      });
+      sendJson(response, 200, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   const candidateActionMatch = rawPathname.match(
     /^\/api\/canon\/pending-candidates\/([^/]+)\/(reparse|reject|activate)$/u,
   );
@@ -1186,14 +1219,16 @@ async function handleRequest(request, response) {
         decodeApiId(candidateActionMatch[1], "candidate_id"),
       );
       const action = candidateActionMatch[2];
+      const input = await parseBody(request);
       if (action === "activate") {
-        sendJson(response, 501, {
-          ok: false,
-          error: "not_implemented_in_phase_2",
+        const result = await activatePendingCandidate(candidateId, {
+          confirm: input.confirm === true,
+          secondConfirm: input.secondConfirm === true || input.second_confirm === true,
+          approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
         });
+        sendJson(response, 200, { ok: true, result });
         return;
       }
-      const input = await parseBody(request);
       const candidate = action === "reparse"
         ? await reparsePendingCandidate(candidateId)
         : await rejectPendingCandidate(candidateId, { reason: input.reason ?? "" });

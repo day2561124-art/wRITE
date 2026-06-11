@@ -1542,6 +1542,11 @@ dialog::backdrop {
   background: #f2f3f5;
 }
 
+.candidate-status-activated {
+  color: #245c79;
+  background: #edf7fb;
+}
+
 .risk-medium {
   color: #876013;
   background: #fff8e7;
@@ -1682,6 +1687,103 @@ dialog::backdrop {
 
 .candidate-actions {
   margin-top: 18px;
+}
+
+.activation-panel {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.activation-warning {
+  margin: 10px 0 14px;
+  padding: 11px 13px;
+  font-size: 12px;
+}
+
+.confirmation-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.confirmation-row input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  accent-color: #315f83;
+}
+
+.second-confirm-panel {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid #d69a72;
+  background: #fff6ef;
+}
+
+.second-confirm-panel[hidden] {
+  display: none;
+}
+
+.canon-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.rollback-confirmation {
+  margin: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshot-list,
+.activation-log-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.snapshot-item,
+.activation-log-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.snapshot-item > div,
+.activation-log-item {
+  min-width: 0;
+}
+
+.snapshot-item > div {
+  display: grid;
+  gap: 3px;
+}
+
+.snapshot-item small,
+.snapshot-item span,
+.activation-log-item small,
+.activation-log-item span,
+.activation-log-item code {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.activation-log-item {
+  align-items: flex-start;
+  flex-direction: column;
 }
 
 @media (max-width: 1120px) {
@@ -1893,6 +1995,10 @@ dialog::backdrop {
 
   .settlement-layout {
     min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .canon-history-grid {
     grid-template-columns: 1fr;
   }
 

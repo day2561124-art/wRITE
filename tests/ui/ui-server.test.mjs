@@ -17,6 +17,10 @@ const agentRunsDir = path.join(rootDir, "data", "agent_runs");
 const neuralTracesDir = path.join(agentRunsDir, "neural_traces");
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
 const pendingCandidatesDir = path.join(rootDir, "data", "canon_db", "pending_engine_candidates");
+const engineSnapshotsDir = path.join(rootDir, "data", "canon_db", "engine_snapshots");
+const engineArchiveDir = path.join(rootDir, "data", "canon_db", "archive");
+const activationLogPath = path.join(rootDir, "data", "canon_db", "activation_logs", "activation_log.jsonl");
+const rollbackIndexPath = path.join(rootDir, "data", "canon_db", "rollback", "rollback_index.json");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -92,6 +96,15 @@ async function readOptionalText(filePath) {
   }
 }
 
+async function readOptionalBuffer(filePath) {
+  try {
+    return { exists: true, content: await readFile(filePath) };
+  } catch (error) {
+    if (error.code === "ENOENT") return { exists: false, content: Buffer.alloc(0) };
+    throw error;
+  }
+}
+
 async function readOptionalDirectory(dirPath) {
   try {
     return (await readdir(dirPath)).sort();
@@ -109,6 +122,10 @@ async function main() {
   const beforeVisualIndex = await readOptionalText(visualIndexPath);
   const activeEngineBefore = await readFile(activeEnginePath);
   const activeEngineHashBefore = createHash("sha256").update(activeEngineBefore).digest("hex");
+  const snapshotsBefore = new Set(await readOptionalDirectory(engineSnapshotsDir));
+  const archiveBefore = new Set(await readOptionalDirectory(engineArchiveDir));
+  const activationLogBefore = await readOptionalBuffer(activationLogPath);
+  const rollbackIndexBefore = await readOptionalBuffer(rollbackIndexPath);
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
@@ -143,6 +160,10 @@ async function main() {
     assert(indexText.includes('data-view-panel="settlement"'), "UI index is missing the settlement workspace.");
     assert(indexText.includes("神經網路模組狀態"), "UI index is missing the neural status heading.");
     assert(indexText.includes('id="settlement-import-form"'), "UI index is missing the settlement import form.");
+    assert(indexText.includes('id="candidate-activate-button"'), "UI index is missing the activation button.");
+    assert(indexText.includes('id="candidate-second-confirm-panel"'), "UI index is missing high-risk confirmation.");
+    assert(indexText.includes('id="snapshot-list"'), "UI index is missing the snapshot list.");
+    assert(indexText.includes('id="activation-log-list"'), "UI index is missing the activation log.");
     assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
@@ -154,10 +175,13 @@ async function main() {
     assert(appText.includes("handleSettlementImport"), "UI app.js is missing the settlement import handler.");
     assert(appText.includes("renderRiskReport"), "UI app.js is missing the risk report renderer.");
     assert(appText.includes("renderDiff"), "UI app.js is missing the diff renderer.");
+    assert(appText.includes("handleActivateCandidate"), "UI app.js is missing the activation handler.");
+    assert(appText.includes("handleRollbackSnapshot"), "UI app.js is missing the rollback handler.");
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
     const stylesResponse = await fetch(`${baseUrl}/styles.css`);
     const stylesText = await stylesResponse.text();
     assert(stylesResponse.ok && stylesText.includes(".risk-critical"), "UI styles are missing risk-critical.");
+    assert(stylesText.includes(".activation-panel"), "UI styles are missing the activation panel.");
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -314,9 +338,73 @@ async function main() {
       },
     ));
     assert(
-      activateResult.response.status === 501
-        && activateResult.payload.error === "not_implemented_in_phase_2",
-      "Phase 2 activate API was not blocked.",
+      activateResult.response.status === 409,
+      "Unconfirmed Phase 3 activation was not blocked.",
+    );
+
+    const confirmedActivation = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/activate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, approvedBy: "ui_contract_test" }),
+      },
+    ));
+    assert(confirmedActivation.response.ok, "Confirmed Phase 3 activation failed.");
+    const activationResult = confirmedActivation.payload.result;
+    assert(activationResult.snapshot_id, "Activation did not return a snapshot id.");
+    assert(activationResult.archive_id, "Activation did not return an archive id.");
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex")
+        === activationResult.active_engine_after_hash,
+      "Activation did not write candidate content to active_engine.md.",
+    );
+    const activatedDetail = await readJson(await fetch(
+      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}`,
+    ));
+    assert(
+      activatedDetail.payload.candidate.status.status === "activated",
+      "Activated candidate status was not persisted.",
+    );
+    const snapshotsResult = await readJson(await fetch(`${baseUrl}/api/canon/snapshots`));
+    assert(
+      snapshotsResult.response.ok
+        && snapshotsResult.payload.snapshots.some(
+          (snapshot) => snapshot.snapshot_id === activationResult.snapshot_id,
+        ),
+      "Snapshot API omitted activation snapshot.",
+    );
+    const logsResult = await readJson(await fetch(`${baseUrl}/api/canon/activation-logs`));
+    assert(
+      logsResult.response.ok
+        && logsResult.payload.logs.some(
+          (entry) => entry.event === "activate_pending_engine_candidate"
+            && entry.candidate_id === apiCandidateId,
+        ),
+      "Activation logs API omitted activation event.",
+    );
+    const unconfirmedRollback = await readJson(await fetch(
+      `${baseUrl}/api/canon/rollback/${activationResult.snapshot_id}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(unconfirmedRollback.response.status === 409, "Unconfirmed rollback was not blocked.");
+    const rollbackResult = await readJson(await fetch(
+      `${baseUrl}/api/canon/rollback/${activationResult.snapshot_id}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, approvedBy: "ui_contract_test" }),
+      },
+    ));
+    assert(rollbackResult.response.ok, "Confirmed rollback failed.");
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex")
+        === activeEngineHashBefore,
+      "Rollback did not restore the original active_engine.md.",
     );
 
     for (const unsafePath of [
@@ -344,9 +432,34 @@ async function main() {
       "{}",
     );
     assert(unsafeReject.status >= 400 && unsafeReject.status < 500, "Unsafe reject path was accepted.");
+    const unsafeRollback = await rawHttpStatus(
+      port,
+      "/api/canon/rollback/%2e%2e%2factive_engine.md",
+      "POST",
+      "{}",
+    );
+    assert(unsafeRollback.status >= 400 && unsafeRollback.status < 500, "Unsafe rollback path was accepted.");
 
+    const rejectImportResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceChapter: "UI 放棄候選測試",
+        rawText: [
+          "## 新版完整創作引擎候選",
+          "",
+          "```md",
+          activeText,
+          "UI 放棄候選規則。",
+          "```",
+        ].join("\n"),
+      }),
+    }));
+    assert(rejectImportResult.response.status === 201, "Reject fixture import failed.");
+    const rejectCandidateId = rejectImportResult.payload.candidate.metadata.candidate_id;
+    createdCandidateIds.push(rejectCandidateId);
     const rejectResult = await readJson(await fetch(
-      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/reject`,
+      `${baseUrl}/api/canon/pending-candidates/${rejectCandidateId}/reject`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -361,7 +474,7 @@ async function main() {
     );
     assert(
       createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
-      "Canon candidate APIs changed active_engine.md.",
+      "Reject changed active_engine.md.",
     );
 
     const proofingResult = await readJson(await fetch(
@@ -564,12 +677,14 @@ async function main() {
     console.log("- Visual delete checked: yes");
     console.log("- Agent run and neural trace APIs checked: yes");
     console.log("- Pending candidate import, diff, risk, reparse, and reject APIs checked: yes");
-    console.log("- Phase 2 active engine activation blocked: yes");
+    console.log("- Confirmed activation, snapshot, archive, logs, and rollback checked: yes");
+    console.log("- Unconfirmed activation and rollback blocked: yes");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
     console.log("- Draft dry-run side effects: none");
   } finally {
+    await writeFile(activeEnginePath, activeEngineBefore);
     await writeFile(visualIndexPath, beforeVisualIndex, "utf8");
     await Promise.all(createdVisualAssetPaths.map((projectPath) => (
       rm(path.join(rootDir, projectPath), { force: true })
@@ -583,6 +698,20 @@ async function main() {
     await Promise.all(createdCandidateIds.map((candidateId) => (
       rm(path.join(pendingCandidatesDir, candidateId), { recursive: true, force: true })
     )));
+    for (const name of await readOptionalDirectory(engineSnapshotsDir)) {
+      if (!snapshotsBefore.has(name)) {
+        await rm(path.join(engineSnapshotsDir, name), { recursive: true, force: true });
+      }
+    }
+    for (const name of await readOptionalDirectory(engineArchiveDir)) {
+      if (!archiveBefore.has(name)) {
+        await rm(path.join(engineArchiveDir, name), { recursive: true, force: true });
+      }
+    }
+    if (activationLogBefore.exists) await writeFile(activationLogPath, activationLogBefore.content);
+    else await rm(activationLogPath, { force: true });
+    if (rollbackIndexBefore.exists) await writeFile(rollbackIndexPath, rollbackIndexBefore.content);
+    else await rm(rollbackIndexPath, { force: true });
     assert(
       createHash("sha256").update(await readFile(activeEnginePath)).digest("hex") === activeEngineHashBefore,
       "active_engine.md changed during UI test cleanup.",

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
@@ -8,11 +8,14 @@ import {
   projectPaths,
   resolveProjectPath,
 } from "./project-paths.mjs";
-import { assertAgentRunId } from "./agent-run-service.mjs";
+import { assertAgentRunId, getAgentRun } from "./agent-run-service.mjs";
+import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 
 export const engineCandidateIdPattern = /^engine_candidate_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+export const engineSnapshotIdPattern = /^engine_snapshot_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+export const engineArchiveIdPattern = /^engine_archive_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const parserVersion = "local-engine-candidate-parser-v1";
-const allowedStatuses = new Set(["candidate", "blocked", "rejected"]);
+const allowedStatuses = new Set(["candidate", "blocked", "rejected", "activated"]);
 const acceptedHeadings = new Set([
   "新版完整創作引擎候選",
   "新版完整創作引擎",
@@ -62,6 +65,16 @@ function timestampIdPart(date = new Date()) {
 function createCandidateId() {
   const stamp = timestampIdPart();
   return `engine_candidate_${stamp.slice(0, 8)}-${stamp.slice(8)}-${randomBytes(4).toString("hex")}`;
+}
+
+function createSnapshotId() {
+  const stamp = timestampIdPart();
+  return `engine_snapshot_${stamp.slice(0, 8)}-${stamp.slice(8)}-${randomBytes(4).toString("hex")}`;
+}
+
+function createArchiveId() {
+  const stamp = timestampIdPart();
+  return `engine_archive_${stamp.slice(0, 8)}-${stamp.slice(8)}-${randomBytes(4).toString("hex")}`;
 }
 
 function candidatePaths(candidateId, roots = {}) {
@@ -133,8 +146,100 @@ function candidateRootsFor(options = {}) {
   };
 }
 
+function phase3PathsFor(options = {}) {
+  const resolveCanonRoot = (value, fallback, label) => (
+    value ? assertPathInside(value, projectPaths.canonDb, label) : fallback
+  );
+  return {
+    activeEngine: activePathFor(options),
+    pendingEngineCandidates: options.pendingEngineCandidates
+      ? assertPathInside(
+        options.pendingEngineCandidates,
+        projectPaths.canonDb,
+        "pending candidate test root",
+      )
+      : projectPaths.pendingEngineCandidates,
+    engineSnapshots: resolveCanonRoot(
+      options.engineSnapshots,
+      projectPaths.engineSnapshots,
+      "engine snapshots root",
+    ),
+    engineArchive: resolveCanonRoot(
+      options.engineArchive,
+      projectPaths.engineArchive,
+      "engine archive root",
+    ),
+    activationLog: options.activationLog
+      ? assertPathInside(options.activationLog, projectPaths.canonDb, "activation log")
+      : projectPaths.activationLog,
+    rollbackIndex: options.rollbackIndex
+      ? assertPathInside(options.rollbackIndex, projectPaths.canonDb, "rollback index")
+      : projectPaths.rollbackIndex,
+  };
+}
+
+function snapshotPaths(snapshotId, roots) {
+  assertSnapshotId(snapshotId);
+  const directory = path.join(roots.engineSnapshots, snapshotId);
+  return {
+    directory,
+    engine: path.join(directory, "active_engine_before_activation.md"),
+    metadata: path.join(directory, "metadata.json"),
+  };
+}
+
+function archivePaths(archiveId, roots) {
+  assertArchiveId(archiveId);
+  const directory = path.join(roots.engineArchive, archiveId);
+  return {
+    directory,
+    engine: path.join(directory, "archived_active_engine.md"),
+    metadata: path.join(directory, "metadata.json"),
+  };
+}
+
+async function uniqueSnapshotId(roots) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const snapshotId = createSnapshotId();
+    if (!await exists(snapshotPaths(snapshotId, roots).directory)) return snapshotId;
+  }
+  throw new Error("Could not allocate a unique snapshot_id.");
+}
+
+async function uniqueArchiveId(roots) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const archiveId = createArchiveId();
+    if (!await exists(archivePaths(archiveId, roots).directory)) return archiveId;
+  }
+  throw new Error("Could not allocate a unique archive_id.");
+}
+
+async function readRollbackIndex(filePath) {
+  try {
+    const value = await readJson(filePath);
+    return {
+      updated_at: value.updated_at ?? null,
+      activations: Array.isArray(value.activations) ? value.activations : [],
+      rollbacks: Array.isArray(value.rollbacks) ? value.rollbacks : [],
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { updated_at: null, activations: [], rollbacks: [] };
+    }
+    throw error;
+  }
+}
+
 export function isSafeCandidateId(id) {
   return typeof id === "string" && engineCandidateIdPattern.test(id);
+}
+
+export function isSafeSnapshotId(id) {
+  return typeof id === "string" && engineSnapshotIdPattern.test(id);
+}
+
+export function isSafeArchiveId(id) {
+  return typeof id === "string" && engineArchiveIdPattern.test(id);
 }
 
 export function assertEngineCandidateId(id) {
@@ -142,10 +247,24 @@ export function assertEngineCandidateId(id) {
   return id;
 }
 
+export function assertSnapshotId(id) {
+  if (!isSafeSnapshotId(id)) throw errorWithStatus("Invalid snapshot_id.");
+  return id;
+}
+
+export function assertArchiveId(id) {
+  if (!isSafeArchiveId(id)) throw errorWithStatus("Invalid archive_id.");
+  return id;
+}
+
 export async function ensureEngineCandidateDirectories() {
   await Promise.all([
     mkdir(projectPaths.pendingEngineCandidates, { recursive: true }),
     mkdir(projectPaths.rejectedEngineCandidates, { recursive: true }),
+    mkdir(projectPaths.engineSnapshots, { recursive: true }),
+    mkdir(projectPaths.engineArchive, { recursive: true }),
+    mkdir(projectPaths.activationLogs, { recursive: true }),
+    mkdir(projectPaths.rollback, { recursive: true }),
   ]);
 }
 
@@ -447,6 +566,7 @@ export async function importSettlementResult(input, options = {}) {
   const sourceChapter = String(input?.sourceChapter ?? "").trim().slice(0, 500);
   const note = String(input?.note ?? "").trim().slice(0, 5000);
   const runId = String(input?.runId ?? "").trim();
+  const requiresNeuralModules = input?.requiresNeuralModules === true;
   const neuralModulesUsedPath = validateImportReferences(
     runId,
     String(input?.neuralModulesUsedPath ?? "").trim(),
@@ -473,6 +593,7 @@ export async function importSettlementResult(input, options = {}) {
     parser_version: parserVersion,
     canon_status: "pending",
     requires_user_confirmation: true,
+    requires_neural_modules: requiresNeuralModules,
     neural_modules_used_path: neuralModulesUsedPath,
   };
   const operations = [
@@ -566,8 +687,11 @@ export async function reparsePendingCandidate(candidateId, options = {}) {
     readJson(paths.status),
     readFile(paths.raw, "utf8"),
   ]);
-  if (currentStatus.status === "rejected") {
-    throw errorWithStatus("Rejected candidate cannot be reparsed; import it as a new candidate.", 409);
+  if (["rejected", "activated"].includes(currentStatus.status)) {
+    throw errorWithStatus(
+      `${currentStatus.status} candidate cannot be reparsed; import it as a new candidate.`,
+      409,
+    );
   }
   const activeEnginePath = activePathFor(options);
   const before = await activeEngineStatus({ activeEnginePath });
@@ -614,6 +738,9 @@ export async function rejectPendingCandidate(candidateId, { reason = "" } = {}, 
   const paths = candidatePaths(candidateId, roots);
   const status = await readJson(paths.status);
   if (!allowedStatuses.has(status.status)) throw errorWithStatus("Invalid candidate status.");
+  if (["rejected", "activated"].includes(status.status)) {
+    throw errorWithStatus(`Candidate status cannot be rejected: ${status.status}`, 409);
+  }
   const nextStatus = {
     ...status,
     status: "rejected",
@@ -630,4 +757,318 @@ export async function rejectPendingCandidate(candidateId, { reason = "" } = {}, 
     phase: "phase_2_pending_only",
   });
   return getPendingCandidate(candidateId, options);
+}
+
+async function verifyCandidateNeuralEvidence(metadata) {
+  if (metadata.requires_neural_modules !== true) {
+    return {
+      required: false,
+      ok: true,
+      run_id: metadata.run_id || "",
+      missing_required_neural_modules: [],
+    };
+  }
+  try {
+    const runId = assertAgentRunId(metadata.run_id);
+    const expectedPath = path.join(projectPaths.agentRuns, runId, "neural_modules_used.json");
+    const actualPath = assertPathInside(
+      metadata.neural_modules_used_path,
+      projectPaths.agentRuns,
+      "neural_modules_used_path",
+    );
+    if (actualPath !== expectedPath) {
+      throw new Error("neural_modules_used_path does not match run_id.");
+    }
+    await getAgentRun(runId);
+    const usage = await summarizeNeuralUsageForRun(runId);
+    if (usage.missing_required_neural_modules.length) {
+      throw new Error(
+        `required modules missing success trace: ${usage.missing_required_neural_modules.join(", ")}`,
+      );
+    }
+    return {
+      required: true,
+      ok: true,
+      run_id: runId,
+      used_neural_network: usage.used_neural_network,
+      neural_modules_used: usage.neural_modules_used,
+      missing_required_neural_modules: [],
+    };
+  } catch (error) {
+    throw errorWithStatus(`neural_trace_missing: ${error.message}`, 409);
+  }
+}
+
+export async function activatePendingCandidate(
+  candidateId,
+  {
+    confirm = false,
+    secondConfirm = false,
+    approvedBy = "local_user",
+  } = {},
+  options = {},
+) {
+  assertEngineCandidateId(candidateId);
+  if (confirm !== true) throw errorWithStatus("User confirmation is required.", 409);
+  const roots = phase3PathsFor(options);
+  const paths = candidatePaths(candidateId, {
+    pendingEngineCandidates: roots.pendingEngineCandidates,
+  });
+  const [metadata, status, riskReport, candidateText, activeText] = await Promise.all([
+    readJson(paths.metadata),
+    readJson(paths.status),
+    readJson(paths.risk),
+    readFile(paths.candidate, "utf8"),
+    readFile(roots.activeEngine, "utf8"),
+  ]);
+  if (status.status !== "candidate") {
+    throw errorWithStatus(`Candidate status cannot be activated: ${status.status}`, 409);
+  }
+  if (riskReport.risk_level === "critical") {
+    throw errorWithStatus("Critical-risk candidate cannot be activated.", 409);
+  }
+  if (!candidateText.trim()) throw errorWithStatus("candidate_engine.md is empty.", 409);
+  if (riskReport.requires_second_confirmation === true && secondConfirm !== true) {
+    throw errorWithStatus("High-risk candidate requires second confirmation.", 409);
+  }
+  const currentHash = sha256(activeText);
+  if (
+    metadata.active_engine_hash_at_import
+    && metadata.active_engine_hash_at_import !== currentHash
+  ) {
+    throw errorWithStatus(
+      "active_engine.md changed since candidate import; reparse before activation.",
+      409,
+    );
+  }
+  const neuralEvidence = await verifyCandidateNeuralEvidence(metadata);
+  const activatedAt = new Date().toISOString();
+  const [snapshotId, archiveId] = await Promise.all([
+    uniqueSnapshotId(roots),
+    uniqueArchiveId(roots),
+  ]);
+  const snapshot = snapshotPaths(snapshotId, roots);
+  const archive = archivePaths(archiveId, roots);
+  const candidateHash = sha256(candidateText.trimEnd());
+  if (metadata.candidate_hash && metadata.candidate_hash !== candidateHash) {
+    throw errorWithStatus("candidate_engine.md hash does not match metadata.", 409);
+  }
+  const activeAfterHash = sha256(candidateText);
+  const snapshotMetadata = {
+    snapshot_id: snapshotId,
+    created_at: activatedAt,
+    reason: "before_pending_candidate_activation",
+    candidate_id: candidateId,
+    source_chapter: metadata.source_chapter,
+    active_engine_hash: currentHash,
+    active_engine_path: normalizeProjectPath(roots.activeEngine),
+    rollback_available: true,
+  };
+  const archiveMetadata = {
+    archive_id: archiveId,
+    archived_at: activatedAt,
+    canon_status: "archived",
+    source_chapter: metadata.source_chapter,
+    superseded_by_candidate_id: candidateId,
+    active_engine_hash: currentHash,
+    rollback_available: true,
+    retention: riskReport.risk_level === "high" ? "high_risk" : "normal",
+    risk_level: riskReport.risk_level,
+  };
+  const activationRecord = {
+    event: "activate_pending_engine_candidate",
+    candidate_id: candidateId,
+    source_chapter: metadata.source_chapter,
+    activated_at: activatedAt,
+    approved_by: String(approvedBy || "local_user").slice(0, 200),
+    snapshot_id: snapshotId,
+    archive_id: archiveId,
+    active_engine_before_hash: currentHash,
+    active_engine_after_hash: activeAfterHash,
+    candidate_hash: candidateHash,
+    risk_level: riskReport.risk_level,
+    requires_second_confirmation: riskReport.requires_second_confirmation === true,
+    neural_evidence: neuralEvidence,
+  };
+  const nextStatus = {
+    ...status,
+    status: "activated",
+    can_activate: false,
+    blocked_reason: null,
+    requires_second_confirmation: riskReport.requires_second_confirmation === true,
+    eligible_for_phase_3_activation: false,
+    activated_at: activatedAt,
+    rejected_at: null,
+    phase: "phase_3_activated",
+  };
+  const rollbackIndex = await readRollbackIndex(roots.rollbackIndex);
+  const nextRollbackIndex = {
+    ...rollbackIndex,
+    updated_at: activatedAt,
+    activations: [...rollbackIndex.activations, {
+      candidate_id: candidateId,
+      snapshot_id: snapshotId,
+      archive_id: archiveId,
+      activated_at: activatedAt,
+      active_engine_before_hash: currentHash,
+      active_engine_after_hash: activeAfterHash,
+    }],
+  };
+  let transaction;
+  try {
+    transaction = await commitFileTransaction("activate-engine-candidate", [
+      { filePath: snapshot.engine, content: activeText },
+      { filePath: snapshot.metadata, content: json(snapshotMetadata) },
+      { filePath: archive.engine, content: activeText },
+      { filePath: archive.metadata, content: json(archiveMetadata) },
+      { filePath: roots.activeEngine, content: candidateText },
+      { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(activationRecord)}\n` },
+      { filePath: paths.status, content: json(nextStatus) },
+      { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
+    ], {
+      candidate_id: candidateId,
+      snapshot_id: snapshotId,
+      archive_id: archiveId,
+      phase: "phase_3_activation",
+      test_fail_after_commits: options.testFailAfterCommits,
+    });
+  } catch (error) {
+    await Promise.all([
+      rm(snapshot.directory, { recursive: true, force: true }),
+      rm(archive.directory, { recursive: true, force: true }),
+    ]);
+    throw error;
+  }
+  const activeAfter = await readFile(roots.activeEngine, "utf8");
+  if (sha256(activeAfter) !== activeAfterHash) {
+    throw new Error("Safety violation: active_engine.md hash mismatch after activation.");
+  }
+  return {
+    ok: true,
+    candidate_id: candidateId,
+    snapshot_id: snapshotId,
+    archive_id: archiveId,
+    activated_at: activatedAt,
+    active_engine_before_hash: currentHash,
+    active_engine_after_hash: activeAfterHash,
+    transaction_id: transaction.transaction_id,
+    status: nextStatus,
+    neural_evidence: neuralEvidence,
+  };
+}
+
+export async function listSnapshots(options = {}) {
+  const roots = phase3PathsFor(options);
+  await mkdir(roots.engineSnapshots, { recursive: true });
+  const entries = await readdir(roots.engineSnapshots, { withFileTypes: true });
+  const snapshots = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isSafeSnapshotId(entry.name)) continue;
+    try {
+      const paths = snapshotPaths(entry.name, roots);
+      const metadata = await readJson(paths.metadata);
+      snapshots.push(metadata);
+    } catch {
+      // Ignore incomplete snapshot directories.
+    }
+  }
+  return snapshots.sort((left, right) => (
+    String(right.created_at).localeCompare(String(left.created_at))
+  ));
+}
+
+export async function listActivationLogs(options = {}) {
+  const roots = phase3PathsFor(options);
+  const text = await readOptionalText(roots.activationLog);
+  return text.split(/\r?\n/u)
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line))
+    .sort((left, right) => (
+      String(right.activated_at ?? right.rollback_at)
+        .localeCompare(String(left.activated_at ?? left.rollback_at))
+    ));
+}
+
+export async function rollbackActiveEngine(
+  snapshotId,
+  {
+    confirm = false,
+    approvedBy = "local_user",
+  } = {},
+  options = {},
+) {
+  assertSnapshotId(snapshotId);
+  if (confirm !== true) throw errorWithStatus("Rollback confirmation is required.", 409);
+  const roots = phase3PathsFor(options);
+  const target = snapshotPaths(snapshotId, roots);
+  const [targetText, targetMetadata, activeText] = await Promise.all([
+    readFile(target.engine, "utf8"),
+    readJson(target.metadata),
+    readFile(roots.activeEngine, "utf8"),
+  ]);
+  if (targetMetadata.rollback_available !== true) {
+    throw errorWithStatus("Snapshot is not available for rollback.", 409);
+  }
+  if (!targetText.trim()) throw errorWithStatus("Snapshot engine content is empty.", 409);
+  const rolledBackAt = new Date().toISOString();
+  const safetySnapshotId = await uniqueSnapshotId(roots);
+  const safety = snapshotPaths(safetySnapshotId, roots);
+  const activeBeforeHash = sha256(activeText);
+  const activeAfterHash = sha256(targetText);
+  const safetyMetadata = {
+    snapshot_id: safetySnapshotId,
+    created_at: rolledBackAt,
+    reason: "before_active_engine_rollback",
+    candidate_id: "",
+    source_chapter: targetMetadata.source_chapter ?? "",
+    active_engine_hash: activeBeforeHash,
+    active_engine_path: normalizeProjectPath(roots.activeEngine),
+    rollback_available: true,
+  };
+  const rollbackRecord = {
+    event: "rollback_active_engine",
+    rollback_at: rolledBackAt,
+    approved_by: String(approvedBy || "local_user").slice(0, 200),
+    target_snapshot_id: snapshotId,
+    safety_snapshot_id: safetySnapshotId,
+    active_engine_before_hash: activeBeforeHash,
+    active_engine_after_hash: activeAfterHash,
+  };
+  const rollbackIndex = await readRollbackIndex(roots.rollbackIndex);
+  const nextRollbackIndex = {
+    ...rollbackIndex,
+    updated_at: rolledBackAt,
+    rollbacks: [...rollbackIndex.rollbacks, rollbackRecord],
+  };
+  let transaction;
+  try {
+    transaction = await commitFileTransaction("rollback-active-engine", [
+      { filePath: safety.engine, content: activeText },
+      { filePath: safety.metadata, content: json(safetyMetadata) },
+      { filePath: roots.activeEngine, content: targetText },
+      { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(rollbackRecord)}\n` },
+      { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
+    ], {
+      target_snapshot_id: snapshotId,
+      safety_snapshot_id: safetySnapshotId,
+      phase: "phase_3_rollback",
+      test_fail_after_commits: options.testFailAfterCommits,
+    });
+  } catch (error) {
+    await rm(safety.directory, { recursive: true, force: true });
+    throw error;
+  }
+  const activeAfter = await readFile(roots.activeEngine, "utf8");
+  if (sha256(activeAfter) !== activeAfterHash) {
+    throw new Error("Safety violation: active_engine.md hash mismatch after rollback.");
+  }
+  return {
+    ok: true,
+    target_snapshot_id: snapshotId,
+    safety_snapshot_id: safetySnapshotId,
+    rollback_at: rolledBackAt,
+    active_engine_before_hash: activeBeforeHash,
+    active_engine_after_hash: activeAfterHash,
+    transaction_id: transaction.transaction_id,
+  };
 }

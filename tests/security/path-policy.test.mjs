@@ -11,8 +11,12 @@ import {
 import { assertAgentRunId } from "../../server/src/agent-run-service.mjs";
 import { assertNeuralTraceId } from "../../server/src/neural-trace-service.mjs";
 import {
+  assertArchiveId,
   assertEngineCandidateId,
+  assertSnapshotId,
+  isSafeArchiveId,
   isSafeCandidateId,
+  isSafeSnapshotId,
 } from "../../server/src/engine-candidate-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
@@ -174,6 +178,41 @@ async function main() {
     projectPaths.rejectedEngineCandidates.startsWith(projectPaths.canonDb),
     "Rejected engine candidates path is outside canon_db.",
   );
+  for (const unsafeId of [
+    "../active_engine.md",
+    "engine_snapshot_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(!isSafeSnapshotId(unsafeId), `Unsafe snapshot id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertSnapshotId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Snapshot traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  for (const unsafeId of ["../archive", "engine_archive_../../x"]) {
+    assert(!isSafeArchiveId(unsafeId), `Unsafe archive id was accepted: ${unsafeId}`);
+    assert(
+      (() => {
+        try {
+          assertArchiveId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Archive traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  assert(projectPaths.engineSnapshots.startsWith(projectPaths.canonDb), "Snapshot path escaped canon_db.");
+  assert(projectPaths.engineArchive.startsWith(projectPaths.canonDb), "Archive path escaped canon_db.");
+  assert(projectPaths.rollbackIndex.startsWith(projectPaths.rollback), "Rollback index escaped rollback root.");
 
   const activeBefore = createHash("sha256").update(await readFile(activeEnginePath)).digest("hex");
   const auditBefore = await optionalBuffer(auditPath);

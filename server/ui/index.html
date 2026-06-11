@@ -518,6 +518,55 @@
                 <button id="candidate-reparse-button" class="button secondary" type="button" disabled>重新解析</button>
                 <button id="candidate-reject-button" class="button danger" type="button" disabled>放棄候選</button>
               </div>
+
+              <section class="candidate-section activation-panel">
+                <div class="section-heading compact">
+                  <h3>啟用 Active Engine</h3>
+                </div>
+                <div class="warning-panel activation-warning">
+                  這會更新 data/canon_db/active_engine.md。系統將先建立 snapshot、archive 舊引擎，成功後寫入 activation log。
+                </div>
+                <label class="confirmation-row">
+                  <input id="candidate-activation-confirm" type="checkbox">
+                  <span>我確認啟用這個候選引擎</span>
+                </label>
+                <div id="candidate-second-confirm-panel" class="second-confirm-panel" hidden>
+                  <label class="confirmation-row">
+                    <input id="candidate-second-confirm" type="checkbox">
+                    <span>我已確認重大不可逆變更</span>
+                  </label>
+                  <label class="field">
+                    <span>輸入「確認啟用」</span>
+                    <input id="candidate-second-confirm-text" type="text" autocomplete="off">
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button id="candidate-activate-button" class="button danger" type="button" disabled>確認啟用新版引擎</button>
+                </div>
+              </section>
+            </section>
+          </div>
+
+          <div class="canon-history-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>Snapshots</h2>
+              </div>
+              <label class="confirmation-row rollback-confirmation">
+                <input id="rollback-confirm" type="checkbox">
+                <span>我確認執行回滾並建立 safety snapshot</span>
+              </label>
+              <div id="snapshot-list" class="snapshot-list">
+                <div class="empty-state">尚無 snapshot</div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>Activation Log</h2>
+              </div>
+              <div id="activation-log-list" class="activation-log-list">
+                <div class="empty-state">尚無 activation log</div>
+              </div>
             </section>
           </div>
         </section>

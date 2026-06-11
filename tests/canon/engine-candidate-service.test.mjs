@@ -3,13 +3,17 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  activatePendingCandidate,
   detectRiskChanges,
   generateEngineDiff,
   importSettlementResult,
+  listActivationLogs,
   listPendingCandidates,
+  listSnapshots,
   parseEngineCandidate,
   rejectPendingCandidate,
   reparsePendingCandidate,
+  rollbackActiveEngine,
 } from "../../server/src/engine-candidate-service.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,6 +23,10 @@ const fixtureRoot = path.join(rootDir, "data", "canon_db", ".engine-candidate-te
 const fixturePending = path.join(fixtureRoot, "pending");
 const fixtureActive = path.join(fixtureRoot, "active_engine.md");
 const missingActive = path.join(fixtureRoot, "missing_active_engine.md");
+const fixtureSnapshots = path.join(fixtureRoot, "engine_snapshots");
+const fixtureArchive = path.join(fixtureRoot, "archive");
+const fixtureActivationLog = path.join(fixtureRoot, "activation_logs", "activation_log.jsonl");
+const fixtureRollbackIndex = path.join(fixtureRoot, "rollback", "rollback_index.json");
 const productionActive = path.join(rootDir, "data", "canon_db", "active_engine.md");
 
 function assert(condition, message) {
@@ -45,6 +53,10 @@ async function main() {
   const options = {
     activeEnginePath: fixtureActive,
     pendingEngineCandidates: fixturePending,
+    engineSnapshots: fixtureSnapshots,
+    engineArchive: fixtureArchive,
+    activationLog: fixtureActivationLog,
+    rollbackIndex: fixtureRollbackIndex,
   };
 
   try {
@@ -149,6 +161,237 @@ async function main() {
     assert(shortenedImport.risk_report.risk_level === "critical", "Large deletion was not critical.");
     assert(shortenedImport.status.status === "blocked", "Large deletion was not blocked.");
 
+    const activationCandidateText = `${activeText}\n啟用測試規則：保持交易完整。`;
+    const activationCandidate = await importSettlementResult({
+      rawText: settlement(activationCandidateText),
+      sourceChapter: "第二十章",
+    }, options);
+    const activationCandidateId = activationCandidate.metadata.candidate_id;
+    let unconfirmedBlocked = false;
+    try {
+      await activatePendingCandidate(activationCandidateId, {}, options);
+    } catch {
+      unconfirmedBlocked = true;
+    }
+    assert(unconfirmedBlocked, "Candidate activated without user confirmation.");
+    assert(
+      hash(await readFile(fixtureActive)) === hash(`${activeText}\n`),
+      "Unconfirmed activation changed active_engine.md.",
+    );
+
+    for (const [label, failAfter] of [
+      ["snapshot", 1],
+      ["archive", 3],
+      ["active engine", 5],
+    ]) {
+      process.env.FILE_TRANSACTION_TEST_MODE = "1";
+      let failed = false;
+      try {
+        await activatePendingCandidate(
+          activationCandidateId,
+          { confirm: true },
+          { ...options, testFailAfterCommits: failAfter },
+        );
+      } catch {
+        failed = true;
+      } finally {
+        delete process.env.FILE_TRANSACTION_TEST_MODE;
+      }
+      assert(failed, `${label} failure injection did not fail activation.`);
+      assert(
+        hash(await readFile(fixtureActive)) === hash(`${activeText}\n`),
+        `${label} failure changed active_engine.md.`,
+      );
+      assert(
+        (await readdir(fixtureSnapshots).catch(() => [])).length === 0,
+        `${label} failure left a snapshot behind.`,
+      );
+      assert(
+        (await readdir(fixtureArchive).catch(() => [])).length === 0,
+        `${label} failure left an archive behind.`,
+      );
+    }
+
+    const activated = await activatePendingCandidate(
+      activationCandidateId,
+      { confirm: true, approvedBy: "service_test" },
+      options,
+    );
+    assert(
+      await readFile(fixtureActive, "utf8") === `${activationCandidateText}\n`,
+      "Activated active_engine.md does not equal candidate_engine.md.",
+    );
+    const activationStatus = JSON.parse(await readFile(
+      path.join(fixturePending, activationCandidateId, "status.json"),
+      "utf8",
+    ));
+    assert(activationStatus.status === "activated", "Candidate status was not activated.");
+    assert(
+      await readFile(
+        path.join(fixtureSnapshots, activated.snapshot_id, "active_engine_before_activation.md"),
+        "utf8",
+      ) === `${activeText}\n`,
+      "Activation snapshot did not preserve the previous active engine.",
+    );
+    assert(
+      await readFile(
+        path.join(fixtureArchive, activated.archive_id, "archived_active_engine.md"),
+        "utf8",
+      ) === `${activeText}\n`,
+      "Activation archive did not preserve the previous active engine.",
+    );
+    assert(
+      (await listActivationLogs(options)).some(
+        (entry) => entry.event === "activate_pending_engine_candidate"
+          && entry.candidate_id === activationCandidateId,
+      ),
+      "Activation log did not record activation.",
+    );
+    assert(
+      (await listSnapshots(options)).some((entry) => entry.snapshot_id === activated.snapshot_id),
+      "Snapshot list omitted the activation snapshot.",
+    );
+    assert(
+      JSON.parse(await readFile(fixtureRollbackIndex, "utf8")).activations.length === 1,
+      "Rollback index did not record activation.",
+    );
+    let activatedAgainBlocked = false;
+    try {
+      await activatePendingCandidate(activationCandidateId, { confirm: true }, options);
+    } catch {
+      activatedAgainBlocked = true;
+    }
+    assert(activatedAgainBlocked, "Activated candidate was activated twice.");
+
+    for (const invalidCandidate of [parseFailure, contaminatedImport, shortenedImport]) {
+      let blocked = false;
+      try {
+        await activatePendingCandidate(
+          invalidCandidate.metadata.candidate_id,
+          { confirm: true, secondConfirm: true },
+          options,
+        );
+      } catch {
+        blocked = true;
+      }
+      assert(blocked, `${invalidCandidate.status.status} candidate was activated.`);
+    }
+
+    const rejectedCandidate = await importSettlementResult({
+      rawText: settlement(`${activationCandidateText}\n放棄候選測試。`),
+    }, options);
+    await rejectPendingCandidate(rejectedCandidate.metadata.candidate_id, { reason: "reject test" }, options);
+    let rejectedActivationBlocked = false;
+    try {
+      await activatePendingCandidate(
+        rejectedCandidate.metadata.candidate_id,
+        { confirm: true },
+        options,
+      );
+    } catch {
+      rejectedActivationBlocked = true;
+    }
+    assert(rejectedActivationBlocked, "Rejected candidate was activated.");
+
+    const highBase = (await readFile(fixtureActive, "utf8")).trimEnd();
+    const highCandidateText = `${highBase}\n本章確認角色死亡、能力突破與暗線核心真相。`;
+    const highCandidate = await importSettlementResult({
+      rawText: settlement(highCandidateText),
+      sourceChapter: "高風險章",
+    }, options);
+    assert(highCandidate.risk_report.risk_level === "high", "High-risk import was not high.");
+    let missingSecondBlocked = false;
+    try {
+      await activatePendingCandidate(
+        highCandidate.metadata.candidate_id,
+        { confirm: true, secondConfirm: false },
+        options,
+      );
+    } catch {
+      missingSecondBlocked = true;
+    }
+    assert(missingSecondBlocked, "High-risk candidate activated without second confirmation.");
+    const highActivated = await activatePendingCandidate(
+      highCandidate.metadata.candidate_id,
+      { confirm: true, secondConfirm: true },
+      options,
+    );
+    const highArchiveMetadata = JSON.parse(await readFile(
+      path.join(fixtureArchive, highActivated.archive_id, "metadata.json"),
+      "utf8",
+    ));
+    assert(highArchiveMetadata.retention === "high_risk", "High-risk archive retention was wrong.");
+
+    const neuralBase = (await readFile(fixtureActive, "utf8")).trimEnd();
+    const fakeRunId = "agent_run_20260611-120000-a1b2c3d4";
+    const neuralCandidate = await importSettlementResult({
+      rawText: settlement(`${neuralBase}\n神經證據檢查規則。`),
+      runId: fakeRunId,
+      requiresNeuralModules: true,
+      neuralModulesUsedPath: `data/agent_runs/${fakeRunId}/neural_modules_used.json`,
+    }, options);
+    let neuralBlocked = false;
+    try {
+      await activatePendingCandidate(
+        neuralCandidate.metadata.candidate_id,
+        { confirm: true },
+        options,
+      );
+    } catch (error) {
+      neuralBlocked = error.message.includes("neural_trace_missing");
+    }
+    assert(neuralBlocked, "Missing required neural trace did not block activation.");
+
+    const beforeFailedRollback = await readFile(fixtureActive);
+    process.env.FILE_TRANSACTION_TEST_MODE = "1";
+    let rollbackFailed = false;
+    try {
+      await rollbackActiveEngine(
+        activated.snapshot_id,
+        { confirm: true },
+        { ...options, testFailAfterCommits: 3 },
+      );
+    } catch {
+      rollbackFailed = true;
+    } finally {
+      delete process.env.FILE_TRANSACTION_TEST_MODE;
+    }
+    assert(rollbackFailed, "Rollback failure injection did not fail.");
+    assert(
+      hash(await readFile(fixtureActive)) === hash(beforeFailedRollback),
+      "Failed rollback changed active_engine.md.",
+    );
+
+    let rollbackWithoutConfirmBlocked = false;
+    try {
+      await rollbackActiveEngine(activated.snapshot_id, {}, options);
+    } catch {
+      rollbackWithoutConfirmBlocked = true;
+    }
+    assert(rollbackWithoutConfirmBlocked, "Rollback succeeded without confirmation.");
+    const rolledBack = await rollbackActiveEngine(
+      activated.snapshot_id,
+      { confirm: true, approvedBy: "service_test" },
+      options,
+    );
+    assert(
+      await readFile(fixtureActive, "utf8") === `${activeText}\n`,
+      "Rollback did not restore snapshot content.",
+    );
+    assert(
+      (await listSnapshots(options)).some(
+        (entry) => entry.snapshot_id === rolledBack.safety_snapshot_id,
+      ),
+      "Rollback did not create a safety snapshot.",
+    );
+    assert(
+      (await listActivationLogs(options)).some(
+        (entry) => entry.event === "rollback_active_engine"
+          && entry.target_snapshot_id === activated.snapshot_id,
+      ),
+      "Activation log did not record rollback.",
+    );
+
     const rejected = await rejectPendingCandidate(candidateId, { reason: "不採用此版本" }, options);
     assert(rejected.status.status === "rejected", "Candidate was not rejected.");
     assert(rejected.status.rejected_at, "Rejected candidate has no rejected_at.");
@@ -169,7 +412,7 @@ async function main() {
     assert(reparsed.metadata.reparsed_at, "Reparse timestamp was not saved.");
 
     const listed = await listPendingCandidates(options);
-    assert(listed.length >= 6, "Pending candidate list omitted test records.");
+    assert(listed.length >= 10, "Pending candidate list omitted test records.");
     assert(
       hash(await readFile(fixtureActive)) === hash(`${activeText}\n`),
       "Fixture active engine changed during Phase 2 operations.",

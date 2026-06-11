@@ -7,4 +7,7 @@ data/outputs/.transaction-test/
 data/agent_runs/
 data/canon_db/pending_engine_candidates/
 data/canon_db/rejected_engine_candidates/
+data/canon_db/engine_snapshots/
+data/canon_db/archive/
 data/canon_db/activation_logs/
+data/canon_db/rollback/

@@ -26,8 +26,12 @@ export const projectPaths = {
   engineVersions: path.join(projectRoot, "data", "canon_db", "versions"),
   pendingEngineCandidates: path.join(projectRoot, "data", "canon_db", "pending_engine_candidates"),
   rejectedEngineCandidates: path.join(projectRoot, "data", "canon_db", "rejected_engine_candidates"),
+  engineSnapshots: path.join(projectRoot, "data", "canon_db", "engine_snapshots"),
+  engineArchive: path.join(projectRoot, "data", "canon_db", "archive"),
   activationLogs: path.join(projectRoot, "data", "canon_db", "activation_logs"),
   activationLog: path.join(projectRoot, "data", "canon_db", "activation_logs", "activation_log.jsonl"),
+  rollback: path.join(projectRoot, "data", "canon_db", "rollback"),
+  rollbackIndex: path.join(projectRoot, "data", "canon_db", "rollback", "rollback_index.json"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 
