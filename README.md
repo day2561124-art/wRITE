@@ -498,6 +498,52 @@ node tests/e2e/full-workflow-smoke.test.mjs
 
 此測試會驗證 Approval Queue 委派 Phase 3、rollback 建立 safety snapshot、Cleanup 只搬入 trash，以及未確認 activation、blocked candidate、`neural_trace_missing` 不可確認。測試結束後會清除全部 fixture，並確認正式 `active_engine.md`、圖庫、feedback 與 outputs 未被修改。
 
+### 10.8. MCP Read-Only Tools
+
+Phase 7A 新增獨立的 read-only tool service：
+
+```text
+server/src/mcp-readonly-tools.mjs
+```
+
+目前只匯出函式與 metadata，尚未接入 `server/src/mcp-server.mjs` tool registry。可用工具包含：
+
+```text
+get_project_status
+get_active_engine
+get_active_writing_card
+get_active_proofing_card
+get_active_longline
+get_generation_context
+get_retrieval_context
+get_task_prompt
+get_latest_candidate_draft
+get_latest_proof_report
+get_latest_adopted_chapter
+get_latest_settlement_context
+get_latest_settlement_report
+get_pending_engine_candidates
+get_approval_queue_status
+get_neural_usage_for_run
+get_cleanup_proposals
+```
+
+所有工具都回傳統一 envelope：`ok`、`tool_name`、`canon_status`、`blocked`、`blocked_reason`、`data`、`sources`、`warnings`。每個 source metadata 會包含 `source_path`、`exists`、`modified_at`、`hash`、`size` 與 `canon_status`。
+
+安全邊界：
+
+- 不寫入 `active_engine.md`。
+- 不建立 pending candidate、draft、proof report、settlement report 或 approval item。
+- 不執行 activation、approve、rollback 或 cleanup execute。
+- pending、blocked、rejected、archived、adopted_pending_settlement 都不會被標成 active canon。
+- metadata 標示為 `permission: read_only`、`writes_files: false`、`can_modify_active_engine: false`。
+
+單獨測試：
+
+```powershell
+node tests/mcp/mcp-readonly-tools.test.mjs
+```
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -1007,6 +1053,7 @@ config/
   mcp-client.windows-local.example.json
 
 server/src/
+  mcp-readonly-tools.mjs
   cleanup-proposal-service.mjs
   approval-queue-service.mjs
   file-transactions.mjs
