@@ -20,6 +20,7 @@ const steps = [
   ["File transaction rollback", ["tests/transactions/file-transactions.test.mjs"]],
   ["Engine candidate service", ["tests/canon/engine-candidate-service.test.mjs"]],
   ["Writing workflow service", ["tests/workflow/writing-workflow-service.test.mjs"]],
+  ["Settlement workflow service", ["tests/workflow/settlement-workflow-service.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],

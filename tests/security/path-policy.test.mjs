@@ -28,6 +28,12 @@ import {
   isSafeDraftId,
   isSafeProofId,
 } from "../../server/src/writing-workflow-service.mjs";
+import {
+  assertSettlementContextId,
+  assertSettlementReportId,
+  isSafeSettlementContextId,
+  isSafeSettlementReportId,
+} from "../../server/src/settlement-workflow-service.mjs";
 import { terminateProcessTree } from "../../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -180,6 +186,56 @@ async function main() {
       `Candidate traversal id was not rejected: ${unsafeId}`,
     );
   }
+  for (const unsafeId of [
+    "../active_engine.md",
+    "settlement_context_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(
+      !isSafeSettlementContextId(unsafeId),
+      `Unsafe settlement context id was accepted: ${unsafeId}`,
+    );
+    assert(
+      (() => {
+        try {
+          assertSettlementContextId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Settlement context traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  for (const unsafeId of [
+    "../active_engine.md",
+    "settlement_report_../../active_engine.md",
+    "%2e%2e%2factive_engine.md",
+  ]) {
+    assert(
+      !isSafeSettlementReportId(unsafeId),
+      `Unsafe settlement report id was accepted: ${unsafeId}`,
+    );
+    assert(
+      (() => {
+        try {
+          assertSettlementReportId(unsafeId);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `Settlement report traversal id was not rejected: ${unsafeId}`,
+    );
+  }
+  assert(
+    projectPaths.settlementContexts.startsWith(projectPaths.settlementWorkflow),
+    "Settlement contexts path is outside settlement workflow.",
+  );
+  assert(
+    projectPaths.settlementReports.startsWith(projectPaths.settlementWorkflow),
+    "Settlement reports path is outside settlement workflow.",
+  );
   assert(
     projectPaths.pendingEngineCandidates.startsWith(projectPaths.canonDb),
     "Pending engine candidates path is outside canon_db.",

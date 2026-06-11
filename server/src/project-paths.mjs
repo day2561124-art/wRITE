@@ -38,6 +38,9 @@ export const projectPaths = {
   adoptedChapters: path.join(projectRoot, "data", "writing_workflow", "adopted_chapters"),
   contextBundles: path.join(projectRoot, "data", "writing_workflow", "context_bundles"),
   workflowLogs: path.join(projectRoot, "data", "writing_workflow", "logs"),
+  settlementWorkflow: path.join(projectRoot, "data", "writing_workflow", "settlements"),
+  settlementContexts: path.join(projectRoot, "data", "writing_workflow", "settlements", "contexts"),
+  settlementReports: path.join(projectRoot, "data", "writing_workflow", "settlements", "reports"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
 };
 

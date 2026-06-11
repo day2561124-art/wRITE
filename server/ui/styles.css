@@ -1926,6 +1926,61 @@ dialog::backdrop {
   background: #effaf4;
 }
 
+.workflow-settlement-panel {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.settlement-report-form {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.settlement-workflow-detail {
+  min-height: 72px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 14px;
+}
+
+.source-manifest-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.source-manifest-list span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.source-manifest-list .is-ready {
+  color: var(--green);
+}
+
+.source-manifest-list .is-missing {
+  color: var(--red);
+}
+
+.settlement-next-step {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.settlement-next-step strong {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
 .proof-issue {
   display: grid;
   gap: 4px;

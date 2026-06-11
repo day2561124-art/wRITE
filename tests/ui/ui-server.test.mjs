@@ -26,6 +26,8 @@ const workflowDraftsDir = path.join(writingWorkflowDir, "candidate_drafts");
 const workflowProofsDir = path.join(writingWorkflowDir, "proof_reports");
 const workflowAdoptedDir = path.join(writingWorkflowDir, "adopted_chapters");
 const workflowContextsDir = path.join(writingWorkflowDir, "context_bundles");
+const workflowSettlementContextsDir = path.join(writingWorkflowDir, "settlements", "contexts");
+const workflowSettlementReportsDir = path.join(writingWorkflowDir, "settlements", "reports");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 function assert(condition, message) {
@@ -135,6 +137,12 @@ async function main() {
   const workflowProofsBefore = new Set(await readOptionalDirectory(workflowProofsDir));
   const workflowAdoptedBefore = new Set(await readOptionalDirectory(workflowAdoptedDir));
   const workflowContextsBefore = new Set(await readOptionalDirectory(workflowContextsDir));
+  const workflowSettlementContextsBefore = new Set(
+    await readOptionalDirectory(workflowSettlementContextsDir),
+  );
+  const workflowSettlementReportsBefore = new Set(
+    await readOptionalDirectory(workflowSettlementReportsDir),
+  );
   const createdVisualAssetPaths = [];
   const createdAgentRunIds = [];
   const createdNeuralTraceIds = [];
@@ -173,6 +181,22 @@ async function main() {
     assert(indexText.includes('id="workflow-draft-list"'), "UI index is missing candidate_draft management.");
     assert(indexText.includes('id="proof-level-summary"'), "UI index is missing P0-P4 proof summary.");
     assert(indexText.includes('id="workflow-adopt-button"'), "UI index is missing draft adoption.");
+    assert(
+      indexText.includes('id="create-settlement-context-button"'),
+      "UI index is missing settlement context creation.",
+    );
+    assert(
+      indexText.includes('id="workflow-settlement-report-form"'),
+      "UI index is missing settlement report creation.",
+    );
+    assert(
+      indexText.includes('id="create-workflow-pending-candidate-button"'),
+      "UI index is missing Phase 4B pending candidate creation.",
+    );
+    assert(
+      indexText.includes("active_engine 啟用仍需 Phase 3 人工確認"),
+      "UI index is missing the Phase 4B activation boundary.",
+    );
     assert(indexText.includes('id="candidate-activate-button"'), "UI index is missing the activation button.");
     assert(indexText.includes('id="candidate-second-confirm-panel"'), "UI index is missing high-risk confirmation.");
     assert(indexText.includes('id="snapshot-list"'), "UI index is missing the snapshot list.");
@@ -193,6 +217,18 @@ async function main() {
     assert(appText.includes("handleWorkflowTask"), "UI app.js is missing draft task handling.");
     assert(appText.includes("refreshWorkflowState"), "UI app.js is missing workflow state loading.");
     assert(appText.includes("renderProofSummary"), "UI app.js is missing P0-P4 rendering.");
+    assert(
+      appText.includes("handleCreateSettlementContext"),
+      "UI app.js is missing settlement context handling.",
+    );
+    assert(
+      appText.includes("handleSaveSettlementReport"),
+      "UI app.js is missing settlement report handling.",
+    );
+    assert(
+      appText.includes("handleCreateWorkflowPendingCandidate"),
+      "UI app.js is missing Phase 4B pending candidate handling.",
+    );
     assert(appText.includes('addEventListener("hashchange"'), "UI hash routing is not synchronized.");
     const stylesResponse = await fetch(`${baseUrl}/styles.css`);
     const stylesText = await stylesResponse.text();
@@ -200,6 +236,10 @@ async function main() {
     assert(stylesText.includes(".activation-panel"), "UI styles are missing the activation panel.");
     assert(stylesText.includes(".workflow-draft-item"), "UI styles are missing workflow draft items.");
     assert(stylesText.includes(".proof-level-summary"), "UI styles are missing proof level summary.");
+    assert(
+      stylesText.includes(".workflow-settlement-panel"),
+      "UI styles are missing the Phase 4B workflow panel.",
+    );
 
     const stateResult = await readJson(await fetch(`${baseUrl}/api/state`));
     assert(stateResult.response.ok && stateResult.payload.ok, "State API failed.");
@@ -439,6 +479,117 @@ async function main() {
       "UI 合約新增規則：維持正式承接一致。",
       "```",
     ].join("\n");
+    const settlementContextResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/adopted-chapters/${adoptedChapterId}/settlement-context`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "UI Phase 4B context" }),
+      },
+    ));
+    assert(settlementContextResult.response.status === 201, "Settlement context API failed.");
+    const settlementContextId =
+      settlementContextResult.payload.settlement_context.metadata.settlement_context_id;
+    assert(
+      settlementContextResult.payload.settlement_context.status.status === "ready",
+      "Settlement context API did not create ready context.",
+    );
+    assert(
+      settlementContextResult.payload.settlement_context.source_manifest.sources.some(
+        (source) => source.label === "active_engine" && source.exists,
+      ),
+      "Settlement context source manifest omitted active_engine.",
+    );
+    const settlementContextList = await readJson(
+      await fetch(`${baseUrl}/api/workflow/settlement-contexts`),
+    );
+    assert(
+      settlementContextList.response.ok
+        && settlementContextList.payload.settlement_contexts.some(
+          (context) => context.settlement_context_id === settlementContextId,
+        ),
+      "Settlement context list omitted context.",
+    );
+    const settlementContextDetail = await readJson(await fetch(
+      `${baseUrl}/api/workflow/settlement-contexts/${settlementContextId}`,
+    ));
+    assert(settlementContextDetail.response.ok, "Settlement context detail API failed.");
+
+    const settlementReportResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/settlement-reports`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settlementContextId,
+          settlementText: settlementRaw,
+          sourceChapter: "UI Workflow 結算章",
+          note: "UI Phase 4B report",
+        }),
+      },
+    ));
+    assert(settlementReportResult.response.status === 201, "Settlement report API failed.");
+    const settlementReportId =
+      settlementReportResult.payload.settlement_report.metadata.settlement_report_id;
+    assert(
+      settlementReportResult.payload.settlement_report.status.status === "settlement_report_saved",
+      "Settlement report status was wrong.",
+    );
+    assert(
+      settlementReportResult.payload.settlement_report.neural_usage.used_neural_network === false,
+      "Settlement report text incorrectly created neural success.",
+    );
+    const settlementReportList = await readJson(
+      await fetch(`${baseUrl}/api/workflow/settlement-reports`),
+    );
+    assert(
+      settlementReportList.response.ok
+        && settlementReportList.payload.settlement_reports.some(
+          (report) => report.settlement_report_id === settlementReportId,
+        ),
+      "Settlement report list omitted report.",
+    );
+    const settlementReportDetail = await readJson(await fetch(
+      `${baseUrl}/api/workflow/settlement-reports/${settlementReportId}`,
+    ));
+    assert(settlementReportDetail.response.ok, "Settlement report detail API failed.");
+
+    const workflowPendingResult = await readJson(await fetch(
+      `${baseUrl}/api/workflow/settlement-reports/${settlementReportId}/create-pending-candidate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    assert(
+      workflowPendingResult.response.status === 201,
+      "Phase 4B pending candidate creation API failed.",
+    );
+    const workflowCandidateId =
+      workflowPendingResult.payload.result.pending_candidate.metadata.candidate_id;
+    createdCandidateIds.push(workflowCandidateId);
+    assert(
+      workflowPendingResult.payload.result.pending_candidate.diff
+        && workflowPendingResult.payload.result.pending_candidate.risk_report,
+      "Phase 4B did not return Phase 2 diff and risk.",
+    );
+    assert(
+      workflowPendingResult.payload.result.settlement_report.status.status
+        === "pending_candidate_created",
+      "Settlement report was not linked to pending candidate.",
+    );
+    assert(
+      workflowPendingResult.payload.result.adopted_chapter.status.status
+        === "settlement_candidate_created",
+      "Adopted chapter was not linked to pending candidate.",
+    );
+    assert(
+      createHash("sha256").update(await readFile(activeEnginePath)).digest("hex")
+        === activeEngineHashBefore,
+      "Phase 4B changed active_engine.md.",
+    );
+
     const importCandidateResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -613,6 +764,36 @@ async function main() {
     assert(
       unsafeDraftAction.status >= 400 && unsafeDraftAction.status < 500,
       "Unsafe writing workflow action path was accepted.",
+    );
+    for (const unsafePath of [
+      "/api/workflow/settlement-contexts/%2e%2e%2factive_engine.md",
+      "/api/workflow/settlement-reports/%2e%2e%2factive_engine.md",
+    ]) {
+      const unsafeResult = await rawHttpStatus(port, unsafePath);
+      assert(
+        unsafeResult.status >= 400 && unsafeResult.status < 500,
+        `Settlement workflow traversal path was not rejected: ${unsafePath}`,
+      );
+    }
+    const unsafeSettlementContext = await rawHttpStatus(
+      port,
+      "/api/workflow/adopted-chapters/%2e%2e%2factive_engine.md/settlement-context",
+      "POST",
+      "{}",
+    );
+    assert(
+      unsafeSettlementContext.status >= 400 && unsafeSettlementContext.status < 500,
+      "Unsafe adopted chapter settlement path was accepted.",
+    );
+    const unsafePendingCreate = await rawHttpStatus(
+      port,
+      "/api/workflow/settlement-reports/%2e%2e%2factive_engine.md/create-pending-candidate",
+      "POST",
+      "{}",
+    );
+    assert(
+      unsafePendingCreate.status >= 400 && unsafePendingCreate.status < 500,
+      "Unsafe settlement report action path was accepted.",
     );
 
     const rejectImportResult = await readJson(await fetch(`${baseUrl}/api/canon/settlement/import`, {
@@ -856,6 +1037,8 @@ async function main() {
     console.log("- Unconfirmed activation and rollback blocked: yes");
     console.log("- Writing candidate, proofing, adoption, and workflow path safety checked: yes");
     console.log("- Writing workflow active_engine side effects: none");
+    console.log("- Settlement context, report, Phase 2 candidate, diff, and risk checked: yes");
+    console.log("- Phase 4B direct active_engine activation: none");
     console.log("- Unknown action rejected: yes");
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
@@ -893,6 +1076,8 @@ async function main() {
       [workflowProofsDir, workflowProofsBefore],
       [workflowAdoptedDir, workflowAdoptedBefore],
       [workflowContextsDir, workflowContextsBefore],
+      [workflowSettlementContextsDir, workflowSettlementContextsBefore],
+      [workflowSettlementReportsDir, workflowSettlementReportsBefore],
     ]) {
       for (const name of await readOptionalDirectory(directory)) {
         if (!namesBefore.has(name)) {

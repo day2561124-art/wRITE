@@ -7,6 +7,9 @@ const state = {
   activeNeuralRunId: "",
   activeCandidateId: "",
   activeWorkflowDraftId: "",
+  activeAdoptedChapterId: "",
+  activeSettlementContextId: "",
+  activeSettlementReportId: "",
   workflow: {
     drafts: [],
     proofReports: [],
@@ -14,6 +17,11 @@ const state = {
     draftDetail: null,
     proofDetail: null,
     context: null,
+    settlementContexts: [],
+    settlementReports: [],
+    settlementContextDetail: null,
+    settlementReportDetail: null,
+    settlementPendingCandidate: null,
   },
   canon: {
     activeEngine: null,
@@ -199,7 +207,10 @@ function switchView(viewName) {
     loadNeuralStatus().catch((error) => toast(error.message, true));
   }
   if (viewName === "settlement") {
-    refreshCanonSettlementState().catch((error) => toast(error.message, true));
+    Promise.all([
+      refreshCanonSettlementState(),
+      refreshWorkflowSettlementState(),
+    ]).catch((error) => toast(error.message, true));
   }
   if (["compose", "review"].includes(viewName)) {
     refreshWorkflowState().catch((error) => toast(error.message, true));
@@ -842,6 +853,91 @@ function neuralUsageHtml(usage) {
   `).join("");
 }
 
+function renderSettlementWorkflow() {
+  const adopted = state.workflow.adoptedChapters ?? [];
+  const select = $("#settlement-adopted-select");
+  const current = state.activeAdoptedChapterId || select.value;
+  select.innerHTML = [
+    '<option value="">選擇 accepted_pending_settlement 章節</option>',
+    ...adopted.map((chapter) => `
+      <option value="${escapeHtml(chapter.adopted_chapter_id)}">
+        ${escapeHtml(chapter.adopted_chapter_id)} · ${escapeHtml(chapter.status)}
+      </option>
+    `),
+  ].join("");
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+  state.activeAdoptedChapterId = select.value;
+  const selected = adopted.find(
+    (chapter) => chapter.adopted_chapter_id === state.activeAdoptedChapterId,
+  );
+  $("#create-settlement-context-button").disabled =
+    selected?.status !== "accepted_pending_settlement";
+
+  const context = state.workflow.settlementContextDetail;
+  $("#workflow-settlement-status").textContent = context
+    ? `${context.status.status} · ${context.metadata.settlement_context_id}`
+    : selected
+      ? selected.status
+      : "尚未選擇 adopted_chapter";
+  $("#save-settlement-report-button").disabled =
+    context?.status.can_save_settlement_report !== true;
+  $("#settlement-context-detail").innerHTML = context
+    ? `
+      <div class="workflow-facts">
+        <span>context · ${escapeHtml(context.metadata.settlement_context_id)}</span>
+        <span>adopted · ${escapeHtml(context.metadata.adopted_chapter_id)}</span>
+        <span>draft · ${escapeHtml(context.metadata.draft_id)}</span>
+        <span>proof · ${escapeHtml(context.metadata.proof_report_id || "none")}</span>
+        <span>active hash · ${escapeHtml(context.metadata.active_engine_hash)}</span>
+        <span>chapter hash · ${escapeHtml(context.metadata.adopted_chapter_hash)}</span>
+        <span class="${context.status.status === "blocked" ? "is-missing" : "is-ready"}">
+          ${escapeHtml(context.status.status)}
+        </span>
+      </div>
+      ${context.status.blocked_reason
+        ? `<div class="blocked-panel">${escapeHtml(context.status.blocked_reason)}</div>`
+        : ""}
+      <div class="source-manifest-list">
+        ${context.source_manifest.sources.map((source) => `
+          <span class="${source.exists ? "is-ready" : "is-missing"}">
+            ${escapeHtml(source.label)} · ${source.exists ? escapeHtml(source.hash) : "missing"}
+          </span>
+        `).join("")}
+      </div>
+    `
+    : '<div class="empty-state">尚未建立 settlement_context</div>';
+
+  const report = state.workflow.settlementReportDetail;
+  $("#create-workflow-pending-candidate-button").disabled =
+    report?.status.can_create_pending_candidate !== true;
+  $("#settlement-report-detail").innerHTML = report
+    ? `
+      <div class="workflow-facts">
+        <span>report · ${escapeHtml(report.metadata.settlement_report_id)}</span>
+        <span>context · ${escapeHtml(report.metadata.settlement_context_id)}</span>
+        <span>chapter · ${escapeHtml(report.metadata.source_chapter || "未指定")}</span>
+        <span>hash · ${escapeHtml(report.metadata.settlement_hash)}</span>
+        <span>status · ${escapeHtml(report.status.status)}</span>
+        <span>candidate · ${escapeHtml(report.status.pending_candidate_id || "尚未建立")}</span>
+      </div>
+      <div class="workflow-neural-summary">${neuralUsageHtml(report.neural_usage)}</div>
+      ${report.status.pending_candidate_id && state.workflow.settlementPendingCandidate ? `
+        <div class="settlement-next-step">
+          <strong>${escapeHtml(report.status.pending_candidate_id)}</strong>
+          <span>
+            ${escapeHtml(state.workflow.settlementPendingCandidate.status.status)}
+            · risk ${escapeHtml(state.workflow.settlementPendingCandidate.risk_report.risk_level)}
+          </span>
+          ${state.workflow.settlementPendingCandidate.status.blocked_reason
+            ? `<span>${escapeHtml(state.workflow.settlementPendingCandidate.status.blocked_reason)}</span>`
+            : ""}
+          <span>已建立 Phase 2 pending candidate。請在下方確認 diff / risk，Phase 3 仍需人工確認啟用。</span>
+        </div>
+      ` : ""}
+    `
+    : '<div class="empty-state">尚未保存 settlement_report</div>';
+}
+
 function renderWorkflowDraftList() {
   const drafts = state.workflow.drafts ?? [];
   $("#workflow-draft-list").innerHTML = drafts.length
@@ -941,6 +1037,162 @@ async function refreshWorkflowState(showToast = false) {
   renderWorkflow();
   if (state.activeWorkflowDraftId) await loadWorkflowDraft(state.activeWorkflowDraftId);
   if (showToast) toast("正文工作流已重新整理");
+}
+
+async function refreshWorkflowSettlementState(showToast = false) {
+  const [adoptedPayload, contextsPayload, reportsPayload] = await Promise.all([
+    api("/api/workflow/adopted-chapters"),
+    api("/api/workflow/settlement-contexts"),
+    api("/api/workflow/settlement-reports"),
+  ]);
+  state.workflow.adoptedChapters = adoptedPayload.adopted_chapters ?? [];
+  state.workflow.settlementContexts = contextsPayload.settlement_contexts ?? [];
+  state.workflow.settlementReports = reportsPayload.settlement_reports ?? [];
+  if (
+    state.activeAdoptedChapterId
+    && !state.workflow.adoptedChapters.some(
+      (chapter) => chapter.adopted_chapter_id === state.activeAdoptedChapterId,
+    )
+  ) {
+    state.activeAdoptedChapterId = "";
+  }
+  if (!state.activeAdoptedChapterId) {
+    state.activeAdoptedChapterId = state.workflow.adoptedChapters.find(
+      (chapter) => ["settlement_context_created", "settlement_report_saved"].includes(chapter.status),
+    )?.adopted_chapter_id
+      ?? state.workflow.adoptedChapters.find(
+        (chapter) => chapter.status === "accepted_pending_settlement",
+      )?.adopted_chapter_id
+      ?? state.workflow.adoptedChapters[0]?.adopted_chapter_id
+      ?? "";
+  }
+  if (!state.activeSettlementContextId) {
+    state.activeSettlementContextId = state.workflow.settlementContexts.find(
+      (context) => context.adopted_chapter_id === state.activeAdoptedChapterId,
+    )?.settlement_context_id ?? "";
+  }
+  const contextSummary = state.workflow.settlementContexts.find(
+    (context) => context.settlement_context_id === state.activeSettlementContextId,
+  );
+  if (contextSummary) {
+    const payload = await api(
+      `/api/workflow/settlement-contexts/${encodeURIComponent(contextSummary.settlement_context_id)}`,
+    );
+    state.workflow.settlementContextDetail = payload.settlement_context;
+  }
+  if (!state.activeSettlementReportId && state.activeSettlementContextId) {
+    state.activeSettlementReportId = state.workflow.settlementReports.find(
+      (report) => report.settlement_context_id === state.activeSettlementContextId,
+    )?.settlement_report_id ?? "";
+  }
+  const reportSummary = state.workflow.settlementReports.find(
+    (report) => report.settlement_report_id === state.activeSettlementReportId,
+  );
+  if (reportSummary) {
+    const payload = await api(
+      `/api/workflow/settlement-reports/${encodeURIComponent(reportSummary.settlement_report_id)}`,
+    );
+    state.workflow.settlementReportDetail = payload.settlement_report;
+    if (payload.settlement_report.status.pending_candidate_id) {
+      const candidatePayload = await api(
+        `/api/canon/pending-candidates/${encodeURIComponent(
+          payload.settlement_report.status.pending_candidate_id,
+        )}`,
+      );
+      state.workflow.settlementPendingCandidate = candidatePayload.candidate;
+    } else {
+      state.workflow.settlementPendingCandidate = null;
+    }
+  } else {
+    state.workflow.settlementReportDetail = null;
+    state.workflow.settlementPendingCandidate = null;
+  }
+  renderSettlementWorkflow();
+  if (showToast) toast("章節結算工作流已重新整理");
+}
+
+async function handleCreateSettlementContext() {
+  const adoptedChapterId = $("#settlement-adopted-select").value;
+  if (!adoptedChapterId) return;
+  try {
+    const payload = await api(
+      `/api/workflow/adopted-chapters/${encodeURIComponent(adoptedChapterId)}/settlement-context`,
+      {
+        method: "POST",
+        body: JSON.stringify({ note: $("#settlement-context-note").value.trim() }),
+      },
+    );
+    state.activeAdoptedChapterId = adoptedChapterId;
+    state.activeSettlementContextId =
+      payload.settlement_context.metadata.settlement_context_id;
+    state.workflow.settlementContextDetail = payload.settlement_context;
+    $("#workflow-settlement-source-chapter").value =
+      state.workflow.drafts.find(
+        (draft) => draft.draft_id === payload.settlement_context.metadata.draft_id,
+      )?.source_chapter ?? "";
+    await refreshWorkflowSettlementState();
+    toast(payload.settlement_context.status.status === "blocked"
+      ? "Settlement context 已保存，但目前被阻擋"
+      : "Settlement context 已建立");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleSaveSettlementReport(event) {
+  event.preventDefault();
+  if (!state.activeSettlementContextId) {
+    toast("請先建立 settlement_context", true);
+    return;
+  }
+  try {
+    const payload = await api("/api/workflow/settlement-reports", {
+      method: "POST",
+      body: JSON.stringify({
+        settlementContextId: state.activeSettlementContextId,
+        settlementText: $("#workflow-settlement-text").value,
+        sourceChapter: $("#workflow-settlement-source-chapter").value.trim(),
+        runId: $("#workflow-settlement-run-id").value.trim(),
+        neuralModulesUsedPath: $("#workflow-settlement-neural-path").value.trim(),
+        note: $("#workflow-settlement-note").value.trim(),
+      }),
+    });
+    state.activeSettlementReportId =
+      payload.settlement_report.metadata.settlement_report_id;
+    state.workflow.settlementReportDetail = payload.settlement_report;
+    await refreshWorkflowSettlementState();
+    toast("Settlement report 已保存，尚未成為正史");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleCreateWorkflowPendingCandidate() {
+  if (!state.activeSettlementReportId) return;
+  if (!window.confirm("此步驟只會建立 pending_engine_candidate，不會更新 active_engine。確定繼續？")) {
+    return;
+  }
+  try {
+    const payload = await api(
+      `/api/workflow/settlement-reports/${encodeURIComponent(state.activeSettlementReportId)}/create-pending-candidate`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          sourceChapter: $("#workflow-settlement-source-chapter").value.trim(),
+          note: $("#workflow-settlement-note").value.trim(),
+        }),
+      },
+    );
+    state.activeCandidateId = payload.result.pending_candidate.metadata.candidate_id;
+    state.workflow.settlementReportDetail = payload.result.settlement_report;
+    await Promise.all([
+      refreshWorkflowSettlementState(),
+      refreshCanonSettlementState(),
+    ]);
+    toast("Pending candidate 已建立；請確認 diff / risk，啟用仍需 Phase 3 人工確認");
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function renderActivityTable() {
@@ -1375,7 +1627,10 @@ function bindEvents() {
     loadNeuralStatus(true).catch((error) => toast(error.message, true))
   ));
   $("#refresh-settlement-button").addEventListener("click", () => (
-    refreshCanonSettlementState(true).catch((error) => toast(error.message, true))
+    Promise.all([
+      refreshCanonSettlementState(true),
+      refreshWorkflowSettlementState(),
+    ]).catch((error) => toast(error.message, true))
   ));
   $("#validate-button").addEventListener("click", runValidation);
 
@@ -1403,6 +1658,21 @@ function bindEvents() {
   $("#workflow-adopt-button").addEventListener("click", () => handleWorkflowDraftAction("adopt"));
   $("#workflow-reject-button").addEventListener("click", () => handleWorkflowDraftAction("reject"));
   $("#workflow-archive-button").addEventListener("click", () => handleWorkflowDraftAction("archive"));
+  $("#settlement-adopted-select").addEventListener("change", () => {
+    state.activeAdoptedChapterId = $("#settlement-adopted-select").value;
+    state.activeSettlementContextId = "";
+    state.activeSettlementReportId = "";
+    state.workflow.settlementContextDetail = null;
+    state.workflow.settlementReportDetail = null;
+    state.workflow.settlementPendingCandidate = null;
+    renderSettlementWorkflow();
+  });
+  $("#create-settlement-context-button").addEventListener("click", handleCreateSettlementContext);
+  $("#workflow-settlement-report-form").addEventListener("submit", handleSaveSettlementReport);
+  $("#create-workflow-pending-candidate-button").addEventListener(
+    "click",
+    handleCreateWorkflowPendingCandidate,
+  );
   $("#feedback-form").addEventListener("submit", handleFeedback);
   $("#visual-upload-form").addEventListener("submit", handleVisualUpload);
   $("#settlement-import-form").addEventListener("submit", handleSettlementImport);

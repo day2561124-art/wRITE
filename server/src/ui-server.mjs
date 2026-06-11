@@ -81,6 +81,18 @@ import {
   saveProofReport,
   sendDraftToProofing,
 } from "./writing-workflow-service.mjs";
+import {
+  assertSettlementContextId,
+  assertSettlementReportId,
+  buildSettlementContext,
+  createPendingCandidateFromSettlementReport,
+  ensureSettlementWorkflowDirectories,
+  getSettlementContext,
+  getSettlementReport,
+  listSettlementContexts,
+  listSettlementReports,
+  saveSettlementReport,
+} from "./settlement-workflow-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1323,6 +1335,122 @@ async function handleRequest(request, response) {
     return;
   }
 
+  const settlementContextCreateMatch = rawPathname.match(
+    /^\/api\/workflow\/adopted-chapters\/([^/]+)\/settlement-context$/u,
+  );
+  if (request.method === "POST" && settlementContextCreateMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin settlement context creation is not allowed.");
+      const adoptedChapterId = assertAdoptedChapterId(
+        decodeApiId(settlementContextCreateMatch[1], "adopted_chapter_id"),
+      );
+      const input = await parseBody(request);
+      const settlementContext = await buildSettlementContext(adoptedChapterId, {
+        runId: input.runId ?? input.run_id ?? "",
+        note: input.note ?? "",
+      });
+      sendJson(response, 201, { ok: true, settlement_context: settlementContext });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/workflow/settlement-contexts") {
+    sendJson(response, 200, {
+      ok: true,
+      settlement_contexts: await listSettlementContexts(),
+    });
+    return;
+  }
+
+  const settlementContextDetailMatch = rawPathname.match(
+    /^\/api\/workflow\/settlement-contexts\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && settlementContextDetailMatch) {
+    try {
+      const settlementContextId = assertSettlementContextId(
+        decodeApiId(settlementContextDetailMatch[1], "settlement_context_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        settlement_context: await getSettlementContext(settlementContextId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/workflow/settlement-reports") {
+    sendJson(response, 200, {
+      ok: true,
+      settlement_reports: await listSettlementReports(),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/workflow/settlement-reports") {
+    try {
+      assertSameOrigin(request, "Cross-origin settlement report creation is not allowed.");
+      const input = await parseBody(request);
+      const settlementReport = await saveSettlementReport({
+        settlementContextId: input.settlementContextId ?? input.settlement_context_id,
+        settlementText: input.settlementText ?? input.settlement_text,
+        sourceChapter: input.sourceChapter ?? input.source_chapter,
+        runId: input.runId ?? input.run_id,
+        neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,
+        note: input.note,
+      });
+      sendJson(response, 201, { ok: true, settlement_report: settlementReport });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const settlementReportActionMatch = rawPathname.match(
+    /^\/api\/workflow\/settlement-reports\/([^/]+)\/create-pending-candidate$/u,
+  );
+  if (request.method === "POST" && settlementReportActionMatch) {
+    try {
+      assertSameOrigin(request, "Cross-origin pending candidate creation is not allowed.");
+      const settlementReportId = assertSettlementReportId(
+        decodeApiId(settlementReportActionMatch[1], "settlement_report_id"),
+      );
+      const input = await parseBody(request);
+      const result = await createPendingCandidateFromSettlementReport(
+        settlementReportId,
+        {
+          sourceChapter: input.sourceChapter ?? input.source_chapter ?? "",
+          note: input.note ?? "",
+        },
+      );
+      sendJson(response, 201, { ok: true, result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const settlementReportDetailMatch = rawPathname.match(
+    /^\/api\/workflow\/settlement-reports\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && settlementReportDetailMatch) {
+    try {
+      const settlementReportId = assertSettlementReportId(
+        decodeApiId(settlementReportDetailMatch[1], "settlement_report_id"),
+      );
+      sendJson(response, 200, {
+        ok: true,
+        settlement_report: await getSettlementReport(settlementReportId),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
   const adoptedDetailMatch = rawPathname.match(/^\/api\/workflow\/adopted-chapters\/([^/]+)$/u);
   if (request.method === "GET" && adoptedDetailMatch) {
     try {
@@ -1673,6 +1801,7 @@ async function main() {
   await ensureAgentRunDirectories();
   await ensureEngineCandidateDirectories();
   await ensureWritingWorkflowDirectories();
+  await ensureSettlementWorkflowDirectories();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {

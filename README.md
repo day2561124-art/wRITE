@@ -431,6 +431,30 @@ data/writing_workflow/
 
 神經模組使用狀態只依 agent run 的 success traces 判定；正文或驗稿文字中的自我聲明不會被視為成功證據。
 
+### 10.4. 採用正文與章節結算候選
+
+Phase 4B 將 `accepted_pending_settlement` adopted chapter 接到既有 Phase 2：
+
+```text
+adopted_chapter
+→ settlement_context
+→ settlement_report
+→ pending_engine_candidate
+→ Phase 2 diff / risk
+→ Phase 3 人工確認啟用
+```
+
+Settlement context 與 report 僅保存於：
+
+```text
+data/writing_workflow/settlements/contexts/
+data/writing_workflow/settlements/reports/
+```
+
+只有建立 pending candidate 時才會呼叫 Phase 2 `importSettlementResult()`，並由 Phase 2 寫入 `data/canon_db/pending_engine_candidates/`、產生 diff 與 risk。Phase 4B 不寫入或啟用 `active_engine.md`，也不執行 rollback、snapshot 或 archive。
+
+Adopted chapter 狀態依序為 `accepted_pending_settlement`、`settlement_context_created`、`settlement_report_saved`、`settlement_candidate_created`。最後一項仍只代表 pending candidate 已建立，不代表正史已更新。
+
 ### 11. 壓縮正式錯誤規則
 
 先預覽目前正式錯誤報告可壓縮出的規則：
@@ -886,6 +910,11 @@ data/
     context_bundles/
       <context_bundle_id>/
     logs/
+    settlements/
+      contexts/
+        <settlement_context_id>/
+      reports/
+        <settlement_report_id>/
   agent_runs/
     <run_id>/
       run.json
@@ -921,6 +950,7 @@ server/src/
   source-registry.mjs
   source-trust.mjs
   visual-db.mjs
+  settlement-workflow-service.mjs
   writing-workflow-service.mjs
   tools/
     build-current-prompt.mjs

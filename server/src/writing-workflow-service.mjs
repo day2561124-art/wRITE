@@ -30,6 +30,13 @@ const draftStatuses = new Set([
   "blocked",
 ]);
 
+const adoptedChapterStatuses = new Set([
+  "accepted_pending_settlement",
+  "settlement_context_created",
+  "settlement_report_saved",
+  "settlement_candidate_created",
+]);
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -738,4 +745,28 @@ export async function getAdoptedChapter(adoptedChapterId, options = {}) {
     readJson(paths.status),
   ]);
   return { chapter_text: chapterText, metadata, status };
+}
+
+export async function updateAdoptedChapterStatus(
+  adoptedChapterId,
+  updates = {},
+  options = {},
+) {
+  assertAdoptedChapterId(adoptedChapterId);
+  const roots = workflowRoots(options);
+  const paths = adoptedPaths(adoptedChapterId, roots);
+  if (!await exists(paths.directory)) throw errorWithStatus("Adopted chapter not found.", 404);
+  const current = await readJson(paths.status);
+  const status = updates.status ?? current.status;
+  if (!adoptedChapterStatuses.has(status)) {
+    throw errorWithStatus("Invalid adopted chapter status.");
+  }
+  const next = { ...current, ...updates, status };
+  await commitFileTransaction("update-adopted-chapter-status", [
+    { filePath: paths.status, content: json(next) },
+  ], {
+    adopted_chapter_id: adoptedChapterId,
+    phase: "phase_4b_settlement_pending_only",
+  });
+  return getAdoptedChapter(adoptedChapterId, options);
 }

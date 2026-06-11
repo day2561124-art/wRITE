@@ -63,6 +63,8 @@ async function main() {
   const snapshotsBefore = await names(projectPaths.engineSnapshots);
   const archiveBefore = await names(projectPaths.engineArchive);
   const activationLogsBefore = await names(projectPaths.activationLogs);
+  const settlementContextsBefore = await names(projectPaths.settlementContexts);
+  const settlementReportsBefore = await names(projectPaths.settlementReports);
   const transactionsBefore = await names(transactionDir);
   const agentRunsBefore = await names(projectPaths.agentRuns);
   const activeText = "# Workflow Test Engine\n\n- Canon remains read-only in Phase 4A.\n";
@@ -249,6 +251,16 @@ async function main() {
       JSON.stringify([...await names(projectPaths.activationLogs)].sort())
         === JSON.stringify([...activationLogsBefore].sort()),
       "Phase 4A changed activation logs.",
+    );
+    assert(
+      JSON.stringify([...await names(projectPaths.settlementContexts)].sort())
+        === JSON.stringify([...settlementContextsBefore].sort()),
+      "Phase 4A created a settlement context.",
+    );
+    assert(
+      JSON.stringify([...await names(projectPaths.settlementReports)].sort())
+        === JSON.stringify([...settlementReportsBefore].sort()),
+      "Phase 4A created a settlement report.",
     );
     console.log("Writing workflow service test passed.");
   } finally {

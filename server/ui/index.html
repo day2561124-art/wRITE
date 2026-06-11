@@ -503,6 +503,72 @@
             此階段只建立 pending candidate，不會更新 active_engine。
           </div>
 
+          <section id="workflow-settlement-panel" class="panel workflow-settlement-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">PHASE 4B</p>
+                <h2>章節結算準備</h2>
+              </div>
+              <span id="workflow-settlement-status" class="workflow-status">尚未選擇 adopted_chapter</span>
+            </div>
+
+            <div class="warning-panel adoption-boundary">
+              此步驟只會建立 pending_engine_candidate，不會更新 active_engine。active_engine 啟用仍需 Phase 3 人工確認。
+            </div>
+
+            <div class="form-row">
+              <label class="field">
+                <span>Adopted Chapter</span>
+                <select id="settlement-adopted-select">
+                  <option value="">選擇 accepted_pending_settlement 章節</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Context 備註</span>
+                <input id="settlement-context-note" type="text" maxlength="5000" placeholder="選填">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button id="create-settlement-context-button" class="button primary" type="button" disabled>建立 Settlement Context</button>
+            </div>
+            <div id="settlement-context-detail" class="settlement-workflow-detail">
+              <div class="empty-state">尚未建立 settlement_context</div>
+            </div>
+
+            <form id="workflow-settlement-report-form" class="settlement-report-form">
+              <div class="form-row">
+                <label class="field">
+                  <span>來源章節</span>
+                  <input id="workflow-settlement-source-chapter" type="text" maxlength="500">
+                </label>
+                <label class="field">
+                  <span>run_id</span>
+                  <input id="workflow-settlement-run-id" type="text" maxlength="100">
+                </label>
+              </div>
+              <label class="field">
+                <span>neural_modules_used_path</span>
+                <input id="workflow-settlement-neural-path" type="text" maxlength="500">
+              </label>
+              <label class="field">
+                <span>Settlement Report</span>
+                <textarea id="workflow-settlement-text" rows="12" maxlength="1000000" required placeholder="貼上 ChatGPT 產生、包含新版完整創作引擎候選區塊的 settlement_report"></textarea>
+              </label>
+              <label class="field">
+                <span>Report 備註</span>
+                <input id="workflow-settlement-note" type="text" maxlength="5000" placeholder="選填">
+              </label>
+              <div class="form-actions">
+                <button id="save-settlement-report-button" class="button primary" type="submit" disabled>保存 Settlement Report</button>
+                <button id="create-workflow-pending-candidate-button" class="button secondary" type="button" disabled>建立 Pending Candidate</button>
+              </div>
+            </form>
+
+            <div id="settlement-report-detail" class="settlement-workflow-detail">
+              <div class="empty-state">尚未保存 settlement_report</div>
+            </div>
+          </section>
+
           <form id="settlement-import-form" class="settlement-import-panel">
             <div class="form-row">
               <label class="field">
