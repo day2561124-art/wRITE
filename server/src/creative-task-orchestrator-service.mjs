@@ -12,6 +12,7 @@ import {
   listApprovalItems,
 } from "./approval-queue-service.mjs";
 import { getPendingCandidate } from "./engine-candidate-service.mjs";
+import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -237,16 +238,37 @@ function blockedResult(taskId, taskType, reason) {
 
 async function generateWritingCandidate(input, taskId, options) {
   const response = resultBase(taskId, input.taskType, input.dryRun ? "dry_run" : "pending");
-  const bundle = await writingTaskBundle(input, taskId, options);
+  const context = await buildGptWritingContext({
+    taskPrompt: input.taskPrompt,
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
+    chapterMode: "next_chapter",
+    outputMode: "chat_only",
+  }, options);
+  const bundle = {
+    ...(await writingTaskBundle(input, taskId, options)),
+    gpt_writing_context: context.bundle,
+  };
   response.result = {
     execution: "not_executed",
-    next_action: "external creative model may consume task_bundle.json",
-    task_bundle: bundle,
+    bundle_id: context.bundle.bundle_id,
+    context_bundle_path: context.context_bundle_path,
+    context_for_chat_path: context.context_for_chat_path,
+    next_action:
+      "ChatGPT / GPT may consume context_for_chat.md via MCP and output the writing candidate in chat.",
+    local_generation_allowed: false,
+    candidate_created: false,
   };
   response.warnings.push(
-    "Phase 8A does not call an OpenAI or other LLM API and does not create a candidate draft.",
-    ...bundle.warnings,
+    "Phase 8B does not call an OpenAI or other LLM API and does not create a candidate draft.",
+    ...context.bundle.warnings,
   );
+  response.created.push({
+    label: "gpt_writing_context",
+    target_id: context.bundle.bundle_id,
+    source_path: context.context_for_chat_path,
+    canon_status: "working_context",
+  });
   return { response, bundle };
 }
 

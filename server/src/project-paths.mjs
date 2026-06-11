@@ -13,6 +13,7 @@ export const projectPaths = {
   outputLogs: path.join(projectRoot, "data", "outputs", "logs"),
   creativeTasks: path.join(projectRoot, "data", "outputs", "creative_tasks"),
   creativeTaskLog: path.join(projectRoot, "data", "outputs", "logs", "creative_task_runs.jsonl"),
+  gptWritingContexts: path.join(projectRoot, "data", "outputs", "gpt_writing_contexts"),
   drafts: path.join(projectRoot, "data", "outputs", "drafts"),
   proofReports: path.join(projectRoot, "data", "outputs", "proof_reports"),
   settlementProposals: path.join(projectRoot, "data", "outputs", "settlement_proposals"),

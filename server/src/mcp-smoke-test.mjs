@@ -167,6 +167,9 @@ const expectedTools = [
   "run_creative_task",
   "get_creative_task_status",
   "list_creative_task_types",
+  "build_gpt_writing_context",
+  "get_gpt_writing_context_bundle",
+  "list_gpt_writing_context_bundles",
 ];
 
 const readOnlyTools = new Set([
@@ -177,6 +180,8 @@ const readOnlyTools = new Set([
   "query_mcp_audit",
   "get_creative_task_status",
   "list_creative_task_types",
+  "get_gpt_writing_context_bundle",
+  "list_gpt_writing_context_bundles",
 ]);
 
 const backupRequiredTools = new Set([
@@ -224,6 +229,26 @@ const unknownArgumentFixtures = expectedTools.map((name) => ({
 }));
 
 const enumConstraintFixtures = [
+  {
+    label: "build_gpt_writing_context invalid chapterMode",
+    name: "build_gpt_writing_context",
+    field: "chapterMode",
+    arguments: {
+      taskPrompt: "Enum constraint fixture.",
+      chapterMode: "invalid-mode",
+    },
+    expectedMessage: "chapterMode must be one of: next_chapter, specific_scene, rewrite_candidate.",
+  },
+  {
+    label: "build_gpt_writing_context invalid outputMode",
+    name: "build_gpt_writing_context",
+    field: "outputMode",
+    arguments: {
+      taskPrompt: "Enum constraint fixture.",
+      outputMode: "invalid-mode",
+    },
+    expectedMessage: "outputMode must be one of: chat_only, candidate_save_later.",
+  },
   {
     label: "run_creative_task invalid taskType",
     name: "run_creative_task",
@@ -426,6 +451,27 @@ const schemaTypeFixtures = [
 
 const integerMaximumFixtures = [
   {
+    label: "build_gpt_writing_context maxContextChars over maximum",
+    name: "build_gpt_writing_context",
+    field: "maxContextChars",
+    expectedMaximum: 250000,
+    arguments: {
+      taskPrompt: "Integer maximum fixture.",
+      maxContextChars: 250001,
+    },
+    expectedMessage: "maxContextChars must be an integer less than or equal to 250000.",
+  },
+  {
+    label: "list_gpt_writing_context_bundles limit over maximum",
+    name: "list_gpt_writing_context_bundles",
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: {
+      limit: 101,
+    },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  },
+  {
     label: "run_creative_task limit over maximum",
     name: "run_creative_task",
     field: "limit",
@@ -624,6 +670,20 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "build_gpt_writing_context missing taskPrompt",
+    name: "build_gpt_writing_context",
+    field: "taskPrompt",
+    arguments: {},
+    expectedMessage: "taskPrompt is required.",
+  },
+  {
+    label: "get_gpt_writing_context_bundle missing bundleId",
+    name: "get_gpt_writing_context_bundle",
+    field: "bundleId",
+    arguments: {},
+    expectedMessage: "bundleId is required.",
+  },
   {
     label: "run_creative_task missing taskType",
     name: "run_creative_task",
@@ -964,6 +1024,16 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
     limit: 20,
   }],
+  ["build_gpt_writing_context", {
+    chapterMode: "next_chapter",
+    outputMode: "chat_only",
+    includeActiveEngine: true,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["list_gpt_writing_context_bundles", { limit: 20 }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -973,6 +1043,8 @@ const expectedIntegerMaximumMetadata = new Map([
   ["compress_error_rules:top", 1000],
   ["compress_error_rules:minCount", 1000],
   ["run_creative_task:limit", 100],
+  ["build_gpt_writing_context:maxContextChars", 250000],
+  ["list_gpt_writing_context_bundles:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {

@@ -21,6 +21,7 @@ const fixturePending = path.join(projectPaths.canonDb, ".creative-task-pending-t
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".creative-task-test");
 const fixtureTasks = path.join(projectPaths.creativeTasks, ".creative-task-test");
 const fixtureLog = path.join(projectPaths.outputLogs, ".creative-task-test-runs.jsonl");
+const fixtureGptContexts = path.join(projectPaths.gptWritingContexts, ".creative-task-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 
 const options = {
@@ -30,6 +31,7 @@ const options = {
   approvalQueue: fixtureApproval,
   creativeTasks: fixtureTasks,
   creativeTaskLog: fixtureLog,
+  gptWritingContexts: fixtureGptContexts,
 };
 
 function assert(condition, message) {
@@ -74,6 +76,7 @@ async function main() {
     rm(fixtureApproval, { recursive: true, force: true }),
     rm(fixtureTasks, { recursive: true, force: true }),
     rm(fixtureLog, { force: true }),
+    rm(fixtureGptContexts, { recursive: true, force: true }),
   ]);
   await mkdir(path.dirname(fixtureActive), { recursive: true });
   await writeFile(fixtureActive, activeText, "utf8");
@@ -98,6 +101,20 @@ async function main() {
     assert(
       generated.result.execution === "not_executed",
       "Generate task unexpectedly executed a model.",
+    );
+    assert(generated.result.bundle_id, "Generate task did not create GPT context bundle.");
+    assert(
+      generated.result.context_for_chat_path.endsWith("/context_for_chat.md"),
+      "Generate task omitted context_for_chat path.",
+    );
+    assert(
+      generated.result.local_generation_allowed === false
+        && generated.result.candidate_created === false,
+      "Generate task exposed local generation or candidate creation.",
+    );
+    assert(
+      generated.result.next_action.includes("ChatGPT / GPT"),
+      "Generate task next action did not direct GPT chat output.",
     );
     assert(
       (await getCreativeTaskStatus(generated.task_id, options)).task_id === generated.task_id,
@@ -199,6 +216,7 @@ async function main() {
       rm(fixtureApproval, { recursive: true, force: true }),
       rm(fixtureTasks, { recursive: true, force: true }),
       rm(fixtureLog, { force: true }),
+      rm(fixtureGptContexts, { recursive: true, force: true }),
     ]);
     await removeNew(transactionDir, transactionsBefore);
     assert(

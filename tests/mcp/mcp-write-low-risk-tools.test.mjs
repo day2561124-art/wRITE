@@ -144,7 +144,12 @@ async function main() {
 
     console.log("MCP write-low-risk tools test passed.");
   } finally {
-    // Ensure fixture pending directory is always cleaned up
+    // Ensure fixture directories are always cleaned up.
+    try {
+      await rm(fixtureWorkflow, { recursive: true, force: true });
+    } catch (e) {
+      // ignore
+    }
     try {
       await rm(fixturePending, { recursive: true, force: true });
     } catch (e) {

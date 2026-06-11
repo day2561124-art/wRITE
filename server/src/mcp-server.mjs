@@ -21,6 +21,11 @@ import {
   list_creative_task_types,
   run_creative_task,
 } from "./mcp-creative-task-tools.mjs";
+import {
+  build_gpt_writing_context,
+  get_gpt_writing_context_bundle,
+  list_gpt_writing_context_bundles,
+} from "./mcp-gpt-writing-context-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1715,6 +1720,52 @@ const toolDefinitions = [
     inputSchema: baseSchema({}),
     handler: async () => jsonContent(await list_creative_task_types()),
   },
+  {
+    name: "build_gpt_writing_context",
+    description: "Build a GPT-facing writing context bundle for chat output without local generation or canon writes.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      taskPrompt: { type: "string" },
+      generationContext: { type: "object" },
+      retrievalContext: { type: "object" },
+      chapterMode: {
+        type: "string",
+        enum: ["next_chapter", "specific_scene", "rewrite_candidate"],
+        default: "next_chapter",
+      },
+      outputMode: {
+        type: "string",
+        enum: ["chat_only", "candidate_save_later"],
+        default: "chat_only",
+      },
+      includeActiveEngine: { type: "boolean", default: true },
+      includeWritingCard: { type: "boolean", default: true },
+      includeProofingCard: { type: "boolean", default: true },
+      includeLongline: { type: "boolean", default: true },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 120000 },
+    }, ["taskPrompt"]),
+    handler: async (args) => jsonContent(await build_gpt_writing_context(args)),
+  },
+  {
+    name: "get_gpt_writing_context_bundle",
+    description: "Read a GPT writing context bundle and its context_for_chat.md content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      bundleId: { type: "string" },
+    }, ["bundleId"]),
+    handler: async (args) => jsonContent(await get_gpt_writing_context_bundle(args)),
+  },
+  {
+    name: "list_gpt_writing_context_bundles",
+    description: "List GPT writing context bundle summaries without dumping source content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_gpt_writing_context_bundles(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -1740,6 +1791,9 @@ const permissionSources = {
   run_creative_task: ["registered_project_sources", "user_input", "workflow_records"],
   get_creative_task_status: ["creative_task_records"],
   list_creative_task_types: ["creative_task_registry"],
+  build_gpt_writing_context: ["registered_project_sources", "user_input"],
+  get_gpt_writing_context_bundle: ["gpt_writing_context_records"],
+  list_gpt_writing_context_bundles: ["gpt_writing_context_records"],
 };
 
 const backupRequiredTools = new Set([
