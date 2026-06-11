@@ -28,6 +28,8 @@ const steps = [
   ["MCP write-low-risk tools", ["tests/mcp/mcp-write-low-risk-tools.test.mjs"]],
   ["MCP approval request tools", ["tests/mcp/mcp-approval-request-tools.test.mjs"]],
   ["MCP approval request E2E", ["tests/mcp/mcp-approval-request-e2e.test.mjs"]],
+  ["Creative task orchestrator service", ["tests/creative/creative-task-orchestrator-service.test.mjs"]],
+  ["MCP creative task tools", ["tests/mcp/mcp-creative-task-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],

@@ -164,6 +164,9 @@ const expectedTools = [
   "compress_error_rules",
   "create_settlement_proposal",
   "activate_engine_version",
+  "run_creative_task",
+  "get_creative_task_status",
+  "list_creative_task_types",
 ];
 
 const readOnlyTools = new Set([
@@ -172,6 +175,8 @@ const readOnlyTools = new Set([
   "get_active_writing_card",
   "validate_jsonl",
   "query_mcp_audit",
+  "get_creative_task_status",
+  "list_creative_task_types",
 ]);
 
 const backupRequiredTools = new Set([
@@ -219,6 +224,15 @@ const unknownArgumentFixtures = expectedTools.map((name) => ({
 }));
 
 const enumConstraintFixtures = [
+  {
+    label: "run_creative_task invalid taskType",
+    name: "run_creative_task",
+    field: "taskType",
+    arguments: {
+      taskType: "invalid-task",
+    },
+    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue.",
+  },
   {
     label: "validate_jsonl invalid schema",
     name: "validate_jsonl",
@@ -412,6 +426,17 @@ const schemaTypeFixtures = [
 
 const integerMaximumFixtures = [
   {
+    label: "run_creative_task limit over maximum",
+    name: "run_creative_task",
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: {
+      taskType: "query_approval_queue",
+      limit: 101,
+    },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  },
+  {
     label: "query_mcp_audit limit over maximum",
     name: "query_mcp_audit",
     field: "limit",
@@ -599,6 +624,20 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "run_creative_task missing taskType",
+    name: "run_creative_task",
+    field: "taskType",
+    arguments: {},
+    expectedMessage: "taskType is required.",
+  },
+  {
+    label: "get_creative_task_status missing taskId",
+    name: "get_creative_task_status",
+    field: "taskId",
+    arguments: {},
+    expectedMessage: "taskId is required.",
+  },
   {
     label: "search_context null query",
     name: "search_context",
@@ -921,6 +960,10 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
   }],
   ["activate_engine_version", { dryRun: true }],
+  ["run_creative_task", {
+    dryRun: false,
+    limit: 20,
+  }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -929,6 +972,7 @@ const expectedIntegerMaximumMetadata = new Map([
   ["run_pipeline:top", 100],
   ["compress_error_rules:top", 1000],
   ["compress_error_rules:minCount", 1000],
+  ["run_creative_task:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {
@@ -3933,7 +3977,7 @@ async function runSmokeTest(options) {
     for (const [field, fieldSchema] of Object.entries(properties)) {
       schemaPropertyCount += 1;
       assert(
-        ["string", "boolean", "integer", "array"].includes(fieldSchema.type),
+        ["string", "boolean", "integer", "array", "object"].includes(fieldSchema.type),
         `${expectedTool}.${field} used unsupported schema type ${fieldSchema.type}.`,
       );
       if (fieldSchema.type === "string") {

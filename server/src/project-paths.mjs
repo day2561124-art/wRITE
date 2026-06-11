@@ -11,6 +11,8 @@ const realProjectRoot = realpathSync.native(projectRoot);
 export const projectPaths = {
   outputs: path.join(projectRoot, "data", "outputs"),
   outputLogs: path.join(projectRoot, "data", "outputs", "logs"),
+  creativeTasks: path.join(projectRoot, "data", "outputs", "creative_tasks"),
+  creativeTaskLog: path.join(projectRoot, "data", "outputs", "logs", "creative_task_runs.jsonl"),
   drafts: path.join(projectRoot, "data", "outputs", "drafts"),
   proofReports: path.join(projectRoot, "data", "outputs", "proof_reports"),
   settlementProposals: path.join(projectRoot, "data", "outputs", "settlement_proposals"),

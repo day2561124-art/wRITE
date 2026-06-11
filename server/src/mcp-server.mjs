@@ -16,6 +16,11 @@ import {
   atomicWriteFile,
   commitFileTransaction,
 } from "./file-transactions.mjs";
+import {
+  get_creative_task_status,
+  list_creative_task_types,
+  run_creative_task,
+} from "./mcp-creative-task-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -967,6 +972,13 @@ function validateToolArguments(tool, args) {
     }
 
     if (
+      schema.type === "object"
+      && (typeof value !== "object" || value === null || Array.isArray(value))
+    ) {
+      throw new Error(`${field} must be an object.`);
+    }
+
+    if (
       schema.type === "integer"
       && (!Number.isInteger(value) || (schema.minimum !== undefined && value < schema.minimum))
     ) {
@@ -1656,6 +1668,53 @@ const toolDefinitions = [
       return textContent(await runNodeTool("activate-engine-version.mjs", argv));
     },
   },
+  {
+    name: "run_creative_task",
+    description: "Run a Phase 8A creative workflow task without approving or activating protected state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      taskType: { type: "string", enum: [
+        "generate_writing_candidate",
+        "proofread_writing_candidate",
+        "request_adopt_writing_candidate",
+        "build_settlement_candidate",
+        "request_engine_activation",
+        "query_approval_queue",
+      ] },
+      taskPrompt: { type: "string" },
+      generationContext: { type: "object" },
+      retrievalContext: { type: "object" },
+      candidateId: { type: "string" },
+      adoptedChapterId: { type: "string" },
+      settlementContextId: { type: "string" },
+      pendingEngineCandidateId: { type: "string" },
+      approvalId: { type: "string" },
+      dryRun: { type: "boolean", default: false },
+      reason: { type: "string" },
+      status: { type: "string" },
+      riskLevel: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }, ["taskType"]),
+    handler: async (args) => jsonContent(await run_creative_task(args)),
+  },
+  {
+    name: "get_creative_task_status",
+    description: "Read a persisted Phase 8A creative task result.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      taskId: { type: "string" },
+    }, ["taskId"]),
+    handler: async (args) => jsonContent(await get_creative_task_status(args)),
+  },
+  {
+    name: "list_creative_task_types",
+    description: "List the supported Phase 8A creative task types.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await list_creative_task_types()),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -1678,6 +1737,9 @@ const permissionSources = {
   compress_error_rules: ["formal_error_report_db"],
   create_settlement_proposal: ["adopted_candidate_draft", "user_input"],
   activate_engine_version: ["canon_version_file", "reviewed_candidate_file"],
+  run_creative_task: ["registered_project_sources", "user_input", "workflow_records"],
+  get_creative_task_status: ["creative_task_records"],
+  list_creative_task_types: ["creative_task_registry"],
 };
 
 const backupRequiredTools = new Set([
