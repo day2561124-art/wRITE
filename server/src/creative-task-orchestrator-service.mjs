@@ -14,6 +14,8 @@ import {
 import { getPendingCandidate } from "./engine-candidate-service.mjs";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
+import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
+import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -30,6 +32,8 @@ export const CREATIVE_TASK_TYPES = Object.freeze({
   REQUEST_ENGINE_ACTIVATION: "request_engine_activation",
   QUERY_APPROVAL_QUEUE: "query_approval_queue",
   SAVE_CHAT_OUTPUT_CANDIDATE: "save_chat_output_candidate",
+  BUILD_CANDIDATE_PROOFING_CONTEXT: "build_candidate_proofing_context",
+  SAVE_CANDIDATE_PROOF_REPORT: "save_candidate_proof_report",
 });
 
 const taskTypes = Object.freeze(Object.values(CREATIVE_TASK_TYPES));
@@ -127,6 +131,31 @@ function normalizeInput(input = {}) {
     ),
     notes: optionalText(input.notes, "notes", 10_000),
     source: optionalText(input.source, "source", 100),
+    proofingContextId: optionalText(
+      input.proofing_context_id ?? input.proofingContextId,
+      "proofing_context_id",
+      200,
+    ),
+    proofingMode: optionalText(
+      input.proofing_mode ?? input.proofingMode,
+      "proofing_mode",
+      100,
+    ),
+    includeCandidateContent:
+      input.include_candidate_content ?? input.includeCandidateContent,
+    includeActiveEngine: input.include_active_engine ?? input.includeActiveEngine,
+    includeWritingCard: input.include_writing_card ?? input.includeWritingCard,
+    includeProofingCard: input.include_proofing_card ?? input.includeProofingCard,
+    includeLongline: input.include_longline ?? input.includeLongline,
+    maxContextChars: input.max_context_chars ?? input.maxContextChars,
+    proofReportText: optionalText(
+      input.proof_report_text ?? input.proofReportText,
+      "proof_report_text",
+      200_000,
+    ),
+    verdict: optionalText(input.verdict, "verdict", 100),
+    severity: optionalText(input.severity, "severity", 100),
+    summary: optionalText(input.summary, "summary", 10_000),
     dryRun: input.dry_run === true || input.dryRun === true,
     reason: optionalText(input.reason, "reason", 5_000),
     status: optionalText(input.status, "status", 100),
@@ -551,6 +580,71 @@ async function saveChatOutputCandidate(input, taskId, options) {
   return { response, bundle: candidate };
 }
 
+async function buildCandidateProofingContextTask(input, taskId, options) {
+  const context = await buildCandidateProofingContext({
+    candidateId: input.candidateId,
+    proofingMode: input.proofingMode || "full",
+    includeCandidateContent: input.includeCandidateContent,
+    includeActiveEngine: input.includeActiveEngine,
+    includeWritingCard: input.includeWritingCard,
+    includeProofingCard: input.includeProofingCard,
+    includeLongline: input.includeLongline,
+    retrievalContext: input.retrievalContext,
+    generationContext: input.generationContext,
+    maxContextChars: input.maxContextChars,
+  }, options);
+  const response = resultBase(taskId, input.taskType, "pending");
+  response.result = {
+    proofing_context_id: context.context.proofing_context_id,
+    candidate_id: context.context.candidate_id,
+    proofing_context_path: context.proofing_context_path,
+    proofing_for_chat_path: context.proofing_for_chat_path,
+    next_action: "GPT may consume proofing_for_chat.md and return a proof report in chat.",
+    local_generation_allowed: false,
+    proof_report_created: false,
+  };
+  response.warnings.push(...context.context.warnings);
+  response.created.push({
+    label: "candidate_proofing_context",
+    target_id: context.context.proofing_context_id,
+    source_path: context.proofing_for_chat_path,
+    canon_status: "working_context",
+  });
+  return { response, bundle: context.context };
+}
+
+async function saveCandidateProofReportTask(input, taskId, options) {
+  const report = await saveChatOutputAsProofReport({
+    candidateId: input.candidateId,
+    proofingContextId: input.proofingContextId,
+    proofReportText: input.proofReportText,
+    verdict: input.verdict || "needs_revision",
+    severity: input.severity || "none",
+    summary: input.summary,
+    notes: input.notes,
+    source: input.source || "chatgpt",
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(
+    taskId,
+    input.taskType,
+    input.dryRun ? "dry_run" : "completed",
+  );
+  response.result = {
+    ...report,
+    next_action: "Review the proof report before any separate approval-based adoption request.",
+  };
+  if (!input.dryRun) {
+    response.created.push({
+      label: "candidate_proof_report",
+      target_id: report.proof_report_id,
+      source_path: report.proof_report_path,
+      canon_status: "candidate_only",
+    });
+  }
+  return { response, bundle: report };
+}
+
 async function executeTask(input, taskId, options) {
   switch (input.taskType) {
     case CREATIVE_TASK_TYPES.GENERATE_WRITING_CANDIDATE:
@@ -567,6 +661,10 @@ async function executeTask(input, taskId, options) {
       return queryApprovalQueue(input, taskId, options);
     case CREATIVE_TASK_TYPES.SAVE_CHAT_OUTPUT_CANDIDATE:
       return saveChatOutputCandidate(input, taskId, options);
+    case CREATIVE_TASK_TYPES.BUILD_CANDIDATE_PROOFING_CONTEXT:
+      return buildCandidateProofingContextTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.SAVE_CANDIDATE_PROOF_REPORT:
+      return saveCandidateProofReportTask(input, taskId, options);
     default:
       throw new Error(`Unknown task_type: ${input.taskType || "(empty)"}`);
   }

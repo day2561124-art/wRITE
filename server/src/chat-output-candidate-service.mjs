@@ -102,6 +102,10 @@ function candidatePaths(candidateId, roots) {
   };
 }
 
+export function resolveWritingCandidatePaths(candidateId, options = {}) {
+  return candidatePaths(candidateId, rootsFor(options));
+}
+
 async function bundleTrace(sourceBundleId, options) {
   if (!sourceBundleId) {
     return {

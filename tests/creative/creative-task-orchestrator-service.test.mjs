@@ -23,6 +23,8 @@ const fixtureTasks = path.join(projectPaths.creativeTasks, ".creative-task-test"
 const fixtureLog = path.join(projectPaths.outputLogs, ".creative-task-test-runs.jsonl");
 const fixtureGptContexts = path.join(projectPaths.gptWritingContexts, ".creative-task-test");
 const fixtureWritingCandidates = path.join(projectPaths.writingCandidates, ".creative-task-test");
+const fixtureProofingContexts = path.join(projectPaths.proofingContexts, ".creative-task-test");
+const fixtureProofReports = path.join(projectPaths.proofReports, ".creative-task-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 
 const options = {
@@ -34,6 +36,8 @@ const options = {
   creativeTaskLog: fixtureLog,
   gptWritingContexts: fixtureGptContexts,
   writingCandidates: fixtureWritingCandidates,
+  proofingContexts: fixtureProofingContexts,
+  proofReports: fixtureProofReports,
 };
 
 function assert(condition, message) {
@@ -80,6 +84,8 @@ async function main() {
     rm(fixtureLog, { force: true }),
     rm(fixtureGptContexts, { recursive: true, force: true }),
     rm(fixtureWritingCandidates, { recursive: true, force: true }),
+    rm(fixtureProofingContexts, { recursive: true, force: true }),
+    rm(fixtureProofReports, { recursive: true, force: true }),
   ]);
   await mkdir(path.dirname(fixtureActive), { recursive: true });
   await writeFile(fixtureActive, activeText, "utf8");
@@ -138,6 +144,32 @@ async function main() {
       intake.result.next_action.includes("proofread_writing_candidate"),
       "Intake next action did not direct proofing.",
     );
+    const proofingContext = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.BUILD_CANDIDATE_PROOFING_CONTEXT,
+      candidate_id: intake.result.candidate_id,
+      proofing_mode: "full",
+      include_active_engine: false,
+      include_writing_card: false,
+      include_proofing_card: false,
+      include_longline: false,
+    }, options);
+    assert(
+      proofingContext.ok && proofingContext.status === "pending",
+      "Candidate proofing context task failed.",
+    );
+    const candidateProof = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.SAVE_CANDIDATE_PROOF_REPORT,
+      candidate_id: intake.result.candidate_id,
+      proofing_context_id: proofingContext.result.proofing_context_id,
+      proof_report_text: "## P2\nRevise one transition.",
+      verdict: "needs_revision",
+      severity: "P2",
+    }, options);
+    assert(
+      candidateProof.ok && candidateProof.status === "completed",
+      "Candidate proof report task failed.",
+    );
+    assert(candidateProof.result.adopted === false, "Candidate proof task adopted the candidate.");
 
     const draft = await saveCandidateDraft({
       draftText: "# Candidate\n\nA stable draft.",
@@ -216,7 +248,7 @@ async function main() {
       .split(/\r?\n/u)
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    assert(logLines.length >= 7, "Creative task JSONL log omitted task runs.");
+    assert(logLines.length >= 9, "Creative task JSONL log omitted task runs.");
     assert(
       hash(await readFile(fixtureActive)) === hash(activeText),
       "Creative tasks modified the fixture active engine.",
@@ -236,6 +268,8 @@ async function main() {
       rm(fixtureLog, { force: true }),
       rm(fixtureGptContexts, { recursive: true, force: true }),
       rm(fixtureWritingCandidates, { recursive: true, force: true }),
+      rm(fixtureProofingContexts, { recursive: true, force: true }),
+      rm(fixtureProofReports, { recursive: true, force: true }),
     ]);
     await removeNew(transactionDir, transactionsBefore);
     assert(

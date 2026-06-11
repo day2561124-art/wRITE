@@ -31,6 +31,14 @@ import {
   list_writing_candidates,
   save_chat_output_as_writing_candidate,
 } from "./mcp-chat-output-candidate-tools.mjs";
+import {
+  build_candidate_proofing_context,
+  get_candidate_proofing_context,
+  get_proof_report_detail,
+  list_candidate_proofing_contexts,
+  list_proof_reports,
+  save_chat_output_as_proof_report,
+} from "./mcp-candidate-proofing-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -777,6 +785,7 @@ const defaultInputLimits = Object.freeze({
   queryMaxLength: 8192,
   contentMaxLength: 65536,
   chatOutputMaxLength: 300000,
+  proofReportMaxLength: 200000,
   textMaxLength: 1000000,
   arrayMaxItems: 100,
   fileArrayMaxItems: 256,
@@ -795,6 +804,9 @@ const contentStringFields = new Set([
 function stringMaxLengthFor(field) {
   if (field === "chatOutputText") {
     return defaultInputLimits.chatOutputMaxLength;
+  }
+  if (field === "proofReportText") {
+    return defaultInputLimits.proofReportMaxLength;
   }
   if (field === "text") {
     return defaultInputLimits.textMaxLength;
@@ -1695,6 +1707,8 @@ const toolDefinitions = [
         "request_engine_activation",
         "query_approval_queue",
         "save_chat_output_candidate",
+        "build_candidate_proofing_context",
+        "save_candidate_proof_report",
       ] },
       taskPrompt: { type: "string" },
       generationContext: { type: "object" },
@@ -1715,6 +1729,20 @@ const toolDefinitions = [
       chapterLabel: { type: "string" },
       notes: { type: "string" },
       source: { type: "string", enum: ["chatgpt", "gpt", "manual_paste"] },
+      proofingContextId: { type: "string" },
+      proofingMode: {
+        type: "string",
+        enum: ["full", "canon_only", "style_only", "continuity_only"],
+      },
+      includeCandidateContent: { type: "boolean" },
+      includeActiveEngine: { type: "boolean" },
+      includeWritingCard: { type: "boolean" },
+      includeProofingCard: { type: "boolean" },
+      includeLongline: { type: "boolean" },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000 },
+      proofReportText: { type: "string" },
+      verdict: { type: "string", enum: ["pass", "needs_revision", "blocked"] },
+      severity: { type: "string", enum: ["P0", "P1", "P2", "P3", "none"] },
     }, ["taskType"]),
     handler: async (args) => jsonContent(await run_creative_task(args)),
   },
@@ -1826,6 +1854,105 @@ const toolDefinitions = [
     }),
     handler: async (args) => jsonContent(await list_writing_candidates(args)),
   },
+  {
+    name: "build_candidate_proofing_context",
+    description: "Build a chat-facing proofing bundle for a candidate without local generation or canon writes.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      proofingMode: {
+        type: "string",
+        enum: ["full", "canon_only", "style_only", "continuity_only"],
+        default: "full",
+      },
+      includeCandidateContent: { type: "boolean", default: true },
+      includeActiveEngine: { type: "boolean", default: true },
+      includeWritingCard: { type: "boolean", default: true },
+      includeProofingCard: { type: "boolean", default: true },
+      includeLongline: { type: "boolean", default: true },
+      retrievalContext: { type: "object" },
+      generationContext: { type: "object" },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 120000 },
+    }, ["candidateId"]),
+    handler: async (args) => jsonContent(await build_candidate_proofing_context(args)),
+  },
+  {
+    name: "get_candidate_proofing_context",
+    description: "Read a candidate proofing context and its proofing_for_chat.md content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      proofingContextId: { type: "string" },
+    }, ["proofingContextId"]),
+    handler: async (args) => jsonContent(await get_candidate_proofing_context(args)),
+  },
+  {
+    name: "list_candidate_proofing_contexts",
+    description: "List candidate proofing context summaries.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      proofingMode: {
+        type: "string",
+        enum: ["full", "canon_only", "style_only", "continuity_only"],
+      },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_candidate_proofing_contexts(args)),
+  },
+  {
+    name: "save_chat_output_as_proof_report",
+    description: "Save pasted GPT/chat proofing output and mark its candidate as proofed.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      proofingContextId: { type: "string" },
+      proofReportText: { type: "string" },
+      verdict: {
+        type: "string",
+        enum: ["pass", "needs_revision", "blocked"],
+        default: "needs_revision",
+      },
+      severity: {
+        type: "string",
+        enum: ["P0", "P1", "P2", "P3", "none"],
+        default: "none",
+      },
+      summary: { type: "string" },
+      notes: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["chatgpt", "gpt", "manual_paste"],
+        default: "chatgpt",
+      },
+      dryRun: { type: "boolean", default: false },
+    }, ["candidateId", "proofReportText"]),
+    handler: async (args) => jsonContent(await save_chat_output_as_proof_report(args)),
+  },
+  {
+    name: "get_proof_report_detail",
+    description: "Read a candidate proof report and its metadata.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      proofReportId: { type: "string" },
+    }, ["proofReportId"]),
+    handler: async (args) => jsonContent(await get_proof_report_detail(args)),
+  },
+  {
+    name: "list_proof_reports",
+    description: "List candidate proof report summaries.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      candidateId: { type: "string" },
+      verdict: { type: "string", enum: ["pass", "needs_revision", "blocked"] },
+      severity: { type: "string", enum: ["P0", "P1", "P2", "P3", "none"] },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_proof_reports(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -1857,6 +1984,12 @@ const permissionSources = {
   save_chat_output_as_writing_candidate: ["user_input", "gpt_writing_context_records"],
   get_writing_candidate_detail: ["writing_candidate_records"],
   list_writing_candidates: ["writing_candidate_records"],
+  build_candidate_proofing_context: ["writing_candidate_records", "registered_project_sources", "user_input"],
+  get_candidate_proofing_context: ["candidate_proofing_context_records"],
+  list_candidate_proofing_contexts: ["candidate_proofing_context_records"],
+  save_chat_output_as_proof_report: ["user_input", "writing_candidate_records", "candidate_proofing_context_records"],
+  get_proof_report_detail: ["candidate_proof_report_records"],
+  list_proof_reports: ["candidate_proof_report_records"],
 };
 
 const backupRequiredTools = new Set([

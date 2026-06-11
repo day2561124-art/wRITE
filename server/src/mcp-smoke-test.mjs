@@ -173,6 +173,12 @@ const expectedTools = [
   "save_chat_output_as_writing_candidate",
   "get_writing_candidate_detail",
   "list_writing_candidates",
+  "build_candidate_proofing_context",
+  "get_candidate_proofing_context",
+  "list_candidate_proofing_contexts",
+  "save_chat_output_as_proof_report",
+  "get_proof_report_detail",
+  "list_proof_reports",
 ];
 
 const readOnlyTools = new Set([
@@ -187,6 +193,10 @@ const readOnlyTools = new Set([
   "list_gpt_writing_context_bundles",
   "get_writing_candidate_detail",
   "list_writing_candidates",
+  "get_candidate_proofing_context",
+  "list_candidate_proofing_contexts",
+  "get_proof_report_detail",
+  "list_proof_reports",
 ]);
 
 const backupRequiredTools = new Set([
@@ -282,8 +292,48 @@ const enumConstraintFixtures = [
     arguments: {
       taskType: "invalid-task",
     },
-    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue, save_chat_output_candidate.",
+    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue, save_chat_output_candidate, build_candidate_proofing_context, save_candidate_proof_report.",
   },
+  ...[
+    ["run_creative_task", "proofingMode", {
+      taskType: "build_candidate_proofing_context",
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }, "full, canon_only, style_only, continuity_only"],
+    ["build_candidate_proofing_context", "proofingMode", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }, "full, canon_only, style_only, continuity_only"],
+    ["list_candidate_proofing_contexts", "proofingMode", {}, "full, canon_only, style_only, continuity_only"],
+    ["run_creative_task", "verdict", {
+      taskType: "save_candidate_proof_report",
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "pass, needs_revision, blocked"],
+    ["save_chat_output_as_proof_report", "verdict", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "pass, needs_revision, blocked"],
+    ["list_proof_reports", "verdict", {}, "pass, needs_revision, blocked"],
+    ["run_creative_task", "severity", {
+      taskType: "save_candidate_proof_report",
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "P0, P1, P2, P3, none"],
+    ["save_chat_output_as_proof_report", "severity", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "P0, P1, P2, P3, none"],
+    ["list_proof_reports", "severity", {}, "P0, P1, P2, P3, none"],
+    ["save_chat_output_as_proof_report", "source", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "chatgpt, gpt, manual_paste"],
+  ].map(([name, field, baseArguments, values]) => ({
+    label: `${name} invalid ${field}`,
+    name,
+    field,
+    arguments: { ...baseArguments, [field]: "invalid-value" },
+    expectedMessage: `${field} must be one of: ${values}.`,
+  })),
   {
     label: "validate_jsonl invalid schema",
     name: "validate_jsonl",
@@ -476,6 +526,37 @@ const schemaTypeFixtures = [
 ];
 
 const integerMaximumFixtures = [
+  {
+    label: "run_creative_task maxContextChars over maximum",
+    name: "run_creative_task",
+    field: "maxContextChars",
+    expectedMaximum: 250000,
+    arguments: {
+      taskType: "build_candidate_proofing_context",
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      maxContextChars: 250001,
+    },
+    expectedMessage: "maxContextChars must be an integer less than or equal to 250000.",
+  },
+  {
+    label: "build_candidate_proofing_context maxContextChars over maximum",
+    name: "build_candidate_proofing_context",
+    field: "maxContextChars",
+    expectedMaximum: 250000,
+    arguments: {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      maxContextChars: 250001,
+    },
+    expectedMessage: "maxContextChars must be an integer less than or equal to 250000.",
+  },
+  ...["list_candidate_proofing_contexts", "list_proof_reports"].map((name) => ({
+    label: `${name} limit over maximum`,
+    name,
+    field: "limit",
+    expectedMaximum: 100,
+    arguments: { limit: 101 },
+    expectedMessage: "limit must be an integer less than or equal to 100.",
+  })),
   {
     label: "get_writing_candidate_detail maxContentChars over maximum",
     name: "get_writing_candidate_detail",
@@ -717,6 +798,21 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  ...[
+    ["build_candidate_proofing_context", "candidateId", {}],
+    ["get_candidate_proofing_context", "proofingContextId", {}],
+    ["save_chat_output_as_proof_report", "candidateId", { proofReportText: "fixture" }],
+    ["save_chat_output_as_proof_report", "proofReportText", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }],
+    ["get_proof_report_detail", "proofReportId", {}],
+  ].map(([name, field, argumentsValue]) => ({
+    label: `${name} missing ${field}`,
+    name,
+    field,
+    arguments: argumentsValue,
+    expectedMessage: `${field} is required.`,
+  })),
   {
     label: "save_chat_output_as_writing_candidate missing chatOutputText",
     name: "save_chat_output_as_writing_candidate",
@@ -1104,6 +1200,23 @@ const expectedDefaultMetadata = new Map([
     maxContentChars: 12000,
   }],
   ["list_writing_candidates", { limit: 20 }],
+  ["build_candidate_proofing_context", {
+    proofingMode: "full",
+    includeCandidateContent: true,
+    includeActiveEngine: true,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["list_candidate_proofing_contexts", { limit: 20 }],
+  ["save_chat_output_as_proof_report", {
+    verdict: "needs_revision",
+    severity: "none",
+    source: "chatgpt",
+    dryRun: false,
+  }],
+  ["list_proof_reports", { limit: 20 }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -1113,10 +1226,14 @@ const expectedIntegerMaximumMetadata = new Map([
   ["compress_error_rules:top", 1000],
   ["compress_error_rules:minCount", 1000],
   ["run_creative_task:limit", 100],
+  ["run_creative_task:maxContextChars", 250000],
   ["build_gpt_writing_context:maxContextChars", 250000],
   ["list_gpt_writing_context_bundles:limit", 100],
   ["get_writing_candidate_detail:maxContentChars", 50000],
   ["list_writing_candidates:limit", 100],
+  ["build_candidate_proofing_context:maxContextChars", 250000],
+  ["list_candidate_proofing_contexts:limit", 100],
+  ["list_proof_reports:limit", 100],
 ]);
 
 const expectedNullNormalizationMetadata = {
@@ -1142,6 +1259,7 @@ const expectedInputLimits = {
   queryMaxLength: 8192,
   contentMaxLength: 65536,
   chatOutputMaxLength: 300000,
+  proofReportMaxLength: 200000,
   textMaxLength: 1000000,
   arrayMaxItems: 100,
   fileArrayMaxItems: 256,
@@ -1160,6 +1278,9 @@ const expectedContentStringFields = new Set([
 function expectedStringMaxLength(field) {
   if (field === "chatOutputText") {
     return expectedInputLimits.chatOutputMaxLength;
+  }
+  if (field === "proofReportText") {
+    return expectedInputLimits.proofReportMaxLength;
   }
   if (field === "text") {
     return expectedInputLimits.textMaxLength;
