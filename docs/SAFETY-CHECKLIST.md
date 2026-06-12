@@ -17,6 +17,7 @@
 ## Runtime 資料
 
 - [ ] `data/backups/` 是 runtime backup/export/preview 資料。
+- [ ] `data/feedback_loop/` 是 feedback learning runtime artifact。
 - [ ] `data/outputs/` 是 runtime output。
 - [ ] 不刪除 `data/visual_db/assets/`。
 - [ ] 清理 backup runtime 前先使用 dry-run。
@@ -24,8 +25,16 @@
 ## Approval
 
 - [ ] Writing adoption、engine activation 與 rollback 都由 approval queue 確認。
+- [ ] Compressed rule proposal 在 Phase 10A 只建立 approval request，不會套用。
 - [ ] Restore request 只建立 approval item，不代表 restore 已執行。
 - [ ] Phase 11A 不提供 direct restore execution。
+
+## Feedback Learning
+
+- [ ] Feedback item、digest、rule candidate 與 proposal 都是 runtime artifact。
+- [ ] `data/error_report_db/compressed_rules.md` hash 未改變。
+- [ ] Rule candidate 標記為 `not_applied`。
+- [ ] Context bundle 只提供 context，不會修改 active engine 或 compressed rules。
 
 ## 驗稿風險
 

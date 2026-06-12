@@ -6,6 +6,7 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $activeEngine = Join-Path $projectRoot "data\canon_db\active_engine.md"
 $forbiddenPrefixes = @(
     "data/backups/",
+    "data/feedback_loop/",
     "data/visual_db/assets/",
     "data/outputs/"
 )

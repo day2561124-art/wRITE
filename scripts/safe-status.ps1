@@ -25,7 +25,7 @@ try {
     Write-Host "`nSafety notes:"
     Write-Host "- Untracked visual assets may be intentional."
     Write-Host "- Stage files by explicit path."
-    Write-Host "- Do not stage data/visual_db/assets/, data/backups/, or data/outputs/ by default."
+    Write-Host "- Do not stage visual assets, backups, feedback_loop, or outputs by default."
 } finally {
     Pop-Location
 }

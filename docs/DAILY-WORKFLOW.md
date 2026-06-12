@@ -25,6 +25,15 @@ engine、rollback 或 restore 的動作，都必須走既有 approval queue。
 P0/P1 需要明確核准。P2 應先修正或留下可追蹤決策。P3/P4 可依工作目的
 處理，但不得跳過 Canon 與 approval 規則。
 
+## Feedback Learning
+
+Phase 10A 可將使用者 feedback、proof report、settlement report 或 rejection
+整理為 feedback item，再建立 deterministic digest、rule candidate 與 proposal。
+
+Rule candidate 不會自動套用。Compressed rule update request 只建立 approval item；
+Phase 10B 尚未實作實際套用。Feedback context bundle 可提供給外部 GPT 的 writing
+或 proofing context，但不會在本機呼叫模型。
+
 ## 收工前檢查
 
 ```powershell
@@ -42,6 +51,7 @@ active engine hash。它不會自動 stage、commit 或 tag。
 
 - `data/visual_db/assets/`
 - `data/backups/`
+- `data/feedback_loop/`
 - `data/outputs/`
 - `data/canon_db/active_engine.md`
 

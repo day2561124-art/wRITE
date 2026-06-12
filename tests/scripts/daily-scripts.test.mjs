@@ -80,6 +80,7 @@ async function main() {
   const preCommit = await text("scripts/pre-commit-check.ps1");
   for (const guarded of [
     "data/backups/",
+    "data/feedback_loop/",
     "data/visual_db/assets/",
     "data/outputs/",
     "data/canon_db/active_engine.md",
@@ -96,7 +97,9 @@ async function main() {
   assert(combinedDocs.includes("preview-only"), "Docs omit restore preview-only behavior.");
   assert(combinedDocs.includes("approval-only"), "Docs omit restore request approval-only behavior.");
   assert(combinedDocs.includes("Phase 10A"), "Phase map omits Phase 10A.");
-  assert(combinedDocs.includes("未定義 / 未實作"), "Phase 10A is not marked unimplemented.");
+  assert(combinedDocs.includes("Feedback Learning Loop"), "Phase 10A name is missing.");
+  assert(combinedDocs.includes("Phase 10B"), "Phase map omits Phase 10B.");
+  assert(combinedDocs.includes("不會套用"), "Phase 10A apply boundary is missing.");
   assert(combinedDocs.includes("Phase 11B"), "Phase map omits Phase 11B.");
   assert(combinedDocs.includes("尚未實作"), "Phase 11B is not marked unimplemented.");
 

@@ -51,6 +51,7 @@ const allowedActions = new Set([
   "approve_cleanup_proposal",
   "execute_cleanup_proposal",
   "restore_from_backup",
+  "compressed_rule_update",
 ]);
 
 function json(value) {
