@@ -118,6 +118,27 @@ import {
   rejectCleanupProposal,
   scanCleanupCandidates,
 } from "./cleanup-proposal-service.mjs";
+import {
+  buildGptWritingContext,
+  listGptWritingContextBundles,
+} from "./gpt-writing-context-service.mjs";
+import {
+  saveChatOutputAsWritingCandidate,
+  listWritingCandidates,
+  getWritingCandidateDetail,
+} from "./chat-output-candidate-service.mjs";
+import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
+import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
+import { requestWritingCandidateAdoption } from "./candidate-adoption-request-service.mjs";
+import {
+  buildAdoptedWritingSettlementContext,
+  saveChatOutputAsSettlementReport,
+  buildPendingEngineCandidateFromSettlementReport,
+} from "./adopted-writing-settlement-service.mjs";
+import {
+  buildPendingEngineCandidateReview,
+  requestPendingEngineCandidateActivation,
+} from "./pending-engine-candidate-review-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1208,6 +1229,53 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/writer-workbench/state") {
+    try {
+      const active = await activeEngineStatus();
+      const [bundles, candidates, proofs, adopted, settlements, pending, approvals] = await Promise.all([
+        listGptWritingContextBundles({ limit: 1 }),
+        listWritingCandidates({ limit: 1 }),
+        listProofReports({ limit: 1 }),
+        listAdoptedChapters(),
+        listSettlementReports({ limit: 1 }),
+        listPendingCandidates(),
+        listApprovalItems(),
+      ]);
+      sendJson(response, 200, {
+        ok: true,
+        state: {
+          active_engine: active,
+          latest: {
+            writing_context_bundle: bundles[0] ?? null,
+            writing_candidate: candidates[0] ?? null,
+            proof_report: proofs[0] ?? null,
+            adoption_request: approvals.find((a) => a.action_type === 'adopt_writing_candidate') ?? null,
+            adopted_writing: adopted[0] ?? null,
+            settlement_report: settlements[0] ?? null,
+            pending_engine_candidate: pending[0] ?? null,
+            engine_candidate_review: null,
+            activation_request: approvals.find((a) => a.action_type === 'activate_engine_candidate') ?? null,
+          },
+          approval_queue: {
+            pending_count: approvals.length,
+            items: approvals,
+          },
+          safety: {
+            local_generation_allowed: false,
+            direct_activation_allowed: false,
+            approval_required_for_adoption: true,
+            approval_required_for_activation: true,
+            rollback_requires_approval: true,
+          },
+          generatedAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      sendError(response, 500, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/cleanup/scan") {
     try {
       assertSameOrigin(request, "Cross-origin cleanup scans are not allowed.");
@@ -1600,6 +1668,159 @@ async function handleRequest(request, response) {
         note: input.note,
       });
       sendJson(response, 201, { ok: true, settlement_report: settlementReport });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/build-writing-context") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const bundle = await buildGptWritingContext({
+        taskPrompt: input.taskPrompt ?? input.task_prompt,
+        includeActiveEngine: input.includeActiveEngine ?? input.include_active_engine ?? false,
+        includeWritingCard: input.includeWritingCard ?? input.include_writing_card ?? false,
+        includeProofingCard: input.includeProofingCard ?? input.include_proofing_card ?? false,
+        includeLongline: input.includeLongline ?? input.include_longline ?? false,
+      });
+      sendJson(response, 201, { ok: true, bundle });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/save-chat-output-candidate") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const candidate = await saveChatOutputAsWritingCandidate({
+        sourceBundleId: input.sourceBundleId ?? input.source_bundle_id,
+        chatOutputText: input.chatOutputText ?? input.chat_output_text,
+        title: input.title,
+        chapterLabel: input.chapterLabel ?? input.chapter_label,
+      });
+      sendJson(response, 201, { ok: true, candidate });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/build-proofing-context") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const context = await buildCandidateProofingContext({
+        candidateId: input.candidateId ?? input.candidate_id,
+      });
+      sendJson(response, 201, { ok: true, context });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/save-proof-report") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const report = await saveChatOutputAsProofReport({
+        candidateId: input.candidateId ?? input.candidate_id,
+        proofingContextId: input.proofingContextId ?? input.proofing_context_id,
+        proofReportText: input.proofReportText ?? input.proof_report_text,
+        verdict: input.verdict,
+        severity: input.severity,
+      });
+      sendJson(response, 201, { ok: true, report });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/request-adoption") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const requestItem = await requestWritingCandidateAdoption({
+        candidateId: input.candidateId ?? input.candidate_id,
+        proofReportId: input.proofReportId ?? input.proof_report_id,
+        reason: input.reason ?? input.note ?? "writer workbench",
+      });
+      sendJson(response, 201, { ok: true, request: requestItem });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/build-settlement-context") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const context = await buildAdoptedWritingSettlementContext({
+        adopted_chapter_id: input.adoptedChapterId ?? input.adopted_chapter_id,
+      });
+      sendJson(response, 201, { ok: true, context });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/save-settlement-report") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const report = await saveChatOutputAsSettlementReport({
+        adopted_chapter_id: input.adoptedChapterId ?? input.adopted_chapter_id,
+        settlement_context_id: input.settlementContextId ?? input.settlement_context_id,
+        settlement_report_text: input.settlementReportText ?? input.settlement_report_text,
+      });
+      // attempt to build pending candidate
+      let pending = null;
+      try {
+        pending = await buildPendingEngineCandidateFromSettlementReport({
+          settlement_report_id: report.settlement_report_id,
+        });
+      } catch (e) {
+        // ignore; caller can query later
+      }
+      sendJson(response, 201, { ok: true, report, pending });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/build-engine-candidate-review") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const review = await buildPendingEngineCandidateReview({
+        pendingEngineCandidateId: input.pendingEngineCandidateId ?? input.pending_engine_candidate_id,
+        reviewMode: input.reviewMode ?? input.review_mode ?? "summary_only",
+      });
+      sendJson(response, 201, { ok: true, review });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/writer-workbench/request-activation") {
+    try {
+      assertSameOrigin(request, "Cross-origin writer workbench actions are not allowed.");
+      const input = await parseBody(request);
+      const requestItem = await requestPendingEngineCandidateActivation({
+        pendingEngineCandidateId: input.pendingEngineCandidateId ?? input.pending_engine_candidate_id,
+        reviewId: input.reviewId ?? input.review_id,
+        reason: input.reason ?? "writer workbench activation",
+      });
+      sendJson(response, 201, { ok: true, request: requestItem });
     } catch (error) {
       sendError(response, error.statusCode ?? 400, error);
     }

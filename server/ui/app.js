@@ -69,6 +69,7 @@ const titles = {
   approval: "確認佇列",
   cleanup: "封存清理",
   activity: "紀錄",
+  "writer-workbench": "寫作工作台",
 };
 
 const sourceIcons = {
@@ -221,6 +222,9 @@ function switchView(viewName) {
   if (viewName === "neural") {
     loadNeuralStatus().catch((error) => toast(error.message, true));
   }
+  if (viewName === "writer-workbench") {
+    refreshWriterWorkbenchState().catch((error) => toast(error.message, true));
+  }
   if (viewName === "settlement") {
     Promise.all([
       refreshCanonSettlementState(),
@@ -237,6 +241,41 @@ function switchView(viewName) {
     refreshWorkflowState().catch((error) => toast(error.message, true));
   }
   window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+async function refreshWriterWorkbenchState() {
+  const payload = await api("/api/writer-workbench/state");
+  const pre = $("#writer-workbench-state");
+  if (!pre) return;
+  pre.textContent = JSON.stringify(payload.state, null, 2);
+}
+
+function bindWriterWorkbenchActions() {
+  $("#writer-refresh-state").addEventListener("click", () => refreshWriterWorkbenchState().catch((e) => toast(e.message, true)));
+  $("#writer-build-context").addEventListener("click", async () => {
+    try {
+      const body = { taskPrompt: $("#pipeline-task")?.value ?? "writer workbench test" };
+      const result = await api("/api/writer-workbench/build-writing-context", { method: "POST", body: JSON.stringify(body) });
+      toast("Context bundle 建立: " + (result.bundle?.bundle_id ?? "-"));
+      refreshWriterWorkbenchState().catch(() => {});
+    } catch (e) { toast(e.message, true); }
+  });
+  $("#writer-save-candidate").addEventListener("click", async () => {
+    try {
+      const body = { chatOutputText: $("#draft-text")?.value ?? "測試候選內容" };
+      const result = await api("/api/writer-workbench/save-chat-output-candidate", { method: "POST", body: JSON.stringify(body) });
+      toast("candidate 建立: " + (result.candidate?.writing_candidate_id ?? "-"));
+      refreshWriterWorkbenchState().catch(() => {});
+    } catch (e) { toast(e.message, true); }
+  });
+  $("#writer-build-proof").addEventListener("click", async () => {
+    try {
+      const body = { candidateId: $("#draft-run-id")?.value ?? null };
+      const result = await api("/api/writer-workbench/build-proofing-context", { method: "POST", body: JSON.stringify(body) });
+      toast("Proofing context 建立");
+      refreshWriterWorkbenchState().catch(() => {});
+    } catch (e) { toast(e.message, true); }
+  });
 }
 
 function renderSources() {
@@ -2214,6 +2253,7 @@ function bindEvents() {
     state.activeVisualId = "";
     renderVisuals();
   });
+  try { bindWriterWorkbenchActions(); } catch (e) { /* ignore if missing */ }
 }
 
 async function initialize() {

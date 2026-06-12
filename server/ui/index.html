@@ -51,6 +51,10 @@
             <span class="nav-symbol" aria-hidden="true">✓</span>
             <span>確認佇列</span>
           </button>
+          <button class="nav-item" data-view="writer-workbench" type="button">
+            <span class="nav-symbol" aria-hidden="true">📝</span>
+            <span>寫作工作台</span>
+          </button>
           <button class="nav-item" data-view="cleanup" type="button">
             <span class="nav-symbol" aria-hidden="true">⌫</span>
             <span>封存清理</span>
@@ -276,6 +280,31 @@
               <div class="empty-state">尚無 candidate_draft</div>
             </div>
           </section>
+        </section>
+
+        <section class="view" data-view-panel="writer-workbench">
+          <div class="workspace-grid">
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">WRITER WORKBENCH</p>
+                  <h2>寫作工作台</h2>
+                </div>
+                <div class="form-actions">
+                  <button id="writer-refresh-state" class="button secondary" type="button">更新狀態</button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <p>此面板以 read-only 聚合後端狀態，並提供 minimal action 按鈕以呼叫安全的後端 glue endpoints。</p>
+                <pre id="writer-workbench-state" class="document-viewer">尚未載入</pre>
+                <div class="form-actions">
+                  <button id="writer-build-context" class="button" type="button">建立 Context</button>
+                  <button id="writer-save-candidate" class="button" type="button">保存候選</button>
+                  <button id="writer-build-proof" class="button" type="button">建立驗稿 Context</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="view" data-view-panel="review">

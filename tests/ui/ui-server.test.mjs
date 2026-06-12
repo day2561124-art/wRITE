@@ -239,6 +239,9 @@ async function main() {
     assert(indexText.includes('id="snapshot-list"'), "UI index is missing the snapshot list.");
     assert(indexText.includes('id="activation-log-list"'), "UI index is missing the activation log.");
     assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
+    assert(indexText.includes('data-view-panel="writer-workbench"'), "UI index is missing the writer workbench view.");
+    assert(indexText.includes('寫作工作台'), "UI index is missing the writer workbench heading.");
+    assert(indexText.includes('id="writer-workbench-state"'), "UI index is missing the writer workbench state element.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -313,6 +316,13 @@ async function main() {
     assert(visuals && visuals.indexPath === "data/visual_db/visual_index.jsonl", "State API did not expose visual index metadata.");
     assert(Array.isArray(visuals.items), "State API visual items are not an array.");
     assert(visuals.categories.length >= 4, "State API visual categories were not exposed.");
+
+    // writer-workbench aggregated state endpoint
+    const wbRes = await fetch(`${baseUrl}/api/writer-workbench/state`);
+    assert(wbRes.ok, "/api/writer-workbench/state did not return 200");
+    const wbPayload = await wbRes.json();
+    assert(wbPayload.ok, "/api/writer-workbench/state payload missing ok=true");
+    assert(wbPayload.state.safety, "writer-workbench state missing safety metadata");
 
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));
     assert(visualsResult.response.ok && visualsResult.payload.ok, "Visuals API failed.");
