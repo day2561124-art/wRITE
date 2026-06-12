@@ -14,6 +14,8 @@ import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 export const engineCandidateIdPattern = /^engine_candidate_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 export const engineSnapshotIdPattern = /^engine_snapshot_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 export const engineArchiveIdPattern = /^engine_archive_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+export const engineActivationLogIdPattern =
+  /^engine_activation_log_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const parserVersion = "local-engine-candidate-parser-v1";
 const allowedStatuses = new Set(["candidate", "blocked", "rejected", "activated"]);
 const acceptedHeadings = new Set([
@@ -75,6 +77,11 @@ function createSnapshotId() {
 function createArchiveId() {
   const stamp = timestampIdPart();
   return `engine_archive_${stamp.slice(0, 8)}-${stamp.slice(8)}-${randomBytes(4).toString("hex")}`;
+}
+
+function createActivationLogId() {
+  const stamp = timestampIdPart();
+  return `engine_activation_log_${stamp.slice(0, 8)}-${stamp.slice(8)}-${randomBytes(4).toString("hex")}`;
 }
 
 function candidatePaths(candidateId, roots = {}) {
@@ -805,6 +812,8 @@ export async function activatePendingCandidate(
     confirm = false,
     secondConfirm = false,
     approvedBy = "local_user",
+    approvalItemId = null,
+    activationSource = "legacy_service_confirmation",
   } = {},
   options = {},
 ) {
@@ -832,9 +841,11 @@ export async function activatePendingCandidate(
     throw errorWithStatus("High-risk candidate requires second confirmation.", 409);
   }
   const currentHash = sha256(activeText);
+  const baseActiveEngineHash =
+    metadata.base_active_engine_hash ?? metadata.active_engine_hash_at_import;
   if (
-    metadata.active_engine_hash_at_import
-    && metadata.active_engine_hash_at_import !== currentHash
+    baseActiveEngineHash
+    && baseActiveEngineHash !== currentHash
   ) {
     throw errorWithStatus(
       "active_engine.md changed since candidate import; reparse before activation.",
@@ -843,6 +854,7 @@ export async function activatePendingCandidate(
   }
   const neuralEvidence = await verifyCandidateNeuralEvidence(metadata);
   const activatedAt = new Date().toISOString();
+  const activationLogId = createActivationLogId();
   const [snapshotId, archiveId] = await Promise.all([
     uniqueSnapshotId(roots),
     uniqueArchiveId(roots),
@@ -856,13 +868,19 @@ export async function activatePendingCandidate(
   const activeAfterHash = sha256(candidateText);
   const snapshotMetadata = {
     snapshot_id: snapshotId,
+    snapshot_kind: "pre_engine_activation",
     created_at: activatedAt,
     reason: "before_pending_candidate_activation",
     candidate_id: candidateId,
+    pending_engine_candidate_id: candidateId,
+    approval_item_id: approvalItemId,
     source_chapter: metadata.source_chapter,
     active_engine_hash: currentHash,
+    previous_active_engine_hash: currentHash,
     active_engine_path: normalizeProjectPath(roots.activeEngine),
+    snapshot_path: normalizeProjectPath(snapshot.engine),
     rollback_available: true,
+    rollback_requires_approval: true,
   };
   const archiveMetadata = {
     archive_id: archiveId,
@@ -876,19 +894,52 @@ export async function activatePendingCandidate(
     risk_level: riskReport.risk_level,
   };
   const activationRecord = {
+    activation_log_id: activationLogId,
+    log_kind: "engine_activation_confirmation",
     event: "activate_pending_engine_candidate",
     candidate_id: candidateId,
+    pending_engine_candidate_id: candidateId,
+    approval_item_id: approvalItemId,
+    activation_source: activationSource,
     source_chapter: metadata.source_chapter,
+    settlement_report_id: metadata.settlement_report_id ?? null,
+    settlement_context_id: metadata.settlement_context_id ?? null,
+    adopted_chapter_id: metadata.adopted_chapter_id ?? null,
     activated_at: activatedAt,
     approved_by: String(approvedBy || "local_user").slice(0, 200),
+    activated_by_user_confirmation: true,
     snapshot_id: snapshotId,
+    snapshot_path: normalizeProjectPath(snapshot.engine),
     archive_id: archiveId,
+    active_engine_path: normalizeProjectPath(roots.activeEngine),
     active_engine_before_hash: currentHash,
     active_engine_after_hash: activeAfterHash,
+    previous_active_engine_hash: currentHash,
+    new_active_engine_hash: activeAfterHash,
     candidate_hash: candidateHash,
     risk_level: riskReport.risk_level,
     requires_second_confirmation: riskReport.requires_second_confirmation === true,
+    rollback_available: true,
+    rollback_requires_approval: true,
     neural_evidence: neuralEvidence,
+  };
+  const nextMetadata = {
+    ...metadata,
+    activated: true,
+    activated_at: activatedAt,
+    activated_by: String(approvedBy || "local_user").slice(0, 200),
+    activation_source: activationSource,
+    activation_approval_item_id: approvalItemId ?? metadata.activation_approval_item_id ?? null,
+    activation_log_id: activationLogId,
+    snapshot_id: snapshotId,
+    archive_id: archiveId,
+    previous_active_engine_hash: currentHash,
+    new_active_engine_hash: activeAfterHash,
+    active_engine_modified: true,
+    review_status: "activated",
+    activation_request_status: "resolved",
+    rollback_available: true,
+    rollback_requires_approval: true,
   };
   const nextStatus = {
     ...status,
@@ -898,6 +949,18 @@ export async function activatePendingCandidate(
     requires_second_confirmation: riskReport.requires_second_confirmation === true,
     eligible_for_phase_3_activation: false,
     activated_at: activatedAt,
+    activated: true,
+    activation_approval_item_id: approvalItemId ?? status.activation_approval_item_id ?? null,
+    activation_log_id: activationLogId,
+    snapshot_id: snapshotId,
+    archive_id: archiveId,
+    previous_active_engine_hash: currentHash,
+    new_active_engine_hash: activeAfterHash,
+    active_engine_modified: true,
+    review_status: "activated",
+    activation_request_status: "resolved",
+    rollback_available: true,
+    rollback_requires_approval: true,
     rejected_at: null,
     phase: "phase_3_activated",
   };
@@ -923,6 +986,7 @@ export async function activatePendingCandidate(
       { filePath: archive.metadata, content: json(archiveMetadata) },
       { filePath: roots.activeEngine, content: candidateText },
       { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(activationRecord)}\n` },
+      { filePath: paths.metadata, content: json(nextMetadata) },
       { filePath: paths.status, content: json(nextStatus) },
       { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
     ], {
@@ -946,11 +1010,20 @@ export async function activatePendingCandidate(
   return {
     ok: true,
     candidate_id: candidateId,
+    pending_engine_candidate_id: candidateId,
+    approval_item_id: approvalItemId,
+    activation_log_id: activationLogId,
     snapshot_id: snapshotId,
+    snapshot_path: normalizeProjectPath(snapshot.engine),
     archive_id: archiveId,
     activated_at: activatedAt,
     active_engine_before_hash: currentHash,
     active_engine_after_hash: activeAfterHash,
+    previous_active_engine_hash: currentHash,
+    new_active_engine_hash: activeAfterHash,
+    active_engine_modified: true,
+    rollback_available: true,
+    rollback_requires_approval: true,
     transaction_id: transaction.transaction_id,
     status: nextStatus,
     neural_evidence: neuralEvidence,

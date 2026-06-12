@@ -849,7 +849,7 @@ async function main() {
       "Unconfirmed Phase 3 activation was not blocked.",
     );
 
-    const confirmedActivation = await readJson(await fetch(
+    const directActivation = await readJson(await fetch(
       `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}/activate`,
       {
         method: "POST",
@@ -857,8 +857,31 @@ async function main() {
         body: JSON.stringify({ confirm: true, approvedBy: "ui_contract_test" }),
       },
     ));
-    assert(confirmedActivation.response.ok, "Confirmed Phase 3 activation failed.");
-    const activationResult = confirmedActivation.payload.result;
+    assert(directActivation.response.status === 409, "Direct UI activation was not blocked.");
+    const activationApprovalScan = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/scan`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ));
+    const activationApproval = activationApprovalScan.payload.scan.items.find(
+      (item) => item.target_id === apiCandidateId
+        && item.action_type === "activate_engine_candidate"
+        && ["pending", "deferred"].includes(item.status.status),
+    );
+    assert(activationApproval, "Approval scan did not create an activatable item.");
+    const confirmedActivation = await readJson(await fetch(
+      `${baseUrl}/api/approval-queue/items/${activationApproval.approval_item_id}/confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, approvedBy: "ui_contract_test" }),
+      },
+    ));
+    assert(confirmedActivation.response.ok, "Approval-confirmed Phase 3 activation failed.");
+    const activationResult = confirmedActivation.payload.result.result;
     assert(activationResult.snapshot_id, "Activation did not return a snapshot id.");
     assert(activationResult.archive_id, "Activation did not return an archive id.");
     const rollbackApprovalResult = await readJson(await fetch(`${baseUrl}/api/approval-queue/scan`, {

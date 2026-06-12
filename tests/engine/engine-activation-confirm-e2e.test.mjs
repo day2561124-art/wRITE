@@ -1,0 +1,160 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { confirmApprovalItem } from "../../server/src/approval-queue-service.mjs";
+import { requestWritingCandidateAdoption } from "../../server/src/candidate-adoption-request-service.mjs";
+import { buildCandidateProofingContext } from "../../server/src/candidate-proofing-context-service.mjs";
+import { saveChatOutputAsProofReport } from "../../server/src/candidate-proof-report-service.mjs";
+import { saveChatOutputAsWritingCandidate } from "../../server/src/chat-output-candidate-service.mjs";
+import { getEngineActivationConfirmLog } from "../../server/src/engine-activation-confirm-service.mjs";
+import { buildGptWritingContext } from "../../server/src/gpt-writing-context-service.mjs";
+import {
+  buildAdoptedWritingSettlementContext,
+  buildPendingEngineCandidateFromSettlementReport,
+  saveChatOutputAsSettlementReport,
+} from "../../server/src/adopted-writing-settlement-service.mjs";
+import {
+  buildPendingEngineCandidateReview,
+  requestPendingEngineCandidateActivation,
+} from "../../server/src/pending-engine-candidate-review-service.mjs";
+import { projectPaths } from "../../server/src/project-paths.mjs";
+
+const suffix = ".engine-activation-confirm-e2e-test";
+const root = path.join(projectPaths.canonDb, suffix);
+const options = {
+  activeEnginePath: path.join(root, "active_engine.md"),
+  pendingEngineCandidates: path.join(root, "pending"),
+  engineSnapshots: path.join(root, "snapshots"),
+  engineArchive: path.join(root, "archive"),
+  activationLog: path.join(root, "logs", "activation.jsonl"),
+  rollbackIndex: path.join(root, "rollback", "index.json"),
+  approvalQueue: path.join(projectPaths.approvalQueue, suffix),
+  gptWritingContexts: path.join(projectPaths.gptWritingContexts, suffix),
+  writingCandidates: path.join(projectPaths.writingCandidates, suffix),
+  proofingContexts: path.join(projectPaths.proofingContexts, suffix),
+  proofReports: path.join(projectPaths.proofReports, suffix),
+  engineCandidateReviews: path.join(projectPaths.engineCandidateReviews, suffix),
+  settlementContexts: path.join(projectPaths.adoptedWritingSettlementContexts, suffix),
+  settlementReports: path.join(projectPaths.adoptedWritingSettlementReports, suffix),
+  adoptedWritings: path.join(projectPaths.adoptedWritings, suffix),
+};
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function hash(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function main() {
+  const productionHash = hash(await readFile(projectPaths.activeEngine));
+  const activeText = "# Phase 8I E2E Engine\n\nRule 1: stable.\n";
+  await Promise.all([
+    rm(root, { recursive: true, force: true }),
+    ...Object.entries(options)
+      .filter(([key]) => key !== "activeEnginePath")
+      .map(([, target]) => rm(target, { recursive: true, force: true })),
+  ]);
+  await mkdir(root, { recursive: true });
+  await writeFile(options.activeEnginePath, activeText, "utf8");
+  try {
+    const writingContext = await buildGptWritingContext({
+      taskPrompt: "Write Phase 8I E2E chapter.",
+      includeActiveEngine: false,
+      includeWritingCard: false,
+      includeProofingCard: false,
+      includeLongline: false,
+    }, options);
+    const writing = await saveChatOutputAsWritingCandidate({
+      sourceBundleId: writingContext.bundle.bundle_id,
+      chatOutputText: "# Phase 8I Chapter\n\nAccepted scene.",
+    }, options);
+    const proofing = await buildCandidateProofingContext({
+      candidateId: writing.candidate_id,
+      includeActiveEngine: false,
+      includeWritingCard: false,
+      includeProofingCard: false,
+      includeLongline: false,
+    }, options);
+    const proof = await saveChatOutputAsProofReport({
+      candidateId: writing.candidate_id,
+      proofingContextId: proofing.context.proofing_context_id,
+      proofReportText: "Pass.",
+      verdict: "pass",
+      severity: "none",
+    }, options);
+    const adoptionRequest = await requestWritingCandidateAdoption({
+      candidateId: writing.candidate_id,
+      proofReportId: proof.proof_report_id,
+    }, options);
+    const adoption = await confirmApprovalItem(adoptionRequest.approval_item_id, {
+      confirm: true,
+      approvedBy: "phase_8i_e2e",
+    }, options);
+    const adoptedChapterId = adoption.result.adopted_chapter_id;
+    const context = await buildAdoptedWritingSettlementContext({
+      adoptedChapterId,
+      includeActiveEngine: false,
+      includeWritingCard: false,
+      includeProofingCard: false,
+      includeLongline: false,
+    }, options);
+    const settlement = await saveChatOutputAsSettlementReport({
+      adoptedChapterId,
+      settlementContextId: context.context.settlement_context_id,
+      settlementReportText: [
+        "# Settlement Report",
+        "",
+        "## pending_engine_candidate",
+        "",
+        "```md",
+        `${activeText.trimEnd()}\nRule 2: confirmed activation.`,
+        "```",
+      ].join("\n"),
+    }, options);
+    const pending = await buildPendingEngineCandidateFromSettlementReport({
+      settlementReportId: settlement.settlement_report_id,
+    }, options);
+    const review = await buildPendingEngineCandidateReview({
+      pendingEngineCandidateId: pending.pending_engine_candidate_id,
+      reviewMode: "summary_only",
+    }, options);
+    const request = await requestPendingEngineCandidateActivation({
+      pendingEngineCandidateId: pending.pending_engine_candidate_id,
+      reviewId: review.review.review_id,
+      reason: "Phase 8I E2E explicit confirmation.",
+    }, options);
+    assert(hash(await readFile(options.activeEnginePath)) === hash(activeText), "Request changed engine.");
+    const confirmed = await confirmApprovalItem(request.approval_item_id, {
+      confirm: true,
+      approvedBy: "phase_8i_e2e",
+    }, options);
+    assert(confirmed.approval_item.status.status === "resolved", "Approval was not resolved.");
+    assert(confirmed.result.active_engine_modified === true, "Activation result is incomplete.");
+    assert((await readdir(options.engineSnapshots)).length === 1, "Snapshot was not created.");
+    assert((await readdir(options.engineArchive)).length === 1, "Archive was not created.");
+    const log = await getEngineActivationConfirmLog(confirmed.result.activation_log_id, options);
+    assert(log.settlement_report_id === settlement.settlement_report_id, "Settlement trace is missing.");
+    assert(log.adopted_chapter_id === settlement.adopted_chapter_id, "Adopted writing trace is missing.");
+    assert(log.rollback_requires_approval === true, "Rollback is not approval-gated.");
+    assert(
+      hash(await readFile(options.activeEnginePath)) === confirmed.result.new_active_engine_hash,
+      "Active engine hash does not match activation result.",
+    );
+    assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Production engine changed.");
+    console.log("Engine activation confirm E2E test passed.");
+  } finally {
+    await Promise.all([
+      rm(root, { recursive: true, force: true }),
+      ...Object.entries(options)
+        .filter(([key]) => key !== "activeEnginePath")
+        .map(([, target]) => rm(target, { recursive: true, force: true })),
+    ]);
+  }
+}
+
+main().catch((error) => {
+  console.error(`Engine activation confirm E2E test failed: ${error.message}`);
+  process.exitCode = 1;
+});

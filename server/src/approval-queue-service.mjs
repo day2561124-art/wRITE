@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import {
-  activatePendingCandidate,
   assertEngineCandidateId,
   assertSnapshotId,
   getPendingCandidate,
@@ -10,6 +9,7 @@ import {
   listSnapshots,
   rollbackActiveEngine,
 } from "./engine-candidate-service.mjs";
+import { activateEngineCandidateAfterApproval } from "./engine-activation-confirm-service.mjs";
 import {
   approveCleanupProposal,
   executeCleanupProposal,
@@ -452,6 +452,8 @@ export async function scanApprovalQueue(options = {}) {
         candidate.risk_report.requires_second_confirmation === true,
       requiresNeuralSuccess: candidate.metadata.requires_neural_modules === true,
       neuralStatus: neural.status,
+      requiresUserConfirmation: true,
+      canExecuteWithoutUserConfirmation: false,
       blockedReason: candidateBlocked
         ? candidate.status.blocked_reason
           || `${candidate.status.status} / ${candidate.risk_report.risk_level}`
@@ -618,11 +620,16 @@ export async function confirmApprovalItem(
     let result;
     if (item.action_type === "activate_engine_candidate") {
       assertEngineCandidateId(item.target_id);
-      result = await activatePendingCandidate(item.target_id, {
-        confirm: true,
-        secondConfirm: item.requires_second_confirmation === true,
-        approvedBy,
-      }, targetOptions(options));
+      result = await activateEngineCandidateAfterApproval({
+        approvalItemId,
+        pendingEngineCandidateId: item.target_id,
+        confirmedBy: approvedBy,
+        secondConfirm,
+      }, {
+        ...targetOptions(options),
+        approvalConfirmed: true,
+        approvalItem: item,
+      });
     } else if (item.action_type === "rollback_active_engine") {
       assertSnapshotId(item.target_id);
       result = await rollbackActiveEngine(item.target_id, {
@@ -671,7 +678,14 @@ export async function confirmApprovalItem(
       confirmed_at: now,
       resolved_at: now,
       reason: null,
-      execution_result: result?.adopted_chapter_id ? {
+      execution_result: result?.activation_log_id ? {
+        activation_log_id: result.activation_log_id,
+        pending_engine_candidate_id: result.pending_engine_candidate_id,
+        snapshot_id: result.snapshot_id,
+        previous_active_engine_hash: result.previous_active_engine_hash,
+        new_active_engine_hash: result.new_active_engine_hash,
+        rollback_requires_approval: result.rollback_requires_approval,
+      } : result?.adopted_chapter_id ? {
         adopted_chapter_id: result.adopted_chapter_id,
         candidate_id: result.candidate_id,
         proof_report_id: result.proof_report_id,

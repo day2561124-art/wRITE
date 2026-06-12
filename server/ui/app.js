@@ -802,7 +802,7 @@ async function handleActivateCandidate() {
   const needsSecond = state.canon.candidateDetail?.risk_report?.requires_second_confirmation === true;
   if (!window.confirm("這會更新 active_engine.md。確定繼續啟用？")) return;
   try {
-    await api(`/api/canon/pending-candidates/${encodeURIComponent(state.activeCandidateId)}/activate`, {
+    await api("/api/approval-queue/scan", {
       method: "POST",
       body: JSON.stringify({
         confirm: true,

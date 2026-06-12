@@ -39,7 +39,6 @@ import {
   run_style_drift_detector,
 } from "./neural-module-service.mjs";
 import {
-  activatePendingCandidate,
   activeEngineStatus,
   assertEngineCandidateId,
   assertSnapshotId,
@@ -1736,13 +1735,11 @@ async function handleRequest(request, response) {
       const action = candidateActionMatch[2];
       const input = await parseBody(request);
       if (action === "activate") {
-        const result = await activatePendingCandidate(candidateId, {
-          confirm: input.confirm === true,
-          secondConfirm: input.secondConfirm === true || input.second_confirm === true,
-          approvedBy: input.approvedBy ?? input.approved_by ?? "local_user",
-        });
-        sendJson(response, 200, { ok: true, result });
-        return;
+        const error = new Error(
+          "Direct engine activation is disabled; confirm an approval queue item.",
+        );
+        error.statusCode = 409;
+        throw error;
       }
       const candidate = action === "reparse"
         ? await reparsePendingCandidate(candidateId)

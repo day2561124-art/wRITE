@@ -223,6 +223,12 @@ async function main() {
       approvedBy: "approval_test",
     }, options);
     assert(lowConfirmed.result.snapshot_id, "Approval did not call Phase 3 activation.");
+    assert(lowConfirmed.result.activation_log_id, "Activation confirmation log id is missing.");
+    assert(
+      lowConfirmed.approval_item.status.execution_result.activation_log_id
+        === lowConfirmed.result.activation_log_id,
+      "Approval result did not preserve activation trace.",
+    );
     assert(
       lowConfirmed.approval_item.status.status === "resolved",
       "Confirmed item was not resolved.",
