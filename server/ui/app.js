@@ -523,6 +523,31 @@ function renderOperatorOverview() {
       : "請依驗稿報告中的 P0-P4 與停止原因決定採用、修正或退稿。";
   $("#compose-empty-state").hidden = Boolean(workflowStep("writing_context")
     && workflowStep("writing_context").status !== "missing");
+  // render writing workbench summary panel (overview)
+  const workbenchPanel = $("#writing-workbench-main");
+  if (workbenchPanel) {
+    const wb = state.workbench ?? {};
+    const chapterTitle = wb.current_chapter?.title ?? wb.adopted_chapter?.title ?? "第二十章｜亮處的影子";
+    const draftText = state.currentDraftText ?? "";
+    const wordcount = draftText ? `${draftText.length} 字` : "--";
+    const autosave = draftText ? "已保存" : "尚未啟用";
+    const titleEl = $("#workbench-chapter-title", workbenchPanel);
+    const wcEl = $("#workbench-wordcount", workbenchPanel);
+    const asEl = $("#workbench-autosave", workbenchPanel);
+    const ta = $("#workbench-draft-text", workbenchPanel);
+    if (titleEl) titleEl.textContent = chapterTitle;
+    if (wcEl) wcEl.textContent = wordcount;
+    if (asEl) asEl.textContent = autosave;
+    if (ta) {
+      ta.value = draftText;
+      ta.disabled = !draftText;
+    }
+    // keep action buttons disabled to avoid exposing unimplemented backend
+    ["workbench-refresh", "workbench-generate", "workbench-save", "workbench-send-proof", "workbench-add-approval"].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = true;
+    });
+  }
   $("#settlement-empty-state").hidden = (state.workflow.adoptedChapters ?? []).length > 0;
 }
 

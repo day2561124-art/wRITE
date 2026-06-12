@@ -9,7 +9,7 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+          <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">武</div>
           <div>
@@ -25,36 +25,36 @@
           </button>
           <button class="nav-item" data-view="compose" type="button">
             <span class="nav-symbol" aria-hidden="true">✎</span>
-            <span>起稿</span>
+            <span>正文寫作</span>
             <span id="nav-badge-compose" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="review" type="button">
             <span class="nav-symbol" aria-hidden="true">✓</span>
-            <span>驗稿</span>
+            <span>驗稿 / 校對</span>
             <span id="nav-badge-review" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="library" type="button">
             <span class="nav-symbol" aria-hidden="true">▤</span>
-            <span>資料庫</span>
+            <span>正史資料</span>
           </button>
           <button class="nav-item" data-view="visuals" type="button">
             <span class="nav-symbol" aria-hidden="true">◇</span>
-            <span>圖庫</span>
+            <span>圖像資料</span>
             <span id="nav-badge-visuals" class="nav-badge">0 / 0</span>
           </button>
           <button class="nav-item" data-view="neural" type="button">
-            <span class="nav-symbol" aria-hidden="true">N</span>
-            <span>神經模組</span>
+            <span class="nav-symbol" aria-hidden="true">🔍</span>
+            <span>檢索記憶</span>
             <span id="nav-badge-neural" class="nav-badge">0 注意</span>
           </button>
           <button class="nav-item" data-view="settlement" type="button">
             <span class="nav-symbol" aria-hidden="true">⇄</span>
-            <span>結算匯入</span>
+            <span>章節結算</span>
             <span id="nav-badge-settlement" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="approval" type="button">
-            <span class="nav-symbol" aria-hidden="true">✓</span>
-            <span>確認佇列</span>
+            <span class="nav-symbol" aria-hidden="true">⚑</span>
+            <span>待我確認</span>
             <span id="nav-badge-approval" class="nav-badge">0 待確認</span>
           </button>
           <button class="nav-item" data-view="writer-workbench" type="button">
@@ -63,12 +63,12 @@
             <span id="nav-badge-workbench" class="nav-badge">載入中</span>
           </button>
           <button class="nav-item" data-view="cleanup" type="button">
-            <span class="nav-symbol" aria-hidden="true">⌫</span>
-            <span>封存清理</span>
+            <span class="nav-symbol" aria-hidden="true">🗄</span>
+            <span>封存 / 清理</span>
           </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
-            <span>紀錄</span>
+            <span>版本紀錄</span>
           </button>
         </nav>
 
@@ -103,6 +103,41 @@
               <p id="today-next-step-text">正在整理目前流程狀態。</p>
             </div>
             <button id="today-next-step-button" class="button primary" data-go-view="writer-workbench" type="button">查看寫作工作台</button>
+          </section>
+
+          <section id="writing-workbench-main" class="panel writing-workbench-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">WRITING</p>
+                <h2>正文寫作操作台</h2>
+              </div>
+              <div class="form-actions">
+                <button id="workbench-refresh" class="button secondary" type="button" disabled>讀取最新資料</button>
+                <button id="workbench-generate" class="button primary" type="button" disabled>請 ChatGPT 寫正文候選</button>
+              </div>
+            </div>
+
+            <div class="workbench-tabs">
+              <div class="result-tabs" role="tablist" aria-label="寫作分頁">
+                <button class="is-active" data-wtab="task" type="button">本章任務</button>
+                <button data-wtab="materials" type="button">寫作材料</button>
+                <button data-wtab="retrieval" type="button">檢索參考</button>
+                <button data-wtab="candidates" type="button">正文候選</button>
+              </div>
+            </div>
+
+            <div class="workbench-body">
+              <div class="workbench-meta">
+                <h3 id="workbench-chapter-title">第二十章｜亮處的影子</h3>
+                <div class="meta-row">字數：<span id="workbench-wordcount">--</span> · 自動保存：<span id="workbench-autosave">尚未啟用</span></div>
+              </div>
+              <textarea id="workbench-draft-text" rows="12" maxlength="1000000" placeholder="尚未載入正文候選。請先讀取最新資料，或請 ChatGPT 產生正文候選。" disabled></textarea>
+              <div class="form-actions">
+                <button id="workbench-save" class="button" type="button" disabled>保存正文候選</button>
+                <button id="workbench-send-proof" class="button secondary" type="button" disabled>送去驗稿</button>
+                <button id="workbench-add-approval" class="button secondary" type="button" disabled>加入待我確認</button>
+              </div>
+            </div>
           </section>
 
           <section class="panel workflow-overview-panel">
@@ -161,11 +196,46 @@
               </div>
             </section>
 
-            <section class="panel">
+            <section class="panel reminders-panel">
               <div class="panel-heading">
-                <h2>最新產物</h2>
+                <h2>寫作提醒</h2>
               </div>
-              <div id="output-list" class="output-list"></div>
+              <div class="reminder-cards">
+                <div class="panel reminder-card">
+                  <div class="panel-heading">
+                    <h3>現行正史規則</h3>
+                  </div>
+                  <ul>
+                    <li>不可承接未採用內容</li>
+                    <li>不可把未支付骨架寫成正史</li>
+                    <li>群像平等，多視角自然切換</li>
+                    <li>重大事件需進入待我確認</li>
+                    <li>角色關係與時間線不得自相矛盾</li>
+                  </ul>
+                </div>
+
+                <div class="panel reminder-card">
+                  <div class="panel-heading">
+                    <h3>角色狀態（範例）</h3>
+                  </div>
+                  <p class="muted">尚未接入正式資料，以下為顯示範例</p>
+                  <ul>
+                    <li><strong>朝日奈千夜</strong> ｜ 主視角 ｜ 狀態穩定，待寫作觀察</li>
+                    <li><strong>九逃</strong> ｜ 重要角色 ｜ 行動自由度高</li>
+                    <li><strong>雪弟</strong> ｜ 配角 ｜ 演練後調整中</li>
+                    <li><strong>貓狼</strong> ｜ 配角 ｜ 等待後續場次</li>
+                  </ul>
+                </div>
+
+                <div class="panel reminder-card">
+                  <div class="panel-heading">
+                    <h3>本章注意事項</h3>
+                  </div>
+                  <p>章名承諾：尚未產生</p>
+                  <p>本章必須支付：尚未接入</p>
+                  <p>不可違反事項：不可承接未採用內容</p>
+                </div>
+              </div>
             </section>
           </div>
 
@@ -175,6 +245,42 @@
             </div>
             <div id="count-strip" class="count-strip"></div>
           </section>
+          <div class="summary-cards">
+            <section class="panel summary-card">
+              <div class="panel-heading"><h3>待我確認</h3></div>
+              <div>
+                <p>正文候選：<strong>0</strong></p>
+                <p>驗稿結果：<strong>0</strong></p>
+                <p>章節結算：<strong>0</strong></p>
+                <p>重大事件：<strong>0</strong></p>
+                <div class="form-actions"><button class="button" type="button">查看全部</button></div>
+              </div>
+            </section>
+
+            <section class="panel summary-card">
+              <div class="panel-heading"><h3>章節結算摘要</h3></div>
+              <div>
+                <p>尚未產生本章結算</p>
+              </div>
+            </section>
+
+            <section class="panel summary-card">
+              <div class="panel-heading"><h3>最近測試</h3></div>
+              <div>
+                <p>bridge:dry-run</p>
+                <p>test:mcp</p>
+                <p>npm test</p>
+              </div>
+            </section>
+
+            <section class="panel summary-card">
+              <div class="panel-heading"><h3>版本指紋</h3></div>
+              <div>
+                <p>正史資料庫：<strong>D797DF08...</strong></p>
+                <p>寫作規則：<strong>F711EED2...</strong></p>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section class="view" data-view-panel="compose">

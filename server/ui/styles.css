@@ -364,6 +364,54 @@
   margin-bottom: 12px;
 }
 
+.writing-workbench-panel .workbench-tabs {
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+.writing-workbench-panel .result-tabs button {
+  margin-right: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.writing-workbench-panel .result-tabs button.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+.writing-workbench-panel .workbench-body {
+  display: grid;
+  gap: 12px;
+}
+.writing-workbench-panel .workbench-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.writing-workbench-panel textarea#workbench-draft-text {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.reminder-cards { display: grid; gap: 12px; }
+.reminder-card { padding: 12px; }
+.reminder-card ul { margin: 8px 0 0 18px; color: var(--muted); }
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.summary-card { padding: 12px; }
+
 .operator-hero,
 .operator-guide,
 .operator-info,
