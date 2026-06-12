@@ -23,8 +23,43 @@ export function createStdioSession() {
 
   child.stdout.on('data', (chunk) => {
     stdoutBuffer += chunk.toString('utf8');
-    let idx;
-    while ((idx = stdoutBuffer.indexOf('\n')) !== -1) {
+
+    // Parse as many complete frames as possible. Support header (Content-Length) framing
+    // and fallback to newline-delimited JSON objects.
+    while (true) {
+      // Header-framed: look for \r\n\r\n separator
+      const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
+      if (headerEnd !== -1) {
+        const header = stdoutBuffer.slice(0, headerEnd);
+        const m = header.match(/Content-Length:\s*(\d+)/i);
+        if (!m) {
+          // malformed header, drop it and continue
+          stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
+          continue;
+        }
+        const len = parseInt(m[1], 10);
+        const totalNeeded = headerEnd + 4 + len;
+        if (stdoutBuffer.length < totalNeeded) break; // wait for more
+        const jsonText = stdoutBuffer.slice(headerEnd + 4, totalNeeded);
+        stdoutBuffer = stdoutBuffer.slice(totalNeeded);
+        if (!jsonText) continue;
+        try {
+          const msg = JSON.parse(jsonText);
+          const id = msg.id ?? randomUUID();
+          const cb = listeners.get(id);
+          if (cb) {
+            try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
+          }
+        } catch (e) {
+          console.error('[mcp-server] JSON parse error (header frame):', e);
+          // continue processing remaining buffered data
+        }
+        continue; // try parse next frame
+      }
+
+      // Fallback to newline-delimited JSON
+      const idx = stdoutBuffer.indexOf('\n');
+      if (idx === -1) break; // incomplete line
       const line = stdoutBuffer.slice(0, idx).trim();
       stdoutBuffer = stdoutBuffer.slice(idx + 1);
       if (!line) continue;
@@ -32,9 +67,12 @@ export function createStdioSession() {
         const msg = JSON.parse(line);
         const id = msg.id ?? randomUUID();
         const cb = listeners.get(id);
-        if (cb) cb(null, msg);
+        if (cb) {
+          try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
+        }
       } catch (e) {
-        // ignore non-json lines
+        // likely a log line or partial JSON; don't crash, just log for debugging
+        console.warn('[mcp-server] ignoring non-JSON stdout line:', line.slice(0, 200));
       }
     }
   });
@@ -44,9 +82,38 @@ export function createStdioSession() {
     console.error('[mcp-server stderr]', s);
   });
 
+  child.on('error', (err) => {
+    console.error('[mcp-server child error]', err);
+    // Notify pending listeners of the failure
+    for (const [id, cb] of listeners.entries()) {
+      try { cb(new Error('child process error'), null); } catch (e) { console.error('listener threw on child error', e); }
+      listeners.delete(id);
+    }
+  });
+
+  child.on('exit', (code, signal) => {
+    console.error(`[mcp-server] child exited code=${code} signal=${signal}`);
+    for (const [id, cb] of listeners.entries()) {
+      try { cb(new Error('child process exited'), null); } catch (e) { console.error('listener threw on child exit', e); }
+      listeners.delete(id);
+    }
+  });
+
   function send(message) {
     const frame = encodeMessage(message, 'line');
-    child.stdin.write(frame);
+    try {
+      child.stdin.write(frame);
+    } catch (e) {
+      console.error('failed to write to child.stdin', e);
+      // If writing fails, notify any listener for this id if present
+      try {
+        const id = message.id ?? null;
+        if (id) {
+          const cb = listeners.get(id);
+          if (cb) { cb(new Error('failed to write to child.stdin'), null); listeners.delete(id); }
+        }
+      } catch (e2) { console.error('error notifying listener after write failure', e2); }
+      }
   }
 
   function call(message, cb) {
