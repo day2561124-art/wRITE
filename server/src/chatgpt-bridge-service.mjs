@@ -308,7 +308,12 @@ export async function saveChatgptBridgeProofReport(input = {}, options = {}) {
 }
 
 export async function requestChatgptBridgeAdoption(input = {}, options = {}) {
-  const result = await requestWritingCandidateAdoption(input, options);
+  const result = await requestWritingCandidateAdoption({
+    ...input,
+    requestSource: "chatgpt_bridge",
+    sourcePhase: "phase_14a_lite",
+    verifiedBy: "phase_14b_e2e_dry_run",
+  }, options);
   return {
     ...result,
     adopted: false,

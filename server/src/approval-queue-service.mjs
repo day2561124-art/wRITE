@@ -298,6 +298,14 @@ export async function createApprovalItem(input = {}, options = {}) {
       input.canExecuteWithoutUserConfirmation === true
       || input.can_execute_without_user_confirmation === true,
     created_by: optionalText(input.createdBy ?? input.created_by, 200),
+    request_kind: optionalText(input.requestKind ?? input.request_kind, 100) || null,
+    source: optionalText(input.source, 100) || null,
+    source_phase: optionalText(input.sourcePhase ?? input.source_phase, 100) || null,
+    verified_by: optionalText(input.verifiedBy ?? input.verified_by, 200) || null,
+    bridge_capabilities: input.bridgeCapabilities ?? input.bridge_capabilities ?? null,
+    lineage: input.lineage ?? null,
+    safety_snapshot: input.safetySnapshot ?? input.safety_snapshot ?? null,
+    operator_readiness: input.operatorReadiness ?? input.operator_readiness ?? null,
     safety: input.safety ?? null,
     impact: input.impact ?? { will_modify: [], will_create: [], rollback_available: false },
     links: {

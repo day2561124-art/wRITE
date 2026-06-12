@@ -74,6 +74,9 @@ import {
   chatgpt_bridge_save_proof_report,
   chatgpt_bridge_save_settlement_report,
 } from "./mcp-chatgpt-bridge-tools.mjs";
+import {
+  approval_queue_bridge_readiness_report,
+} from "./mcp-approval-queue-readiness-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1834,6 +1837,20 @@ const toolDefinitions = [
     handler: async () => jsonContent(await chatgpt_bridge_get_workbench_status()),
   },
   {
+    name: "approval_queue_bridge_readiness_report",
+    description: "Build a read-only operator readiness report for a ChatGPT Bridge adoption request.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      requestId: { type: "string" },
+      includeLineagePreview: { type: "boolean", default: false },
+      maxPreviewChars: { type: "integer", minimum: 1, maximum: 20000, default: 4000 },
+    }, ["requestId"]),
+    handler: async (args) => jsonContent(
+      await approval_queue_bridge_readiness_report(args),
+    ),
+  },
+  {
     name: "chatgpt_bridge_get_current_inputs",
     description: "Read bounded task, generation, and retrieval inputs without active-engine text by default.",
     risk: "read",
@@ -2472,6 +2489,15 @@ const permissionSources = {
   chatgpt_bridge_request_adoption: ["writing_candidate_records", "candidate_proof_report_records", "user_input"],
   chatgpt_bridge_build_settlement_context: ["adopted_writing_records", "registered_project_sources", "user_input"],
   chatgpt_bridge_save_settlement_report: ["user_input", "adopted_writing_records", "adopted_writing_settlement_context_records"],
+  approval_queue_bridge_readiness_report: [
+    "approval_queue",
+    "writing_candidate_records",
+    "candidate_proof_report_records",
+    "candidate_proofing_context_records",
+    "gpt_writing_context_records",
+    "active_engine",
+    "compressed_rules",
+  ],
 };
 
 const backupRequiredTools = new Set([

@@ -168,6 +168,7 @@ const expectedTools = [
   "get_creative_task_status",
   "list_creative_task_types",
   "chatgpt_bridge_get_workbench_status",
+  "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
@@ -215,6 +216,7 @@ const readOnlyTools = new Set([
   "get_creative_task_status",
   "list_creative_task_types",
   "chatgpt_bridge_get_workbench_status",
+  "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
@@ -619,6 +621,17 @@ const schemaTypeFixtures = [
 
 const integerMaximumFixtures = [
   {
+    label: "approval_queue_bridge_readiness_report maxPreviewChars over maximum",
+    name: "approval_queue_bridge_readiness_report",
+    field: "maxPreviewChars",
+    expectedMaximum: 20000,
+    arguments: {
+      requestId: "approval_item_20260613-140000-14c00000",
+      maxPreviewChars: 20001,
+    },
+    expectedMessage: "maxPreviewChars must be an integer less than or equal to 20000.",
+  },
+  {
     label: "chatgpt_bridge_get_current_inputs maxChars over maximum",
     name: "chatgpt_bridge_get_current_inputs",
     field: "maxChars",
@@ -961,6 +974,13 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "approval_queue_bridge_readiness_report missing requestId",
+    name: "approval_queue_bridge_readiness_report",
+    field: "requestId",
+    arguments: {},
+    expectedMessage: "requestId is required.",
+  },
   {
     label: "get_adopted_writing_detail missing adoptedChapterId",
     name: "get_adopted_writing_detail",
@@ -1398,6 +1418,10 @@ const expectedDefaultMetadata = new Map([
     includeActiveEngineText: false,
     maxChars: 120000,
   }],
+  ["approval_queue_bridge_readiness_report", {
+    includeLineagePreview: false,
+    maxPreviewChars: 4000,
+  }],
   ["chatgpt_bridge_build_writing_context", {
     useCurrentInputs: true,
     chapterMode: "next_chapter",
@@ -1531,6 +1555,7 @@ const expectedIntegerMaximumMetadata = new Map([
   ["run_creative_task:limit", 100],
   ["run_creative_task:maxContextChars", 250000],
   ["chatgpt_bridge_get_current_inputs:maxChars", 250000],
+  ["approval_queue_bridge_readiness_report:maxPreviewChars", 20000],
   ["chatgpt_bridge_build_writing_context:maxContextChars", 250000],
   ["chatgpt_bridge_build_proofing_context:maxContextChars", 250000],
   ["chatgpt_bridge_build_settlement_context:maxContextChars", 250000],

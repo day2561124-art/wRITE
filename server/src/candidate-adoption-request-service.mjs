@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   createApprovalItem,
@@ -10,6 +11,7 @@ import {
 } from "./chat-output-candidate-service.mjs";
 import { getProofReportDetail } from "./candidate-proof-report-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { projectPaths } from "./project-paths.mjs";
 
 const riskLevels = new Set(["low", "medium", "high"]);
 const riskRanks = { low: 1, medium: 2, high: 3 };
@@ -76,6 +78,21 @@ function normalizeInput(input = {}) {
       "allow_without_proof",
     ),
     dryRun: optionalBoolean(input.dry_run ?? input.dryRun, false, "dry_run"),
+    requestSource: optionalText(
+      input.request_source ?? input.requestSource,
+      "request_source",
+      100,
+    ),
+    sourcePhase: optionalText(
+      input.source_phase ?? input.sourcePhase,
+      "source_phase",
+      100,
+    ),
+    verifiedBy: optionalText(
+      input.verified_by ?? input.verifiedBy,
+      "verified_by",
+      200,
+    ),
   };
 }
 
@@ -140,6 +157,57 @@ function candidateStatus(metadata) {
   };
 }
 
+async function fileHash(filePath) {
+  return createHash("sha256").update(await readFile(filePath)).digest("hex");
+}
+
+async function bridgeRequestMetadata(input, candidate, proof) {
+  if (input.requestSource !== "chatgpt_bridge") return {};
+  const lineage = {
+    writing_context_id: candidate.metadata.source_bundle_id || null,
+    source_bundle_id: candidate.metadata.source_bundle_id || null,
+    candidate_id: candidate.metadata.candidate_id,
+    proofing_context_id: proof?.metadata.proofing_context_id || null,
+    proof_report_id: proof?.metadata.proof_report_id || null,
+  };
+  return {
+    requestKind: "candidate_adoption",
+    source: "chatgpt_bridge",
+    sourcePhase: input.sourcePhase || "phase_14a_lite",
+    verifiedBy: input.verifiedBy || "phase_14b_e2e_dry_run",
+    bridgeCapabilities: {
+      can_approve: false,
+      can_confirm_adoption: false,
+      can_modify_active_engine: false,
+      can_modify_compressed_rules: false,
+      can_activate_engine: false,
+      can_restore: false,
+      can_rollback: false,
+    },
+    lineage,
+    safetySnapshot: {
+      active_engine_hash_at_request: await fileHash(projectPaths.activeEngine),
+      compressed_rules_hash_at_request: await fileHash(projectPaths.compressedRules),
+      candidate_hash_at_request: candidate.metadata.candidate_hash,
+      proof_report_hash_at_request: proof?.metadata.proof_report_hash ?? null,
+      protected_files_modified_at_request: false,
+      pending_engine_candidate_created: false,
+      adopted_chapter_created: false,
+      approval_confirmed: false,
+      adoption_confirmed: false,
+    },
+    operatorReadiness: {
+      requires_manual_review: true,
+      requires_candidate_review: true,
+      requires_proof_report_review: true,
+      requires_hash_check: true,
+      requires_clean_git_check: true,
+      next_action:
+        "Review this request in approval queue. Do not confirm unless candidate and proof report are both acceptable.",
+    },
+  };
+}
+
 function publicResult(item, candidate, proof, warnings = []) {
   return {
     ok: item.status.status !== "blocked",
@@ -154,6 +222,11 @@ function publicResult(item, candidate, proof, warnings = []) {
     blocked: item.status.status === "blocked",
     blocked_reason: item.blocked_reason,
     warnings,
+    source: item.source,
+    request_kind: item.request_kind,
+    lineage: item.lineage,
+    safety_snapshot: item.safety_snapshot,
+    operator_readiness: item.operator_readiness,
     candidate_status: candidateStatus(candidate.metadata),
     safety: safety(),
     next_action:
@@ -210,6 +283,7 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
       };
     }
 
+    const requestMetadata = await bridgeRequestMetadata(input, candidate, proof);
     const item = await createApprovalItem({
       actionType,
       targetType: "writing_candidate",
@@ -248,6 +322,7 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
       canExecuteWithoutUserConfirmation: false,
       createdBy: "candidate_adoption_request_service",
       safety: safety(),
+      ...requestMetadata,
     }, options);
     const paths = resolveWritingCandidatePaths(input.candidateId, options);
     const currentMetadata = JSON.parse(await readFile(paths.metadata, "utf8"));

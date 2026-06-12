@@ -38,6 +38,7 @@ const steps = [
   ["MCP creative task tools", ["tests/mcp/mcp-creative-task-tools.test.mjs"]],
   ["MCP ChatGPT bridge tools", ["tests/mcp/mcp-chatgpt-bridge-tools.test.mjs"]],
   ["MCP ChatGPT bridge E2E dry run", ["tests/mcp/mcp-chatgpt-bridge-e2e-dry-run.test.mjs"]],
+  ["MCP approval queue bridge readiness", ["tests/mcp/mcp-approval-queue-bridge-readiness.test.mjs"]],
   ["GPT writing context service", ["tests/creative/gpt-writing-context-service.test.mjs"]],
   ["MCP GPT writing context tools", ["tests/mcp/mcp-gpt-writing-context-tools.test.mjs"]],
   ["Chat output candidate service", ["tests/creative/chat-output-candidate-service.test.mjs"]],

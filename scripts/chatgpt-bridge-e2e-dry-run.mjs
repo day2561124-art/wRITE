@@ -11,6 +11,9 @@ import { fileURLToPath } from "node:url";
 import {
   chatgptBridgeTools,
 } from "../server/src/mcp-chatgpt-bridge-tools.mjs";
+import {
+  buildApprovalQueueReadinessReport,
+} from "../server/src/approval-queue-readiness-service.mjs";
 import { projectPaths } from "../server/src/project-paths.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -210,6 +213,15 @@ function summaryTemplate(fixtureRoot) {
       synthetic_adopted_writing_persisted: false,
       cleanup_completed: false,
     },
+    approval_queue_readiness: {
+      checked: false,
+      ok: false,
+      decision: null,
+      source: null,
+      lineage_complete: false,
+      can_approve: false,
+      can_confirm_adoption: false,
+    },
   };
 }
 
@@ -308,6 +320,39 @@ export async function runChatgptBridgeE2eDryRun(rawOptions = {}) {
     summary.steps.adoption_request_created = true;
     summary.steps.stopped_at_approval_queue = true;
     summary.artifacts.adoption_request_id = adoptionRequest.approval_item_id;
+    if (
+      adoptionRequest.source !== "chatgpt_bridge"
+      || !adoptionRequest.lineage?.candidate_id
+      || !adoptionRequest.lineage?.proof_report_id
+      || !adoptionRequest.lineage?.proofing_context_id
+      || !adoptionRequest.lineage?.writing_context_id
+    ) {
+      throw new Error("Adoption request bridge source or lineage is incomplete.");
+    }
+    const readiness = await buildApprovalQueueReadinessReport(
+      adoptionRequest.approval_item_id,
+      options,
+    );
+    summary.approval_queue_readiness = {
+      checked: true,
+      ok: readiness.ok,
+      decision: readiness.decision,
+      source: readiness.source,
+      lineage_complete: Object.values(readiness.lineage).every(
+        (entry) => entry.id && entry.exists,
+      ),
+      can_approve: readiness.safety.bridge_can_approve,
+      can_confirm_adoption: readiness.safety.bridge_can_confirm_adoption,
+    };
+    if (
+      readiness.ok !== true
+      || readiness.decision !== "ready_for_human_review"
+      || summary.approval_queue_readiness.lineage_complete !== true
+      || readiness.safety.bridge_can_approve !== false
+      || readiness.safety.bridge_can_confirm_adoption !== false
+    ) {
+      throw new Error("Approval queue readiness report did not pass.");
+    }
 
     if (rawOptions.includeSettlementFixture === true) {
       await createSyntheticAdoptedWriting(

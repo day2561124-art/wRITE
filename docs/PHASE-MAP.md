@@ -1,5 +1,18 @@
 # Phase Map
 
+## Phase 14C
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 14C | Operator Approval Queue Bridge Readiness | Bridge requests are traceable and read-only validated |
+
+- Bridge adoption requests include source, artifact lineage, protected hashes,
+  denied capabilities, and human-review requirements.
+- A read-only readiness report blocks missing artifacts, hash mismatches, or
+  requests that are no longer pending.
+- The report cannot approve, confirm adoption, activate, restore, or roll back.
+- `active_engine.md` and `compressed_rules.md` remain protected.
+
 ## Phase 14B
 
 | Phase | Name | Status |

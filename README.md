@@ -20,6 +20,12 @@ covered only with synthetic fixture data. It never confirms adoption, creates
 a pending engine candidate, or modifies the active engine or compressed rules.
 See [`docs/CHATGPT-MCP-BRIDGE-DRY-RUN.md`](docs/CHATGPT-MCP-BRIDGE-DRY-RUN.md).
 
+Phase 14C adds operator readiness checks for bridge-created adoption requests.
+Each request carries source, lineage, safety snapshots, and manual review
+requirements. The read-only readiness report cannot approve, confirm adoption,
+activate an engine, apply compressed rules, restore, or roll back. See
+[`docs/APPROVAL-QUEUE-BRIDGE-READINESS.md`](docs/APPROVAL-QUEUE-BRIDGE-READINESS.md).
+
 ## 快速開始
 
 推薦直接啟動本機工作台啟動器：

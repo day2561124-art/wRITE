@@ -1,5 +1,12 @@
 # MCP Client Config Templates
 
+## Phase 14C Approval Readiness
+
+The read-only `approval_queue_bridge_readiness_report` tool checks source,
+lineage, artifact existence, protected hashes, and denied bridge capabilities
+for a pending adoption request. It cannot approve, confirm adoption, activate
+an engine, apply compressed rules, restore, or roll back.
+
 ## Phase 14B Dry Run
 
 Phase 14B adds a deterministic E2E dry run for the same local MCP server:

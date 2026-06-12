@@ -111,6 +111,25 @@ async function main() {
   assert(summary.fixture.cleanup_completed === true, "Fixture cleanup was not completed.");
   assert(summary.artifacts.adoption_request_id, "Adoption request ID is missing.");
   assert(summary.artifacts.settlement_context_id, "Settlement context ID is missing.");
+  assert(summary.approval_queue_readiness.checked === true, "Readiness was not checked.");
+  assert(summary.approval_queue_readiness.ok === true, "Readiness was not ok.");
+  assert(
+    summary.approval_queue_readiness.decision === "ready_for_human_review",
+    "Readiness decision is wrong.",
+  );
+  assert(
+    summary.approval_queue_readiness.source === "chatgpt_bridge",
+    "Readiness source is wrong.",
+  );
+  assert(
+    summary.approval_queue_readiness.lineage_complete === true,
+    "Readiness lineage is incomplete.",
+  );
+  assert(summary.approval_queue_readiness.can_approve === false, "Bridge may approve.");
+  assert(
+    summary.approval_queue_readiness.can_confirm_adoption === false,
+    "Bridge may confirm adoption.",
+  );
   assert(
     Buffer.compare(await readFile(projectPaths.activeEngine), activeBefore) === 0,
     "Dry-run changed active_engine.md.",
