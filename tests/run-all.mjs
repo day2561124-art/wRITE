@@ -49,6 +49,7 @@ const steps = [
   ["Pending engine candidate review E2E", ["tests/engine/pending-engine-candidate-review-e2e.test.mjs"]],
   ["Engine activation confirm service", ["tests/engine/engine-activation-confirm-service.test.mjs"]],
   ["Engine activation confirm E2E", ["tests/engine/engine-activation-confirm-e2e.test.mjs"]],
+  ["Full creative workflow final smoke", ["tests/creative/full-creative-workflow-final-smoke.test.mjs"]],
   ["MCP pending engine candidate review tools", ["tests/mcp/mcp-pending-engine-candidate-review-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
