@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 14A-Lite
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 14A-Lite | ChatGPT MCP Bridge MVP | Implemented with guarded workflow facade |
+
+- Exposes nine `chatgpt_bridge_*` tools over the existing writing workflow.
+- Reads bounded current inputs and excludes active-engine text by default.
+- Saves only candidate, proof, approval-request, context, and settlement-report
+  artifacts through existing services.
+- Cannot generate locally, call an external LLM, confirm adoption, approve,
+  create a pending engine candidate, activate, restore, roll back, or clean up.
+- Does not modify `active_engine.md` or `compressed_rules.md`.
+
 ## Phase 13D-Lite
 
 | Phase | Name | Status |

@@ -167,6 +167,15 @@ const expectedTools = [
   "run_creative_task",
   "get_creative_task_status",
   "list_creative_task_types",
+  "chatgpt_bridge_get_workbench_status",
+  "chatgpt_bridge_get_current_inputs",
+  "chatgpt_bridge_build_writing_context",
+  "chatgpt_bridge_save_candidate",
+  "chatgpt_bridge_build_proofing_context",
+  "chatgpt_bridge_save_proof_report",
+  "chatgpt_bridge_request_adoption",
+  "chatgpt_bridge_build_settlement_context",
+  "chatgpt_bridge_save_settlement_report",
   "build_gpt_writing_context",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
@@ -205,6 +214,8 @@ const readOnlyTools = new Set([
   "query_mcp_audit",
   "get_creative_task_status",
   "list_creative_task_types",
+  "chatgpt_bridge_get_workbench_status",
+  "chatgpt_bridge_get_current_inputs",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
   "get_writing_candidate_detail",
@@ -378,6 +389,36 @@ const enumConstraintFixtures = [
     ["request_pending_engine_candidate_activation", "riskLevel", {
       pendingEngineCandidateId: "engine_candidate_20260612-000000-00000000",
     }, "medium, high"],
+    ["chatgpt_bridge_build_writing_context", "chapterMode", {}, "next_chapter, specific_scene, rewrite_candidate"],
+    ["chatgpt_bridge_build_writing_context", "outputMode", {}, "chat_only, candidate_save_later"],
+    ["chatgpt_bridge_save_candidate", "source", {
+      chatOutputText: "fixture",
+    }, "chatgpt, gpt, manual_paste"],
+    ["chatgpt_bridge_build_proofing_context", "proofingMode", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }, "full, canon_only, style_only, continuity_only"],
+    ["chatgpt_bridge_save_proof_report", "verdict", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "pass, needs_revision, blocked"],
+    ["chatgpt_bridge_save_proof_report", "severity", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "P0, P1, P2, P3, none"],
+    ["chatgpt_bridge_save_proof_report", "source", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      proofReportText: "fixture",
+    }, "chatgpt, gpt, manual_paste"],
+    ["chatgpt_bridge_request_adoption", "riskLevel", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }, "low, medium, high"],
+    ["chatgpt_bridge_build_settlement_context", "settlementMode", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }, "full, facts_only, minimal"],
+    ["chatgpt_bridge_save_settlement_report", "source", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+      settlementReportText: "fixture",
+    }, "chatgpt, gpt, manual_paste"],
   ].map(([name, field, baseArguments, values]) => ({
     label: `${name} invalid ${field}`,
     name,
@@ -577,6 +618,30 @@ const schemaTypeFixtures = [
 ];
 
 const integerMaximumFixtures = [
+  {
+    label: "chatgpt_bridge_get_current_inputs maxChars over maximum",
+    name: "chatgpt_bridge_get_current_inputs",
+    field: "maxChars",
+    expectedMaximum: 250000,
+    arguments: { maxChars: 250001 },
+    expectedMessage: "maxChars must be an integer less than or equal to 250000.",
+  },
+  ...[
+    ["chatgpt_bridge_build_writing_context", {}],
+    ["chatgpt_bridge_build_proofing_context", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }],
+    ["chatgpt_bridge_build_settlement_context", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }],
+  ].map(([name, baseArguments]) => ({
+    label: `${name} maxContextChars over maximum`,
+    name,
+    field: "maxContextChars",
+    expectedMaximum: 250000,
+    arguments: { ...baseArguments, maxContextChars: 250001 },
+    expectedMessage: "maxContextChars must be an integer less than or equal to 250000.",
+  })),
   {
     label: "list_adopted_writings limit over maximum",
     name: "list_adopted_writings",
@@ -917,6 +982,22 @@ const requiredConstraintFixtures = [
       settlementReportText: "fixture",
     }],
     ["save_chat_output_as_settlement_report", "settlementReportText", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }],
+    ["chatgpt_bridge_save_candidate", "chatOutputText", {}],
+    ["chatgpt_bridge_build_proofing_context", "candidateId", {}],
+    ["chatgpt_bridge_save_proof_report", "candidateId", {
+      proofReportText: "fixture",
+    }],
+    ["chatgpt_bridge_save_proof_report", "proofReportText", {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+    }],
+    ["chatgpt_bridge_request_adoption", "candidateId", {}],
+    ["chatgpt_bridge_build_settlement_context", "adoptedChapterId", {}],
+    ["chatgpt_bridge_save_settlement_report", "adoptedChapterId", {
+      settlementReportText: "fixture",
+    }],
+    ["chatgpt_bridge_save_settlement_report", "settlementReportText", {
       adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
     }],
   ].map(([name, field, argumentsValue]) => ({
@@ -1311,6 +1392,58 @@ const expectedDefaultMetadata = new Map([
     allowWithoutProof: false,
     allowBaseHashMismatch: false,
   }],
+  ["chatgpt_bridge_get_current_inputs", {
+    includeText: true,
+    includeActiveEngineMetadata: true,
+    includeActiveEngineText: false,
+    maxChars: 120000,
+  }],
+  ["chatgpt_bridge_build_writing_context", {
+    useCurrentInputs: true,
+    chapterMode: "next_chapter",
+    outputMode: "chat_only",
+    includeActiveEngine: false,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["chatgpt_bridge_save_candidate", {
+    source: "chatgpt",
+    dryRun: false,
+  }],
+  ["chatgpt_bridge_build_proofing_context", {
+    proofingMode: "full",
+    includeCandidateContent: true,
+    includeActiveEngine: false,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["chatgpt_bridge_save_proof_report", {
+    verdict: "needs_revision",
+    severity: "none",
+    source: "chatgpt",
+    dryRun: false,
+  }],
+  ["chatgpt_bridge_request_adoption", {
+    allowWithoutProof: false,
+    dryRun: false,
+  }],
+  ["chatgpt_bridge_build_settlement_context", {
+    settlementMode: "full",
+    includeAdoptedContent: true,
+    includeActiveEngine: false,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["chatgpt_bridge_save_settlement_report", {
+    source: "chatgpt",
+    dryRun: false,
+  }],
   ["build_gpt_writing_context", {
     chapterMode: "next_chapter",
     outputMode: "chat_only",
@@ -1397,6 +1530,10 @@ const expectedIntegerMaximumMetadata = new Map([
   ["compress_error_rules:minCount", 1000],
   ["run_creative_task:limit", 100],
   ["run_creative_task:maxContextChars", 250000],
+  ["chatgpt_bridge_get_current_inputs:maxChars", 250000],
+  ["chatgpt_bridge_build_writing_context:maxContextChars", 250000],
+  ["chatgpt_bridge_build_proofing_context:maxContextChars", 250000],
+  ["chatgpt_bridge_build_settlement_context:maxContextChars", 250000],
   ["build_gpt_writing_context:maxContextChars", 250000],
   ["list_gpt_writing_context_bundles:limit", 100],
   ["get_writing_candidate_detail:maxContentChars", 50000],
@@ -3513,6 +3650,13 @@ async function runSmokeTest(options) {
     makeRequest(postUnknownArgumentPingRequestId, "ping", {}),
     options.verbose,
   );
+  // Keep the broad schema matrix below from accidentally becoming a dispatch
+  // queue saturation test as the public tool registry grows.
+  const earlyPostUnknownArgumentPing = await waitForResponse(
+    responses,
+    postUnknownArgumentPingRequestId,
+    10_000,
+  );
   const firstEnumConstraintRequestId = postUnknownArgumentPingRequestId + 1;
   for (const [index, fixture] of enumConstraintFixtures.entries()) {
     sendMessage(
@@ -4040,11 +4184,7 @@ async function runSmokeTest(options) {
       waitForResponse(responses, firstUnknownArgumentRequestId + index, 10_000)
     )),
   );
-  const postUnknownArgumentPing = await waitForResponse(
-    responses,
-    postUnknownArgumentPingRequestId,
-    10_000,
-  );
+  const postUnknownArgumentPing = earlyPostUnknownArgumentPing;
   const enumConstraintCalls = await Promise.all(
     enumConstraintFixtures.map((_, index) => (
       waitForResponse(responses, firstEnumConstraintRequestId + index, 10_000)

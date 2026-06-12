@@ -1,5 +1,17 @@
 # MCP Client Config Templates
 
+## Phase 14A-Lite ChatGPT Bridge
+
+The local MCP server now exposes `chatgpt_bridge_*` tools for the guarded
+Writer Workbench flow. Configure the same local `server/src/mcp-server.mjs`
+entrypoint shown below; no external API key or model endpoint is used.
+
+The bridge can read bounded workbench inputs and create low-risk workflow
+artifacts. Adoption still requires explicit confirmation in the Writer
+Workbench approval queue. The bridge cannot approve, confirm adoption, modify
+the active engine or compressed rules, activate, restore, roll back, or execute
+cleanup.
+
 本目錄提供本地 MCP client 設定檔範本。
 
 ## Files

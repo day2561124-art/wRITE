@@ -36,6 +36,7 @@ const steps = [
   ["MCP approval request E2E", ["tests/mcp/mcp-approval-request-e2e.test.mjs"]],
   ["Creative task orchestrator service", ["tests/creative/creative-task-orchestrator-service.test.mjs"]],
   ["MCP creative task tools", ["tests/mcp/mcp-creative-task-tools.test.mjs"]],
+  ["MCP ChatGPT bridge tools", ["tests/mcp/mcp-chatgpt-bridge-tools.test.mjs"]],
   ["GPT writing context service", ["tests/creative/gpt-writing-context-service.test.mjs"]],
   ["MCP GPT writing context tools", ["tests/mcp/mcp-gpt-writing-context-tools.test.mjs"]],
   ["Chat output candidate service", ["tests/creative/chat-output-candidate-service.test.mjs"]],
