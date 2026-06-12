@@ -246,8 +246,51 @@ function switchView(viewName) {
 async function refreshWriterWorkbenchState() {
   const payload = await api("/api/writer-workbench/state");
   const pre = $("#writer-workbench-state");
-  if (!pre) return;
-  pre.textContent = JSON.stringify(payload.state, null, 2);
+  const timeline = $("#workbench-timeline");
+  const nextPanel = $("#workbench-next-action");
+  const riskPanel = $("#workbench-risk");
+  const approvalPanel = $("#workbench-approval");
+  const reviewPanel = $("#workbench-review");
+  if (!pre || !timeline || !nextPanel || !riskPanel) return;
+  const state = payload.state ?? {};
+  // render timeline
+  const steps = (state.workflow?.steps ?? []);
+  timeline.innerHTML = steps.map((s) => `
+    <div class="workflow-step">
+      <div class="status-badge status-${escapeHtml(s.status)}">${escapeHtml(s.status)}</div>
+      <div class="workflow-step-label">${escapeHtml(s.label)}</div>
+      <div class="workflow-step-meta">${escapeHtml(s.entity_id ?? "")}${s.blocked_reason ? ` · ${escapeHtml(s.blocked_reason)}` : ""}</div>
+    </div>
+  `).join("");
+
+  // next action
+  const nextActions = state.next_actions ?? [];
+  const suggested = nextActions.find((a) => a.enabled);
+  nextPanel.innerHTML = suggested
+    ? `<div class="next-action-panel"><strong>下一步：</strong>${escapeHtml(suggested.label)} <span class="next-action-hint">${escapeHtml(suggested.enabled ? "可執行" : "不可執行")}</span></div>`
+    : `<div class="next-action-panel"><strong>下一步：</strong>無建議</div>`;
+
+  // risk panel
+  const risk = state.risk ?? {};
+  riskPanel.innerHTML = `
+    <div class="risk-summary">
+      <div>direct_activation_allowed: <strong>${risk.direct_activation_allowed}</strong></div>
+      <div>activation_requires_approval: <strong>${risk.activation_requires_approval}</strong></div>
+      <div>base_hash_mismatch: <strong>${risk.base_hash_mismatch}</strong></div>
+      <div>active_engine: <strong>${escapeHtml(state.active_engine?.sha256 ?? state.active_engine?.hash ?? "")}</strong></div>
+    </div>
+  `;
+
+  // approval panel
+  approvalPanel.innerHTML = `<div>Approval queue: ${state.approval_queue?.pending_count ?? 0} pending</div>`;
+
+  // review/diff panel (show minimal info)
+  reviewPanel.innerHTML = state.blocked?.is_blocked
+    ? `<div class="warning-panel">目前卡住：${escapeHtml(state.blocked.reason ?? "")}</div>`
+    : `<div>未被封鎖</div>`;
+
+  // show raw JSON for debug (hidden by default)
+  pre.textContent = JSON.stringify(state, null, 2);
 }
 
 function bindWriterWorkbenchActions() {

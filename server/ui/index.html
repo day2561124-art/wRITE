@@ -296,7 +296,14 @@
               </div>
               <div class="panel-body">
                 <p>此面板以 read-only 聚合後端狀態，並提供 minimal action 按鈕以呼叫安全的後端 glue endpoints。</p>
-                <pre id="writer-workbench-state" class="document-viewer">尚未載入</pre>
+                <div id="writer-workbench-panels">
+                  <div id="workbench-timeline" class="workflow-timeline" aria-live="polite"></div>
+                  <div id="workbench-next-action" class="next-action-panel"></div>
+                  <div id="workbench-risk" class="risk-panel"></div>
+                  <div id="workbench-approval" class="approval-panel"></div>
+                  <div id="workbench-review" class="review-panel"></div>
+                </div>
+                <pre id="writer-workbench-state" class="document-viewer" hidden>尚未載入</pre>
                 <div class="form-actions">
                   <button id="writer-build-context" class="button" type="button">建立 Context</button>
                   <button id="writer-save-candidate" class="button" type="button">保存候選</button>

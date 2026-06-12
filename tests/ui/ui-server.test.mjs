@@ -323,6 +323,22 @@ async function main() {
     const wbPayload = await wbRes.json();
     assert(wbPayload.ok, "/api/writer-workbench/state payload missing ok=true");
     assert(wbPayload.state.safety, "writer-workbench state missing safety metadata");
+    // Phase 9B additional assertions
+    const wbState = wbPayload.state;
+    assert(Array.isArray(wbState.workflow?.steps), "workflow.steps must be an array");
+    const requiredKeys = ["writing_context","chat_output_candidate","proof_report","adoption_request","settlement_report","pending_engine_candidate","engine_candidate_review","activation_request"];
+    const stepKeys = (wbState.workflow.steps || []).map((s) => s.key);
+    requiredKeys.forEach((k) => { if (!stepKeys.includes(k)) throw new Error(`workflow missing step: ${k}`); });
+    assert(typeof wbState.blocked === "object", "state.blocked must exist");
+    assert(Array.isArray(wbState.next_actions), "state.next_actions must exist");
+    assert(wbState.risk && wbState.risk.direct_activation_allowed === false, "risk.direct_activation_allowed must be false");
+    assert(wbState.risk && wbState.risk.activation_requires_approval === true, "risk.activation_requires_approval must be true");
+    assert(wbState.safety && wbState.safety.approval_required_for_adoption === true, "safety.approval_required_for_adoption must be true");
+    assert(wbState.safety && wbState.safety.approval_required_for_activation === true, "safety.approval_required_for_activation must be true");
+    // Ensure state endpoint is read-only: active_engine unchanged
+    const activeEngineAfter = await readFile(activeEnginePath, "utf8");
+    const activeEngineHashAfter = createHash("sha256").update(activeEngineAfter).digest("hex");
+    assert(activeEngineHashAfter === activeEngineHashBefore, "active_engine file changed after calling state endpoint");
 
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));
     assert(visualsResult.response.ok && visualsResult.payload.ok, "Visuals API failed.");

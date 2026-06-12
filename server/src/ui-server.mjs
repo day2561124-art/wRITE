@@ -1241,21 +1241,186 @@ async function handleRequest(request, response) {
         listPendingCandidates(),
         listApprovalItems(),
       ]);
+      // Build a workflow status mapper according to Phase 9B rules. This is read-only.
+      function step(key, label, status, extras = {}) {
+        return { key, label, status, entity_id: extras.entity_id ?? null, summary: extras.summary ?? null, blocked_reason: extras.blocked_reason ?? null, next_action: extras.next_action ?? null, requires_approval: !!extras.requires_approval, risk_level: extras.risk_level ?? "low", modifies_active_engine: !!extras.modifies_active_engine };
+      }
+
+      const latest = {
+        writing_context_bundle: bundles[0] ?? null,
+        writing_candidate: candidates[0] ?? null,
+        proof_report: proofs[0] ?? null,
+        adoption_request: approvals.find((a) => a.action_type === 'adopt_writing_candidate') ?? null,
+        adopted_writing: adopted[0] ?? null,
+        settlement_report: settlements[0] ?? null,
+        pending_engine_candidate: pending[0] ?? null,
+        engine_candidate_review: null,
+        activation_request: approvals.find((a) => a.action_type === 'activate_engine_candidate') ?? null,
+      };
+
+      // Derive statuses for each workflow step
+      const steps = [];
+
+      // writing_context
+      if (!latest.writing_context_bundle) {
+        steps.push(step("writing_context", "Writing Context", "missing", { next_action: "build_writing_context", safety_note: "Does not generate text or modify active_engine." }));
+      } else {
+        steps.push(step("writing_context", "Writing Context", "completed", { entity_id: latest.writing_context_bundle.bundle_id ?? null }));
+      }
+
+      // chat_output_candidate
+      if (!latest.writing_candidate) {
+        steps.push(step("chat_output_candidate", "Chat Output Candidate", "missing", { next_action: "save_chat_output_candidate" }));
+      } else {
+        steps.push(step("chat_output_candidate", "Chat Output Candidate", "completed", { entity_id: latest.writing_candidate.candidate_id ?? null }));
+      }
+
+      // proof_report
+      if (!latest.writing_candidate) {
+        steps.push(step("proof_report", "Proof Report", "blocked", { blocked_reason: "尚未保存正文候選，請先保存候選稿。", resolution_hint: "先貼上 GPT 聊天欄正文並保存候選稿。" }));
+      } else if (!latest.proof_report) {
+        steps.push(step("proof_report", "Proof Report", "missing", { next_action: "save_proof_report" }));
+      } else if (latest.proof_report.status === "blocked") {
+        steps.push(step("proof_report", "Proof Report", "blocked", { blocked_reason: "驗稿報告為 blocked。", resolution_hint: "請修正驗稿內容並保存新的 proof report。" }));
+      } else {
+        steps.push(step("proof_report", "Proof Report", "completed", { entity_id: latest.proof_report.proof_id ?? null }));
+      }
+
+      // adoption_request
+      const adoptionApproval = latest.adoption_request;
+      if (!latest.proof_report) {
+        steps.push(step("adoption_request", "Adoption Request", "blocked", { blocked_reason: "候選稿尚未驗稿，請先建立 proof report。" }));
+      } else if (!adoptionApproval) {
+        steps.push(step("adoption_request", "Adoption Request", "ready", { next_action: "request_adoption", requires_approval: true }));
+      } else if (adoptionApproval.status === "pending") {
+        steps.push(step("adoption_request", "Adoption Request", "pending_approval", { entity_id: adoptionApproval.item_id ?? null }));
+      } else if (adoptionApproval.status === "confirmed") {
+        steps.push(step("adoption_request", "Adoption Request", "confirmed", { entity_id: adoptionApproval.item_id ?? null }));
+      } else if (adoptionApproval.status === "rejected") {
+        steps.push(step("adoption_request", "Adoption Request", "rejected", { entity_id: adoptionApproval.item_id ?? null }));
+      } else {
+        steps.push(step("adoption_request", "Adoption Request", "deferred", { entity_id: adoptionApproval.item_id ?? null }));
+      }
+
+      // adopted_writing
+      if (!latest.adopted_writing) {
+        // If adoption request not confirmed, blocked
+        if (!adoptionApproval || adoptionApproval.status !== "confirmed") {
+          steps.push(step("adopted_writing", "Adopted Writing", "blocked", { blocked_reason: "採用尚未確認，請在 Approval Queue 完成採用。" }));
+        } else {
+          steps.push(step("adopted_writing", "Adopted Writing", "blocked", { blocked_reason: "採用已確認，但尚未建立 adopted writing。" }));
+        }
+      } else {
+        steps.push(step("adopted_writing", "Adopted Writing", "completed", { entity_id: latest.adopted_writing.chapter_id ?? null }));
+      }
+
+      // settlement_context
+      if (!latest.adopted_writing) {
+        steps.push(step("settlement_context", "Settlement Context", "blocked", { blocked_reason: "尚未建立 adopted writing，無法建立章節結算。" }));
+      } else if (!latest.settlement_report) {
+        steps.push(step("settlement_context", "Settlement Context", "ready", { next_action: "build_settlement_context" }));
+      } else {
+        steps.push(step("settlement_context", "Settlement Context", "completed", { entity_id: latest.settlement_report.settlement_id ?? null }));
+      }
+
+      // settlement_report
+      if (!latest.adopted_writing) {
+        steps.push(step("settlement_report", "Settlement Report", "blocked", { blocked_reason: "章節結算尚未開始。" }));
+      } else if (!latest.settlement_report) {
+        steps.push(step("settlement_report", "Settlement Report", "ready", { next_action: "save_settlement_report" }));
+      } else {
+        steps.push(step("settlement_report", "Settlement Report", "completed", { entity_id: latest.settlement_report.report_id ?? null }));
+      }
+
+      // pending_engine_candidate
+      if (!latest.settlement_report) {
+        steps.push(step("pending_engine_candidate", "Pending Engine Candidate", "blocked", { blocked_reason: "尚未保存 settlement report，無法建立 pending engine candidate。" }));
+      } else if (!latest.pending_engine_candidate) {
+        steps.push(step("pending_engine_candidate", "Pending Engine Candidate", "ready", { next_action: "create_pending_engine_candidate" }));
+      } else if (latest.pending_engine_candidate.status === "pending_review") {
+        steps.push(step("pending_engine_candidate", "Pending Engine Candidate", "completed", { entity_id: latest.pending_engine_candidate.candidate_id ?? null }));
+      } else if (latest.pending_engine_candidate.status === "activated") {
+        steps.push(step("pending_engine_candidate", "Pending Engine Candidate", "completed", { entity_id: latest.pending_engine_candidate.candidate_id ?? null }));
+      } else {
+        steps.push(step("pending_engine_candidate", "Pending Engine Candidate", "ready", { entity_id: latest.pending_engine_candidate.candidate_id ?? null }));
+      }
+
+      // engine_candidate_review
+      // For now engine_candidate_review is not constructed by services; we inspect pending candidate
+      if (!latest.pending_engine_candidate) {
+        steps.push(step("engine_candidate_review", "Engine Candidate Review", "blocked", { blocked_reason: "尚未建立 pending engine candidate。" }));
+      } else {
+        // check base_hash_mismatch if available on pending candidate
+        const baseHashMismatch = !!latest.pending_engine_candidate.base_hash_mismatch;
+        if (baseHashMismatch) {
+          steps.push(step("engine_candidate_review", "Engine Candidate Review", "blocked", { blocked_reason: "pending engine candidate 的 base hash 與 active_engine 不一致。", resolution_hint: "請重新 review 或人工處理。", risk_level: "high" }));
+        } else {
+          steps.push(step("engine_candidate_review", "Engine Candidate Review", "completed", { entity_id: latest.pending_engine_candidate.candidate_id ?? null }));
+        }
+      }
+
+      // activation_request
+      const activationApproval = latest.activation_request;
+      if (!latest.pending_engine_candidate) {
+        steps.push(step("activation_request", "Activation Request", "blocked", { blocked_reason: "尚未建立 pending engine candidate。" }));
+      } else if (activationApproval && activationApproval.status === "pending") {
+        steps.push(step("activation_request", "Activation Request", "pending_approval", { entity_id: activationApproval.item_id ?? null, requires_approval: true }));
+      } else if (activationApproval && activationApproval.status === "confirmed") {
+        steps.push(step("activation_request", "Activation Request", "confirmed", { entity_id: activationApproval.item_id ?? null }));
+      } else if (activationApproval && activationApproval.status === "rejected") {
+        steps.push(step("activation_request", "Activation Request", "rejected", { entity_id: activationApproval.item_id ?? null }));
+      } else {
+        steps.push(step("activation_request", "Activation Request", "ready", { next_action: "request_activation", requires_approval: true }));
+      }
+
+      // activation_confirm
+      const activationLogs = await listActivationLogs();
+      if (activationLogs.length > 0) {
+        steps.push(step("activation_confirm", "Activation Confirm", "completed", { entity_id: activationLogs[0].log_id ?? null }));
+      } else if (activationApproval && activationApproval.status === "pending") {
+        steps.push(step("activation_confirm", "Activation Confirm", "pending_approval", { blocked_reason: "Activation request pending approval." }));
+      } else {
+        steps.push(step("activation_confirm", "Activation Confirm", "blocked", { blocked_reason: "尚未有 activation request confirmed。" }));
+      }
+
+      // top-level blocked summary
+      const blockedEntry = steps.find((s) => s.status === "blocked");
+      const isBlocked = !!blockedEntry;
+
+      // next_actions suggested list
+      const next_actions = [
+        { key: "build_writing_context", label: "Build GPT Writing Context", enabled: !latest.writing_context_bundle, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/build-writing-context" },
+        { key: "save_chat_output_candidate", label: "Save Chat Output Candidate", enabled: !!latest.writing_candidate === false, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/save-candidate" },
+        { key: "save_proof_report", label: "Save Proof Report", enabled: !!latest.writing_candidate && !latest.proof_report, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/save-proof-report" },
+        { key: "request_adoption", label: "Request Adoption", enabled: !!latest.proof_report && !adoptionApproval, requires_approval: true, risk_level: "medium", endpoint: "/api/writer-workbench/request-adoption" },
+        { key: "go_to_approval_queue", label: "Go to Approval Queue", enabled: approvals.length > 0, requires_approval: false, risk_level: "low", endpoint: "/ui/approval-queue" },
+      ];
+
+      // risk summary
+      const risk = {
+        base_hash_mismatch: !!(latest.pending_engine_candidate && latest.pending_engine_candidate.base_hash_mismatch),
+        pending_engine_candidate_risk: latest.pending_engine_candidate?.risk_level ?? null,
+        activation_requires_approval: true,
+        direct_activation_allowed: false,
+      };
+
       sendJson(response, 200, {
         ok: true,
         state: {
           active_engine: active,
-          latest: {
-            writing_context_bundle: bundles[0] ?? null,
-            writing_candidate: candidates[0] ?? null,
-            proof_report: proofs[0] ?? null,
-            adoption_request: approvals.find((a) => a.action_type === 'adopt_writing_candidate') ?? null,
-            adopted_writing: adopted[0] ?? null,
-            settlement_report: settlements[0] ?? null,
-            pending_engine_candidate: pending[0] ?? null,
-            engine_candidate_review: null,
-            activation_request: approvals.find((a) => a.action_type === 'activate_engine_candidate') ?? null,
+          workflow: {
+            current_step: steps.find((s) => s.status === "in_progress")?.key ?? steps.find((s) => s.status === "missing")?.key ?? "writing_context",
+            overall_status: isBlocked ? "blocked" : "idle",
+            steps,
           },
+          blocked: {
+            is_blocked: isBlocked,
+            blocked_step: blockedEntry?.key ?? null,
+            reason: blockedEntry?.blocked_reason ?? null,
+            resolution_hint: blockedEntry?.resolution_hint ?? null,
+          },
+          next_actions,
+          risk,
           approval_queue: {
             pending_count: approvals.length,
             items: approvals,

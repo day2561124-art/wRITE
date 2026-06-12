@@ -276,6 +276,40 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Writer Workbench UI enhancements */
+.workflow-timeline {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.workflow-step {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.status-missing { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber); }
+.status-ready { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.status-completed { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
+.status-blocked { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); }
+.status-pending_approval { background: #fff7ed; color: #a26010; border: 1px solid #a26010; }
+.next-action-panel, .risk-panel, .approval-panel, .review-panel {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.risk-summary div { margin-bottom: 6px; }
+.warning-panel { background: var(--amber-soft); padding: 8px; border-left: 4px solid var(--amber); }
+
 @media (max-width: 900px) {
   .approval-toolbar,
   .approval-layout,
