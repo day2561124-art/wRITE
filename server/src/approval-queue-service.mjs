@@ -50,6 +50,7 @@ const allowedActions = new Set([
   "neural_trace_missing",
   "approve_cleanup_proposal",
   "execute_cleanup_proposal",
+  "restore_from_backup",
 ]);
 
 function json(value) {

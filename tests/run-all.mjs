@@ -23,6 +23,7 @@ const steps = [
   ["Settlement workflow service", ["tests/workflow/settlement-workflow-service.test.mjs"]],
   ["Approval queue service", ["tests/approval/approval-queue-service.test.mjs"]],
   ["Cleanup proposal service", ["tests/cleanup/cleanup-proposal-service.test.mjs"]],
+  ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
   ["Full workflow smoke test", ["tests/e2e/full-workflow-smoke.test.mjs"]],
   ["MCP read-only tools", ["tests/mcp/mcp-readonly-tools.test.mjs"]],
   ["MCP write-low-risk tools", ["tests/mcp/mcp-write-low-risk-tools.test.mjs"]],

@@ -77,6 +77,10 @@ export const projectPaths = {
   cleanupStaging: path.join(projectRoot, "data", "cleanup", "staging"),
   cleanupTombstones: path.join(projectRoot, "data", "cleanup", "tombstones"),
   pendingErrorReports: path.join(projectRoot, "data", "feedback_db", "pending_error_reports.jsonl"),
+  backupsRoot: path.join(projectRoot, "data", "backups"),
+  projectBackups: path.join(projectRoot, "data", "backups", "project_backups"),
+  backupExports: path.join(projectRoot, "data", "backups", "exports"),
+  restorePreviews: path.join(projectRoot, "data", "backups", "restore_previews"),
 };
 
 function isInside(basePath, targetPath) {
