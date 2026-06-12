@@ -21,6 +21,7 @@ const writingCardPath = path.join(rootDir, "data", "writing_policy_db", "active_
 const proofingCardPath = path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md");
 const feedbackLoopDir = path.join(rootDir, "data", "feedback_loop");
 const backupsDir = path.join(rootDir, "data", "backups");
+const currentPromptPath = path.join(rootDir, "data", "outputs", "current_prompt.md");
 const pendingCandidatesDir = path.join(rootDir, "data", "canon_db", "pending_engine_candidates");
 const engineSnapshotsDir = path.join(rootDir, "data", "canon_db", "engine_snapshots");
 const engineArchiveDir = path.join(rootDir, "data", "canon_db", "archive");
@@ -145,6 +146,7 @@ async function main() {
   const proofingCardBefore = await readOptionalBuffer(proofingCardPath);
   const feedbackLoopBefore = new Set(await readOptionalDirectory(feedbackLoopDir));
   const backupsBefore = new Set(await readOptionalDirectory(backupsDir));
+  const currentPromptBefore = await readOptionalBuffer(currentPromptPath);
   const snapshotsBefore = new Set(await readOptionalDirectory(engineSnapshotsDir));
   const archiveBefore = new Set(await readOptionalDirectory(engineArchiveDir));
   const activationLogBefore = await readOptionalBuffer(activationLogPath);
@@ -250,11 +252,26 @@ async function main() {
     assert(indexText.includes('id="activation-log-list"'), "UI index is missing the activation log.");
     assert(indexText.includes('id="visual-upload-form"'), "UI index is missing the visual upload form.");
     assert(indexText.includes('data-view-panel="writer-workbench"'), "UI index is missing the writer workbench view.");
+    assert(indexText.includes("今日下一步"), "Overview is missing the operator next-step card.");
+    assert(indexText.includes("本輪流程進度"), "Overview is missing workflow progress guidance.");
+    assert(indexText.includes("你現在在："), "Writer Workbench is missing the current-stage guidance.");
+    assert(indexText.includes("visual_index records"), "Visual gallery is missing index diagnostics.");
+    assert(indexText.includes("asset png files"), "Visual gallery is missing PNG diagnostics.");
+    assert(indexText.includes("PNG 圖片本體不進 Git"), "Visual gallery is missing Git-ignore guidance.");
+    assert(
+      indexText.includes("神經模組目前是輔助 trace，不是正文生成必要條件"),
+      "Neural view is missing the optional-module explanation.",
+    );
+    assert(indexText.includes("此頁只讀，不會修改正式資料"), "Library is missing its read-only notice.");
+    assert(
+      indexText.includes("記錄回饋不會自動修改正史"),
+      "Activity view is missing Feedback Learning canon safety guidance.",
+    );
     assert(indexText.includes('寫作工作台'), "UI index is missing the writer workbench heading.");
     assert(indexText.includes('id="writer-workbench-state"'), "UI index is missing the writer workbench state element.");
     assert(indexText.includes('id="feedback-learning-panel"'), "UI index is missing the Feedback Learning panel.");
-    assert(indexText.includes("This panel is read-only"), "Feedback Learning panel is missing its read-only warning.");
-    assert(indexText.includes("Review pending updates in Approval Queue"), "Feedback Learning panel is missing its Approval Queue guidance.");
+    assert(indexText.includes("此面板只讀"), "Feedback Learning panel is missing its read-only warning.");
+    assert(indexText.includes("待確認更新請到確認佇列處理"), "Feedback Learning panel is missing its Approval Queue guidance.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -270,6 +287,9 @@ async function main() {
     assert(appText.includes("handleWorkflowTask"), "UI app.js is missing draft task handling.");
     assert(appText.includes("refreshWorkflowState"), "UI app.js is missing workflow state loading.");
     assert(appText.includes("renderFeedbackLearning"), "UI app.js is missing Feedback Learning rendering.");
+    assert(appText.includes("primaryNextStep"), "UI app.js is missing operator next-step derivation.");
+    assert(appText.includes("operatorStatusLabel"), "UI app.js is missing localized status rendering.");
+    assert(appText.includes("可稍後處理"), "Approval Queue is missing deferred grouping guidance.");
     assert(
       appText.includes("/api/writer-workbench/feedback-learning-state"),
       "UI app.js is missing Feedback Learning state loading.",
@@ -334,6 +354,12 @@ async function main() {
     assert(visuals && visuals.indexPath === "data/visual_db/visual_index.jsonl", "State API did not expose visual index metadata.");
     assert(Array.isArray(visuals.items), "State API visual items are not an array.");
     assert(visuals.count > 0, "State API visual gallery did not load reindexed records.");
+    assert(
+      visuals.diagnostics?.indexRecords === visuals.count,
+      "Visual diagnostics index count does not match the gallery count.",
+    );
+    assert(visuals.diagnostics?.pngFiles > 0, "Visual diagnostics did not count PNG assets.");
+    assert(visuals.diagnostics?.gitIgnored === true, "Visual diagnostics did not report ignored assets.");
     assert(visuals.categories.length >= 4, "State API visual categories were not exposed.");
 
     // writer-workbench aggregated state endpoint
@@ -409,6 +435,12 @@ async function main() {
       JSON.stringify(await readOptionalDirectory(backupsDir))
         === JSON.stringify([...backupsBefore].sort()),
       "Feedback API created backup runtime artifacts.",
+    );
+    const currentPromptAfter = await readOptionalBuffer(currentPromptPath);
+    assert(
+      currentPromptAfter.exists === currentPromptBefore.exists
+        && currentPromptAfter.content.equals(currentPromptBefore.content),
+      "Read-only UI state created or changed data/outputs/current_prompt.md.",
     );
     const unsafeFeedbackState = await rawHttpStatus(
       port,

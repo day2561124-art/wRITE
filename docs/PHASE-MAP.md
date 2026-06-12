@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 13C-Lite
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 13C-Lite | Operator UX Polish | Human-readable UI and read-only diagnostics |
+
+- Adds localized workflow states, today's next step, progress guidance, text badges,
+  empty states, and layered risk explanations.
+- Adds read-only visual asset diagnostics and clearer optional neural trace status.
+- Groups Approval Queue items by main-flow priority, optional work, and history.
+- Does not add apply, approval confirm, restore execution, or rollback execution.
+- Does not modify `active_engine` or `compressed_rules`.
+- Visual asset reindex was completed in Phase 13B; this phase only improves display.
+
 ## Phase 13A-Lite
 
 | Phase | Name | Status |

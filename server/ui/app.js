@@ -47,6 +47,7 @@ const state = {
     runs: [],
     traces: [],
   },
+  workbench: null,
   visualFilters: {
     character: "",
     category: "",
@@ -120,6 +121,78 @@ function visualStatusLabel(value) {
     deprecated: "停用",
     invalid: "錯誤",
   }[value] ?? value ?? "";
+}
+
+const operatorStatusLabels = {
+  pending: "待確認",
+  pending_approval: "待確認",
+  blocked: "暫時卡住",
+  completed: "已完成",
+  confirmed: "已完成",
+  resolved: "已完成",
+  ready: "可進行",
+  missing: "尚未開始",
+  optional: "可稍後",
+  deferred: "可稍後",
+  warning: "注意",
+  failed: "失敗",
+  rejected: "已拒絕",
+  unknown: "尚無資料",
+};
+
+const workflowStepMeta = {
+  writing_context: { label: "起稿", view: "compose" },
+  chat_output_candidate: { label: "候選稿", view: "compose" },
+  proof_report: { label: "驗稿", view: "review" },
+  adoption_request: { label: "採用確認", view: "approval" },
+  settlement_report: { label: "結算", view: "settlement" },
+  pending_engine_candidate: { label: "引擎候選", view: "settlement" },
+  activation_request: { label: "啟用確認", view: "approval" },
+};
+
+function operatorStatusLabel(value) {
+  return operatorStatusLabels[value] ?? value ?? "尚無資料";
+}
+
+function workflowSteps(workbench = state.workbench) {
+  return workbench?.workflow?.steps ?? [];
+}
+
+function workflowStep(key, workbench = state.workbench) {
+  return workflowSteps(workbench).find((item) => item.key === key);
+}
+
+function workflowReason(step) {
+  if (!step) return "尚無流程資料。";
+  if (step.blocked_reason) return step.blocked_reason;
+  if (["completed", "confirmed"].includes(step.status)) return "此階段已具備所需資料。";
+  if (["ready", "missing"].includes(step.status)) return "前置條件已整理，可依提示繼續。";
+  if (step.status === "pending_approval") return "已送入確認佇列，等待人工處理。";
+  return "請查看詳細資料確認目前狀態。";
+}
+
+function primaryNextStep(workbench = state.workbench) {
+  const checks = [
+    ["writing_context", "下一步：到起稿頁建立本輪任務提示", "compose"],
+    ["chat_output_candidate", "下一步：把任務提示貼給 ChatGPT，取得正文候選後回到紀錄頁保存", "compose"],
+    ["proof_report", "下一步：到驗稿頁建立驗稿 context", "review"],
+    ["adoption_request", "下一步：到確認佇列處理採用請求", "approval"],
+    ["settlement_report", "下一步：到結算匯入頁建立章節結算 context", "settlement"],
+    ["pending_engine_candidate", "下一步：審查引擎候選差異", "settlement"],
+    ["activation_request", "下一步：到確認佇列處理引擎啟用確認", "approval"],
+  ];
+  for (const [key, text, view] of checks) {
+    const step = workflowStep(key, workbench);
+    if (!step || !["completed", "confirmed", "resolved"].includes(step.status)) {
+      return { key, text, view, step };
+    }
+  }
+  return {
+    key: "writing_context",
+    text: "目前沒有阻塞項，可開始新一輪正文候選。",
+    view: "compose",
+    step: workflowStep("writing_context", workbench),
+  };
 }
 
 function neuralStatusMeta(run, traces) {
@@ -199,8 +272,12 @@ async function loadFile(projectPath) {
 }
 
 async function refreshState(showToast = false) {
-  const payload = await api("/api/state");
+  const [payload, workbenchPayload] = await Promise.all([
+    api("/api/state"),
+    api("/api/writer-workbench/state"),
+  ]);
   state.data = payload.state;
+  state.workbench = workbenchPayload.state;
   renderAll();
   $("#last-sync").textContent = `同步 ${formatDate(payload.state.generatedAt)}`;
   if (showToast) toast("資料已重新整理");
@@ -255,46 +332,63 @@ async function refreshWriterWorkbenchState() {
   const approvalPanel = $("#workbench-approval");
   const reviewPanel = $("#workbench-review");
   if (!pre || !timeline || !nextPanel || !riskPanel) return;
-  const state = payload.state ?? {};
+  const workbench = payload.state ?? {};
+  state.workbench = workbench;
   // render timeline
-  const steps = (state.workflow?.steps ?? []);
+  const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
     <div class="workflow-step">
-      <div class="status-badge status-${escapeHtml(s.status)}">${escapeHtml(s.status)}</div>
-      <div class="workflow-step-label">${escapeHtml(s.label)}</div>
-      <div class="workflow-step-meta">${escapeHtml(s.entity_id ?? "")}${s.blocked_reason ? ` · ${escapeHtml(s.blocked_reason)}` : ""}</div>
+      <div class="status-badge status-${escapeHtml(s.status)}">${escapeHtml(operatorStatusLabel(s.status))}</div>
+      <div class="workflow-step-label">${escapeHtml(workflowStepMeta[s.key]?.label ?? s.label)}</div>
+      <div class="workflow-step-meta">${escapeHtml(workflowReason(s))}</div>
     </div>
   `).join("");
 
   // next action
-  const nextActions = state.next_actions ?? [];
-  const suggested = nextActions.find((a) => a.enabled);
-  nextPanel.innerHTML = suggested
-    ? `<div class="next-action-panel"><strong>下一步：</strong>${escapeHtml(suggested.label)} <span class="next-action-hint">${escapeHtml(suggested.enabled ? "可執行" : "不可執行")}</span></div>`
-    : `<div class="next-action-panel"><strong>下一步：</strong>無建議</div>`;
+  const suggested = primaryNextStep(workbench);
+  nextPanel.innerHTML = `
+    <strong>${escapeHtml(suggested.text)}</strong>
+    <button class="button primary" type="button" data-go-view="${escapeHtml(suggested.view)}">前往處理</button>
+  `;
 
   // risk panel
-  const risk = state.risk ?? {};
+  const risk = workbench.risk ?? {};
   riskPanel.innerHTML = `
-    <div class="risk-summary">
-      <div>direct_activation_allowed: <strong>${risk.direct_activation_allowed}</strong></div>
-      <div>activation_requires_approval: <strong>${risk.activation_requires_approval}</strong></div>
-      <div>base_hash_mismatch: <strong>${risk.base_hash_mismatch}</strong></div>
-      <div>active_engine: <strong>${escapeHtml(state.active_engine?.sha256 ?? state.active_engine?.hash ?? "")}</strong></div>
-    </div>
+    <strong>高風險操作提醒</strong>
+    <p>引擎啟用與採用確認仍須經確認佇列；本頁不會直接修改正式引擎。</p>
+    ${risk.base_hash_mismatch ? '<div class="warning-panel">引擎候選基準已變動，請先重新審查差異。</div>' : ""}
   `;
 
   // approval panel
-  approvalPanel.innerHTML = `<div>Approval queue: ${state.approval_queue?.pending_count ?? 0} pending</div>`;
+  approvalPanel.innerHTML = `<div>確認佇列：${workbench.approval_queue?.pending_count ?? 0} 筆待確認</div>`;
 
   // review/diff panel (show minimal info)
-  reviewPanel.innerHTML = state.blocked?.is_blocked
-    ? `<div class="warning-panel">目前卡住：${escapeHtml(state.blocked.reason ?? "")}</div>`
-    : `<div>未被封鎖</div>`;
+  reviewPanel.innerHTML = workbench.blocked?.is_blocked
+    ? `<div class="warning-panel">目前卡住：${escapeHtml(workbench.blocked.reason ?? "")}</div>`
+    : `<div>目前沒有阻塞項。</div>`;
+
+  const next = primaryNextStep(workbench);
+  $("#workbench-stage-card").innerHTML = `
+    <p class="eyebrow">CURRENT STAGE</p>
+    <h3>你現在在：${escapeHtml(workflowStepMeta[next.key]?.label ?? "新一輪起稿")}</h3>
+    <p>${escapeHtml(next.text)}</p>
+    <p>目前沒有任何資料會被寫入正式引擎。</p>
+  `;
+  const completed = steps.filter((item) => ["completed", "confirmed", "resolved"].includes(item.status));
+  $("#workbench-completed").innerHTML = `
+    <strong>已完成項目</strong>
+    <span>${escapeHtml(completed.map((item) => workflowStepMeta[item.key]?.label ?? item.label).join("、") || "尚無")}</span>
+  `;
+  const later = steps.filter((item) => ["deferred", "optional"].includes(item.status));
+  $("#workbench-later").innerHTML = `
+    <strong>可稍後處理</strong>
+    <span>${escapeHtml(later.map((item) => workflowStepMeta[item.key]?.label ?? item.label).join("、") || "目前沒有")}</span>
+  `;
 
   // show raw JSON for debug (hidden by default)
-  pre.textContent = JSON.stringify(state, null, 2);
+  pre.textContent = JSON.stringify(workbench, null, 2);
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
+  renderOperatorOverview();
 }
 
 function feedbackRecordId(record) {
@@ -366,6 +460,72 @@ function renderFeedbackLearning(feedback) {
   $("#feedback-learning-raw").textContent = JSON.stringify(feedback, null, 2);
 }
 
+function renderOperatorOverview() {
+  const next = primaryNextStep();
+  $("#today-next-step-text").textContent = next.text;
+  $("#today-next-step-button").dataset.goView = next.view;
+  $("#today-next-step-button").textContent = `前往${titles[next.view]}`;
+
+  const keys = [
+    "writing_context",
+    "chat_output_candidate",
+    "proof_report",
+    "adoption_request",
+    "settlement_report",
+    "pending_engine_candidate",
+    "activation_request",
+  ];
+  const steps = keys.map((key) => workflowStep(key)).filter(Boolean);
+  $("#workflow-overview-summary").textContent =
+    `${steps.filter((item) => ["completed", "confirmed", "resolved"].includes(item.status)).length} / ${steps.length} 已完成`;
+  $("#workflow-overview-steps").innerHTML = steps.map((step) => {
+    const meta = workflowStepMeta[step.key] ?? { label: step.label, view: "writer-workbench" };
+    return `
+      <article class="operator-progress-step status-card-${escapeHtml(step.status)}">
+        <div>
+          <span class="status-badge status-${escapeHtml(step.status)}">${escapeHtml(operatorStatusLabel(step.status))}</span>
+          <strong>${escapeHtml(meta.label)}</strong>
+        </div>
+        <p>${escapeHtml(workflowReason(step))}</p>
+        <button class="text-button" type="button" data-go-view="${escapeHtml(meta.view)}">前往頁面</button>
+      </article>
+    `;
+  }).join("");
+
+  const visuals = state.data?.visuals ?? {};
+  const diagnostics = visuals.diagnostics ?? {};
+  $("#nav-badge-compose").textContent =
+    operatorStatusLabel(workflowStep("writing_context")?.status ?? "unknown");
+  $("#nav-badge-review").textContent =
+    operatorStatusLabel(workflowStep("proof_report")?.status ?? "unknown");
+  $("#nav-badge-settlement").textContent =
+    operatorStatusLabel(workflowStep("settlement_report")?.status ?? "unknown");
+  $("#nav-badge-approval").textContent =
+    `${state.workbench?.approval_queue?.pending_count ?? 0} 待確認`;
+  $("#nav-badge-visuals").textContent =
+    `${diagnostics.indexRecords ?? visuals.count ?? 0} / ${diagnostics.pngFiles ?? 0}`;
+  $("#nav-badge-neural").textContent =
+    `${(state.neuralData.runs ?? []).filter((run) => run.warning).length} 注意`;
+  $("#nav-badge-workbench").textContent =
+    workflowStepMeta[next.key]?.label ?? "可開始";
+
+  const drafts = state.workflow.drafts ?? [];
+  const proofReports = state.workflow.proofReports ?? [];
+  $("#review-conclusion").textContent = !drafts.length
+    ? "尚無資料"
+    : !proofReports.length
+      ? "待驗稿"
+      : proofReports.some((report) => report.status === "blocked") ? "停止採用" : "請查看驗稿結論";
+  $("#review-conclusion-reason").textContent = !drafts.length
+    ? "尚未保存正文候選。請先到起稿流程完成候選稿保存，再進行驗稿。"
+    : !proofReports.length
+      ? "已有候選稿，但尚未保存驗稿報告。請建立驗稿 context 後完成 P0-P4 檢查。"
+      : "請依驗稿報告中的 P0-P4 與停止原因決定採用、修正或退稿。";
+  $("#compose-empty-state").hidden = Boolean(workflowStep("writing_context")
+    && workflowStep("writing_context").status !== "missing");
+  $("#settlement-empty-state").hidden = (state.workflow.adoptedChapters ?? []).length > 0;
+}
+
 function bindWriterWorkbenchActions() {
   $("#writer-refresh-state").addEventListener("click", () => refreshWriterWorkbenchState().catch((e) => toast(e.message, true)));
   $("#writer-build-context").addEventListener("click", async () => {
@@ -408,7 +568,13 @@ function renderSources() {
         : "";
     return `
       <button class="source-item" type="button" data-open-file="${escapeHtml(source.path)}">
-        <span class="trust-badge${badgeClass}">${escapeHtml(source.trust)}</span>
+        <span class="trust-badge${badgeClass}" title="${escapeHtml({
+          T1: "正式正史",
+          T3: "正式政策",
+          T5: "錯誤報告",
+          T6: "輔助記憶",
+          T8: "衍生規則或工作資料",
+        }[source.trust] ?? "來源信任層級")}">${escapeHtml(source.trust)}</span>
         <strong>${escapeHtml(source.label)}</strong>
         <span>${escapeHtml(source.version)} · ${formatBytes(source.bytes)}</span>
       </button>
@@ -560,6 +726,19 @@ function renderVisuals() {
   $("#visual-summary").textContent = visuals.errorCount || visuals.warningCount
     ? `${items.length}/${visuals.count} 張 · ${visuals.errorCount} 錯誤 · ${visuals.warningCount} 注意`
     : `${items.length}/${visuals.count} 張`;
+  const diagnostics = visuals.diagnostics ?? {
+    indexRecords: visuals.count ?? 0,
+    pngFiles: 0,
+    gitIgnored: false,
+  };
+  $("#visual-index-records").textContent = String(diagnostics.indexRecords);
+  $("#visual-png-files").textContent = String(diagnostics.pngFiles);
+  $("#visual-git-ignored").textContent = diagnostics.gitIgnored ? "true（已忽略）" : "false（未忽略）";
+  $("#visual-diagnostic-message").textContent = diagnostics.indexRecords > 0
+    ? `圖庫索引正常，UI 可讀取 ${diagnostics.indexRecords} 筆圖像紀錄。`
+    : diagnostics.pngFiles > 0
+      ? "圖片檔案存在，但尚未建立索引，因此 UI 暫時不顯示。"
+      : "尚未上傳或匯入圖像。";
 
   if (!items.some((item) => item.visual_id === state.activeVisualId)) {
     state.activeVisualId = items[0]?.visual_id ?? "";
@@ -585,7 +764,11 @@ function renderVisuals() {
         </button>
       `;
     }).join("")
-    : '<div class="empty-state">尚無圖像紀錄</div>';
+    : `<div class="empty-state">${
+      diagnostics.pngFiles > 0
+        ? "目前沒有可顯示的索引紀錄。圖片檔案仍存在，請使用安全的本地 reindex 工具建立索引。"
+        : "目前沒有圖像。尚未上傳或匯入圖片，可由左側上傳第一張視覺參考。"
+    }</div>`;
 
   renderVisualDetail(items.find((item) => item.visual_id === state.activeVisualId));
 }
@@ -597,7 +780,21 @@ function renderNeuralStatus() {
     traces.some((trace) => trace.run_id === run.run_id && trace.status === "success")
   )).length;
   const warningRuns = runs.filter((run) => run.warning).length;
+  const failedRuns = runs.filter((run) => (
+    traces.some((trace) => trace.run_id === run.run_id && trace.status === "failed")
+  )).length;
+  const runningRuns = runs.filter((run) => run.status === "running").length;
   $("#neural-summary").textContent = `${runs.length} runs · ${successRuns} 已使用 · ${warningRuns} warning`;
+  const latestWarning = runs.find((run) => run.warning)?.warning ?? "";
+  $("#neural-summary-grid").innerHTML = `
+    <div><strong>${runs.length}</strong><span>總 runs</span></div>
+    <div><strong>${warningRuns}</strong><span>注意 runs</span></div>
+    <div><strong>${failedRuns}</strong><span>失敗 runs</span></div>
+    <div><strong>${runningRuns}</strong><span>執行中 runs</span></div>
+  `;
+  $("#neural-warning-explanation").textContent = warningRuns
+    ? `本地神經模型尚未設定，系統已跳過此模組，不影響主流程。${latestWarning ? ` 最新原因：${latestWarning}` : ""}`
+    : "神經模組目前是輔助 trace，不是正文生成必要條件。";
 
   if (!runs.some((run) => run.run_id === state.activeNeuralRunId)) {
     state.activeNeuralRunId = runs[0]?.run_id ?? "";
@@ -631,17 +828,22 @@ function renderNeuralStatus() {
   }
 
   const status = neuralStatusMeta(run, runTraces);
-  $("#neural-detail-run-id").textContent = run.run_id;
+  $("#neural-detail-run-id").textContent = "TECHNICAL DETAILS";
   $("#neural-detail-title").textContent = run.task_type;
   $("#neural-detail-status").className = status.className;
   $("#neural-detail-status").textContent = status.label;
   $("#neural-run-facts").innerHTML = `
-    <div><dt>task_type</dt><dd>${escapeHtml(run.task_type)}</dd></div>
-    <div><dt>status</dt><dd>${escapeHtml(run.status)}</dd></div>
-    <div><dt>requires_neural_modules</dt><dd>${run.requires_neural_modules ? "true" : "false"}</dd></div>
-    <div><dt>required_neural_modules</dt><dd>${escapeHtml((run.required_neural_modules ?? []).join(", ") || "none")}</dd></div>
-    <div><dt>input_hash</dt><dd>${escapeHtml(run.input_hash)}</dd></div>
-    <div><dt>output_hash</dt><dd>${escapeHtml(run.output_hash ?? "null")}</dd></div>
+    <div><dt>目前狀態</dt><dd>${escapeHtml(operatorStatusLabel(run.status))}</dd></div>
+    <div><dt>用途</dt><dd>輔助 trace，不是正文生成必要條件</dd></div>
+    <details class="technical-details neural-technical-details">
+      <summary>技術詳情：run_id、hash 與必要模組</summary>
+      <dl>
+        <div><dt>run_id</dt><dd>${escapeHtml(run.run_id)}</dd></div>
+        <div><dt>required_neural_modules</dt><dd>${escapeHtml((run.required_neural_modules ?? []).join(", ") || "none")}</dd></div>
+        <div><dt>input_hash</dt><dd>${escapeHtml(run.input_hash)}</dd></div>
+        <div><dt>output_hash</dt><dd>${escapeHtml(run.output_hash ?? "null")}</dd></div>
+      </dl>
+    </details>
   `;
   $("#neural-trace-list").innerHTML = runTraces.length
     ? runTraces.map((trace) => `
@@ -653,6 +855,8 @@ function renderNeuralStatus() {
           </div>
           <span class="neural-status-${escapeHtml(trace.status)}">${escapeHtml(trace.status)}</span>
         </div>
+        <details class="technical-details">
+          <summary>技術詳情：trace、hash 與 raw summary</summary>
         <dl class="neural-trace-facts">
           <div><dt>trace_id</dt><dd>${escapeHtml(trace.trace_id)}</dd></div>
           <div><dt>called_at</dt><dd>${escapeHtml(trace.called_at)}</dd></div>
@@ -664,6 +868,7 @@ function renderNeuralStatus() {
           <div><dt>input_summary</dt><dd>${escapeHtml(JSON.stringify(trace.input_summary ?? {}))}</dd></div>
           <div><dt>output_summary</dt><dd>${escapeHtml(JSON.stringify(trace.output_summary ?? {}))}</dd></div>
         </dl>
+        </details>
       </article>
     `).join("")
     : '<div class="empty-state">沒有 neural_trace，因此不得宣稱已使用神經網路模型。</div>';
@@ -1039,18 +1244,33 @@ function approvalStatusClass(status) {
 function renderApprovalQueue() {
   const items = state.approval.items ?? [];
   $("#approval-queue-count").textContent = String(items.length);
-  $("#approval-item-list").innerHTML = items.length
-    ? items.map((item) => `
+  const laterTypes = new Set(["restore_from_backup", "rollback_active_engine", "cleanup_proposal"]);
+  const isHistory = (item) => ["resolved", "confirmed", "rejected"].includes(item.status?.status);
+  const groups = [
+    ["目前主流程必須處理", items.filter((item) => !laterTypes.has(item.action_type) && !isHistory(item))],
+    ["可稍後處理", items.filter((item) => laterTypes.has(item.action_type) && !isHistory(item))],
+    ["歷史與已處理", items.filter(isHistory)],
+  ];
+  const itemHtml = (item) => `
       <button class="approval-item${item.approval_item_id === state.activeApprovalItemId ? " is-active" : ""}${item.risk_level === "high" ? " is-high-risk" : ""}" type="button" data-approval-item-id="${escapeHtml(item.approval_item_id)}">
         <span>
           <strong>${escapeHtml(item.title || item.action_type)}</strong>
-          <small>${escapeHtml(item.target_id)}</small>
+          <small>${escapeHtml(item.source_chapter || item.target_type || "未指定來源")}</small>
         </span>
         <span>
-          <span class="candidate-status ${approvalStatusClass(item.status.status)}">${escapeHtml(item.status.status)}</span>
-          <small>${escapeHtml(item.risk_level)} · ${escapeHtml(item.neural_status)}</small>
+          <span class="candidate-status ${approvalStatusClass(item.status.status)}">${escapeHtml(operatorStatusLabel(item.status.status))}</span>
+          <small>${escapeHtml(riskLabel(item.risk_level))}</small>
         </span>
       </button>
+  `;
+  $("#approval-item-list").innerHTML = items.length
+    ? groups.map(([label, groupItems]) => `
+      <section class="approval-group">
+        <h3>${escapeHtml(label)} <span>${groupItems.length}</span></h3>
+        ${groupItems.length
+          ? groupItems.map(itemHtml).join("")
+          : '<div class="operator-empty compact-empty">目前沒有項目。</div>'}
+      </section>
     `).join("")
     : '<div class="empty-state">尚無 approval item</div>';
 
@@ -1072,28 +1292,49 @@ function renderApprovalQueue() {
   $("#create-rollback-approval-button").disabled = !snapshotSelect.value;
 
   const item = state.approval.detail;
-  $("#approval-detail-id").textContent = item?.approval_item_id ?? "NO ITEM SELECTED";
+  $("#approval-detail-id").textContent = item ? "APPROVAL DETAILS" : "NO ITEM SELECTED";
   $("#approval-detail-title").textContent = item?.title ?? "確認項目詳情";
-  $("#approval-detail-status").textContent = item?.status?.status ?? "未選擇";
+  $("#approval-detail-status").textContent =
+    item ? operatorStatusLabel(item.status?.status) : "未選擇";
   $("#approval-detail-status").className =
     `candidate-status ${approvalStatusClass(item?.status?.status ?? "blocked")}`;
   $("#approval-detail-facts").innerHTML = item
     ? `
-      <span>action · ${escapeHtml(item.action_type)}</span>
-      <span>target · ${escapeHtml(item.target_type)}</span>
-      <span>id · ${escapeHtml(item.target_id)}</span>
-      <span>chapter · ${escapeHtml(item.source_chapter || "未指定")}</span>
-      <span>risk · ${escapeHtml(item.risk_level)}</span>
-      <span>neural · ${escapeHtml(item.neural_status)}</span>
+      <span>操作類型 · ${escapeHtml(item.action_type)}</span>
+      <span>來源章節 · ${escapeHtml(item.source_chapter || "未指定")}</span>
+      <span>風險 · ${escapeHtml(riskLabel(item.risk_level))}</span>
+      <span>神經狀態 · ${escapeHtml(operatorStatusLabel(item.neural_status))}</span>
+      <details class="technical-details">
+        <summary>技術詳情：target 與長 ID</summary>
+        <p>${escapeHtml(item.target_type)} · ${escapeHtml(item.target_id)}</p>
+        <p>${escapeHtml(item.approval_item_id)}</p>
+      </details>
     `
     : "";
   $("#approval-impact-summary").innerHTML = item
     ? `
-      <div><strong>Will modify</strong><span>${escapeHtml((item.impact?.will_modify ?? []).join("、") || "none")}</span></div>
-      <div><strong>Will create</strong><span>${escapeHtml((item.impact?.will_create ?? []).join("、") || "none")}</span></div>
-      <div><strong>Rollback</strong><span>${item.impact?.rollback_available ? "available" : "not available"}</span></div>
+      <div><strong>這會修改什麼？</strong><span>${escapeHtml((item.impact?.will_modify ?? []).join("、") || "不修改既有正式資料")}</span></div>
+      <div><strong>這會建立什麼？</strong><span>${escapeHtml((item.impact?.will_create ?? []).join("、") || "不建立額外資料")}</span></div>
+      <div><strong>可否回復？</strong><span>${item.impact?.rollback_available ? "已有回復資訊" : "沒有自動回復能力"}</span></div>
     `
     : "";
+  $("#approval-human-guidance").innerHTML = item
+    ? `
+      <p><strong>這不會修改什麼？</strong>未列在上方的正式資料不會因查看本項目而改變。</p>
+      <p><strong>為什麼需要確認？</strong>${escapeHtml(
+        item.risk_level === "high"
+          ? "此操作可能影響正式資料或工作流狀態，需要人工確認。"
+          : "此操作會建立或更新工作流紀錄，需要使用者明確決定。",
+      )}</p>
+      <p><strong>可以暫時忽略嗎？</strong>${
+        item.action_type === "restore_from_backup"
+          ? "這是資料還原請求，不是目前寫作必須處理。若你沒有要還原資料，可以暫時忽略。"
+          : laterTypes.has(item.action_type)
+            ? "可以。這項目預設不阻塞目前寫作主流程。"
+            : "若主流程正在等待此項確認，延後會讓相對應階段維持待確認。"
+      }</p>
+    `
+    : '<p>請先從左側選擇確認項目。</p>';
   $("#approval-blocked-reason").innerHTML = item?.blocked_reason
     ? `<div class="blocked-panel">${escapeHtml(item.blocked_reason)}</div>`
     : "";
@@ -1797,6 +2038,7 @@ function renderAll() {
   renderWorkflow();
   renderApprovalQueue();
   renderActivityTable();
+  renderOperatorOverview();
 }
 
 async function openLibraryFile(projectPath, title = "") {
@@ -2169,9 +2411,6 @@ function bindEvents() {
   $$(".nav-item").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
-  $$("[data-go-view]").forEach((button) => {
-    button.addEventListener("click", () => switchView(button.dataset.goView));
-  });
   $("[data-action='build-context']").addEventListener("click", async () => {
     try {
       await runAction("buildContext");
@@ -2277,9 +2516,15 @@ function bindEvents() {
   });
 
   $("#copy-result-button").addEventListener("click", () => copyText(state.currentComposeText, "產物"));
+  $("#copy-prompt-button").addEventListener("click", () => copyText(state.currentComposeText, "任務提示"));
   $("#copy-library-button").addEventListener("click", () => copyText(state.currentLibraryText, "資料"));
 
   document.addEventListener("click", (event) => {
+    const goView = event.target.closest("[data-go-view]");
+    if (goView) {
+      switchView(goView.dataset.goView);
+      return;
+    }
     const openFile = event.target.closest("[data-open-file]");
     if (openFile) {
       openLibraryFile(openFile.dataset.openFile);

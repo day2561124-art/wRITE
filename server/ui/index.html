@@ -26,10 +26,12 @@
           <button class="nav-item" data-view="compose" type="button">
             <span class="nav-symbol" aria-hidden="true">✎</span>
             <span>起稿</span>
+            <span id="nav-badge-compose" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="review" type="button">
             <span class="nav-symbol" aria-hidden="true">✓</span>
             <span>驗稿</span>
+            <span id="nav-badge-review" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="library" type="button">
             <span class="nav-symbol" aria-hidden="true">▤</span>
@@ -38,22 +40,27 @@
           <button class="nav-item" data-view="visuals" type="button">
             <span class="nav-symbol" aria-hidden="true">◇</span>
             <span>圖庫</span>
+            <span id="nav-badge-visuals" class="nav-badge">0 / 0</span>
           </button>
           <button class="nav-item" data-view="neural" type="button">
             <span class="nav-symbol" aria-hidden="true">N</span>
             <span>神經模組</span>
+            <span id="nav-badge-neural" class="nav-badge">0 注意</span>
           </button>
           <button class="nav-item" data-view="settlement" type="button">
             <span class="nav-symbol" aria-hidden="true">⇄</span>
             <span>結算匯入</span>
+            <span id="nav-badge-settlement" class="nav-badge">尚未開始</span>
           </button>
           <button class="nav-item" data-view="approval" type="button">
             <span class="nav-symbol" aria-hidden="true">✓</span>
             <span>確認佇列</span>
+            <span id="nav-badge-approval" class="nav-badge">0 待確認</span>
           </button>
           <button class="nav-item" data-view="writer-workbench" type="button">
             <span class="nav-symbol" aria-hidden="true">📝</span>
             <span>寫作工作台</span>
+            <span id="nav-badge-workbench" class="nav-badge">載入中</span>
           </button>
           <button class="nav-item" data-view="cleanup" type="button">
             <span class="nav-symbol" aria-hidden="true">⌫</span>
@@ -89,6 +96,26 @@
         <div id="loading-bar" class="loading-bar" hidden></div>
 
         <section class="view is-active" data-view-panel="overview">
+          <section id="today-next-step" class="panel operator-hero" aria-live="polite">
+            <div>
+              <p class="eyebrow">TODAY'S NEXT STEP</p>
+              <h2>今日下一步</h2>
+              <p id="today-next-step-text">正在整理目前流程狀態。</p>
+            </div>
+            <button id="today-next-step-button" class="button primary" data-go-view="writer-workbench" type="button">查看寫作工作台</button>
+          </section>
+
+          <section class="panel workflow-overview-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">WORKFLOW</p>
+                <h2>本輪流程進度</h2>
+              </div>
+              <span id="workflow-overview-summary" class="status-summary">載入中</span>
+            </div>
+            <div id="workflow-overview-steps" class="operator-progress"></div>
+          </section>
+
           <div class="source-status-band">
             <div class="section-heading">
               <div>
@@ -151,6 +178,18 @@
         </section>
 
         <section class="view" data-view-panel="compose">
+          <section class="panel operator-guide">
+            <div>
+              <p class="eyebrow">THREE STEPS</p>
+              <h2>起稿流程</h2>
+            </div>
+            <ol>
+              <li>填寫本輪章節任務與承接位置。</li>
+              <li>建立 generation context 與可複製的任務提示。</li>
+              <li>把 ChatGPT 生成的正文候選保存回工作台。</li>
+            </ol>
+            <p id="compose-empty-state" class="operator-empty">尚未建立本輪任務提示。請先填寫章節任務或選擇目前承接位置。</p>
+          </section>
           <div class="workspace-grid">
             <form id="pipeline-form" class="form-surface">
               <div class="section-heading">
@@ -183,7 +222,7 @@
               </label>
 
               <div class="form-actions">
-                <button class="button primary" type="submit">執行流水線</button>
+                <button class="button primary" type="submit">建立本輪任務提示</button>
                 <button id="search-only-button" class="button secondary" type="button">只做檢索</button>
               </div>
             </form>
@@ -197,7 +236,13 @@
                 </div>
                 <button id="copy-result-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
               </div>
-              <pre id="compose-result" class="document-viewer">尚未載入產物。</pre>
+              <div class="form-actions compact-actions">
+                <button id="copy-prompt-button" class="button secondary" type="button">複製給 ChatGPT</button>
+              </div>
+              <details class="technical-details">
+                <summary>查看完整 prompt</summary>
+                <pre id="compose-result" class="document-viewer">尚未載入產物。</pre>
+              </details>
             </section>
           </div>
 
@@ -209,6 +254,8 @@
               </div>
               <span id="workflow-context-status" class="workflow-status">尚未建立 context bundle</span>
             </div>
+            <details class="technical-details">
+              <summary>技術詳情：run_id 與 context bundle</summary>
             <div class="form-row">
               <label class="field">
                 <span>來源章節</span>
@@ -262,6 +309,7 @@
               <span>neural_modules_used_path</span>
               <input id="draft-neural-path" type="text" maxlength="500" placeholder="有 run_id 時可自動推導">
             </label>
+            </details>
             <label class="field">
               <span>正文</span>
               <textarea id="draft-text" rows="14" maxlength="1000000" required></textarea>
@@ -296,6 +344,13 @@
               </div>
               <div class="panel-body">
                 <p>此面板以 read-only 聚合後端狀態，並提供 minimal action 按鈕以呼叫安全的後端 glue endpoints。</p>
+                <section id="workbench-stage-card" class="operator-stage-card">
+                  <p class="eyebrow">CURRENT STAGE</p>
+                  <h3>你現在在：整理流程狀態</h3>
+                  <p>目前沒有任何資料會被寫入正式引擎。</p>
+                </section>
+                <div id="workbench-completed" class="operator-summary-list"></div>
+                <div id="workbench-later" class="operator-summary-list"></div>
                 <div id="writer-workbench-panels">
                   <div id="workbench-timeline" class="workflow-timeline" aria-live="polite"></div>
                   <div id="workbench-next-action" class="next-action-panel"></div>
@@ -311,8 +366,8 @@
                       <span id="feedback-learning-approval-count" class="workflow-status">0 pending</span>
                     </div>
                     <p class="feedback-learning-safety">
-                      This panel is read-only. It does not apply rules or modify active_engine /
-                      compressed_rules. Review pending updates in Approval Queue.
+                      此面板只讀，不會套用規則，也不會修改 active_engine 或 compressed_rules。
+                      待確認更新請到確認佇列處理。
                     </p>
                     <div id="feedback-learning-summary" class="feedback-learning-summary"></div>
                     <div id="feedback-learning-records" class="feedback-learning-records"></div>
@@ -323,7 +378,10 @@
                     </details>
                   </section>
                 </div>
-                <pre id="writer-workbench-state" class="document-viewer" hidden>尚未載入</pre>
+                <details class="technical-details">
+                  <summary>技術詳情：raw workflow state、hash 與 IDs</summary>
+                  <pre id="writer-workbench-state" class="document-viewer">尚未載入</pre>
+                </details>
                 <div class="form-actions">
                   <button id="writer-build-context" class="button" type="button">建立 Context</button>
                   <button id="writer-save-candidate" class="button" type="button">保存候選</button>
@@ -335,6 +393,17 @@
         </section>
 
         <section class="view" data-view-panel="review">
+          <section id="review-conclusion-card" class="panel operator-conclusion">
+            <div>
+              <p class="eyebrow">ADOPTION READINESS</p>
+              <h2>採用前結論</h2>
+            </div>
+            <strong id="review-conclusion">尚無資料</strong>
+            <p id="review-conclusion-reason">尚未保存正文候選。請先到起稿流程完成候選稿保存，再進行驗稿。</p>
+            <div class="severity-legend">
+              <span>P0：不可採用</span><span>P1：重大問題</span><span>P2：需修正</span><span>P3：小問題</span><span>P4：提醒</span>
+            </div>
+          </section>
           <div class="workspace-grid review-grid">
             <section class="form-surface">
               <div class="section-heading">
@@ -410,6 +479,18 @@
         </section>
 
         <section class="view" data-view-panel="library">
+          <section class="panel operator-info">
+            <h2>資料來源用途</h2>
+            <div class="source-purpose-grid">
+              <span><strong>Canon DB</strong>正式正史</span>
+              <span><strong>正文寫作卡</strong>成稿方式</span>
+              <span><strong>正式驗稿卡</strong>採用前驗收</span>
+              <span><strong>長線骨架</strong>未支付方向</span>
+              <span><strong>錯誤壓縮規則</strong>避錯輔助</span>
+              <span><strong>Memory</strong>輔助記憶，不凌駕正史</span>
+            </div>
+            <p class="read-only-note">此頁只讀，不會修改正式資料。T1 為正式正史；T3 為正式政策；T5 為錯誤報告；T6 為輔助記憶；T8 為衍生規則或工作資料。</p>
+          </section>
           <div class="library-layout">
             <aside class="library-sidebar">
               <div class="panel-heading">
@@ -429,12 +510,19 @@
                 </div>
                 <button id="copy-library-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
               </div>
-              <pre id="library-content" class="document-viewer">選擇左側資料。</pre>
+              <pre id="library-content" class="document-viewer">請從左側選擇資料來源。</pre>
             </section>
           </div>
         </section>
 
         <section class="view" data-view-panel="visuals">
+          <section id="visual-diagnostics" class="panel diagnostic-card" aria-live="polite">
+            <div><strong id="visual-index-records">0</strong><span>visual_index records</span></div>
+            <div><strong id="visual-png-files">0</strong><span>asset png files</span></div>
+            <div><strong id="visual-git-ignored">尚未確認</strong><span>git ignored</span></div>
+            <p id="visual-diagnostic-message">正在檢查圖庫狀態。</p>
+            <p>PNG 圖片本體不進 Git；Git 只保存索引與工具，避免版本庫過大。</p>
+          </section>
           <div class="visual-layout">
             <aside class="library-sidebar">
               <div class="panel-heading">
@@ -529,6 +617,10 @@
               <button id="refresh-neural-button" class="button secondary" type="button">重新整理</button>
             </div>
           </div>
+          <section class="panel neural-summary-card">
+            <div id="neural-summary-grid" class="diagnostic-card compact-diagnostics"></div>
+            <p id="neural-warning-explanation">神經模組目前是輔助 trace，不是正文生成必要條件。</p>
+          </section>
           <div class="neural-layout">
             <aside class="panel neural-run-panel">
               <div class="panel-heading">
@@ -555,6 +647,19 @@
         </section>
 
         <section class="view" data-view-panel="settlement">
+          <section class="panel operator-guide">
+            <div>
+              <p class="eyebrow">THREE STEPS</p>
+              <h2>正式結算流程</h2>
+            </div>
+            <ol>
+              <li>選擇已正式採用的章節。</li>
+              <li>建立 settlement context。</li>
+              <li>保存 settlement report 並產生新版引擎候選。</li>
+            </ol>
+            <p id="settlement-empty-state" class="operator-empty">尚未有正式採用章節。請先完成採用確認，再進行正式結算。</p>
+            <p class="read-only-note">結算只同步正文已成立內容，不會補戲，也不會把未支付骨架寫成正史。</p>
+          </section>
           <div class="settlement-status-bar">
             <div>
               <p class="eyebrow">CANON SETTLEMENT</p>
@@ -818,6 +923,7 @@
               </div>
               <div id="approval-detail-facts" class="approval-detail-facts"></div>
               <div id="approval-impact-summary" class="approval-impact-summary"></div>
+              <div id="approval-human-guidance" class="operator-info"></div>
               <div id="approval-blocked-reason"></div>
 
               <div id="approval-confirm-panel" class="approval-confirm-panel">
@@ -955,6 +1061,11 @@
         </section>
 
         <section class="view" data-view-panel="activity">
+          <section class="panel operator-info feedback-impact-card">
+            <h2>這筆紀錄會影響什麼</h2>
+            <p>記錄回饋不會自動修改正史，也不會自動修改 compressed_rules。</p>
+            <p>回饋會進入 Feedback Learning Loop，之後可產生規則候選；規則候選仍需 approval confirm 才能套用。</p>
+          </section>
           <div class="activity-grid">
             <form id="feedback-form" class="form-surface">
               <div class="section-heading">

@@ -363,6 +363,253 @@
   gap: 8px;
   margin-bottom: 12px;
 }
+
+.operator-hero,
+.operator-guide,
+.operator-info,
+.operator-conclusion,
+.operator-stage-card,
+.neural-summary-card,
+.diagnostic-card {
+  display: grid;
+  gap: 12px;
+}
+
+.operator-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: 16px;
+  border-left: 4px solid var(--accent);
+}
+
+.operator-hero h2,
+.operator-hero p,
+.operator-guide h2,
+.operator-guide p,
+.operator-info h2,
+.operator-info p,
+.operator-conclusion h2,
+.operator-conclusion p,
+.operator-stage-card h3,
+.operator-stage-card p {
+  margin: 0;
+}
+
+.workflow-overview-panel,
+.operator-guide,
+.operator-info,
+.operator-conclusion,
+.diagnostic-card,
+.neural-summary-card {
+  margin-bottom: 16px;
+}
+
+.operator-progress {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.operator-progress-step {
+  min-width: 130px;
+  display: grid;
+  align-content: space-between;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.operator-progress-step > div {
+  display: grid;
+  gap: 7px;
+}
+
+.operator-progress-step p {
+  min-height: 48px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.operator-guide ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style-position: inside;
+}
+
+.operator-guide li,
+.source-purpose-grid span {
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  line-height: 1.5;
+}
+
+.operator-empty,
+.read-only-note {
+  padding: 11px 13px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink-soft);
+}
+
+.compact-empty {
+  min-height: auto;
+  margin: 0;
+  font-size: 11px;
+}
+
+.operator-stage-card {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  background: var(--surface-muted);
+}
+
+.operator-summary-list {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.technical-details {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.technical-details summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.technical-details > :not(summary) {
+  margin: 0;
+}
+
+.compact-actions {
+  margin-bottom: 8px;
+}
+
+.severity-legend,
+.source-purpose-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.severity-legend span {
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.source-purpose-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.source-purpose-grid strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.diagnostic-card {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.diagnostic-card > div {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.diagnostic-card > div strong {
+  font-size: 20px;
+}
+
+.diagnostic-card > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.compact-diagnostics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.approval-group {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-group + .approval-group {
+  margin-top: 16px;
+}
+
+.approval-group h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.feedback-impact-card {
+  border-left: 4px solid var(--accent);
+}
+
+.nav-badge {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid #435367;
+  color: #d9e3ee;
+  background: #172232;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.neural-technical-details {
+  grid-column: 1 / -1;
+}
+
+.neural-technical-details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+@media (max-width: 900px) {
+  .operator-hero,
+  .operator-guide ol,
+  .severity-legend,
+  .source-purpose-grid,
+  .diagnostic-card,
+  .compact-diagnostics {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnostic-card > p {
+    grid-column: auto;
+  }
+}
 .workflow-step {
   display: flex;
   gap: 12px;

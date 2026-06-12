@@ -1,5 +1,18 @@
 # Daily Workflow
 
+## Phase 13C-Lite Operator UX
+
+Use the overview's 「今日下一步」 card and workflow progress row to identify the
+current stage. Status badges use Chinese labels and do not rely on color alone.
+Technical IDs, hashes, traces, and raw state remain available under details.
+
+The visual gallery diagnostics compare `visual_index` records with local PNG files
+and explain that PNG assets remain ignored by Git. Phase 13B already provides the
+reindex workflow; Phase 13C-Lite does not overwrite the index or stage assets.
+
+This phase adds no core write capability. Approval confirmation, restore execution,
+rollback execution, `active_engine`, and `compressed_rules` boundaries are unchanged.
+
 ## Phase 13A-Lite Feedback Learning Status
 
 Writer Workbench includes a read-only Feedback Learning status panel. Use it to

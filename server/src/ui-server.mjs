@@ -447,8 +447,32 @@ async function visualAssetState(record) {
   return result;
 }
 
+async function countPngAssets(directory) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return 0;
+    throw error;
+  }
+  let count = 0;
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      count += await countPngAssets(entryPath);
+    } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".png") {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 async function visualPayload() {
-  const text = await readOptionalText(visualIndexPath);
+  const [text, pngFiles, gitignoreText] = await Promise.all([
+    readOptionalText(visualIndexPath),
+    countPngAssets(visualAssetsDir),
+    readOptionalText(".gitignore"),
+  ]);
   const lines = text.split(/\r?\n/u);
   const itemTasks = [];
   for (const [index, raw] of lines.entries()) {
@@ -497,6 +521,14 @@ async function visualPayload() {
     categories: visualCategorySpecs.map(([key, label]) => ({ key, label })),
     errorCount: items.reduce((total, item) => total + item.errors.length, 0),
     warningCount: items.reduce((total, item) => total + item.warnings.length, 0),
+    diagnostics: {
+      indexRecords: items.length,
+      pngFiles,
+      gitIgnored: gitignoreText
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .includes("data/visual_db/assets/"),
+    },
   };
 }
 
@@ -1266,6 +1298,7 @@ async function handleRequest(request, response) {
         engine_candidate_review: null,
         activation_request: approvals.find((a) => a.action_type === 'activate_engine_candidate') ?? null,
       };
+      const approvalStatus = (item) => item?.status?.status ?? item?.status ?? null;
 
       // Derive statuses for each workflow step
       const steps = [];
@@ -1301,11 +1334,11 @@ async function handleRequest(request, response) {
         steps.push(step("adoption_request", "Adoption Request", "blocked", { blocked_reason: "候選稿尚未驗稿，請先建立 proof report。" }));
       } else if (!adoptionApproval) {
         steps.push(step("adoption_request", "Adoption Request", "ready", { next_action: "request_adoption", requires_approval: true }));
-      } else if (adoptionApproval.status === "pending") {
+      } else if (approvalStatus(adoptionApproval) === "pending") {
         steps.push(step("adoption_request", "Adoption Request", "pending_approval", { entity_id: adoptionApproval.item_id ?? null }));
-      } else if (adoptionApproval.status === "confirmed") {
+      } else if (approvalStatus(adoptionApproval) === "confirmed") {
         steps.push(step("adoption_request", "Adoption Request", "confirmed", { entity_id: adoptionApproval.item_id ?? null }));
-      } else if (adoptionApproval.status === "rejected") {
+      } else if (approvalStatus(adoptionApproval) === "rejected") {
         steps.push(step("adoption_request", "Adoption Request", "rejected", { entity_id: adoptionApproval.item_id ?? null }));
       } else {
         steps.push(step("adoption_request", "Adoption Request", "deferred", { entity_id: adoptionApproval.item_id ?? null }));
@@ -1314,7 +1347,7 @@ async function handleRequest(request, response) {
       // adopted_writing
       if (!latest.adopted_writing) {
         // If adoption request not confirmed, blocked
-        if (!adoptionApproval || adoptionApproval.status !== "confirmed") {
+        if (!adoptionApproval || approvalStatus(adoptionApproval) !== "confirmed") {
           steps.push(step("adopted_writing", "Adopted Writing", "blocked", { blocked_reason: "採用尚未確認，請在 Approval Queue 完成採用。" }));
         } else {
           steps.push(step("adopted_writing", "Adopted Writing", "blocked", { blocked_reason: "採用已確認，但尚未建立 adopted writing。" }));
@@ -1372,11 +1405,11 @@ async function handleRequest(request, response) {
       const activationApproval = latest.activation_request;
       if (!latest.pending_engine_candidate) {
         steps.push(step("activation_request", "Activation Request", "blocked", { blocked_reason: "尚未建立 pending engine candidate。" }));
-      } else if (activationApproval && activationApproval.status === "pending") {
+      } else if (activationApproval && approvalStatus(activationApproval) === "pending") {
         steps.push(step("activation_request", "Activation Request", "pending_approval", { entity_id: activationApproval.item_id ?? null, requires_approval: true }));
-      } else if (activationApproval && activationApproval.status === "confirmed") {
+      } else if (activationApproval && approvalStatus(activationApproval) === "confirmed") {
         steps.push(step("activation_request", "Activation Request", "confirmed", { entity_id: activationApproval.item_id ?? null }));
-      } else if (activationApproval && activationApproval.status === "rejected") {
+      } else if (activationApproval && approvalStatus(activationApproval) === "rejected") {
         steps.push(step("activation_request", "Activation Request", "rejected", { entity_id: activationApproval.item_id ?? null }));
       } else {
         steps.push(step("activation_request", "Activation Request", "ready", { next_action: "request_activation", requires_approval: true }));
@@ -1386,7 +1419,7 @@ async function handleRequest(request, response) {
       const activationLogs = await listActivationLogs();
       if (activationLogs.length > 0) {
         steps.push(step("activation_confirm", "Activation Confirm", "completed", { entity_id: activationLogs[0].log_id ?? null }));
-      } else if (activationApproval && activationApproval.status === "pending") {
+      } else if (activationApproval && approvalStatus(activationApproval) === "pending") {
         steps.push(step("activation_confirm", "Activation Confirm", "pending_approval", { blocked_reason: "Activation request pending approval." }));
       } else {
         steps.push(step("activation_confirm", "Activation Confirm", "blocked", { blocked_reason: "尚未有 activation request confirmed。" }));

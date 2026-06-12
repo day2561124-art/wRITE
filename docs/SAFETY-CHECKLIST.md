@@ -1,5 +1,17 @@
 # Safety Checklist
 
+## Phase 13C-Lite Operator UX
+
+- [ ] 「今日下一步」與流程進度只讀取既有 workflow state。
+- [ ] 中文 badge 同時顯示文字，不只依賴顏色。
+- [ ] Hash、run ID、trace ID 與 raw state 預設收在 details。
+- [ ] Visual diagnostics 只讀取 index、PNG 數量與 `.gitignore`。
+- [ ] PNG assets 仍由 Git ignore，沒有 stage `data/visual_db/assets/`。
+- [ ] 沒有新增 apply、approval confirm、restore execution 或 rollback execution。
+- [ ] 沒有修改 `active_engine`、`compressed_rules`、正式寫作卡、驗稿卡或長線。
+- [ ] 讀取 UI state 沒有建立 `data/backups/`、`data/feedback_loop/` 或
+  `data/outputs/current_prompt.md`。
+
 ## Phase 13A-Lite Feedback Learning UI
 
 - [ ] Feedback Learning UI/API remains read-only.
