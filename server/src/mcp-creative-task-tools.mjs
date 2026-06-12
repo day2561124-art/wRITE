@@ -67,6 +67,7 @@ export const creativeTaskToolMetadata = {
       normalizeProjectPath(projectPaths.pendingEngineCandidates),
       normalizeProjectPath(projectPaths.adoptedWritings),
       normalizeProjectPath(projectPaths.writingCandidates),
+      normalizeProjectPath(projectPaths.engineCandidateReviews),
     ],
     can_modify_active_engine: false,
     can_activate_engine: false,

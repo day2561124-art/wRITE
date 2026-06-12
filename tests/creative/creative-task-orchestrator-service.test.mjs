@@ -25,6 +25,7 @@ const fixtureGptContexts = path.join(projectPaths.gptWritingContexts, ".creative
 const fixtureWritingCandidates = path.join(projectPaths.writingCandidates, ".creative-task-test");
 const fixtureProofingContexts = path.join(projectPaths.proofingContexts, ".creative-task-test");
 const fixtureProofReports = path.join(projectPaths.proofReports, ".creative-task-test");
+const fixtureEngineReviews = path.join(projectPaths.engineCandidateReviews, ".creative-task-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 
 const options = {
@@ -38,6 +39,7 @@ const options = {
   writingCandidates: fixtureWritingCandidates,
   proofingContexts: fixtureProofingContexts,
   proofReports: fixtureProofReports,
+  engineCandidateReviews: fixtureEngineReviews,
 };
 
 function assert(condition, message) {
@@ -86,6 +88,7 @@ async function main() {
     rm(fixtureWritingCandidates, { recursive: true, force: true }),
     rm(fixtureProofingContexts, { recursive: true, force: true }),
     rm(fixtureProofReports, { recursive: true, force: true }),
+    rm(fixtureEngineReviews, { recursive: true, force: true }),
   ]);
   await mkdir(path.dirname(fixtureActive), { recursive: true });
   await writeFile(fixtureActive, activeText, "utf8");
@@ -234,15 +237,59 @@ async function main() {
       rawText: settlement(`${activeText.trimEnd()}\nRule 31: pending only.`),
       sourceChapter: "Creative activation test",
     }, options);
-    const activation = await runCreativeTask({
-      task_type: CREATIVE_TASK_TYPES.REQUEST_ENGINE_ACTIVATION,
+    const candidateMetadataPath = path.join(
+      fixturePending,
+      candidate.metadata.candidate_id,
+      "metadata.json",
+    );
+    const candidateStatusPath = path.join(
+      fixturePending,
+      candidate.metadata.candidate_id,
+      "status.json",
+    );
+    await Promise.all([
+      writeFile(candidateMetadataPath, `${JSON.stringify({
+        ...candidate.metadata,
+        base_active_engine_hash: hash(activeText),
+        review_status: "pending_review",
+      }, null, 2)}\n`, "utf8"),
+      readFile(candidateStatusPath, "utf8").then(JSON.parse).then((status) => (
+        writeFile(candidateStatusPath, `${JSON.stringify({
+          ...status,
+          review_status: "pending_review",
+        }, null, 2)}\n`, "utf8")
+      )),
+    ]);
+    const review = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.BUILD_PENDING_ENGINE_CANDIDATE_REVIEW,
       pending_engine_candidate_id: candidate.metadata.candidate_id,
+      review_mode: "diff_only",
+    }, options);
+    assert(review.ok && review.result.review_id, "Candidate review task failed.");
+    assert(
+      review.result.activation_approval_item_created === false,
+      "Review task created activation approval.",
+    );
+    const activation = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.REQUEST_PENDING_ENGINE_CANDIDATE_ACTIVATION,
+      pending_engine_candidate_id: candidate.metadata.candidate_id,
+      review_id: review.result.review_id,
       reason: "Review this candidate.",
     }, options);
     assert(activation.result.approval_item_id, "Activation request did not create approval item.");
     assert(
       activation.safety.can_activate_engine === false,
       "Activation request exposed activation permission.",
+    );
+    const legacyActivation = await runCreativeTask({
+      task_type: CREATIVE_TASK_TYPES.REQUEST_ENGINE_ACTIVATION,
+      pending_engine_candidate_id: candidate.metadata.candidate_id,
+      review_id: review.result.review_id,
+      reason: "Legacy safe request path.",
+    }, options);
+    assert(
+      legacyActivation.result.approval_item_id === activation.result.approval_item_id,
+      "Legacy activation request did not use the guarded deduplicated path.",
     );
 
     const queue = await runCreativeTask({
@@ -257,7 +304,7 @@ async function main() {
       .split(/\r?\n/u)
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    assert(logLines.length >= 9, "Creative task JSONL log omitted task runs.");
+    assert(logLines.length >= 11, "Creative task JSONL log omitted task runs.");
     assert(
       hash(await readFile(fixtureActive)) === hash(activeText),
       "Creative tasks modified the fixture active engine.",
@@ -279,6 +326,7 @@ async function main() {
       rm(fixtureWritingCandidates, { recursive: true, force: true }),
       rm(fixtureProofingContexts, { recursive: true, force: true }),
       rm(fixtureProofReports, { recursive: true, force: true }),
+      rm(fixtureEngineReviews, { recursive: true, force: true }),
     ]);
     await removeNew(transactionDir, transactionsBefore);
     assert(

@@ -184,6 +184,17 @@ const expectedTools = [
   "list_writing_candidate_adoption_requests",
   "get_adopted_writing_detail",
   "list_adopted_writings",
+  "build_adopted_writing_settlement_context",
+  "get_adopted_writing_settlement_context",
+  "list_adopted_writing_settlement_contexts",
+  "save_chat_output_as_settlement_report",
+  "get_settlement_report_detail",
+  "list_settlement_reports",
+  "build_pending_engine_candidate_from_settlement_report",
+  "build_pending_engine_candidate_review",
+  "get_pending_engine_candidate_review",
+  "list_pending_engine_candidate_reviews",
+  "request_pending_engine_candidate_activation",
 ];
 
 const readOnlyTools = new Set([
@@ -206,6 +217,12 @@ const readOnlyTools = new Set([
   "list_writing_candidate_adoption_requests",
   "get_adopted_writing_detail",
   "list_adopted_writings",
+  "get_adopted_writing_settlement_context",
+  "list_adopted_writing_settlement_contexts",
+  "get_settlement_report_detail",
+  "list_settlement_reports",
+  "get_pending_engine_candidate_review",
+  "list_pending_engine_candidate_reviews",
 ]);
 
 const backupRequiredTools = new Set([
@@ -301,7 +318,7 @@ const enumConstraintFixtures = [
     arguments: {
       taskType: "invalid-task",
     },
-    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue, save_chat_output_candidate, build_candidate_proofing_context, save_candidate_proof_report.",
+    expectedMessage: "taskType must be one of: generate_writing_candidate, proofread_writing_candidate, request_adopt_writing_candidate, build_settlement_candidate, request_engine_activation, query_approval_queue, save_chat_output_candidate, build_candidate_proofing_context, save_candidate_proof_report, build_adopted_writing_settlement_context, save_adopted_writing_settlement_report, build_pending_engine_candidate_from_settlement_report, build_pending_engine_candidate_review, request_pending_engine_candidate_activation.",
   },
   ...[
     ["run_creative_task", "proofingMode", {
@@ -340,6 +357,27 @@ const enumConstraintFixtures = [
       candidateId: "writing_candidate_20260612-000000-00000000",
     }, "low, medium, high"],
     ["list_writing_candidate_adoption_requests", "riskLevel", {}, "low, medium, high"],
+    ["build_adopted_writing_settlement_context", "settlementMode", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }, "full, facts_only, minimal"],
+    ["run_creative_task", "settlementMode", {
+      taskType: "build_adopted_writing_settlement_context",
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }, "full, facts_only, minimal"],
+    ["save_chat_output_as_settlement_report", "source", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+      settlementReportText: "fixture",
+    }, "chatgpt, gpt, manual_paste"],
+    ["build_pending_engine_candidate_review", "reviewMode", {
+      pendingEngineCandidateId: "engine_candidate_20260612-000000-00000000",
+    }, "full, diff_only, summary_only"],
+    ["run_creative_task", "reviewMode", {
+      taskType: "build_pending_engine_candidate_review",
+      pendingEngineCandidateId: "engine_candidate_20260612-000000-00000000",
+    }, "full, diff_only, summary_only"],
+    ["request_pending_engine_candidate_activation", "riskLevel", {
+      pendingEngineCandidateId: "engine_candidate_20260612-000000-00000000",
+    }, "medium, high"],
   ].map(([name, field, baseArguments, values]) => ({
     label: `${name} invalid ${field}`,
     name,
@@ -578,7 +616,38 @@ const integerMaximumFixtures = [
     },
     expectedMessage: "maxContextChars must be an integer less than or equal to 250000.",
   },
-  ...["list_candidate_proofing_contexts", "list_proof_reports"].map((name) => ({
+  ...[
+    ["build_adopted_writing_settlement_context", "maxContextChars", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+      maxContextChars: 250001,
+    }, 250000],
+    ["build_pending_engine_candidate_review", "maxContextChars", {
+      pendingEngineCandidateId: "engine_candidate_20260612-000000-00000000",
+      maxContextChars: 250001,
+    }, 250000],
+    ["get_settlement_report_detail", "maxContentChars", {
+      id: "settlement_report_20260612-000000-00000000",
+      maxContentChars: 50001,
+    }, 50000],
+    ["get_pending_engine_candidate_review", "maxContentChars", {
+      reviewId: "engine_review_20260612-000000-00000000",
+      maxContentChars: 50001,
+    }, 50000],
+  ].map(([name, field, argumentsValue, maximum]) => ({
+    label: `${name} ${field} over maximum`,
+    name,
+    field,
+    expectedMaximum: maximum,
+    arguments: argumentsValue,
+    expectedMessage: `${field} must be an integer less than or equal to ${maximum}.`,
+  })),
+  ...[
+    "list_candidate_proofing_contexts",
+    "list_proof_reports",
+    "list_adopted_writing_settlement_contexts",
+    "list_settlement_reports",
+    "list_pending_engine_candidate_reviews",
+  ].map((name) => ({
     label: `${name} limit over maximum`,
     name,
     field: "limit",
@@ -837,6 +906,19 @@ const requiredConstraintFixtures = [
   ...[
     ["request_writing_candidate_adoption", "candidateId", {}],
     ["get_writing_candidate_adoption_request", "requestId", {}],
+    ["build_adopted_writing_settlement_context", "adoptedChapterId", {}],
+    ["get_adopted_writing_settlement_context", "id", {}],
+    ["build_pending_engine_candidate_from_settlement_report", "settlementReportId", {}],
+    ["build_pending_engine_candidate_review", "pendingEngineCandidateId", {}],
+    ["get_pending_engine_candidate_review", "reviewId", {}],
+    ["request_pending_engine_candidate_activation", "pendingEngineCandidateId", {}],
+    ["get_settlement_report_detail", "id", {}],
+    ["save_chat_output_as_settlement_report", "adoptedChapterId", {
+      settlementReportText: "fixture",
+    }],
+    ["save_chat_output_as_settlement_report", "settlementReportText", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+    }],
   ].map(([name, field, argumentsValue]) => ({
     label: `${name} missing ${field}`,
     name,
@@ -1227,6 +1309,7 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
     limit: 20,
     allowWithoutProof: false,
+    allowBaseHashMismatch: false,
   }],
   ["build_gpt_writing_context", {
     chapterMode: "next_chapter",
@@ -1270,6 +1353,40 @@ const expectedDefaultMetadata = new Map([
   }],
   ["list_writing_candidate_adoption_requests", { limit: 20 }],
   ["list_adopted_writings", { limit: 20 }],
+  ["build_adopted_writing_settlement_context", {
+    settlementMode: "full",
+    includeAdoptedContent: true,
+    includeActiveEngine: true,
+    includeWritingCard: true,
+    includeProofingCard: true,
+    includeLongline: true,
+    maxContextChars: 120000,
+  }],
+  ["list_adopted_writing_settlement_contexts", { limit: 20 }],
+  ["save_chat_output_as_settlement_report", {
+    source: "chatgpt",
+    dryRun: false,
+  }],
+  ["get_settlement_report_detail", {
+    includeContent: false,
+    maxContentChars: 12000,
+  }],
+  ["list_settlement_reports", { limit: 20 }],
+  ["build_pending_engine_candidate_from_settlement_report", { dryRun: false }],
+  ["build_pending_engine_candidate_review", {
+    reviewMode: "full",
+    maxContextChars: 120000,
+  }],
+  ["get_pending_engine_candidate_review", {
+    includeContent: false,
+    maxContentChars: 12000,
+  }],
+  ["list_pending_engine_candidate_reviews", { limit: 20 }],
+  ["request_pending_engine_candidate_activation", {
+    riskLevel: "medium",
+    allowBaseHashMismatch: false,
+    dryRun: false,
+  }],
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
@@ -1287,6 +1404,13 @@ const expectedIntegerMaximumMetadata = new Map([
   ["build_candidate_proofing_context:maxContextChars", 250000],
   ["list_candidate_proofing_contexts:limit", 100],
   ["list_proof_reports:limit", 100],
+  ["build_adopted_writing_settlement_context:maxContextChars", 250000],
+  ["list_adopted_writing_settlement_contexts:limit", 100],
+  ["get_settlement_report_detail:maxContentChars", 50000],
+  ["list_settlement_reports:limit", 100],
+  ["build_pending_engine_candidate_review:maxContextChars", 250000],
+  ["get_pending_engine_candidate_review:maxContentChars", 50000],
+  ["list_pending_engine_candidate_reviews:limit", 100],
   ["list_writing_candidate_adoption_requests:limit", 100],
   ["list_adopted_writings:limit", 100],
 ]);
@@ -3717,6 +3841,12 @@ async function runSmokeTest(options) {
     makeRequest(postConcurrencyFailurePingRequestId, "ping", {}),
     options.verbose,
   );
+  // Keep transport framing fixtures independent from the growing schema fixture set.
+  const postConcurrencyFailurePing = await waitForResponse(
+    responses,
+    postConcurrencyFailurePingRequestId,
+    10_000,
+  );
   const firstInvalidJsonRpcRequestId = postConcurrencyFailurePingRequestId + 1;
   for (const [index, fixture] of invalidJsonRpcFixtures.entries()) {
     sendMessage(
@@ -4059,11 +4189,6 @@ async function runSmokeTest(options) {
     concurrencyFailureFixtures.map((_, index) => (
       waitForResponse(responses, firstConcurrencyFailureRequestId + index, 10_000)
     )),
-  );
-  const postConcurrencyFailurePing = await waitForResponse(
-    responses,
-    postConcurrencyFailurePingRequestId,
-    10_000,
   );
   const invalidJsonRpcResponses = await Promise.all(
     invalidJsonRpcFixtures.map((_, index) => (

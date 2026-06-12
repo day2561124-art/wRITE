@@ -57,6 +57,12 @@ import {
   list_settlement_reports,
   save_chat_output_as_settlement_report,
 } from "./mcp-adopted-writing-settlement-tools.mjs";
+import {
+  build_pending_engine_candidate_review,
+  get_pending_engine_candidate_review,
+  list_pending_engine_candidate_reviews,
+  request_pending_engine_candidate_activation,
+} from "./mcp-pending-engine-candidate-review-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1727,6 +1733,11 @@ const toolDefinitions = [
         "save_chat_output_candidate",
         "build_candidate_proofing_context",
         "save_candidate_proof_report",
+        "build_adopted_writing_settlement_context",
+        "save_adopted_writing_settlement_report",
+        "build_pending_engine_candidate_from_settlement_report",
+        "build_pending_engine_candidate_review",
+        "request_pending_engine_candidate_activation",
       ] },
       taskPrompt: { type: "string" },
       generationContext: { type: "object" },
@@ -1734,7 +1745,18 @@ const toolDefinitions = [
       candidateId: { type: "string" },
       adoptedChapterId: { type: "string" },
       settlementContextId: { type: "string" },
+      settlementReportId: { type: "string" },
+      settlementReportText: { type: "string" },
+      settlementMode: {
+        type: "string",
+        enum: ["full", "facts_only", "minimal"],
+      },
       pendingEngineCandidateId: { type: "string" },
+      reviewId: { type: "string" },
+      reviewMode: {
+        type: "string",
+        enum: ["full", "diff_only", "summary_only"],
+      },
       approvalId: { type: "string" },
       dryRun: { type: "boolean", default: false },
       reason: { type: "string" },
@@ -1753,6 +1775,11 @@ const toolDefinitions = [
         enum: ["full", "canon_only", "style_only", "continuity_only"],
       },
       includeCandidateContent: { type: "boolean" },
+      includeAdoptedContent: { type: "boolean" },
+      includeCandidateEngine: { type: "boolean" },
+      includeDiff: { type: "boolean" },
+      includeSettlementReport: { type: "boolean" },
+      includeSourceAdoptedWriting: { type: "boolean" },
       includeActiveEngine: { type: "boolean" },
       includeWritingCard: { type: "boolean" },
       includeProofingCard: { type: "boolean" },
@@ -1764,6 +1791,8 @@ const toolDefinitions = [
       severity: { type: "string", enum: ["P0", "P1", "P2", "P3", "none"] },
       requestedBy: { type: "string" },
       allowWithoutProof: { type: "boolean", default: false },
+      allowBaseHashMismatch: { type: "boolean", default: false },
+      baseActiveEngineHash: { type: "string" },
     }, ["taskType"]),
     handler: async (args) => jsonContent(await run_creative_task(args)),
   },
@@ -2133,6 +2162,69 @@ const toolDefinitions = [
       await build_pending_engine_candidate_from_settlement_report(args),
     ),
   },
+  {
+    name: "build_pending_engine_candidate_review",
+    description: "Build a review bundle and diff for a pending engine candidate without requesting or performing activation.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      pendingEngineCandidateId: { type: "string" },
+      reviewMode: {
+        type: "string",
+        enum: ["full", "diff_only", "summary_only"],
+        default: "full",
+      },
+      includeActiveEngine: { type: "boolean" },
+      includeCandidateEngine: { type: "boolean" },
+      includeDiff: { type: "boolean" },
+      includeSettlementReport: { type: "boolean" },
+      includeSourceAdoptedWriting: { type: "boolean" },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 120000 },
+    }, ["pendingEngineCandidateId"]),
+    handler: async (args) => jsonContent(await build_pending_engine_candidate_review(args)),
+  },
+  {
+    name: "get_pending_engine_candidate_review",
+    description: "Read a pending engine candidate review with optional bounded Markdown content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      reviewId: { type: "string" },
+      includeContent: { type: "boolean", default: false },
+      maxContentChars: { type: "integer", minimum: 1, maximum: 50000, default: 12000 },
+    }, ["reviewId"]),
+    handler: async (args) => jsonContent(await get_pending_engine_candidate_review(args)),
+  },
+  {
+    name: "list_pending_engine_candidate_reviews",
+    description: "List pending engine candidate review summaries without large content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      pendingEngineCandidateId: { type: "string" },
+      status: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_pending_engine_candidate_reviews(args)),
+  },
+  {
+    name: "request_pending_engine_candidate_activation",
+    description: "Create an approval-queue activation request after candidate review without approving or activating it.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      pendingEngineCandidateId: { type: "string" },
+      reviewId: { type: "string" },
+      reason: { type: "string" },
+      requestedBy: { type: "string" },
+      riskLevel: {
+        type: "string",
+        enum: ["medium", "high"],
+        default: "medium",
+      },
+      allowBaseHashMismatch: { type: "boolean", default: false },
+      dryRun: { type: "boolean", default: false },
+    }, ["pendingEngineCandidateId"]),
+    handler: async (args) => jsonContent(await request_pending_engine_candidate_activation(args)),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -2182,6 +2274,10 @@ const permissionSources = {
   get_settlement_report_detail: ["adopted_writing_settlement_report_records"],
   list_settlement_reports: ["adopted_writing_settlement_report_records"],
   build_pending_engine_candidate_from_settlement_report: ["adopted_writing_settlement_report_records", "active_engine"],
+  build_pending_engine_candidate_review: ["pending_engine_candidate_records", "active_engine", "adopted_writing_settlement_report_records"],
+  get_pending_engine_candidate_review: ["pending_engine_candidate_review_records"],
+  list_pending_engine_candidate_reviews: ["pending_engine_candidate_review_records"],
+  request_pending_engine_candidate_activation: ["pending_engine_candidate_records", "pending_engine_candidate_review_records", "user_input"],
 };
 
 const backupRequiredTools = new Set([

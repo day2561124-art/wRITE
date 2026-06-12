@@ -31,6 +31,12 @@ export const projectPaths = {
     "outputs",
     "settlement_reports",
   ),
+  engineCandidateReviews: path.join(
+    projectRoot,
+    "data",
+    "outputs",
+    "engine_candidate_reviews",
+  ),
   settlementProposals: path.join(projectRoot, "data", "outputs", "settlement_proposals"),
   compressedRuleCandidates: path.join(projectRoot, "data", "outputs", "compressed_rule_candidates"),
   visualDb: path.join(projectRoot, "data", "visual_db"),

@@ -7,10 +7,8 @@ import {
 } from "./writing-workflow-service.mjs";
 import { buildSettlementContext } from "./settlement-workflow-service.mjs";
 import {
-  createApprovalItem,
   listApprovalItems,
 } from "./approval-queue-service.mjs";
-import { getPendingCandidate } from "./engine-candidate-service.mjs";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
@@ -21,6 +19,10 @@ import {
   buildPendingEngineCandidateFromSettlementReport,
   saveChatOutputAsSettlementReport,
 } from "./adopted-writing-settlement-service.mjs";
+import {
+  buildPendingEngineCandidateReview,
+  requestPendingEngineCandidateActivation,
+} from "./pending-engine-candidate-review-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -43,6 +45,9 @@ export const CREATIVE_TASK_TYPES = Object.freeze({
   SAVE_ADOPTED_WRITING_SETTLEMENT_REPORT: "save_adopted_writing_settlement_report",
   BUILD_PENDING_ENGINE_CANDIDATE_FROM_SETTLEMENT_REPORT:
     "build_pending_engine_candidate_from_settlement_report",
+  BUILD_PENDING_ENGINE_CANDIDATE_REVIEW: "build_pending_engine_candidate_review",
+  REQUEST_PENDING_ENGINE_CANDIDATE_ACTIVATION:
+    "request_pending_engine_candidate_activation",
 });
 
 const taskTypes = Object.freeze(Object.values(CREATIVE_TASK_TYPES));
@@ -121,6 +126,7 @@ function normalizeInput(input = {}) {
       "pending_engine_candidate_id",
       200,
     ),
+    reviewId: optionalText(input.review_id ?? input.reviewId, "review_id", 200),
     approvalId: optionalText(input.approval_id ?? input.approvalId, "approval_id", 200),
     sourceBundleId: optionalText(
       input.source_bundle_id ?? input.sourceBundleId,
@@ -172,6 +178,20 @@ function normalizeInput(input = {}) {
       "base_active_engine_hash",
       128,
     ),
+    reviewMode: optionalText(
+      input.review_mode ?? input.reviewMode,
+      "review_mode",
+      100,
+    ),
+    includeCandidateEngine:
+      input.include_candidate_engine ?? input.includeCandidateEngine,
+    includeDiff: input.include_diff ?? input.includeDiff,
+    includeSettlementReport:
+      input.include_settlement_report ?? input.includeSettlementReport,
+    includeSourceAdoptedWriting:
+      input.include_source_adopted_writing ?? input.includeSourceAdoptedWriting,
+    allowBaseHashMismatch:
+      input.allow_base_hash_mismatch === true || input.allowBaseHashMismatch === true,
     proofingMode: optionalText(
       input.proofing_mode ?? input.proofingMode,
       "proofing_mode",
@@ -548,73 +568,66 @@ async function buildPendingEngineCandidateFromSettlementReportTask(input, taskId
   return { response, bundle: candidate };
 }
 
-async function requestEngineActivation(input, taskId, options) {
-  if (!input.pendingEngineCandidateId) {
-    throw new Error("pending_engine_candidate_id is required.");
-  }
-  const candidate = await getPendingCandidate(
-    input.pendingEngineCandidateId,
-    workflowOptions(options),
-  );
-  if (input.dryRun) {
-    const response = resultBase(taskId, input.taskType, "dry_run");
-    response.result = {
-      pending_engine_candidate_id: input.pendingEngineCandidateId,
-      candidate_status: candidate.status.status,
-      would_create_approval_request: true,
-    };
-    return { response, bundle: response.result };
-  }
-  const blockedReason = candidate.status.status !== "candidate"
-    ? candidate.status.blocked_reason || `candidate status: ${candidate.status.status}`
-    : candidate.risk_report.risk_level === "critical"
-      ? "critical candidate requires non-MCP review"
-      : null;
-  const item = await createApprovalItem({
-    actionType: "activate_engine_candidate",
-    targetType: "pending_engine_candidate",
-    targetId: input.pendingEngineCandidateId,
-    sourceChapter: candidate.metadata.source_chapter,
-    title: "Creative task engine activation request",
-    summary: input.reason || "Creative task requested engine candidate activation review.",
-    riskLevel: candidate.risk_report.risk_level,
-    requiresSecondConfirmation: candidate.risk_report.requires_second_confirmation === true,
-    requiresNeuralSuccess: candidate.metadata.requires_neural_modules === true,
-    neuralStatus: "not_checked_by_creative_task",
-    blockedReason,
-    status: blockedReason ? "blocked" : "pending",
-    impact: {
-      will_modify: ["data/canon_db/active_engine.md"],
-      will_create: ["snapshot", "archive", "activation_log"],
-      rollback_available: true,
-    },
-    links: { candidate_id: input.pendingEngineCandidateId },
-    details: {
-      requested_by: "creative_task_orchestrator",
-      candidate_status: candidate.status.status,
-      diff: candidate.diff,
-    },
-  }, approvalOptions(options));
-  const response = resultBase(taskId, input.taskType, item.status.status);
+async function buildPendingEngineCandidateReviewTask(input, taskId, options) {
+  const review = await buildPendingEngineCandidateReview({
+    pendingEngineCandidateId: input.pendingEngineCandidateId,
+    reviewMode: input.reviewMode || "full",
+    includeActiveEngine: input.includeActiveEngine,
+    includeCandidateEngine: input.includeCandidateEngine,
+    includeDiff: input.includeDiff,
+    includeSettlementReport: input.includeSettlementReport,
+    includeSourceAdoptedWriting: input.includeSourceAdoptedWriting,
+    maxContextChars: input.maxContextChars,
+  }, options);
+  const response = resultBase(taskId, input.taskType, "completed");
   response.result = {
-    approval_item_id: item.approval_item_id,
-    action_type: item.action_type,
-    status: item.status.status,
-    risk_level: item.risk_level,
-    target_id: item.target_id,
+    review_id: review.review.review_id,
+    pending_engine_candidate_id: review.review.pending_engine_candidate_id,
+    base_hash_mismatch: review.review.base_hash_mismatch,
+    review_path: review.review_path,
+    review_for_ui_path: review.review_for_ui_path,
+    diff_path: review.diff_path,
+    activation_approval_item_created: false,
+    active_engine_modified: false,
   };
   response.created.push({
-    label: "approval_item",
-    target_id: item.approval_item_id,
-    canon_status: "approval_required",
+    label: "pending_engine_candidate_review",
+    target_id: review.review.review_id,
+    source_path: review.review_for_ui_path,
+    canon_status: "review_only",
   });
-  if (blockedReason) {
-    response.ok = false;
-    response.status = "blocked";
-    response.blocked = true;
-    response.blocked_reason = blockedReason;
+  response.warnings.push(...review.review.warnings);
+  return { response, bundle: review.review };
+}
+
+async function requestPendingEngineCandidateActivationTask(input, taskId, options) {
+  const request = await requestPendingEngineCandidateActivation({
+    pendingEngineCandidateId: input.pendingEngineCandidateId,
+    reviewId: input.reviewId,
+    reason: input.reason,
+    requestedBy: input.requestedBy || "creative_task_orchestrator",
+    riskLevel: input.riskLevel || "medium",
+    allowBaseHashMismatch: input.allowBaseHashMismatch,
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(
+    taskId,
+    input.taskType,
+    input.dryRun ? "dry_run" : request.approval_status,
+  );
+  response.result = request;
+  if (!input.dryRun) {
+    response.created.push({
+      label: "approval_item",
+      target_id: request.approval_item_id,
+      canon_status: "approval_required",
+    });
   }
-  return { response, bundle: { candidate: candidate.metadata, risk_report: candidate.risk_report } };
+  return { response, bundle: request };
+}
+
+async function requestEngineActivation(input, taskId, options) {
+  return requestPendingEngineCandidateActivationTask(input, taskId, options);
 }
 
 async function queryApprovalQueue(input, taskId, options) {
@@ -761,6 +774,10 @@ async function executeTask(input, taskId, options) {
       return saveAdoptedWritingSettlementReportTask(input, taskId, options);
     case CREATIVE_TASK_TYPES.BUILD_PENDING_ENGINE_CANDIDATE_FROM_SETTLEMENT_REPORT:
       return buildPendingEngineCandidateFromSettlementReportTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.BUILD_PENDING_ENGINE_CANDIDATE_REVIEW:
+      return buildPendingEngineCandidateReviewTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.REQUEST_PENDING_ENGINE_CANDIDATE_ACTIVATION:
+      return requestPendingEngineCandidateActivationTask(input, taskId, options);
     default:
       throw new Error(`Unknown task_type: ${input.taskType || "(empty)"}`);
   }
