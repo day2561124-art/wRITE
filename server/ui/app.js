@@ -61,16 +61,28 @@ const state = {
 
 const titles = {
   overview: "總覽",
-  compose: "起稿",
-  review: "驗稿",
-  library: "資料庫",
-  visuals: "圖庫",
-  neural: "神經模組",
-  settlement: "結算匯入",
-  approval: "確認佇列",
-  cleanup: "封存清理",
-  activity: "紀錄",
-  "writer-workbench": "寫作工作台",
+  compose: "正文寫作",
+  review: "驗稿 / 校對",
+  library: "正史資料",
+  visuals: "圖像資料",
+  neural: "檢索記憶",
+  settlement: "章節結算",
+  approval: "待我確認",
+  cleanup: "錯誤回報",
+  activity: "版本紀錄",
+  settings: "設定",
+  "writer-workbench": "創作引擎",
+};
+
+const uiLabels = {
+  task_prompt: "本章任務",
+  generation_context: "寫作材料",
+  retrieval_context: "檢索參考",
+  writing_context: "給 ChatGPT 的寫作包",
+  approval_queue: "待我確認",
+  active_engine: "正史資料庫",
+  compressed_rules: "寫作規則",
+  neural: "檢索記憶",
 };
 
 const sourceIcons = {
@@ -2086,6 +2098,7 @@ function renderActivityTable() {
 }
 
 function renderAll() {
+  renderTopbarStatus();
   renderSources();
   renderOutputs();
   renderCounts();
@@ -2097,6 +2110,27 @@ function renderAll() {
   renderApprovalQueue();
   renderActivityTable();
   renderOperatorOverview();
+}
+
+function renderTopbarStatus() {
+  try {
+    const bridge = state.data?.bridge ?? null;
+    const sources = state.data?.sources ?? [];
+    const rules = state.data?.rules ?? null;
+    const memory = state.data?.memory ?? null;
+    const pending = state.workbench?.approval_queue?.pending_count ?? 0;
+    const bridgeText = bridge?.available ? `ChatGPT Bridge：可用` : bridge?.error ? `ChatGPT Bridge：錯誤` : `ChatGPT Bridge：尚未接入`;
+    const canonText = sources.length ? `正史資料庫：${sources.filter(s=>s.errors?.length).length ? '警告' : '正常'}` : '正史資料庫：載入中';
+    const rulesText = rules?.hash ? `寫作規則：正常` : `寫作規則：載入中`;
+    const memoryText = memory?.status ? `檢索記憶：${memory.status}` : `檢索記憶：載入中`;
+    $(`#bridge-status`) && ($(`#bridge-status`).textContent = bridgeText);
+    $(`#canon-status`) && ($(`#canon-status`).textContent = canonText);
+    $(`#rules-status`) && ($(`#rules-status`).textContent = rulesText);
+    $(`#memory-status`) && ($(`#memory-status`).textContent = memoryText);
+    $(`#pending-count`) && ($(`#pending-count`).textContent = `待我確認：${pending}`);
+  } catch (e) {
+    // fail quietly
+  }
 }
 
 async function openLibraryFile(projectPath, title = "") {

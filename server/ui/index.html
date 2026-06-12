@@ -33,6 +33,16 @@
             <span>驗稿 / 校對</span>
             <span id="nav-badge-review" class="nav-badge">尚未開始</span>
           </button>
+          <button class="nav-item" data-view="settlement" type="button">
+            <span class="nav-symbol" aria-hidden="true">⇄</span>
+            <span>章節結算</span>
+            <span id="nav-badge-settlement" class="nav-badge">尚未開始</span>
+          </button>
+          <button class="nav-item" data-view="approval" type="button">
+            <span class="nav-symbol" aria-hidden="true">⚑</span>
+            <span>待我確認</span>
+            <span id="nav-badge-approval" class="nav-badge">0 待確認</span>
+          </button>
           <button class="nav-item" data-view="library" type="button">
             <span class="nav-symbol" aria-hidden="true">▤</span>
             <span>正史資料</span>
@@ -47,28 +57,22 @@
             <span>檢索記憶</span>
             <span id="nav-badge-neural" class="nav-badge">0 注意</span>
           </button>
-          <button class="nav-item" data-view="settlement" type="button">
-            <span class="nav-symbol" aria-hidden="true">⇄</span>
-            <span>章節結算</span>
-            <span id="nav-badge-settlement" class="nav-badge">尚未開始</span>
-          </button>
-          <button class="nav-item" data-view="approval" type="button">
-            <span class="nav-symbol" aria-hidden="true">⚑</span>
-            <span>待我確認</span>
-            <span id="nav-badge-approval" class="nav-badge">0 待確認</span>
-          </button>
           <button class="nav-item" data-view="writer-workbench" type="button">
-            <span class="nav-symbol" aria-hidden="true">📝</span>
-            <span>寫作工作台</span>
+            <span class="nav-symbol" aria-hidden="true">🧭</span>
+            <span>創作引擎</span>
             <span id="nav-badge-workbench" class="nav-badge">載入中</span>
           </button>
           <button class="nav-item" data-view="cleanup" type="button">
-            <span class="nav-symbol" aria-hidden="true">🗄</span>
-            <span>封存 / 清理</span>
+            <span class="nav-symbol" aria-hidden="true">⚠</span>
+            <span>錯誤回報</span>
           </button>
           <button class="nav-item" data-view="activity" type="button">
             <span class="nav-symbol" aria-hidden="true">≡</span>
             <span>版本紀錄</span>
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <span class="nav-symbol" aria-hidden="true">⚙</span>
+            <span>設定</span>
           </button>
         </nav>
 
@@ -85,6 +89,14 @@
             <h1 id="view-title">總覽</h1>
           </div>
           <div class="topbar-actions">
+            <div class="status-indicators">
+              <span id="mode-indicator" class="last-sync">本地模式</span>
+              <span id="bridge-status" class="topbar-status">ChatGPT Bridge：尚未接入</span>
+              <span id="canon-status" class="topbar-status">正史資料庫：載入中</span>
+              <span id="rules-status" class="topbar-status">寫作規則：載入中</span>
+              <span id="memory-status" class="topbar-status">檢索記憶：載入中</span>
+              <span id="pending-count" class="topbar-status">待我確認：0</span>
+            </div>
             <span id="last-sync" class="last-sync">尚未同步</span>
             <button id="refresh-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">
               <span aria-hidden="true">↻</span>
