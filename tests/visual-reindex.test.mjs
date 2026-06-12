@@ -39,16 +39,43 @@ async function main() {
     for (const record of records) {
       const directory = record.path.split("/").at(-2);
       assert(record.category === expectedCategories[directory], `Wrong category for ${record.path}.`);
-      assert(record.title === `${directory}.png`, `Filename title fallback missing for ${record.path}.`);
+      assert(record.title === directory, `Filename title fallback missing for ${record.path}.`);
       assert(record.character === "unknown", `Character fallback missing for ${record.path}.`);
       assert(record.status === "imported", `Imported status missing for ${record.path}.`);
       assert(record.source === "reindexed_from_assets", `Reindex source missing for ${record.path}.`);
+      assert(record.metadata_source === "fallback", `Fallback metadata source missing for ${record.path}.`);
       assert(record.tags.length === 0, `Tag fallback missing for ${record.path}.`);
       assert(validateVisualRecord(record).errors.length === 0, `Invalid record for ${record.path}.`);
     }
 
     const secondResult = await reindexVisualAssets({ assetsPath, indexPath });
     assert(secondResult.records === records.length, "Reindex is not idempotent.");
+
+    const preservedPath = records[0].path;
+    const preservedCreatedAt = records[0].created_at;
+    const preservedStatus = records[0].status;
+    const preserved = records.map((record) => record.path === preservedPath
+      ? {
+          ...record,
+          title: "人工命名",
+          character: "測試角色",
+          tags: ["角色基準圖"],
+          metadata_source: "manual_mapping",
+        }
+      : record);
+    await writeFile(indexPath, `${preserved.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    await reindexVisualAssets({ assetsPath, indexPath });
+    const afterPreserve = (await readFile(indexPath, "utf8"))
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => JSON.parse(line))
+      .find((record) => record.path === preservedPath);
+    assert(afterPreserve.title === "人工命名", "Reindex overwrote an existing title.");
+    assert(afterPreserve.character === "測試角色", "Reindex overwrote an existing character.");
+    assert(afterPreserve.category === records[0].category, "Reindex overwrote an existing category.");
+    assert(afterPreserve.tags[0] === "角色基準圖", "Reindex overwrote existing tags.");
+    assert(afterPreserve.created_at === preservedCreatedAt, "Reindex overwrote created_at.");
+    assert(afterPreserve.status === preservedStatus, "Reindex overwrote status.");
 
     const gitignore = await readFile(path.resolve(".gitignore"), "utf8");
     assert(

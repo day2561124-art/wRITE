@@ -34,6 +34,7 @@ export const visualSourceValues = new Set([
   "reindexed_from_assets",
 ]);
 export const visualImportStatusValues = new Set(["imported"]);
+export const visualMetadataSourceValues = new Set(["fallback", "manual_mapping", "recovered"]);
 export const allowedVisualImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 
 export function isVisualAssetProjectPath(projectPath) {
@@ -104,7 +105,14 @@ export function validateVisualRecord(record) {
     if (field in record) requireString(errors, record, field);
   }
 
-  for (const field of ["updated_at", "notes", "description", "ability_state", "status"]) {
+  for (const field of [
+    "updated_at",
+    "notes",
+    "description",
+    "ability_state",
+    "status",
+    "metadata_source",
+  ]) {
     optionalString(errors, record, field);
   }
 
@@ -131,6 +139,13 @@ export function validateVisualRecord(record) {
   }
   if ("status" in record && record.status && !visualImportStatusValues.has(record.status)) {
     errors.push(`status must be one of: ${[...visualImportStatusValues].join(", ")}.`);
+  }
+  if (
+    "metadata_source" in record
+    && record.metadata_source
+    && !visualMetadataSourceValues.has(record.metadata_source)
+  ) {
+    errors.push(`metadata_source must be one of: ${[...visualMetadataSourceValues].join(", ")}.`);
   }
   if ("path" in record && !isVisualAssetProjectPath(record.path)) {
     errors.push("path must point to an allowed image under data/visual_db/assets/.");

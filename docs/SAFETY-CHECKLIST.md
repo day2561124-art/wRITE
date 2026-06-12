@@ -1,5 +1,16 @@
 # Safety Checklist
 
+## Phase 13D-Lite Visual Gallery
+
+- [ ] Thumbnail URLs use `/api/visual-db/asset?path=...`, not local filesystem paths.
+- [ ] Asset serving rejects traversal, absolute paths, non-images, and files outside
+  `data/visual_db/assets/`.
+- [ ] Reindex preserves existing title, character, category, tags, status, and creation time.
+- [ ] Fallback records are visibly marked 「待補命名」.
+- [ ] Metadata mapping updates only `data/visual_db/visual_index.jsonl`.
+- [ ] PNG assets remain ignored and are not staged.
+- [ ] `active_engine`, `compressed_rules`, writing card, proofing card, and longline are unchanged.
+
 ## Phase 13C-Lite Operator UX
 
 - [ ] 「今日下一步」與流程進度只讀取既有 workflow state。

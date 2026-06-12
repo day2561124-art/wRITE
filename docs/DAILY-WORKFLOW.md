@@ -1,5 +1,27 @@
 # Daily Workflow
 
+## Phase 13D-Lite Visual Metadata
+
+Gallery thumbnails are served by:
+
+```text
+GET /api/visual-db/asset?path=<encoded visual asset project path>
+```
+
+The endpoint is read-only and restricted to PNG, JPEG, and WEBP files under
+`data/visual_db/assets/`. Image files remain ignored by Git.
+
+When a reindexed record shows 「待補命名」, create a JSON mapping containing
+`path` plus any of `title`, `character`, `category`, and `tags`, then run:
+
+```powershell
+node scripts/update-visual-metadata.mjs .\visual-metadata.json
+```
+
+The script validates the index before and after the update, skips unknown paths,
+and never modifies image files. Reindex preserves records marked
+`metadata_source=manual_mapping`.
+
 ## Phase 13C-Lite Operator UX
 
 Use the overview's 「今日下一步」 card and workflow progress row to identify the

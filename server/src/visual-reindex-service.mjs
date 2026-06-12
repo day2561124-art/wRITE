@@ -74,6 +74,20 @@ function visualId(projectPath) {
   return `VIS-REINDEX-${digest}`;
 }
 
+function normalizeFallbackRecord(record) {
+  if (record.source !== "reindexed_from_assets") return record;
+  if (record.metadata_source && record.metadata_source !== "fallback") return record;
+  const filename = path.posix.basename(record.path);
+  const filenameStem = filename.slice(0, -path.posix.extname(filename).length);
+  const titleIsFallback = record.title === filename || record.title === filenameStem;
+  if (record.character !== "unknown" || !titleIsFallback) return record;
+  return {
+    ...record,
+    title: filenameStem,
+    metadata_source: "fallback",
+  };
+}
+
 async function buildImportedRecord(assetsPath, filePath) {
   const projectPath = projectAssetPath(assetsPath, filePath);
   const fileStats = await stat(filePath);
@@ -82,11 +96,12 @@ async function buildImportedRecord(assetsPath, filePath) {
     created_at: fileStats.mtime.toISOString(),
     character: "unknown",
     category: categoryForAsset(assetsPath, filePath),
-    title: path.basename(filePath),
+    title: path.basename(filePath, path.extname(filePath)),
     canon_status: "reference",
     trust_level: "T7",
     source: "reindexed_from_assets",
     status: "imported",
+    metadata_source: "fallback",
     path: projectPath,
     notes: "Reindexed visual reference only; does not establish canon facts or ability mechanics.",
     description: "",
@@ -108,7 +123,9 @@ export async function reindexVisualAssets({
     findPngFiles(assetsPath),
     readExistingRecords(indexPath),
   ]);
-  const recordsByPath = new Map(existingRecords.map((record) => [record.path, record]));
+  const recordsByPath = new Map(
+    existingRecords.map((record) => [record.path, normalizeFallbackRecord(record)]),
+  );
 
   for (const filePath of files) {
     const assetPath = projectAssetPath(assetsPath, filePath);

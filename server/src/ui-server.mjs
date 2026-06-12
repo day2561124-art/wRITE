@@ -395,9 +395,7 @@ async function readJsonl(projectPath, limit = 100) {
 }
 
 function visualAssetUrl(projectPath) {
-  const filePath = resolveProjectPath(projectPath);
-  const relative = path.relative(visualAssetsDir, filePath).replaceAll(path.sep, "/");
-  return `/visual-assets/${relative.split("/").map(encodeURIComponent).join("/")}`;
+  return `/api/visual-db/asset?path=${encodeURIComponent(projectPath)}`;
 }
 
 async function visualAssetState(record) {
@@ -1178,12 +1176,24 @@ function decodeAssetPath(value) {
   }
 }
 
-async function serveVisualAsset(response, relativePath) {
-  const decoded = decodeAssetPath(relativePath);
+const servedVisualImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+async function serveVisualAsset(response, projectPath) {
+  let canonicalPath;
+  try {
+    canonicalPath = canonicalProjectPath(projectPath);
+  } catch (error) {
+    sendError(response, 403, error);
+    return;
+  }
+  if (!canonicalPath.startsWith("data/visual_db/assets/")) {
+    sendError(response, 403, new Error("Visual asset must stay under data/visual_db/assets/."));
+    return;
+  }
   let filePath;
   try {
     filePath = assertPathInside(
-      path.resolve(visualAssetsDir, decoded),
+      canonicalPath,
       visualAssetsDir,
       "visual asset",
     );
@@ -1192,7 +1202,7 @@ async function serveVisualAsset(response, relativePath) {
     return;
   }
   const extension = path.extname(filePath).toLowerCase();
-  if (!allowedVisualImageExtensions.has(extension)) {
+  if (!servedVisualImageExtensions.has(extension)) {
     sendError(response, 403, new Error("Visual asset type is not allowed."));
     return;
   }
@@ -2378,8 +2388,8 @@ async function handleRequest(request, response) {
     return;
   }
 
-  if (request.method === "GET" && rawPathname.startsWith("/visual-assets/")) {
-    await serveVisualAsset(response, rawPathname.slice("/visual-assets/".length));
+  if (request.method === "GET" && url.pathname === "/api/visual-db/asset") {
+    await serveVisualAsset(response, url.searchParams.get("path") ?? "");
     return;
   }
 

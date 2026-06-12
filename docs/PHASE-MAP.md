@@ -1,5 +1,18 @@
 # Phase Map
 
+## Phase 13D-Lite
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 13D-Lite | Visual Gallery Thumbnail + Metadata Recovery | Safe thumbnails and metadata mapping |
+
+- Serves thumbnails through a read-only asset API restricted to visual assets.
+- Visual cards never use local project paths directly as image URLs.
+- Reindex preserves existing metadata and labels filename/unknown records as fallback.
+- Original metadata was not present in tracked history; manual recovery uses a JSON
+  mapping script that updates only `visual_index.jsonl`.
+- PNG assets remain ignored and are not versioned.
+
 ## Phase 13C-Lite
 
 | Phase | Name | Status |

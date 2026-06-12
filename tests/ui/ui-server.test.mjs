@@ -278,6 +278,14 @@ async function main() {
     assert(appResponse.ok && appText.includes("handlePipeline"), "UI app.js was not served.");
     assert(appText.includes("handleVisualUpload"), "UI app.js is missing the visual upload handler.");
     assert(appText.includes("handleVisualDelete"), "UI app.js is missing the visual delete handler.");
+    assert(
+      appText.includes("/api/visual-db/asset?path=${encodeURIComponent(projectPath)}"),
+      "Visual cards do not build encoded asset API URLs.",
+    );
+    assert(
+      !appText.includes('<img src="${escapeHtml(item.path)}"'),
+      "Visual cards use a local project path directly as img src.",
+    );
     assert(appText.includes("renderNeuralStatus"), "UI app.js is missing the neural status renderer.");
     assert(appText.includes("handleSettlementImport"), "UI app.js is missing the settlement import handler.");
     assert(appText.includes("renderRiskReport"), "UI app.js is missing the risk report renderer.");
@@ -461,6 +469,16 @@ async function main() {
       visualsResult.payload.visuals.items.some((item) => item.exists && item.assetUrl),
       "Visuals API did not expose a readable reindexed asset.",
     );
+    const firstVisual = visualsResult.payload.visuals.items.find((item) => item.exists);
+    const firstAssetResponse = await fetch(
+      `${baseUrl}/api/visual-db/asset?path=${encodeURIComponent(firstVisual.path)}`,
+    );
+    assert(firstAssetResponse.ok, "First reindexed visual asset endpoint failed.");
+    assert(
+      firstAssetResponse.headers.get("content-type") === "image/png",
+      "Reindexed visual asset endpoint returned the wrong Content-Type.",
+    );
+    assert((await firstAssetResponse.arrayBuffer()).byteLength > 0, "Visual asset response was empty.");
 
     const createRunResult = await readJson(await fetch(`${baseUrl}/api/agent/runs`, {
       method: "POST",
@@ -1273,10 +1291,23 @@ async function main() {
     ));
     assert(directTraversalResult.response.status === 403, "Direct project escape was not rejected.");
 
-    const visualTraversalResult = await rawHttpStatus(port, "/visual-assets/%2e%2e/README.md");
-    assert(visualTraversalResult.status === 403, "Visual asset traversal was not rejected.");
-
-    const visualTypeResult = await readJson(await fetch(`${baseUrl}/visual-assets/characters/not-image.txt`));
+    const visualTraversalResult = await readJson(await fetch(
+      `${baseUrl}/api/visual-db/asset?path=${encodeURIComponent("../README.md")}`,
+    ));
+    assert(
+      [400, 403].includes(visualTraversalResult.response.status),
+      "Visual asset traversal was not rejected.",
+    );
+    const visualOutsideResult = await readJson(await fetch(
+      `${baseUrl}/api/visual-db/asset?path=${encodeURIComponent("data/canon_db/active_engine.md")}`,
+    ));
+    assert(
+      [400, 403].includes(visualOutsideResult.response.status),
+      "Visual asset endpoint read outside the asset directory.",
+    );
+    const visualTypeResult = await readJson(await fetch(
+      `${baseUrl}/api/visual-db/asset?path=${encodeURIComponent("data/visual_db/assets/characters/not-image.txt")}`,
+    ));
     assert(visualTypeResult.response.status === 403, "Visual asset type restriction was not enforced.");
 
     const dryRunVisualUpload = await readJson(await fetch(`${baseUrl}/api/visuals/upload`, {

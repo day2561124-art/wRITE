@@ -14,6 +14,7 @@ const steps = [
   ["Source registry contract", ["tests/source-registry.test.mjs"]],
   ["Visual DB contract", ["tests/visual-db.test.mjs"]],
   ["Visual asset reindex", ["tests/visual-reindex.test.mjs"]],
+  ["Visual metadata update", ["tests/visual-metadata.test.mjs"]],
   ["Agent run service", ["tests/agent/agent-run-service.test.mjs"]],
   ["Neural trace service", ["tests/agent/neural-trace-service.test.mjs"]],
   ["Launcher contract", ["tests/launcher.test.mjs"]],

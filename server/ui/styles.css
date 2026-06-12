@@ -1576,6 +1576,7 @@ textarea:disabled {
 }
 
 .visual-thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 5;
   display: grid;
@@ -1589,10 +1590,68 @@ textarea:disabled {
 }
 
 .visual-thumb img {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+.visual-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted-weak);
+  background: var(--surface-quiet);
+  font-size: 28px;
+}
+
+.visual-thumb.is-failed img {
+  display: none;
+}
+
+.visual-thumb.is-loaded .visual-placeholder {
+  display: none;
+}
+
+.visual-card-tags,
+.visual-card-path {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.visual-card-path {
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.visual-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.metadata-badge {
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.metadata-badge.is-fallback {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.metadata-badge.is-named {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-soft);
 }
 
 .visual-card strong,

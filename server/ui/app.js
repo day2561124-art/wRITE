@@ -679,6 +679,25 @@ function visualMatchesFilters(item) {
   );
 }
 
+function visualAssetEndpoint(projectPath) {
+  return `/api/visual-db/asset?path=${encodeURIComponent(projectPath)}`;
+}
+
+function isFallbackVisualMetadata(item) {
+  const filename = String(item.path ?? "").split("/").at(-1) ?? "";
+  const filenameStem = filename.replace(/\.[^.]+$/u, "");
+  return item.metadata_source === "fallback"
+    || item.character === "unknown"
+    || [filename, filenameStem].includes(item.title);
+}
+
+function bindVisualImageFallbacks() {
+  $$(".visual-thumb img").forEach((image) => {
+    image.addEventListener("load", () => image.closest(".visual-thumb")?.classList.add("is-loaded"));
+    image.addEventListener("error", () => image.closest(".visual-thumb")?.classList.add("is-failed"));
+  });
+}
+
 function renderVisualDetail(item) {
   if (!item) {
     $("#visual-detail-path").textContent = "VISUAL REFERENCE";
@@ -697,6 +716,7 @@ function renderVisualDetail(item) {
       <div><dt>狀態</dt><dd>${escapeHtml(visualStatusLabel(item.canon_status))}</dd></div>
       <div><dt>信任</dt><dd>${escapeHtml(item.trust_level)}</dd></div>
       <div><dt>來源</dt><dd>${escapeHtml(item.source)}</dd></div>
+      <div><dt>命名狀態</dt><dd>${isFallbackVisualMetadata(item) ? "待補命名" : "已命名"}</dd></div>
       <div><dt>檔案</dt><dd>${item.exists ? `${formatBytes(item.bytes)} · ${formatDate(item.modifiedAt)}` : "缺少"}</dd></div>
     </dl>
     ${item.description ? `<p class="visual-notes">${escapeHtml(item.description)}</p>` : ""}
@@ -754,13 +774,25 @@ function renderVisuals() {
       return `
         <button class="visual-card${state.activeVisualId === item.visual_id ? " is-active" : ""}" type="button" data-visual-id="${escapeHtml(item.visual_id)}">
           <span class="visual-thumb">
-            ${item.assetUrl && item.exists
-              ? `<img src="${escapeHtml(item.assetUrl)}" alt="${escapeHtml(item.title)}">`
-              : `<span aria-hidden="true">◇</span>`}
+            <span class="visual-placeholder" aria-hidden="true">◇</span>
+            ${item.exists
+              ? `<img src="${escapeHtml(visualAssetEndpoint(item.path))}" alt="${escapeHtml(item.title)}" loading="lazy">`
+              : ""}
           </span>
-          <span class="trust-badge${flagClass}">${escapeHtml(item.trust_level || "N/A")}</span>
           <strong>${escapeHtml(item.title)}</strong>
-          <span>${escapeHtml(item.character || "未指定")} · ${escapeHtml(item.categoryLabel)}</span>
+          <span>${escapeHtml(item.character || "未指定")}</span>
+          <span>${escapeHtml(item.categoryLabel)}</span>
+          ${(item.tags ?? []).length
+            ? `<span class="visual-card-tags">${item.tags.map((tag) => escapeHtml(tag)).join(" · ")}</span>`
+            : ""}
+          <span class="visual-card-path">${escapeHtml(item.path?.split("/").at(-1) ?? "")}</span>
+          <span class="visual-card-badges">
+            <span class="trust-badge${flagClass}">${escapeHtml(item.trust_level || "N/A")}</span>
+            <span class="metadata-badge${isFallbackVisualMetadata(item) ? " is-fallback" : " is-named"}">
+              ${isFallbackVisualMetadata(item) ? "待補命名" : "已命名"}
+            </span>
+            ${item.source === "reindexed_from_assets" ? '<span class="metadata-badge">重新索引</span>' : ""}
+          </span>
         </button>
       `;
     }).join("")
@@ -771,6 +803,7 @@ function renderVisuals() {
     }</div>`;
 
   renderVisualDetail(items.find((item) => item.visual_id === state.activeVisualId));
+  bindVisualImageFallbacks();
 }
 
 function renderNeuralStatus() {
