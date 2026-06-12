@@ -244,7 +244,10 @@ function switchView(viewName) {
 }
 
 async function refreshWriterWorkbenchState() {
-  const payload = await api("/api/writer-workbench/state");
+  const [payload, feedbackPayload] = await Promise.all([
+    api("/api/writer-workbench/state"),
+    api("/api/writer-workbench/feedback-learning-state"),
+  ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
   const nextPanel = $("#workbench-next-action");
@@ -291,6 +294,76 @@ async function refreshWriterWorkbenchState() {
 
   // show raw JSON for debug (hidden by default)
   pre.textContent = JSON.stringify(state, null, 2);
+  renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
+}
+
+function feedbackRecordId(record) {
+  return record.feedback_id
+    ?? record.digest_id
+    ?? record.rule_candidate_id
+    ?? record.proposal_id
+    ?? record.application_id
+    ?? record.approval_item_id
+    ?? "unknown";
+}
+
+function feedbackRecordMeta(record) {
+  const status = record.status?.status ?? record.status ?? "";
+  const mode = record.proposed_patch?.mode ?? record.applied_patch?.mode ?? "";
+  const risk = record.risk_level
+    ?? (record.risk?.requires_approval ? "approval required" : "");
+  return [record.created_at, status, mode, risk].filter(Boolean).join(" · ");
+}
+
+function feedbackRecordsHtml(title, records) {
+  return `
+    <section class="feedback-learning-group">
+      <h4>${escapeHtml(title)} <span>${records.length}</span></h4>
+      ${records.length
+        ? records.slice(0, 5).map((record) => `
+          <article class="feedback-learning-record">
+            <strong>${escapeHtml(feedbackRecordId(record))}</strong>
+            <small>${escapeHtml(feedbackRecordMeta(record) || "metadata available")}</small>
+            ${record.diff_summary
+              ? `<p>${escapeHtml(record.diff_summary)}</p>`
+              : ""}
+            ${record.metadata?.rollback_metadata_available
+              ? "<small>Rollback metadata available</small>"
+              : ""}
+          </article>
+        `).join("")
+        : '<div class="empty-state">No records</div>'}
+    </section>
+  `;
+}
+
+function renderFeedbackLearning(feedback) {
+  const groups = [
+    ["Feedback items", feedback.items ?? []],
+    ["Digests", feedback.digests ?? []],
+    ["Rule candidates", feedback.rule_candidates ?? []],
+    ["Compressed rule proposals", feedback.compressed_rule_proposals ?? []],
+    ["Rule applications", feedback.compressed_rule_applications ?? []],
+    ["Pending approvals", feedback.pending_approvals ?? []],
+  ];
+  $("#feedback-learning-summary").innerHTML = groups.map(([label, records]) => `
+    <div><strong>${records.length}</strong><span>${escapeHtml(label)}</span></div>
+  `).join("");
+  $("#feedback-learning-records").innerHTML = groups
+    .map(([label, records]) => feedbackRecordsHtml(label, records))
+    .join("");
+  $("#feedback-learning-approval-count").textContent =
+    `${(feedback.pending_approvals ?? []).length} pending`;
+  const blocked = feedback.blocked ?? [];
+  const nextAction = feedback.next_actions?.[0];
+  $("#feedback-learning-next-action").innerHTML = `
+    <strong>Next action:</strong>
+    ${escapeHtml(nextAction?.label ?? "No pending action")}
+    ${blocked.length
+      ? `<span class="warning-panel">${escapeHtml(blocked.map((item) => item.reason).join(" · "))}</span>`
+      : ""}
+  `;
+  $("#feedback-learning-raw").textContent = JSON.stringify(feedback, null, 2);
 }
 
 function bindWriterWorkbenchActions() {

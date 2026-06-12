@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { createApprovalItem } from "./approval-queue-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
@@ -209,8 +209,13 @@ async function exists(filePath) {
 }
 
 async function listArtifacts(root, pattern, filename) {
-  await mkdir(root, { recursive: true });
-  const entries = await readdir(root, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   const records = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !pattern.test(entry.name)) continue;
@@ -342,6 +347,30 @@ export async function listFeedbackItems(input = {}, options = {}) {
     .filter((item) => !severity || item.severity === severity)
     .filter((item) => !status || item.status === status)
     .slice(0, optionalLimit(input.limit));
+}
+
+export async function listFeedbackDigests(input = {}, options = {}) {
+  const roots = rootsFor(options);
+  return (await listArtifacts(roots.digests, digestIdPattern, "digest.json"))
+    .slice(0, optionalLimit(input.limit));
+}
+
+export async function listRuleCandidates(input = {}, options = {}) {
+  const roots = rootsFor(options);
+  return (await listArtifacts(
+    roots.ruleCandidates,
+    ruleCandidateIdPattern,
+    "candidate.json",
+  )).slice(0, optionalLimit(input.limit));
+}
+
+export async function listCompressedRuleUpdateProposals(input = {}, options = {}) {
+  const roots = rootsFor(options);
+  return (await listArtifacts(
+    roots.proposals,
+    proposalIdPattern,
+    "proposal.json",
+  )).slice(0, optionalLimit(input.limit));
 }
 
 export async function createFeedbackDigest(input = {}, options = {}) {

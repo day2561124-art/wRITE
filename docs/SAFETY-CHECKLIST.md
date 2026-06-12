@@ -1,5 +1,15 @@
 # Safety Checklist
 
+## Phase 13A-Lite Feedback Learning UI
+
+- [ ] Feedback Learning UI/API remains read-only.
+- [ ] No apply, rollback, restore, approve, or `compressed_rules` editor was added.
+- [ ] Pending `compressed_rule_update` approvals are handled in Approval Queue.
+- [ ] Reading status did not modify `active_engine`, `compressed_rules`, writing
+  card, or proofing card.
+- [ ] Reading status did not create `data/feedback_loop` or `data/backups` artifacts.
+- [ ] MCP wrapper and creative task integration remain deferred.
+
 ## Active Engine
 
 - [ ] 執行 `.\scripts\show-active-engine-hash.ps1`。

@@ -1,5 +1,15 @@
 # Daily Workflow
 
+## Phase 13A-Lite Feedback Learning Status
+
+Writer Workbench includes a read-only Feedback Learning status panel. Use it to
+inspect recent feedback artifacts and pending `compressed_rule_update`
+approvals. Handle approvals in the existing Approval Queue.
+
+The panel does not apply rules, edit `compressed_rules`, or modify
+`active_engine`. Rollback/restore execution, MCP wrappers, and creative task
+integration remain deferred.
+
 本文件描述日常寫作與維護流程。所有會改動 Canon、採用正文、啟用
 engine、rollback 或 restore 的動作，都必須走既有 approval queue。
 

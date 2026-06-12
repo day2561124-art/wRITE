@@ -340,8 +340,14 @@ export async function createApprovalItem(input = {}, options = {}) {
 }
 
 export async function listApprovalItems(options = {}) {
-  const roots = await ensureApprovalQueueDirectories(options);
-  const entries = await readdir(roots.approvalItems, { withFileTypes: true });
+  const roots = rootsFor(options);
+  let entries;
+  try {
+    entries = await readdir(roots.approvalItems, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   const items = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !isSafeApprovalItemId(entry.name)) continue;

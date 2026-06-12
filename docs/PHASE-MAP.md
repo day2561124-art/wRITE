@@ -1,5 +1,18 @@
 # Phase Map
 
+## Phase 13A-Lite
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 13A-Lite | Feedback Learning UI Status Panel | Read-only UI/API status |
+
+- Shows feedback items, digests, rule candidates, compressed rule proposals,
+  applications, and pending `compressed_rule_update` approvals.
+- The UI and API are read-only.
+- The panel cannot apply `compressed_rules` or modify `active_engine`.
+- Compressed rule updates still require the existing Approval Queue.
+- Rollback/restore execution, MCP wrappers, and creative task integration are deferred.
+
 | Phase | 名稱 | 狀態 |
 | --- | --- | --- |
 | 8A | Creative Task Orchestrator | 已完成 |

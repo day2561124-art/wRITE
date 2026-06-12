@@ -139,6 +139,15 @@ import {
   buildPendingEngineCandidateReview,
   requestPendingEngineCandidateActivation,
 } from "./pending-engine-candidate-review-service.mjs";
+import {
+  listCompressedRuleUpdateProposals,
+  listFeedbackDigests,
+  listFeedbackItems,
+  listRuleCandidates,
+} from "./feedback-learning-service.mjs";
+import {
+  listCompressedRuleApplications,
+} from "./compressed-rule-update-confirm-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1437,6 +1446,77 @@ async function handleRequest(request, response) {
       });
     } catch (error) {
       sendError(response, 500, error);
+    }
+    return;
+  }
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/feedback-learning-state"
+  ) {
+    try {
+      const [
+        items,
+        digests,
+        ruleCandidates,
+        proposals,
+        applications,
+        approvals,
+      ] = await Promise.all([
+        listFeedbackItems({ limit: 10 }),
+        listFeedbackDigests({ limit: 10 }),
+        listRuleCandidates({ limit: 10 }),
+        listCompressedRuleUpdateProposals({ limit: 10 }),
+        listCompressedRuleApplications({ limit: 10 }),
+        listApprovalItems(),
+      ]);
+      const pendingApprovals = approvals.filter((item) => (
+        item.action_type === "compressed_rule_update"
+        && ["pending", "deferred", "blocked"].includes(item.status?.status)
+      ));
+      const blocked = pendingApprovals
+        .filter((item) => item.status?.status === "blocked" || item.blocked_reason)
+        .map((item) => ({
+          approval_id: item.approval_item_id,
+          reason: item.blocked_reason ?? item.status?.reason ?? "Approval is blocked.",
+        }));
+      const nextActions = pendingApprovals.length
+        ? [{
+          key: "go_to_approval_queue",
+          label: "Review pending compressed rule updates in Approval Queue",
+          target: "#approval",
+          pending_count: pendingApprovals.length,
+        }]
+        : [{
+          key: "no_pending_compressed_rule_updates",
+          label: "No pending compressed rule update approvals",
+          target: null,
+          pending_count: 0,
+        }];
+      sendJson(response, 200, {
+        ok: true,
+        feedback_learning: {
+          items,
+          digests,
+          rule_candidates: ruleCandidates,
+          compressed_rule_proposals: proposals,
+          compressed_rule_applications: applications,
+          pending_approvals: pendingApprovals,
+          blocked,
+          next_actions: nextActions,
+          risk: {
+            can_apply_from_this_panel: false,
+            requires_approval_queue: true,
+            modifies_active_engine: false,
+            modifies_compressed_rules_from_ui: false,
+          },
+        },
+      });
+    } catch {
+      sendJson(response, 500, {
+        ok: false,
+        error: "Unable to read feedback learning state.",
+      });
     }
     return;
   }

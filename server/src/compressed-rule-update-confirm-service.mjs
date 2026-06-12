@@ -14,6 +14,9 @@ import {
 } from "./project-paths.mjs";
 import { getApprovalItem, appendApprovalLog } from "./approval-queue-service.mjs";
 
+const applicationIdPattern =
+  /^compressed_rule_application_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+
 function sha256Buffer(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
@@ -191,15 +194,41 @@ export async function confirmCompressedRuleUpdate(input = {}, options = {}) {
   return { application_id: applicationId, application };
 }
 
-export async function listCompressedRuleApplications(options = {}) {
+export async function listCompressedRuleApplications(input = {}, options = {}) {
+  const limit = input.limit ?? 20;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("limit must be an integer between 1 and 100.");
+  }
   const roots = rootsFor(options);
   const root = roots.applications;
-  try { await mkdir(root, { recursive: true }); } catch {}
   try {
     const list = await (await import("node:fs/promises")).readdir(root, { withFileTypes: true });
-    return list.filter((d) => d.isDirectory()).map((d) => d.name).sort().reverse();
-  } catch {
-    return [];
+    const records = [];
+    for (const entry of list) {
+      if (!entry.isDirectory() || !applicationIdPattern.test(entry.name)) continue;
+      try {
+        const directory = path.join(root, entry.name);
+        const application = JSON.parse(await readFile(
+          path.join(directory, "application.json"),
+          "utf8",
+        ));
+        application.metadata = {
+          diff_summary_available: await stat(path.join(directory, "diff_summary.md"))
+            .then(() => true, () => false),
+          rollback_metadata_available: await stat(path.join(directory, "rollback.md"))
+            .then(() => true, () => false),
+        };
+        records.push(application);
+      } catch {
+        // Ignore incomplete runtime artifacts.
+      }
+    }
+    return records
+      .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))
+      .slice(0, limit);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
   }
 }
 

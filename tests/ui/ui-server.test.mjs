@@ -16,6 +16,11 @@ const visualIndexPath = path.join(rootDir, "data", "visual_db", "visual_index.js
 const agentRunsDir = path.join(rootDir, "data", "agent_runs");
 const neuralTracesDir = path.join(agentRunsDir, "neural_traces");
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
+const compressedRulesPath = path.join(rootDir, "data", "error_report_db", "compressed_rules.md");
+const writingCardPath = path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md");
+const proofingCardPath = path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md");
+const feedbackLoopDir = path.join(rootDir, "data", "feedback_loop");
+const backupsDir = path.join(rootDir, "data", "backups");
 const pendingCandidatesDir = path.join(rootDir, "data", "canon_db", "pending_engine_candidates");
 const engineSnapshotsDir = path.join(rootDir, "data", "canon_db", "engine_snapshots");
 const engineArchiveDir = path.join(rootDir, "data", "canon_db", "archive");
@@ -135,6 +140,11 @@ async function main() {
   const beforeVisualIndex = await readOptionalText(visualIndexPath);
   const activeEngineBefore = await readFile(activeEnginePath);
   const activeEngineHashBefore = createHash("sha256").update(activeEngineBefore).digest("hex");
+  const compressedRulesBefore = await readOptionalBuffer(compressedRulesPath);
+  const writingCardBefore = await readOptionalBuffer(writingCardPath);
+  const proofingCardBefore = await readOptionalBuffer(proofingCardPath);
+  const feedbackLoopBefore = new Set(await readOptionalDirectory(feedbackLoopDir));
+  const backupsBefore = new Set(await readOptionalDirectory(backupsDir));
   const snapshotsBefore = new Set(await readOptionalDirectory(engineSnapshotsDir));
   const archiveBefore = new Set(await readOptionalDirectory(engineArchiveDir));
   const activationLogBefore = await readOptionalBuffer(activationLogPath);
@@ -242,6 +252,9 @@ async function main() {
     assert(indexText.includes('data-view-panel="writer-workbench"'), "UI index is missing the writer workbench view.");
     assert(indexText.includes('寫作工作台'), "UI index is missing the writer workbench heading.");
     assert(indexText.includes('id="writer-workbench-state"'), "UI index is missing the writer workbench state element.");
+    assert(indexText.includes('id="feedback-learning-panel"'), "UI index is missing the Feedback Learning panel.");
+    assert(indexText.includes("This panel is read-only"), "Feedback Learning panel is missing its read-only warning.");
+    assert(indexText.includes("Review pending updates in Approval Queue"), "Feedback Learning panel is missing its Approval Queue guidance.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -256,6 +269,11 @@ async function main() {
     assert(appText.includes("handleRollbackSnapshot"), "UI app.js is missing the rollback handler.");
     assert(appText.includes("handleWorkflowTask"), "UI app.js is missing draft task handling.");
     assert(appText.includes("refreshWorkflowState"), "UI app.js is missing workflow state loading.");
+    assert(appText.includes("renderFeedbackLearning"), "UI app.js is missing Feedback Learning rendering.");
+    assert(
+      appText.includes("/api/writer-workbench/feedback-learning-state"),
+      "UI app.js is missing Feedback Learning state loading.",
+    );
     assert(appText.includes("renderProofSummary"), "UI app.js is missing P0-P4 rendering.");
     assert(
       appText.includes("handleCreateSettlementContext"),
@@ -339,6 +357,66 @@ async function main() {
     const activeEngineAfter = await readFile(activeEnginePath, "utf8");
     const activeEngineHashAfter = createHash("sha256").update(activeEngineAfter).digest("hex");
     assert(activeEngineHashAfter === activeEngineHashBefore, "active_engine file changed after calling state endpoint");
+
+    const feedbackStateResult = await readJson(await fetch(
+      `${baseUrl}/api/writer-workbench/feedback-learning-state`,
+    ));
+    assert(feedbackStateResult.response.ok, "Feedback Learning state API did not return 200.");
+    const feedbackState = feedbackStateResult.payload.feedback_learning;
+    assert(feedbackStateResult.payload.ok === true, "Feedback Learning state API missing ok=true.");
+    assert(Array.isArray(feedbackState.items), "Feedback Learning items must be an array.");
+    assert(Array.isArray(feedbackState.digests), "Feedback Learning digests must be an array.");
+    assert(Array.isArray(feedbackState.rule_candidates), "Rule candidates must be an array.");
+    assert(
+      Array.isArray(feedbackState.compressed_rule_proposals),
+      "Compressed rule proposals must be an array.",
+    );
+    assert(
+      Array.isArray(feedbackState.compressed_rule_applications),
+      "Compressed rule applications must be an array.",
+    );
+    assert(Array.isArray(feedbackState.pending_approvals), "Pending approvals must be an array.");
+    assert(feedbackState.risk.can_apply_from_this_panel === false, "Feedback panel can apply rules.");
+    assert(feedbackState.risk.requires_approval_queue === true, "Approval Queue is not required.");
+    assert(feedbackState.risk.modifies_active_engine === false, "Feedback API can modify active_engine.");
+    assert(
+      feedbackState.risk.modifies_compressed_rules_from_ui === false,
+      "Feedback API can modify compressed_rules from UI.",
+    );
+    assert(
+      (await readOptionalBuffer(activeEnginePath)).content.equals(activeEngineBefore),
+      "Feedback API changed active_engine.md.",
+    );
+    assert(
+      (await readOptionalBuffer(compressedRulesPath)).content.equals(compressedRulesBefore.content),
+      "Feedback API changed compressed_rules.md.",
+    );
+    assert(
+      (await readOptionalBuffer(writingCardPath)).content.equals(writingCardBefore.content),
+      "Feedback API changed active_writing_card.md.",
+    );
+    assert(
+      (await readOptionalBuffer(proofingCardPath)).content.equals(proofingCardBefore.content),
+      "Feedback API changed active_proofing_card.md.",
+    );
+    assert(
+      JSON.stringify(await readOptionalDirectory(feedbackLoopDir))
+        === JSON.stringify([...feedbackLoopBefore].sort()),
+      "Feedback API created feedback_loop runtime artifacts.",
+    );
+    assert(
+      JSON.stringify(await readOptionalDirectory(backupsDir))
+        === JSON.stringify([...backupsBefore].sort()),
+      "Feedback API created backup runtime artifacts.",
+    );
+    const unsafeFeedbackState = await rawHttpStatus(
+      port,
+      "/api/writer-workbench/feedback-learning-state/%2e%2e%2factive_engine.md",
+    );
+    assert(
+      unsafeFeedbackState.status >= 400 && unsafeFeedbackState.status < 500,
+      "Feedback Learning traversal path was not rejected.",
+    );
 
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));
     assert(visualsResult.response.ok && visualsResult.payload.ok, "Visuals API failed.");
@@ -1343,6 +1421,8 @@ async function main() {
     console.log("- Invalid action input rejected: yes");
     console.log(`- Source trust records checked through UI: ${trustReport.checked_sources}`);
     console.log("- Draft dry-run side effects: none");
+    console.log("- Feedback Learning read-only UI/API checked: yes");
+    console.log("- Feedback Learning protected file and runtime side effects: none");
   } finally {
     const activeEngineAfter = await readFile(activeEnginePath);
     if (!activeEngineAfter.equals(activeEngineBefore)) {

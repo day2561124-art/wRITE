@@ -302,6 +302,26 @@
                   <div id="workbench-risk" class="risk-panel"></div>
                   <div id="workbench-approval" class="approval-panel"></div>
                   <div id="workbench-review" class="review-panel"></div>
+                  <section id="feedback-learning-panel" class="feedback-learning-panel" aria-live="polite">
+                    <div class="feedback-learning-heading">
+                      <div>
+                        <p class="eyebrow">READ-ONLY STATUS</p>
+                        <h3>Feedback Learning</h3>
+                      </div>
+                      <span id="feedback-learning-approval-count" class="workflow-status">0 pending</span>
+                    </div>
+                    <p class="feedback-learning-safety">
+                      This panel is read-only. It does not apply rules or modify active_engine /
+                      compressed_rules. Review pending updates in Approval Queue.
+                    </p>
+                    <div id="feedback-learning-summary" class="feedback-learning-summary"></div>
+                    <div id="feedback-learning-records" class="feedback-learning-records"></div>
+                    <div id="feedback-learning-next-action" class="next-action-panel"></div>
+                    <details>
+                      <summary>Raw feedback learning state</summary>
+                      <pre id="feedback-learning-raw" class="document-viewer"></pre>
+                    </details>
+                  </section>
                 </div>
                 <pre id="writer-workbench-state" class="document-viewer" hidden>尚未載入</pre>
                 <div class="form-actions">
