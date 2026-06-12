@@ -13,3 +13,10 @@ data/canon_db/activation_logs/
 data/canon_db/rollback/
 data/writing_workflow/
 data/approval_queue/
+
+# Generated visual/runtime artifacts
+data/visual_db/assets/
+data/backups/
+data/feedback_loop/
+outputs/current_prompt.md
+outputs/retrieval_debug_report.json
