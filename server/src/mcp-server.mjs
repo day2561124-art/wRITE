@@ -48,6 +48,15 @@ import {
   get_adopted_writing_detail,
   list_adopted_writings,
 } from "./mcp-adopted-writing-tools.mjs";
+import {
+  build_adopted_writing_settlement_context,
+  build_pending_engine_candidate_from_settlement_report,
+  get_adopted_writing_settlement_context,
+  get_settlement_report_detail,
+  list_adopted_writing_settlement_contexts,
+  list_settlement_reports,
+  save_chat_output_as_settlement_report,
+} from "./mcp-adopted-writing-settlement-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -2024,6 +2033,106 @@ const toolDefinitions = [
     }),
     handler: async (args) => jsonContent(await list_adopted_writings(args)),
   },
+  {
+    name: "build_adopted_writing_settlement_context",
+    description: "Build a GPT-facing settlement context for an adopted writing without local generation or canon changes.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      adoptedChapterId: { type: "string" },
+      settlementMode: {
+        type: "string",
+        enum: ["full", "facts_only", "minimal"],
+        default: "full",
+      },
+      includeAdoptedContent: { type: "boolean", default: true },
+      includeActiveEngine: { type: "boolean", default: true },
+      includeWritingCard: { type: "boolean", default: true },
+      includeProofingCard: { type: "boolean", default: true },
+      includeLongline: { type: "boolean", default: true },
+      retrievalContext: { type: "object" },
+      generationContext: { type: "object" },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 120000 },
+    }, ["adoptedChapterId"]),
+    handler: async (args) => jsonContent(await build_adopted_writing_settlement_context(args)),
+  },
+  {
+    name: "get_adopted_writing_settlement_context",
+    description: "Read an adopted-writing settlement context and its chat-facing Markdown.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      id: { type: "string" },
+    }, ["id"]),
+    handler: async (args) => jsonContent(await get_adopted_writing_settlement_context(args)),
+  },
+  {
+    name: "list_adopted_writing_settlement_contexts",
+    description: "List adopted-writing settlement context summaries.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      adoptedChapterId: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_adopted_writing_settlement_contexts(args)),
+  },
+  {
+    name: "save_chat_output_as_settlement_report",
+    description: "Save pasted GPT/chat settlement output without creating or activating an engine candidate.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      adoptedChapterId: { type: "string" },
+      settlementContextId: { type: "string" },
+      settlementReportText: { type: "string" },
+      summary: { type: "string" },
+      source: {
+        type: "string",
+        enum: ["chatgpt", "gpt", "manual_paste"],
+        default: "chatgpt",
+      },
+      dryRun: { type: "boolean", default: false },
+    }, ["adoptedChapterId", "settlementReportText"]),
+    handler: async (args) => jsonContent(await save_chat_output_as_settlement_report(args)),
+  },
+  {
+    name: "get_settlement_report_detail",
+    description: "Read an adopted-writing settlement report with optional bounded content.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      id: { type: "string" },
+      includeContent: { type: "boolean", default: false },
+      maxContentChars: { type: "integer", minimum: 1, maximum: 50000, default: 12000 },
+    }, ["id"]),
+    handler: async (args) => jsonContent(await get_settlement_report_detail(args)),
+  },
+  {
+    name: "list_settlement_reports",
+    description: "List adopted-writing settlement report summaries.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      adoptedChapterId: { type: "string" },
+      status: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await list_settlement_reports(args)),
+  },
+  {
+    name: "build_pending_engine_candidate_from_settlement_report",
+    description: "Create a pending-review engine candidate from a saved settlement report without activation or approval creation.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      settlementReportId: { type: "string" },
+      adoptedChapterId: { type: "string" },
+      baseActiveEngineHash: { type: "string" },
+      reason: { type: "string" },
+      dryRun: { type: "boolean", default: false },
+    }, ["settlementReportId"]),
+    handler: async (args) => jsonContent(
+      await build_pending_engine_candidate_from_settlement_report(args),
+    ),
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -2066,6 +2175,13 @@ const permissionSources = {
   list_writing_candidate_adoption_requests: ["approval_queue"],
   get_adopted_writing_detail: ["adopted_writing_records"],
   list_adopted_writings: ["adopted_writing_records"],
+  build_adopted_writing_settlement_context: ["adopted_writing_records", "registered_project_sources", "user_input"],
+  get_adopted_writing_settlement_context: ["adopted_writing_settlement_context_records"],
+  list_adopted_writing_settlement_contexts: ["adopted_writing_settlement_context_records"],
+  save_chat_output_as_settlement_report: ["user_input", "adopted_writing_records", "adopted_writing_settlement_context_records"],
+  get_settlement_report_detail: ["adopted_writing_settlement_report_records"],
+  list_settlement_reports: ["adopted_writing_settlement_report_records"],
+  build_pending_engine_candidate_from_settlement_report: ["adopted_writing_settlement_report_records", "active_engine"],
 };
 
 const backupRequiredTools = new Set([

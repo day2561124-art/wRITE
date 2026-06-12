@@ -59,11 +59,17 @@ async function main() {
     }
 
     const types = await creativeTaskTools.list_creative_task_types();
-    assert(types.ok && types.task_types.length === 9, "Task type listing failed.");
+    assert(types.ok && types.task_types.length === 12, "Task type listing failed.");
     assert(
       types.task_types.includes("build_candidate_proofing_context")
         && types.task_types.includes("save_candidate_proof_report"),
       "Phase 8D task types are missing.",
+    );
+    assert(
+      types.task_types.includes("build_adopted_writing_settlement_context")
+        && types.task_types.includes("save_adopted_writing_settlement_report")
+        && types.task_types.includes("build_pending_engine_candidate_from_settlement_report"),
+      "Phase 8G task types are missing.",
     );
 
     const run = await creativeTaskTools.run_creative_task({

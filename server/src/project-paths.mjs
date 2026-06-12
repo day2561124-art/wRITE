@@ -19,6 +19,18 @@ export const projectPaths = {
   proofReports: path.join(projectRoot, "data", "outputs", "proof_reports"),
   proofingContexts: path.join(projectRoot, "data", "outputs", "proofing_contexts"),
   adoptedWritings: path.join(projectRoot, "data", "outputs", "adopted_writings"),
+  adoptedWritingSettlementContexts: path.join(
+    projectRoot,
+    "data",
+    "outputs",
+    "settlement_contexts",
+  ),
+  adoptedWritingSettlementReports: path.join(
+    projectRoot,
+    "data",
+    "outputs",
+    "settlement_reports",
+  ),
   settlementProposals: path.join(projectRoot, "data", "outputs", "settlement_proposals"),
   compressedRuleCandidates: path.join(projectRoot, "data", "outputs", "compressed_rule_candidates"),
   visualDb: path.join(projectRoot, "data", "visual_db"),

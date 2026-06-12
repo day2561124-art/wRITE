@@ -16,6 +16,11 @@ import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-servic
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
 import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
 import { requestWritingCandidateAdoption } from "./candidate-adoption-request-service.mjs";
+import {
+  buildAdoptedWritingSettlementContext,
+  buildPendingEngineCandidateFromSettlementReport,
+  saveChatOutputAsSettlementReport,
+} from "./adopted-writing-settlement-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -34,6 +39,10 @@ export const CREATIVE_TASK_TYPES = Object.freeze({
   SAVE_CHAT_OUTPUT_CANDIDATE: "save_chat_output_candidate",
   BUILD_CANDIDATE_PROOFING_CONTEXT: "build_candidate_proofing_context",
   SAVE_CANDIDATE_PROOF_REPORT: "save_candidate_proof_report",
+  BUILD_ADOPTED_WRITING_SETTLEMENT_CONTEXT: "build_adopted_writing_settlement_context",
+  SAVE_ADOPTED_WRITING_SETTLEMENT_REPORT: "save_adopted_writing_settlement_report",
+  BUILD_PENDING_ENGINE_CANDIDATE_FROM_SETTLEMENT_REPORT:
+    "build_pending_engine_candidate_from_settlement_report",
 });
 
 const taskTypes = Object.freeze(Object.values(CREATIVE_TASK_TYPES));
@@ -140,6 +149,28 @@ function normalizeInput(input = {}) {
       input.proof_report_id ?? input.proofReportId,
       "proof_report_id",
       200,
+    ),
+    settlementReportId: optionalText(
+      input.settlement_report_id ?? input.settlementReportId,
+      "settlement_report_id",
+      200,
+    ),
+    settlementReportText: optionalText(
+      input.settlement_report_text ?? input.settlementReportText,
+      "settlement_report_text",
+      250_000,
+    ),
+    settlementMode: optionalText(
+      input.settlement_mode ?? input.settlementMode,
+      "settlement_mode",
+      100,
+    ),
+    includeAdoptedContent:
+      input.include_adopted_content ?? input.includeAdoptedContent,
+    baseActiveEngineHash: optionalText(
+      input.base_active_engine_hash ?? input.baseActiveEngineHash,
+      "base_active_engine_hash",
+      128,
     ),
     proofingMode: optionalText(
       input.proofing_mode ?? input.proofingMode,
@@ -434,6 +465,89 @@ async function buildSettlementCandidate(input, taskId, options) {
   return { response, bundle: context };
 }
 
+async function buildAdoptedWritingSettlementContextTask(input, taskId, options) {
+  const context = await buildAdoptedWritingSettlementContext({
+    adoptedChapterId: input.adoptedChapterId,
+    settlementMode: input.settlementMode || "full",
+    includeAdoptedContent: input.includeAdoptedContent,
+    includeActiveEngine: input.includeActiveEngine,
+    includeWritingCard: input.includeWritingCard,
+    includeProofingCard: input.includeProofingCard,
+    includeLongline: input.includeLongline,
+    retrievalContext: input.retrievalContext,
+    generationContext: input.generationContext,
+    maxContextChars: input.maxContextChars,
+  }, options);
+  const response = resultBase(taskId, input.taskType, "pending");
+  response.result = {
+    settlement_context_id: context.context.settlement_context_id,
+    adopted_chapter_id: context.context.adopted_chapter_id,
+    settlement_context_path: context.settlement_context_path,
+    settlement_for_chat_path: context.settlement_for_chat_path,
+    local_generation_allowed: false,
+    settlement_report_created: false,
+    pending_engine_candidate_created: false,
+  };
+  response.created.push({
+    label: "adopted_writing_settlement_context",
+    target_id: context.context.settlement_context_id,
+    source_path: context.settlement_for_chat_path,
+    canon_status: "working_context",
+  });
+  response.warnings.push(...context.context.warnings);
+  return { response, bundle: context.context };
+}
+
+async function saveAdoptedWritingSettlementReportTask(input, taskId, options) {
+  const report = await saveChatOutputAsSettlementReport({
+    adoptedChapterId: input.adoptedChapterId,
+    settlementContextId: input.settlementContextId,
+    settlementReportText: input.settlementReportText,
+    summary: input.summary,
+    source: input.source || "chatgpt",
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(
+    taskId,
+    input.taskType,
+    input.dryRun ? "dry_run" : "completed",
+  );
+  response.result = report;
+  if (!input.dryRun) {
+    response.created.push({
+      label: "adopted_writing_settlement_report",
+      target_id: report.settlement_report_id,
+      source_path: report.settlement_report_path,
+      canon_status: "settlement_report_only",
+    });
+  }
+  return { response, bundle: report };
+}
+
+async function buildPendingEngineCandidateFromSettlementReportTask(input, taskId, options) {
+  const candidate = await buildPendingEngineCandidateFromSettlementReport({
+    settlementReportId: input.settlementReportId,
+    adoptedChapterId: input.adoptedChapterId,
+    baseActiveEngineHash: input.baseActiveEngineHash,
+    reason: input.reason,
+    dryRun: input.dryRun,
+  }, options);
+  const response = resultBase(
+    taskId,
+    input.taskType,
+    input.dryRun ? "dry_run" : "pending",
+  );
+  response.result = candidate;
+  if (!input.dryRun) {
+    response.created.push({
+      label: "pending_engine_candidate",
+      target_id: candidate.pending_engine_candidate_id,
+      canon_status: "pending_review",
+    });
+  }
+  return { response, bundle: candidate };
+}
+
 async function requestEngineActivation(input, taskId, options) {
   if (!input.pendingEngineCandidateId) {
     throw new Error("pending_engine_candidate_id is required.");
@@ -641,6 +755,12 @@ async function executeTask(input, taskId, options) {
       return buildCandidateProofingContextTask(input, taskId, options);
     case CREATIVE_TASK_TYPES.SAVE_CANDIDATE_PROOF_REPORT:
       return saveCandidateProofReportTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.BUILD_ADOPTED_WRITING_SETTLEMENT_CONTEXT:
+      return buildAdoptedWritingSettlementContextTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.SAVE_ADOPTED_WRITING_SETTLEMENT_REPORT:
+      return saveAdoptedWritingSettlementReportTask(input, taskId, options);
+    case CREATIVE_TASK_TYPES.BUILD_PENDING_ENGINE_CANDIDATE_FROM_SETTLEMENT_REPORT:
+      return buildPendingEngineCandidateFromSettlementReportTask(input, taskId, options);
     default:
       throw new Error(`Unknown task_type: ${input.taskType || "(empty)"}`);
   }
