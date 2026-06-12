@@ -1,5 +1,18 @@
 # MCP Client Config Templates
 
+## Phase 14B Dry Run
+
+Phase 14B adds a deterministic E2E dry run for the same local MCP server:
+
+```powershell
+npm.cmd run bridge:dry-run
+```
+
+It exercises the `chatgpt_bridge_*` flow through a pending adoption request and
+then stops. Settlement context uses synthetic fixture data only. No adoption
+confirmation, pending engine candidate, active-engine update, or
+compressed-rule update is performed.
+
 ## Phase 14A-Lite ChatGPT Bridge
 
 The local MCP server now exposes `chatgpt_bridge_*` tools for the guarded

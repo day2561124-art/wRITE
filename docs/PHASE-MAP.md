@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 14B
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 14B | ChatGPT Bridge End-to-End Dry Run | Deterministic guarded workflow verified |
+
+- Exercises the Phase 14A bridge from workbench status through a pending
+  adoption request using deterministic candidate and proof fixtures.
+- Stops at the approval queue and never confirms adoption.
+- Covers settlement context only through an isolated synthetic adopted-writing
+  fixture that is removed after the run.
+- Does not create a pending engine candidate or modify `active_engine.md` or
+  `compressed_rules.md`.
+
 ## Phase 14A-Lite
 
 | Phase | Name | Status |

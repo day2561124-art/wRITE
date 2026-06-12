@@ -4,6 +4,22 @@
 
 完整開發與操作規格見 [`SKILL.md`](SKILL.md)。
 
+## ChatGPT Bridge Dry Run
+
+Phase 14B provides a deterministic end-to-end dry run for the local ChatGPT
+MCP Bridge:
+
+```powershell
+npm.cmd run bridge:dry-run
+npm.cmd run test:bridge:e2e
+```
+
+The workflow verifies the bridge chain from workbench status to a pending
+adoption request, then stops at the approval queue. Settlement context is
+covered only with synthetic fixture data. It never confirms adoption, creates
+a pending engine candidate, or modifies the active engine or compressed rules.
+See [`docs/CHATGPT-MCP-BRIDGE-DRY-RUN.md`](docs/CHATGPT-MCP-BRIDGE-DRY-RUN.md).
+
 ## 快速開始
 
 推薦直接啟動本機工作台啟動器：
