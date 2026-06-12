@@ -31,7 +31,9 @@ export const visualSourceValues = new Set([
   "ai_generated_reference",
   "external_reference",
   "repository_fixture",
+  "reindexed_from_assets",
 ]);
+export const visualImportStatusValues = new Set(["imported"]);
 export const allowedVisualImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 
 export function isVisualAssetProjectPath(projectPath) {
@@ -102,7 +104,7 @@ export function validateVisualRecord(record) {
     if (field in record) requireString(errors, record, field);
   }
 
-  for (const field of ["updated_at", "notes", "description", "ability_state"]) {
+  for (const field of ["updated_at", "notes", "description", "ability_state", "status"]) {
     optionalString(errors, record, field);
   }
 
@@ -126,6 +128,9 @@ export function validateVisualRecord(record) {
   }
   if ("source" in record && !visualSourceValues.has(record.source)) {
     errors.push(`source must be one of: ${[...visualSourceValues].join(", ")}.`);
+  }
+  if ("status" in record && record.status && !visualImportStatusValues.has(record.status)) {
+    errors.push(`status must be one of: ${[...visualImportStatusValues].join(", ")}.`);
   }
   if ("path" in record && !isVisualAssetProjectPath(record.path)) {
     errors.push("path must point to an allowed image under data/visual_db/assets/.");

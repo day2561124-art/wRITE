@@ -22,8 +22,9 @@
     },
     "source": {
       "type": "string",
-      "enum": ["user_imported", "ai_generated_reference", "external_reference", "repository_fixture"]
+      "enum": ["user_imported", "ai_generated_reference", "external_reference", "repository_fixture", "reindexed_from_assets"]
     },
+    "status": { "type": "string", "enum": ["imported"] },
     "path": {
       "type": "string",
       "pattern": "^data/visual_db/assets/.+\\.(png|jpg|jpeg|webp|gif)$"

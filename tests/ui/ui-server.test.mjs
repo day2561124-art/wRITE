@@ -333,6 +333,7 @@ async function main() {
     const visuals = stateResult.payload.state.visuals;
     assert(visuals && visuals.indexPath === "data/visual_db/visual_index.jsonl", "State API did not expose visual index metadata.");
     assert(Array.isArray(visuals.items), "State API visual items are not an array.");
+    assert(visuals.count > 0, "State API visual gallery did not load reindexed records.");
     assert(visuals.categories.length >= 4, "State API visual categories were not exposed.");
 
     // writer-workbench aggregated state endpoint
@@ -423,6 +424,10 @@ async function main() {
     assert(
       visualsResult.payload.visuals.indexPath === "data/visual_db/visual_index.jsonl",
       "Visuals API returned the wrong index path.",
+    );
+    assert(
+      visualsResult.payload.visuals.items.some((item) => item.exists && item.assetUrl),
+      "Visuals API did not expose a readable reindexed asset.",
     );
 
     const createRunResult = await readJson(await fetch(`${baseUrl}/api/agent/runs`, {
