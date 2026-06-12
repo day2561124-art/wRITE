@@ -158,16 +158,14 @@ async function main() {
       "Approval request can execute without confirmation.");
     const approval = await getApprovalItem(request.approval_item_id, options);
     assert(approval.safety.approval_only === true, "Approval item is not approval-only.");
-    await expectReject(
-      () => confirmApprovalItem(request.approval_item_id, {
-        confirm: true,
-        secondConfirm: true,
-        approvedBy: "phase_10a_test",
-      }, options),
-      "Phase 10A approval request applied compressed rules.",
-    );
+    // Confirm the approval item (Phase 10B behaviour: confirm stored, but not auto-applied)
+    await confirmApprovalItem(request.approval_item_id, {
+      confirm: true,
+      secondConfirm: true,
+      approvedBy: "phase_10a_test",
+    }, options);
     assert(hash(await readFile(projectPaths.compressedRules)) === compressedHash,
-      "Approval confirmation attempt modified compressed_rules.md.");
+      "Approval confirmation modified compressed_rules.md.");
 
     const bundle = await buildFeedbackContextBundle({
       feedbackIds: [dialogue.feedback_id, pacing.feedback_id],

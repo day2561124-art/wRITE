@@ -668,6 +668,10 @@ export async function confirmApprovalItem(
         confirm: true,
         approvedBy,
       }, cleanupTargetOptions(options));
+    } else if (item.action_type === "compressed_rule_update") {
+      // Approval confirmed for compressed rule update — do not auto-apply here.
+      // Execution is handled by a dedicated service to ensure safety and explicit application.
+      result = null;
     } else {
       throw errorWithStatus(`Unsupported confirm action: ${item.action_type}`, 409);
     }

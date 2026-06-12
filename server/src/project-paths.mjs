@@ -94,6 +94,18 @@ export const projectPaths = {
     "feedback_loop",
     "rule_update_proposals",
   ),
+  feedbackLoopRuleUpdateApplications: path.join(
+    projectRoot,
+    "data",
+    "feedback_loop",
+    "rule_update_applications",
+  ),
+  feedbackLoopRuleUpdateBackups: path.join(
+    projectRoot,
+    "data",
+    "feedback_loop",
+    "rule_update_backups",
+  ),
   feedbackLoopContextBundles: path.join(
     projectRoot,
     "data",
