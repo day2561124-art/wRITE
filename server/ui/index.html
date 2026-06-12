@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <title>武裝學院工作台</title>
+    <meta name="color-scheme" content="dark">
+    <title>武裝學院的二三事｜創作工作台</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -135,28 +135,28 @@
               <div class="quick-actions">
                 <button class="quick-action" data-go-view="compose" type="button">
                   <span class="quick-symbol" aria-hidden="true">✎</span>
-                  <strong>準備起稿</strong>
+                  <strong>開始寫正文</strong>
                   <span>下一章正文</span>
                 </button>
                 <button class="quick-action" data-go-view="review" type="button">
                   <span class="quick-symbol" aria-hidden="true">✓</span>
-                  <strong>正式驗稿</strong>
+                  <strong>查看正文候選</strong>
                   <span>候選稿檢查</span>
                 </button>
-                <button class="quick-action" data-action="build-context" type="button">
-                  <span class="quick-symbol" aria-hidden="true">↻</span>
-                  <strong>重建上下文</strong>
-                  <span>更新資料包</span>
+                <button class="quick-action" data-go-view="approval" type="button">
+                  <span class="quick-symbol" aria-hidden="true">⚑</span>
+                  <strong>查看待我確認</strong>
+                  <span>處理待確認項目</span>
                 </button>
-                <button class="quick-action" data-go-view="library" type="button">
-                  <span class="quick-symbol" aria-hidden="true">▤</span>
-                  <strong>檢視資料</strong>
-                  <span>正式來源</span>
+                <button class="quick-action" data-go-view="settlement" type="button">
+                  <span class="quick-symbol" aria-hidden="true">⇄</span>
+                  <strong>查看章節結算</strong>
+                  <span>章節結算摘要</span>
                 </button>
-                <button class="quick-action" data-go-view="visuals" type="button">
-                  <span class="quick-symbol" aria-hidden="true">◇</span>
-                  <strong>人設圖庫</strong>
-                  <span>視覺參考</span>
+                <button class="quick-action" data-go-view="writer-workbench" type="button">
+                  <span class="quick-symbol" aria-hidden="true">🧭</span>
+                  <strong>查看創作引擎</strong>
+                  <span>正史資料庫狀態</span>
                 </button>
               </div>
             </section>
@@ -230,9 +230,9 @@
             <section class="result-surface">
               <div class="panel-heading">
                 <div class="result-tabs" role="tablist" aria-label="產物預覽">
-                  <button class="is-active" data-result-file="data/outputs/task_prompt.md" type="button">任務提示</button>
-                  <button data-result-file="data/outputs/retrieval_context.md" type="button">檢索結果</button>
-                  <button data-result-file="data/outputs/generation_context.md" type="button">生成上下文</button>
+                  <button class="is-active" data-result-file="data/outputs/task_prompt.md" type="button">本章任務</button>
+                  <button data-result-file="data/outputs/retrieval_context.md" type="button">檢索參考</button>
+                  <button data-result-file="data/outputs/generation_context.md" type="button">寫作材料</button>
                 </div>
                 <button id="copy-result-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
               </div>
@@ -335,7 +335,7 @@
             <div class="panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">WRITER WORKBENCH</p>
+                  <p class="eyebrow">寫作者工作台</p>
                   <h2>寫作工作台</h2>
                 </div>
                 <div class="form-actions">
@@ -343,7 +343,7 @@
                 </div>
               </div>
               <div class="panel-body">
-                <p>此面板以 read-only 聚合後端狀態，並提供 minimal action 按鈕以呼叫安全的後端 glue endpoints。</p>
+                <p>此面板以唯讀聚合後端狀態，並提供簡潔操作按鈕以呼叫安全的後端流程（不會直接寫入正史資料庫）。</p>
                 <section id="workbench-stage-card" class="operator-stage-card">
                   <p class="eyebrow">CURRENT STAGE</p>
                   <h3>你現在在：整理流程狀態</h3>
@@ -366,7 +366,7 @@
                       <span id="feedback-learning-approval-count" class="workflow-status">0 pending</span>
                     </div>
                     <p class="feedback-learning-safety">
-                      此面板只讀，不會套用規則，也不會修改 active_engine 或 compressed_rules。
+                      此面板只讀，不會套用寫作規則，也不會修改正史資料庫或寫作規則（技術名稱：active_engine / compressed_rules）。
                       待確認更新請到確認佇列處理。
                     </p>
                     <div id="feedback-learning-summary" class="feedback-learning-summary"></div>
@@ -665,11 +665,11 @@
               <p class="eyebrow">CANON SETTLEMENT</p>
               <h2>正式章節結算匯入</h2>
             </div>
-            <div id="active-engine-status" class="active-engine-status">讀取 active_engine 狀態中</div>
+            <div id="active-engine-status" class="active-engine-status">讀取正史資料庫狀態中</div>
           </div>
 
           <div class="warning-panel phase-boundary">
-            此階段只建立 pending candidate，不會更新 active_engine。
+            此階段只建立待寫入正史的更新（pending candidate），不會更新正史資料庫。
           </div>
 
           <section id="workflow-settlement-panel" class="panel workflow-settlement-panel">
@@ -682,7 +682,7 @@
             </div>
 
             <div class="warning-panel adoption-boundary">
-              此步驟只會建立 pending_engine_candidate，不會更新 active_engine。active_engine 啟用仍需 Phase 3 人工確認。
+              此步驟只會建立待寫入正史的更新（pending_engine_candidate），不會更新正史資料庫。正史資料庫的啟用仍需人工確認。
             </div>
 
             <div class="form-row">
@@ -815,10 +815,10 @@
 
               <section class="candidate-section activation-panel">
                 <div class="section-heading compact">
-                  <h3>啟用 Active Engine</h3>
+                  <h3>啟用正史資料庫</h3>
                 </div>
                 <div class="warning-panel activation-warning">
-                  這會更新 data/canon_db/active_engine.md。系統將先建立 snapshot、archive 舊引擎，成功後寫入 activation log。
+                  這會更新正式的正史資料庫檔案。系統將先建立 snapshot、archive 舊版本，成功後記錄啟用日誌。
                 </div>
                 <label class="confirmation-row">
                   <input id="candidate-activation-confirm" type="checkbox">
@@ -869,7 +869,7 @@
           <div class="approval-toolbar">
             <div>
               <p class="eyebrow">PHASE 5A</p>
-              <h2>Approval Queue｜確認佇列</h2>
+              <h2>待我確認</h2>
             </div>
             <div class="form-actions">
               <button id="scan-approval-queue-button" class="button primary" type="button">掃描待確認項目</button>
