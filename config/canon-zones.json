@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "source_component": "canon_data",
+  "source_path": "data/canon_db/active_engine.md",
+  "expected_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "mode": "read_only_preview",
+  "zones": [
+    {
+      "id": "engine_header",
+      "label": "Engine header",
+      "start": "BOF",
+      "end_before": "# R0｜正式資料界線",
+      "component_hint": "engine_header",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "r0_formal_boundary",
+      "label": "R0 formal data boundary",
+      "start": "# R0｜正式資料界線",
+      "end_before": "# 第二層｜正式設定資料",
+      "component_hint": "governance_policy",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "formal_setting_layer_header",
+      "label": "Formal setting layer header",
+      "start": "# 第二層｜正式設定資料",
+      "end_before": "## 1. 正式設定總則",
+      "component_hint": "canon_data",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "setting_principles",
+      "label": "Formal setting principles",
+      "start": "## 1. 正式設定總則",
+      "end_before": "## 2. 世界觀核心設定",
+      "component_hint": "canon_setting_principles",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "world_core",
+      "label": "World core",
+      "start": "## 2. 世界觀核心設定",
+      "end_before": "## 3. 角色設定",
+      "component_hint": "world_registry",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "character_registry_zone",
+      "label": "Character registry candidate zone",
+      "start": "## 3. 角色設定",
+      "end_before": "## 4. 關係狀態、戀愛限制與受保護關係方向",
+      "component_hint": "character_registry",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "relationship_rules",
+      "label": "Relationship rules",
+      "start": "## 4. 關係狀態、戀愛限制與受保護關係方向",
+      "end_before": "### 5.1 角色異能武裝與能力資料位置",
+      "component_hint": "relationship_registry",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "ability_weapon_registry_zone",
+      "label": "Ability and weapon registry candidate zone",
+      "start": "### 5.1 角色異能武裝與能力資料位置",
+      "end_before": "# 第三層｜新版正文正史進度與現行承接資料",
+      "component_hint": "ability_weapon_registry",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "canon_progress_zone",
+      "label": "Canon progress",
+      "start": "# 第三層｜新版正文正史進度與現行承接資料",
+      "end_before": "# 第四層｜專案長線骨架外置與防誤承接邊界",
+      "component_hint": "canon_progress",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "longline_boundary_zone",
+      "label": "Longline boundary",
+      "start": "# 第四層｜專案長線骨架外置與防誤承接邊界",
+      "end_before": "# 正式資料處理規則｜僅供查證、設定治理與正式章節結算",
+      "component_hint": "longline_boundary",
+      "update_policy": "preview_only"
+    },
+    {
+      "id": "governance_rules_zone",
+      "label": "Formal data governance rules",
+      "start": "# 正式資料處理規則｜僅供查證、設定治理與正式章節結算",
+      "end_before": "EOF",
+      "component_hint": "governance_policy",
+      "update_policy": "preview_only"
+    }
+  ]
+}

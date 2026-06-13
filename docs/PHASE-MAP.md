@@ -1,5 +1,15 @@
 # Phase Map
 
+## Phase 17D
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17D | Canon Zones Preview | Read-only roundtrip preview implemented |
+
+- Defines exact-heading Canon Zone candidates without splitting Canon data.
+- Validates continuous coverage and reversible LF-normalized compilation.
+- Adds no MCP tools and never modifies `active_engine.md`.
+
 ## Phase 14C
 
 | Phase | Name | Status |
