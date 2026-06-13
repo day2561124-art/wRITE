@@ -81,6 +81,16 @@
 - Produces deterministic `import_dry_run` items including `would_be_approval_item_preview`, `lineage`, `risk_summary`, and `confirmation_guard`.
 - Does not write to Approval Queue, does not create approval items, does not create `canon_visual_lock`, and does not modify `active_engine.md` or `visual_index.jsonl`.
 
+## Phase 17L
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17L | Visual Link Approval Queue Import Guard / UI Readiness Preview | Read-only guard and UI readiness preview implemented |
+
+- Depends on Phase 17H / 17I / 17J / 17K and consumes Phase 17K import dry-run items.
+- Produces deterministic guard decisions and UI-ready preview cards for manual review.
+- Does not write to Approval Queue, create approval items, create `canon_visual_lock`, modify `active_engine.md` or `visual_index.jsonl`, or create UI/server routes.
+
 ## Phase 14C
 
 | Phase | Name | Status |
