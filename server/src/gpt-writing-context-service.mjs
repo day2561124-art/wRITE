@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -215,12 +216,37 @@ function chatMarkdown(bundle) {
   const sourceLines = Object.values(bundle.sources).map((source) => (
     `- ${source.label}: included=${source.included}, exists=${source.exists}, hash=${source.hash ?? "none"}, path=${source.path}`
   ));
+  const engineStatus = bundle.engine_components_status;
+  const requiredNeuralModules = bundle.required_neural_modules
+    .map((moduleName) => `  - ${moduleName}`);
   return [
     "# GPT Writing Context Bundle",
     "",
     "## Task Prompt",
     "",
     bundle.task_prompt,
+    "",
+    "## 完整創作引擎狀態",
+    "",
+    `- Engine-first：${bundle.engine_first}`,
+    `- active_engine：${engineStatus.components?.canon_data?.hash_matches ? "valid" : "invalid"}`,
+    `- active_engine path：${engineStatus.components?.canon_data?.path ?? "unavailable"}`,
+    `- active_engine expected SHA-256 (LF)：${engineStatus.components?.canon_data?.expected_sha256_lf ?? "unavailable"}`,
+    `- active_engine actual SHA-256 (LF)：${engineStatus.components?.canon_data?.actual_sha256_lf ?? "unavailable"}`,
+    `- writing_method：${engineStatus.components?.writing_method?.version ?? "unavailable"}`,
+    `- proofing_method：${engineStatus.components?.proofing_method?.version ?? "unavailable"}`,
+    `- neural_pipeline：${bundle.neural_pipeline_required ? "required" : "optional"}`,
+    "- required neural modules：",
+    ...requiredNeuralModules,
+    `- governance policy present：${engineStatus.components?.governance_policy?.exists === true}`,
+    "- canon update permission：none",
+    "- any canon change：requires user approval",
+    ...(bundle.engine_component_validation_errors.length
+      ? [
+        "- validation errors：",
+        ...bundle.engine_component_validation_errors.map((error) => `  - ${error}`),
+      ]
+      : []),
     "",
     "## Canon Sources",
     "",
@@ -263,10 +289,45 @@ function chatMarkdown(bundle) {
   ].join("\n");
 }
 
+async function engineStatusFor(options) {
+  try {
+    const status = typeof options.engineComponentsStatusProvider === "function"
+      ? await options.engineComponentsStatusProvider()
+      : await getEngineComponentsStatus(options.engineComponentRegistryOptions);
+    const validationErrors = status.ok === true
+      ? []
+      : status.issues?.length
+        ? [...status.issues]
+        : ["Engine component validation failed."];
+    return { status, validationErrors };
+  } catch (error) {
+    return {
+      status: {
+        ok: false,
+        read_only: true,
+        engine_id: null,
+        design_principle: "engine-first",
+        components: {},
+        issues: [error.message],
+      },
+      validationErrors: [error.message],
+    };
+  }
+}
+
 export async function buildGptWritingContext(rawInput, options = {}) {
   const input = normalizeInput(rawInput);
   const roots = rootsFor(options);
   await mkdir(roots.gptWritingContexts, { recursive: true });
+  const {
+    status: engineComponentsStatus,
+    validationErrors: engineComponentValidationErrors,
+  } = await engineStatusFor(options);
+  const requiredNeuralModules = (
+    engineComponentsStatus.components?.neural_pipeline?.modules ?? []
+  )
+    .filter((module) => module.required_status === "available")
+    .map((module) => module.name);
   const bundleId = createBundleId();
   const paths = bundlePaths(bundleId, roots);
   const activeEnginePath = options.activeEnginePath
@@ -332,6 +393,9 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   if (allocated.truncated_sections.length) {
     warnings.push(`Context truncated: ${allocated.truncated_sections.join(", ")}`);
   }
+  for (const error of engineComponentValidationErrors) {
+    warnings.push(`Engine component validation: ${error}`);
+  }
   const publicSources = Object.fromEntries(sourceList.map(({ content, ...source }) => [
     source.label,
     source,
@@ -345,8 +409,19 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     chapter_mode: input.chapterMode,
     output_mode: input.outputMode,
     for_chat_output: true,
+    engine_first: true,
+    engine_id: engineComponentsStatus.engine_id,
+    engine_components_status: engineComponentsStatus,
+    engine_components_valid: engineComponentsStatus.ok === true,
+    engine_component_validation_errors: engineComponentValidationErrors,
+    neural_pipeline_required:
+      engineComponentsStatus.components?.neural_pipeline?.required === true,
+    required_neural_modules: requiredNeuralModules,
+    governance_policy_required:
+      engineComponentsStatus.components?.governance_policy?.required === true,
     local_generation_allowed: false,
     canon_update_allowed: false,
+    approval_required_for_canon_change: true,
     active_engine_update_allowed: false,
     adoption_allowed: false,
     settlement_allowed: false,

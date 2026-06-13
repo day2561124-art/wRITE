@@ -14,6 +14,16 @@ const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".gpt-writing-co
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".gpt-writing-context-test");
 const fixturePending = path.join(projectPaths.canonDb, ".gpt-writing-context-pending-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
+const expectedActiveEngineLfHash = (
+  "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
+);
+const expectedNeuralModules = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
 const options = {
   gptWritingContexts: fixtureContexts,
   activeEnginePath: fixtureActive,
@@ -75,6 +85,30 @@ async function main() {
     const { bundle } = built;
     assert(bundle.bundle_kind === "gpt_writing_context", "Bundle kind was wrong.");
     assert(bundle.for_chat_output === true, "Bundle was not marked for chat.");
+    assert(bundle.engine_first === true, "Bundle was not marked engine-first.");
+    assert(bundle.engine_components_valid === true, "Engine components were not valid.");
+    assert(bundle.engine_components_status.ok === true, "Engine component status failed.");
+    assert(
+      bundle.engine_components_status.components.canon_data.expected_sha256_lf
+        === expectedActiveEngineLfHash
+        && bundle.engine_components_status.components.canon_data.actual_sha256_lf
+          === expectedActiveEngineLfHash,
+      "Bundle did not use the registry LF active engine hash.",
+    );
+    assert(
+      bundle.engine_components_status.components.writing_method.version === "v2.8",
+      "Writing method version was missing.",
+    );
+    assert(
+      bundle.engine_components_status.components.proofing_method.version === "v1.1",
+      "Proofing method version was missing.",
+    );
+    assert(bundle.neural_pipeline_required === true, "Neural pipeline was not required.");
+    assert(
+      JSON.stringify(bundle.required_neural_modules) === JSON.stringify(expectedNeuralModules),
+      "Required neural modules were incomplete.",
+    );
+    assert(bundle.governance_policy_required === true, "Governance policy was not required.");
     assert(bundle.local_generation_allowed === false, "Bundle allowed local generation.");
     assert(bundle.active_engine_update_allowed === false, "Bundle allowed engine updates.");
     assert(bundle.canon_update_allowed === false, "Bundle allowed canon updates.");
@@ -104,6 +138,19 @@ async function main() {
       "Chat markdown omitted active engine boundary.",
     );
     assert(
+      stored.context_for_chat.includes("## 完整創作引擎狀態")
+        && stored.context_for_chat.includes("- active_engine：valid")
+        && stored.context_for_chat.includes("- writing_method：v2.8")
+        && stored.context_for_chat.includes("- proofing_method：v1.1")
+        && stored.context_for_chat.includes("- neural_pipeline：required")
+        && expectedNeuralModules.every((moduleName) => (
+          stored.context_for_chat.includes(`  - ${moduleName}`)
+        ))
+        && stored.context_for_chat.includes("- governance policy present：true")
+        && stored.context_for_chat.includes("- canon update permission：none"),
+      "Chat markdown omitted the integrated engine status summary.",
+    );
+    assert(
       (await listGptWritingContextBundles({ limit: 20 }, options))[0].bundle_id
         === bundle.bundle_id,
       "Bundle list omitted the stored bundle.",
@@ -121,6 +168,42 @@ async function main() {
     }, options);
     assert(limited.bundle.truncated_sections.length > 0, "Context budget did not truncate.");
     assert(limited.bundle.max_context_chars === 40, "Context budget limit was not recorded.");
+
+    const invalid = await buildGptWritingContext({
+      taskPrompt: "Validation warning test.",
+      includeActiveEngine: false,
+      includeWritingCard: false,
+      includeProofingCard: false,
+      includeLongline: false,
+    }, {
+      ...options,
+      engineComponentsStatusProvider: async () => ({
+        ok: false,
+        read_only: true,
+        engine_id: "fixture-engine",
+        design_principle: "engine-first",
+        components: {
+          neural_pipeline: {
+            required: true,
+            modules: expectedNeuralModules.map((name) => ({
+              name,
+              required_status: "available",
+            })),
+          },
+          governance_policy: { required: true, exists: false },
+        },
+        issues: ["governance_policy:missing"],
+      }),
+    });
+    assert(invalid.bundle.engine_first === true, "Invalid bundle lost engine-first metadata.");
+    assert(invalid.bundle.engine_components_valid === false, "Invalid registry was marked valid.");
+    assert(
+      invalid.bundle.engine_component_validation_errors.includes("governance_policy:missing")
+        && invalid.bundle.warnings.includes(
+          "Engine component validation: governance_policy:missing",
+        ),
+      "Registry validation failure was silently omitted.",
+    );
 
     await expectReject(() => buildGptWritingContext({}, options), "task_prompt is required");
     await expectReject(

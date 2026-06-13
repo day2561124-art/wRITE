@@ -114,6 +114,16 @@ async function main() {
     }, options);
     assert(context.ok && context.result.bundle.bundle_id, "Writing context failed.");
     assert(context.result.generated_locally === false, "Writing context generated locally.");
+    assert(context.result.bundle.engine_first === true, "Bridge context was not engine-first.");
+    assert(
+      context.result.bundle.engine_components_valid === true,
+      "Bridge context engine components were invalid.",
+    );
+    assert(
+      context.result.bundle.neural_pipeline_required === true
+        && context.result.bundle.required_neural_modules.length === 5,
+      "Bridge context omitted the required neural pipeline.",
+    );
 
     const candidate = await chatgptBridgeTools.chatgpt_bridge_save_candidate({
       source_bundle_id: context.result.bundle.bundle_id,
