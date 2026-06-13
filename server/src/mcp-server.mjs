@@ -2431,6 +2431,35 @@ const toolDefinitions = [
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
+const chatgptPublicToolNames = new Set([
+  "chatgpt_bridge_get_workbench_status",
+  "chatgpt_bridge_get_current_inputs",
+  "chatgpt_bridge_build_writing_context",
+  "chatgpt_bridge_save_candidate",
+  "chatgpt_bridge_build_proofing_context",
+  "chatgpt_bridge_save_proof_report",
+  "chatgpt_bridge_request_adoption",
+  "chatgpt_bridge_build_settlement_context",
+  "chatgpt_bridge_save_settlement_report",
+  "approval_queue_bridge_readiness_report",
+]);
+
+const toolProfiles = new Map([
+  ["full", null],
+  ["chatgpt_public", chatgptPublicToolNames],
+]);
+
+const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || "full";
+const activeToolProfile = toolProfiles.get(activeToolProfileName);
+
+if (!toolProfiles.has(activeToolProfileName)) {
+  throw new Error(`Unknown MCP tool profile: ${activeToolProfileName}`);
+}
+
+function isToolAllowed(toolName) {
+  return activeToolProfile === null || activeToolProfile.has(toolName);
+}
+
 const permissionSources = {
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
@@ -2777,6 +2806,12 @@ async function callTool(params) {
   }
 
   const name = requiredString(params, "name");
+  if (!isToolAllowed(name)) {
+    throw new Error(
+      `Tool not allowed by MCP tool profile ${activeToolProfileName}: ${name}`,
+    );
+  }
+
   const tool = toolRegistry.get(name);
   if (!tool) {
     throw new Error(`Unknown tool: ${name}`);
@@ -2843,7 +2878,9 @@ async function dispatch(message) {
 
   if (message.method === "tools/list") {
     return makeResult(message.id, {
-      tools: toolDefinitions.map(publicToolDefinition),
+      tools: toolDefinitions
+        .filter((tool) => isToolAllowed(tool.name))
+        .map(publicToolDefinition),
     });
   }
 

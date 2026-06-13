@@ -15,6 +15,10 @@ function encodeMessage(message, framing = 'line') {
 export function createStdioSession() {
   const child = spawn(process.execPath, ['server/src/mcp-server.mjs'], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      MCP_TOOL_PROFILE: 'chatgpt_public',
+    },
   });
 
   let stdoutBuffer = '';

@@ -63,6 +63,7 @@ const steps = [
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
   ["Canon golden tests", ["tests/golden/canon-golden.test.mjs"]],
   ["UI server contract tests", ["tests/ui/ui-server.test.mjs"]],
+  ["MCP tool profiles", ["tests/mcp/mcp-tool-profiles.test.mjs"]],
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 ];
 
