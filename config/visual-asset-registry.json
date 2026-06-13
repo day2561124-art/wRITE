@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "mode": "read_only_preview",
+  "source_visual_index_path": "data/visual_db/visual_index.jsonl",
+  "source_entity_registry_config": "config/entity-registry.json",
+  "source_engine_path": "data/canon_db/active_engine.md",
+  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "canon_write_allowed": false,
+  "approval_required_for_canon_change": true,
+  "updates_canon_db": false,
+  "updates_active_engine": false,
+  "updates_visual_index": false,
+  "creates_patch_candidate": false,
+  "creates_formal_visual_card": false,
+  "creates_canon_visual_lock": false,
+
+  "allowed_asset_kinds": [
+    "character_visual",
+    "weapon_visual",
+    "location_visual",
+    "world_entity_visual",
+    "organization_visual",
+    "scene_visual",
+    "reference_visual",
+    "unknown_visual"
+  ],
+
+  "allowed_statuses": [
+    "reference_only",
+    "canon_link_candidate",
+    "approved_reference",
+    "variant_noncanon",
+    "superseded",
+    "rejected",
+    "ambiguous_visual_candidate"
+  ],
+
+  "forbidden_statuses": [
+    "canon",
+    "official",
+    "canon_lock",
+    "canon_visual_lock",
+    "active",
+    "finalized",
+    "patched",
+    "compiled"
+  ]
+}

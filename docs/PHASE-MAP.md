@@ -40,6 +40,17 @@
 - Generates completion reminders for newly discovered entities in adopted chapters, settlement reports, or manual input.
 - Read-only candidate-only output: does not create formal cards, does not modify `active_engine.md`, and does not write to Canon DB.
 
+## Phase 17H
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17H | Visual Asset Registry Preview | Read-only visual asset registry preview implemented |
+
+- Produces a read-only, candidate-only preview of visual assets extracted from explicit metadata or the visual index.
+- Images are only treated as references or candidate references; they are never written into the Canon DB or `active_engine.md`.
+- Does not create formal visual cards, patch candidates, or `canon_visual_lock` — all canonical changes require explicit human confirmation and subsequent phases (17I/17J).
+- Relies on Phase 17E Entity Registry Preview for conservative entity matching and only creates link candidates when metadata explicitly marks entity ids or entity display names that uniquely match the registry.
+
 ## Phase 14C
 
 | Phase | Name | Status |

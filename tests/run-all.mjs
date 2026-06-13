@@ -61,6 +61,7 @@ const steps = [
   ["Engine component registry", ["tests/engine/engine-component-registry.test.mjs"]],
   ["Canon zone preview service", ["tests/engine/canon-zone-preview-service.test.mjs"]],
   ["Entity registry preview service", ["tests/engine/entity-registry-preview-service.test.mjs"]],
+  ["Visual asset registry preview service", ["tests/engine/visual-asset-registry-preview-service.test.mjs"]],
   ["Entity intake service", ["tests/engine/entity-intake-service.test.mjs"]],
   ["Settlement completion reminders", ["tests/engine/settlement-completion-reminder-service.test.mjs"]],
   ["Full creative workflow final smoke", ["tests/creative/full-creative-workflow-final-smoke.test.mjs"]],
