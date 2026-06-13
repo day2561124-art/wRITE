@@ -63,6 +63,7 @@ const steps = [
   ["Entity registry preview service", ["tests/engine/entity-registry-preview-service.test.mjs"]],
   ["Visual asset registry preview service", ["tests/engine/visual-asset-registry-preview-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
+  ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],
   ["Entity intake service", ["tests/engine/entity-intake-service.test.mjs"]],
   ["Settlement completion reminders", ["tests/engine/settlement-completion-reminder-service.test.mjs"]],
   ["Full creative workflow final smoke", ["tests/creative/full-creative-workflow-final-smoke.test.mjs"]],

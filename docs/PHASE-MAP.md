@@ -61,6 +61,16 @@
 - Produces deterministic, read-only readiness items describing whether a visual asset's link candidate is ready for human review, needs more metadata, or is blocked (forbidden status, missing/ambiguous links).
 - Does not create approval items, does not write to Approval Queue, does not create canon_visual_lock, and does not modify `active_engine.md` or `visual_index.jsonl`.
 
+## Phase 17J
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17J | Visual Link Approval Queue Candidate Preview | Read-only queue-candidate preview implemented |
+
+- Consumes Phase 17I readiness items and emits read-only queue candidate previews for human review.
+- Does not write to Approval Queue, does not create approval items, does not create `canon_visual_lock`, and does not modify `active_engine.md` or `visual_index.jsonl`.
+- All write-related flags are false; output is always candidate-only and deterministic.
+
 ## Phase 14C
 
 | Phase | Name | Status |

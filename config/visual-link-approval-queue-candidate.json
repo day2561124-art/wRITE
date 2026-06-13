@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "phase": "17J",
+  "mode": "read_only_approval_queue_candidate_preview",
+  "source_visual_link_readiness_config": "config/visual-link-approval-readiness.json",
+  "source_visual_asset_registry_config": "config/visual-asset-registry.json",
+  "source_entity_registry_config": "config/entity-registry.json",
+  "source_engine_path": "data/canon_db/active_engine.md",
+  "source_visual_index_path": "data/visual_db/visual_index.jsonl",
+  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "canon_write_allowed": false,
+  "approval_queue_write_allowed": false,
+  "visual_index_write_allowed": false,
+  "updates_canon_db": false,
+  "updates_active_engine": false,
+  "updates_visual_index": false,
+  "writes_approval_queue": false,
+  "creates_approval_item": false,
+  "creates_patch_candidate": false,
+  "creates_formal_visual_card": false,
+  "creates_canon_visual_lock": false
+}
