@@ -10,6 +10,16 @@
 - Validates continuous coverage and reversible LF-normalized compilation.
 - Adds no MCP tools and never modifies `active_engine.md`.
 
+## Phase 17E
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17E | Entity Registry Preview | Read-only candidate extraction implemented |
+
+- Extracts candidate entities (character, weapon, organization, location) from Canon Zones preview.
+- Candidate IDs are stable, recomputable, and not canonical; no writes to Canon DB are performed.
+- Preview is conservative and does not perform inference or automatic approvals.
+
 ## Phase 14C
 
 | Phase | Name | Status |
