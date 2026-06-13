@@ -1,5 +1,20 @@
 # Phase Map
 
+## Phase 18F
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18F | Visual Library Approval Guard UI Readiness / Final Acceptance Preview | Read-only final acceptance implemented |
+
+- Connects the Phase 18B through Phase 18E preview pipeline and produces final
+  acceptance summaries and UI readiness card previews.
+- `approval_queue_import_dry_run_ready` remains dry-run ready only; every write,
+  approval creation, confirmation, asset copy, and lock capability is disabled.
+- Does not write Approval Queue, the visual index, or visual assets, create
+  `canon_visual_lock`, or modify Canon and `active_engine.md`.
+- Phase 18G may add a controlled Approval Queue import guard UI or a
+  human-confirmed import tool.
+
 ## Phase 18E
 
 | Phase | Name | Status |
