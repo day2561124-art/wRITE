@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "engine_id": "armed-academy-integrated-creative-engine",
+  "design_principle": "engine-first",
+  "components": {
+    "canon_data": {
+      "path": "data/canon_db/active_engine.md",
+      "expected_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+      "required": true
+    },
+    "writing_method": {
+      "path": "data/writing_policy_db/active_writing_card.md",
+      "version": "v2.8",
+      "required": true
+    },
+    "proofing_method": {
+      "path": "data/proofing_policy_db/active_proofing_card.md",
+      "version": "v1.1",
+      "required": true
+    },
+    "neural_pipeline": {
+      "path": "server/src/neural-module-service.mjs",
+      "required": true,
+      "modules": [
+        {
+          "name": "run_scene_planner",
+          "required_status": "available"
+        },
+        {
+          "name": "run_character_simulator",
+          "required_status": "available"
+        },
+        {
+          "name": "run_neural_critic",
+          "required_status": "available"
+        },
+        {
+          "name": "run_style_drift_detector",
+          "required_status": "available"
+        },
+        {
+          "name": "run_over_governance_detector",
+          "required_status": "available"
+        }
+      ]
+    },
+    "governance_policy": {
+      "path": "docs/DAILY-WORKFLOW.md",
+      "version": "phase-16c",
+      "required": true,
+      "controls": [
+        "candidate_before_canon",
+        "adoption_requires_human_confirmation",
+        "settlement_before_engine_candidate",
+        "activation_requires_human_confirmation"
+      ]
+    }
+  }
+}

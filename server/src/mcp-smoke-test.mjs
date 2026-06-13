@@ -149,6 +149,7 @@ const expectedToolScripts = [
 const expectedTools = [
   "get_current_project_state",
   "get_active_engine",
+  "get_engine_components_status",
   "get_active_writing_card",
   "validate_jsonl",
   "query_mcp_audit",
@@ -210,6 +211,7 @@ const expectedTools = [
 const readOnlyTools = new Set([
   "get_current_project_state",
   "get_active_engine",
+  "get_engine_components_status",
   "get_active_writing_card",
   "validate_jsonl",
   "query_mcp_audit",

@@ -77,6 +77,7 @@ import {
 import {
   approval_queue_bridge_readiness_report,
 } from "./mcp-approval-queue-readiness-tools.mjs";
+import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1292,6 +1293,14 @@ const toolDefinitions = [
     },
   },
   {
+    name: "get_engine_components_status",
+    description: "Read the integrated creative engine registry and validate required component availability.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await getEngineComponentsStatus()),
+  },
+  {
     name: "get_active_writing_card",
     description: "Read Writing Policy active_writing_card.md metadata, optionally including full text.",
     risk: "read",
@@ -2432,6 +2441,7 @@ const toolDefinitions = [
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
+  "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -2463,6 +2473,7 @@ function isToolAllowed(toolName) {
 const permissionSources = {
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
+  get_engine_components_status: ["engine_component_registry", "registered_engine_components"],
   get_active_writing_card: ["writing_policy_db"],
   validate_jsonl: ["feedback_db", "error_report_db"],
   query_mcp_audit: ["mcp_audit_log"],

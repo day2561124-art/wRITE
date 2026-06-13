@@ -11,8 +11,17 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const serverPath = path.join(rootDir, "server", "src", "mcp-server.mjs");
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
+const publicReadPaths = [
+  path.join(rootDir, "config", "engine-components.json"),
+  activeEnginePath,
+  path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md"),
+  path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md"),
+  path.join(rootDir, "server", "src", "neural-module-service.mjs"),
+  path.join(rootDir, "docs", "DAILY-WORKFLOW.md"),
+];
 
 const publicToolNames = [
+  "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -106,14 +115,26 @@ const listRequest = {
 
 const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
-assert.equal(fullNames.length, 58, "full profile tool count changed");
+assert.equal(fullNames.length, 59, "full profile tool count changed");
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }
 
-const activeEngineBefore = await readFile(activeEnginePath);
+const publicReadHashesBefore = new Map();
+for (const filePath of publicReadPaths) {
+  publicReadHashesBefore.set(filePath, sha256(await readFile(filePath)));
+}
 const publicRequests = [
   listRequest,
+  {
+    jsonrpc: "2.0",
+    id: "component-status",
+    method: "tools/call",
+    params: {
+      name: "get_engine_components_status",
+      arguments: {},
+    },
+  },
   ...blockedToolNames.map((name, index) => ({
     jsonrpc: "2.0",
     id: `blocked-${index}`,
@@ -155,12 +176,22 @@ assert.deepEqual(
   {},
 );
 
-const activeEngineAfter = await readFile(activeEnginePath);
-assert.equal(
-  sha256(activeEngineAfter),
-  sha256(activeEngineBefore),
-  "blocked public calls changed active_engine.md",
+const componentStatusResponse = publicResponses.find(
+  (response) => response.id === "component-status",
 );
+assert.equal(componentStatusResponse.result.isError, undefined);
+const componentStatus = JSON.parse(componentStatusResponse.result.content[0].text);
+assert.equal(componentStatus.ok, true);
+assert.equal(componentStatus.read_only, true);
+assert.equal(componentStatus.components.neural_pipeline.required, true);
+
+for (const filePath of publicReadPaths) {
+  assert.equal(
+    sha256(await readFile(filePath)),
+    publicReadHashesBefore.get(filePath),
+    `${path.relative(rootDir, filePath)} changed during public read-only call`,
+  );
+}
 
 const adapterSession = createStdioSession();
 try {
