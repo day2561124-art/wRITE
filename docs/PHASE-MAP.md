@@ -31,6 +31,15 @@
 - Conservative extraction only: marker lines, explicit tables, or owner links. No inference from ordinary prose.
 - Candidates are merged by `intake_id` with multiple `sources` preserved for review.
 
+## Phase 17G
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17G | Settlement Completion Reminder | Read-only reminder preview implemented |
+
+- Generates completion reminders for newly discovered entities in adopted chapters, settlement reports, or manual input.
+- Read-only candidate-only output: does not create formal cards, does not modify `active_engine.md`, and does not write to Canon DB.
+
 ## Phase 14C
 
 | Phase | Name | Status |

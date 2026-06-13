@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "mode": "read_only_preview",
+  "source_entity_registry_config": "config/entity-registry.json",
+  "source_entity_intake_config": "config/entity-intake.json",
+  "source_engine_path": "data/canon_db/active_engine.md",
+  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "canon_write_allowed": false,
+  "approval_required_for_canon_change": true,
+  "creates_patch_candidate": false,
+  "updates_canon_db": false,
+  "updates_active_engine": false,
+  "creates_formal_character_card": false,
+  "creates_formal_weapon_card": false,
+  "creates_formal_ability_card": false,
+  "creates_formal_location_card": false,
+  "creates_formal_organization_card": false,
+  "reminder_kinds": [
+    "character_completion_reminder",
+    "weapon_completion_reminder",
+    "ability_completion_reminder",
+    "character_weapon_link_completion_reminder",
+    "organization_completion_reminder",
+    "location_completion_reminder",
+    "world_entity_completion_reminder",
+    "relationship_completion_reminder",
+    "naming_review_reminder"
+  ],
+  "allowed_statuses": [
+    "reminder_candidate",
+    "needs_completion",
+    "existing_entity_reference",
+    "ambiguous_reminder_candidate",
+    "rejected_by_rule"
+  ]
+}
