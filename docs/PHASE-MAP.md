@@ -71,6 +71,16 @@
 - Does not write to Approval Queue, does not create approval items, does not create `canon_visual_lock`, and does not modify `active_engine.md` or `visual_index.jsonl`.
 - All write-related flags are false; output is always candidate-only and deterministic.
 
+## Phase 17K
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17K | Visual Link Approval Queue Import Dry Run | Read-only import-readiness preview implemented |
+
+- Consumes Phase 17J queue candidate previews and validates import readiness without writing to Approval Queue or Canon DB.
+- Produces deterministic `import_dry_run` items including `would_be_approval_item_preview`, `lineage`, `risk_summary`, and `confirmation_guard`.
+- Does not write to Approval Queue, does not create approval items, does not create `canon_visual_lock`, and does not modify `active_engine.md` or `visual_index.jsonl`.
+
 ## Phase 14C
 
 | Phase | Name | Status |
