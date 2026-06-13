@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 18E
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18E | Visual Library Approval Queue Import Dry-Run / Guard Preview | Read-only dry-run implemented |
+
+- Converts Phase 18D readiness candidates into Approval Queue payload previews
+  and guard cards.
+- `approval_queue_import_dry_run_ready` is dry-run ready only and never permits
+  queue writes, approval item creation, import confirmation, or asset copying.
+- Does not write the visual index or assets, create `canon_visual_lock`, or
+  modify Canon and `active_engine.md`.
+- Phase 18F may add guard UI readiness or final acceptance preview.
+
 ## Phase 18D
 
 | Phase | Name | Status |
