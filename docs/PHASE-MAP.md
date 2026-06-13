@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 18C
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18C | Visual Library Import Simulation / Confirm Gate | Read-only simulation implemented |
+
+- Consumes Phase 18B intake candidates and builds simulated import operations,
+  proposed visual index records, duplicate handling, warnings, and risk.
+- Exact confirmation unlocks eligible simulation decisions only; no import is
+  executed and no files or index records are written.
+- Unknown categories, duplicate secondary candidates, missing source files, and
+  unsafe target paths remain blocked.
+- Phase 18D may add pending import candidate or Approval Queue readiness preview.
+
 ## Phase 18B
 
 | Phase | Name | Status |
