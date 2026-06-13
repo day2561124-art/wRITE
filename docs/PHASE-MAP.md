@@ -20,6 +20,17 @@
 - Candidate IDs are stable, recomputable, and not canonical; no writes to Canon DB are performed.
 - Preview is conservative and does not perform inference or automatic approvals.
 
+## Phase 17F
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17F | Character & Weapon Intake | Candidate-only intake implemented |
+
+- Receives explicit, marked-up candidate mentions for new characters and weapons.
+- Produces intake candidates (`character_intake`, `weapon_intake`, `character_weapon_link_intake`) without writing to Canon DB or `active_engine.md`.
+- Conservative extraction only: marker lines, explicit tables, or owner links. No inference from ordinary prose.
+- Candidates are merged by `intake_id` with multiple `sources` preserved for review.
+
 ## Phase 14C
 
 | Phase | Name | Status |

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "mode": "read_only_preview",
+  "source_entity_registry_config": "config/entity-registry.json",
+  "source_engine_path": "data/canon_db/active_engine.md",
+  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "canon_write_allowed": false,
+  "approval_required_for_canon_change": true,
+  "creates_formal_character_card": false,
+  "creates_formal_weapon_card": false,
+  "creates_formal_ability_card": false,
+  "intake_kinds": [
+    "character_intake",
+    "weapon_intake",
+    "character_weapon_link_intake"
+  ],
+  "allowed_statuses": [
+    "intake_candidate",
+    "ambiguous_intake_candidate",
+    "needs_completion",
+    "existing_entity_reference",
+    "rejected_by_rule"
+  ]
+}

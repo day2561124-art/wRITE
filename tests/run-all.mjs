@@ -61,6 +61,7 @@ const steps = [
   ["Engine component registry", ["tests/engine/engine-component-registry.test.mjs"]],
   ["Canon zone preview service", ["tests/engine/canon-zone-preview-service.test.mjs"]],
   ["Entity registry preview service", ["tests/engine/entity-registry-preview-service.test.mjs"]],
+  ["Entity intake service", ["tests/engine/entity-intake-service.test.mjs"]],
   ["Full creative workflow final smoke", ["tests/creative/full-creative-workflow-final-smoke.test.mjs"]],
   ["MCP pending engine candidate review tools", ["tests/mcp/mcp-pending-engine-candidate-review-tools.test.mjs"]],
   ["Atomic pipeline failure", ["tests/pipeline/atomic-pipeline.test.mjs"]],
