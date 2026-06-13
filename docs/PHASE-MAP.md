@@ -1,5 +1,19 @@
 # Phase Map
 
+## Phase 18D
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18D | Visual Library Pending Import Candidate / Approval Readiness | Read-only readiness preview implemented |
+
+- Converts Phase 18C simulation operations into pending candidate previews and
+  approval readiness cards.
+- `ready_for_human_visual_import_review` means human-review ready only; cards
+  cannot submit to Approval Queue or confirm an import.
+- Does not write the visual index or assets, create approval items or
+  `canon_visual_lock`, or modify Canon and `active_engine.md`.
+- Phase 18E may add Approval Queue import dry-run or guard preview.
+
 ## Phase 18C
 
 | Phase | Name | Status |
