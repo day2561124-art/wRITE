@@ -66,6 +66,7 @@ const steps = [
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],
   ["Visual link approval queue import dry-run service", ["tests/engine/visual-link-approval-queue-import-dry-run-service.test.mjs"]],
   ["Visual link approval queue import guard service", ["tests/engine/visual-link-approval-queue-import-guard-service.test.mjs"]],
+  ["Visual link final acceptance service", ["tests/engine/visual-link-final-acceptance-service.test.mjs"]],
   ["Entity intake service", ["tests/engine/entity-intake-service.test.mjs"]],
   ["Settlement completion reminders", ["tests/engine/settlement-completion-reminder-service.test.mjs"]],
   ["Full creative workflow final smoke", ["tests/creative/full-creative-workflow-final-smoke.test.mjs"]],

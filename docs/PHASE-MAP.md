@@ -91,6 +91,16 @@
 - Produces deterministic guard decisions and UI-ready preview cards for manual review.
 - Does not write to Approval Queue, create approval items, create `canon_visual_lock`, modify `active_engine.md` or `visual_index.jsonl`, or create UI/server routes.
 
+## Phase 17M
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17M | Visual Link Final Acceptance Preview | Read-only final acceptance preview implemented |
+
+- Final acceptance stage to run a consolidated read-only preview across Phase 17H..17L.
+- Strictly a dry-run: does not write Approval Queue, does not create approval items, does not create `canon_visual_lock`, and does not modify `active_engine.md` or `visual_index.jsonl`.
+- Produces acceptance summaries, safety and lineage summaries, and a CLI preview. Intended for final verification before any human approval writes.
+
 ## Phase 14C
 
 | Phase | Name | Status |
