@@ -62,6 +62,7 @@ const steps = [
   ["Canon zone preview service", ["tests/engine/canon-zone-preview-service.test.mjs"]],
   ["Entity registry preview service", ["tests/engine/entity-registry-preview-service.test.mjs"]],
   ["Visual asset registry preview service", ["tests/engine/visual-asset-registry-preview-service.test.mjs"]],
+  ["Visual library rebuild intake service", ["tests/engine/visual-library-rebuild-intake-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],
   ["Visual link approval queue import dry-run service", ["tests/engine/visual-link-approval-queue-import-dry-run-service.test.mjs"]],

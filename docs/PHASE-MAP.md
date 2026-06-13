@@ -1,5 +1,18 @@
 # Phase Map
 
+## Phase 18B
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18B | Visual Library Rebuild Intake Preview | Read-only intake preview implemented |
+
+- Scans an optional intake directory and proposes image metadata, categories,
+  visual ids, target paths, duplicate groups, warnings, and risk.
+- Missing intake directories return a successful empty preview.
+- Does not write the visual index or assets, modify Canon or `active_engine.md`,
+  create `canon_visual_lock`, or write to Approval Queue.
+- Phase 18C may add import simulation and an explicit confirmation gate.
+
 ## Phase 17D
 
 | Phase | Name | Status |
