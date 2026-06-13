@@ -51,6 +51,16 @@
 - Does not create formal visual cards, patch candidates, or `canon_visual_lock` — all canonical changes require explicit human confirmation and subsequent phases (17I/17J).
 - Relies on Phase 17E Entity Registry Preview for conservative entity matching and only creates link candidates when metadata explicitly marks entity ids or entity display names that uniquely match the registry.
 
+## Phase 17I
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 17I | Visual Link Approval Readiness Preview | Read-only approval readiness preview implemented |
+
+- Consumes Phase 17H visual asset registry preview and evaluates link candidates for human approval readiness.
+- Produces deterministic, read-only readiness items describing whether a visual asset's link candidate is ready for human review, needs more metadata, or is blocked (forbidden status, missing/ambiguous links).
+- Does not create approval items, does not write to Approval Queue, does not create canon_visual_lock, and does not modify `active_engine.md` or `visual_index.jsonl`.
+
 ## Phase 14C
 
 | Phase | Name | Status |
