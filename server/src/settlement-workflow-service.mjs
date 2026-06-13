@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { getAgentRun } from "./agent-run-service.mjs";
+import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { importSettlementResult } from "./engine-candidate-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
@@ -223,6 +224,7 @@ export async function buildSettlementContext(
   assertAdoptedChapterId(adoptedChapterId);
   const roots = await ensureSettlementWorkflowDirectories(options);
   const adopted = await getAdoptedChapter(adoptedChapterId, options);
+  const sourceDraft = await getCandidateDraft(adopted.metadata.draft_id, options);
   if (adopted.status.status !== "accepted_pending_settlement") {
     throw errorWithStatus(
       `Adopted chapter cannot create settlement context: ${adopted.status.status}`,
@@ -295,6 +297,18 @@ export async function buildSettlementContext(
     adopted_chapter_hash: adoptedSource.hash,
     canon_status: "settlement_context",
     note: optionalText(note, 5_000),
+    source_candidate_id: sourceDraft.metadata.draft_id,
+    source_engine_first: sourceDraft.metadata.engine_first === true,
+    source_context_snapshot_id: sourceDraft.metadata.context_snapshot_id ?? null,
+    source_context_bundle_id: sourceDraft.metadata.context_bundle_id ?? null,
+    source_engine_components_valid:
+      sourceDraft.metadata.engine_components_valid === true,
+    source_neural_trace_complete:
+      sourceDraft.metadata.neural_trace_complete === true,
+    source_pipeline_status:
+      sourceDraft.metadata.pipeline_status ?? "incomplete_engine_pipeline",
+    source_missing_required_neural_modules:
+      sourceDraft.metadata.missing_required_neural_modules ?? [],
   };
   const status = {
     status: blockedReason ? "blocked" : "ready",
@@ -424,6 +438,28 @@ export async function saveSettlementReport(input = {}, options = {}) {
     500,
   );
   const usage = await neuralUsage(runId, neuralModulesUsedPath);
+  const engineComponentsStatus = await getEngineComponentsStatus();
+  const settlementRequiredModules = (
+    engineComponentsStatus.components.neural_pipeline.modules ?? []
+  ).map((module) => module.name);
+  const successfulModules = new Set(usage.neural_modules_used ?? []);
+  const settlementModulesUsed = settlementRequiredModules.filter(
+    (moduleName) => successfulModules.has(moduleName.replace(/^run_/u, "")),
+  );
+  const settlementMissingModules = settlementRequiredModules.filter(
+    (moduleName) => !successfulModules.has(moduleName.replace(/^run_/u, "")),
+  );
+  const sourceIncomplete = context.metadata.source_pipeline_status
+    !== "complete_engine_pipeline";
+  const settlementNeuralRequired = (
+    engineComponentsStatus.components.neural_pipeline.required === true
+  );
+  const settlementNeuralComplete = (
+    settlementNeuralRequired && settlementMissingModules.length === 0
+  );
+  const blockingWarnings = [];
+  if (sourceIncomplete) blockingWarnings.push("incomplete_source_pipeline");
+  if (!settlementNeuralComplete) blockingWarnings.push("missing_settlement_neural_trace");
   const settlementReportId = createId("settlement_report");
   const paths = reportPaths(settlementReportId, roots);
   const metadata = {
@@ -445,6 +481,26 @@ export async function saveSettlementReport(input = {}, options = {}) {
       : "",
     canon_status: "settlement_report",
     note: optionalText(input.note, 5_000),
+    source_candidate_id: context.metadata.source_candidate_id,
+    source_engine_first: context.metadata.source_engine_first,
+    source_context_snapshot_id: context.metadata.source_context_snapshot_id,
+    source_context_bundle_id: context.metadata.source_context_bundle_id,
+    source_engine_components_valid: context.metadata.source_engine_components_valid,
+    source_neural_trace_complete: context.metadata.source_neural_trace_complete,
+    source_pipeline_status: context.metadata.source_pipeline_status,
+    source_missing_required_neural_modules:
+      context.metadata.source_missing_required_neural_modules,
+    settlement_neural_pipeline_required: settlementNeuralRequired,
+    settlement_required_neural_modules: settlementRequiredModules,
+    settlement_neural_modules_used: settlementModulesUsed,
+    settlement_missing_required_neural_modules: settlementMissingModules,
+    settlement_neural_trace_complete: settlementNeuralComplete,
+    settlement_pipeline_status: (
+      !sourceIncomplete && settlementNeuralComplete
+        ? "complete_engine_pipeline"
+        : "incomplete_engine_pipeline"
+    ),
+    blocking_warnings: blockingWarnings,
   };
   const status = {
     status: "settlement_report_saved",
@@ -535,7 +591,9 @@ export async function createPendingCandidateFromSettlementReport(
     note: optionalText(note, 5_000) || report.metadata.note,
     runId: report.metadata.run_id,
     neuralModulesUsedPath: report.metadata.neural_modules_used_path,
-    requiresNeuralModules: report.neural_usage.requires_neural_modules === true,
+    requiresNeuralModules:
+      report.metadata.settlement_neural_pipeline_required === true,
+    blockingWarnings: report.metadata.blocking_warnings,
   }, options);
   const candidateId = candidate.metadata.candidate_id;
   const paths = reportPaths(settlementReportId, roots);

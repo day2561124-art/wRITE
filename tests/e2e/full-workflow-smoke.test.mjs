@@ -10,6 +10,13 @@ import {
 import path from "node:path";
 import { createAgentRun } from "../../server/src/agent-run-service.mjs";
 import {
+  run_character_simulator,
+  run_neural_critic,
+  run_over_governance_detector,
+  run_scene_planner,
+  run_style_drift_detector,
+} from "../../server/src/neural-module-service.mjs";
+import {
   confirmApprovalItem,
   scanApprovalQueue,
 } from "../../server/src/approval-queue-service.mjs";
@@ -33,11 +40,27 @@ import {
 } from "../../server/src/settlement-workflow-service.mjs";
 import {
   adoptCandidateDraft,
+  createDraftTask,
   getAdoptedChapter,
   getCandidateDraft,
   saveCandidateDraft,
   saveProofReport,
 } from "../../server/src/writing-workflow-service.mjs";
+
+const requiredNeuralModules = [
+  "scene_planner",
+  "character_simulator",
+  "neural_critic",
+  "style_drift_detector",
+  "over_governance_detector",
+];
+const neuralWrappers = [
+  run_scene_planner,
+  run_character_simulator,
+  run_neural_critic,
+  run_style_drift_detector,
+  run_over_governance_detector,
+];
 
 const fixtureCanon = path.join(projectPaths.canonDb, ".full-workflow-smoke");
 const fixtureActive = path.join(fixtureCanon, "active_engine.md");
@@ -184,6 +207,7 @@ async function main() {
   const productionHash = sha256(productionActive);
   const protectedBefore = await protectedState();
   const agentRunsBefore = await names(projectPaths.agentRuns);
+  const neuralTracesBefore = await names(projectPaths.neuralTraces);
   const transactionsBefore = await names(transactionDir);
   const productionPendingBefore = await names(projectPaths.pendingEngineCandidates);
   const productionSnapshotsBefore = await names(projectPaths.engineSnapshots);
@@ -202,6 +226,18 @@ async function main() {
   const initialFixtureHash = sha256(await readFile(fixtureActive));
 
   try {
+    const draftTask = await createDraftTask({
+      sourceChapter: "Phase 6A full workflow",
+      task: "Build a complete engine-first candidate.",
+      requiresNeuralModules: true,
+      requiredNeuralModules,
+    }, options);
+    for (const wrapper of neuralWrappers) {
+      await wrapper("full workflow draft fixture", {
+        run_id: draftTask.run.run_id,
+        adapter: async () => ({ ok: true }),
+      });
+    }
     const draft = await saveCandidateDraft({
       draftText: [
         "# 第十九章：完整流程煙霧測試",
@@ -211,6 +247,10 @@ async function main() {
       ].join("\n"),
       sourceChapter: "第十九章",
       note: "Phase 6A full workflow smoke fixture",
+      runId: draftTask.run.run_id,
+      contextBundleId: draftTask.context_bundle.context_bundle_id,
+      neuralModulesUsedPath:
+        `data/agent_runs/${draftTask.run.run_id}/neural_modules_used.json`,
     }, options);
     assert(draft.status.status === "candidate", "Candidate draft status was not candidate.");
     assert(sha256(await readFile(fixtureActive)) === initialFixtureHash, "Draft changed active engine.");
@@ -271,11 +311,26 @@ async function main() {
 
     const activeText = (await readFile(fixtureActive, "utf8")).trimEnd();
     const candidateText = `${activeText}\n\n## Phase 6A Smoke Marker\n\n- Full workflow smoke scenario completed.`;
+    const settlementRun = await createAgentRun({
+      task_type: "chapter_settlement",
+      requires_neural_modules: true,
+      required_neural_modules: requiredNeuralModules,
+      input: "Full workflow settlement fixture.",
+    });
+    for (const wrapper of neuralWrappers) {
+      await wrapper("full workflow settlement fixture", {
+        run_id: settlementRun.run_id,
+        adapter: async () => ({ ok: true }),
+      });
+    }
     const report = await saveSettlementReport({
       settlementContextId: context.metadata.settlement_context_id,
       settlementText: settlement(candidateText),
       sourceChapter: "第十九章",
       note: "Phase 6A settlement report",
+      runId: settlementRun.run_id,
+      neuralModulesUsedPath:
+        `data/agent_runs/${settlementRun.run_id}/neural_modules_used.json`,
     }, options);
     assert(
       report.status.status === "settlement_report_saved",
@@ -519,6 +574,7 @@ async function main() {
       rm(fixtureCleanup, { recursive: true, force: true }),
     ]);
     await removeNew(projectPaths.agentRuns, agentRunsBefore);
+    await removeNew(projectPaths.neuralTraces, neuralTracesBefore);
     await removeNew(transactionDir, transactionsBefore);
     assert(sha256(await readFile(projectPaths.activeEngine)) === productionHash, "Cleanup changed production active.");
     await assertProtectedStateUnchanged(protectedBefore);

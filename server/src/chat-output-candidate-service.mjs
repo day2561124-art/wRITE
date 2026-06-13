@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { buildEnginePipelineMetadata } from "./engine-pipeline-metadata.mjs";
 import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import {
   assertPathInside,
@@ -116,6 +117,7 @@ async function bundleTrace(sourceBundleId, options) {
       source_active_engine_hash: null,
       warning:
         "source_bundle_id missing; candidate cannot be traced to a GPT writing context bundle.",
+      bundle: null,
     };
   }
   const source = await getGptWritingContextBundle(sourceBundleId, options);
@@ -126,6 +128,7 @@ async function bundleTrace(sourceBundleId, options) {
     source_bundle_created_at: source.bundle.created_at,
     source_active_engine_hash: source.bundle.sources?.active_engine?.hash ?? null,
     warning: null,
+    bundle: source.bundle,
   };
 }
 
@@ -148,7 +151,11 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   const roots = rootsFor(options);
   const trace = await bundleTrace(input.sourceBundleId, options);
   const candidateHash = sha256(input.chatOutputText);
-  const warnings = trace.warning ? [trace.warning] : [];
+  const pipelineMetadata = buildEnginePipelineMetadata(trace.bundle, {});
+  const warnings = [
+    ...(trace.warning ? [trace.warning] : []),
+    ...pipelineMetadata.warnings,
+  ];
   if (input.dryRun) {
     return {
       dry_run: true,
@@ -191,6 +198,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
     local_generation_used: false,
+    ...pipelineMetadata,
     content_path: normalizeProjectPath(paths.content),
     metadata_path: normalizeProjectPath(paths.metadata),
     warnings,

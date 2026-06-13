@@ -150,6 +150,30 @@ async function main() {
     );
     assert(report.neural_usage.used_neural_network === false, "Text created neural success.");
     assert(
+      report.metadata.source_candidate_id === adopted.metadata.draft_id,
+      "Settlement report lost source candidate id.",
+    );
+    assert(report.metadata.source_engine_first === false, "Untraced source claimed engine-first.");
+    assert(
+      report.metadata.source_pipeline_status === "incomplete_engine_pipeline"
+        && report.metadata.source_neural_trace_complete === false,
+      "Settlement report lost incomplete source pipeline state.",
+    );
+    assert(
+      report.metadata.blocking_warnings.includes("incomplete_source_pipeline"),
+      "Settlement report omitted incomplete source warning.",
+    );
+    assert(report.metadata.settlement_neural_pipeline_required === true, "Settlement neural pipeline was optional.");
+    assert(
+      report.metadata.settlement_required_neural_modules.length === 5,
+      "Settlement required neural wrapper list was incomplete.",
+    );
+    assert(
+      report.metadata.settlement_pipeline_status === "incomplete_engine_pipeline"
+        && report.metadata.settlement_neural_trace_complete === false,
+      "Missing settlement traces were not marked incomplete.",
+    );
+    assert(
       (await listSettlementReports(options)).some(
         (item) => item.settlement_report_id === reportId,
       ),
@@ -169,6 +193,13 @@ async function main() {
     );
     assert(created.pending_candidate.diff, "Pending candidate did not contain diff.");
     assert(created.pending_candidate.risk_report, "Pending candidate did not contain risk report.");
+    assert(
+      created.pending_candidate.metadata.requires_neural_modules === true
+        && created.pending_candidate.metadata.blocking_warnings.includes(
+          "missing_settlement_neural_trace",
+        ),
+      "Pending candidate ignored settlement neural blocking warnings.",
+    );
     assert(
       created.settlement_report.status.status === "pending_candidate_created"
         && created.settlement_report.status.pending_candidate_id === candidateId,

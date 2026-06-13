@@ -15,6 +15,9 @@ const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".chat-output-ca
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".chat-output-candidate-test");
 const fixturePending = path.join(projectPaths.canonDb, ".chat-output-candidate-test-pending");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
+const expectedActiveEngineLfHash = (
+  "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
+);
 const options = {
   writingCandidates: fixtureCandidates,
   gptWritingContexts: fixtureContexts,
@@ -110,6 +113,31 @@ async function main() {
         === context.bundle.sources.active_engine.hash,
       "Candidate did not retain source active engine hash.",
     );
+    assert(detail.metadata.engine_first === true, "Candidate was not engine-first.");
+    assert(
+      detail.metadata.context_snapshot_id === context.bundle.bundle_id,
+      "Candidate lost the context snapshot id.",
+    );
+    assert(
+      detail.metadata.engine_components_snapshot.canon_data.actual_sha256_lf
+        === expectedActiveEngineLfHash,
+      "Candidate did not reuse the writing context LF hash.",
+    );
+    assert(
+      detail.metadata.writing_method_component_label === "v2.8"
+        && detail.metadata.proofing_method_component_label === "v1.1",
+      "Candidate component labels were wrong.",
+    );
+    assert(
+      detail.metadata.pipeline_status === "incomplete_engine_pipeline"
+        && detail.metadata.missing_required_neural_modules.length === 5,
+      "Candidate without neural traces was not marked incomplete.",
+    );
+    assert(detail.metadata.canon_update_allowed === false, "Candidate allowed canon updates.");
+    assert(
+      detail.metadata.approval_required_for_canon_change === true,
+      "Candidate omitted canon approval requirement.",
+    );
     assert(detail.content_truncated === true, "Bounded content was not truncated.");
 
     const storedText = await readFile(
@@ -132,6 +160,12 @@ async function main() {
     assert(
       untraced.warnings.some((warning) => warning.includes("source_bundle_id missing")),
       "Missing bundle warning was omitted.",
+    );
+    const untracedDetail = await getWritingCandidateDetail(untraced.candidate_id, options);
+    assert(
+      untracedDetail.metadata.engine_first === false
+        && untracedDetail.metadata.warnings.includes("missing_engine_first_context"),
+      "Candidate without context was not marked incomplete.",
     );
 
     const beforeDryRun = await names(fixtureCandidates);

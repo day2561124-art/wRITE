@@ -602,6 +602,9 @@ export async function importSettlementResult(input, options = {}) {
     requires_user_confirmation: true,
     requires_neural_modules: requiresNeuralModules,
     neural_modules_used_path: neuralModulesUsedPath,
+    blocking_warnings: Array.isArray(input?.blockingWarnings)
+      ? [...input.blockingWarnings]
+      : [],
   };
   const operations = [
     { filePath: paths.raw, content: rawText },

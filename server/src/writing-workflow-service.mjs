@@ -5,6 +5,8 @@ import {
   createAgentRun,
   getAgentRun,
 } from "./agent-run-service.mjs";
+import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
+import { buildEnginePipelineMetadata } from "./engine-pipeline-metadata.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 import {
@@ -279,6 +281,10 @@ export async function buildDraftContextBundle(input = {}, options = {}) {
     sourceRecord("retrieval_context", path.join(projectPaths.outputs, "retrieval_context.md"), "working"),
   ]);
   const active = sources[0];
+  const engineComponentsStatus = await getEngineComponentsStatus();
+  const requiredNeuralModules = (
+    engineComponentsStatus.components.neural_pipeline.modules ?? []
+  ).map((module) => module.name);
   const missingSources = sources.filter((source) => !source.exists).map((source) => source.label);
   const warnings = missingSources.filter((label) => label !== "active_engine")
     .map((label) => `Missing optional source: ${label}`);
@@ -299,6 +305,16 @@ export async function buildDraftContextBundle(input = {}, options = {}) {
     status: active.exists ? "ready" : "blocked",
     blocked_reason: active.exists ? null : "active_engine.md 不存在",
     active_engine_hash: active.hash,
+    engine_first: true,
+    engine_id: engineComponentsStatus.engine_id,
+    engine_components_status: engineComponentsStatus,
+    engine_components_valid: engineComponentsStatus.ok === true,
+    engine_component_validation_errors: [...engineComponentsStatus.issues],
+    neural_pipeline_required:
+      engineComponentsStatus.components.neural_pipeline.required === true,
+    required_neural_modules: requiredNeuralModules,
+    canon_update_allowed: false,
+    approval_required_for_canon_change: true,
   };
   await commitFileTransaction("build-draft-context-bundle", [
     { filePath: paths.bundle, content: json(bundle) },
@@ -352,10 +368,15 @@ export async function saveCandidateDraft(input = {}, options = {}) {
   const contextBundleId = optionalText(input.contextBundleId, 100);
   if (contextBundleId) assertContextBundleId(contextBundleId);
   const usage = await neuralUsage(runId, optionalText(input.neuralModulesUsedPath, 500));
+  const contextBundle = contextBundleId
+    ? await readJson(bundlePaths(contextBundleId, roots).bundle)
+    : null;
+  const pipelineMetadata = buildEnginePipelineMetadata(contextBundle, usage);
   const warnings = [];
   if (/(正式結算|新版完整創作引擎候選|pending_engine_candidate)/iu.test(draftText)) {
     warnings.push("draft_text 疑似包含章節結算或 engine candidate 內容");
   }
+  warnings.push(...pipelineMetadata.warnings);
   const metadata = {
     draft_id: draftId,
     run_id: runId,
@@ -370,6 +391,7 @@ export async function saveCandidateDraft(input = {}, options = {}) {
       : "",
     canon_status: "candidate",
     note: optionalText(input.note, 5_000),
+    ...pipelineMetadata,
     warnings,
   };
   const status = {
@@ -665,6 +687,17 @@ export async function adoptCandidateDraft(
     canon_status: "adopted_pending_settlement",
     note: optionalText(note, 5_000),
     warning: hasSevereIssues ? "Latest proof report contains P0/P1; manually adopted." : null,
+    engine_pipeline: {
+      engine_first: draft.metadata.engine_first === true,
+      context_snapshot_id: draft.metadata.context_snapshot_id ?? null,
+      context_bundle_id: draft.metadata.context_bundle_id ?? null,
+      engine_components_valid: draft.metadata.engine_components_valid === true,
+      neural_trace_complete: draft.metadata.neural_trace_complete === true,
+      pipeline_status:
+        draft.metadata.pipeline_status ?? "incomplete_engine_pipeline",
+      missing_required_neural_modules:
+        draft.metadata.missing_required_neural_modules ?? [],
+    },
   };
   const status = {
     status: "accepted_pending_settlement",

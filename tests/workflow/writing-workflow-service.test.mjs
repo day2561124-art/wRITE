@@ -18,11 +18,29 @@ import {
   saveProofReport,
   sendDraftToProofing,
 } from "../../server/src/writing-workflow-service.mjs";
+import {
+  run_character_simulator,
+  run_neural_critic,
+  run_over_governance_detector,
+  run_scene_planner,
+  run_style_drift_detector,
+} from "../../server/src/neural-module-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
 const fixtureRoot = path.join(projectPaths.writingWorkflow, ".writing-workflow-test");
 const fixtureActive = path.join(projectPaths.canonDb, ".writing-workflow-active-test.md");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
+const expectedActiveEngineLfHash = (
+  "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
+);
+const requiredWrapperModules = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+const requiredTraceModules = requiredWrapperModules.map((name) => name.replace(/^run_/u, ""));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -67,6 +85,7 @@ async function main() {
   const settlementReportsBefore = await names(projectPaths.settlementReports);
   const transactionsBefore = await names(transactionDir);
   const agentRunsBefore = await names(projectPaths.agentRuns);
+  const neuralTracesBefore = await names(projectPaths.neuralTraces);
   const activeText = "# Workflow Test Engine\n\n- Canon remains read-only in Phase 4A.\n";
   const options = {
     writingWorkflow: fixtureRoot,
@@ -110,6 +129,35 @@ async function main() {
     assert(saved.status.status === "candidate", "Draft initial status was not candidate.");
     assert(saved.metadata.canon_status === "candidate", "Draft canon status was not candidate.");
     assert(saved.neural_usage.used_neural_network === false, "Text-only run became neural success.");
+    assert(saved.metadata.engine_first === true, "Draft lost engine-first context.");
+    assert(saved.metadata.context_snapshot_id === task.context_bundle.context_bundle_id, "Draft lost context snapshot id.");
+    assert(saved.metadata.engine_components_valid === true, "Draft engine components were invalid.");
+    assert(
+      saved.metadata.engine_components_snapshot.canon_data.actual_sha256_lf
+        === expectedActiveEngineLfHash,
+      "Draft did not preserve the registry LF active engine hash.",
+    );
+    assert(
+      saved.metadata.writing_method_component_label === "v2.8"
+        && saved.metadata.proofing_method_component_label === "v1.1",
+      "Draft component labels were wrong.",
+    );
+    assert(saved.metadata.neural_pipeline_required === true, "Draft neural pipeline was optional.");
+    assert(
+      JSON.stringify(saved.metadata.required_neural_modules)
+        === JSON.stringify(requiredWrapperModules),
+      "Draft required neural wrappers were incomplete.",
+    );
+    assert(saved.metadata.neural_trace_complete === false, "Missing traces were marked complete.");
+    assert(
+      saved.metadata.pipeline_status === "incomplete_engine_pipeline",
+      "Missing traces did not mark the draft pipeline incomplete.",
+    );
+    assert(saved.metadata.canon_update_allowed === false, "Draft allowed canon updates.");
+    assert(
+      saved.metadata.approval_required_for_canon_change === true,
+      "Draft omitted canon approval requirement.",
+    );
     for (const file of ["draft.md", "metadata.json", "status.json", "neural_modules_used.json"]) {
       assert(
         await readFile(path.join(fixtureRoot, "candidate_drafts", draftId, file)),
@@ -206,6 +254,12 @@ async function main() {
       draftText: "將被退稿的候選。",
       sourceChapter: "第二十章 B",
     }, options);
+    assert(rejectedDraft.metadata.engine_first === false, "Untraced draft claimed engine-first.");
+    assert(
+      rejectedDraft.metadata.pipeline_status === "incomplete_engine_pipeline"
+        && rejectedDraft.metadata.warnings.includes("missing_engine_first_context"),
+      "Missing engine-first context was not recorded.",
+    );
     await rejectCandidateDraft(rejectedDraft.metadata.draft_id, { reason: "不採用" }, options);
     await expectReject(
       () => adoptCandidateDraft(rejectedDraft.metadata.draft_id, { confirm: true }, options),
@@ -228,6 +282,42 @@ async function main() {
     await expectReject(
       () => sendDraftToProofing(archivedDraft.metadata.draft_id, {}, options),
       "Archived draft was sent to proofing.",
+    );
+
+    const completeTask = await createDraftTask({
+      sourceChapter: "Complete pipeline",
+      task: "Exercise every required neural wrapper.",
+      requiresNeuralModules: true,
+      requiredNeuralModules: requiredTraceModules,
+    }, options);
+    const wrappers = [
+      run_scene_planner,
+      run_character_simulator,
+      run_neural_critic,
+      run_style_drift_detector,
+      run_over_governance_detector,
+    ];
+    for (const wrapper of wrappers) {
+      await wrapper("fixture", {
+        run_id: completeTask.run.run_id,
+        adapter: async () => ({ ok: true }),
+      });
+    }
+    const completeDraft = await saveCandidateDraft({
+      draftText: "Complete engine pipeline candidate.",
+      runId: completeTask.run.run_id,
+      contextBundleId: completeTask.context_bundle.context_bundle_id,
+      neuralModulesUsedPath:
+        `data/agent_runs/${completeTask.run.run_id}/neural_modules_used.json`,
+    }, options);
+    assert(completeDraft.metadata.neural_trace_complete === true, "Five success traces were not complete.");
+    assert(
+      completeDraft.metadata.pipeline_status === "complete_engine_pipeline",
+      "Complete trace set did not mark the pipeline complete.",
+    );
+    assert(
+      completeDraft.metadata.missing_required_neural_modules.length === 0,
+      "Complete trace set still reported missing modules.",
     );
 
     assert(hash(await readFile(fixtureActive)) === hash(activeText), "Fixture active engine changed.");
@@ -267,6 +357,7 @@ async function main() {
     await rm(fixtureRoot, { recursive: true, force: true });
     await rm(fixtureActive, { force: true });
     await removeNew(projectPaths.agentRuns, agentRunsBefore);
+    await removeNew(projectPaths.neuralTraces, neuralTracesBefore);
     await removeNew(transactionDir, transactionsBefore);
     assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Cleanup changed active engine.");
   }
