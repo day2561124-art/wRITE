@@ -1,5 +1,21 @@
 # Phase Map
 
+## Phase 19B
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19B | Visual Import Rollback / Delete / Restore Safety | Controlled safety core implemented |
+
+- Supports manifest-bounded confirmed-import rollback, controlled delete to
+  trash, and manifest-driven restore.
+- Requires `--execute` plus operation-specific exact confirmation.
+- Uses atomic visual index updates, operation manifests, post-operation
+  validation, and reverse rollback for partial failures.
+- Does not modify Canon, `active_engine.md`, writing/proofing policy, Approval
+  Queue, approval items, or `canon_visual_lock`.
+- Development verification uses sandbox paths and leaves the formal visual
+  library at its empty baseline.
+
 ## Phase 19A
 
 | Phase | Name | Status |
