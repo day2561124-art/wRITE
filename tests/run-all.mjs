@@ -75,6 +75,7 @@ const steps = [
   ["Visual library MCP readonly tool service", ["tests/engine/visual-library-mcp-readonly-tool-service.test.mjs"]],
   ["Visual library controlled import trial service", ["tests/engine/visual-library-controlled-import-trial-service.test.mjs"]],
   ["Visual library persistent import operator checklist service", ["tests/engine/visual-library-persistent-import-operator-checklist-service.test.mjs"]],
+  ["Visual library persistent baseline transition service", ["tests/engine/visual-library-persistent-baseline-transition-service.test.mjs"]],
   ["Visual library final E2E acceptance service", ["tests/engine/visual-library-final-e2e-acceptance-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],

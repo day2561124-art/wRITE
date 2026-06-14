@@ -410,3 +410,17 @@
 - Does not register an MCP tool or change the MCP tool count.
 - Persistent import execution and acceptance baseline changes remain deferred
   to Phase 19H.
+
+## Phase 19H-A
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19H-A | Visual Library Persistent Baseline Transition Tooling | Preview-first transition plan implemented |
+
+- Describes the future formal visual-library transition from an empty baseline
+  to a configured persistent baseline of one to three records and assets.
+- Produces required inputs, confirmation gates, acceptance update planning,
+  rollback planning, protected-file checks, and Phase 19H-B readiness.
+- Does not import, write formal visual data, update acceptance baselines, or
+  modify protected files.
+- Does not register an MCP tool or change the MCP tool count.
