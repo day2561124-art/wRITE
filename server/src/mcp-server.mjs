@@ -1,3 +1,4 @@
+import "./mcp-stdio-guard.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -72,6 +73,7 @@ import {
   chatgpt_bridge_request_adoption,
   chatgpt_bridge_save_candidate,
   chatgpt_bridge_save_proof_report,
+  chatgpt_bridge_visual_library_ui_import_flow_preview,
   chatgpt_bridge_save_settlement_report,
 } from "./mcp-chatgpt-bridge-tools.mjs";
 import {
@@ -1873,6 +1875,21 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_get_current_inputs(args)),
   },
   {
+    name: "chatgpt_bridge_visual_library_ui_import_flow_preview",
+    description: "Read-only preview of the Visual Library UI import flow for ChatGPT/MCP",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      source_dir: { type: "string" },
+      include_pipeline_summary: { type: "boolean" },
+      include_ui_review_model: { type: "boolean" },
+      include_bridge_readiness: { type: "boolean" },
+      include_final_acceptance_summary: { type: "boolean" },
+      output_mode: { type: "string", enum: ["summary", "full"] },
+    }),
+    handler: async (args) => jsonContent(await chatgpt_bridge_visual_library_ui_import_flow_preview(args)),
+  },
+  {
     name: "chatgpt_bridge_build_writing_context",
     description: "Build a ChatGPT-facing writing context from current workbench inputs without generation.",
     risk: "low-risk-write",
@@ -3274,7 +3291,7 @@ function maybeFinalizeEndOfInput() {
 }
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log(usage());
+  console.error(usage());
   process.exit(0);
 }
 

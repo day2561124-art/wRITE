@@ -17,7 +17,7 @@
   "visual_index_path": "data/visual_db/visual_index.jsonl",
   "active_engine_path": "data/canon_db/active_engine.md",
   "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
-  "expected_mcp_tool_count": 59,
+  "expected_mcp_tool_count": 60,
   "formal_gallery_must_remain_empty": true,
   "sandbox_execute_allowed": true,
   "formal_execute_allowed": false,

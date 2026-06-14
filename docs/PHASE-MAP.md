@@ -15,6 +15,17 @@
 - The formal visual library remains empty and Canon DB, `active_engine.md`,
   Approval Queue, approval items, and `canon_visual_lock` remain unchanged.
 
+## Phase 19F
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19F | Visual Library MCP Read-only Tool Registration | Read-only MCP tool registered |
+
+- Registers a single read-only, preview-only MCP tool `chatgpt_bridge_visual_library_ui_import_flow_preview` for UI import flow previews.
+- The tool is read-only and preview-only and does not accept `execute` or confirmation arguments; it must not write or modify `active_engine.md`, the visual index, assets, Approval Queue, approval items, or `canon_visual_lock`.
+- MCP tool count increases by one due to this registration (59 → 60).
+- The formal visual library baseline remains empty and unchanged.
+
 ## Phase 19C
 
 | Phase | Name | Status |

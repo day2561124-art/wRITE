@@ -116,5 +116,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(config.port ?? DEFAULT_PORT, config.host ?? '127.0.0.1', () => {
-  console.log(`MCP Streamable HTTP Server listening on http://${config.host ?? '127.0.0.1'}:${config.port ?? DEFAULT_PORT}/mcp`);
+  console.error(`MCP Streamable HTTP Server listening on http://${config.host ?? '127.0.0.1'}:${config.port ?? DEFAULT_PORT}/mcp`);
 });

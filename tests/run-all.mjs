@@ -72,6 +72,7 @@ const steps = [
   ["Visual library rollback/delete/restore service", ["tests/engine/visual-library-rollback-delete-restore-service.test.mjs"]],
   ["Visual library UI import flow service", ["tests/engine/visual-library-ui-import-flow-service.test.mjs"]],
   ["Visual library bridge readiness service", ["tests/engine/visual-library-bridge-readiness-service.test.mjs"]],
+  ["Visual library MCP readonly tool service", ["tests/engine/visual-library-mcp-readonly-tool-service.test.mjs"]],
   ["Visual library final E2E acceptance service", ["tests/engine/visual-library-final-e2e-acceptance-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],

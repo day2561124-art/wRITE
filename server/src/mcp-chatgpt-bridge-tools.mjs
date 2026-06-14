@@ -11,6 +11,9 @@ import {
   saveChatgptBridgeSettlementReport,
 } from "./chatgpt-bridge-service.mjs";
 import { normalizeProjectPath, projectPaths } from "./project-paths.mjs";
+import {
+  runVisualLibraryMcpReadonlyToolPreview,
+} from "./visual-library-mcp-readonly-tool-service.mjs";
 
 function response(toolName, permission, result, created = []) {
   return {
@@ -140,6 +143,12 @@ export const chatgpt_bridge_save_settlement_report = tool(
   }] : [],
 );
 
+export const chatgpt_bridge_visual_library_ui_import_flow_preview = tool(
+  "chatgpt_bridge_visual_library_ui_import_flow_preview",
+  "read_only",
+  runVisualLibraryMcpReadonlyToolPreview,
+);
+
 export const chatgptBridgeTools = {
   chatgpt_bridge_get_workbench_status,
   chatgpt_bridge_get_current_inputs,
@@ -150,6 +159,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_request_adoption,
   chatgpt_bridge_build_settlement_context,
   chatgpt_bridge_save_settlement_report,
+  chatgpt_bridge_visual_library_ui_import_flow_preview,
 };
 
 const readMetadata = {
@@ -207,4 +217,5 @@ export const chatgptBridgeToolMetadata = {
     projectPaths.adoptedWritings,
     projectPaths.outputLogs,
   ]),
+  chatgpt_bridge_visual_library_ui_import_flow_preview: { ...readMetadata },
 };
