@@ -58,8 +58,12 @@ export function buildVisualLibraryMcpReadonlyToolOutputSchemaSummary() {
   };
 }
 
-function sha256(content) {
-  return createHash("sha256").update(content).digest("hex");
+function normalizeLf(value) {
+  return String(value).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function sha256Lf(content) {
+  return createHash("sha256").update(normalizeLf(content), "utf8").digest("hex").toUpperCase();
 }
 
 async function countFiles(directory) {
@@ -113,7 +117,7 @@ export async function runVisualLibraryMcpReadonlyToolPreview(input = {}, options
   let activeEngineHash = null;
   try {
     const content = await readFile(path.join(projectRoot, activeEnginePath));
-    activeEngineHash = sha256(content.toString("utf8")).toUpperCase();
+    activeEngineHash = sha256Lf(content.toString("utf8"));
   } catch (err) {
     activeEngineHash = null;
   }

@@ -34,6 +34,12 @@ try {
   assert.ok(["empty_visual_library_mcp_readonly_preview_passed", "visual_library_mcp_readonly_preview_ready"].includes(empty.tool_decision));
   assert.equal(empty.action_availability?.can_execute, false);
 
+  const mismatch = await runVisualLibraryMcpReadonlyToolPreview(
+    {},
+    { config: { ...config, expected_engine_sha256_lf: "A".repeat(64) } },
+  );
+  assert.equal(mismatch.tool_decision, "blocked_active_engine_hash_mismatch");
+
   const blocked = await runVisualLibraryMcpReadonlyToolPreview({ execute: true }, { config });
   assert.equal(blocked.tool_decision, "blocked_forbidden_execute_argument");
 
