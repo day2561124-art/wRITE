@@ -347,3 +347,16 @@
   context bundle，但不套用 rule。
 - Phase 10B 尚未實作 compressed rule approval confirmation 與原子寫入。
 - Phase 11B 目前不存在，不得宣稱可執行 restore。
+## Phase 19D
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19D | ChatGPT / MCP Bridge Readiness for Visual Library | Read-only bridge payload preview implemented |
+
+- Reuses the Phase 19C UI review model and exposes visual-library baseline,
+  pipeline, blocker, warning, human-check, action-availability, and safety data.
+- Provides a read-only, preview-only MCP tool manifest preview without
+  registering a new MCP tool or changing the MCP tool count.
+- Does not accept execute, import, rollback, delete, or restore capability.
+- Does not modify the visual index, visual assets, active engine, Canon DB,
+  Approval Queue, approval items, or `canon_visual_lock`.
