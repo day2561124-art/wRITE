@@ -6,6 +6,7 @@ param(
   [switch]$RunTests,
   [switch]$CreateShortcut,
   [switch]$Status,
+  [switch]$StartMcpTunnel,
   [switch]$NoOpen,
   [ValidateRange(1, 65535)]
   [int]$Port = 4173
@@ -261,6 +262,18 @@ function New-DesktopShortcut {
   return $true
 }
 
+
+function Start-McpTunnel {
+  $script = Join-Path $Root "scripts\start-mcp-tunnel.ps1"
+  if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    Write-Host "MCP tunnel script was not found: $script" -ForegroundColor Red
+    return $false
+  }
+
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $script
+  return ($LASTEXITCODE -eq 0)
+}
+
 function Show-Menu {
   while ($true) {
     Write-Title
@@ -272,6 +285,7 @@ function Show-Menu {
     Write-Host "  4. Run full validation"
     Write-Host "  5. Create desktop shortcut"
     Write-Host "  6. Stop UI"
+    Write-Host "  7. Start MCP + Cloudflare tunnel"
     Write-Host "  0. Exit"
     Write-Host ""
     $choice = Read-Host "Choose"
@@ -284,6 +298,7 @@ function Show-Menu {
       "4" { Run-Validation | Out-Null }
       "5" { New-DesktopShortcut | Out-Null }
       "6" { Stop-Workbench | Out-Null }
+      "7" { Start-McpTunnel | Out-Null }
       "0" { return }
       default { Write-Host "Unknown option." -ForegroundColor Yellow }
     }
@@ -300,6 +315,7 @@ try {
   if ($OpenVisuals) { if (Open-VisualFolder) { exit 0 } else { exit 1 } }
   if ($RunTests) { if (Run-Validation) { exit 0 } else { exit 1 } }
   if ($CreateShortcut) { if (New-DesktopShortcut) { exit 0 } else { exit 1 } }
+  if ($StartMcpTunnel) { if (Start-McpTunnel) { exit 0 } else { exit 1 } }
   if ($Status) { if (Show-Status) { exit 0 } else { exit 1 } }
 
   Show-Menu
