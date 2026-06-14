@@ -67,6 +67,7 @@ const steps = [
   ["Visual library pending import readiness service", ["tests/engine/visual-library-pending-import-readiness-service.test.mjs"]],
   ["Visual library Approval Queue import dry-run service", ["tests/engine/visual-library-approval-queue-import-dry-run-service.test.mjs"]],
   ["Visual library final acceptance service", ["tests/engine/visual-library-final-acceptance-service.test.mjs"]],
+  ["Visual library controlled import guard service", ["tests/engine/visual-library-controlled-import-guard-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],
   ["Visual link approval queue import dry-run service", ["tests/engine/visual-link-approval-queue-import-dry-run-service.test.mjs"]],

@@ -1,5 +1,23 @@
 # Phase Map
 
+## Phase 18G
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 18G | Visual Library Controlled Import Guard / Pre-Write Final Gate | Read-only pre-write guard implemented |
+
+- Rechecks Phase 18F accepted candidates, source hashes, target safety and
+  occupancy, the empty visual index baseline, lineage, category, duplicates,
+  and no-write safety behind two exact confirmation gates.
+- `ready_for_phase_19a_confirmed_import` means only that Phase 19A prerequisites
+  passed; all write, copy, approval, lock, and real-import actions remain
+  disabled.
+- Does not write Approval Queue, the visual index, or visual assets, create
+  approval items or `canon_visual_lock`, or modify Canon and
+  `active_engine.md`.
+- Phase 19A may begin designing the confirmed import core with atomic writes,
+  snapshots, rechecks, and rollback support.
+
 ## Phase 18F
 
 | Phase | Name | Status |
@@ -12,8 +30,8 @@
   approval creation, confirmation, asset copy, and lock capability is disabled.
 - Does not write Approval Queue, the visual index, or visual assets, create
   `canon_visual_lock`, or modify Canon and `active_engine.md`.
-- Phase 18G may add a controlled Approval Queue import guard UI or a
-  human-confirmed import tool.
+- Phase 18G adds the controlled pre-write final gate while retaining all
+  no-write protections.
 
 ## Phase 18E
 
