@@ -1,5 +1,21 @@
 # Phase Map
 
+## Phase 19A
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19A | Confirmed Visual Import Core | Controlled confirmed import implemented |
+
+- Requires three exact confirmation texts plus an explicit `--execute` flag.
+- Reruns the Phase 18G guard and rechecks protected hashes, index state, source
+  hashes, target safety, and target occupancy immediately before writing.
+- Writes only visual assets and the visual index using temporary files, atomic
+  rename, post-write validation, and a rollback manifest.
+- Does not modify Canon, `active_engine.md`, writing/proofing policy, Approval
+  Queue, approval items, or `canon_visual_lock`.
+- Development verification uses sandbox paths and leaves the formal visual
+  library at its empty baseline.
+
 ## Phase 18G
 
 | Phase | Name | Status |
