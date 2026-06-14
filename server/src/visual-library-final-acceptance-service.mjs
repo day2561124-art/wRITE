@@ -386,6 +386,7 @@ export async function runVisualLibraryAcceptanceCasePipeline(options = {}) {
       confirmText,
       configPath: options.readinessConfigPath,
       simulationPreview,
+      visualIndexRecords: options.visualIndexRecords,
     });
   const approvalDryRunPreview = options.approvalDryRunPreview
     ?? await runVisualLibraryApprovalQueueImportDryRunPreview({
@@ -544,6 +545,7 @@ export async function runVisualLibraryFinalAcceptancePreview(options = {}) {
     simulationConfigPath: config.simulation_config_path,
     readinessConfigPath: config.readiness_config_path,
     approvalDryRunConfigPath: config.approval_dry_run_config_path,
+    visualIndexRecords: options.visualIndexRecords,
   });
   const after = {
     visual_index: await readFile(visualIndexPath),

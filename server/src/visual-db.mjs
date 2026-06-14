@@ -9,6 +9,8 @@ export const visualCategorySpecs = [
   ["scene_reference", "場景參考"],
 ];
 
+visualCategorySpecs.push(["character_sheet", "角色三視圖"]);
+
 export const visualCategories = new Set(visualCategorySpecs.map(([key]) => key));
 export const visualCategoryLabels = Object.fromEntries(visualCategorySpecs);
 export const visualCategoryAssetDirectories = {
@@ -18,6 +20,7 @@ export const visualCategoryAssetDirectories = {
   ability: "abilities",
   expression: "expressions",
   scene_reference: "scenes",
+  character_sheet: "character_sheets",
 };
 export const visualCanonStatusValues = new Set([
   "reference",
@@ -32,6 +35,7 @@ export const visualSourceValues = new Set([
   "external_reference",
   "repository_fixture",
   "reindexed_from_assets",
+  "visual_library_persistent_baseline_activation",
 ]);
 export const visualImportStatusValues = new Set(["imported"]);
 export const visualMetadataSourceValues = new Set(["fallback", "manual_mapping", "recovered"]);

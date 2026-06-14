@@ -93,11 +93,17 @@ try {
     config.expected_engine_sha256_lf,
   );
 
-  const emptyPreview = await runVisualLibraryImportSimulationPreview();
-  assert.equal(emptyPreview.import_plan_summary.decision, "empty_import_simulation");
-  assert.equal(emptyPreview.import_plan_summary.operation_count, 0);
-  assert.deepEqual(emptyPreview.operations, []);
-  assert.equal(emptyPreview.confirmation_gate.accepted, false);
+  const defaultPreview = await runVisualLibraryImportSimulationPreview();
+  assert.equal(
+    defaultPreview.import_plan_summary.decision,
+    "simulation_contains_blocked_operations",
+  );
+  assert.equal(defaultPreview.import_plan_summary.operation_count, 3);
+  assert.equal(defaultPreview.import_plan_summary.blocked_operation_count, 3);
+  assert.ok(defaultPreview.operations.every(
+    (item) => item.import_decision === "blocked_by_confirmation_gate",
+  ));
+  assert.equal(defaultPreview.confirmation_gate.accepted, false);
   assert.equal(
     evaluateVisualImportConfirmationGate(config, "確認視覺匯入").decision,
     "locked_by_confirmation_gate",

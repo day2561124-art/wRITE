@@ -538,12 +538,14 @@ export async function runVisualLibraryControlledImportGuardPreview(options = {})
     options.sourceDir ?? options.source_dir ?? config.default_source_dir,
     "controlled import guard source directory",
   );
+  // allow callers to override the visual index path and assets root via
+  // options for sandboxed tests or alternative environments
   const visualIndexPath = resolveProjectPath(
-    config.visual_index_path,
+    options.visualIndexPath ?? options.visual_index_path ?? config.visual_index_path,
     "visual index path",
   );
   const visualAssetsRoot = resolveProjectPath(
-    config.visual_assets_root,
+    options.visualAssetsRoot ?? options.visual_assets_root ?? config.visual_assets_root,
     "visual assets root",
   );
   const activeEnginePath = resolveProjectPath(
@@ -574,6 +576,7 @@ export async function runVisualLibraryControlledImportGuardPreview(options = {})
   const { config: finalAcceptanceConfig } =
     await loadVisualLibraryFinalAcceptanceConfig({
       configPath: config.final_acceptance_config_path,
+      visualIndexRecords: options.visualIndexRecords,
     });
   const finalAcceptance = options.finalAcceptancePreview
     ?? await runVisualLibraryFinalAcceptancePreview({
@@ -587,9 +590,8 @@ export async function runVisualLibraryControlledImportGuardPreview(options = {})
     await loadVisualLibraryImportSimulationConfig({
       configPath: finalAcceptanceConfig.simulation_config_path,
     });
-  const visualIndexRecords = visualIndexRecordCount(
-    before.visual_index.toString("utf8"),
-  );
+  const visualIndexRecords = options.visualIndexRecords
+    ?? visualIndexRecordCount(before.visual_index.toString("utf8"));
   const items = [];
   for (const acceptanceCase of finalAcceptance.acceptance_cases) {
     items.push(await buildControlledImportPreflightManifestPreview({

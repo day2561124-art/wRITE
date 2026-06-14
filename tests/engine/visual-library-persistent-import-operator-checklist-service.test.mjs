@@ -121,7 +121,16 @@ try {
     /writes_visual_index must be false/u,
   );
 
-  const ready = await runVisualLibraryPersistentImportOperatorChecklist();
+  const formalState =
+    await runVisualLibraryPersistentImportOperatorChecklist();
+  assert.equal(
+    formalState.checklist_decision,
+    "blocked_formal_visual_index_not_empty",
+  );
+  const sandboxConfig = await createSandboxConfig(config);
+  const ready = await runVisualLibraryPersistentImportOperatorChecklist({
+    config: sandboxConfig,
+  });
   assert.equal(
     ready.checklist_decision,
     "persistent_import_operator_checklist_ready",
@@ -158,7 +167,6 @@ try {
   assert.equal(ready.safety_summary.no_write_operations_invoked, true);
   assert.equal(ready.safety_summary.mcp_tool_count_changed, false);
 
-  const sandboxConfig = await createSandboxConfig(config);
   const sandboxIndex = path.resolve(
     projectRoot,
     sandboxConfig.formal_visual_index_path,

@@ -48,7 +48,8 @@ async function main() {
   assert(visualCategorySpecs.length >= 4, "Visual category registry is unexpectedly small.");
   assert(
     visualCategoryAssetDirectories.character_design === "characters"
-      && visualCategoryAssetDirectories.armed_form === "armed_forms",
+      && visualCategoryAssetDirectories.armed_form === "armed_forms"
+      && visualCategoryAssetDirectories.character_sheet === "character_sheets",
     "Visual category asset directory mapping is incomplete.",
   );
   const indexStats = await stat("data/visual_db/visual_index.jsonl");

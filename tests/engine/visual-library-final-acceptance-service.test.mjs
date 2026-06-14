@@ -117,6 +117,7 @@ try {
 
   const lockedPreview = await runVisualLibraryFinalAcceptancePreview({
     sourceDir,
+    visualIndexRecords: 0,
   });
   const lockedScene = lockedPreview.acceptance_cases.find(
     (item) => item.case_name === "scene-background.png",
@@ -126,6 +127,7 @@ try {
   const confirmedPreview = await runVisualLibraryFinalAcceptancePreview({
     sourceDir,
     confirmText: config.required_confirmation_text,
+    visualIndexRecords: 0,
   });
   const readyScene = confirmedPreview.acceptance_cases.find(
     (item) => item.case_name === "scene-background.png",
@@ -189,6 +191,7 @@ try {
   const pipeline = await runVisualLibraryAcceptanceCasePipeline({
     sourceDir,
     confirmText: config.required_confirmation_text,
+    visualIndexRecords: 0,
   });
   const readyCandidate =
     pipeline.pending_import_readiness.pending_candidates.find(

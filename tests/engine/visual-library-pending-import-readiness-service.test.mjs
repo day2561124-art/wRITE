@@ -106,14 +106,13 @@ try {
     config.expected_engine_sha256_lf,
   );
 
-  const emptyPreview = await runVisualLibraryPendingImportReadinessPreview();
+  const defaultPreview = await runVisualLibraryPendingImportReadinessPreview();
   assert.equal(
-    emptyPreview.approval_readiness_summary.decision,
-    "empty_approval_readiness_preview",
+    defaultPreview.approval_readiness_summary.decision,
+    "approval_readiness_contains_blocked_candidates",
   );
-  assert.deepEqual(emptyPreview.pending_candidates, []);
-  assert.deepEqual(emptyPreview.readiness_cards, []);
-  assert.deepEqual(emptyPreview.blocked_candidates, []);
+  assert.equal(defaultPreview.pending_candidates.length, 0);
+  assert.equal(defaultPreview.blocked_candidates.length, 3);
 
   await mkdir(fixtureRoot, { recursive: true });
   await writeFile(path.join(fixtureRoot, "character-primary.png"), tinyPng);
@@ -131,6 +130,7 @@ try {
 
   const lockedPreview = await runVisualLibraryPendingImportReadinessPreview({
     sourceDir,
+    visualIndexRecords: 0,
   });
   const lockedScene = lockedPreview.blocked_candidates.find(
     (candidate) => candidate.lineage.source_file === "scene-background.png",
@@ -143,6 +143,7 @@ try {
   const confirmedPreview = await runVisualLibraryPendingImportReadinessPreview({
     sourceDir,
     confirmText: config.required_confirmation_text,
+    visualIndexRecords: 0,
   });
   const readyScene = confirmedPreview.pending_candidates.find(
     (candidate) => candidate.lineage.source_file === "scene-background.png",

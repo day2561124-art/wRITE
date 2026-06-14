@@ -18,6 +18,10 @@ import {
   loadVisualLibraryControlledImportGuardConfig,
   runVisualLibraryControlledImportGuardPreview,
 } from "../../server/src/visual-library-controlled-import-guard-service.mjs";
+import {
+  loadVisualLibraryFinalAcceptanceConfig,
+  runVisualLibraryFinalAcceptancePreview,
+} from "../../server/src/visual-library-final-acceptance-service.mjs";
 import { projectRoot } from "../../server/src/project-paths.mjs";
 
 const visualIndexPath = path.join(
@@ -154,10 +158,20 @@ try {
   const sourceDir = path.relative(projectRoot, sourceRoot);
   const { config: guardConfig } =
     await loadVisualLibraryControlledImportGuardConfig();
+  const { config: finalAcceptanceConfig } =
+    await loadVisualLibraryFinalAcceptanceConfig();
+  const finalAcceptancePreview = await runVisualLibraryFinalAcceptancePreview({
+    sourceDir,
+    confirmText: finalAcceptanceConfig.required_confirmation_text,
+    visualIndexRecords: 0,
+  });
+
   const readyGuard = await runVisualLibraryControlledImportGuardPreview({
     sourceDir,
     confirmText: guardConfig.required_simulation_confirmation_text,
     preWriteConfirmText: guardConfig.required_pre_write_confirmation_text,
+    visualIndexRecords: 0,
+    finalAcceptancePreview,
   });
   assert.equal(
     readyGuard.controlled_import_guard_decision,

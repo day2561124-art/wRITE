@@ -424,3 +424,18 @@
 - Does not import, write formal visual data, update acceptance baselines, or
   modify protected files.
 - Does not register an MCP tool or change the MCP tool count.
+
+## Phase 19H-B
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19H-B | Visual Library Persistent Baseline Activation | Initial three-record formal baseline activation implemented |
+
+- Activates the selected three-image character-sheet set with four exact
+  confirmations and atomic writes.
+- Persists a Phase 19B-compatible rollback manifest and validates all copied
+  asset hashes.
+- Updates final acceptance to the configured three-record, three-asset formal
+  baseline.
+- Does not modify active engine, Canon DB, compressed rules, Approval Queue,
+  approval items, `canon_visual_lock`, or MCP registration.

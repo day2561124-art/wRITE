@@ -518,12 +518,13 @@ export async function runVisualLibraryUiImportFlowPreview(options = {}) {
     confirmText,
     configPath: config.final_acceptance_config_path,
   });
-  const guard = await runVisualLibraryControlledImportGuardPreview({
-    sourceDir: normalizeProjectPath(sourceDir),
-    confirmText,
-    preWriteConfirmText,
-    configPath: config.controlled_guard_config_path,
-  });
+  const guard = options.controlledGuardPreview
+    ?? await runVisualLibraryControlledImportGuardPreview({
+      sourceDir: normalizeProjectPath(sourceDir),
+      confirmText,
+      preWriteConfirmText,
+      configPath: config.controlled_guard_config_path,
+    });
   const manifest = options.manifest ?? null;
   let actionAvailability = buildVisualLibraryUiActionAvailability({
     guard_decision: guard.controlled_import_guard_decision,

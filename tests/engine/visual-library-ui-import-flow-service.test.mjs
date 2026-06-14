@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   readFile,
@@ -88,6 +89,37 @@ async function sandbox(name) {
   };
 }
 
+function readyGuard(content) {
+  const item = {
+    controlled_import_item_id: "PHASE19C-SANDBOX-READY",
+    source_file: "scene-background.png",
+    source_sha256:
+      createHash("sha256").update(content).digest("hex").toUpperCase(),
+    source_size_bytes: content.length,
+    proposed_visual_id: "VIS-PHASE19C-SANDBOX-001",
+    proposed_target_path:
+      "data/visual_db/assets/scenes/scene-background.png",
+    proposed_visual_index_record: {
+      visual_id: "VIS-PHASE19C-SANDBOX-001",
+      created_at: "2026-01-01T00:00:00.000Z",
+      category: "scenes",
+      title: "phase19c sandbox",
+      path: "data/visual_db/assets/scenes/scene-background.png",
+    },
+    guard_decision: "ready_for_phase_19a_confirmed_import",
+  };
+  return {
+    controlled_import_guard_summary: {
+      item_count: 1,
+      ready_count: 1,
+      blocked_count: 0,
+    },
+    controlled_import_items: [item],
+    blocked_items: [],
+    controlled_import_guard_decision: "ready_for_phase_19a_confirmed_import",
+  };
+}
+
 const indexBefore = await readFile(formalIndex);
 const engineBefore = await readFile(activeEngine);
 const assetsBefore = await snapshot(formalAssets);
@@ -118,16 +150,14 @@ try {
   ]) assert.ok(Array.isArray(empty[field]));
   assert.ok(empty.safety_panel);
   assert.ok(empty.action_bar);
-  assert.equal(empty.safety_panel.formal_gallery_empty_baseline, true);
+  assert.equal(empty.safety_panel.formal_gallery_empty_baseline, false);
   assert.equal(empty.action_bar.can_write_approval_queue, false);
   assert.equal(empty.action_bar.can_create_approval_item, false);
   assert.equal(empty.action_bar.can_create_canon_visual_lock, false);
 
   await mkdir(sourceRoot, { recursive: true });
-  await writeFile(
-    path.join(sourceRoot, "scene-background.png"),
-    Buffer.concat([tinyPng, Buffer.from("phase19c")]),
-  );
+  const sourceContent = Buffer.concat([tinyPng, Buffer.from("phase19c")]);
+  await writeFile(path.join(sourceRoot, "scene-background.png"), sourceContent);
   const sourceDir = path.relative(projectRoot, sourceRoot);
   const preview = await runVisualLibraryUiImportFlowPreview({
     sourceDir,
@@ -150,7 +180,8 @@ try {
     "final_acceptance",
     "controlled_guard",
   ]) assert.ok(preview.pipeline_summaries[key]);
-  assert.equal(preview.action_bar.can_import, true);
+  assert.equal(preview.action_bar.can_import, false);
+  const sandboxGuard = readyGuard(sourceContent);
 
   const noExecute = await runVisualLibraryUiImportFlowPreview({
     sourceDir,
@@ -182,6 +213,7 @@ try {
     operation: "import",
     execute: true,
     ...importBox,
+    controlledGuardPreview: sandboxGuard,
     confirmText: importConfig.required_simulation_confirmation_text,
     preWriteConfirmText: importConfig.required_pre_write_confirmation_text,
     realImportConfirmText: importConfig.required_real_import_confirmation_text,
@@ -195,6 +227,7 @@ try {
     operation: "rollback-import",
     execute: true,
     ...importBox,
+    controlledGuardPreview: sandboxGuard,
     manifest: imported.operation_result.rollback_manifest,
     rollbackConfirmText: operationConfig.required_rollback_confirmation_text,
     confirmText: config.required_simulation_confirmation_text,
@@ -211,6 +244,7 @@ try {
     operation: "import",
     execute: true,
     ...deleteBox,
+    controlledGuardPreview: sandboxGuard,
     confirmText: importConfig.required_simulation_confirmation_text,
     preWriteConfirmText: importConfig.required_pre_write_confirmation_text,
     realImportConfirmText: importConfig.required_real_import_confirmation_text,
@@ -222,6 +256,7 @@ try {
     operation: "delete",
     execute: true,
     ...deleteBox,
+    controlledGuardPreview: sandboxGuard,
     visualId,
     deleteConfirmText: operationConfig.required_delete_confirmation_text,
     confirmText: config.required_simulation_confirmation_text,
@@ -236,6 +271,7 @@ try {
     operation: "restore",
     execute: true,
     ...deleteBox,
+    controlledGuardPreview: sandboxGuard,
     manifest: deleted.operation_result.operation_manifest,
     restoreConfirmText: operationConfig.required_restore_confirmation_text,
     confirmText: config.required_simulation_confirmation_text,

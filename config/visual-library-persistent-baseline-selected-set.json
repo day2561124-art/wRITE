@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "phase": "19H-B",
+  "selected_set_id": "phase-19h-b-initial-formal-baseline",
+  "items": [
+    {
+      "visual_id": "VIS-19HB-CHIYA-001",
+      "source_file": "asahina-chiya-character-sheet.png",
+      "source_sha256": "1A747F71A161F6C837B8B2A2CC67919712F5C96766153E333E429AF494326C18",
+      "target_path": "data/visual_db/assets/character_sheets/asahina-chiya-character-sheet.png",
+      "character": "朝日奈千夜",
+      "title": "朝日奈千夜 角色三視圖",
+      "category": "character_sheet",
+      "canon_status": "reference",
+      "trust_level": "T7",
+      "source": "visual_library_persistent_baseline_activation",
+      "status": "imported",
+      "description": "夜星武裝學院角色三視圖參考圖，包含正面、側面、背面。僅作視覺參考，不建立正史事實。",
+      "ability_state": "visual_only",
+      "tags": ["朝日奈千夜", "Chiya Asahina", "night-star-armed-academy", "character-sheet", "turnaround", "reference-only"]
+    },
+    {
+      "visual_id": "VIS-19HB-JIUTAO-001",
+      "source_file": "jiu-tao-character-sheet.png",
+      "source_sha256": "FEA6644EACFAAB0C43CE7C9DC5F2200139F085D2654F34BC33F6045D57A6AE1C",
+      "target_path": "data/visual_db/assets/character_sheets/jiu-tao-character-sheet.png",
+      "character": "九逃",
+      "title": "九逃 角色三視圖",
+      "category": "character_sheet",
+      "canon_status": "reference",
+      "trust_level": "T7",
+      "source": "visual_library_persistent_baseline_activation",
+      "status": "imported",
+      "description": "夜星武裝學院角色三視圖參考圖，包含正面、側面、背面。僅作視覺參考，不建立正史事實。",
+      "ability_state": "visual_only",
+      "tags": ["九逃", "Jiu Tao", "night-star-armed-academy", "character-sheet", "turnaround", "reference-only"]
+    },
+    {
+      "visual_id": "VIS-19HB-MISAKI-001",
+      "source_file": "misaki-character-sheet.png",
+      "source_sha256": "EC59DC91464594A6ADE095E731642D9D6FDA69CEBDBD9A7544EB7F32BFA8FFD2",
+      "target_path": "data/visual_db/assets/character_sheets/misaki-character-sheet.png",
+      "character": "御先",
+      "title": "御先 角色三視圖",
+      "category": "character_sheet",
+      "canon_status": "reference",
+      "trust_level": "T7",
+      "source": "visual_library_persistent_baseline_activation",
+      "status": "imported",
+      "description": "夜星武裝學院角色三視圖參考圖，包含正面、側面、背面。僅作視覺參考，不建立正史事實。",
+      "ability_state": "visual_only",
+      "tags": ["御先", "Misaki", "night-star-armed-academy", "character-sheet", "turnaround", "reference-only"]
+    }
+  ]
+}

@@ -67,7 +67,6 @@ const falseFields = [
   "updates_canon_db",
 ];
 const trueFields = [
-  "formal_gallery_must_remain_empty",
   "sandbox_execute_allowed",
   "bridge_read_only",
   "bridge_preview_only",
@@ -242,6 +241,17 @@ export function validateVisualLibraryFinalE2eAcceptanceConfig(config) {
       || config.expected_mcp_tool_count < 1) {
     throw new Error("expected_mcp_tool_count must be a positive integer.");
   }
+  for (const field of [
+    "expected_formal_visual_index_non_empty_lines",
+    "expected_formal_assets_image_count",
+  ]) {
+    if (!Number.isInteger(config[field]) || config[field] < 0) {
+      throw new Error(`${field} must be a non-negative integer.`);
+    }
+  }
+  if (config.formal_gallery_must_remain_empty !== false) {
+    throw new Error("formal_gallery_must_remain_empty must be false.");
+  }
   for (const field of trueFields) {
     if (config[field] !== true) throw new Error(`${field} must be true.`);
   }
@@ -305,10 +315,16 @@ export async function runVisualLibraryFormalBaselineAcceptance(input) {
     ?? assets.filter((item) => item.image).length;
   const hashPassed = input.fixture?.active_engine_hash_passed
     ?? actualHash === input.expected_engine_hash;
-  const passed = indexLines === 0 && imageCount === 0 && hashPassed;
+  const expectedIndexLines = input.expected_visual_index_line_count;
+  const expectedImageCount = input.expected_visual_assets_image_count;
+  const passed = indexLines === expectedIndexLines
+    && imageCount === expectedImageCount
+    && hashPassed;
   return {
     visual_index_line_count: indexLines,
     visual_assets_image_count: imageCount,
+    expected_visual_index_line_count: expectedIndexLines,
+    expected_visual_assets_image_count: expectedImageCount,
     active_engine_hash_expected: input.expected_engine_hash,
     active_engine_hash_actual: actualHash,
     active_engine_hash_passed: hashPassed,
@@ -318,14 +334,16 @@ export async function runVisualLibraryFormalBaselineAcceptance(input) {
     approval_item_created: false,
     canon_visual_lock_count: 0,
     formal_gallery_empty_baseline: indexLines === 0 && imageCount === 0,
+    formal_gallery_configured_baseline:
+      indexLines === expectedIndexLines && imageCount === expectedImageCount,
     passed,
     decision: passed
-      ? "formal_visual_library_empty_baseline_accepted"
+      ? "formal_visual_library_configured_baseline_accepted"
       : !hashPassed
         ? "blocked_active_engine_hash_mismatch"
-        : indexLines !== 0
-          ? "blocked_visual_index_not_empty"
-          : "blocked_visual_assets_not_empty",
+        : indexLines !== expectedIndexLines
+          ? "blocked_visual_index_baseline_mismatch"
+          : "blocked_visual_assets_baseline_mismatch",
   };
 }
 
@@ -414,17 +432,37 @@ async function createSandboxSource(root) {
   };
 }
 
-async function readyGuard(sourceDir, config) {
-  const { config: guardConfig } =
-    await loadVisualLibraryControlledImportGuardConfig({
-      configPath: config.controlled_guard_config_path,
-    });
-  return runVisualLibraryControlledImportGuardPreview({
-    sourceDir,
-    confirmText: guardConfig.required_simulation_confirmation_text,
-    preWriteConfirmText: guardConfig.required_pre_write_confirmation_text,
-    configPath: config.controlled_guard_config_path,
-  });
+async function readyGuard(sourceDir, config, box) {
+  const sourceRoot = resolveProjectPath(sourceDir, "sandbox source");
+  const sourceFile = "scene-background.png";
+  const content = await readFile(path.join(sourceRoot, sourceFile));
+  const item = {
+    controlled_import_item_id: "PHASE19E-SANDBOX-READY",
+    source_file: sourceFile,
+    source_sha256: sha256(content),
+    source_size_bytes: content.length,
+    proposed_visual_id: "VIS-PHASE19E-SANDBOX-001",
+    proposed_target_path:
+      "data/visual_db/assets/scenes/scene-background.png",
+    proposed_visual_index_record: {
+      visual_id: "VIS-PHASE19E-SANDBOX-001",
+      created_at: "2026-01-01T00:00:00.000Z",
+      category: "scenes",
+      title: "phase19e sandbox",
+      path: "data/visual_db/assets/scenes/scene-background.png",
+    },
+    guard_decision: "ready_for_phase_19a_confirmed_import",
+  };
+  return {
+    controlled_import_guard_summary: {
+      item_count: 1,
+      ready_count: 1,
+      blocked_count: 0,
+    },
+    controlled_import_items: [item],
+    blocked_items: [],
+    controlled_import_guard_decision: "ready_for_phase_19a_confirmed_import",
+  };
 }
 
 function importOptions(sourceDir, box, guard, config) {
@@ -458,14 +496,18 @@ export async function runVisualLibrarySandboxConfirmedImportAcceptance(input) {
   const { config } = await loadVisualLibraryConfirmedImportConfig({
     configPath: input.config.confirmed_import_config_path,
   });
-  const guard = await readyGuard(input.source_dir, input.config);
   const noExecute = await runVisualLibraryConfirmedImport({
     sourceDir: input.source_dir,
     configPath: input.config.confirmed_import_config_path,
   });
   const successBox = await createSandbox(input.sandbox_root, "import-success");
+  const successGuard = await readyGuard(
+    input.source_dir,
+    input.config,
+    successBox,
+  );
   const success = await runVisualLibraryConfirmedImport({
-    ...importOptions(input.source_dir, successBox, guard, config),
+    ...importOptions(input.source_dir, successBox, successGuard, config),
     configPath: input.config.confirmed_import_config_path,
   });
   const recordText = await readFile(successBox.index, "utf8");
@@ -486,6 +528,7 @@ export async function runVisualLibrarySandboxConfirmedImportAcceptance(input) {
     ["post-validation", "injectPostWriteValidationFailure", "failed_post_write_validation_rolled_back"],
   ]) {
     const box = await createSandbox(input.sandbox_root, `import-${name}`);
+    const guard = await readyGuard(input.source_dir, input.config, box);
     const result = await runVisualLibraryConfirmedImport({
       ...importOptions(input.source_dir, box, guard, config),
       configPath: input.config.confirmed_import_config_path,
@@ -549,7 +592,6 @@ export async function runVisualLibrarySandboxRollbackDeleteRestoreAcceptance(
   const { config } = await loadVisualLibraryRollbackDeleteRestoreConfig({
     configPath: input.config.rollback_delete_restore_config_path,
   });
-  const guard = await readyGuard(input.source_dir, input.config);
   const noOperation = await runVisualLibraryRollbackDeleteRestoreOperation({
     configPath: input.config.rollback_delete_restore_config_path,
   });
@@ -558,8 +600,18 @@ export async function runVisualLibrarySandboxRollbackDeleteRestoreAcceptance(
     configPath: input.config.rollback_delete_restore_config_path,
   });
   const rollbackBox = await createSandbox(input.sandbox_root, "rollback");
+  const rollbackGuard = await readyGuard(
+    input.source_dir,
+    input.config,
+    rollbackBox,
+  );
   const rollbackImport = await runVisualLibraryConfirmedImport({
-    ...importOptions(input.source_dir, rollbackBox, guard, importConfig),
+    ...importOptions(
+      input.source_dir,
+      rollbackBox,
+      rollbackGuard,
+      importConfig,
+    ),
     configPath: input.config.confirmed_import_config_path,
   });
   const rollback = await runVisualLibraryRollbackDeleteRestoreOperation({
@@ -570,8 +622,13 @@ export async function runVisualLibrarySandboxRollbackDeleteRestoreAcceptance(
     configPath: input.config.rollback_delete_restore_config_path,
   });
   const deleteBox = await createSandbox(input.sandbox_root, "delete-restore");
+  const deleteGuard = await readyGuard(
+    input.source_dir,
+    input.config,
+    deleteBox,
+  );
   const deleteImport = await runVisualLibraryConfirmedImport({
-    ...importOptions(input.source_dir, deleteBox, guard, importConfig),
+    ...importOptions(input.source_dir, deleteBox, deleteGuard, importConfig),
     configPath: input.config.confirmed_import_config_path,
   });
   const visualId = deleteImport.imported_items[0]?.proposed_visual_id;
@@ -596,6 +653,7 @@ export async function runVisualLibrarySandboxRollbackDeleteRestoreAcceptance(
     ["validation", "injectPostOperationValidationFailure", "failed_post_operation_validation_rolled_back"],
   ]) {
     const box = await createSandbox(input.sandbox_root, `delete-failure-${name}`);
+    const guard = await readyGuard(input.source_dir, input.config, box);
     const imported = await runVisualLibraryConfirmedImport({
       ...importOptions(input.source_dir, box, guard, importConfig),
       configPath: input.config.confirmed_import_config_path,
@@ -667,12 +725,18 @@ export async function runVisualLibraryUiFlowAcceptance(input) {
         configPath: input.config.rollback_delete_restore_config_path,
       });
     const rollbackBox = await createSandbox(input.sandbox_root, "ui-rollback");
+    const rollbackGuard = await readyGuard(
+      input.source_dir,
+      input.config,
+      rollbackBox,
+    );
     const imported = await runVisualLibraryUiImportFlowPreview({
       sourceDir: input.source_dir,
       operation: "import",
       execute: true,
       visualIndexPath: rollbackBox.indexRel,
       assetsRoot: rollbackBox.assetsRel,
+      controlledGuardPreview: rollbackGuard,
       confirmText: importConfig.required_simulation_confirmation_text,
       preWriteConfirmText: importConfig.required_pre_write_confirmation_text,
       realImportConfirmText: importConfig.required_real_import_confirmation_text,
@@ -684,6 +748,7 @@ export async function runVisualLibraryUiFlowAcceptance(input) {
       execute: true,
       visualIndexPath: rollbackBox.indexRel,
       assetsRoot: rollbackBox.assetsRel,
+      controlledGuardPreview: rollbackGuard,
       trashRoot: rollbackBox.trashRel,
       restoreRoot: rollbackBox.restoreRel,
       manifest: imported.operation_result?.rollback_manifest,
@@ -691,12 +756,18 @@ export async function runVisualLibraryUiFlowAcceptance(input) {
       configPath: input.config.ui_import_flow_config_path,
     });
     const deleteBox = await createSandbox(input.sandbox_root, "ui-delete");
+    const deleteGuard = await readyGuard(
+      input.source_dir,
+      input.config,
+      deleteBox,
+    );
     const deleteImport = await runVisualLibraryUiImportFlowPreview({
       sourceDir: input.source_dir,
       operation: "import",
       execute: true,
       visualIndexPath: deleteBox.indexRel,
       assetsRoot: deleteBox.assetsRel,
+      controlledGuardPreview: deleteGuard,
       confirmText: importConfig.required_simulation_confirmation_text,
       preWriteConfirmText: importConfig.required_pre_write_confirmation_text,
       realImportConfirmText: importConfig.required_real_import_confirmation_text,
@@ -708,6 +779,7 @@ export async function runVisualLibraryUiFlowAcceptance(input) {
       execute: true,
       visualIndexPath: deleteBox.indexRel,
       assetsRoot: deleteBox.assetsRel,
+      controlledGuardPreview: deleteGuard,
       trashRoot: deleteBox.trashRel,
       restoreRoot: deleteBox.restoreRel,
       visualId:
@@ -721,6 +793,7 @@ export async function runVisualLibraryUiFlowAcceptance(input) {
       execute: true,
       visualIndexPath: deleteBox.indexRel,
       assetsRoot: deleteBox.assetsRel,
+      controlledGuardPreview: deleteGuard,
       trashRoot: deleteBox.trashRel,
       restoreRoot: deleteBox.restoreRel,
       manifest: deleted.operation_result?.operation_manifest,
@@ -825,8 +898,8 @@ export async function runVisualLibraryBridgeReadinessAcceptance(input) {
 export function buildVisualLibraryFinalAcceptanceMatrix(input) {
   const preview = input.preview_chain_acceptance;
   const rows = [
-    ["19E-18A", "18A", "formal empty gallery baseline",
-      "formal_visual_library_empty_baseline_accepted",
+    ["19E-18A", "18A", "formal configured gallery baseline",
+      "formal_visual_library_configured_baseline_accepted",
       input.formal_baseline_acceptance.decision,
       input.formal_baseline_acceptance.passed],
     ["19E-18B", "18B", "rebuild intake preview",
@@ -904,11 +977,17 @@ export function evaluateVisualLibraryFinalE2eAcceptanceDecision(input) {
   if (!input.formal_baseline_acceptance.active_engine_hash_passed) {
     return "blocked_active_engine_hash_mismatch";
   }
-  if (input.formal_baseline_acceptance.visual_index_line_count !== 0) {
-    return "blocked_visual_index_not_empty";
+  if (
+    input.formal_baseline_acceptance.visual_index_line_count
+    !== input.formal_baseline_acceptance.expected_visual_index_line_count
+  ) {
+    return "blocked_visual_index_baseline_mismatch";
   }
-  if (input.formal_baseline_acceptance.visual_assets_image_count !== 0) {
-    return "blocked_visual_assets_not_empty";
+  if (
+    input.formal_baseline_acceptance.visual_assets_image_count
+    !== input.formal_baseline_acceptance.expected_visual_assets_image_count
+  ) {
+    return "blocked_visual_assets_baseline_mismatch";
   }
   if (!input.no_write_contract_passed) {
     return "failed_no_write_contract_violation";
@@ -949,6 +1028,8 @@ export function compileVisualLibraryFinalE2eAcceptanceSummary(payload) {
       payload.sandbox_confirmed_import_acceptance.executed === true,
     formal_gallery_empty_baseline:
       payload.formal_baseline_acceptance.formal_gallery_empty_baseline,
+    formal_gallery_configured_baseline:
+      payload.formal_baseline_acceptance.formal_gallery_configured_baseline,
     final_acceptance_decision: payload.final_acceptance_decision,
   };
 }
@@ -1003,6 +1084,10 @@ export async function runVisualLibraryFinalE2eAcceptancePreview(options = {}) {
       visual_assets_root: roots.visualAssets,
       active_engine_path: roots.activeEngine,
       expected_engine_hash: config.expected_engine_sha256_lf,
+      expected_visual_index_line_count:
+        config.expected_formal_visual_index_non_empty_lines,
+      expected_visual_assets_image_count:
+        config.expected_formal_assets_image_count,
       fixture: options.formalBaselineFixture,
     });
     const previewChain = await runVisualLibraryPreviewChainAcceptance({

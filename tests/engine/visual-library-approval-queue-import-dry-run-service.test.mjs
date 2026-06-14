@@ -109,15 +109,14 @@ try {
     config.expected_engine_sha256_lf,
   );
 
-  const emptyPreview =
+  const defaultPreview =
     await runVisualLibraryApprovalQueueImportDryRunPreview();
   assert.equal(
-    emptyPreview.approval_queue_dry_run_summary.decision,
-    "empty_approval_queue_import_dry_run",
+    defaultPreview.approval_queue_dry_run_summary.decision,
+    "approval_queue_import_dry_run_contains_blocked_items",
   );
-  assert.deepEqual(emptyPreview.approval_item_previews, []);
-  assert.deepEqual(emptyPreview.guard_cards, []);
-  assert.deepEqual(emptyPreview.blocked_items, []);
+  assert.equal(defaultPreview.approval_item_previews.length, 3);
+  assert.equal(defaultPreview.blocked_items.length, 3);
 
   await mkdir(fixtureRoot, { recursive: true });
   await writeFile(path.join(fixtureRoot, "character-primary.png"), tinyPng);
@@ -136,6 +135,7 @@ try {
     await runVisualLibraryPendingImportReadinessPreview({
       sourceDir,
       confirmText: config.required_confirmation_text,
+      visualIndexRecords: 0,
     });
   const lockedReadiness = {
     ...confirmedReadiness,
@@ -160,6 +160,7 @@ try {
     await runVisualLibraryApprovalQueueImportDryRunPreview({
       sourceDir,
       confirmText: config.required_confirmation_text,
+      readinessPreview: confirmedReadiness,
     });
   const readyScene = confirmedPreview.approval_item_previews.find(
     (item) => item.lineage.source_file === "scene-background.png",

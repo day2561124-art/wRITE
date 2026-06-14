@@ -122,7 +122,16 @@ try {
     /this_phase_updates_acceptance_baseline must be false/u,
   );
 
-  const ready = await runVisualLibraryPersistentBaselineTransitionPreview();
+  const formalState =
+    await runVisualLibraryPersistentBaselineTransitionPreview();
+  assert.equal(
+    formalState.transition_decision,
+    "blocked_formal_visual_index_not_empty",
+  );
+  const sandboxConfig = await createSandboxConfig(config);
+  const ready = await runVisualLibraryPersistentBaselineTransitionPreview({
+    config: sandboxConfig,
+  });
   assert.equal(
     ready.transition_decision,
     "persistent_baseline_transition_tooling_ready",
@@ -175,7 +184,6 @@ try {
     "create_mcp_write_tool",
   ]) assert.ok(ready.forbidden_actions.includes(action));
 
-  const sandboxConfig = await createSandboxConfig(config);
   const sandboxIndex = path.resolve(
     projectRoot,
     sandboxConfig.formal_visual_index_path,
@@ -249,7 +257,7 @@ try {
   assert.equal(prettyCli.status, 0, prettyCli.stderr);
   assert.equal(
     JSON.parse(prettyCli.stdout).transition_decision,
-    "persistent_baseline_transition_tooling_ready",
+    "blocked_formal_visual_index_not_empty",
   );
 
   for (const argument of ["--execute", "--update-acceptance"]) {

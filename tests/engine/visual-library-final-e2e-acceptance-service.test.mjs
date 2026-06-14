@@ -70,8 +70,10 @@ function decisionInput(overrides = {}) {
     forbidden_execute_argument: false,
     formal_baseline_acceptance: {
       active_engine_hash_passed: true,
-      visual_index_line_count: 0,
-      visual_assets_image_count: 0,
+      visual_index_line_count: 3,
+      visual_assets_image_count: 3,
+      expected_visual_index_line_count: 3,
+      expected_visual_assets_image_count: 3,
     },
     preview_chain_acceptance: { passed: true },
     sandbox_confirmed_import_acceptance: { passed: true },
@@ -103,6 +105,10 @@ try {
     "visual_library_final_e2e_preview_acceptance_passed",
   );
   assert.equal(preview.formal_baseline_acceptance.passed, true);
+  assert.equal(
+    preview.formal_baseline_acceptance.formal_gallery_configured_baseline,
+    true,
+  );
   assert.equal(preview.preview_chain_acceptance.passed, true);
   assert.equal(preview.ui_flow_acceptance.passed, true);
   assert.equal(preview.bridge_readiness_acceptance.passed, true);
@@ -215,8 +221,10 @@ try {
       {
         formal_baseline_acceptance: {
           active_engine_hash_passed: false,
-          visual_index_line_count: 0,
-          visual_assets_image_count: 0,
+          visual_index_line_count: 3,
+          visual_assets_image_count: 3,
+          expected_visual_index_line_count: 3,
+          expected_visual_assets_image_count: 3,
         },
       },
       "blocked_active_engine_hash_mismatch",
@@ -225,21 +233,25 @@ try {
       {
         formal_baseline_acceptance: {
           active_engine_hash_passed: true,
-          visual_index_line_count: 1,
-          visual_assets_image_count: 0,
+          visual_index_line_count: 2,
+          visual_assets_image_count: 3,
+          expected_visual_index_line_count: 3,
+          expected_visual_assets_image_count: 3,
         },
       },
-      "blocked_visual_index_not_empty",
+      "blocked_visual_index_baseline_mismatch",
     ],
     [
       {
         formal_baseline_acceptance: {
           active_engine_hash_passed: true,
-          visual_index_line_count: 0,
-          visual_assets_image_count: 1,
+          visual_index_line_count: 3,
+          visual_assets_image_count: 2,
+          expected_visual_index_line_count: 3,
+          expected_visual_assets_image_count: 3,
         },
       },
-      "blocked_visual_assets_not_empty",
+      "blocked_visual_assets_baseline_mismatch",
     ],
     [
       { preview_chain_acceptance: { passed: false } },

@@ -116,10 +116,17 @@ try {
 
   const defaultPreview = await scanVisualLibraryIntakePreview();
   assert.equal(defaultPreview.source_dir, config.default_source_dir);
-  assert.equal(defaultPreview.scanned_file_count, 0);
-  assert.equal(defaultPreview.accepted_candidate_count, 0);
+  assert.equal(defaultPreview.scanned_file_count, 3);
+  assert.equal(defaultPreview.accepted_candidate_count, 3);
   assert.equal(defaultPreview.rejected_file_count, 0);
-  assert.deepEqual(defaultPreview.candidates, []);
+  assert.deepEqual(
+    defaultPreview.candidates.map((item) => item.source_file).sort(),
+    [
+      "phase-19h-b-selected/asahina-chiya-character-sheet.png",
+      "phase-19h-b-selected/jiu-tao-character-sheet.png",
+      "phase-19h-b-selected/misaki-character-sheet.png",
+    ],
+  );
 
   await mkdir(fixtureRoot, { recursive: true });
   const categoryFixtures = [
