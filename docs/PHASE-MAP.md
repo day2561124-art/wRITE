@@ -396,3 +396,17 @@
 - Does not accept execute, import, rollback, delete, or restore capability.
 - Does not modify the visual index, visual assets, active engine, Canon DB,
   Approval Queue, approval items, or `canon_visual_lock`.
+
+## Phase 19H-Lite
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19H-Lite | Visual Library Persistent Import Operator Checklist | Preview-only operator checklist implemented |
+
+- Defines the 15-step operator checklist and four confirmation gates required
+  before a future persistent visual-library baseline transition.
+- Verifies the formal empty baseline and protected active-engine hash without
+  importing, rolling back, deleting, restoring, or writing any formal data.
+- Does not register an MCP tool or change the MCP tool count.
+- Persistent import execution and acceptance baseline changes remain deferred
+  to Phase 19H.
