@@ -298,7 +298,7 @@ function Show-Menu {
       "4" { Run-Validation | Out-Null }
       "5" { New-DesktopShortcut | Out-Null }
       "6" { Stop-Workbench | Out-Null }
-      "7" { Start-McpTunnel | Out-Null }
+      "7" { Start-McpTunnel }
       "0" { return }
       default { Write-Host "Unknown option." -ForegroundColor Yellow }
     }
