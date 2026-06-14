@@ -199,6 +199,16 @@
 | --- | --- | --- |
 | 17G | Settlement Completion Reminder | Read-only reminder preview implemented |
 
+## Phase 19G
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19G | Visual Library Controlled Import Trial | Trial implemented (writes + rollback)
+
+- Implements a guarded, confirm-driven trial that writes to the formal visual library paths and immediately rolls back to restore the empty baseline. Uses the Phase 19A confirmed import core and Phase 19B rollback core.
+- Guarantees no lasting changes to `active_engine.md`, Canon DB, compressed rules, Approval Queue, approval items, or `canon_visual_lock`.
+- Trial runs require `--execute` plus exact confirmation texts; results are recorded under `data/outputs/runs/visual_library_phase19g` (not tracked).
+
 - Generates completion reminders for newly discovered entities in adopted chapters, settlement reports, or manual input.
 - Read-only candidate-only output: does not create formal cards, does not modify `active_engine.md`, and does not write to Canon DB.
 
