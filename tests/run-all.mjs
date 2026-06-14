@@ -70,6 +70,7 @@ const steps = [
   ["Visual library controlled import guard service", ["tests/engine/visual-library-controlled-import-guard-service.test.mjs"]],
   ["Visual library confirmed import service", ["tests/engine/visual-library-confirmed-import-service.test.mjs"]],
   ["Visual library rollback/delete/restore service", ["tests/engine/visual-library-rollback-delete-restore-service.test.mjs"]],
+  ["Visual library UI import flow service", ["tests/engine/visual-library-ui-import-flow-service.test.mjs"]],
   ["Visual link approval readiness service", ["tests/engine/visual-link-approval-readiness-service.test.mjs"]],
   ["Visual link approval queue candidate service", ["tests/engine/visual-link-approval-queue-candidate-service.test.mjs"]],
   ["Visual link approval queue import dry-run service", ["tests/engine/visual-link-approval-queue-import-dry-run-service.test.mjs"]],

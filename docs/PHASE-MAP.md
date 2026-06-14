@@ -1,5 +1,21 @@
 # Phase Map
 
+## Phase 19C
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| 19C | Visual Library UI Import Flow / Review Screen | Server-side review model implemented |
+
+- Integrates Phase 18B through Phase 19B summaries into wizard steps, review
+  cards, operation cards, a safety panel, and guarded action availability.
+- UI behavior is preview-only by default; write operations require explicit
+  execute intent, exact confirmations, ready preflight state, and manifests.
+- Sandbox execution delegates to the Phase 19A/19B cores without adding a
+  public route, client component, or MCP tool.
+- Does not modify Canon, `active_engine.md`, writing/proofing policy, Approval
+  Queue, approval items, or `canon_visual_lock`.
+- Development verification leaves the formal visual library empty.
+
 ## Phase 19B
 
 | Phase | Name | Status |
