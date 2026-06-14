@@ -96,13 +96,11 @@ try {
   const defaultPreview = await runVisualLibraryImportSimulationPreview();
   assert.equal(
     defaultPreview.import_plan_summary.decision,
-    "simulation_contains_blocked_operations",
+    "empty_import_simulation",
   );
-  assert.equal(defaultPreview.import_plan_summary.operation_count, 3);
-  assert.equal(defaultPreview.import_plan_summary.blocked_operation_count, 3);
-  assert.ok(defaultPreview.operations.every(
-    (item) => item.import_decision === "blocked_by_confirmation_gate",
-  ));
+  assert.equal(defaultPreview.import_plan_summary.operation_count, 0);
+  assert.equal(defaultPreview.import_plan_summary.blocked_operation_count, 0);
+  assert.deepEqual(defaultPreview.operations, []);
   assert.equal(defaultPreview.confirmation_gate.accepted, false);
   assert.equal(
     evaluateVisualImportConfirmationGate(config, "確認視覺匯入").decision,

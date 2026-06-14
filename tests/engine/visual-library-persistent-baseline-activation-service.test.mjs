@@ -119,14 +119,7 @@ try {
   await writeFile(path.join(sandbox.canon, "fixture.md"), "canon unchanged");
   for (const item of selectedSet.items) {
     await copyFile(
-      path.join(
-        projectRoot,
-        "data",
-        "visual_db",
-        "intake",
-        "phase-19h-b-selected",
-        item.source_file,
-      ),
+      path.join(projectRoot, item.target_path),
       path.join(sandbox.intake, item.source_file),
     );
   }

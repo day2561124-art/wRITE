@@ -109,10 +109,10 @@ try {
   const defaultPreview = await runVisualLibraryPendingImportReadinessPreview();
   assert.equal(
     defaultPreview.approval_readiness_summary.decision,
-    "approval_readiness_contains_blocked_candidates",
+    "empty_approval_readiness_preview",
   );
   assert.equal(defaultPreview.pending_candidates.length, 0);
-  assert.equal(defaultPreview.blocked_candidates.length, 3);
+  assert.equal(defaultPreview.blocked_candidates.length, 0);
 
   await mkdir(fixtureRoot, { recursive: true });
   await writeFile(path.join(fixtureRoot, "character-primary.png"), tinyPng);

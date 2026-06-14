@@ -113,10 +113,10 @@ try {
     await runVisualLibraryApprovalQueueImportDryRunPreview();
   assert.equal(
     defaultPreview.approval_queue_dry_run_summary.decision,
-    "approval_queue_import_dry_run_contains_blocked_items",
+    "empty_approval_queue_import_dry_run",
   );
-  assert.equal(defaultPreview.approval_item_previews.length, 3);
-  assert.equal(defaultPreview.blocked_items.length, 3);
+  assert.equal(defaultPreview.approval_item_previews.length, 0);
+  assert.equal(defaultPreview.blocked_items.length, 0);
 
   await mkdir(fixtureRoot, { recursive: true });
   await writeFile(path.join(fixtureRoot, "character-primary.png"), tinyPng);

@@ -192,7 +192,7 @@ try {
         proposed_visual_index_record: proposedRecord,
         source_file: chosen.source_file,
         source_sha256: chosen.source_sha256,
-        source_size_bytes: (await readFile(path.join(projectRoot, "data", "visual_db", "intake", "phase-19h-b-selected", chosen.source_file))).byteLength,
+        source_size_bytes: (await readFile(path.join(projectRoot, chosen.target_path))).byteLength,
         proposed_visual_id: chosen.visual_id,
         proposed_target_path: sandboxProposedRelative,
       },
