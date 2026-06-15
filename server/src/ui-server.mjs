@@ -148,6 +148,13 @@ import {
 import {
   listCompressedRuleApplications,
 } from "./compressed-rule-update-confirm-service.mjs";
+import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
+import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
+import {
+  createSettingChangeProposal,
+  getSettingChangeProposal,
+  listSettingChangeProposals,
+} from "./setting-change-proposal-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -1282,6 +1289,8 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && url.pathname === "/api/writer-workbench/state") {
     try {
+      sendJson(response, 200, { ok: true, state: await buildWriterWorkbenchState() });
+      return;
       const active = await activeEngineStatus();
       const [bundles, candidates, proofs, adopted, settlements, pending, approvals] = await Promise.all([
         listGptWritingContextBundles({ limit: 1 }),
@@ -1442,10 +1451,10 @@ async function handleRequest(request, response) {
       // next_actions suggested list
       const next_actions = [
         { key: "build_writing_context", label: "Build GPT Writing Context", enabled: !latest.writing_context_bundle, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/build-writing-context" },
-        { key: "save_chat_output_candidate", label: "Save Chat Output Candidate", enabled: !!latest.writing_candidate === false, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/save-candidate" },
+        { key: "save_chat_output_candidate", label: "Save Chat Output Candidate", enabled: !!latest.writing_candidate === false, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/save-chat-output-candidate" },
         { key: "save_proof_report", label: "Save Proof Report", enabled: !!latest.writing_candidate && !latest.proof_report, requires_approval: false, risk_level: "low", endpoint: "/api/writer-workbench/save-proof-report" },
         { key: "request_adoption", label: "Request Adoption", enabled: !!latest.proof_report && !adoptionApproval, requires_approval: true, risk_level: "medium", endpoint: "/api/writer-workbench/request-adoption" },
-        { key: "go_to_approval_queue", label: "Go to Approval Queue", enabled: approvals.length > 0, requires_approval: false, risk_level: "low", endpoint: "/ui/approval-queue" },
+        { key: "go_to_approval_queue", label: "Go to Approval Queue", enabled: approvals.length > 0, requires_approval: false, risk_level: "low", endpoint: "#approval" },
       ];
 
       // risk summary
@@ -1489,6 +1498,57 @@ async function handleRequest(request, response) {
       });
     } catch (error) {
       sendError(response, 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/canon-settings") {
+    try {
+      sendJson(response, 200, { ok: true, catalog: await buildCanonSettingsCatalog() });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/setting-change-proposals") {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        proposals: await listSettingChangeProposals({
+          setting_type: url.searchParams.get("setting_type") ?? "",
+        }),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/setting-change-proposals") {
+    try {
+      assertSameOrigin(request, "Cross-origin setting proposals are not allowed.");
+      const result = await createSettingChangeProposal(await parseBody(request));
+      sendJson(response, 201, { ok: true, ...result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const settingProposalMatch = rawPathname.match(
+    /^\/api\/setting-change-proposals\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && settingProposalMatch) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        proposal: await getSettingChangeProposal(
+          decodeApiId(settingProposalMatch[1], "proposal_id"),
+        ),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 404, error);
     }
     return;
   }
@@ -1669,6 +1729,19 @@ async function handleRequest(request, response) {
       const snapshotId = input.snapshotId ?? input.snapshot_id ?? "";
       if (snapshotId) rollbackItem = await createRollbackApprovalItem(snapshotId);
       sendJson(response, 200, { ok: true, scan, rollback_item: rollbackItem });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/approval-queue/rollback-request") {
+    try {
+      assertSameOrigin(request, "Cross-origin rollback requests are not allowed.");
+      const input = await parseBody(request);
+      const snapshotId = assertSnapshotId(input.snapshotId ?? input.snapshot_id);
+      const item = await createRollbackApprovalItem(snapshotId);
+      sendJson(response, 201, { ok: true, approval_item: item });
     } catch (error) {
       sendError(response, error.statusCode ?? 400, error);
     }

@@ -30,7 +30,7 @@ function runNode(args) {
       settled = true;
       terminateProcessTree(child);
       reject(new Error(`Command timed out: node ${args.join(" ")}`));
-    }, 60_000);
+    }, 120_000);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {

@@ -239,8 +239,14 @@ async function main() {
       lowConfirmed.result.snapshot_id,
       options,
     );
+    assert(rollbackItem.risk_level === "P0", "Rollback approval must be P0.");
+    assert(
+      rollbackItem.requires_second_confirmation === true,
+      "Rollback approval must require second confirmation.",
+    );
     const rollbackConfirmed = await confirmApprovalItem(rollbackItem.approval_item_id, {
       confirm: true,
+      secondConfirm: true,
       approvedBy: "approval_test",
     }, options);
     assert(rollbackConfirmed.result.safety_snapshot_id, "Approval did not call Phase 3 rollback.");

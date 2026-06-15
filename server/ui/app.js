@@ -43,6 +43,8 @@ const state = {
     logs: [],
     scan: null,
   },
+  canonSettings: null,
+  proposalPreviewReady: false,
   neuralData: {
     runs: [],
     traces: [],
@@ -72,6 +74,13 @@ const titles = {
   activity: "版本紀錄",
   settings: "設定",
   "writer-workbench": "創作引擎",
+  "canon-overview": "正史總覽",
+  characters: "角色設定",
+  abilities: "能力 / 武裝",
+  timeline: "時間線",
+  "world-rules": "世界觀規則",
+  "setting-proposals": "設定修改提案",
+  "setting-conflicts": "衝突 / 缺漏",
 };
 
 const uiLabels = {
@@ -143,6 +152,8 @@ const operatorStatusLabels = {
   confirmed: "已完成",
   resolved: "已完成",
   ready: "可進行",
+  loading: "讀取中",
+  not_started: "尚未開始",
   missing: "尚未開始",
   optional: "可稍後",
   deferred: "可稍後",
@@ -153,6 +164,14 @@ const operatorStatusLabels = {
 };
 
 const workflowStepMeta = {
+  load_data: { label: "讀取資料", view: "overview" },
+  generate_candidate: { label: "生成正文候選", view: "compose" },
+  save_candidate: { label: "保存候選", view: "compose" },
+  proofread: { label: "驗稿 / 校對", view: "review" },
+  queue_adoption: { label: "加入待我確認", view: "approval" },
+  settlement: { label: "章節結算", view: "settlement" },
+  canon_candidate: { label: "建立正史更新候選", view: "settlement" },
+  manual_approval: { label: "等待人工確認", view: "approval" },
   writing_context: { label: "起稿", view: "compose" },
   chat_output_candidate: { label: "候選稿", view: "compose" },
   proof_report: { label: "驗稿", view: "review" },
@@ -184,6 +203,16 @@ function workflowReason(step) {
 }
 
 function primaryNextStep(workbench = state.workbench) {
+  if (workbench?.next_step) {
+    return {
+      key: workbench.next_step.key,
+      text: workbench.next_step.reason
+        ? `${workbench.next_step.label}：${workbench.next_step.reason}`
+        : `下一步：${workbench.next_step.label}`,
+      view: String(workbench.next_step.route ?? "#overview").replace(/^#/u, ""),
+      step: workflowStep(workbench.next_step.key, workbench),
+    };
+  }
   const checks = [
     ["writing_context", "下一步：到起稿頁建立本輪任務提示", "compose"],
     ["chat_output_candidate", "下一步：把任務提示貼給 ChatGPT，取得正文候選後回到紀錄頁保存", "compose"],
@@ -325,6 +354,17 @@ function switchView(viewName) {
   }
   if (viewName === "cleanup") {
     refreshCleanup().catch((error) => toast(error.message, true));
+  }
+  if ([
+    "canon-overview",
+    "characters",
+    "abilities",
+    "timeline",
+    "world-rules",
+    "setting-proposals",
+    "setting-conflicts",
+  ].includes(viewName)) {
+    refreshCanonSettings().catch((error) => toast(error.message, true));
   }
   if (["compose", "review"].includes(viewName)) {
     refreshWorkflowState().catch((error) => toast(error.message, true));
@@ -479,13 +519,14 @@ function renderOperatorOverview() {
   $("#today-next-step-button").textContent = `前往${titles[next.view]}`;
 
   const keys = [
-    "writing_context",
-    "chat_output_candidate",
-    "proof_report",
-    "adoption_request",
-    "settlement_report",
-    "pending_engine_candidate",
-    "activation_request",
+    "load_data",
+    "generate_candidate",
+    "save_candidate",
+    "proofread",
+    "queue_adoption",
+    "settlement",
+    "canon_candidate",
+    "manual_approval",
   ];
   const steps = keys.map((key) => workflowStep(key)).filter(Boolean);
   $("#workflow-overview-summary").textContent =
@@ -507,11 +548,11 @@ function renderOperatorOverview() {
   const visuals = state.data?.visuals ?? {};
   const diagnostics = visuals.diagnostics ?? {};
   $("#nav-badge-compose").textContent =
-    operatorStatusLabel(workflowStep("writing_context")?.status ?? "unknown");
+    operatorStatusLabel(workflowStep("save_candidate")?.status ?? "unknown");
   $("#nav-badge-review").textContent =
-    operatorStatusLabel(workflowStep("proof_report")?.status ?? "unknown");
+    operatorStatusLabel(workflowStep("proofread")?.status ?? "unknown");
   $("#nav-badge-settlement").textContent =
-    operatorStatusLabel(workflowStep("settlement_report")?.status ?? "unknown");
+    operatorStatusLabel(workflowStep("settlement")?.status ?? "unknown");
   $("#nav-badge-approval").textContent =
     `${state.workbench?.approval_queue?.pending_count ?? 0} 待確認`;
   $("#nav-badge-visuals").textContent =
@@ -533,13 +574,13 @@ function renderOperatorOverview() {
     : !proofReports.length
       ? "已有候選稿，但尚未保存驗稿報告。請建立驗稿 context 後完成 P0-P4 檢查。"
       : "請依驗稿報告中的 P0-P4 與停止原因決定採用、修正或退稿。";
-  $("#compose-empty-state").hidden = Boolean(workflowStep("writing_context")
-    && workflowStep("writing_context").status !== "missing");
+  $("#compose-empty-state").hidden = Boolean(workflowStep("generate_candidate")
+    && workflowStep("generate_candidate").status !== "not_started");
   // render writing workbench summary panel (overview)
   const workbenchPanel = $("#writing-workbench-main");
   if (workbenchPanel) {
     const wb = state.workbench ?? {};
-    const chapterTitle = wb.current_chapter?.title ?? wb.adopted_chapter?.title ?? "第二十章｜亮處的影子";
+    const chapterTitle = wb.chapter?.title ?? "尚未建立本輪章節";
     const draftText = state.currentDraftText ?? "";
     const wordcount = draftText ? `${draftText.length} 字` : "--";
     const autosave = draftText ? "已保存" : "尚未啟用";
@@ -554,11 +595,23 @@ function renderOperatorOverview() {
       ta.value = draftText;
       ta.disabled = !draftText;
     }
-    // keep action buttons disabled to avoid exposing unimplemented backend
-    ["workbench-refresh", "workbench-generate", "workbench-save", "workbench-send-proof", "workbench-add-approval"].forEach((id) => {
-      const btn = document.getElementById(id);
-      if (btn) btn.disabled = true;
-    });
+    const actionState = new Map((wb.next_actions ?? []).map((item) => [item.key, item]));
+    const controls = [
+      ["workbench-refresh", "refresh", ""],
+      ["workbench-generate", "generate_candidate", "ChatGPT Bridge 尚未接入，請先使用聊天欄生成候選"],
+      ["workbench-save", "save_chat_output_candidate", "尚無正文候選，無法保存"],
+      ["workbench-send-proof", "save_proof_report", "尚未保存候選，無法送去驗稿"],
+      ["workbench-add-approval", "go_to_approval_queue", "尚未完成驗稿，無法加入待確認"],
+    ];
+    for (const [id, key, fallbackReason] of controls) {
+      const button = document.getElementById(id);
+      if (!button) continue;
+      const action = actionState.get(key);
+      button.disabled = action ? action.enabled !== true : key !== "refresh";
+      const reason = action?.disabled_reason || fallbackReason;
+      button.dataset.disabledReason = reason;
+      button.title = button.disabled ? reason : "";
+    }
   }
   $("#settlement-empty-state").hidden = (state.workflow.adoptedChapters ?? []).length > 0;
 }
@@ -1229,19 +1282,25 @@ async function handleRejectCandidate() {
 
 async function handleActivateCandidate() {
   if (!state.activeCandidateId || $("#candidate-activate-button").disabled) return;
-  const needsSecond = state.canon.candidateDetail?.risk_report?.requires_second_confirmation === true;
-  if (!window.confirm("這會更新 active_engine.md。確定繼續啟用？")) return;
+  if (!window.confirm("建立啟用確認項並前往待我確認？此步驟不會啟用 active_engine。")) return;
   try {
-    await api("/api/approval-queue/scan", {
+    const reviewPayload = await api("/api/writer-workbench/build-engine-candidate-review", {
       method: "POST",
       body: JSON.stringify({
-        confirm: true,
-        secondConfirm: needsSecond,
-        approvedBy: "local_user",
+        pendingEngineCandidateId: state.activeCandidateId,
+        reviewMode: "summary_only",
       }),
     });
-    await refreshCanonSettlementState();
-    toast("新版 active_engine 已啟用，snapshot 與 archive 已建立");
+    await api("/api/writer-workbench/request-activation", {
+      method: "POST",
+      body: JSON.stringify({
+        pendingEngineCandidateId: state.activeCandidateId,
+        reviewId: reviewPayload.review?.review_id,
+        reason: "writer workbench activation approval request",
+      }),
+    });
+    toast("已建立啟用確認項，請到待我確認完成啟用。");
+    switchView("approval");
   } catch (error) {
     toast(error.message, true);
   }
@@ -1249,18 +1308,15 @@ async function handleActivateCandidate() {
 
 async function handleRollbackSnapshot(snapshotId) {
   if (!$("#rollback-confirm").checked) return;
-  if (!window.confirm(`確定回滾至 ${snapshotId}？目前引擎會先建立 safety snapshot。`)) return;
+  if (!window.confirm(`建立 ${snapshotId} 的 P0 回滾確認項？此步驟不會執行回滾。`)) return;
   try {
-    await api(`/api/canon/rollback/${encodeURIComponent(snapshotId)}`, {
+    await api("/api/approval-queue/rollback-request", {
       method: "POST",
-      body: JSON.stringify({
-        confirm: true,
-        approvedBy: "local_user",
-      }),
+      body: JSON.stringify({ snapshotId }),
     });
     $("#rollback-confirm").checked = false;
-    await refreshCanonSettlementState();
-    toast("active_engine 已完成回滾");
+    toast("已建立回滾確認項，請到待我確認處理。");
+    switchView("approval");
   } catch (error) {
     toast(error.message, true);
   }
@@ -1309,6 +1365,18 @@ function approvalStatusClass(status) {
   if (status === "rejected") return "candidate-status-rejected";
   if (status === "resolved" || status === "confirmed") return "candidate-status-activated";
   return "candidate-status-candidate";
+}
+
+function approvalTypeLabel(actionType) {
+  return {
+    adopt_writing_candidate: "正文採納",
+    adopt_p0_p1_draft: "正文採納",
+    setting_change_proposal: "設定修改",
+    activate_engine_candidate: "引擎啟用",
+    rollback_active_engine: "回滾",
+    approve_cleanup_proposal: "清理",
+    execute_cleanup_proposal: "清理",
+  }[actionType] ?? actionType;
 }
 
 function renderApprovalQueue() {
@@ -1370,10 +1438,13 @@ function renderApprovalQueue() {
     `candidate-status ${approvalStatusClass(item?.status?.status ?? "blocked")}`;
   $("#approval-detail-facts").innerHTML = item
     ? `
-      <span>操作類型 · ${escapeHtml(item.action_type)}</span>
+      <span>類型 · ${escapeHtml(approvalTypeLabel(item.action_type))}</span>
       <span>來源章節 · ${escapeHtml(item.source_chapter || "未指定")}</span>
       <span>風險 · ${escapeHtml(riskLabel(item.risk_level))}</span>
-      <span>神經狀態 · ${escapeHtml(operatorStatusLabel(item.neural_status))}</span>
+      <span>secondConfirm · ${item.requires_second_confirmation ? "需要" : "不需要"}</span>
+      <span>workflow_run_id · ${escapeHtml(item.lineage?.workflow_run_id || "未提供")}</span>
+      <span>candidate / proposal · ${escapeHtml(item.candidate_id || item.details?.proposal_id || "未提供")}</span>
+      <span>建立時間 · ${escapeHtml(formatDate(item.created_at))}</span>
       <details class="technical-details">
         <summary>技術詳情：target 與長 ID</summary>
         <p>${escapeHtml(item.target_type)} · ${escapeHtml(item.target_id)}</p>
@@ -1388,6 +1459,17 @@ function renderApprovalQueue() {
       <div><strong>可否回復？</strong><span>${item.impact?.rollback_available ? "已有回復資訊" : "沒有自動回復能力"}</span></div>
     `
     : "";
+  $("#approval-setting-diff")?.remove();
+  if (item?.details?.diff || (item?.details?.before && item?.details?.after)) {
+    const before = item.details.diff?.before ?? item.details.before ?? "";
+    const after = item.details.diff?.after ?? item.details.after ?? "";
+    $("#approval-impact-summary").insertAdjacentHTML("afterend", `
+      <div id="approval-setting-diff" class="diff-columns">
+        <pre>${escapeHtml(before)}</pre>
+        <pre>${escapeHtml(after)}</pre>
+      </div>
+    `);
+  }
   $("#approval-human-guidance").innerHTML = item
     ? `
       <p><strong>這不會修改什麼？</strong>未列在上方的正式資料不會因查看本項目而改變。</p>
@@ -1415,21 +1497,32 @@ function renderApprovalQueue() {
     || Boolean(item.blocked_reason);
   const resolved = item && ["resolved", "confirmed", "rejected"].includes(item.status.status);
   const needsSecond = item?.requires_second_confirmation === true;
-  const activationHighRisk = needsSecond && item?.action_type === "activate_engine_candidate";
+  const typedHighRisk = needsSecond
+    && ["activate_engine_candidate", "setting_change_proposal"].includes(item?.action_type);
   $("#approval-second-confirm-panel").hidden = !needsSecond;
-  $("#approval-confirm-text-field").hidden = !activationHighRisk;
+  $("#approval-confirm-text-field").hidden = !typedHighRisk;
+  const confirmationText = item?.action_type === "setting_change_proposal"
+    ? "確認設定修改"
+    : "確認啟用";
+  $("#approval-confirm-text-field span").textContent = `輸入「${confirmationText}」`;
   $("#approval-confirm-message").textContent = !item
     ? "此操作將呼叫既有安全流程，不會直接寫 active_engine。"
     : item.action_type === "neural_trace_missing"
       ? "缺少必要 neural success trace。此項不可確認，只能延後或拒絕。"
       : item.action_type === "activate_engine_candidate"
         ? "這會使用 Phase 3 安全流程：snapshot → archive → active_engine → activation_log。"
+        : item.action_type === "setting_change_proposal"
+          ? "核准只會完成 proposal 人工審核，本階段不會套用 active_engine、Canon DB 或 compressed_rules。"
         : item.action_type === "rollback_active_engine"
           ? "這會回滾 active_engine。系統會先建立 safety snapshot。"
           : "此驗稿含 P0 / P1，採用前必須再次人工確認。";
   const baseConfirmed = $("#approval-confirm-checkbox").checked;
   const secondConfirmed = !needsSecond || $("#approval-second-confirm-checkbox").checked;
-  const textConfirmed = !activationHighRisk || $("#approval-confirm-text").value === "確認啟用";
+  const legacyActivationTextConfirmed = $("#approval-confirm-text").value === "確認啟用";
+  const textConfirmed = !typedHighRisk
+    || (item?.action_type === "activate_engine_candidate"
+      ? legacyActivationTextConfirmed
+      : $("#approval-confirm-text").value === confirmationText);
   $("#approval-confirm-button").disabled =
     blocked || resolved || !baseConfirmed || !secondConfirmed || !textConfirmed;
   $("#approval-reject-button").disabled = !item || resolved;
@@ -2430,6 +2523,150 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function settingCard(item) {
+  return `
+    <article class="setting-card ${item.has_conflict ? "is-conflict" : ""}">
+      <div>
+        <span class="status-badge status-${item.status === "canon" ? "completed" : "missing"}">${escapeHtml(item.status)}</span>
+        <strong>${escapeHtml(item.title)}</strong>
+      </div>
+      <p>${escapeHtml(item.content).slice(0, 360)}</p>
+      <small>${escapeHtml(item.source)} · ${escapeHtml(item.risk_level)}</small>
+      <button class="text-button" type="button" data-propose-setting="${escapeHtml(item.setting_id)}">提出修改</button>
+    </article>
+  `;
+}
+
+function renderSettingList(selector, items, emptyText) {
+  const element = $(selector);
+  if (!element) return;
+  element.innerHTML = items.length
+    ? items.map(settingCard).join("")
+    : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+}
+
+function renderCanonSettings() {
+  const catalog = state.canonSettings;
+  if (!catalog) return;
+  const summary = catalog.summary ?? {};
+  const summaryItems = [
+    ["角色", summary.character_count],
+    ["能力 / 武裝", summary.ability_weapon_count],
+    ["世界觀規則", summary.world_rule_count],
+    ["章節事件", summary.chapter_event_count],
+    ["時間線事件", summary.timeline_event_count],
+    ["待確認修改", summary.pending_setting_change_count],
+    ["衝突 / 缺漏", summary.conflict_gap_count],
+    ["active_engine", String(summary.active_engine_hash ?? "").slice(0, 12)],
+    ["compressed_rules", String(summary.compressed_rules_hash ?? "").slice(0, 12)],
+  ];
+  $("#canon-summary-grid").innerHTML = summaryItems.map(([label, value]) => `
+    <article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? 0)}</strong></article>
+  `).join("");
+  $("#canon-setting-count").textContent = `${catalog.settings.length} 筆正式設定`;
+  renderSettingList("#canon-overview-list", catalog.settings, "尚無可顯示的正式設定");
+  renderSettingList("#character-settings-list", catalog.characters, "尚未解析出角色設定");
+  renderSettingList("#ability-settings-list", catalog.abilities, "尚未解析出能力 / 武裝設定");
+  renderSettingList("#timeline-settings-list", catalog.timeline, "尚未解析出時間線設定");
+  renderSettingList("#world-rule-settings-list", catalog.world_rules, "尚未解析出世界觀規則");
+  renderSettingList("#setting-conflict-list", catalog.conflicts, "目前沒有已標記的衝突 / 缺漏");
+  $("#setting-conflict-count").textContent = `${catalog.conflicts.length} 筆`;
+  $("#setting-proposal-list").innerHTML = catalog.proposals.length
+    ? catalog.proposals.map((proposal) => `
+      <article class="setting-card">
+        <div><span class="status-badge status-pending_approval">${escapeHtml(proposal.status)}</span><strong>${escapeHtml(proposal.title)}</strong></div>
+        <p>${escapeHtml(proposal.reason)}</p>
+        <small>${escapeHtml(proposal.proposal_id)} · ${escapeHtml(proposal.risk_level)}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">尚無設定修改提案</div>';
+
+  const select = $("#proposal-target-setting");
+  const selected = select.value;
+  select.innerHTML = [
+    '<option value="">選擇設定</option>',
+    ...catalog.settings.map((item) => (
+      `<option value="${escapeHtml(item.setting_id)}">${escapeHtml(item.title)}</option>`
+    )),
+  ].join("");
+  if (catalog.settings.some((item) => item.setting_id === selected)) select.value = selected;
+}
+
+async function refreshCanonSettings() {
+  const payload = await api("/api/canon-settings");
+  state.canonSettings = payload.catalog;
+  renderCanonSettings();
+}
+
+function selectProposalTarget(settingId) {
+  const setting = state.canonSettings?.settings.find((item) => item.setting_id === settingId);
+  if (!setting) return;
+  $("#proposal-target-setting").value = setting.setting_id;
+  $("#proposal-title").value = setting.title;
+  $("#proposal-before").value = setting.content;
+  $("#proposal-after").value = setting.content;
+  state.proposalPreviewReady = false;
+  $("#proposal-submit-button").disabled = true;
+  $("#proposal-submit-button").title = "請先預覽 before / after diff";
+  switchView("setting-proposals");
+}
+
+function previewSettingProposal() {
+  const before = $("#proposal-before").value.trim();
+  const after = $("#proposal-after").value.trim();
+  const ready = Boolean(before && after && before !== after && $("#proposal-reason").value.trim());
+  $("#proposal-before-preview").textContent = before || "尚未輸入修改前內容";
+  $("#proposal-after-preview").textContent = after || "尚未輸入修改後內容";
+  const highRisk = /死亡|長期失能|重大能力突破|代表資格|主角身份|階級突破|時間線重大|角色關係重大|世界觀基礎規則|active_engine|rollback|回滾|正式資料清理/u
+    .test(`${before}\n${after}\n${$("#proposal-reason").value}`);
+  $("#proposal-risk-badge").textContent = highRisk ? "P0 · 需要 secondConfirm" : "P1 · 人工確認";
+  $("#proposal-risk-badge").className = `status-badge ${highRisk ? "status-blocked" : "status-pending_approval"}`;
+  state.proposalPreviewReady = ready;
+  $("#proposal-submit-button").disabled = !ready;
+  $("#proposal-submit-button").title = ready ? "" : "before / after 必須不同，且需填寫理由";
+}
+
+async function submitSettingProposal(event) {
+  event.preventDefault();
+  if (!state.proposalPreviewReady) return;
+  const target = state.canonSettings?.settings.find(
+    (item) => item.setting_id === $("#proposal-target-setting").value,
+  );
+  if (!target) {
+    toast("請先選擇目標設定", true);
+    return;
+  }
+  try {
+    await api("/api/setting-change-proposals", {
+      method: "POST",
+      body: JSON.stringify({
+        target_setting_id: target.setting_id,
+        setting_type: target.setting_type,
+        title: $("#proposal-title").value,
+        before: $("#proposal-before").value,
+        after: $("#proposal-after").value,
+        reason: $("#proposal-reason").value,
+        source: "writer_workbench_ui",
+        created_by: "local_user",
+      }),
+    });
+    state.proposalPreviewReady = false;
+    await refreshCanonSettings();
+    toast("已建立設定修改提案，請到待我確認處理。");
+    switchView("approval");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function annotateDisabledReasons() {
+  $$("button:disabled").forEach((button) => {
+    const reason = button.dataset.disabledReason || button.title || "目前前置條件尚未完成";
+    button.dataset.disabledReason = reason;
+    button.title = reason;
+  });
+}
+
 async function handleVisualUpload(event) {
   event.preventDefault();
   const fileInput = $("#visual-upload-file");
@@ -2606,6 +2843,17 @@ function bindEvents() {
   $("#clear-console-button").addEventListener("click", () => {
     $("#action-console").textContent = "等待操作。";
   });
+  $("#proposal-preview-button").addEventListener("click", previewSettingProposal);
+  $("#setting-proposal-form").addEventListener("submit", submitSettingProposal);
+  $("#proposal-target-setting").addEventListener("change", (event) => {
+    const setting = state.canonSettings?.settings.find((item) => item.setting_id === event.target.value);
+    if (!setting) return;
+    $("#proposal-title").value = setting.title;
+    $("#proposal-before").value = setting.content;
+    $("#proposal-after").value = setting.content;
+    state.proposalPreviewReady = false;
+    $("#proposal-submit-button").disabled = true;
+  });
 
   $("#copy-result-button").addEventListener("click", () => copyText(state.currentComposeText, "產物"));
   $("#copy-prompt-button").addEventListener("click", () => copyText(state.currentComposeText, "任務提示"));
@@ -2615,6 +2863,11 @@ function bindEvents() {
     const goView = event.target.closest("[data-go-view]");
     if (goView) {
       switchView(goView.dataset.goView);
+      return;
+    }
+    const proposeSetting = event.target.closest("[data-propose-setting]");
+    if (proposeSetting) {
+      selectProposalTarget(proposeSetting.dataset.proposeSetting);
       return;
     }
     const openFile = event.target.closest("[data-open-file]");
@@ -2711,6 +2964,7 @@ function bindEvents() {
 
 async function initialize() {
   bindEvents();
+  annotateDisabledReasons();
   switchView(window.location.hash.slice(1) || "overview");
   try {
     await refreshState();

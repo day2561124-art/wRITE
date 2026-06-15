@@ -2639,7 +2639,15 @@ async function readResource(params) {
     throw new Error(`Unknown resource URI: ${uri}`);
   }
 
-  const text = await readFile(resource.filePath, "utf8");
+  let text;
+  try {
+    text = await readFile(resource.filePath, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    text = resource.mimeType === "application/json"
+      ? `${JSON.stringify({ status: "empty", placeholder: true, generated: false }, null, 2)}\n`
+      : "# Placeholder\n\nStatus: not yet generated. This is not canon data.\n";
+  }
   return {
     contents: [
       {

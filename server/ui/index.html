@@ -19,6 +19,7 @@
         </div>
 
         <nav class="primary-nav" aria-label="主要工作區">
+          <span class="nav-group-label">今日工作</span>
           <button class="nav-item is-active" data-view="overview" type="button">
             <span class="nav-symbol" aria-hidden="true">⌂</span>
             <span>總覽</span>
@@ -43,10 +44,36 @@
             <span>待我確認</span>
             <span id="nav-badge-approval" class="nav-badge">0 待確認</span>
           </button>
-          <button class="nav-item" data-view="library" type="button">
+          <span class="nav-group-label">小說設定</span>
+          <button class="nav-item" data-view="canon-overview" type="button">
             <span class="nav-symbol" aria-hidden="true">▤</span>
-            <span>正史資料</span>
+            <span>正史總覽</span>
           </button>
+          <button class="nav-item" data-view="characters" type="button">
+            <span class="nav-symbol" aria-hidden="true">人</span>
+            <span>角色設定</span>
+          </button>
+          <button class="nav-item" data-view="abilities" type="button">
+            <span class="nav-symbol" aria-hidden="true">力</span>
+            <span>能力 / 武裝</span>
+          </button>
+          <button class="nav-item" data-view="timeline" type="button">
+            <span class="nav-symbol" aria-hidden="true">時</span>
+            <span>時間線</span>
+          </button>
+          <button class="nav-item" data-view="world-rules" type="button">
+            <span class="nav-symbol" aria-hidden="true">規</span>
+            <span>世界觀規則</span>
+          </button>
+          <button class="nav-item" data-view="setting-proposals" type="button">
+            <span class="nav-symbol" aria-hidden="true">提</span>
+            <span>設定修改提案</span>
+          </button>
+          <button class="nav-item" data-view="setting-conflicts" type="button">
+            <span class="nav-symbol" aria-hidden="true">!</span>
+            <span>衝突 / 缺漏</span>
+          </button>
+          <span class="nav-group-label">素材資料</span>
           <button class="nav-item" data-view="visuals" type="button">
             <span class="nav-symbol" aria-hidden="true">◇</span>
             <span>圖像資料</span>
@@ -57,6 +84,11 @@
             <span>檢索記憶</span>
             <span id="nav-badge-neural" class="nav-badge">0 注意</span>
           </button>
+          <button class="nav-item" data-view="library" type="button">
+            <span class="nav-symbol" aria-hidden="true">章</span>
+            <span>章節資料</span>
+          </button>
+          <span class="nav-group-label">系統</span>
           <button class="nav-item" data-view="writer-workbench" type="button">
             <span class="nav-symbol" aria-hidden="true">🧭</span>
             <span>創作引擎</span>
@@ -933,14 +965,14 @@
 
               <section class="candidate-section activation-panel">
                 <div class="section-heading compact">
-                  <h3>啟用正史資料庫</h3>
+                  <h3>建立引擎啟用確認項</h3>
                 </div>
                 <div class="warning-panel activation-warning">
-                  這會更新正式的正史資料庫檔案。系統將先建立 snapshot、archive 舊版本，成功後記錄啟用日誌。
+                  本頁只建立 Approval Queue item，不會直接修改 active_engine 或 Canon DB。實際啟用必須到待我確認完成。
                 </div>
                 <label class="confirmation-row">
                   <input id="candidate-activation-confirm" type="checkbox">
-                  <span>我確認啟用這個候選引擎</span>
+                  <span>我確認建立此候選的啟用確認項</span>
                 </label>
                 <div id="candidate-second-confirm-panel" class="second-confirm-panel" hidden>
                   <label class="confirmation-row">
@@ -953,7 +985,7 @@
                   </label>
                 </div>
                 <div class="form-actions">
-                  <button id="candidate-activate-button" class="button danger" type="button" disabled>確認啟用新版引擎</button>
+                  <button id="candidate-activate-button" class="button danger" type="button" disabled data-disabled-reason="請先選擇可審查候選並確認風險">建立啟用確認項</button>
                 </div>
               </section>
             </section>
@@ -981,6 +1013,65 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" data-view-panel="canon-overview">
+          <section class="panel settings-hero">
+            <div>
+              <p class="eyebrow">CANON WORKSPACE</p>
+              <h2>正史設定工作台</h2>
+              <p>此工作台只讀取正式設定。任何修改只會建立 proposal，絕不直接寫入正史。</p>
+            </div>
+            <button class="button primary" type="button" data-go-view="setting-proposals">提出設定修改</button>
+          </section>
+          <div id="canon-summary-grid" class="settings-summary-grid"></div>
+          <section class="panel">
+            <div class="panel-heading"><h2>正式設定索引</h2><span id="canon-setting-count" class="status-summary">載入中</span></div>
+            <div id="canon-overview-list" class="settings-list"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="characters">
+          <section class="panel"><div class="panel-heading"><h2>角色設定</h2><span class="read-only-note">正式與候選狀態分開顯示</span></div><div id="character-settings-list" class="settings-list"></div></section>
+        </section>
+
+        <section class="view" data-view-panel="abilities">
+          <section class="panel"><div class="panel-heading"><h2>能力 / 武裝</h2><span class="read-only-note">禁止提前突破項需人工確認</span></div><div id="ability-settings-list" class="settings-list"></div></section>
+        </section>
+
+        <section class="view" data-view-panel="timeline">
+          <section class="panel"><div class="panel-heading"><h2>正史時間線</h2><span class="read-only-note">只顯示正式來源</span></div><div id="timeline-settings-list" class="settings-list"></div></section>
+        </section>
+
+        <section class="view" data-view-panel="world-rules">
+          <section class="panel"><div class="panel-heading"><h2>世界觀規則</h2><span class="read-only-note">基礎規則改寫一律 P0</span></div><div id="world-rule-settings-list" class="settings-list"></div></section>
+        </section>
+
+        <section class="view" data-view-panel="setting-proposals">
+          <div class="settings-proposal-layout">
+            <form id="setting-proposal-form" class="panel form-panel">
+              <div class="panel-heading"><h2>提出設定修改</h2><span class="candidate-status candidate-status-candidate">proposal only</span></div>
+              <label class="field"><span>目標設定</span><select id="proposal-target-setting" required><option value="">選擇設定</option></select></label>
+              <label class="field"><span>標題</span><input id="proposal-title" maxlength="500" required></label>
+              <label class="field"><span>修改前</span><textarea id="proposal-before" rows="7" maxlength="100000" required></textarea></label>
+              <label class="field"><span>修改後</span><textarea id="proposal-after" rows="7" maxlength="100000" required></textarea></label>
+              <label class="field"><span>修改理由</span><textarea id="proposal-reason" rows="4" maxlength="10000" required></textarea></label>
+              <div class="form-actions">
+                <button id="proposal-preview-button" class="button secondary" type="button">預覽 Diff</button>
+                <button id="proposal-submit-button" class="button primary" type="submit" disabled data-disabled-reason="請先預覽 before / after diff">送入待我確認</button>
+              </div>
+              <p class="read-only-note">儲存只會建立 setting_change_proposal 與 Approval Queue item。</p>
+            </form>
+            <section class="panel">
+              <div class="panel-heading"><h2>Diff 預覽</h2><span id="proposal-risk-badge" class="status-badge status-missing">尚未預覽</span></div>
+              <div class="diff-columns"><pre id="proposal-before-preview">尚未選擇設定</pre><pre id="proposal-after-preview">尚未輸入修改</pre></div>
+              <div id="setting-proposal-list" class="settings-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view-panel="setting-conflicts">
+          <section class="panel"><div class="panel-heading"><h2>衝突 / 缺漏</h2><span id="setting-conflict-count" class="status-summary">載入中</span></div><div id="setting-conflict-list" class="settings-list"></div></section>
         </section>
 
         <section class="view" data-view-panel="approval">
@@ -1263,6 +1354,13 @@
               </div>
             </div>
             <div id="activity-table" class="table-wrap"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="settings">
+          <section class="panel">
+            <div class="panel-heading"><h2>設定</h2><span class="candidate-status candidate-status-candidate">本機唯讀</span></div>
+            <p>目前沒有可直接變更正式資料的設定。高風險操作統一由待我確認處理。</p>
           </section>
         </section>
       </main>

@@ -52,6 +52,7 @@ const allowedActions = new Set([
   "execute_cleanup_proposal",
   "restore_from_backup",
   "compressed_rule_update",
+  "setting_change_proposal",
 ]);
 
 function json(value) {
@@ -314,6 +315,7 @@ export async function createApprovalItem(input = {}, options = {}) {
       proof_report_id: input.links?.proof_report_id ?? null,
       adopted_chapter_id: input.links?.adopted_chapter_id ?? null,
       draft_id: input.links?.draft_id ?? null,
+      proposal_id: input.links?.proposal_id ?? null,
     },
     details: input.details ?? {},
   };
@@ -536,8 +538,8 @@ export async function createRollbackApprovalItem(snapshotId, options = {}) {
     sourceChapter: snapshot.source_chapter,
     title: "回滾 Active Engine",
     summary: "Phase 3 將先建立 safety snapshot，再回滾至指定版本。",
-    riskLevel: "high",
-    requiresSecondConfirmation: false,
+    riskLevel: "P0",
+    requiresSecondConfirmation: true,
     neuralStatus: "not_required",
     impact: {
       will_modify: ["data/canon_db/active_engine.md"],
@@ -633,6 +635,16 @@ export async function confirmApprovalItem(
     ) {
       throw errorWithStatus("High-risk approval requires checkbox and exact confirmation text.", 409);
     }
+    if (
+      item.action_type === "setting_change_proposal"
+      && item.requires_second_confirmation === true
+      && approvalText !== "確認設定修改"
+    ) {
+      throw errorWithStatus(
+        "P0 setting proposal approval requires exact confirmation text.",
+        409,
+      );
+    }
     let result;
     if (item.action_type === "activate_engine_candidate") {
       assertEngineCandidateId(item.target_id);
@@ -686,6 +698,15 @@ export async function confirmApprovalItem(
       // Approval confirmed for compressed rule update — do not auto-apply here.
       // Execution is handled by a dedicated service to ensure safety and explicit application.
       result = null;
+    } else if (item.action_type === "setting_change_proposal") {
+      result = {
+        proposal_id: item.details?.proposal_id ?? item.links?.proposal_id ?? null,
+        proposal_approved: true,
+        applied_to_canon: false,
+        active_engine_modified: false,
+        canon_db_modified: false,
+        compressed_rules_modified: false,
+      };
     } else {
       throw errorWithStatus(`Unsupported confirm action: ${item.action_type}`, 409);
     }

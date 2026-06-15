@@ -69,6 +69,7 @@ export const projectPaths = {
   approvalItems: path.join(projectRoot, "data", "approval_queue", "items"),
   approvalLogs: path.join(projectRoot, "data", "approval_queue", "logs"),
   approvalLog: path.join(projectRoot, "data", "approval_queue", "logs", "approval_log.jsonl"),
+  settingChangeProposals: path.join(projectRoot, "data", "setting_change_proposals"),
   cleanupRoot: path.join(projectRoot, "data", "cleanup"),
   cleanupProposals: path.join(projectRoot, "data", "cleanup", "proposals"),
   cleanupLogs: path.join(projectRoot, "data", "cleanup", "logs"),

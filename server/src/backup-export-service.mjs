@@ -206,15 +206,75 @@ export default {
 };
 
 export async function createExportBundle({ export_type = "active_engine", createdBy = "system", note = null } = {}) {
-  if (export_type !== "active_engine") throw new Error("Unsupported export_type");
+  if (!["active_engine", "review_package"].includes(export_type)) {
+    throw new Error("Unsupported export_type");
+  }
   await mkdir(projectPaths.backupExports, { recursive: true });
   const exportId = makeId("export");
   const dir = path.join(projectPaths.backupExports, exportId);
   await mkdir(dir, { recursive: true });
   const activePath = resolveProjectPath(projectPaths.activeEngine, "active engine");
-  const content = await readFile(activePath, "utf8");
-  // write content.md
-  await writeFile(path.join(dir, "content.md"), content, "utf8");
+  if (export_type === "active_engine") {
+    const content = await readFile(activePath, "utf8");
+    await writeFile(path.join(dir, "content.md"), content, "utf8");
+  } else {
+    const requiredFiles = [
+      ".gitignore",
+      "README.md",
+      "SKILL.md",
+      "package.json",
+      "package-lock.json",
+      "launcher.cmd",
+      "launcher.ps1",
+      ".github/workflows/ci.yml",
+      "data/memory_store/canon_memory.json",
+      "data/memory_store/preference_memory.json",
+      "data/memory_store/working_memory.json",
+      "data/outputs/current_prompt.md",
+      "data/outputs/generation_context.md",
+      "data/outputs/retrieval_context.md",
+      "data/outputs/task_prompt.md",
+      "prompts/generate_chapter.md",
+      "prompts/proofread_draft.md",
+      "prompts/settle_chapter.md",
+      "prompts/compress_errors.md",
+      "prompts/rewrite_by_errors.md",
+      "data/visual_db/index.jsonl",
+    ];
+    const markdownPlaceholder =
+      "# Placeholder\n\nStatus: not yet generated. This file contains no canon data.\n";
+    const jsonPlaceholder =
+      `${JSON.stringify({ status: "empty", placeholder: true, generated: false }, null, 2)}\n`;
+    for (const relativePath of requiredFiles) {
+      const sourcePath = path.join(projectRoot, relativePath);
+      const destinationPath = path.join(dir, relativePath);
+      await mkdir(path.dirname(destinationPath), { recursive: true });
+      try {
+        await copyFile(sourcePath, destinationPath);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        await writeFile(
+          destinationPath,
+          relativePath.endsWith(".json") || relativePath.endsWith(".jsonl")
+            ? jsonPlaceholder
+            : markdownPlaceholder,
+          "utf8",
+        );
+      }
+    }
+    const visualAssetsDestination = path.join(dir, "data", "visual_db", "assets");
+    await mkdir(visualAssetsDestination, { recursive: true });
+    try {
+      for (const filePath of await walkDirectory(projectPaths.visualAssets)) {
+        const relativePath = path.relative(projectPaths.visualAssets, filePath);
+        const destinationPath = path.join(visualAssetsDestination, relativePath);
+        await mkdir(path.dirname(destinationPath), { recursive: true });
+        await copyFile(filePath, destinationPath);
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
   const meta = {
     export_id: exportId,
     export_type,
@@ -222,6 +282,7 @@ export async function createExportBundle({ export_type = "active_engine", create
     created_by: createdBy,
     note: note || null,
     source_active_engine_path: normalizeProjectPath(projectPaths.activeEngine),
+    package_root: export_type === "review_package" ? "." : null,
   };
   await writeFile(path.join(dir, "metadata.json"), json(meta), "utf8");
   const exportJson = { export_id: exportId, generated_at: meta.created_at, type: export_type };

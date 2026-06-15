@@ -113,6 +113,141 @@
   }
 }
 
+/* Phase 20 author workflow and canon settings workspace */
+.primary-nav {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.nav-group-label {
+  display: block;
+  padding: 14px 11px 5px;
+  color: var(--sidebar-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-not_started {
+  color: #9fb6c6;
+  background: #162233;
+  border: 1px solid #435367;
+}
+
+.status-loading {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+.settings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+  border-left: 4px solid var(--accent);
+}
+
+.settings-hero h2,
+.settings-hero p {
+  margin: 0 0 8px;
+}
+
+.settings-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.settings-summary-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.settings-summary-grid span,
+.setting-card small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-summary-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.settings-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.setting-card {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+}
+
+.setting-card.is-conflict {
+  border-left: 4px solid var(--red);
+}
+
+.setting-card > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.setting-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.settings-proposal-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+}
+
+.diff-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.diff-columns pre {
+  min-height: 260px;
+  max-height: 520px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--ink-soft);
+  background: var(--surface-quiet);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .settings-hero,
+  .settings-summary-grid,
+  .settings-proposal-layout,
+  .diff-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .approval-toolbar,
 .approval-layout,
 .approval-detail-facts,
