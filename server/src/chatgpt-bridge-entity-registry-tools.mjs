@@ -17,6 +17,73 @@ function normalizeStringArg(value, maxLength = 120, name = "q") {
   return trimmed;
 }
 
+function normalizeEntitySearchText(value) {
+  return String(value ?? "")
+    .toLocaleLowerCase("zh-Hant")
+    .replace(/[\s｜|、，,。；;：:（）()[\]【】「」『』《》<>]+/gu, " ")
+    .trim();
+}
+
+function entitySearchTokens(query) {
+  const normalized = normalizeEntitySearchText(query);
+  if (!normalized) return [];
+  return [...new Set(normalized.split(/\s+/u).filter(Boolean))];
+}
+
+function entitySearchHaystack(meta = {}, full = {}) {
+  return normalizeEntitySearchText([
+    full.canonical_name,
+    meta.canonical_name,
+    meta.entity_id,
+    ...(Array.isArray(full.aliases) ? full.aliases : []),
+    full.source_excerpt,
+    full.source_section,
+    ...(Array.isArray(full.related_chapters) ? full.related_chapters : []),
+    ...(Array.isArray(full.related_characters) ? full.related_characters : []),
+    ...(Array.isArray(full.related_entities) ? full.related_entities : []),
+  ].filter(Boolean).join("\n"));
+}
+
+function entitySearchScore(meta = {}, full = {}, query = "") {
+  const tokens = entitySearchTokens(query);
+  if (tokens.length === 0) return 0;
+
+  const canonical = normalizeEntitySearchText(full.canonical_name ?? meta.canonical_name);
+  const metaCanonical = normalizeEntitySearchText(meta.canonical_name);
+  const entityId = normalizeEntitySearchText(meta.entity_id);
+  const aliases = (Array.isArray(full.aliases) ? full.aliases : []).map((item) => normalizeEntitySearchText(item));
+  const haystack = entitySearchHaystack(meta, full);
+
+  let score = 0;
+
+  for (const token of tokens) {
+    if (!token) continue;
+
+    if (canonical === token) score += 180;
+    else if (metaCanonical === token) score += 160;
+    else if (aliases.includes(token)) score += 150;
+    else if (canonical.includes(token)) score += 80;
+    else if (metaCanonical.includes(token)) score += 70;
+    else if (aliases.some((alias) => alias.includes(token))) score += 65;
+    else if (entityId.includes(token)) score += 40;
+    else if (haystack.includes(token)) score += 10;
+  }
+
+  if (tokens.length === 1) {
+    const token = tokens[0];
+    const isExactCanonical = canonical === token || metaCanonical === token;
+    const isExactAlias = aliases.includes(token);
+
+    if (meta.entity_type === "character" && (isExactCanonical || isExactAlias)) {
+      score += 1000;
+    } else if (isExactCanonical || isExactAlias) {
+      score += 200;
+    }
+  }
+
+  return score;
+}
+
 function assertUnknownArgs(args, allowed = []) {
   for (const key of Object.keys(args)) {
     if (!allowed.includes(key)) throw new Error(`Unknown argument for entity registry tool: ${key}.`);
@@ -99,14 +166,24 @@ export async function chatgpt_bridge_search_canon_entities(input = {}) {
   if (type) entries = entries.filter((e) => e.entity_type === type);
   if (status) entries = entries.filter((e) => e.status === status);
   if (risk_level) entries = entries.filter((e) => String(e.risk_level) === risk_level);
+  const fullForMeta = (meta) => (
+    (registry[`${meta.entity_type}s`] || []).find((it) => it.entity_id === meta.entity_id) ?? {}
+  );
+  const queryScores = new Map();
+
   if (q) {
-    const qn = q.toLowerCase();
-    entries = entries.filter((e) => (e.canonical_name || "").toLowerCase().includes(qn) || (e.entity_id || "").toLowerCase().includes(qn));
+    entries = entries.filter((e) => {
+      const full = fullForMeta(e);
+      const score = entitySearchScore(e, full, q);
+      if (score <= 0) return false;
+      queryScores.set(e.entity_id, score);
+      return true;
+    });
   }
   if (related_chapter || related_character) {
     // need to consult full registry
     entries = entries.filter((e) => {
-      const full = (registry[e.entity_type + "s"] || []).find((it) => it.entity_id === e.entity_id);
+      const full = fullForMeta(e);
       if (!full) return false;
       if (related_chapter && !(full.related_chapters || []).some((c) => c.includes(related_chapter))) return false;
       if (related_character && !(full.related_characters || []).some((c) => c.includes(related_character))) return false;
@@ -118,6 +195,7 @@ export async function chatgpt_bridge_search_canon_entities(input = {}) {
   const statusOrder = { canon: 0, candidate: 1, pending: 2, deprecated: 3, conflict: 4, unknown: 5 };
   entries.sort((a, b) => (
     (statusOrder[a.status] - statusOrder[b.status])
+    || ((queryScores.get(b.entity_id) ?? 0) - (queryScores.get(a.entity_id) ?? 0))
     || ((a.canonical_name === b.canonical_name) ? 0 : ((a.canonical_name === (q || "")) ? -1 : (b.canonical_name === (q || "")) ? 1 : 0))
     || ((b.confidence || 0) - (a.confidence || 0))
     || a.entity_type.localeCompare(b.entity_type)
@@ -128,11 +206,11 @@ export async function chatgpt_bridge_search_canon_entities(input = {}) {
   const returned = Math.min(entries.length, limit);
   const slice = entries.slice(0, limit);
   const entities = slice.map((meta) => {
-    const full = (registry[meta.entity_type + "s"] || []).find((it) => it.entity_id === meta.entity_id) ?? {};
+    const full = fullForMeta(meta);
     return {
       entity_id: meta.entity_id,
       entity_type: meta.entity_type,
-      canonical_name: meta.canonical_name,
+      canonical_name: meta.canonical_name ?? full.canonical_name ?? null,
       aliases: full.aliases ?? [],
       status: meta.status,
       risk_level: meta.risk_level ?? full.risk_level ?? null,

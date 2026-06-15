@@ -286,6 +286,50 @@ function textToContext(snapshot) {
   };
 }
 
+function normalizeBridgeEntitySearchText(value) {
+  return String(value ?? "")
+    .toLocaleLowerCase("zh-Hant")
+    .replace(/[\s｜|、，,。；;：:（）()[\]【】「」『』《》<>]+/gu, " ")
+    .trim();
+}
+
+function bridgeEntitySearchTokens(query) {
+  const normalized = normalizeBridgeEntitySearchText(query);
+  if (!normalized) return [];
+  return [...new Set(normalized.split(/\s+/u).filter(Boolean))];
+}
+
+function bridgeEntitySearchHaystack(entity = {}) {
+  return normalizeBridgeEntitySearchText([
+    entity.canonical_name,
+    entity.entity_id,
+    ...(Array.isArray(entity.aliases) ? entity.aliases : []),
+    entity.source_excerpt,
+    entity.source_section,
+    ...(Array.isArray(entity.related_chapters) ? entity.related_chapters : []),
+    ...(Array.isArray(entity.related_characters) ? entity.related_characters : []),
+    ...(Array.isArray(entity.related_entities) ? entity.related_entities : []),
+  ].filter(Boolean).join("\n"));
+}
+
+function bridgeEntitySearchScore(entity = {}, tokens = []) {
+  if (tokens.length === 0) return 0;
+
+  const canonical = normalizeBridgeEntitySearchText(entity.canonical_name);
+  const entityId = normalizeBridgeEntitySearchText(entity.entity_id);
+  const haystack = bridgeEntitySearchHaystack(entity);
+
+  let score = 0;
+  for (const token of tokens) {
+    if (canonical === token) score += 100;
+    else if (canonical.includes(token)) score += 60;
+    else if (entityId.includes(token)) score += 40;
+    else if (haystack.includes(token)) score += 10;
+  }
+  return score;
+}
+
+
 export async function buildChatgptBridgeWritingContext(rawInput = {}, options = {}) {
   const useCurrentInputs = optionalBoolean(
     rawInput.use_current_inputs ?? rawInput.useCurrentInputs,
@@ -479,18 +523,23 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
             }).filter(Boolean)
             : Object.keys(registry).filter((k) => Array.isArray(registry[k]));
 
-          const q = entityQuery ? String(entityQuery).toLocaleLowerCase("zh-Hant") : "";
+          const queryTokens = bridgeEntitySearchTokens(entityQuery);
           const candidates = [];
           for (const bucket of buckets) {
             for (const entity of registry[bucket] ?? []) {
-              if (q) {
-                const hay = [entity.canonical_name, ...(entity.aliases ?? []), entity.source_excerpt ?? ""].join("\n").toLocaleLowerCase("zh-Hant");
-                if (!hay.includes(q)) continue;
-              }
-              candidates.push(entity);
+              const score = bridgeEntitySearchScore(entity, queryTokens);
+              if (queryTokens.length > 0 && score <= 0) continue;
+              candidates.push({ entity, score });
             }
           }
-          for (const entity of candidates.slice(0, entityLimit)) pushEntity(entity);
+
+          candidates.sort((a, b) => (
+            (b.score - a.score)
+            || String(a.entity.canonical_name ?? "").localeCompare(String(b.entity.canonical_name ?? ""))
+            || String(a.entity.entity_id ?? "").localeCompare(String(b.entity.entity_id ?? ""))
+          ));
+
+          for (const { entity } of candidates.slice(0, entityLimit)) pushEntity(entity);
         }
 
         if (includeEntityProvenance) {
@@ -656,4 +705,3 @@ export async function saveChatgptBridgeSettlementReport(input = {}, options = {}
     safety: chatgptBridgeSafety,
   };
 }
-
