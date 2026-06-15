@@ -10,6 +10,13 @@ import {
   saveChatgptBridgeProofReport,
   saveChatgptBridgeSettlementReport,
 } from "./chatgpt-bridge-service.mjs";
+import {
+  chatgpt_bridge_get_entity_registry_summary as _get_entity_registry_summary_handler,
+  chatgpt_bridge_search_canon_entities as _search_canon_entities_handler,
+  chatgpt_bridge_get_canon_entity_detail as _get_canon_entity_detail_handler,
+  chatgpt_bridge_get_entity_conflicts as _get_entity_conflicts_handler,
+  chatgpt_bridge_get_entity_registry_provenance as _get_registry_provenance_handler,
+} from "./chatgpt-bridge-entity-registry-tools.mjs";
 import { normalizeProjectPath, projectPaths } from "./project-paths.mjs";
 import {
   runVisualLibraryMcpReadonlyToolPreview,
@@ -149,6 +156,36 @@ export const chatgpt_bridge_visual_library_ui_import_flow_preview = tool(
   runVisualLibraryMcpReadonlyToolPreview,
 );
 
+export const chatgpt_bridge_get_entity_registry_summary = tool(
+  "chatgpt_bridge_get_entity_registry_summary",
+  "read_only",
+  _get_entity_registry_summary_handler,
+);
+
+export const chatgpt_bridge_search_canon_entities = tool(
+  "chatgpt_bridge_search_canon_entities",
+  "read_only",
+  _search_canon_entities_handler,
+);
+
+export const chatgpt_bridge_get_canon_entity_detail = tool(
+  "chatgpt_bridge_get_canon_entity_detail",
+  "read_only",
+  _get_canon_entity_detail_handler,
+);
+
+export const chatgpt_bridge_get_entity_conflicts = tool(
+  "chatgpt_bridge_get_entity_conflicts",
+  "read_only",
+  _get_entity_conflicts_handler,
+);
+
+export const chatgpt_bridge_get_entity_registry_provenance = tool(
+  "chatgpt_bridge_get_entity_registry_provenance",
+  "read_only",
+  _get_registry_provenance_handler,
+);
+
 export const chatgptBridgeTools = {
   chatgpt_bridge_get_workbench_status,
   chatgpt_bridge_get_current_inputs,
@@ -160,6 +197,11 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_build_settlement_context,
   chatgpt_bridge_save_settlement_report,
   chatgpt_bridge_visual_library_ui_import_flow_preview,
+  chatgpt_bridge_get_entity_registry_summary,
+  chatgpt_bridge_search_canon_entities,
+  chatgpt_bridge_get_canon_entity_detail,
+  chatgpt_bridge_get_entity_conflicts,
+  chatgpt_bridge_get_entity_registry_provenance,
 };
 
 const readMetadata = {
@@ -218,4 +260,9 @@ export const chatgptBridgeToolMetadata = {
     projectPaths.outputLogs,
   ]),
   chatgpt_bridge_visual_library_ui_import_flow_preview: { ...readMetadata },
+  chatgpt_bridge_get_entity_registry_summary: { ...readMetadata },
+  chatgpt_bridge_search_canon_entities: { ...readMetadata },
+  chatgpt_bridge_get_canon_entity_detail: { ...readMetadata },
+  chatgpt_bridge_get_entity_conflicts: { ...readMetadata },
+  chatgpt_bridge_get_entity_registry_provenance: { ...readMetadata },
 };

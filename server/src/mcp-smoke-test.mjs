@@ -171,6 +171,16 @@ const expectedTools = [
   "chatgpt_bridge_get_workbench_status",
   "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
+  "chatgpt_bridge_get_entity_registry_summary",
+  "chatgpt_bridge_search_canon_entities",
+  "chatgpt_bridge_get_canon_entity_detail",
+  "chatgpt_bridge_get_entity_conflicts",
+  "chatgpt_bridge_get_entity_registry_provenance",
+  "chatgpt_bridge_get_entity_registry_summary",
+  "chatgpt_bridge_search_canon_entities",
+  "chatgpt_bridge_get_canon_entity_detail",
+  "chatgpt_bridge_get_entity_conflicts",
+  "chatgpt_bridge_get_entity_registry_provenance",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_proofing_context",
@@ -220,6 +230,11 @@ const readOnlyTools = new Set([
   "chatgpt_bridge_get_workbench_status",
   "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
+  "chatgpt_bridge_get_entity_registry_summary",
+  "chatgpt_bridge_search_canon_entities",
+  "chatgpt_bridge_get_canon_entity_detail",
+  "chatgpt_bridge_get_entity_conflicts",
+  "chatgpt_bridge_get_entity_registry_provenance",
   "get_gpt_writing_context_bundle",
   "list_gpt_writing_context_bundles",
   "get_writing_candidate_detail",
@@ -325,6 +340,35 @@ const enumConstraintFixtures = [
       outputMode: "invalid-mode",
     },
     expectedMessage: "outputMode must be one of: chat_only, candidate_save_later.",
+  },
+  {
+    label: "chatgpt_bridge_search_canon_entities invalid status",
+    name: "chatgpt_bridge_search_canon_entities",
+    field: "status",
+    arguments: {
+      q: "fixture",
+      status: "invalid-status",
+    },
+    expectedMessage: "status must be one of: canon, candidate, pending, deprecated, conflict, unknown.",
+  },
+  {
+    label: "chatgpt_bridge_search_canon_entities invalid type",
+    name: "chatgpt_bridge_search_canon_entities",
+    field: "type",
+    arguments: {
+      q: "fixture",
+      type: "invalid-type",
+    },
+    expectedMessage: "type must be one of: character, ability, weapon, timeline_event, world_rule, organization, location, chapter_event, relationship, status_effect.",
+  },
+  {
+    label: "chatgpt_bridge_get_entity_conflicts invalid severity",
+    name: "chatgpt_bridge_get_entity_conflicts",
+    field: "severity",
+    arguments: {
+      severity: "invalid-sev",
+    },
+    expectedMessage: "severity must be one of: P0, P1, P2.",
   },
   {
     label: "run_creative_task invalid taskType",
@@ -778,6 +822,22 @@ const integerMaximumFixtures = [
     expectedMessage: "limit must be an integer less than or equal to 100.",
   },
   {
+    label: "chatgpt_bridge_search_canon_entities limit over maximum",
+    name: "chatgpt_bridge_search_canon_entities",
+    field: "limit",
+    expectedMaximum: 50,
+    arguments: { limit: 51 },
+    expectedMessage: "limit must be an integer less than or equal to 50.",
+  },
+  {
+    label: "chatgpt_bridge_get_entity_conflicts limit over maximum",
+    name: "chatgpt_bridge_get_entity_conflicts",
+    field: "limit",
+    expectedMaximum: 50,
+    arguments: { limit: 51 },
+    expectedMessage: "limit must be an integer less than or equal to 50.",
+  },
+  {
     label: "run_creative_task limit over maximum",
     name: "run_creative_task",
     field: "limit",
@@ -1022,6 +1082,7 @@ const requiredConstraintFixtures = [
     ["chatgpt_bridge_save_settlement_report", "settlementReportText", {
       adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
     }],
+    ["chatgpt_bridge_get_canon_entity_detail", "entity_id", {}],
   ].map(([name, field, argumentsValue]) => ({
     label: `${name} missing ${field}`,
     name,
@@ -1499,6 +1560,32 @@ const expectedDefaultMetadata = new Map([
     maxContextChars: 120000,
   }],
   ["list_candidate_proofing_contexts", { limit: 20 }],
+  ["chatgpt_bridge_get_entity_registry_summary", {
+    include_counts_by_status: true,
+    include_counts_by_type: true,
+    include_conflict_summary: true,
+    include_provenance: true,
+  }],
+  ["chatgpt_bridge_search_canon_entities", {
+    limit: 20,
+    include_excerpt: true,
+    include_related_entities: false,
+  }],
+  ["chatgpt_bridge_get_canon_entity_detail", {
+    include_related_entities: true,
+    include_source_excerpt: true,
+    include_provenance: true,
+  }],
+  ["chatgpt_bridge_get_entity_conflicts", {
+    limit: 20,
+    include_evidence: true,
+    include_recommended_action: true,
+  }],
+  ["chatgpt_bridge_get_entity_registry_provenance", {
+    include_source_files: true,
+    include_build_report: true,
+    include_warnings: true,
+  }],
   ["save_chat_output_as_proof_report", {
     verdict: "needs_revision",
     severity: "none",
@@ -1568,6 +1655,8 @@ const expectedIntegerMaximumMetadata = new Map([
   ["build_candidate_proofing_context:maxContextChars", 250000],
   ["list_candidate_proofing_contexts:limit", 100],
   ["list_proof_reports:limit", 100],
+  ["chatgpt_bridge_search_canon_entities:limit", 50],
+  ["chatgpt_bridge_get_entity_conflicts:limit", 50],
   ["build_adopted_writing_settlement_context:maxContextChars", 250000],
   ["list_adopted_writing_settlement_contexts:limit", 100],
   ["get_settlement_report_detail:maxContentChars", 50000],
@@ -1619,6 +1708,9 @@ const expectedContentStringFields = new Set([
 ]);
 
 function expectedStringMaxLength(field) {
+  if (field === "q") {
+    return 120;
+  }
   if (field === "chatOutputText") {
     return expectedInputLimits.chatOutputMaxLength;
   }
