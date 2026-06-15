@@ -552,7 +552,18 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
     // validation errors should surface as warnings rather than breaking the context build
     result.entity_registry_context = { enabled: false, entities: [], warnings: [error.message] };
   }
-  return { ...result, generated_locally: false, safety: chatgptBridgeSafety };
+  const writingContextId = result.bundle?.bundle_id ?? null;
+
+  return {
+    ...result,
+    writing_context_id: writingContextId,
+    source_bundle_id: writingContextId,
+    sourceBundleId: writingContextId,
+    context_bundle_path: result.context_bundle_path ?? null,
+    context_for_chat_path: result.context_for_chat_path ?? null,
+    generated_locally: false,
+    safety: chatgptBridgeSafety,
+  };
 }
 
 export async function saveChatgptBridgeCandidate(input = {}, options = {}) {
