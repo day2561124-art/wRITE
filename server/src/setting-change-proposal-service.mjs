@@ -10,7 +10,19 @@ import {
 } from "./project-paths.mjs";
 
 const proposalIdPattern = /^setting_proposal_\d{8}-\d{6}-[a-f0-9]{8}$/u;
-const settingTypes = new Set(["character", "ability", "weapon", "timeline", "world_rule"]);
+const settingTypes = new Set([
+  "character",
+  "ability",
+  "weapon",
+  "timeline",
+  "timeline_event",
+  "world_rule",
+  "organization",
+  "location",
+  "chapter_event",
+  "relationship",
+  "status_effect",
+]);
 const highRiskTerms = [
   "死亡", "長期失能", "重大能力突破", "代表資格", "主角身份", "階級突破",
   "時間線重大", "角色關係重大", "世界觀基礎規則", "active_engine", "rollback",
@@ -122,6 +134,17 @@ function normalizeInput(rawInput = {}) {
       rawInput.related_characters ?? rawInput.relatedCharacters,
       "related_characters",
     ),
+    targetEntityId: text(
+      rawInput.target_entity_id ?? rawInput.targetEntityId,
+      "target_entity_id",
+      200,
+    ),
+    entityType: text(rawInput.entity_type ?? rawInput.entityType, "entity_type", 50),
+    provenance: rawInput.provenance && typeof rawInput.provenance === "object"
+      && !Array.isArray(rawInput.provenance)
+      ? rawInput.provenance
+      : null,
+    conflictId: text(rawInput.conflict_id ?? rawInput.conflictId, "conflict_id", 200),
   };
 }
 
@@ -136,6 +159,8 @@ export async function createSettingChangeProposal(rawInput = {}, options = {}) {
   const proposal = {
     proposal_id: proposalId,
     target_setting_id: input.targetSettingId,
+    target_entity_id: input.targetEntityId || input.targetSettingId,
+    entity_type: input.entityType || input.settingType,
     setting_type: input.settingType,
     title: input.title,
     before: input.before,
@@ -154,6 +179,8 @@ export async function createSettingChangeProposal(rawInput = {}, options = {}) {
     requires_second_confirm: risk.requires_second_confirm,
     related_chapters: input.relatedChapters,
     related_characters: input.relatedCharacters,
+    provenance: input.provenance,
+    conflict_id: input.conflictId || null,
     active_engine_hash_at_creation: hashes.active_engine_hash,
     compressed_rules_hash_at_creation: hashes.compressed_rules_hash,
     risk_matches: risk.matched_terms,
@@ -182,7 +209,11 @@ export async function createSettingChangeProposal(rawInput = {}, options = {}) {
     canExecuteWithoutUserConfirmation: false,
     createdBy: input.createdBy,
     source: input.source,
-    lineage: { proposal_id: proposalId },
+    lineage: {
+      proposal_id: proposalId,
+      target_entity_id: proposal.target_entity_id,
+      conflict_id: proposal.conflict_id,
+    },
     impact: {
       will_modify: [],
       will_create: [normalizeProjectPath(filePath)],
@@ -192,6 +223,10 @@ export async function createSettingChangeProposal(rawInput = {}, options = {}) {
     details: {
       proposal_id: proposalId,
       setting_type: input.settingType,
+      entity_type: proposal.entity_type,
+      target_entity_id: proposal.target_entity_id,
+      provenance: proposal.provenance,
+      conflict_id: proposal.conflict_id,
       before: input.before,
       after: input.after,
       diff: proposal.diff,

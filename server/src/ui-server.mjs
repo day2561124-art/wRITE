@@ -155,6 +155,13 @@ import {
   getSettingChangeProposal,
   listSettingChangeProposals,
 } from "./setting-change-proposal-service.mjs";
+import {
+  entityTypes,
+  getStructuredEntity,
+  getStructuredEntityRegistry,
+  rebuildStructuredEntityRegistryPreview,
+  searchStructuredEntities,
+} from "./structured-canon-entity-registry-service.mjs";
 
 const rootDir = projectRoot;
 const uiDir = path.join(rootDir, "server", "ui");
@@ -626,6 +633,15 @@ function optionalStringArray(value, field, maxItems = 20, maxLength = 80) {
     throw new Error(`${field} items must be at most ${maxLength} characters.`);
   }
   return [...new Set(items)];
+}
+
+function rejectUnknownFields(input, allowedFields) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Request body must be an object.");
+  }
+  const allowed = new Set(allowedFields);
+  const unknown = Object.keys(input).filter((key) => !allowed.has(key));
+  if (unknown.length) throw new Error(`Unknown fields: ${unknown.join(", ")}`);
 }
 
 function safeFileStem(...values) {
@@ -1507,6 +1523,166 @@ async function handleRequest(request, response) {
       sendJson(response, 200, { ok: true, catalog: await buildCanonSettingsCatalog() });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/entity-registry") {
+    try {
+      const { registry, buildReport, conflictReport, provenance } =
+        await getStructuredEntityRegistry();
+      sendJson(response, 200, {
+        ok: true,
+        registry: {
+          schema_version: registry.schema_version,
+          registry_mode: registry.registry_mode,
+          read_only: registry.read_only,
+          entity_counts_by_type: buildReport.entity_counts_by_type,
+          status_counts: buildReport.status_counts,
+          conflict_counts: buildReport.conflict_counts,
+          entity_count: buildReport.entity_count,
+          build_status: buildReport.status,
+          conflict_count: conflictReport.conflict_count,
+          provenance,
+        },
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/entity-registry/entities") {
+    try {
+      const input = Object.fromEntries(
+        ["type", "status", "q", "risk_level", "related_chapter", "related_character", "limit"]
+          .map((key) => [key, url.searchParams.get(key)])
+          .filter(([, value]) => value !== null && value !== ""),
+      );
+      sendJson(response, 200, { ok: true, ...await searchStructuredEntities(input) });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/entity-registry/conflicts") {
+    try {
+      const { conflictReport, provenance } = await getStructuredEntityRegistry();
+      sendJson(response, 200, { ok: true, conflict_report: conflictReport, provenance });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/entity-registry/provenance") {
+    try {
+      const { provenance, buildReport } = await getStructuredEntityRegistry();
+      sendJson(response, 200, { ok: true, provenance, build_report: buildReport });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/entity-registry/rebuild-preview") {
+    try {
+      assertSameOrigin(request, "Cross-origin registry rebuilds are not allowed.");
+      const input = await parseBody(request);
+      rejectUnknownFields(input, []);
+      const built = await rebuildStructuredEntityRegistryPreview();
+      sendJson(response, 201, {
+        ok: true,
+        build_report: built.buildReport,
+        conflict_report: built.conflictReport,
+        provenance: built.provenance,
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/entity-registry/propose-change") {
+    try {
+      assertSameOrigin(request, "Cross-origin entity proposals are not allowed.");
+      const input = await parseBody(request);
+      rejectUnknownFields(input, [
+        "target_entity_id",
+        "entity_type",
+        "title",
+        "before",
+        "after",
+        "reason",
+        "risk_level",
+        "conflict_id",
+        "related_chapters",
+        "related_characters",
+        "created_by",
+      ]);
+      const target = await getStructuredEntity(
+        requireString(input.target_entity_id, "target_entity_id", 200),
+      );
+      const entityType = requireString(input.entity_type, "entity_type", 50);
+      const entityTypeMap = new Map([
+        ["characters", "character"],
+        ["abilities", "ability"],
+        ["weapons", "weapon"],
+        ["timeline_events", "timeline_event"],
+        ["world_rules", "world_rule"],
+        ["organizations", "organization"],
+        ["locations", "location"],
+        ["chapter_events", "chapter_event"],
+        ["relationships", "relationship"],
+        ["status_effects", "status_effect"],
+      ]);
+      const normalizedEntityType = entityTypeMap.get(entityType) ?? entityType;
+      if (
+        !entityTypes.includes(entityType)
+        && ![...entityTypeMap.values()].includes(entityType)
+      ) {
+        throw new Error("entity_type is not supported.");
+      }
+      if (target.entity.entity_type !== normalizedEntityType) {
+        throw new Error("entity_type does not match target_entity_id.");
+      }
+      const result = await createSettingChangeProposal({
+        target_setting_id: target.entity.entity_id,
+        target_entity_id: target.entity.entity_id,
+        setting_type: target.entity.entity_type,
+        entity_type: target.entity.entity_type,
+        title: input.title,
+        before: input.before,
+        after: input.after,
+        reason: input.reason,
+        risk_level: input.risk_level,
+        conflict_id: input.conflict_id,
+        related_chapters: input.related_chapters,
+        related_characters: input.related_characters,
+        provenance: {
+          entity: target.entity.provenance,
+          registry: target.provenance,
+        },
+        source: "entity_registry_ui",
+        created_by: input.created_by,
+      });
+      sendJson(response, 201, { ok: true, ...result });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
+    }
+    return;
+  }
+
+  const entityRegistryDetailMatch = rawPathname.match(
+    /^\/api\/entity-registry\/entities\/([^/]+)$/u,
+  );
+  if (request.method === "GET" && entityRegistryDetailMatch) {
+    try {
+      const entityId = decodeApiId(entityRegistryDetailMatch[1], "entity_id");
+      sendJson(response, 200, { ok: true, ...await getStructuredEntity(entityId) });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 400, error);
     }
     return;
   }

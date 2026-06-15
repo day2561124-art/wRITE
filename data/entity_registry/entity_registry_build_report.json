@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "built_at": "2026-06-15T11:47:24.563Z",
+  "deterministic_source_hash": "56fe0cf38e265b91d5796b648eaaaac617f9aac91bf841ee9407e29a43ed934e",
+  "entity_count": 215,
+  "entity_counts_by_type": {
+    "characters": 54,
+    "abilities": 12,
+    "weapons": 43,
+    "timeline_events": 3,
+    "world_rules": 24,
+    "organizations": 12,
+    "locations": 2,
+    "chapter_events": 3,
+    "relationships": 0,
+    "status_effects": 62
+  },
+  "status_counts": {
+    "canon": 192,
+    "candidate": 23,
+    "pending": 0,
+    "deprecated": 0,
+    "conflict": 0,
+    "unknown": 0
+  },
+  "conflict_counts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0
+  },
+  "validation_errors": [],
+  "warnings": [],
+  "protected_sources_modified": false
+}

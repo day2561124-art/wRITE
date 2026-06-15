@@ -45,6 +45,7 @@ const state = {
   },
   canonSettings: null,
   proposalPreviewReady: false,
+  activeSettingConflictId: "",
   neuralData: {
     runs: [],
     traces: [],
@@ -2524,6 +2525,11 @@ function readFileAsDataUrl(file) {
 }
 
 function settingCard(item) {
+  const provenance = [
+    item.source_section,
+    item.source_anchor,
+    item.entity_id,
+  ].filter(Boolean).join(" · ");
   return `
     <article class="setting-card ${item.has_conflict ? "is-conflict" : ""}">
       <div>
@@ -2532,7 +2538,30 @@ function settingCard(item) {
       </div>
       <p>${escapeHtml(item.content).slice(0, 360)}</p>
       <small>${escapeHtml(item.source)} · ${escapeHtml(item.risk_level)}</small>
+      ${provenance ? `<details><summary>來源與 entity ID</summary><pre>${escapeHtml(provenance)}</pre></details>` : ""}
+      ${item.related_entities?.length ? `<div class="entity-links">${item.related_entities.map(
+        (entityId) => `<button class="text-button" type="button" data-related-entity="${escapeHtml(entityId)}">${escapeHtml(entityId)}</button>`,
+      ).join("")}</div>` : ""}
       <button class="text-button" type="button" data-propose-setting="${escapeHtml(item.setting_id)}">提出修改</button>
+    </article>
+  `;
+}
+
+function conflictCard(item) {
+  const targetEntityId = item.involved_entity_ids?.[0] ?? "";
+  return `
+    <article class="setting-card is-conflict">
+      <div>
+        <span class="status-badge status-blocked">${escapeHtml(item.severity)}</span>
+        <strong>${escapeHtml(item.summary)}</strong>
+      </div>
+      <p>${escapeHtml(item.recommended_action ?? "")}</p>
+      <small>${escapeHtml(item.conflict_type)} · ${escapeHtml(item.conflict_id)}</small>
+      <details><summary>證據與涉及 entities</summary><pre>${escapeHtml([
+        ...(item.evidence ?? []),
+        ...(item.involved_entity_ids ?? []),
+      ].join("\n"))}</pre></details>
+      ${targetEntityId ? `<button class="text-button" type="button" data-propose-conflict="${escapeHtml(item.conflict_id)}" data-target-entity="${escapeHtml(targetEntityId)}">提出修正提案</button>` : ""}
     </article>
   `;
 }
@@ -2545,6 +2574,20 @@ function renderSettingList(selector, items, emptyText) {
     : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
 }
 
+function matchesSetting(item, query, status = "", risk = "") {
+  const haystack = [
+    item.title,
+    item.content,
+    item.source,
+    item.source_section,
+    ...(item.aliases ?? []),
+    ...(item.related_characters ?? []),
+  ].join("\n").toLocaleLowerCase("zh-TW");
+  return (!query || haystack.includes(query.toLocaleLowerCase("zh-TW")))
+    && (!status || item.status === status)
+    && (!risk || item.risk_level === risk);
+}
+
 function renderCanonSettings() {
   const catalog = state.canonSettings;
   if (!catalog) return;
@@ -2555,21 +2598,72 @@ function renderCanonSettings() {
     ["世界觀規則", summary.world_rule_count],
     ["章節事件", summary.chapter_event_count],
     ["時間線事件", summary.timeline_event_count],
+    ["組織", summary.entity_counts_by_type?.organizations],
+    ["地點", summary.entity_counts_by_type?.locations],
+    ["關係", summary.entity_counts_by_type?.relationships],
+    ["狀態效果", summary.entity_counts_by_type?.status_effects],
+    ["Registry", summary.registry_build_status],
+    ["Canon / Candidate", `${summary.status_counts?.canon ?? 0} / ${summary.status_counts?.candidate ?? 0}`],
+    ["P0 / P1 / P2", `${summary.conflict_counts?.P0 ?? 0} / ${summary.conflict_counts?.P1 ?? 0} / ${summary.conflict_counts?.P2 ?? 0}`],
     ["待確認修改", summary.pending_setting_change_count],
     ["衝突 / 缺漏", summary.conflict_gap_count],
+    ["最後建置", formatDate(summary.last_build_time)],
     ["active_engine", String(summary.active_engine_hash ?? "").slice(0, 12)],
+    ["canon_db", String(summary.canon_db_hash ?? "").slice(0, 12)],
     ["compressed_rules", String(summary.compressed_rules_hash ?? "").slice(0, 12)],
   ];
   $("#canon-summary-grid").innerHTML = summaryItems.map(([label, value]) => `
     <article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? 0)}</strong></article>
   `).join("");
-  $("#canon-setting-count").textContent = `${catalog.settings.length} 筆正式設定`;
+  $("#canon-setting-count").textContent = `${catalog.settings.length} 筆衍生設定 entities`;
   renderSettingList("#canon-overview-list", catalog.settings, "尚無可顯示的正式設定");
-  renderSettingList("#character-settings-list", catalog.characters, "尚未解析出角色設定");
-  renderSettingList("#ability-settings-list", catalog.abilities, "尚未解析出能力 / 武裝設定");
-  renderSettingList("#timeline-settings-list", catalog.timeline, "尚未解析出時間線設定");
-  renderSettingList("#world-rule-settings-list", catalog.world_rules, "尚未解析出世界觀規則");
-  renderSettingList("#setting-conflict-list", catalog.conflicts, "目前沒有已標記的衝突 / 缺漏");
+  const characters = catalog.characters.filter((item) => matchesSetting(
+    item,
+    $("#character-entity-search")?.value.trim() ?? "",
+    $("#character-status-filter")?.value ?? "",
+    $("#character-risk-filter")?.value ?? "",
+  ));
+  const abilities = catalog.abilities.filter((item) => (
+    matchesSetting(
+      item,
+      $("#ability-entity-search")?.value.trim() ?? "",
+      $("#ability-status-filter")?.value ?? "",
+    )
+    && (!$("#ability-type-filter")?.value || item.entity_type === $("#ability-type-filter").value)
+  ));
+  const timeline = catalog.timeline.filter((item) => matchesSetting(
+    item,
+    $("#timeline-entity-search")?.value.trim() ?? "",
+  ));
+  const timelineSort = $("#timeline-sort")?.value ?? "source";
+  timeline.sort((left, right) => {
+    if (timelineSort === "name") return left.title.localeCompare(right.title, "zh-TW");
+    if (timelineSort === "status") return left.status.localeCompare(right.status);
+    return String(left.source_anchor).localeCompare(String(right.source_anchor), "zh-TW");
+  });
+  const categories = [...new Set(catalog.world_rules.map(
+    (item) => item.detail?.fields?.category,
+  ).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-TW"));
+  const categorySelect = $("#world-rule-category-filter");
+  const selectedCategory = categorySelect?.value ?? "";
+  if (categorySelect) {
+    categorySelect.innerHTML = [
+      '<option value="">全部分類</option>',
+      ...categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`),
+    ].join("");
+    if (categories.includes(selectedCategory)) categorySelect.value = selectedCategory;
+  }
+  const worldRules = catalog.world_rules.filter((item) => (
+    matchesSetting(item, $("#world-rule-search")?.value.trim() ?? "")
+    && (!selectedCategory || item.detail?.fields?.category === selectedCategory)
+  ));
+  renderSettingList("#character-settings-list", characters, "沒有符合條件的角色設定");
+  renderSettingList("#ability-settings-list", abilities, "沒有符合條件的能力 / 武裝設定");
+  renderSettingList("#timeline-settings-list", timeline, "沒有符合條件的時間線設定");
+  renderSettingList("#world-rule-settings-list", worldRules, "沒有符合條件的世界觀規則");
+  $("#setting-conflict-list").innerHTML = catalog.conflicts.length
+    ? catalog.conflicts.map(conflictCard).join("")
+    : '<div class="empty-state">目前沒有已標記的衝突 / 缺漏</div>';
   $("#setting-conflict-count").textContent = `${catalog.conflicts.length} 筆`;
   $("#setting-proposal-list").innerHTML = catalog.proposals.length
     ? catalog.proposals.map((proposal) => `
@@ -2605,10 +2699,40 @@ function selectProposalTarget(settingId) {
   $("#proposal-title").value = setting.title;
   $("#proposal-before").value = setting.content;
   $("#proposal-after").value = setting.content;
+  state.activeSettingConflictId = "";
   state.proposalPreviewReady = false;
   $("#proposal-submit-button").disabled = true;
   $("#proposal-submit-button").title = "請先預覽 before / after diff";
   switchView("setting-proposals");
+}
+
+function selectConflictProposal(conflictId, entityId) {
+  selectProposalTarget(entityId);
+  const conflict = state.canonSettings?.conflicts.find(
+    (item) => item.conflict_id === conflictId,
+  );
+  if (!conflict) return;
+  state.activeSettingConflictId = conflictId;
+  $("#proposal-reason").value = `${conflict.summary}\n${conflict.recommended_action ?? ""}`.trim();
+  $("#proposal-title").value = `修正：${conflict.summary}`;
+}
+
+function openRelatedEntity(entityId) {
+  const setting = state.canonSettings?.settings.find((item) => item.entity_id === entityId);
+  if (!setting) {
+    toast("關聯 entity 尚未建立或目前不可見", true);
+    return;
+  }
+  const view = setting.entity_type === "character"
+    ? "characters"
+    : ["ability", "weapon"].includes(setting.entity_type)
+      ? "abilities"
+      : setting.entity_type === "timeline_event"
+        ? "timeline"
+        : setting.entity_type === "world_rule"
+          ? "world-rules"
+          : "canon-overview";
+  switchView(view);
 }
 
 function previewSettingProposal() {
@@ -2637,20 +2761,24 @@ async function submitSettingProposal(event) {
     return;
   }
   try {
-    await api("/api/setting-change-proposals", {
+    await api("/api/entity-registry/propose-change", {
       method: "POST",
       body: JSON.stringify({
-        target_setting_id: target.setting_id,
-        setting_type: target.setting_type,
+        target_entity_id: target.entity_id,
+        entity_type: target.entity_type,
         title: $("#proposal-title").value,
         before: $("#proposal-before").value,
         after: $("#proposal-after").value,
         reason: $("#proposal-reason").value,
-        source: "writer_workbench_ui",
+        risk_level: $("#proposal-risk-badge").textContent.startsWith("P0") ? "P0" : "P1",
+        conflict_id: state.activeSettingConflictId || undefined,
+        related_chapters: target.related_chapters,
+        related_characters: target.related_characters,
         created_by: "local_user",
       }),
     });
     state.proposalPreviewReady = false;
+    state.activeSettingConflictId = "";
     await refreshCanonSettings();
     toast("已建立設定修改提案，請到待我確認處理。");
     switchView("approval");
@@ -2851,8 +2979,24 @@ function bindEvents() {
     $("#proposal-title").value = setting.title;
     $("#proposal-before").value = setting.content;
     $("#proposal-after").value = setting.content;
+    state.activeSettingConflictId = "";
     state.proposalPreviewReady = false;
     $("#proposal-submit-button").disabled = true;
+  });
+  [
+    "#character-entity-search",
+    "#character-status-filter",
+    "#character-risk-filter",
+    "#ability-entity-search",
+    "#ability-type-filter",
+    "#ability-status-filter",
+    "#timeline-entity-search",
+    "#timeline-sort",
+    "#world-rule-search",
+    "#world-rule-category-filter",
+  ].forEach((selector) => {
+    $(selector)?.addEventListener("input", renderCanonSettings);
+    $(selector)?.addEventListener("change", renderCanonSettings);
   });
 
   $("#copy-result-button").addEventListener("click", () => copyText(state.currentComposeText, "產物"));
@@ -2868,6 +3012,19 @@ function bindEvents() {
     const proposeSetting = event.target.closest("[data-propose-setting]");
     if (proposeSetting) {
       selectProposalTarget(proposeSetting.dataset.proposeSetting);
+      return;
+    }
+    const proposeConflict = event.target.closest("[data-propose-conflict]");
+    if (proposeConflict) {
+      selectConflictProposal(
+        proposeConflict.dataset.proposeConflict,
+        proposeConflict.dataset.targetEntity,
+      );
+      return;
+    }
+    const relatedEntity = event.target.closest("[data-related-entity]");
+    if (relatedEntity) {
+      openRelatedEntity(relatedEntity.dataset.relatedEntity);
       return;
     }
     const openFile = event.target.closest("[data-open-file]");

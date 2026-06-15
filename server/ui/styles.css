@@ -186,6 +186,13 @@
   margin-top: 16px;
 }
 
+.registry-filter-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(2, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .setting-card {
   display: grid;
   gap: 9px;
@@ -210,6 +217,23 @@
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.setting-card details {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.setting-card details pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.entity-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .settings-proposal-layout {

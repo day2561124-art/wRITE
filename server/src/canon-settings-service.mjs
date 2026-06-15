@@ -1,90 +1,100 @@
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { listApprovalItems } from "./approval-queue-service.mjs";
 import { listSettingChangeProposals } from "./setting-change-proposal-service.mjs";
-import { projectPaths } from "./project-paths.mjs";
+import {
+  entityTypes,
+  getStructuredEntityRegistry,
+} from "./structured-canon-entity-registry-service.mjs";
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function sections(markdown) {
-  const result = [];
-  const lines = markdown.split(/\r?\n/u);
-  let current = null;
-  for (const line of lines) {
-    const heading = line.match(/^(#{1,4})\s+(.+)$/u);
-    if (heading) {
-      if (current) result.push(current);
-      current = { title: heading[2].trim(), level: heading[1].length, lines: [] };
-    } else if (current) {
-      current.lines.push(line);
-    }
-  }
-  if (current) result.push(current);
-  return result;
-}
-
-function classify(title) {
-  if (/角色|人物|學生|教師/u.test(title)) return "character";
-  if (/能力|異能|武裝|靈力|戰力/u.test(title)) return "ability";
-  if (/時間|週次|事件|章節/u.test(title)) return "timeline";
-  return "world_rule";
-}
-
-function recordsFrom(markdown) {
-  return sections(markdown)
-    .filter((section) => section.level >= 2)
-    .map((section, index) => ({
-      setting_id: `canon_setting_${String(index + 1).padStart(4, "0")}`,
-      setting_type: classify(section.title),
-      title: section.title,
-      content: section.lines.join("\n").trim() || "[empty section]",
-      status: "canon",
-      source: "data/canon_db/active_engine.md",
-      last_confirmed_version: "active_engine",
-      risk_level: "P2",
-      related_chapters: [],
-      related_characters: [],
-      has_conflict: /衝突|缺漏|待確認/u.test(section.lines.join("\n")),
-      can_propose_change: true,
-    }));
+function settingRecord(entity) {
+  return {
+    setting_id: entity.entity_id,
+    entity_id: entity.entity_id,
+    setting_type: entity.entity_type,
+    entity_type: entity.entity_type,
+    title: entity.canonical_name,
+    canonical_name: entity.canonical_name,
+    aliases: entity.aliases,
+    content: entity.source_excerpt,
+    status: entity.status,
+    source: entity.source_file,
+    source_section: entity.source_section,
+    source_anchor: entity.source_anchor,
+    provenance: entity.provenance,
+    related_chapters: entity.related_chapters,
+    related_characters: entity.related_characters,
+    related_entities: entity.related_entities,
+    last_confirmed_version: "active_engine",
+    risk_level: entity.risk_level,
+    has_conflict: entity.status === "conflict",
+    can_propose_change: true,
+    structured: true,
+    detail: entity,
+  };
 }
 
 export async function buildCanonSettingsCatalog() {
-  const [activeEngine, compressedRules, proposals, approvals] = await Promise.all([
-    readFile(projectPaths.activeEngine, "utf8"),
-    readFile(projectPaths.compressedRules, "utf8"),
-    listSettingChangeProposals(),
-    listApprovalItems(),
-  ]);
-  const settings = recordsFrom(activeEngine);
-  const byType = (type) => settings.filter((item) => item.setting_type === type);
-  const conflicts = settings.filter((item) => item.has_conflict);
+  const [{ registry, buildReport, conflictReport, provenance }, proposals, approvals] =
+    await Promise.all([
+      getStructuredEntityRegistry(),
+      listSettingChangeProposals(),
+      listApprovalItems(),
+    ]);
+  const records = Object.fromEntries(entityTypes.map((type) => [
+    type,
+    registry[type].map(settingRecord),
+  ]));
+  const settings = entityTypes.flatMap((type) => records[type]);
+  const conflicts = conflictReport.conflicts.map((item) => ({
+    ...item,
+    title: item.summary,
+    content: item.evidence.join("\n"),
+    status: "conflict",
+    risk_level: item.severity,
+    has_conflict: true,
+    can_propose_change: true,
+  }));
   return {
     summary: {
-      character_count: byType("character").length,
-      ability_weapon_count: byType("ability").length,
-      world_rule_count: byType("world_rule").length,
-      chapter_event_count: byType("timeline").length,
-      timeline_event_count: byType("timeline").length,
+      character_count: records.characters.length,
+      ability_weapon_count: records.abilities.length + records.weapons.length,
+      world_rule_count: records.world_rules.length,
+      chapter_event_count: records.chapter_events.length,
+      timeline_event_count: records.timeline_events.length,
       pending_setting_change_count: proposals.filter((item) => item.status === "pending_review").length,
       conflict_gap_count: conflicts.length,
-      active_engine_hash: sha256(activeEngine),
-      compressed_rules_hash: sha256(compressedRules),
+      active_engine_hash: provenance.active_engine_hash,
+      canon_db_hash: provenance.canon_db_hash,
+      compressed_rules_hash: provenance.compressed_rules_hash,
+      registry_build_status: buildReport.status,
+      last_build_time: buildReport.built_at,
+      entity_counts_by_type: buildReport.entity_counts_by_type,
+      status_counts: buildReport.status_counts,
+      conflict_counts: buildReport.conflict_counts,
     },
     settings,
-    characters: byType("character"),
-    abilities: byType("ability"),
-    timeline: byType("timeline"),
-    world_rules: byType("world_rule"),
+    characters: records.characters,
+    abilities: [...records.abilities, ...records.weapons],
+    weapons: records.weapons,
+    timeline: records.timeline_events,
+    world_rules: records.world_rules,
+    organizations: records.organizations,
+    locations: records.locations,
+    chapter_events: records.chapter_events,
+    relationships: records.relationships,
+    status_effects: records.status_effects,
     conflicts,
     proposals,
     approval_items: approvals.filter((item) => item.action_type === "setting_change_proposal"),
+    registry: {
+      build_report: buildReport,
+      provenance,
+      conflict_report: conflictReport,
+    },
     safety: {
       read_only_canon: true,
       proposals_only: true,
       direct_apply_allowed: false,
+      registry_mode: "derived_preview",
     },
   };
 }

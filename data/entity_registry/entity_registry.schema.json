@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "armed-academy://schemas/entity-registry",
+  "title": "Structured Canon Entity Registry",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "registry_mode",
+    "characters",
+    "abilities",
+    "weapons",
+    "timeline_events",
+    "world_rules",
+    "organizations",
+    "locations",
+    "chapter_events",
+    "relationships",
+    "status_effects",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "registry_mode": {
+      "const": "derived_preview"
+    },
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "abilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "weapons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "timeline_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "world_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "organizations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "chapter_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "status_effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "canonical_name",
+          "aliases",
+          "status",
+          "source_tier",
+          "source_file",
+          "source_section",
+          "source_anchor",
+          "source_excerpt",
+          "related_chapters",
+          "related_characters",
+          "related_entities",
+          "risk_level",
+          "confidence",
+          "provenance",
+          "active_engine_hash_at_build",
+          "canon_db_hash_at_build",
+          "compressed_rules_hash_at_build",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "provenance": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "registry_mode": "derived_preview",
+  "source_tier": "T8 derived",
+  "built_at": "2026-06-15T11:47:24.563Z",
+  "active_engine_hash": "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  "canon_db_hash": "1d6755d6f95068df28c8a066888c877236598dd0d401d5d3836ae43c8309f272",
+  "compressed_rules_hash": "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
+  "source_files": [
+    "data/canon_db/active_engine.md",
+    "data/error_report_db/compressed_rules.md",
+    "config/canon-zones.json",
+    "config/entity-registry.json"
+  ],
+  "build_warnings": [],
+  "direct_canon_write_allowed": false
+}
