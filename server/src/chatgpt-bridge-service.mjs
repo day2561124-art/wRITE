@@ -14,7 +14,9 @@ import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
+  projectRoot,
 } from "./project-paths.mjs";
+import { commitFileTransaction } from "./file-transactions.mjs";
 
 const defaultMaxChars = 120_000;
 const maximumMaxChars = 250_000;
@@ -422,6 +424,42 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
       }
 
       result.entity_registry_context = context;
+      // Persist entity_registry_context back into the written bundle and chat markdown
+      try {
+        const bundlePath = result.context_bundle_path;
+        const chatPath = result.context_for_chat_path;
+        const updatedBundle = { ...result.bundle, entity_registry_context: context };
+        // read existing chat markdown and append a summary section
+        let chatText = "";
+        try {
+          chatText = await readFile(path.join(projectRoot, chatPath), "utf8");
+        } catch (err) {
+          chatText = null;
+        }
+        const summaryLines = [
+          "## Entity Registry Context",
+          "",
+          `- enabled: ${String(context.enabled)}`,
+          `- source: ${context.source}`,
+          `- query: ${context.query == null ? "(none)" : String(context.query)}`,
+          `- categories: ${Array.isArray(context.categories) && context.categories.length > 0 ? JSON.stringify(context.categories) : "(all)"}`,
+          `- limit: ${String(context.limit)}`,
+          `- entities: ${Array.isArray(context.entities) ? context.entities.length : 0} items`,
+          "",
+          "```json",
+          JSON.stringify(context, null, 2),
+          "```",
+          "",
+        ].join("\n");
+        const newChat = chatText === null ? summaryLines : `${chatText}\n\n${summaryLines}`;
+        await commitFileTransaction("attach-entity-registry-context", [
+          { filePath: bundlePath, content: `${JSON.stringify(updatedBundle, null, 2)}\n` },
+          { filePath: chatPath, content: newChat },
+        ], { phase: "phase_21d_entity_registry_context_persist_hotfix" });
+      } catch (err) {
+        // If persisting fails, add a warning but continue
+        result.entity_registry_context.warnings.push(`failed_to_persist_entity_registry_context: ${err.message}`);
+      }
     }
   } catch (error) {
     // validation errors should surface as warnings rather than breaking the context build
