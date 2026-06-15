@@ -54,6 +54,34 @@ function optionalInteger(value, fallback, label) {
   return value;
 }
 
+function boundTaskPromptFromSnapshot(snapshot, maxAllowed = 12000) {
+  const meta = {
+    original_task_prompt_chars: 0,
+    task_prompt_chars_used: 0,
+    task_prompt_truncated: false,
+    task_prompt_source_path: null,
+    task_prompt_source_sha256: null,
+  };
+  if (!snapshot || typeof snapshot.text !== "string") return { bounded: "", meta };
+  const text = snapshot.text;
+  meta.original_task_prompt_chars = Array.from(text).length;
+  meta.task_prompt_source_path = snapshot.path ?? null;
+  meta.task_prompt_source_sha256 = snapshot.sha256 ?? null;
+  if (meta.original_task_prompt_chars <= maxAllowed) {
+    meta.task_prompt_chars_used = meta.original_task_prompt_chars;
+    return { bounded: text, meta };
+  }
+  // Bound by taking head portion and reserving room for the truncation marker.
+  meta.task_prompt_truncated = true;
+  const marker = `\n\n[truncated: original_chars=${meta.original_task_prompt_chars}]`;
+  const markerChars = Array.from(marker).length;
+  const headLimit = Math.max(0, maxAllowed - markerChars);
+  const truncated = Array.from(text).slice(0, headLimit).join("");
+  const compacted = `${truncated}${marker}`;
+  meta.task_prompt_chars_used = Array.from(compacted).length;
+  return { bounded: compacted, meta };
+}
+
 function rootOption(options, key, fallback, allowedRoot = projectPaths.outputs) {
   return options[key]
     ? assertPathInside(options[key], allowedRoot, `${key} test root`)
@@ -230,6 +258,16 @@ export async function getChatgptBridgeCurrentInputs(rawInput = {}, options = {})
     : projectPaths.activeEngine;
   return {
     inputs: Object.fromEntries(inputs),
+    // Provide a bounded task_prompt preview and metadata for bridge consumers.
+    bounded_task_prompt: (() => {
+      try {
+        const snapshot = Object.fromEntries(inputs)["task_prompt"];
+        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 12000);
+        return { text: bounded, meta };
+      } catch {
+        return { text: "", meta: {} };
+      }
+    })(),
     active_engine: includeActiveEngineMetadata
       ? await fileSnapshot(activeEnginePath, includeActiveEngineText, maxChars)
       : null,
@@ -262,10 +300,22 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
       maxChars: rawInput.max_context_chars ?? rawInput.maxContextChars,
     }, options);
   }
+  let taskPromptMetadata = null;
   const taskPrompt = rawInput.task_prompt
     ?? rawInput.taskPrompt
-    ?? current?.inputs.task_prompt.text
-    ?? "";
+    ?? (() => {
+      // If an explicit task_prompt argument was not provided, derive from current inputs and bound it.
+      try {
+        const snapshot = current?.inputs?.task_prompt;
+        if (!snapshot || typeof snapshot.text !== "string") return "";
+        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 12000);
+        // stash metadata for later bundle persistence
+        taskPromptMetadata = meta;
+        return bounded;
+      } catch {
+        return current?.inputs.task_prompt?.text ?? "";
+      }
+    })();
   const result = await buildGptWritingContext({
     ...rawInput,
     taskPrompt,
@@ -279,6 +329,43 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
       ?? rawInput.includeActiveEngine
       ?? false,
   }, options);
+
+  // If we bounded the task prompt from current inputs, persist metadata into the bundle and chat markdown.
+  if (taskPromptMetadata) {
+    try {
+      const bundlePath = result.context_bundle_path;
+      const chatPath = result.context_for_chat_path;
+      const updatedBundle = { ...result.bundle, task_prompt_metadata: taskPromptMetadata };
+      result.bundle = updatedBundle;
+      // read existing chat markdown and append a metadata section
+      let chatText = "";
+      try {
+        chatText = await readFile(path.join(projectRoot, chatPath), "utf8");
+      } catch (err) {
+        chatText = null;
+      }
+      const metaLines = [
+        "## Task Prompt Metadata",
+        "",
+        `- original_task_prompt_chars: ${taskPromptMetadata.original_task_prompt_chars}`,
+        `- task_prompt_chars_used: ${taskPromptMetadata.task_prompt_chars_used}`,
+        `- task_prompt_truncated: ${taskPromptMetadata.task_prompt_truncated}`,
+        `- task_prompt_source_path: ${taskPromptMetadata.task_prompt_source_path}`,
+        `- task_prompt_source_sha256: ${taskPromptMetadata.task_prompt_source_sha256}`,
+        "",
+      ].join("\n");
+      const newChat = chatText === null ? metaLines : `${chatText}\n\n${metaLines}`;
+      await commitFileTransaction("attach-task-prompt-metadata", [
+        { filePath: bundlePath, content: `${JSON.stringify(updatedBundle, null, 2)}\n` },
+        { filePath: chatPath, content: newChat },
+      ], { phase: "phase_21e_task_prompt_bounding" });
+    } catch (err) {
+      // attach warning
+      result.bundle = result.bundle || {};
+      result.bundle.warnings = result.bundle.warnings || [];
+      result.bundle.warnings.push(`failed_to_persist_task_prompt_metadata: ${err.message}`);
+    }
+  }
 
   // Optional, read-only, bounded entity registry integration
   try {
@@ -558,3 +645,4 @@ export async function saveChatgptBridgeSettlementReport(input = {}, options = {}
     safety: chatgptBridgeSafety,
   };
 }
+
