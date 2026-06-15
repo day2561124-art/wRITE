@@ -277,6 +277,156 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
       ?? rawInput.includeActiveEngine
       ?? false,
   }, options);
+
+  // Optional, read-only, bounded entity registry integration
+  try {
+    const includeEntityRegistry = optionalBoolean(
+      rawInput.include_entity_registry ?? rawInput.includeEntityRegistry,
+      false,
+      "include_entity_registry",
+    );
+    if (includeEntityRegistry) {
+      // normalize inputs
+      const entityQuery = rawInput.entity_query ?? rawInput.entityQuery ?? null;
+      if (entityQuery && typeof entityQuery === "string" && Array.from(entityQuery).length > 120) {
+        throw new Error("entityQuery must be at most 120 characters.");
+      }
+      const entityIds = Array.isArray(rawInput.entity_ids ?? rawInput.entityIds)
+        ? rawInput.entity_ids ?? rawInput.entityIds
+        : null;
+      if (entityIds && entityIds.length > 20) throw new Error("entityIds must contain at most 20 items.");
+      if (entityIds && entityIds.some((id) => typeof id !== "string" || Array.from(id).length > 160)) {
+        throw new Error("entityIds must be strings up to 160 characters.");
+      }
+      const entityCategories = Array.isArray(rawInput.entity_categories ?? rawInput.entityCategories)
+        ? rawInput.entity_categories ?? rawInput.entityCategories
+        : null;
+      const allowedCategories = new Set([
+        "character",
+        "ability",
+        "weapon",
+        "organization",
+        "location",
+        "timeline_event",
+        "world_rule",
+        "chapter_event",
+        "status_effect",
+      ]);
+      if (entityCategories && entityCategories.some((c) => !allowedCategories.has(c))) {
+        throw new Error("entityCategories contained unknown category.");
+      }
+      const entityLimit = rawInput.entity_limit ?? rawInput.entityLimit ?? 20;
+      if (!Number.isInteger(entityLimit) || entityLimit < 1 || entityLimit > 50) {
+        throw new Error("entityLimit must be an integer between 1 and 50.");
+      }
+      const includeEntityEvidence = optionalBoolean(
+        rawInput.include_entity_evidence ?? rawInput.includeEntityEvidence,
+        true,
+        "include_entity_evidence",
+      );
+      const includeEntityProvenance = optionalBoolean(
+        rawInput.include_entity_provenance ?? rawInput.includeEntityProvenance,
+        false,
+        "include_entity_provenance",
+      );
+
+      const context = {
+        enabled: true,
+        source: "structured_canon_entity_registry",
+        query: entityQuery ?? null,
+        categories: entityCategories ?? null,
+        limit: entityLimit,
+        entities: [],
+        warnings: [],
+      };
+
+      // Read registry files directly (read-only). If files missing or parse error, warn and continue.
+      try {
+        const registryText = await readFile(projectPaths.entityRegistryData, "utf8");
+        const indexText = await readFile(projectPaths.entityRegistryIndex, "utf8");
+        const registry = JSON.parse(registryText);
+        const index = JSON.parse(indexText);
+
+        // helper to push entity object into context.entities
+        const pushEntity = (entity) => {
+          context.entities.push({
+            entity_id: entity.entity_id,
+            category: entity.entity_type,
+            name: entity.canonical_name,
+            aliases: entity.aliases ?? [],
+            summary: entity.source_excerpt ?? "",
+            canonical_status: entity.status ?? entity.status,
+            risk_flags: entity.risk_level ? [entity.risk_level] : [],
+            evidence_refs: includeEntityEvidence ? (entity.source_anchor ? [entity.source_anchor] : []) : [],
+            related_entity_ids: entity.related_entities ?? [],
+          });
+        };
+
+        if (entityIds && entityIds.length) {
+          for (const id of entityIds.slice(0, 20)) {
+            const entry = index.by_id?.[id];
+            if (entry) {
+              const typeKey = Object.keys(registry).find((k) => Array.isArray(registry[k]) && registry[k].some((e) => e.entity_id === id));
+              const entity = registry[typeKey].find((e) => e.entity_id === id);
+              if (entity) pushEntity(entity);
+            }
+          }
+        } else {
+          // search by query / category
+          const buckets = entityCategories && entityCategories.length
+            ? entityCategories.map((c) => {
+              // map to plural keys used in registry
+              return {
+                character: "characters",
+                ability: "abilities",
+                weapon: "weapons",
+                organization: "organizations",
+                location: "locations",
+                timeline_event: "timeline_events",
+                world_rule: "world_rules",
+                chapter_event: "chapter_events",
+                status_effect: "status_effects",
+              }[c];
+            }).filter(Boolean)
+            : Object.keys(registry).filter((k) => Array.isArray(registry[k]));
+
+          const q = entityQuery ? String(entityQuery).toLocaleLowerCase("zh-Hant") : "";
+          const candidates = [];
+          for (const bucket of buckets) {
+            for (const entity of registry[bucket] ?? []) {
+              if (q) {
+                const hay = [entity.canonical_name, ...(entity.aliases ?? []), entity.source_excerpt ?? ""].join("\n").toLocaleLowerCase("zh-Hant");
+                if (!hay.includes(q)) continue;
+              }
+              candidates.push(entity);
+            }
+          }
+          for (const entity of candidates.slice(0, entityLimit)) pushEntity(entity);
+        }
+
+        if (includeEntityProvenance) {
+          try {
+            const provText = await readFile(projectPaths.entityRegistryProvenance, "utf8");
+            const prov = JSON.parse(provText);
+            context.registry_hashes = prov;
+          } catch (err) {
+            context.warnings.push("could not read provenance");
+          }
+        }
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          context.warnings.push("entity registry files missing");
+        } else {
+          context.warnings.push("entity registry parse error");
+        }
+      }
+
+      result.entity_registry_context = context;
+    }
+  } catch (error) {
+    // validation errors should surface as warnings rather than breaking the context build
+    result.entity_registry_context = { enabled: false, entities: [], warnings: [error.message] };
+  }
   return { ...result, generated_locally: false, safety: chatgptBridgeSafety };
 }
 
@@ -296,6 +446,31 @@ export async function buildChatgptBridgeProofingContext(input = {}, options = {}
       ?? input.includeActiveEngine
       ?? false,
   }, options);
+  // Mirror writing context's optional entity registry integration
+  try {
+    const includeEntityRegistry = optionalBoolean(
+      input.include_entity_registry ?? input.includeEntityRegistry,
+      false,
+      "include_entity_registry",
+    );
+    if (includeEntityRegistry) {
+      // Delegate to writing-context's implementation by reusing similar logic
+      const proxyInput = {
+        include_entity_registry: true,
+        entity_query: input.entity_query ?? input.entityQuery,
+        entity_ids: input.entity_ids ?? input.entityIds,
+        entity_categories: input.entity_categories ?? input.entityCategories,
+        entity_limit: input.entity_limit ?? input.entityLimit,
+        include_entity_evidence: input.include_entity_evidence ?? input.includeEntityEvidence,
+        include_entity_provenance: input.include_entity_provenance ?? input.includeEntityProvenance,
+      };
+      // call the same logic by invoking buildChatgptBridgeWritingContext with a tiny wrapper
+      const writingCtx = await buildChatgptBridgeWritingContext(proxyInput, options);
+      result.entity_registry_context = writingCtx.entity_registry_context ?? { enabled: false, entities: [], warnings: [] };
+    }
+  } catch (err) {
+    result.entity_registry_context = { enabled: false, entities: [], warnings: [err.message] };
+  }
   return { ...result, generated_locally: false, safety: chatgptBridgeSafety };
 }
 

@@ -667,6 +667,27 @@ const schemaTypeFixtures = [
 
 const integerMaximumFixtures = [
   {
+    label: "chatgpt_bridge_build_proofing_context entityLimit over maximum",
+    name: "chatgpt_bridge_build_proofing_context",
+    field: "entityLimit",
+    expectedMaximum: 50,
+    arguments: {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      includeEntityRegistry: true,
+      entityLimit: 51,
+    },
+    expectedMessage: "entityLimit must be an integer less than or equal to 50.",
+  },  {
+    label: "chatgpt_bridge_build_writing_context entityLimit over maximum",
+    name: "chatgpt_bridge_build_writing_context",
+    field: "entityLimit",
+    expectedMaximum: 50,
+    arguments: {
+      includeEntityRegistry: true,
+      entityLimit: 51,
+    },
+    expectedMessage: "entityLimit must be an integer less than or equal to 50.",
+  },  {
     label: "approval_queue_bridge_readiness_report maxPreviewChars over maximum",
     name: "approval_queue_bridge_readiness_report",
     field: "maxPreviewChars",
@@ -1012,6 +1033,47 @@ const sizeConstraintFixtures = [
 
 const stringArrayBlankFixtures = [
   {
+    label: "chatgpt_bridge_build_writing_context entityIds blank item",
+    name: "chatgpt_bridge_build_writing_context",
+    field: "entityIds",
+    arguments: {
+      includeEntityRegistry: true,
+      entityIds: [""],
+    },
+    expectedMessage: "entityIds must not contain blank strings.",
+  },
+  {
+    label: "chatgpt_bridge_build_writing_context entityCategories blank item",
+    name: "chatgpt_bridge_build_writing_context",
+    field: "entityCategories",
+    arguments: {
+      includeEntityRegistry: true,
+      entityCategories: ["   "],
+    },
+    expectedMessage: "entityCategories must not contain blank strings.",
+  },
+  {
+    label: "chatgpt_bridge_build_proofing_context entityIds blank item",
+    name: "chatgpt_bridge_build_proofing_context",
+    field: "entityIds",
+    arguments: {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      includeEntityRegistry: true,
+      entityIds: [""],
+    },
+    expectedMessage: "entityIds must not contain blank strings.",
+  },
+  {
+    label: "chatgpt_bridge_build_proofing_context entityCategories blank item",
+    name: "chatgpt_bridge_build_proofing_context",
+    field: "entityCategories",
+    arguments: {
+      candidateId: "writing_candidate_20260612-000000-00000000",
+      includeEntityRegistry: true,
+      entityCategories: ["   "],
+    },
+    expectedMessage: "entityCategories must not contain blank strings.",
+  },  {
     label: "validate_jsonl blank file item",
     name: "validate_jsonl",
     field: "files",
@@ -1493,6 +1555,10 @@ const expectedDefaultMetadata = new Map([
     includeWritingCard: true,
     includeProofingCard: true,
     includeLongline: true,
+    includeEntityRegistry: false,
+    entityLimit: 20,
+    includeEntityEvidence: true,
+    includeEntityProvenance: false,
     maxContextChars: 120000,
   }],
   ["chatgpt_bridge_save_candidate", {
@@ -1506,6 +1572,10 @@ const expectedDefaultMetadata = new Map([
     includeWritingCard: true,
     includeProofingCard: true,
     includeLongline: true,
+    includeEntityRegistry: false,
+    entityLimit: 20,
+    includeEntityEvidence: true,
+    includeEntityProvenance: false,
     maxContextChars: 120000,
   }],
   ["chatgpt_bridge_save_proof_report", {
@@ -1636,6 +1706,8 @@ const expectedDefaultMetadata = new Map([
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
+  ["chatgpt_bridge_build_writing_context:entityLimit", 50],
+  ["chatgpt_bridge_build_proofing_context:entityLimit", 50],
   ["query_mcp_audit:limit", 1000],
   ["search_context:top", 100],
   ["run_pipeline:top", 100],
@@ -1699,6 +1771,18 @@ const expectedInputLimits = {
   fileItemMaxLength: 4096,
 };
 
+function expectedArrayMaxItems(field) {
+  if (field === "files") return expectedInputLimits.fileArrayMaxItems;
+  if (field === "entityIds") return 20;
+  return expectedInputLimits.arrayMaxItems;
+}
+
+function expectedArrayItemMaxLength(field) {
+  if (field === "files") return expectedInputLimits.fileItemMaxLength;
+  if (field === "entityIds") return 160;
+  return expectedInputLimits.arrayItemMaxLength;
+}
+
 const expectedContentStringFields = new Set([
   "task",
   "feedback",
@@ -1708,7 +1792,7 @@ const expectedContentStringFields = new Set([
 ]);
 
 function expectedStringMaxLength(field) {
-  if (field === "q") {
+  if (field === "q" || field === "entityQuery") {
     return 120;
   }
   if (field === "chatOutputText") {
@@ -4701,12 +4785,8 @@ async function runSmokeTest(options) {
           fieldSchema.items?.type === "string",
           `${expectedTool}.${field} did not expose string array items.`,
         );
-        const expectedMaxItems = field === "files"
-          ? expectedInputLimits.fileArrayMaxItems
-          : expectedInputLimits.arrayMaxItems;
-        const expectedItemMaxLength = field === "files"
-          ? expectedInputLimits.fileItemMaxLength
-          : expectedInputLimits.arrayItemMaxLength;
+        const expectedMaxItems = expectedArrayMaxItems(field);
+        const expectedItemMaxLength = expectedArrayItemMaxLength(field);
         assert(
           fieldSchema.maxItems === expectedMaxItems,
           `${expectedTool}.${field} maxItems was ${fieldSchema.maxItems}, expected ${expectedMaxItems}.`,
