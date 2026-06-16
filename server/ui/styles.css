@@ -3148,3 +3148,74 @@ dialog::backdrop {
     bottom: 78px;
   }
 }
+
+
+/* Phase 22A readability and visual upload fixes */
+.field input::placeholder,
+.field textarea::placeholder {
+  color: #d4edf5;
+  opacity: 0.72;
+}
+
+.field select option,
+.section-heading select option {
+  color: #061424;
+  background: #ffffff;
+}
+
+.field input[type="file"] {
+  min-height: 44px;
+  padding: 7px 11px;
+}
+
+.field input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  padding: 7px 12px;
+  color: #061424;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.section-heading select:focus {
+  color: var(--ink);
+  background: #102b3a;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(12 124 134 / 22%);
+}
+
+.field input:user-invalid,
+.field select:user-invalid,
+.field textarea:user-invalid,
+.visual-upload-panel.was-validated input:invalid,
+.visual-upload-panel.was-validated select:invalid,
+.visual-upload-panel.was-validated textarea:invalid {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.12);
+}
+
+.field-help {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.field-help.is-error {
+  color: var(--red);
+}
+
+.field-help.is-success {
+  color: var(--green);
+}
+
+select:disabled,
+textarea:disabled,
+input:disabled {
+  opacity: 0.72;
+}

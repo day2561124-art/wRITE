@@ -318,6 +318,33 @@ async function main() {
     assert(appText.includes("refreshApprovalQueue"), "UI app.js is missing approval queue loading.");
     assert(appText.includes("handleApprovalDecision"), "UI app.js is missing approval decisions.");
     assert(appText.includes("refreshCleanup"), "UI app.js is missing cleanup loading.");
+    // Additional UI interaction checks
+    assert(indexText.includes('id="pipeline-submit-button"'), "index.html missing pipeline submit button id");
+    assert(indexText.includes('id="search-only-button"'), "index.html missing search-only button id");
+    assert(indexText.includes('id="workflow-task-submit-button"'), "index.html missing workflow task submit button id");
+    assert(indexText.includes('id="visual-upload-file-status"'), "index.html missing visual upload file status element");
+    assert(indexText.includes('id="visual-upload-status"'), "index.html missing visual upload status element");
+    assert(indexText.includes('id="visual-upload-submit"'), "index.html missing visual upload submit button");
+
+    // app.js should reference the key selectors and helper functions
+    assert(appText.includes('pipeline-submit-button'), "app.js missing pipeline-submit-button selector reference");
+    assert(appText.includes('search-only-button'), "app.js missing search-only-button selector reference");
+    assert(appText.includes('workflow-task-submit-button'), "app.js missing workflow-task-submit-button selector reference");
+    assert(appText.includes('visual-upload-file'), "app.js missing visual-upload-file selector reference");
+    assert(appText.includes('describeVisualUploadFile'), "app.js missing describeVisualUploadFile helper");
+    assert(appText.includes('setVisualUploadStatus'), "app.js missing setVisualUploadStatus helper");
+
+    // Ensure workflow form does not contain nested <form> and has balanced details
+    const wfStart = indexText.indexOf('id="workflow-task-form"');
+    const wfEnd = indexText.indexOf('</form>', wfStart);
+    const wfHtml = wfStart >= 0 && wfEnd > wfStart ? indexText.slice(wfStart, wfEnd) : '';
+    assert(!wfHtml.includes('<form'), 'workflow-task-form contains a nested <form>');
+    const detailsOpen = (wfHtml.match(/<details/gu) || []).length;
+    const detailsClose = (wfHtml.match(/<\/details>/gu) || []).length;
+    assert(detailsOpen === detailsClose, 'workflow-task-form has unbalanced <details> tags');
+
+    // Check loading/feedback labels exist in JS
+    assert(appText.includes('建立中…') || appText.includes('檢索中…') || appText.includes('上傳中…'), 'app.js missing loading label text for actions');
     assert(appText.includes("handleCleanupDecision"), "UI app.js is missing cleanup decisions.");
     assert(
       appText.includes('status !== "approved"'),

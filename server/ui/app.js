@@ -288,7 +288,10 @@ async function api(url, options = {}) {
       headers: options.body ? { "Content-Type": "application/json" } : undefined,
       ...options,
     });
-    const payload = await response.json();
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json")
+      ? await response.json()
+      : { ok: response.ok, error: await response.text() };
     if (!response.ok || payload.ok === false) {
       throw new Error(payload.error ?? payload.result?.stderr ?? `HTTP ${response.status}`);
     }
@@ -306,6 +309,22 @@ async function runAction(name, body = {}) {
   const output = [payload.result.stdout, payload.result.stderr].filter(Boolean).join("\n\n");
   $("#action-console").textContent = output || `${name}: completed`;
   return payload.result;
+}
+
+function setActionProgress(message) {
+  const consoleEl = $("#action-console");
+  if (consoleEl) consoleEl.textContent = message;
+}
+
+function markButtonRunning(button, label) {
+  if (!button) return () => {};
+  const previousText = button.textContent;
+  button.textContent = label;
+  button.disabled = true;
+  return () => {
+    button.textContent = previousText;
+    button.disabled = false;
+  };
 }
 
 async function loadFile(projectPath) {
@@ -597,24 +616,147 @@ function renderOperatorOverview() {
       ta.disabled = !draftText;
     }
     const actionState = new Map((wb.next_actions ?? []).map((item) => [item.key, item]));
+    const lineage = wb.lineage ?? {};
+    const canSaveCandidate = actionState.get("save_chat_output_candidate")?.enabled === true;
+    const hasCandidate = Boolean(lineage.candidate_id);
+    const hasProofReport = Boolean(lineage.proof_report_id);
+    if (ta && canSaveCandidate) {
+      ta.disabled = false;
+      ta.placeholder = "請把 ChatGPT 產出的正文候選貼到這裡，再按「保存正文候選」。";
+    }
     const controls = [
-      ["workbench-refresh", "refresh", ""],
-      ["workbench-generate", "generate_candidate", "ChatGPT Bridge 尚未接入，請先使用聊天欄生成候選"],
-      ["workbench-save", "save_chat_output_candidate", "尚無正文候選，無法保存"],
-      ["workbench-send-proof", "save_proof_report", "尚未保存候選，無法送去驗稿"],
-      ["workbench-add-approval", "go_to_approval_queue", "尚未完成驗稿，無法加入待確認"],
+      ["workbench-refresh", true, ""],
+      ["workbench-generate", true, "ChatGPT Bridge 尚未接入；此按鈕會帶你到可複製 prompt 的正文寫作頁。"],
+      ["workbench-save", canSaveCandidate, actionState.get("save_chat_output_candidate")?.disabled_reason || "尚未建立本輪寫作 context，或本輪已有候選。"],
+      ["workbench-send-proof", hasCandidate && !hasProofReport, hasCandidate ? "本候選已建立驗稿資料。" : "尚未保存候選，無法送去驗稿。"],
+      ["workbench-add-approval", hasCandidate && hasProofReport && !wb.chapter?.in_approval_queue, hasProofReport ? "此候選已在待確認流程，或沒有可送出的項目。" : "尚未完成驗稿，無法加入待確認。"],
     ];
-    for (const [id, key, fallbackReason] of controls) {
+    for (const [id, enabled, fallbackReason] of controls) {
       const button = document.getElementById(id);
       if (!button) continue;
-      const action = actionState.get(key);
-      button.disabled = action ? action.enabled !== true : key !== "refresh";
-      const reason = action?.disabled_reason || fallbackReason;
-      button.dataset.disabledReason = reason;
-      button.title = button.disabled ? reason : "";
+      button.disabled = enabled !== true;
+      button.dataset.disabledReason = fallbackReason || "";
+      button.title = button.disabled ? fallbackReason : "";
     }
   }
   $("#settlement-empty-state").hidden = (state.workflow.adoptedChapters ?? []).length > 0;
+}
+
+
+function bindOverviewWorkbenchActions() {
+  const refreshButton = $("#workbench-refresh");
+  refreshButton?.addEventListener("click", () => {
+    refreshState(true).catch((error) => toast(error.message, true));
+  });
+
+  const generateButton = $("#workbench-generate");
+  generateButton?.addEventListener("click", async () => {
+    switchView("compose");
+    try {
+      await openComposeResult("data/outputs/task_prompt.md");
+      toast("已切到正文寫作頁。請複製本章任務給 ChatGPT 生成正文候選，再貼回保存區。");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  const saveButton = $("#workbench-save");
+  saveButton?.addEventListener("click", async () => {
+    const chatOutputText = $("#workbench-draft-text")?.value?.trim() ?? "";
+    if (!chatOutputText) {
+      toast("請先把正文候選貼到文字框。", true);
+      return;
+    }
+    try {
+      const payload = await api("/api/writer-workbench/save-chat-output-candidate", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceBundleId: state.workbench?.lineage?.workflow_run_id ?? "",
+          chatOutputText,
+          title: state.workbench?.chapter?.title ?? "",
+          chapterLabel: state.workbench?.chapter?.chapter_id ?? state.workbench?.chapter?.title ?? "",
+        }),
+      });
+      toast(`正文候選已保存：${payload.candidate?.candidate_id ?? "created"}`);
+      await refreshState();
+      switchView("writer-workbench");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  const proofButton = $("#workbench-send-proof");
+  proofButton?.addEventListener("click", async () => {
+    const candidateId = state.workbench?.lineage?.candidate_id;
+    if (!candidateId) {
+      toast("尚未保存候選，無法建立驗稿 Context。", true);
+      return;
+    }
+    try {
+      const payload = await api("/api/writer-workbench/build-proofing-context", {
+        method: "POST",
+        body: JSON.stringify({ candidateId }),
+      });
+      toast(`驗稿 Context 已建立：${payload.context?.proofing_context_id ?? "created"}`);
+      await refreshState();
+      switchView("review");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  const approvalButton = $("#workbench-add-approval");
+  approvalButton?.addEventListener("click", async () => {
+    const candidateId = state.workbench?.lineage?.candidate_id;
+    const proofReportId = state.workbench?.lineage?.proof_report_id;
+    if (!candidateId || !proofReportId) {
+      toast("候選與驗稿報告都完成後，才能加入待我確認。", true);
+      return;
+    }
+    try {
+      const payload = await api("/api/writer-workbench/request-adoption", {
+        method: "POST",
+        body: JSON.stringify({
+          candidateId,
+          proofReportId,
+          reason: "overview workbench adoption request",
+        }),
+      });
+      toast(`已加入待我確認：${payload.request?.approval_item_id ?? "created"}`);
+      await refreshState();
+      switchView("approval");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+
+  document.addEventListener("click", async (event) => {
+    const tab = event.target.closest("[data-wtab]");
+    if (!tab) return;
+    $$('[data-wtab]').forEach((button) => {
+      button.classList.toggle("is-active", button === tab);
+    });
+    const textArea = $("#workbench-draft-text");
+    if (!textArea) return;
+    const outputMap = {
+      task: "data/outputs/task_prompt.md",
+      materials: "data/outputs/generation_context.md",
+      retrieval: "data/outputs/retrieval_context.md",
+    };
+    const outputPath = outputMap[tab.dataset.wtab];
+    if (!outputPath) {
+      textArea.value = state.currentDraftText ?? "";
+      textArea.disabled = !textArea.value && !(state.workbench?.next_actions ?? [])
+        .some((item) => item.key === "save_chat_output_candidate" && item.enabled === true);
+      return;
+    }
+    try {
+      textArea.value = await loadFile(outputPath);
+      textArea.disabled = true;
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
 }
 
 function bindWriterWorkbenchActions() {
@@ -674,8 +816,10 @@ function renderSources() {
 }
 
 function renderOutputs() {
+  const outputList = $("#output-list");
+  if (!outputList) return;
   const outputs = state.data?.outputs ?? [];
-  $("#output-list").innerHTML = outputs.map((output) => `
+  outputList.innerHTML = outputs.map((output) => `
     <div class="output-item">
       <div>
         <strong>${escapeHtml(output.label)}</strong>
@@ -2282,6 +2426,10 @@ async function ensureWriteConfirmed(dryRun, label) {
 
 async function handlePipeline(event) {
   event.preventDefault();
+  const restoreButton = markButtonRunning($("#pipeline-submit-button"), "建立中…");
+  $("#compose-empty-state").textContent = "正在建立本輪任務提示，請稍候。";
+  setActionProgress("正在執行 pipeline：建立 generation context、retrieval context 與可複製任務提示…");
+  toast("正在建立本輪任務提示…");
   try {
     await runAction("pipeline", {
       query: $("#pipeline-query").value,
@@ -2290,13 +2438,21 @@ async function handlePipeline(event) {
       top: Number.parseInt($("#pipeline-top").value, 10),
     });
     await Promise.all([refreshState(), openComposeResult("data/outputs/task_prompt.md")]);
+    $("#compose-empty-state").textContent = "本輪任務提示已建立。請複製給 ChatGPT 生成正文候選。";
     toast("流水線已完成");
   } catch (error) {
+    setActionProgress(`pipeline 失敗：${error.message}`);
+    $("#compose-empty-state").textContent = "建立本輪任務提示失敗，請查看操作輸出或 Console。";
     toast(error.message, true);
+  } finally {
+    restoreButton();
   }
 }
 
 async function handleSearchOnly() {
+  const restoreButton = markButtonRunning($("#search-only-button"), "檢索中…");
+  setActionProgress("正在執行 search：建立 retrieval context…");
+  toast("正在檢索…");
   try {
     await runAction("search", {
       query: $("#pipeline-query").value,
@@ -2305,7 +2461,10 @@ async function handleSearchOnly() {
     await Promise.all([refreshState(), openComposeResult("data/outputs/retrieval_context.md")]);
     toast("檢索已完成");
   } catch (error) {
+    setActionProgress(`檢索失敗：${error.message}`);
     toast(error.message, true);
+  } finally {
+    restoreButton();
   }
 }
 
@@ -2336,6 +2495,8 @@ function renderWorkflowContext(result) {
 }
 
 async function handleWorkflowContext() {
+  const restoreButton = markButtonRunning($("#workflow-rebuild-context-button"), "重建中…");
+  $("#workflow-context-status").textContent = "正在重建 context bundle…";
   try {
     const payload = await api("/api/workflow/context-bundles/draft", {
       method: "POST",
@@ -2347,12 +2508,17 @@ async function handleWorkflowContext() {
     renderWorkflowContext(payload.result);
     toast("Draft context bundle 已建立");
   } catch (error) {
+    $("#workflow-context-status").textContent = "context bundle 建立失敗";
     toast(error.message, true);
+  } finally {
+    restoreButton();
   }
 }
 
 async function handleWorkflowTask(event) {
   event.preventDefault();
+  const restoreButton = markButtonRunning($("#workflow-task-submit-button"), "建立中…");
+  $("#workflow-context-status").textContent = "正在建立正文任務與 agent run…";
   try {
     const modules = workflowRequiredModules();
     const payload = await api("/api/workflow/draft-tasks", {
@@ -2370,7 +2536,10 @@ async function handleWorkflowTask(event) {
     $("#draft-chapter").value = $("#workflow-source-chapter").value;
     toast("正文任務與 agent run 已建立");
   } catch (error) {
+    $("#workflow-context-status").textContent = "正文任務建立失敗";
     toast(error.message, true);
+  } finally {
+    restoreButton();
   }
 }
 
@@ -2795,18 +2964,50 @@ function annotateDisabledReasons() {
   });
 }
 
+function setVisualUploadStatus(message, kind = "") {
+  const status = $("#visual-upload-status");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("is-error", kind === "error");
+  status.classList.toggle("is-success", kind === "success");
+}
+
+function describeVisualUploadFile(file) {
+  if (!file) return "尚未選擇圖片。";
+  const sizeMb = file.size / (1024 * 1024);
+  return `已選擇：${file.name}（${sizeMb >= 1 ? sizeMb.toFixed(2) : Math.max(1, Math.round(file.size / 1024))} ${sizeMb >= 1 ? "MB" : "KB"}）`;
+}
+
 async function handleVisualUpload(event) {
   event.preventDefault();
+  const form = $("#visual-upload-form");
   const fileInput = $("#visual-upload-file");
   const file = fileInput.files?.[0];
-  if (!file) {
-    toast("請先選擇圖片", true);
+  const character = $("#visual-upload-character").value.trim();
+  const title = $("#visual-upload-title").value.trim();
+  const missing = [];
+  if (!file) missing.push("圖片");
+  if (!character) missing.push("角色");
+  if (!title) missing.push("標題");
+  if (missing.length) {
+    form?.classList.add("was-validated");
+    setVisualUploadStatus(`請先補齊：${missing.join("、")}。`, "error");
+    toast(`請先補齊：${missing.join("、")}`, true);
     return;
   }
   if (file.size > maxVisualUploadBytes) {
+    setVisualUploadStatus("圖片不可超過 8 MB。", "error");
     toast("圖片不可超過 8 MB", true);
     return;
   }
+
+  const submitButton = $("#visual-upload-submit");
+  const originalLabel = submitButton?.textContent ?? "上傳";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "上傳中…";
+  }
+  setVisualUploadStatus("正在讀取圖片並寫入圖庫…");
 
   try {
     const payload = await api("/api/visuals/upload", {
@@ -2815,8 +3016,8 @@ async function handleVisualUpload(event) {
         filename: file.name,
         mimeType: file.type,
         dataBase64: await readFileAsDataUrl(file),
-        character: $("#visual-upload-character").value,
-        title: $("#visual-upload-title").value,
+        character,
+        title,
         category: $("#visual-upload-category").value,
         tags: $("#visual-upload-tags").value,
         notes: $("#visual-upload-notes").value,
@@ -2825,11 +3026,21 @@ async function handleVisualUpload(event) {
     state.data.visuals = payload.visuals;
     state.visualFilters = { character: "", category: "", status: "" };
     state.activeVisualId = payload.upload.record.visual_id;
-    $("#visual-upload-form").reset();
+    form?.reset();
+    form?.classList.remove("was-validated");
+    const fileStatus = $("#visual-upload-file-status");
+    if (fileStatus) fileStatus.textContent = "尚未選擇圖片。";
+    setVisualUploadStatus(`人設圖已上傳：${payload.upload.record.visual_id}`, "success");
     renderVisuals();
     toast("人設圖已上傳");
   } catch (error) {
+    setVisualUploadStatus(error.message, "error");
     toast(error.message, true);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalLabel;
+    }
   }
 }
 
@@ -2868,7 +3079,7 @@ function bindEvents() {
   $$(".nav-item").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
   });
-  $("[data-action='build-context']").addEventListener("click", async () => {
+  $("[data-action='build-context']")?.addEventListener("click", async () => {
     try {
       await runAction("buildContext");
       await refreshState();
@@ -2877,42 +3088,42 @@ function bindEvents() {
       toast(error.message, true);
     }
   });
-  $("#refresh-button").addEventListener("click", () => refreshState(true).catch((error) => toast(error.message, true)));
-  $("#refresh-neural-button").addEventListener("click", () => (
+  $("#refresh-button")?.addEventListener("click", () => refreshState(true).catch((error) => toast(error.message, true)));
+  $("#refresh-neural-button")?.addEventListener("click", () => (
     loadNeuralStatus(true).catch((error) => toast(error.message, true))
   ));
-  $("#refresh-settlement-button").addEventListener("click", () => (
+  $("#refresh-settlement-button")?.addEventListener("click", () => (
     Promise.all([
       refreshCanonSettlementState(true),
       refreshWorkflowSettlementState(),
     ]).catch((error) => toast(error.message, true))
   ));
-  $("#scan-approval-queue-button").addEventListener("click", () => handleScanApprovalQueue());
-  $("#refresh-approval-queue-button").addEventListener("click", () => (
+  $("#scan-approval-queue-button")?.addEventListener("click", () => handleScanApprovalQueue());
+  $("#refresh-approval-queue-button")?.addEventListener("click", () => (
     refreshApprovalQueue(true).catch((error) => toast(error.message, true))
   ));
-  $("#approval-snapshot-select").addEventListener("change", renderApprovalQueue);
-  $("#create-rollback-approval-button").addEventListener("click", () => {
+  $("#approval-snapshot-select")?.addEventListener("change", renderApprovalQueue);
+  $("#create-rollback-approval-button")?.addEventListener("click", () => {
     const snapshotId = $("#approval-snapshot-select").value;
     if (snapshotId) handleScanApprovalQueue(snapshotId);
   });
-  $("#approval-confirm-checkbox").addEventListener("change", renderApprovalQueue);
-  $("#approval-second-confirm-checkbox").addEventListener("change", renderApprovalQueue);
-  $("#approval-confirm-text").addEventListener("input", renderApprovalQueue);
-  $("#approval-confirm-button").addEventListener("click", () => handleApprovalDecision("confirm"));
-  $("#approval-reject-button").addEventListener("click", () => handleApprovalDecision("reject"));
-  $("#approval-defer-button").addEventListener("click", () => handleApprovalDecision("defer"));
-  $("#scan-cleanup-button").addEventListener("click", () => handleCleanupScan(false));
-  $("#create-cleanup-proposal-button").addEventListener("click", () => handleCleanupScan(true));
-  $("#refresh-cleanup-button").addEventListener("click", () => (
+  $("#approval-confirm-checkbox")?.addEventListener("change", renderApprovalQueue);
+  $("#approval-second-confirm-checkbox")?.addEventListener("change", renderApprovalQueue);
+  $("#approval-confirm-text")?.addEventListener("input", renderApprovalQueue);
+  $("#approval-confirm-button")?.addEventListener("click", () => handleApprovalDecision("confirm"));
+  $("#approval-reject-button")?.addEventListener("click", () => handleApprovalDecision("reject"));
+  $("#approval-defer-button")?.addEventListener("click", () => handleApprovalDecision("defer"));
+  $("#scan-cleanup-button")?.addEventListener("click", () => handleCleanupScan(false));
+  $("#create-cleanup-proposal-button")?.addEventListener("click", () => handleCleanupScan(true));
+  $("#refresh-cleanup-button")?.addEventListener("click", () => (
     refreshCleanup(true).catch((error) => toast(error.message, true))
   ));
-  $("#cleanup-confirm-checkbox").addEventListener("change", renderCleanup);
-  $("#cleanup-approve-button").addEventListener("click", () => handleCleanupDecision("approve"));
-  $("#cleanup-execute-button").addEventListener("click", () => handleCleanupDecision("execute"));
-  $("#cleanup-reject-button").addEventListener("click", () => handleCleanupDecision("reject"));
-  $("#cleanup-defer-button").addEventListener("click", () => handleCleanupDecision("defer"));
-  $("#validate-button").addEventListener("click", runValidation);
+  $("#cleanup-confirm-checkbox")?.addEventListener("change", renderCleanup);
+  $("#cleanup-approve-button")?.addEventListener("click", () => handleCleanupDecision("approve"));
+  $("#cleanup-execute-button")?.addEventListener("click", () => handleCleanupDecision("execute"));
+  $("#cleanup-reject-button")?.addEventListener("click", () => handleCleanupDecision("reject"));
+  $("#cleanup-defer-button")?.addEventListener("click", () => handleCleanupDecision("defer"));
+  $("#validate-button")?.addEventListener("click", runValidation);
 
   $("#mode-control").addEventListener("click", (event) => {
     const button = event.target.closest("[data-mode]");
@@ -2923,21 +3134,21 @@ function bindEvents() {
     });
   });
 
-  $("#pipeline-form").addEventListener("submit", handlePipeline);
-  $("#workflow-task-form").addEventListener("submit", handleWorkflowTask);
-  $("#workflow-rebuild-context-button").addEventListener("click", handleWorkflowContext);
-  $("#refresh-workflow-button").addEventListener("click", () => (
+  $("#pipeline-form")?.addEventListener("submit", handlePipeline);
+  $("#workflow-task-form")?.addEventListener("submit", handleWorkflowTask);
+  $("#workflow-rebuild-context-button")?.addEventListener("click", handleWorkflowContext);
+  $("#refresh-workflow-button")?.addEventListener("click", () => (
     refreshWorkflowState(true).catch((error) => toast(error.message, true))
   ));
-  $("#search-only-button").addEventListener("click", handleSearchOnly);
-  $("#draft-form").addEventListener("submit", handleSaveDraft);
-  $("#draft-select").addEventListener("change", handleDraftSelect);
-  $("#prepare-proof-button").addEventListener("click", prepareProof);
-  $("#copy-draft-button").addEventListener("click", () => copyText(state.currentDraftText, "候選稿"));
-  $("#proof-form").addEventListener("submit", handleSaveProof);
-  $("#workflow-adopt-button").addEventListener("click", () => handleWorkflowDraftAction("adopt"));
-  $("#workflow-reject-button").addEventListener("click", () => handleWorkflowDraftAction("reject"));
-  $("#workflow-archive-button").addEventListener("click", () => handleWorkflowDraftAction("archive"));
+  $("#search-only-button")?.addEventListener("click", handleSearchOnly);
+  $("#draft-form")?.addEventListener("submit", handleSaveDraft);
+  $("#draft-select")?.addEventListener("change", handleDraftSelect);
+  $("#prepare-proof-button")?.addEventListener("click", prepareProof);
+  $("#copy-draft-button")?.addEventListener("click", () => copyText(state.currentDraftText, "候選稿"));
+  $("#proof-form")?.addEventListener("submit", handleSaveProof);
+  $("#workflow-adopt-button")?.addEventListener("click", () => handleWorkflowDraftAction("adopt"));
+  $("#workflow-reject-button")?.addEventListener("click", () => handleWorkflowDraftAction("reject"));
+  $("#workflow-archive-button")?.addEventListener("click", () => handleWorkflowDraftAction("archive"));
   $("#settlement-adopted-select").addEventListener("change", () => {
     state.activeAdoptedChapterId = $("#settlement-adopted-select").value;
     state.activeSettlementContextId = "";
@@ -2947,24 +3158,31 @@ function bindEvents() {
     state.workflow.settlementPendingCandidate = null;
     renderSettlementWorkflow();
   });
-  $("#create-settlement-context-button").addEventListener("click", handleCreateSettlementContext);
-  $("#workflow-settlement-report-form").addEventListener("submit", handleSaveSettlementReport);
-  $("#create-workflow-pending-candidate-button").addEventListener(
+  $("#create-settlement-context-button")?.addEventListener("click", handleCreateSettlementContext);
+  $("#workflow-settlement-report-form")?.addEventListener("submit", handleSaveSettlementReport);
+  $("#create-workflow-pending-candidate-button")?.addEventListener(
     "click",
     handleCreateWorkflowPendingCandidate,
   );
-  $("#feedback-form").addEventListener("submit", handleFeedback);
-  $("#visual-upload-form").addEventListener("submit", handleVisualUpload);
-  $("#settlement-import-form").addEventListener("submit", handleSettlementImport);
-  $("#candidate-reparse-button").addEventListener("click", handleReparseCandidate);
-  $("#candidate-reject-button").addEventListener("click", handleRejectCandidate);
-  $("#candidate-activate-button").addEventListener("click", handleActivateCandidate);
-  $("#candidate-activation-confirm").addEventListener("change", updateActivationControls);
-  $("#candidate-second-confirm").addEventListener("change", updateActivationControls);
-  $("#candidate-second-confirm-text").addEventListener("input", updateActivationControls);
-  $("#rollback-confirm").addEventListener("change", () => renderSnapshots(state.canon.snapshots));
-  $("#visual-upload-file").addEventListener("change", (event) => {
+  $("#feedback-form")?.addEventListener("submit", handleFeedback);
+  const visualUploadForm = $("#visual-upload-form");
+  if (visualUploadForm) {
+    visualUploadForm.noValidate = true;
+    visualUploadForm.addEventListener("submit", handleVisualUpload);
+  }
+  $("#settlement-import-form")?.addEventListener("submit", handleSettlementImport);
+  $("#candidate-reparse-button")?.addEventListener("click", handleReparseCandidate);
+  $("#candidate-reject-button")?.addEventListener("click", handleRejectCandidate);
+  $("#candidate-activate-button")?.addEventListener("click", handleActivateCandidate);
+  $("#candidate-activation-confirm")?.addEventListener("change", updateActivationControls);
+  $("#candidate-second-confirm")?.addEventListener("change", updateActivationControls);
+  $("#candidate-second-confirm-text")?.addEventListener("input", updateActivationControls);
+  $("#rollback-confirm")?.addEventListener("change", () => renderSnapshots(state.canon.snapshots));
+  $("#visual-upload-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
+    const fileStatus = $("#visual-upload-file-status");
+    if (fileStatus) fileStatus.textContent = describeVisualUploadFile(file);
+    setVisualUploadStatus(file ? "圖片已選擇，請確認角色與標題後按上傳。" : "請先選擇圖片，並填完角色與標題。");
     if (!file || $("#visual-upload-title").value.trim()) return;
     $("#visual-upload-title").value = file.name.replace(/\.[^.]+$/u, "");
   });
@@ -3117,6 +3335,7 @@ function bindEvents() {
     renderVisuals();
   });
   try { bindWriterWorkbenchActions(); } catch (e) { /* ignore if missing */ }
+  try { bindOverviewWorkbenchActions(); } catch (e) { /* ignore if missing */ }
 }
 
 async function initialize() {

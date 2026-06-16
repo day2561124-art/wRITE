@@ -297,7 +297,7 @@
                 <p>驗稿結果：<strong>0</strong></p>
                 <p>章節結算：<strong>0</strong></p>
                 <p>重大事件：<strong>0</strong></p>
-                <div class="form-actions"><button class="button" type="button">查看全部</button></div>
+                <div class="form-actions"><button class="button" type="button" data-go-view="approval">查看全部</button></div>
               </div>
             </section>
 
@@ -372,7 +372,7 @@
               </label>
 
               <div class="form-actions">
-                <button class="button primary" type="submit">建立本輪任務提示</button>
+                <button id="pipeline-submit-button" class="button primary" type="submit">建立本輪任務提示</button>
                 <button id="search-only-button" class="button secondary" type="button">只做檢索</button>
               </div>
             </form>
@@ -404,8 +404,6 @@
               </div>
               <span id="workflow-context-status" class="workflow-status">尚未建立 context bundle</span>
             </div>
-            <details class="technical-details">
-              <summary>技術詳情：run_id 與 context bundle</summary>
             <div class="form-row">
               <label class="field">
                 <span>來源章節</span>
@@ -422,7 +420,7 @@
             </label>
             <div class="form-actions">
               <button id="workflow-rebuild-context-button" class="button secondary" type="button">重建上下文</button>
-              <button class="button primary" type="submit">建立正文任務</button>
+              <button id="workflow-task-submit-button" class="button primary" type="submit">建立正文任務</button>
             </div>
             <div id="workflow-context-facts" class="workflow-facts"></div>
           </form>
@@ -445,20 +443,22 @@
                 <input id="draft-note" type="text" maxlength="5000" placeholder="選填">
               </label>
             </div>
-            <div class="form-row">
+            <details class="technical-details">
+              <summary>技術詳情：run_id、context bundle 與 neural trace</summary>
+              <div class="form-row">
+                <label class="field">
+                  <span>run_id</span>
+                  <input id="draft-run-id" type="text" maxlength="100" placeholder="建立正文任務後自動帶入">
+                </label>
+                <label class="field">
+                  <span>context_bundle_id</span>
+                  <input id="draft-context-bundle-id" type="text" maxlength="100" placeholder="建立 context 後自動帶入">
+                </label>
+              </div>
               <label class="field">
-                <span>run_id</span>
-                <input id="draft-run-id" type="text" maxlength="100" placeholder="建立正文任務後自動帶入">
+                <span>neural_modules_used_path</span>
+                <input id="draft-neural-path" type="text" maxlength="500" placeholder="有 run_id 時可自動推導">
               </label>
-              <label class="field">
-                <span>context_bundle_id</span>
-                <input id="draft-context-bundle-id" type="text" maxlength="100" placeholder="建立 context 後自動帶入">
-              </label>
-            </div>
-            <label class="field">
-              <span>neural_modules_used_path</span>
-              <input id="draft-neural-path" type="text" maxlength="500" placeholder="有 run_id 時可自動推導">
-            </label>
             </details>
             <label class="field">
               <span>正文</span>
@@ -711,6 +711,7 @@
                 <label class="field">
                   <span>圖片</span>
                   <input id="visual-upload-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required>
+                  <p id="visual-upload-file-status" class="field-help">尚未選擇圖片。</p>
                 </label>
                 <label class="field">
                   <span>角色</span>
@@ -739,7 +740,8 @@
                   <span>備註</span>
                   <textarea id="visual-upload-notes" rows="3" maxlength="4000" placeholder="僅作視覺參考，不成立新的能力機制。"></textarea>
                 </label>
-                <button class="button primary full-width" type="submit">上傳</button>
+                <button id="visual-upload-submit" class="button primary full-width" type="submit">上傳</button>
+                <p id="visual-upload-status" class="field-help" aria-live="polite">請先選擇圖片，並填完角色與標題。</p>
               </form>
             </aside>
 
