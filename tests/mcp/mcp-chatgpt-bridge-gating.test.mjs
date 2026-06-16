@@ -14,6 +14,8 @@ const options = {
   proofReports: path.join(projectPaths.proofReports, suffix),
   approvalQueue: path.join(projectPaths.approvalQueue, suffix),
 };
+const expectedBlockedAdoptionNextAction =
+  "Adoption request was blocked before approval queue creation. Review blocked_reasons on the candidate/proof report detail page.";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -54,6 +56,8 @@ async function main() {
   assert(Array.isArray(dryMissing.result.blocked_reasons), "blocked_reasons missing.");
   assert(dryMissing.result.blocked_reasons.some((r) => r.startsWith("missing_required_neural_modules")), "missing_required_neural_modules reason absent.");
 
+  assert(dryMissing.result.next_action === expectedBlockedAdoptionNextAction, "Missing modules dryRun must provide blocked next_action guidance.");
+
   // 2) proof verdict needs_revision should be blocked
   const candidate2 = (await chatgptBridgeTools.chatgpt_bridge_save_candidate({
     source_bundle_id: writing.bundle.bundle_id,
@@ -79,6 +83,7 @@ async function main() {
   assert(dryProof.result.blocked === true, "Proof verdict needs_revision must be blocked.");
   assert(dryProof.result.approval_item_created === false, "Blocked dry run must not create approval item.");
   assert(dryProof.result.blocked_reasons.some((r) => r.startsWith("proof_verdict_not_pass")), "proof_verdict_not_pass reason absent.");
+  assert(dryProof.result.next_action === expectedBlockedAdoptionNextAction, "Proof verdict dryRun must provide blocked next_action guidance.");
 
   // 3) proof severity P1 should be blocked
   const candidate3 = (await chatgptBridgeTools.chatgpt_bridge_save_candidate({
@@ -104,6 +109,7 @@ async function main() {
   }, options);
   assert(drySeverity.result.blocked === true, "Proof severity P1 must be blocked.");
   assert(drySeverity.result.blocked_reasons.some((r) => r.startsWith("proof_severity_blocking")), "proof_severity_blocking reason absent.");
+  assert(drySeverity.result.next_action === expectedBlockedAdoptionNextAction, "Proof severity dryRun must provide blocked next_action guidance.");
 
   // 4) dryRun:false in blocked state must not create approval item
   const blockedReal = await chatgptBridgeTools.chatgpt_bridge_request_adoption({
@@ -113,6 +119,11 @@ async function main() {
   }, options);
   assert(blockedReal.result.approval_item_created === false, "Blocked real run must not create approval item.");
   assert(blockedReal.result.blocked === true, "Blocked real run must be blocked.");
+  assert(blockedReal.result.next_action === expectedBlockedAdoptionNextAction, "Blocked real run must provide blocked next_action guidance.");
+  assert(
+    !blockedReal.result.next_action.includes("confirm this adoption request"),
+    "Blocked real run must not tell users to confirm a blocked request.",
+  );
 
   // 5) readiness report for blocked lineage should be decision=blocked
   const blockedItemId = blockedReal.result.approval_item_id || blockedReal.result.request_id || null;

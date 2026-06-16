@@ -674,11 +674,18 @@ export async function requestChatgptBridgeAdoption(input = {}, options = {}) {
     sourcePhase: "phase_14a_lite",
     verifiedBy: "phase_14b_e2e_dry_run",
   }, options);
+
+  const approvalQueueNextAction =
+    "Open the Writer Workbench approval queue and explicitly confirm this adoption request.";
+  const blockedAdoptionNextAction =
+    "Adoption request was blocked before approval queue creation. Review blocked_reasons on the candidate/proof report detail page.";
+
   return {
     ...result,
     adopted: false,
-    next_action:
-      "Open the Writer Workbench approval queue and explicitly confirm this adoption request.",
+    next_action: result.approval_item_created
+      ? approvalQueueNextAction
+      : (result.next_action ?? blockedAdoptionNextAction),
     safety: chatgptBridgeSafety,
   };
 }

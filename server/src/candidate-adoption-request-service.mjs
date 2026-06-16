@@ -16,6 +16,8 @@ import { projectPaths } from "./project-paths.mjs";
 const riskLevels = new Set(["low", "medium", "high"]);
 const riskRanks = { low: 1, medium: 2, high: 3 };
 const actionType = "adopt_writing_candidate";
+const blockedAdoptionNextAction =
+  "Adoption request was blocked before approval queue creation. Review blocked_reasons on the candidate/proof report detail page.";
 
 function requiredText(value, label, maxLength = 200) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required.`);
@@ -121,6 +123,7 @@ function blockedResult(candidateId, reason) {
     blocked_reason: reason,
     blocked_reasons: Array.isArray(reason) ? reason : (reason ? [reason] : []),
     safety: safety(),
+    next_action: blockedAdoptionNextAction,
   };
 }
 
@@ -305,6 +308,9 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
         warnings,
         candidate_status: candidateStatus(candidate.metadata),
         safety: safety(),
+        next_action: blockingReasons.length
+          ? blockedAdoptionNextAction
+          : "Dry run passed; no approval item was created.",
       };
     }
 
