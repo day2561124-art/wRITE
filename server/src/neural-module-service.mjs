@@ -31,6 +31,11 @@ const moduleSpecs = {
     model_version: "v1.0.0",
     result_type: "over_governance_report",
   },
+  writing_card_director: {
+    model_name: "local-writing-card-director",
+    model_version: "v1.0.0",
+    result_type: "writing_card_director_context",
+  },
 };
 
 function inputText(value) {
@@ -127,4 +132,8 @@ export function run_style_drift_detector(input, options) {
 
 export function run_over_governance_detector(input, options) {
   return runModule("over_governance_detector", input, options);
+}
+
+export function run_writing_card_director(input, options) {
+  return runModule("writing_card_director", input, options);
 }

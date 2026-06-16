@@ -24,6 +24,7 @@ import {
   run_over_governance_detector,
   run_scene_planner,
   run_style_drift_detector,
+  run_writing_card_director,
 } from "../../server/src/neural-module-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
@@ -39,6 +40,7 @@ const requiredWrapperModules = [
   "run_neural_critic",
   "run_style_drift_detector",
   "run_over_governance_detector",
+  "run_writing_card_director",
 ];
 const requiredTraceModules = requiredWrapperModules.map((name) => name.replace(/^run_/u, ""));
 
@@ -138,7 +140,7 @@ async function main() {
       "Draft did not preserve the registry LF active engine hash.",
     );
     assert(
-      saved.metadata.writing_method_component_label === "v2.8"
+      saved.metadata.writing_method_component_label === "v3.0"
         && saved.metadata.proofing_method_component_label === "v1.1",
       "Draft component labels were wrong.",
     );
@@ -296,6 +298,7 @@ async function main() {
       run_neural_critic,
       run_style_drift_detector,
       run_over_governance_detector,
+      run_writing_card_director,
     ];
     for (const wrapper of wrappers) {
       await wrapper("fixture", {

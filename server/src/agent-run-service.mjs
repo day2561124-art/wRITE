@@ -18,6 +18,7 @@ export const neuralModuleNames = new Set([
   "neural_critic",
   "style_drift_detector",
   "over_governance_detector",
+  "writing_card_director",
 ]);
 const runStatuses = new Set(["running", "success", "warning", "failed"]);
 

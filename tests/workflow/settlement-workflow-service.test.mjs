@@ -164,10 +164,11 @@ async function main() {
       "Settlement report omitted incomplete source warning.",
     );
     assert(report.metadata.settlement_neural_pipeline_required === true, "Settlement neural pipeline was optional.");
-    assert(
-      report.metadata.settlement_required_neural_modules.length === 5,
-      "Settlement required neural wrapper list was incomplete.",
-    );
+    
+      assert(
+        report.metadata.settlement_required_neural_modules.length === 6,
+        "Settlement required neural wrapper list was incomplete.",
+      );
     assert(
       report.metadata.settlement_pipeline_status === "incomplete_engine_pipeline"
         && report.metadata.settlement_neural_trace_complete === false,

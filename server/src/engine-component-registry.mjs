@@ -27,6 +27,7 @@ const neuralModuleNames = [
   "run_neural_critic",
   "run_style_drift_detector",
   "run_over_governance_detector",
+  "run_writing_card_director",
 ];
 
 function requireObject(value, label) {

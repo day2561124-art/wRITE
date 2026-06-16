@@ -23,7 +23,7 @@ function sha256(content) {
 const { registry } = await loadEngineComponentRegistry();
 assert.equal(validateEngineComponentRegistry(registry), registry);
 assert.equal(registry.design_principle, "engine-first");
-assert.equal(registry.components.writing_method.version, "v2.8");
+assert.equal(registry.components.writing_method.version, "v3.0");
 assert.equal(registry.components.proofing_method.version, "v1.1");
 assert.equal(registry.components.neural_pipeline.required, true);
 assert.equal(registry.components.governance_policy.required, true);
@@ -35,6 +35,7 @@ assert.deepEqual(moduleNames, [
   "run_neural_critic",
   "run_style_drift_detector",
   "run_over_governance_detector",
+  "run_writing_card_director",
 ]);
 
 const watchedPaths = [
@@ -56,7 +57,7 @@ assert.equal(status.read_only, true);
 assert.equal(status.components.canon_data.hash_matches, true);
 assert.equal(status.components.canon_data.actual_sha256_lf, expectedActiveEngineHash);
 assert.equal(status.components.neural_pipeline.required, true);
-assert.equal(status.components.neural_pipeline.modules.length, 5);
+assert.equal(status.components.neural_pipeline.modules.length, 6);
 assert(
   status.components.neural_pipeline.modules.every(
     (module) => module.required_status === "available" && module.status === "available",

@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { buildWritingCardDirectorContext } from "./writing-card-director-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -92,6 +93,11 @@ function normalizeInput(input = {}) {
       input.include_writing_card ?? input.includeWritingCard,
       true,
       "include_writing_card",
+    ),
+    includeWritingCardDirector: optionalBoolean(
+      input.include_writing_card_director ?? input.includeWritingCardDirector,
+      true,
+      "include_writing_card_director",
     ),
     includeProofingCard: optionalBoolean(
       input.include_proofing_card ?? input.includeProofingCard,
@@ -219,6 +225,7 @@ function chatMarkdown(bundle) {
   const engineStatus = bundle.engine_components_status;
   const requiredNeuralModules = bundle.required_neural_modules
     .map((moduleName) => `  - ${moduleName}`);
+  const writingCardDirectorPresent = bundle.content && bundle.content.writing_card_director_context ? "present" : "absent";
   return [
     "# GPT Writing Context Bundle",
     "",
@@ -238,6 +245,7 @@ function chatMarkdown(bundle) {
     `- neural_pipeline：${bundle.neural_pipeline_required ? "required" : "optional"}`,
     "- required neural modules：",
     ...requiredNeuralModules,
+    `- writing_card_director_context：${writingCardDirectorPresent}`,
     `- governance policy present：${engineStatus.components?.governance_policy?.exists === true}`,
     "- canon update permission：none",
     "- any canon change：requires user approval",
@@ -452,12 +460,28 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       generation_context: input.generationContext,
       retrieval_context_for_chat: allocated.content.retrieval_context,
       generation_context_for_chat: allocated.content.generation_context,
+      writing_card_director_context: null,
     },
     context_chars_used: allocated.context_chars_used,
     max_context_chars: allocated.context_chars_limit,
     truncated_sections: allocated.truncated_sections,
     warnings,
   };
+  // Attach deterministic writing card director context (local only)
+  if (input.includeWritingCardDirector) {
+    try {
+      const director = buildWritingCardDirectorContext({
+        taskPrompt: input.taskPrompt,
+        generationContext: input.generationContext,
+        retrievalContext: input.retrievalContext,
+        writingCardText: byLabel.active_writing_card.content,
+      });
+      bundle.content.writing_card_director_context = director;
+    } catch (error) {
+      bundle.warnings.push(`Writing card director generation failed: ${error.message}`);
+    }
+  }
+
   const markdown = chatMarkdown(bundle);
   await commitFileTransaction("build-gpt-writing-context", [
     { filePath: paths.bundle, content: `${JSON.stringify(bundle, null, 2)}\n` },

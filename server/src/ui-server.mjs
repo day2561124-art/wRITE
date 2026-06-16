@@ -37,6 +37,7 @@ import {
   run_over_governance_detector,
   run_scene_planner,
   run_style_drift_detector,
+  run_writing_card_director,
 } from "./neural-module-service.mjs";
 import {
   activeEngineStatus,
@@ -244,6 +245,7 @@ const neuralApiModules = {
   "neural-critic": run_neural_critic,
   "style-drift-detector": run_style_drift_detector,
   "over-governance-detector": run_over_governance_detector,
+  "writing-card-director": run_writing_card_director,
 };
 
 function normalizePath(filePath) {

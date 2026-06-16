@@ -124,13 +124,13 @@ async function main() {
       "Candidate did not reuse the writing context LF hash.",
     );
     assert(
-      detail.metadata.writing_method_component_label === "v2.8"
+      detail.metadata.writing_method_component_label === "v3.0"
         && detail.metadata.proofing_method_component_label === "v1.1",
       "Candidate component labels were wrong.",
     );
     assert(
       detail.metadata.pipeline_status === "incomplete_engine_pipeline"
-        && detail.metadata.missing_required_neural_modules.length === 5,
+        && detail.metadata.missing_required_neural_modules.length === 6,
       "Candidate without neural traces was not marked incomplete.",
     );
     assert(detail.metadata.canon_update_allowed === false, "Candidate allowed canon updates.");

@@ -10,7 +10,7 @@
     },
     "writing_method": {
       "path": "data/writing_policy_db/active_writing_card.md",
-      "version": "v2.8",
+      "version": "v3.0",
       "required": true
     },
     "proofing_method": {
@@ -40,6 +40,11 @@
         },
         {
           "name": "run_over_governance_detector",
+          "required_status": "available"
+        }
+        ,
+        {
+          "name": "run_writing_card_director",
           "required_status": "available"
         }
       ]

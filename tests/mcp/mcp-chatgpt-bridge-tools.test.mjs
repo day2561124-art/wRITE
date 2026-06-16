@@ -121,7 +121,7 @@ async function main() {
     );
     assert(
       context.result.bundle.neural_pipeline_required === true
-        && context.result.bundle.required_neural_modules.length === 5,
+        && context.result.bundle.required_neural_modules.length === 6,
       "Bridge context omitted the required neural pipeline.",
     );
 

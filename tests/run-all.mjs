@@ -28,6 +28,7 @@ const steps = [
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
   ["Phase 20 contracts", ["tests/phase20/phase20-contract.test.mjs"]],
   ["Phase 21 entity registry contracts", ["tests/phase21/phase21-entity-registry-contract.test.mjs"]],
+  ["Phase 22 writing card director", ["tests/phase22/phase22a-writing-card-director-service.test.mjs", "tests/phase22/phase22a-writing-card-director-context.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

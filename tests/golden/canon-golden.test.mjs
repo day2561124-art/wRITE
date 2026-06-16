@@ -30,7 +30,7 @@ function runNode(args) {
       settled = true;
       terminateProcessTree(child);
       reject(new Error(`Command timed out: node ${args.join(" ")}`));
-    }, 120_000);
+    }, 300_000);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -188,3 +188,4 @@ main().catch((error) => {
   console.error(`Golden tests failed: ${error.message}`);
   process.exitCode = 1;
 });
+

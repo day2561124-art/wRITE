@@ -23,6 +23,7 @@ const expectedNeuralModules = [
   "run_neural_critic",
   "run_style_drift_detector",
   "run_over_governance_detector",
+  "run_writing_card_director",
 ];
 const options = {
   gptWritingContexts: fixtureContexts,
@@ -96,7 +97,7 @@ async function main() {
       "Bundle did not use the registry LF active engine hash.",
     );
     assert(
-      bundle.engine_components_status.components.writing_method.version === "v2.8",
+      bundle.engine_components_status.components.writing_method.version === "v3.0",
       "Writing method version was missing.",
     );
     assert(
@@ -140,7 +141,7 @@ async function main() {
     assert(
       stored.context_for_chat.includes("## 完整創作引擎狀態")
         && stored.context_for_chat.includes("- active_engine：valid")
-        && stored.context_for_chat.includes("- writing_method：v2.8")
+        && stored.context_for_chat.includes("- writing_method：v3.0")
         && stored.context_for_chat.includes("- proofing_method：v1.1")
         && stored.context_for_chat.includes("- neural_pipeline：required")
         && expectedNeuralModules.every((moduleName) => (
