@@ -15,6 +15,15 @@ import {
 import { importSettlementResult } from "../../server/src/engine-candidate-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
+const REQUIRED_NEURAL_MODULES = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+
+
 const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".creative-task-test");
 const fixtureActive = path.join(projectPaths.canonDb, ".creative-task-active-test.md");
 const fixturePending = path.join(projectPaths.canonDb, ".creative-task-pending-test");
@@ -164,9 +173,9 @@ async function main() {
       task_type: CREATIVE_TASK_TYPES.SAVE_CANDIDATE_PROOF_REPORT,
       candidate_id: intake.result.candidate_id,
       proofing_context_id: proofingContext.result.proofing_context_id,
-      proof_report_text: "## P2\nRevise one transition.",
-      verdict: "needs_revision",
-      severity: "P2",
+      proof_report_text: "## PASS\nNo blocking issue.",
+      verdict: "pass",
+      severity: "none",
     }, options);
     assert(
       candidateProof.ok && candidateProof.status === "completed",
@@ -192,6 +201,19 @@ async function main() {
       draftId: draft.metadata.draft_id,
       proofText: "## P2: wording\nPolish one sentence.",
     }, options);
+    const { readFile: readCandidateMeta, writeFile: writeCandidateMeta } = await import("node:fs/promises");
+    const pathModule = await import("node:path");
+    const candidateMetaPath = pathModule.join(
+      options.writingCandidates,
+      intake.result.candidate_id,
+      "candidate.json",
+    );
+    const candidateMeta = JSON.parse(await readCandidateMeta(candidateMetaPath, "utf8"));
+    candidateMeta.missing_required_neural_modules = [];
+    candidateMeta.neural_trace_complete = true;
+    candidateMeta.neural_modules_used = REQUIRED_NEURAL_MODULES;
+    await writeCandidateMeta(candidateMetaPath, `${JSON.stringify(candidateMeta, null, 2)}\n`, "utf8");
+
     const adoption = await runCreativeTask({
       task_type: CREATIVE_TASK_TYPES.REQUEST_ADOPT_WRITING_CANDIDATE,
       candidate_id: intake.result.candidate_id,

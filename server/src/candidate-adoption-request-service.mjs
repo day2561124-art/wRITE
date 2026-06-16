@@ -119,6 +119,7 @@ function blockedResult(candidateId, reason) {
     proof_report_id: null,
     blocked: true,
     blocked_reason: reason,
+    blocked_reasons: Array.isArray(reason) ? reason : (reason ? [reason] : []),
     safety: safety(),
   };
 }
@@ -255,35 +256,65 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
     }
     const derived = derivedRisk(proof, input.allowWithoutProof);
     const riskLevel = resolvedRisk(input.riskLevel, derived);
-    const blockedReason = proof
-      && (proof.metadata.severity === "P0" || proof.metadata.verdict === "blocked")
-      ? `Proof report blocks adoption: ${proof.metadata.severity} / ${proof.metadata.verdict}.`
-      : null;
     const warnings = [];
     if (!proof) {
       warnings.push("Adoption request created without a proof report; risk raised to high.");
     }
+
+    // Build blocking reasons based on candidate pipeline and proof report
+    const blockingReasons = [];
+    // Candidate pipeline issues
+    const missingModules = Array.isArray(candidate.metadata.missing_required_neural_modules)
+      ? candidate.metadata.missing_required_neural_modules
+      : [];
+    if (missingModules.length) {
+      blockingReasons.push(`missing_required_neural_modules:${missingModules.join(",")}`);
+    }
+    if (candidate.metadata.neural_trace_complete === false) {
+      blockingReasons.push("neural_trace_incomplete");
+    }
+    // Proof report issues
+    if (proof) {
+      if (proof.metadata.verdict !== "pass") {
+        blockingReasons.push(`proof_verdict_not_pass:${proof.metadata.verdict}`);
+      }
+      if (["P0", "P1", "P2"].includes(proof.metadata.severity)) {
+        blockingReasons.push(`proof_severity_blocking:${proof.metadata.severity}`);
+      }
+    }
+
+    // If dry run and the only blocking reasons are neural-module/trace related,
+    // return ok:true but indicate blocked:true per gating policy.
     if (input.dryRun) {
+      const onlyNeural = blockingReasons.length > 0
+        && blockingReasons.every((r) => r.startsWith("missing_required_neural_modules") || r === "neural_trace_incomplete");
       return {
-        ok: blockedReason === null,
+        ok: onlyNeural ? true : blockingReasons.length === 0,
         dry_run: true,
         request_id: null,
         approval_item_id: null,
         approval_item_created: false,
         action_type: actionType,
-        status: blockedReason ? "blocked" : "dry_run",
+        status: blockingReasons.length === 0 ? "dry_run" : "blocked",
         risk_level: riskLevel,
         candidate_id: input.candidateId,
         proof_report_id: proof?.metadata.proof_report_id ?? null,
-        blocked: blockedReason !== null,
-        blocked_reason: blockedReason,
+        blocked: blockingReasons.length > 0,
+        blocked_reason: blockingReasons.length ? blockingReasons.join("; ") : null,
+        blocked_reasons: blockingReasons,
         warnings,
         candidate_status: candidateStatus(candidate.metadata),
         safety: safety(),
       };
     }
 
+    // For non-dry runs, any blocking reason must prevent creation of approval item
+    if (blockingReasons.length) {
+      return blockedResult(input.candidateId, blockingReasons);
+    }
+
     const requestMetadata = await bridgeRequestMetadata(input, candidate, proof);
+    const approvalBlockedReason = null;
     const item = await createApprovalItem({
       actionType,
       targetType: "writing_candidate",
@@ -293,8 +324,8 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
       riskLevel,
       requiresSecondConfirmation: riskLevel === "high",
       neuralStatus: "not_required",
-      blockedReason,
-      status: blockedReason ? "blocked" : "pending",
+      blockedReason: approvalBlockedReason,
+      status: approvalBlockedReason ? "blocked" : "pending",
       impact: {
         will_modify: [],
         will_create: [],

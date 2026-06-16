@@ -60,6 +60,23 @@ async function names(directory) {
   }
 }
 
+const REQUIRED_NEURAL_MODULES = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+
+async function markCandidateNeuralTraceComplete(candidateId) {
+  const metaPath = path.join(options.writingCandidates, candidateId, "candidate.json");
+  const meta = JSON.parse(await readFile(metaPath, "utf8"));
+  meta.missing_required_neural_modules = [];
+  meta.neural_trace_complete = true;
+  meta.neural_modules_used = REQUIRED_NEURAL_MODULES;
+  await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+}
+
 async function main() {
   const productionHash = hash(await readFile(projectPaths.activeEngine));
   const activeText = "# Phase 8J E2E Engine\n\nRule 1: stable.\n";
@@ -87,6 +104,7 @@ async function main() {
       sourceBundleId: context.bundle.bundle_id,
       chatOutputText: "第測試章｜最後的煙霧測試\n\n這是一段 Phase 8J 測試正文候選。它只存在於測試 fixture 中，不應進入正式正史。",
     }, options);
+    await markCandidateNeuralTraceComplete(candidate.candidate_id);
     assert(candidate.candidate_created === true, "Candidate not created");
     const detail = await getWritingCandidateDetail(candidate.candidate_id, options);
     assert(detail.metadata.candidate_kind === "chat_output_writing_candidate", "Candidate kind mismatch");

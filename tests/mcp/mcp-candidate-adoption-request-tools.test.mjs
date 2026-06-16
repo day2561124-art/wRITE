@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, rm } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { saveChatOutputAsWritingCandidate } from "../../server/src/chat-output-candidate-service.mjs";
 import { saveChatOutputAsProofReport } from "../../server/src/candidate-proof-report-service.mjs";
@@ -34,6 +34,23 @@ async function names(directory) {
     if (error.code === "ENOENT") return new Set();
     throw error;
   }
+}
+
+const REQUIRED_NEURAL_MODULES = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+
+async function markCandidateNeuralTraceComplete(candidateId) {
+  const metaPath = path.join(options.writingCandidates, candidateId, "candidate.json");
+  const meta = JSON.parse(await readFile(metaPath, "utf8"));
+  meta.missing_required_neural_modules = [];
+  meta.neural_trace_complete = true;
+  meta.neural_modules_used = REQUIRED_NEURAL_MODULES;
+  await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
 }
 
 async function removeNew(directory, before) {
@@ -80,6 +97,7 @@ async function main() {
     const candidate = await saveChatOutputAsWritingCandidate({
       chatOutputText: "# MCP adoption candidate\n\nBody.",
     }, options);
+    await markCandidateNeuralTraceComplete(candidate.candidate_id);
     await saveChatOutputAsProofReport({
       candidateId: candidate.candidate_id,
       proofReportText: "Proof complete.",

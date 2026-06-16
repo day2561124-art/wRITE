@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, rm } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { confirmApprovalItem } from "../../server/src/approval-queue-service.mjs";
 import {
@@ -133,6 +133,13 @@ async function main() {
     }, options);
     assert(candidate.ok && candidate.result.candidate_created, "Candidate save failed.");
     assert(candidate.result.candidate_only === true, "Candidate was not candidate-only.");
+
+    // Ensure neural trace is marked complete for approval-gated tests
+    const candidateMetaPath = path.join(options.writingCandidates, candidate.result.candidate_id, "candidate.json");
+    const meta = JSON.parse(await readFile(candidateMetaPath, "utf8"));
+    meta.missing_required_neural_modules = [];
+    meta.neural_trace_complete = true;
+    await writeFile(candidateMetaPath, `${JSON.stringify(meta, null, 2)}\n`);
 
     const proofing = await chatgptBridgeTools.chatgpt_bridge_build_proofing_context({
       candidate_id: candidate.result.candidate_id,

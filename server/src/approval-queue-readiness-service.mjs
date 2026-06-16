@@ -142,6 +142,23 @@ export async function validateApprovalQueueBridgeRequest(request, options = {}) 
   if (candidate.detail?.metadata?.candidate_hash !== snapshot.candidate_hash_at_request) {
     blockingReasons.push("candidate_hash_mismatch");
   }
+  // Neural pipeline / trace checks
+  const missingModules = candidate.detail?.metadata?.missing_required_neural_modules ?? [];
+  if (Array.isArray(missingModules) && missingModules.length) {
+    blockingReasons.push(`missing_required_neural_modules:${missingModules.join(",")}`);
+  }
+  if (candidate.detail?.metadata?.neural_trace_complete === false) {
+    blockingReasons.push("neural_trace_incomplete");
+  }
+  // Proof report verdict / severity checks
+  const proofVerdict = proofReport.detail?.metadata?.verdict ?? null;
+  const proofSeverity = proofReport.detail?.metadata?.severity ?? null;
+  if (proofVerdict && proofVerdict !== "pass") {
+    blockingReasons.push(`proof_verdict_not_pass:${proofVerdict}`);
+  }
+  if (["P0", "P1", "P2"].includes(proofSeverity)) {
+    blockingReasons.push(`proof_severity_blocking:${proofSeverity}`);
+  }
   if (proofReport.detail?.metadata?.proof_report_hash !== snapshot.proof_report_hash_at_request) {
     blockingReasons.push("proof_report_hash_mismatch");
   }

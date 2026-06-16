@@ -51,6 +51,23 @@ async function names(directory) {
   }
 }
 
+const REQUIRED_NEURAL_MODULES = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+
+async function markCandidateNeuralTraceComplete(candidateId) {
+  const metaPath = path.join(options.writingCandidates, candidateId, "candidate.json");
+  const meta = JSON.parse(await readFile(metaPath, "utf8"));
+  meta.missing_required_neural_modules = [];
+  meta.neural_trace_complete = true;
+  meta.neural_modules_used = REQUIRED_NEURAL_MODULES;
+  await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+}
+
 async function removeNew(directory, before) {
   for (const name of await names(directory)) {
     if (!before.has(name)) await rm(path.join(directory, name), { recursive: true, force: true });
@@ -61,6 +78,7 @@ async function createAdoptedWriting() {
   const candidate = await saveChatOutputAsWritingCandidate({
     chatOutputText: "# Adopted Chapter\n\nA stable adopted chapter.",
   }, options);
+  await markCandidateNeuralTraceComplete(candidate.candidate_id);
   const proof = await saveChatOutputAsProofReport({
     candidateId: candidate.candidate_id,
     proofReportText: "Pass.",

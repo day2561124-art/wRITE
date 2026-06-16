@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   getWritingCandidateAdoptionRequest,
@@ -50,16 +50,34 @@ async function exists(filePath) {
   }
 }
 
+const REQUIRED_NEURAL_MODULES = [
+  "run_scene_planner",
+  "run_character_simulator",
+  "run_neural_critic",
+  "run_style_drift_detector",
+  "run_over_governance_detector",
+];
+
+async function markCandidateNeuralTraceComplete(candidateId) {
+  const metaPath = path.join(options.writingCandidates, candidateId, "candidate.json");
+  const meta = JSON.parse(await readFile(metaPath, "utf8"));
+  meta.missing_required_neural_modules = [];
+  meta.neural_trace_complete = true;
+  meta.neural_modules_used = REQUIRED_NEURAL_MODULES;
+  await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+}
+
 async function removeNew(directory, before) {
   for (const name of await names(directory)) {
     if (!before.has(name)) await rm(path.join(directory, name), { recursive: true, force: true });
   }
 }
 
-async function candidateWithProof(verdict = "needs_revision", severity = "P2") {
+async function candidateWithProof(verdict = "pass", severity = "none") {
   const candidate = await saveChatOutputAsWritingCandidate({
     chatOutputText: `# Candidate ${severity}\n\nBody.`,
   }, options);
+  await markCandidateNeuralTraceComplete(candidate.candidate_id);
   const proof = await saveChatOutputAsProofReport({
     candidateId: candidate.candidate_id,
     proofReportText: `Proof ${severity}.`,
@@ -95,6 +113,7 @@ async function main() {
     const allowedWithoutProof = await saveChatOutputAsWritingCandidate({
       chatOutputText: "# Exception\n\nBody.",
     }, options);
+    await markCandidateNeuralTraceComplete(allowedWithoutProof.candidate_id);
     const exception = await requestWritingCandidateAdoption({
       candidateId: allowedWithoutProof.candidate_id,
       allowWithoutProof: true,
@@ -110,6 +129,7 @@ async function main() {
       proofReportId: proof.proof_report_id,
       requestedBy: "phase_8e_test",
       reason: "Ready for approval review.",
+      riskLevel: "medium",
     }, options);
     assert(requested.ok && requested.status === "pending", "Adoption request was not pending.");
     assert(requested.action_type === "adopt_writing_candidate", "Action type drifted.");
@@ -147,7 +167,7 @@ async function main() {
       proofReportId: critical.proof.proof_report_id,
     }, options);
     assert(blocked.blocked && blocked.status === "blocked", "P0 request was not blocked.");
-    assert(blocked.approval_item_created === true, "P0 blocked item was not created.");
+    assert(blocked.approval_item_created === false, "P0 blocked request created approval item.");
 
     const dryCandidate = await candidateWithProof("pass", "none");
     const countBeforeDryRun = (await listWritingCandidateAdoptionRequests({}, options)).length;
