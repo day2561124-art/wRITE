@@ -126,11 +126,12 @@ function normalizeInput(input = {}) {
       "max_context_chars",
       maximumContextChars,
     ),
-    // opt-in: materialize neural traces when explicitly requested and adapter available
-    runNeuralTraces: optionalBoolean(
-      input.run_neural_traces ?? input.runNeuralTraces,
-      false,
-      "run_neural_traces",
+    // Opt-in: materialize neural traces when explicitly requested and adapter available.
+    // The MCP schema may default both snake_case and camelCase aliases to false, so
+    // treat either explicit true value as an opt-in while still validating both fields.
+    runNeuralTraces: (
+      optionalBoolean(input.run_neural_traces, false, "run_neural_traces")
+      || optionalBoolean(input.runNeuralTraces, false, "runNeuralTraces")
     ),
   };
 }

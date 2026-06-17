@@ -579,6 +579,48 @@ const schemaTypeFixtures = [
     expectedMessage: "includeText must be a boolean.",
   },
   {
+    label: "chatgpt_bridge_build_writing_context non-boolean run_neural_traces",
+    name: "chatgpt_bridge_build_writing_context",
+    field: "run_neural_traces",
+    expectedType: "boolean",
+    arguments: {
+      run_neural_traces: "yes",
+    },
+    expectedMessage: "run_neural_traces must be a boolean.",
+  },
+  {
+    label: "chatgpt_bridge_build_writing_context non-boolean runNeuralTraces alias",
+    name: "chatgpt_bridge_build_writing_context",
+    field: "runNeuralTraces",
+    expectedType: "boolean",
+    arguments: {
+      runNeuralTraces: "yes",
+    },
+    expectedMessage: "runNeuralTraces must be a boolean.",
+  },
+  {
+    label: "build_gpt_writing_context non-boolean run_neural_traces",
+    name: "build_gpt_writing_context",
+    field: "run_neural_traces",
+    expectedType: "boolean",
+    arguments: {
+      taskPrompt: "Schema type fixture",
+      run_neural_traces: "yes",
+    },
+    expectedMessage: "run_neural_traces must be a boolean.",
+  },
+  {
+    label: "build_gpt_writing_context non-boolean runNeuralTraces alias",
+    name: "build_gpt_writing_context",
+    field: "runNeuralTraces",
+    expectedType: "boolean",
+    arguments: {
+      taskPrompt: "Schema type fixture",
+      runNeuralTraces: "yes",
+    },
+    expectedMessage: "runNeuralTraces must be a boolean.",
+  },
+  {
     label: "validate_jsonl non-array files",
     name: "validate_jsonl",
     field: "files",
@@ -1548,6 +1590,8 @@ const expectedDefaultMetadata = new Map([
     maxPreviewChars: 4000,
   }],
   ["chatgpt_bridge_build_writing_context", {
+    run_neural_traces: false,
+    runNeuralTraces: false,
     useCurrentInputs: true,
     chapterMode: "next_chapter",
     outputMode: "chat_only",
@@ -1602,6 +1646,8 @@ const expectedDefaultMetadata = new Map([
     dryRun: false,
   }],
   ["build_gpt_writing_context", {
+    run_neural_traces: false,
+    runNeuralTraces: false,
     chapterMode: "next_chapter",
     outputMode: "chat_only",
     includeActiveEngine: true,

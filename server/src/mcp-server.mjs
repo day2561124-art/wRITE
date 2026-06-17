@@ -1968,9 +1968,19 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_writing_context",
-    description: "Build a ChatGPT-facing writing context from current workbench inputs without generation.",
+    description: "Build a ChatGPT-facing writing context from current workbench inputs without generation. Optional: set run_neural_traces (boolean, default: false) to request neural trace materialization; when no legal adapter is available, the context records skipped/warning trace status instead of faking success.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
+      run_neural_traces: {
+        type: "boolean",
+        default: false,
+        description: "Optional, default false. When true, request neural trace materialization through a legal adapter; if no adapter is available, record skipped/warning status and never fake trace success.",
+      },
+      runNeuralTraces: {
+        type: "boolean",
+        default: false,
+        description: "Alias for run_neural_traces with the same safety behavior: default false, legal-adapter only, skipped/warning when unavailable, never fake trace success.",
+      },
       taskPrompt: { type: "string" },
       useCurrentInputs: { type: "boolean", default: true },
       generationContext: { type: "object" },
@@ -2135,9 +2145,19 @@ const toolDefinitions = [
   },
   {
     name: "build_gpt_writing_context",
-    description: "Build a GPT-facing writing context bundle for chat output without local generation or canon writes.",
+    description: "Build a GPT-facing writing context bundle for chat output without local generation or canon writes. Optional: set run_neural_traces (boolean, default: false) to request neural trace materialization; when no legal adapter is available, the context records skipped/warning trace status instead of faking success.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
+      run_neural_traces: {
+        type: "boolean",
+        default: false,
+        description: "Optional, default false. When true, request neural trace materialization through a legal adapter; if no adapter is available, record skipped/warning status and never fake trace success.",
+      },
+      runNeuralTraces: {
+        type: "boolean",
+        default: false,
+        description: "Alias for run_neural_traces with the same safety behavior: default false, legal-adapter only, skipped/warning when unavailable, never fake trace success.",
+      },
       taskPrompt: { type: "string" },
       generationContext: { type: "object" },
       retrievalContext: { type: "object" },

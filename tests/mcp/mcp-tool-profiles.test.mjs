@@ -159,6 +159,42 @@ assert.deepEqual(
   [...publicToolNames].sort(),
 );
 
+const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+const publicWritingContextSchema = publicToolMap.get(
+  "chatgpt_bridge_build_writing_context",
+)?.inputSchema?.properties;
+for (const field of ["run_neural_traces", "runNeuralTraces"]) {
+  assert.equal(
+    publicWritingContextSchema?.[field]?.type,
+    "boolean",
+    `chatgpt_public chatgpt_bridge_build_writing_context did not expose ${field} as boolean`,
+  );
+  assert.equal(
+    publicWritingContextSchema?.[field]?.default,
+    false,
+    `chatgpt_public chatgpt_bridge_build_writing_context ${field} default drifted`,
+  );
+  assert.match(
+    publicWritingContextSchema?.[field]?.description ?? "",
+    /default false/i,
+    `chatgpt_public ${field} schema should document default false`,
+  );
+  assert.match(
+    publicWritingContextSchema?.[field]?.description ?? "",
+    /never fake trace success/i,
+    `chatgpt_public ${field} schema should document no fake trace success`,
+  );
+}
+
+const fullToolMap = new Map(fullResponses[0].result.tools.map((tool) => [tool.name, tool]));
+for (const toolName of ["chatgpt_bridge_build_writing_context", "build_gpt_writing_context"]) {
+  const schema = fullToolMap.get(toolName)?.inputSchema?.properties;
+  for (const field of ["run_neural_traces", "runNeuralTraces"]) {
+    assert.equal(schema?.[field]?.type, "boolean", `full ${toolName} did not expose ${field} as boolean`);
+    assert.equal(schema?.[field]?.default, false, `full ${toolName} ${field} default drifted`);
+  }
+}
+
 for (const [index, toolName] of blockedToolNames.entries()) {
   assert(!listedPublicNames.includes(toolName), `${toolName} leaked into tools/list`);
   const response = publicResponses.find(
