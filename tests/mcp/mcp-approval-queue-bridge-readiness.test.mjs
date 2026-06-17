@@ -71,7 +71,7 @@ async function main() {
 
 第十九章〈第一聲鈴〉後座：
 
-朝日奈千夜與九逃在後座短暫交手，場面有醫療後座的描寫與短期限制。九逃取得一場勝利，但因場內裁定而中止（九逃勝，裁定中止）。
+朝日奈千夜與九逃在第十九章〈第一聲鈴〉後進入醫療後座與處置室流程。兩人的本體顯現單局決勝已結束，裁定為續戰條件不足，勝者九逃；朝日奈千夜敗。候選只描寫醫療處置、短期疼痛、換藥複查與戰後對話，不新增任何場上交手，也不定案其他第一日場次結果。
 
 （此候選說明：包含章節承接點所需之核心人物與結果描述，僅為候選，不成立正史。）`,
       title: "Phase 14C Candidate",
@@ -216,3 +216,4 @@ main().catch((error) => {
   console.error(`MCP approval queue bridge readiness test failed: ${error.message}`);
   process.exitCode = 1;
 });
+

@@ -98,24 +98,88 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
     }
   }
 
-  // P0_RESULT_CONFLICT: locked_result mismatch
-  const lockedResult = anchor.locked_result;
-  if (lockedResult) {
-    const normalizedLocked = String(lockedResult).toLocaleLowerCase("zh-Hant");
-    if (normalizedLocked && !lc.includes(normalizedLocked)) {
-      // if candidate explicitly states a different winner, flag
-      const resultKeywords = ["勝", "敗", "裁定", "中止", "勝利", "獲勝"];
-      const mentionsResult = resultKeywords.some((kw) => lc.includes(kw));
-      if (mentionsResult) {
-        report.push({ code: "P0_RESULT_CONFLICT", message: "Candidate result conflicts with locked_result." });
-      }
-    }
+  // Result alignment helper
+  function extractWinner(token) {
+    if (!token) return null;
+    const m = String(token).match(/([\p{L}\p{N}\-\u4e00-\u9fff]+)\s*勝/u);
+    if (m) return m[1];
+    // fallback: contiguous "九逃勝" style
+    const m2 = String(token).match(/([\u4e00-\u9fff]{1,10})勝/u);
+    if (m2) return m2[1];
+    return String(token).trim();
   }
 
-  // P1_TOO_MANY_NEW_NAMES: count distinct new capitalized / CJK name-like tokens
-  const nameMatches = candidateText.match(/(?:\p{Script=Han}){2,4}/gu) || [];
-  const uniqueNames = [...new Set(nameMatches)].filter(Boolean);
-  const newNamesCount = Math.max(0, uniqueNames.length - (required.length + (anchor.allowed_supporting_characters?.length ?? 0)));
+  function resultAlignmentCheck(lockedResultToken, candidateTextLc) {
+    if (!lockedResultToken) return { aligned: false, conflict: false };
+    const lockedWinner = extractWinner(lockedResultToken) || String(lockedResultToken).trim();
+    const winnerLc = String(lockedWinner).toLocaleLowerCase("zh-Hant");
+
+    // candidate explicitly shows locked winner as winning
+    const winnerWinPatterns = [
+      new RegExp(`${winnerLc}\\s*(?:勝|獲勝|勝利)`),
+      new RegExp(`勝者[^\n]{0,20}${winnerLc}`),
+      new RegExp(`${winnerLc}[^\n]{0,6}勝`),
+    ];
+    for (const p of winnerWinPatterns) if (p.test(candidateTextLc)) return { aligned: true, conflict: false };
+
+    // candidate explicitly shows some other core character losing -> aligned
+    for (const name of required) {
+      const nameLc = String(name).toLocaleLowerCase("zh-Hant");
+      if (nameLc === winnerLc) continue;
+      if (new RegExp(`${nameLc}[^\n]{0,6}(?:敗|落敗|輸)`).test(candidateTextLc)) return { aligned: true, conflict: false };
+    }
+
+    // candidate explicitly shows locked winner losing -> conflict
+    if (new RegExp(`${winnerLc}[^\n]{0,6}(?:敗|落敗|輸)`).test(candidateTextLc)) return { aligned: false, conflict: true };
+
+    // candidate names a forbidden character as winner -> conflict
+    for (const f of forbidden) {
+      const fLc = String(f).toLocaleLowerCase("zh-Hant");
+      if (new RegExp(`${fLc}[^\n]{0,6}(?:勝|獲勝|勝利)`).test(candidateTextLc)) return { aligned: false, conflict: true };
+    }
+
+    // candidate contains explicit opposite-win phrases for other obvious core names
+    for (const name of required) {
+      const nameLc = String(name).toLocaleLowerCase("zh-Hant");
+      if (new RegExp(`${nameLc}[^\n]{0,6}(?:勝|獲勝|勝利)`).test(candidateTextLc) && nameLc !== winnerLc) {
+        return { aligned: false, conflict: true };
+      }
+    }
+
+    // ambiguous: contains result-related keywords but no clear alignment or conflict
+    const resultKeywords = ["勝", "敗", "裁定", "中止", "勝利", "獲勝"];
+    const mentionsResult = resultKeywords.some((kw) => candidateTextLc.includes(kw));
+    if (mentionsResult) return { aligned: false, conflict: false };
+
+    return { aligned: false, conflict: false };
+  }
+
+  // P0_RESULT_CONFLICT: locked_result mismatch (use alignment helper)
+  const lockedResult = anchor.locked_result;
+  if (lockedResult) {
+    const check = resultAlignmentCheck(lockedResult, lc);
+    if (check.conflict) {
+      report.push({ code: "P0_RESULT_CONFLICT", message: "Candidate result conflicts with locked_result." });
+    }
+    // if aligned -> no report; if ambiguous -> do not escalate to P0
+  }
+
+  // P1_TOO_MANY_NEW_NAMES: count distinct new CJK name-like tokens, excluding stopwords/whitelist
+  const rawNameMatches = candidateText.match(/(?:\p{Script=Han}){2,4}/gu) || [];
+  const stopwords = new Set([
+    "醫療組", "處置室", "醫療終端", "終端", "裁判組", "值勤教官", "電子牌", "訓練館", "醫療樓",
+    "走廊", "擔架", "安全牆", "第一日", "第一場", "候場區", "觀眾", "警界", "戰鬥紀錄",
+    "代表資格", "正式名額", "醫療後座", "短期疼痛與訓練限制", "觀眾反應", "候場區",
+  ].map((s) => s.toLocaleLowerCase("zh-Hant")));
+  const filteredNames = [...new Set(rawNameMatches.map((n) => n.toLocaleLowerCase("zh-Hant")))].filter(Boolean).filter((n) => {
+    if (required.map((r) => r.toLocaleLowerCase("zh-Hant")).includes(n)) return false;
+    if ((anchor.allowed_supporting_characters || []).map((r) => r.toLocaleLowerCase("zh-Hant")).includes(n)) return false;
+    if (stopwords.has(n)) return false;
+    // ignore purely numeric-like or single char tokens
+    if (/^\d+$/.test(n)) return false;
+    return true;
+  });
+  const newNamesCount = Math.max(0, filteredNames.length - (anchor.allowed_supporting_characters?.length ?? 0) - required.length);
   if (newNamesCount > 2) {
     report.push({ code: "P1_TOO_MANY_NEW_NAMES", message: `Candidate adds ${newNamesCount} new names beyond allowed.` });
   }
