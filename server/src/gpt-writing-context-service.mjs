@@ -4,6 +4,7 @@ import path from "node:path";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { buildWritingCardDirectorContext } from "./writing-card-director-service.mjs";
+import { buildChapterAnchorFromBundle } from "./chapter-anchor-guard.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -229,6 +230,8 @@ function chatMarkdown(bundle) {
   return [
     "# GPT Writing Context Bundle",
     "",
+    // Fixed guard section must be placed before task prompt to avoid truncation
+    ...(bundle.fixed_guard_section ? [bundle.fixed_guard_section, ""] : []),
     "## Task Prompt",
     "",
     bundle.task_prompt,
@@ -480,6 +483,33 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     } catch (error) {
       bundle.warnings.push(`Writing card director generation failed: ${error.message}`);
     }
+  }
+
+  // Attach chapter anchor guard (fixed guard section)
+  try {
+    const anchor = buildChapterAnchorFromBundle(bundle);
+    // attach into bundle content
+    bundle.content.chapter_anchor = anchor.chapter_anchor;
+    bundle.anchor_confidence = anchor.anchor_confidence;
+    bundle.guard_severity = anchor.guard_severity;
+    bundle.compact_entity_anchor = anchor.compact_entity_anchor;
+    // prepare a fixed guard section to place at top of chat markdown
+    const guardLines = [
+      "## 【P0｜本章錨點鎖】",
+      "",
+      "```json",
+      JSON.stringify(anchor.chapter_anchor, null, 2),
+      "```",
+      "",
+      "## 【P0｜創作自由越界阻擋】",
+      "",
+      "- GPT 必須將所有創作建立在 active_engine、generation_context、retrieval_context、writing_card 與本輪章節錨點之上。",
+      "- 如無法被 current context 支援，停止生成並回報：缺少設定依據。",
+      "",
+    ].join("\n");
+    bundle.fixed_guard_section = guardLines;
+  } catch (err) {
+    bundle.warnings.push(`chapter_anchor_generation_failed: ${err.message}`);
   }
 
   const markdown = chatMarkdown(bundle);

@@ -162,6 +162,11 @@ export async function validateApprovalQueueBridgeRequest(request, options = {}) 
   if (proofReport.detail?.metadata?.proof_report_hash !== snapshot.proof_report_hash_at_request) {
     blockingReasons.push("proof_report_hash_mismatch");
   }
+  // Candidate guard report (e.g., wrong-cast, forbidden characters)
+  const guardReport = candidate.detail?.metadata?.guard_report ?? [];
+  if (Array.isArray(guardReport) && guardReport.some((g) => typeof g.code === "string" && g.code.startsWith("P0"))) {
+    blockingReasons.push("guard_blocked_P0");
+  }
   if (activeEngineModified) blockingReasons.push("active_engine_hash_mismatch");
   if (compressedRulesModified) blockingReasons.push("compressed_rules_hash_mismatch");
   if (pendingEngineCandidateCreated) blockingReasons.push("pending_engine_candidate_created");

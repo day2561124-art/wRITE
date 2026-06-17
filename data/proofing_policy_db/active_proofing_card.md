@@ -185,6 +185,21 @@ unknown source 不得作為正史承接依據。
 進入 pending_user_review。
 輸出停止原因。
 
+### 5.4 Phase 22B：錯誤人物包與章節錨點阻擋
+
+本階段新增硬停止項，若候選正文出現下列情形，必須直接退稿或停止：
+
+* 【P0｜錯誤人物包】候選正文核心人物、主視角、主要對話群若不符合 current chapter_anchor 的 required_core_characters 與 allowed_supporting_characters，直接 blocked。
+
+* 【P0｜錯誤事件承接】候選正文主事件若未承接 current chapter_anchor.locked_event，或另開一場替代對局／替代醫療後座／替代勝負，直接 blocked。
+
+* 【P0｜創作自由越界】候選正文若以創作自由為理由改寫正史、替換主事件、改寫勝負、改寫傷勢、提前成立名額或正式編組，直接 blocked。
+
+* 【P0｜Forbidden Characters】候選正文若出現 current chapter_anchor.forbidden_characters 中任一人物，直接 blocked。
+
+* 【P1｜新增具名角色過量】候選正文新增多名 current context 無支援的具名角色，需人工確認，不得自動通過。
+
+
 ---
 
 ### 5.4 檢索或資料來源不可信

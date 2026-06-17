@@ -14,6 +14,7 @@
     "test:mcp": "node tests/tools/mcp-contract.test.mjs",
     "bridge:dry-run": "node scripts/chatgpt-bridge-e2e-dry-run.mjs --dry-run --cleanup --include-settlement-fixture",
     "test:bridge:e2e": "node tests/mcp/mcp-chatgpt-bridge-e2e-dry-run.test.mjs",
+    "test:phase22b": "node tests/phase22/phase22b-wrong-cast.test.mjs",
     "test:bridge:approval-readiness": "node tests/mcp/mcp-approval-queue-bridge-readiness.test.mjs",
     "mcp:http": "node server/src/mcp-http-server.mjs --config config/mcp-http.example.json"
   },

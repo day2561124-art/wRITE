@@ -4,6 +4,7 @@ import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { buildEnginePipelineMetadata } from "./engine-pipeline-metadata.mjs";
 import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
+import { evaluateCandidateAgainstAnchor } from "./chapter-anchor-guard.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -203,6 +204,26 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     metadata_path: normalizeProjectPath(paths.metadata),
     warnings,
   };
+
+  // Run Wrong-Cast guard evaluation if we have bundle context
+  try {
+    if (trace.bundle && typeof evaluateCandidateAgainstAnchor === "function") {
+      const evalResult = evaluateCandidateAgainstAnchor(trace.bundle, input.chatOutputText);
+      if (process.env.DEBUG_BRIDGE === "1" || process.env.BRIDGE_VERBOSE === "1") {
+        console.error("DEBUG_BRIDGE: evaluateCandidateAgainstAnchor result:", JSON.stringify(evalResult, null, 2));
+        console.error("DEBUG_BRIDGE: extracted chapter_anchor:", JSON.stringify(trace.bundle.content?.chapter_anchor ?? {}, null, 2));
+        console.error("DEBUG_BRIDGE: candidate text preview:", input.chatOutputText.slice(0, 200));
+      }
+      metadata.guard_report = evalResult.guard_report || [];
+      if (evalResult.blocked) {
+        metadata.canon_status = "blocked";
+        metadata.adoption_allowed_without_approval = false;
+        metadata.warnings = metadata.warnings.concat(["candidate_blocked_by_guard"]);
+      }
+    }
+  } catch (err) {
+    metadata.warnings.push(`guard_evaluation_failed: ${err.message}`);
+  }
   await commitFileTransaction("save-chat-output-writing-candidate", [
     { filePath: paths.content, content: `${input.chatOutputText}\n` },
     { filePath: paths.metadata, content: `${JSON.stringify(metadata, null, 2)}\n` },
@@ -211,6 +232,9 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     ...publicResult(metadata),
     candidate_created: true,
     warnings,
+    // NOTE: do not set top-level `blocked` here — saving a candidate should succeed and
+    // record guard_report in metadata so readiness/adoption gates can block later.
+    guard_report: metadata.guard_report ?? [],
   };
 }
 

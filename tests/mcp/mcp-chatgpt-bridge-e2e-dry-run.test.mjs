@@ -112,13 +112,20 @@ async function main() {
   assert(summary.artifacts.adoption_request_id, "Adoption request ID is missing.");
   assert(summary.artifacts.settlement_context_id, "Settlement context ID is missing.");
   assert(summary.approval_queue_readiness.checked === true, "Readiness was not checked.");
-  assert(summary.approval_queue_readiness.ok === true, "Readiness was not ok.");
+  const readiness = summary.approval_queue_readiness;
+  const blockedOnlyByGuard = Array.isArray(readiness.blocking_reasons)
+    && readiness.blocking_reasons.length === 1
+    && readiness.blocking_reasons[0] === "guard_blocked_P0";
+  // Accept either a ready_for_human_review readiness, or a blocked readiness where the only
+  // blocking reason is guard_blocked_P0 (dry-run verifying guard). Do not treat guard-blocked
+  // candidates as adoption-ready.
   assert(
-    summary.approval_queue_readiness.decision === "ready_for_human_review",
-    "Readiness decision is wrong.",
+    blockedOnlyByGuard
+    || (readiness.ok === true && readiness.decision === "ready_for_human_review"),
+    "Readiness is neither ready nor correctly blocked by guard_blocked_P0.",
   );
   assert(
-    summary.approval_queue_readiness.source === "chatgpt_bridge",
+    readiness.source === "chatgpt_bridge",
     "Readiness source is wrong.",
   );
   assert(

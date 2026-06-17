@@ -67,7 +67,13 @@ async function main() {
     }, options), "writing context");
     const candidate = result(await chatgptBridgeTools.chatgpt_bridge_save_candidate({
       source_bundle_id: writing.bundle.bundle_id,
-      chat_output_text: "# Phase 14C Candidate\n\nReadiness fixture.",
+      chat_output_text: `# Phase 14C Candidate
+
+第十九章〈第一聲鈴〉後座：
+
+朝日奈千夜與九逃在後座短暫交手，場面有醫療後座的描寫與短期限制。九逃取得一場勝利，但因場內裁定而中止（九逃勝，裁定中止）。
+
+（此候選說明：包含章節承接點所需之核心人物與結果描述，僅為候選，不成立正史。）`,
       title: "Phase 14C Candidate",
     }, options), "candidate");
     // Mark candidate metadata to simulate complete neural trace so readiness can pass

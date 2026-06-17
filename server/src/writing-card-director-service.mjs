@@ -89,6 +89,17 @@ export function buildWritingCardDirectorContext(input = {}) {
     })(),
   };
 
+  // Simple chapter anchor summary extraction
+  const chapter = (combinedText.match(/第[一二三四五六七八九十百0-9]+章/u) || [null])[0];
+  const required_core_characters = [];
+  if (combinedText.includes("朝日奈千夜")) required_core_characters.push("朝日奈千夜");
+  if (combinedText.includes("九逃")) required_core_characters.push("九逃");
+  const forbidden_characters = ["江止澄", "蒼藤嵐", "周念今", "安岫", "建瑞凰"].filter((n) => combinedText.includes(n));
+  const locked_result = combinedText.includes("九逃勝") || combinedText.includes("九逃 勝") ? "九逃勝，裁定中止" : null;
+  const anchor_confidence = required_core_characters.length >= 2 ? "high" : "low";
+  const guard_severity = anchor_confidence === "high" ? "medium" : "high";
+
+
   return {
     version: "v1.0.0",
     context_kind: "writing_card_director_context",
@@ -108,6 +119,14 @@ export function buildWritingCardDirectorContext(input = {}) {
       retrieval_context_keys: Object.keys(retrievalContext || {}),
       writing_card_excerpt_length: writingCardText.length,
       candidate_excerpt_length: candidateText.length,
+    },
+    chapter_anchor_summary: {
+      chapter: chapter ?? null,
+      required_core_characters,
+      forbidden_characters,
+      locked_result: locked_result,
+      anchor_confidence,
+      guard_severity,
     },
   };
 }
