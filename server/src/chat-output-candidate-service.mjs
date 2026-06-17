@@ -152,7 +152,37 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   const roots = rootsFor(options);
   const trace = await bundleTrace(input.sourceBundleId, options);
   const candidateHash = sha256(input.chatOutputText);
-  const pipelineMetadata = buildEnginePipelineMetadata(trace.bundle, {});
+  // Attempt to inherit any neural trace / neural modules used info from the
+  // source context bundle so candidate metadata reflects actual traces when
+  // present. We normalize module names to the base module name (without the
+  // `run_` wrapper prefix) because pipeline metadata matching strips the
+  // wrapper prefix when comparing.
+  const extractNeuralUsageFromBundle = (bundle) => {
+    if (!bundle || typeof bundle !== "object") return {};
+    // direct list of used modules (could be 'run_scene_planner' or 'scene_planner')
+    const candidates = bundle.neural_modules_used ?? bundle.neuralModulesUsed ?? null;
+    if (Array.isArray(candidates) && candidates.length) {
+      return {
+        neural_modules_used: candidates.map((n) => String(n ?? "").trim()).filter(Boolean).map((n) => (
+          n.startsWith("run_") ? n.slice(4) : n
+        )),
+      };
+    }
+    // some bundles may include a neural_trace structure listing module entries
+    const traceObj = bundle.neural_trace ?? bundle.neuralTrace ?? bundle.content?.neural_trace ?? null;
+    if (Array.isArray(traceObj) && traceObj.length) {
+      const used = traceObj.map((entry) => {
+        if (!entry) return null;
+        if (typeof entry === "string") return entry;
+        return entry.module || entry.name || entry.wrapper || null;
+      }).filter(Boolean).map((n) => (n.startsWith("run_") ? n.slice(4) : n));
+      if (used.length) return { neural_modules_used: used };
+    }
+    return {};
+  };
+
+  const neuralUsage = extractNeuralUsageFromBundle(trace.bundle);
+  const pipelineMetadata = buildEnginePipelineMetadata(trace.bundle, neuralUsage);
   const warnings = [
     ...(trace.warning ? [trace.warning] : []),
     ...pipelineMetadata.warnings,
@@ -200,6 +230,8 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     settlement_allowed_without_adoption: false,
     local_generation_used: false,
     ...pipelineMetadata,
+    // Inherit writing_card_director context if present in source bundle
+    writing_card_director_context: trace.bundle?.content?.writing_card_director_context ?? null,
     content_path: normalizeProjectPath(paths.content),
     metadata_path: normalizeProjectPath(paths.metadata),
     warnings,

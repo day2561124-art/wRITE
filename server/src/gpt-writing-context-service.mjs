@@ -5,6 +5,16 @@ import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { buildWritingCardDirectorContext } from "./writing-card-director-service.mjs";
 import { buildChapterAnchorFromBundle } from "./chapter-anchor-guard.mjs";
+import { createAgentRun, finalizeAgentRun } from "./agent-run-service.mjs";
+import {
+  run_scene_planner,
+  run_character_simulator,
+  run_neural_critic,
+  run_style_drift_detector,
+  run_over_governance_detector,
+  run_writing_card_director,
+} from "./neural-module-service.mjs";
+import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -115,6 +125,12 @@ function normalizeInput(input = {}) {
       defaultMaxContextChars,
       "max_context_chars",
       maximumContextChars,
+    ),
+    // opt-in: materialize neural traces when explicitly requested and adapter available
+    runNeuralTraces: optionalBoolean(
+      input.run_neural_traces ?? input.runNeuralTraces,
+      false,
+      "run_neural_traces",
     ),
   };
 }
@@ -510,6 +526,80 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     bundle.fixed_guard_section = guardLines;
   } catch (err) {
     bundle.warnings.push(`chapter_anchor_generation_failed: ${err.message}`);
+  }
+  // Optionally materialize neural traces into the bundle when explicitly requested.
+  if (input.runNeuralTraces === true) {
+    try {
+      // derive required trace modules (strip wrapper prefix)
+      const requiredWrappers = bundle.required_neural_modules ?? [];
+      const requiredTraceModules = requiredWrappers.map((w) => (
+        String(w ?? "").startsWith("run_") ? String(w).slice(4) : String(w)
+      )).filter(Boolean);
+      if (requiredTraceModules.length > 0) {
+        // create an agent run to record traces
+        const agentRun = await createAgentRun({
+          requires_neural_modules: true,
+          required_neural_modules: requiredTraceModules,
+          task_type: "draft_generation",
+          created_by: "gpt_writing_context_service",
+        });
+        const runId = agentRun.run_id;
+        // adapter resolution: options.neuralAdapter or options.neuralAdapters[module]
+        const adapters = options.neuralAdapters ?? null;
+        const globalAdapter = options.neuralAdapter ?? options.neural_adapter ?? null;
+        const wrapperByName = {
+          scene_planner: run_scene_planner,
+          character_simulator: run_character_simulator,
+          neural_critic: run_neural_critic,
+          style_drift_detector: run_style_drift_detector,
+          over_governance_detector: run_over_governance_detector,
+          writing_card_director: run_writing_card_director,
+        };
+        for (const moduleName of requiredTraceModules) {
+          const wrapper = wrapperByName[moduleName];
+          const adapter = (adapters && adapters[moduleName]) ? adapters[moduleName] : globalAdapter;
+          // call wrapper; if adapter is null the wrapper will record a skipped trace
+          try {
+            await wrapper({
+              task_prompt: input.taskPrompt,
+              generation_context: input.generationContext,
+              retrieval_context: input.retrievalContext,
+            }, { run_id: runId, task_type: "draft_generation", adapter });
+          } catch (err) {
+            // record but do not block bundle creation
+            bundle.warnings.push(`neural_wrapper_failed:${moduleName}:${err.message}`);
+          }
+        }
+        // finalize run (verifies modules and writes warnings)
+        try {
+          await finalizeAgentRun(runId, {});
+        } catch (err) {
+          // non-fatal
+          bundle.warnings.push(`finalize_agent_run_failed:${err.message}`);
+        }
+        // summarize usage and attach into bundle
+        try {
+          const summary = await summarizeNeuralUsageForRun(runId);
+          bundle.neural_modules_used = summary.neural_modules_used ?? [];
+          bundle.neural_traces = (summary.traces ?? []).map((t) => ({
+            trace_id: t.trace_id,
+            module_name: t.module_name,
+            status: t.status,
+            called_at: t.called_at,
+            latency_ms: t.latency_ms,
+          }));
+          bundle.neural_trace_complete = (summary.missing_required_neural_modules ?? []).length === 0;
+          bundle.neural_trace_warnings = summary.warnings ?? [];
+          if (summary.missing_required_neural_modules && summary.missing_required_neural_modules.length) {
+            bundle.warnings.push("missing_required_neural_modules");
+          }
+        } catch (err) {
+          bundle.warnings.push(`summarize_neural_usage_failed:${err.message}`);
+        }
+      }
+    } catch (err) {
+      bundle.warnings.push(`neural_trace_materialization_failed: ${err.message}`);
+    }
   }
 
   const markdown = chatMarkdown(bundle);
