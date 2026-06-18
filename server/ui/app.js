@@ -392,6 +392,43 @@ function switchView(viewName) {
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
+
+function guardSeverityLabel(severity) {
+  return {
+    blocking: "P0 阻擋",
+    warning: "P1 提醒",
+    info: "提醒",
+  }[severity] ?? severity ?? "提醒";
+}
+
+function guardReportDisplayHtml(display) {
+  const entries = Array.isArray(display?.entries) ? display.entries : [];
+  if (!entries.length) return "";
+  return `
+    <section class="guard-report-panel${display.has_blocking_errors ? " is-blocking" : " is-warning"}">
+      <div class="guard-report-heading">
+        <strong>Guard report</strong>
+        <span>${escapeHtml(display.blocking_count ?? 0)} P0 · ${escapeHtml(display.warning_count ?? 0)} P1</span>
+      </div>
+      ${entries.map((entry) => `
+        <article class="guard-report-entry guard-${escapeHtml(entry.severity)}">
+          <div>
+            <span class="candidate-status ${entry.severity === "blocking" ? "candidate-status-blocked" : "candidate-status-candidate"}">${escapeHtml(guardSeverityLabel(entry.severity))}</span>
+            <strong>${escapeHtml(entry.title ?? entry.code)}</strong>
+          </div>
+          <p>${escapeHtml(entry.summary ?? "")}</p>
+          ${(entry.details ?? []).length ? `
+            <ul>
+              ${(entry.details ?? []).map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
+            </ul>
+          ` : ""}
+          ${entry.action_hint ? `<small>${escapeHtml(entry.action_hint)}</small>` : ""}
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
 async function refreshWriterWorkbenchState() {
   const [payload, feedbackPayload] = await Promise.all([
     api("/api/writer-workbench/state"),
@@ -425,10 +462,12 @@ async function refreshWriterWorkbenchState() {
 
   // risk panel
   const risk = workbench.risk ?? {};
+  const guardDisplay = risk.candidate_guard_report_display ?? workbench.chapter?.guard_report_display;
   riskPanel.innerHTML = `
     <strong>高風險操作提醒</strong>
     <p>引擎啟用與採用確認仍須經確認佇列；本頁不會直接修改正式引擎。</p>
     ${risk.base_hash_mismatch ? '<div class="warning-panel">引擎候選基準已變動，請先重新審查差異。</div>' : ""}
+    ${guardReportDisplayHtml(guardDisplay)}
   `;
 
   // approval panel
@@ -436,8 +475,8 @@ async function refreshWriterWorkbenchState() {
 
   // review/diff panel (show minimal info)
   reviewPanel.innerHTML = workbench.blocked?.is_blocked
-    ? `<div class="warning-panel">目前卡住：${escapeHtml(workbench.blocked.reason ?? "")}</div>`
-    : `<div>目前沒有阻塞項。</div>`;
+    ? `<div class="warning-panel">目前卡住：${escapeHtml(workbench.blocked.reason ?? "")}</div>${guardReportDisplayHtml(guardDisplay)}`
+    : `<div>目前沒有阻塞項。</div>${guardReportDisplayHtml(guardDisplay)}`;
 
   const next = primaryNextStep(workbench);
   $("#workbench-stage-card").innerHTML = `

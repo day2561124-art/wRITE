@@ -16,6 +16,7 @@ import {
   listPendingCandidates,
 } from "./engine-candidate-service.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
+import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
 
 const fixturePattern = /(?:^|[_\-\s])(ui[_-]?test|e2e|fixture|demo)(?:$|[_\-\s])/iu;
 const invalidCandidateStatuses = new Set([
@@ -125,9 +126,13 @@ export async function buildWriterWorkbenchState() {
   const candidateSummary = workflowRunId
     ? candidates.find((item) => item.source_bundle_id === workflowRunId && !isFixture(item)) ?? null
     : null;
-  const candidate = candidateSummary
-    ? (await getWritingCandidateDetail(candidateSummary.candidate_id)).metadata
+  const candidateDetail = candidateSummary
+    ? await getWritingCandidateDetail(candidateSummary.candidate_id)
     : null;
+  const candidate = candidateDetail?.metadata ?? null;
+  const candidateGuardReport = candidate?.guard_report ?? [];
+  const candidateGuardReportDisplay = candidateDetail?.guard_report_display
+    ?? formatGuardReportForDisplay(candidateGuardReport);
   const proof = candidate
     ? proofs.find((item) => item.candidate_id === candidate.candidate_id && !isFixture(item)) ?? null
     : null;
@@ -281,6 +286,8 @@ export async function buildWriterWorkbenchState() {
       in_approval_queue: Boolean(adoptionApproval),
       has_settlement_report: Boolean(settlement),
       has_pending_engine_candidate: Boolean(pending),
+      guard_report: candidateGuardReport,
+      guard_report_display: candidateGuardReportDisplay,
     },
     workflow: {
       current_step: nextStep.key,
@@ -345,6 +352,8 @@ export async function buildWriterWorkbenchState() {
       items: pendingApprovals,
     },
     risk: {
+      candidate_guard_report: candidateGuardReport,
+      candidate_guard_report_display: candidateGuardReportDisplay,
       activation_requires_approval: true,
       direct_activation_allowed: false,
       direct_canon_mutation_allowed: false,

@@ -3219,3 +3219,49 @@ textarea:disabled,
 input:disabled {
   opacity: 0.72;
 }
+
+
+.guard-report-panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+  margin-top: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.guard-report-panel.is-blocking {
+  border-color: rgba(255, 112, 112, 0.55);
+}
+
+.guard-report-panel.is-warning {
+  border-color: rgba(255, 199, 96, 0.45);
+}
+
+.guard-report-heading,
+.guard-report-entry > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.guard-report-entry {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-muted, rgba(255, 255, 255, 0.08));
+}
+
+.guard-report-entry p,
+.guard-report-entry small {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+.guard-report-entry ul {
+  margin: 0.65rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.guard-report-entry li + li {
+  margin-top: 0.35rem;
+}

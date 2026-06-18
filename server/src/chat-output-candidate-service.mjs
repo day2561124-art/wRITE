@@ -5,6 +5,7 @@ import { commitFileTransaction } from "./file-transactions.mjs";
 import { buildEnginePipelineMetadata } from "./engine-pipeline-metadata.mjs";
 import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import { evaluateCandidateAgainstAnchor } from "./chapter-anchor-guard.mjs";
+import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -144,6 +145,7 @@ function publicResult(metadata) {
     adopted: metadata.adopted,
     settled: metadata.settled,
     proofed: metadata.proofed,
+    guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
   };
 }
 
@@ -247,6 +249,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
         console.error("DEBUG_BRIDGE: candidate text preview:", input.chatOutputText.slice(0, 200));
       }
       metadata.guard_report = evalResult.guard_report || [];
+      metadata.guard_report_display = formatGuardReportForDisplay(metadata.guard_report);
       if (evalResult.blocked) {
         metadata.canon_status = "blocked";
         metadata.adoption_allowed_without_approval = false;
@@ -267,6 +270,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     // NOTE: do not set top-level `blocked` here — saving a candidate should succeed and
     // record guard_report in metadata so readiness/adoption gates can block later.
     guard_report: metadata.guard_report ?? [],
+    guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
   };
 }
 
@@ -292,6 +296,7 @@ export async function getWritingCandidateDetail(candidateId, options = {}) {
   }
   return {
     metadata,
+    guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
     content,
     content_included: includeContent,
     content_truncated: contentTruncated,
