@@ -8,6 +8,7 @@ import {
   getAgentRun,
   verifyRequiredNeuralModules as verifyAgentRunModules,
 } from "./agent-run-service.mjs";
+import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
 import { atomicWriteFile } from "./file-transactions.mjs";
 import { projectPaths } from "./project-paths.mjs";
 
@@ -48,11 +49,16 @@ function normalizeTrace(input, allowSuccess) {
   const traceId = input.trace_id ?? `neural_trace_${isoStamp()}-${randomBytes(4).toString("hex")}`;
   assertNeuralTraceId(traceId);
   assertAgentRunId(input.run_id);
+  // Normalize module name: accept either "run_*" wrapper names or canonical module keys
+  let moduleNameRaw = String(input.module_name ?? "").trim();
+  if (!moduleNameRaw) throw new Error("module_name is required.");
+  // If someone passed a wrapper-style name like "run_scene_planner", strip the prefix.
+  if (moduleNameRaw.startsWith("run_")) moduleNameRaw = moduleNameRaw.slice(4);
   return {
     run_id: input.run_id,
     trace_id: traceId,
     task_type: requireString(input.task_type, "task_type", 100),
-    module_name: requireString(input.module_name, "module_name", 100),
+    module_name: requireString(moduleNameRaw, "module_name", 100),
     model_name: requireString(input.model_name, "model_name", 200),
     model_version: requireString(input.model_version, "model_version", 100),
     called_at: input.called_at ?? new Date().toISOString(),
@@ -144,8 +150,9 @@ export async function summarizeNeuralUsageForRun(runId) {
   assertAgentRunId(runId);
   const run = await getAgentRun(runId);
   const traces = await listNeuralTraces({ run_id: runId });
+  // Normalize module names from traces: accept either "run_*" or canonical keys.
   const successfulModules = [...new Set(
-    traces.filter((trace) => trace.status === "success").map((trace) => trace.module_name),
+    traces.filter((trace) => trace.status === "success").map((trace) => normalizeNeuralModuleKey(trace.module_name)),
   )];
   const missingRequiredModules = run.requires_neural_modules
     ? run.required_neural_modules.filter((moduleName) => !successfulModules.includes(moduleName))

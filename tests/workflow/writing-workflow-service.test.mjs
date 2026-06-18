@@ -35,12 +35,12 @@ const expectedActiveEngineLfHash = (
   "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
 );
 const requiredWrapperModules = [
-  "run_scene_planner",
-  "run_character_simulator",
-  "run_neural_critic",
-  "run_style_drift_detector",
-  "run_over_governance_detector",
-  "run_writing_card_director",
+  "scene_planner",
+  "character_simulator",
+  "neural_critic",
+  "style_drift_detector",
+  "over_governance_detector",
+  "writing_card_director",
 ];
 const requiredTraceModules = requiredWrapperModules.map((name) => name.replace(/^run_/u, ""));
 

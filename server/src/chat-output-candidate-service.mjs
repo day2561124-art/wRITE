@@ -11,6 +11,7 @@ import {
   normalizeProjectPath,
   projectPaths,
 } from "./project-paths.mjs";
+import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
 
 const candidateIdPattern = /^writing_candidate_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const allowedSources = new Set(["chatgpt", "gpt", "manual_paste"]);
@@ -165,9 +166,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     const candidates = bundle.neural_modules_used ?? bundle.neuralModulesUsed ?? null;
     if (Array.isArray(candidates) && candidates.length) {
       return {
-        neural_modules_used: candidates.map((n) => String(n ?? "").trim()).filter(Boolean).map((n) => (
-          n.startsWith("run_") ? n.slice(4) : n
-        )),
+        neural_modules_used: candidates.map((n) => normalizeNeuralModuleKey(n)).filter(Boolean),
       };
     }
     // some bundles may include a neural_trace structure listing module entries
@@ -177,7 +176,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
         if (!entry) return null;
         if (typeof entry === "string") return entry;
         return entry.module || entry.name || entry.wrapper || null;
-      }).filter(Boolean).map((n) => (n.startsWith("run_") ? n.slice(4) : n));
+      }).filter(Boolean).map((n) => normalizeNeuralModuleKey(n));
       if (used.length) return { neural_modules_used: used };
     }
     return {};

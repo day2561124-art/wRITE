@@ -1,10 +1,4 @@
-const wrapperPrefix = "run_";
-
-function traceModuleName(wrapperName) {
-  return wrapperName.startsWith(wrapperPrefix)
-    ? wrapperName.slice(wrapperPrefix.length)
-    : wrapperName;
-}
+import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
 
 export function engineComponentsSnapshot(status = {}) {
   const components = status.components ?? {};
@@ -41,16 +35,15 @@ export function buildEnginePipelineMetadata(context = null, neuralUsage = {}) {
   const engineFirst = context?.engine_first === true;
   const status = context?.engine_components_status ?? {};
   const snapshot = engineComponentsSnapshot(status);
-  const requiredModules = engineFirst
-    ? [...(context.required_neural_modules ?? snapshot.neural_pipeline.required_modules)]
-    : [];
-  const successfulTraceModules = new Set(neuralUsage.neural_modules_used ?? []);
-  const usedModules = requiredModules.filter(
-    (wrapperName) => successfulTraceModules.has(traceModuleName(wrapperName)),
-  );
-  const missingModules = requiredModules.filter(
-    (wrapperName) => !successfulTraceModules.has(traceModuleName(wrapperName)),
-  );
+    const requiredModulesRaw = engineFirst
+      ? [...(context.required_neural_modules ?? snapshot.neural_pipeline.required_modules)]
+      : [];
+    // Normalize required module names to canonical keys (strip any wrapper prefix)
+    const requiredModules = requiredModulesRaw.map((name) => normalizeNeuralModuleKey(name)).filter(Boolean);
+    const successfulTraceModules = new Set(neuralUsage.neural_modules_used ?? []);
+    // Produce canonical lists for used and missing modules
+    const usedModules = requiredModules.filter((moduleName) => successfulTraceModules.has(moduleName));
+    const missingModules = requiredModules.filter((moduleName) => !successfulTraceModules.has(moduleName));
   const neuralRequired = engineFirst && (
     context.neural_pipeline_required === true
     || snapshot.neural_pipeline.required === true
@@ -78,9 +71,9 @@ export function buildEnginePipelineMetadata(context = null, neuralUsage = {}) {
     writing_method_component_label: snapshot.writing_method.version_label,
     proofing_method_component_label: snapshot.proofing_method.version_label,
     neural_pipeline_required: neuralRequired,
-    required_neural_modules: requiredModules,
-    neural_modules_used: usedModules,
-    missing_required_neural_modules: neuralRequired ? missingModules : [],
+        required_neural_modules: requiredModules,
+        neural_modules_used: usedModules,
+        missing_required_neural_modules: neuralRequired ? missingModules : [],
     neural_trace_complete: neuralTraceComplete,
     pipeline_status: (
       engineComponentsValid && neuralTraceComplete
