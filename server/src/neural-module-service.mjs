@@ -36,6 +36,11 @@ const moduleSpecs = {
     model_version: "v1.0.0",
     result_type: "writing_card_director_context",
   },
+  final_polisher: {
+    model_name: "local-final-polisher",
+    model_version: "v1.0.0",
+    result_type: "final_polisher_report",
+  },
 };
 
 function inputText(value) {
@@ -136,4 +141,8 @@ export function run_over_governance_detector(input, options) {
 
 export function run_writing_card_director(input, options) {
   return runModule("writing_card_director", input, options);
+}
+
+export function run_final_polisher(input, options) {
+  return runModule("final_polisher", input, options);
 }
