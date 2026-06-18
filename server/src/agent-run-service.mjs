@@ -196,8 +196,9 @@ export async function attachNeuralModulesUsed(runId, usage) {
   await getAgentRun(runId);
   const current = await readJson(paths.modules);
   const entries = Array.isArray(current.neural_modules_used) ? current.neural_modules_used : [];
+  const { normalizeNeuralModuleKey } = await import("./neural-module-utils.mjs");
   const nextEntry = {
-    module_name: requireString(usage.module_name, "module_name", 100),
+    module_name: normalizeNeuralModuleKey(requireString(usage.module_name, "module_name", 100)),
     model_name: requireString(usage.model_name, "model_name", 200),
     model_version: requireString(usage.model_version, "model_version", 100),
     status: requireString(usage.status, "status", 20),
@@ -215,8 +216,9 @@ export async function verifyRequiredNeuralModules(runId) {
   const paths = runPaths(runId);
   const usage = await readJson(paths.modules);
   const entries = Array.isArray(usage.neural_modules_used) ? usage.neural_modules_used : [];
+  const { normalizeNeuralModuleKey } = await import("./neural-module-utils.mjs");
   const successful = new Set(
-    entries.filter((entry) => entry.status === "success").map((entry) => entry.module_name),
+    entries.filter((entry) => entry.status === "success").map((entry) => normalizeNeuralModuleKey(entry.module_name)),
   );
   const missing = run.requires_neural_modules
     ? run.required_neural_modules.filter((moduleName) => !successful.has(moduleName))
