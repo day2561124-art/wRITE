@@ -30,6 +30,10 @@ const neuralModuleNames = [
   "run_writing_card_director",
 ];
 
+const postGenerationNeuralModuleNames = [
+  "run_final_polisher",
+];
+
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object.`);
@@ -117,6 +121,39 @@ export function validateEngineComponentRegistry(registry) {
     || neuralModuleNames.some((name) => !configuredModules.includes(name))
   ) {
     throw new Error("components.neural_pipeline.modules must list all required neural wrappers.");
+  }
+
+  const postGenerationNeuralPipeline = requireObject(
+    components.post_generation_neural_pipeline,
+    "components.post_generation_neural_pipeline",
+  );
+  requireBoolean(
+    postGenerationNeuralPipeline.required,
+    "components.post_generation_neural_pipeline.required",
+  );
+  if (!Array.isArray(postGenerationNeuralPipeline.modules)) {
+    throw new Error("components.post_generation_neural_pipeline.modules must be an array.");
+  }
+  const configuredPostGenerationModules = postGenerationNeuralPipeline.modules.map((module, index) => {
+    requireObject(module, `components.post_generation_neural_pipeline.modules[${index}]`);
+    const name = requireString(
+      module.name,
+      `components.post_generation_neural_pipeline.modules[${index}].name`,
+    );
+    if (module.required_status !== "available") {
+      throw new Error(
+        `components.post_generation_neural_pipeline.modules[${index}].required_status must be available.`,
+      );
+    }
+    return name;
+  });
+  if (
+    configuredPostGenerationModules.length !== postGenerationNeuralModuleNames.length
+    || postGenerationNeuralModuleNames.some((name) => !configuredPostGenerationModules.includes(name))
+  ) {
+    throw new Error(
+      "components.post_generation_neural_pipeline.modules must include all required post-generation neural wrappers.",
+    );
   }
 
   validateFileComponent(
@@ -210,6 +247,14 @@ export async function getEngineComponentsStatus(options = {}) {
     ...module,
     status: neuralPipeline.exists ? "available" : "missing",
   }));
+  const postGenerationNeuralPipeline = {
+    required: components.post_generation_neural_pipeline.required === true,
+    status: "available",
+    modules: components.post_generation_neural_pipeline.modules.map((module) => ({
+      ...module,
+      status: "available",
+    })),
+  };
   const governancePolicy = {
     ...await fileStatus(components.governance_policy),
     version: components.governance_policy.version,
@@ -221,6 +266,7 @@ export async function getEngineComponentsStatus(options = {}) {
     writing_method: writingMethod,
     proofing_method: proofingMethod,
     neural_pipeline: neuralPipeline,
+    post_generation_neural_pipeline: postGenerationNeuralPipeline,
     governance_policy: governancePolicy,
   };
   const issues = Object.entries(componentStatus)
@@ -239,3 +285,4 @@ export async function getEngineComponentsStatus(options = {}) {
     issues,
   };
 }
+

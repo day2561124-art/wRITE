@@ -536,7 +536,17 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       const requiredTraceModules = requiredWrappers.map((w) => (
         String(w ?? "").startsWith("run_") ? String(w).slice(4) : String(w)
       )).filter(Boolean);
-      if (requiredTraceModules.length > 0) {
+      // Exclude post-generation modules from pre-generation trace materialization
+      const preGenerationModules = new Set([
+        "scene_planner",
+        "character_simulator",
+        "neural_critic",
+        "style_drift_detector",
+        "over_governance_detector",
+        "writing_card_director",
+      ]);
+      const filteredRequiredTraceModules = requiredTraceModules.filter((m) => preGenerationModules.has(m));
+      if (filteredRequiredTraceModules.length > 0) {
         // create an agent run to record traces
         const agentRun = await createAgentRun({
           requires_neural_modules: true,
@@ -556,7 +566,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
           over_governance_detector: run_over_governance_detector,
           writing_card_director: run_writing_card_director,
         };
-        for (const moduleName of requiredTraceModules) {
+        for (const moduleName of filteredRequiredTraceModules) {
           const wrapper = wrapperByName[moduleName];
           const adapter = (adapters && adapters[moduleName]) ? adapters[moduleName] : globalAdapter;
           // call wrapper; if adapter is null the wrapper will record a skipped trace
@@ -660,3 +670,4 @@ export async function listGptWritingContextBundles(input = {}, options = {}) {
     .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))
     .slice(0, limit);
 }
+

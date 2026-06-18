@@ -48,8 +48,23 @@ export function buildEnginePipelineMetadata(context = null, neuralUsage = {}) {
     context.neural_pipeline_required === true
     || snapshot.neural_pipeline.required === true
   );
-  const neuralTraceComplete = engineFirst
-    && (!neuralRequired || missingModules.length === 0);
+  // Split required modules into pre- and post-generation concerns.
+  const preGenerationRequired = [
+    "scene_planner",
+    "character_simulator",
+    "neural_critic",
+    "style_drift_detector",
+    "over_governance_detector",
+    "writing_card_director",
+  ];
+  const postGenerationRequired = ["final_polisher"];
+  const successful = new Set(neuralUsage.neural_modules_used ?? []);
+  const pre_used = preGenerationRequired.filter((m) => successful.has(m));
+  const pre_missing = preGenerationRequired.filter((m) => !successful.has(m));
+  const pre_complete = pre_missing.length === 0;
+  const post_used = postGenerationRequired.filter((m) => successful.has(m));
+  const post_missing = postGenerationRequired.filter((m) => !successful.has(m));
+  const post_complete = post_missing.length === 0;
   const engineComponentsValid = engineFirst && context.engine_components_valid === true;
   const warnings = [];
   if (!engineFirst) warnings.push("missing_engine_first_context");
@@ -71,12 +86,20 @@ export function buildEnginePipelineMetadata(context = null, neuralUsage = {}) {
     writing_method_component_label: snapshot.writing_method.version_label,
     proofing_method_component_label: snapshot.proofing_method.version_label,
     neural_pipeline_required: neuralRequired,
-        required_neural_modules: requiredModules,
-        neural_modules_used: usedModules,
-        missing_required_neural_modules: neuralRequired ? missingModules : [],
-    neural_trace_complete: neuralTraceComplete,
+    required_neural_modules: requiredModules,
+    neural_modules_used: usedModules,
+    missing_required_neural_modules: neuralRequired ? missingModules : [],
+    // New fields splitting pre/post generation status for Phase22S
+    pre_generation_neural_trace_complete: pre_complete,
+    pre_generation_modules_used: pre_used,
+    post_generation_neural_trace_complete: post_complete,
+    post_generation_modules_used: post_used,
+    // writing pipeline considered complete only when pre/post traces present
+    // (structural revisions decision will be evaluated elsewhere)
+    writing_pipeline_complete: engineComponentsValid && pre_complete && post_complete,
+    neural_trace_complete: engineFirst && (!neuralRequired || missingModules.length === 0),
     pipeline_status: (
-      engineComponentsValid && neuralTraceComplete
+      engineComponentsValid && (!neuralRequired || missingModules.length === 0)
         ? "complete_engine_pipeline"
         : "incomplete_engine_pipeline"
     ),

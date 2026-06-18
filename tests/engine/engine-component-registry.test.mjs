@@ -63,6 +63,21 @@ assert(
     (module) => module.required_status === "available" && module.status === "available",
   ),
 );
+assert.equal(status.components.post_generation_neural_pipeline.required, true);
+assert.equal(status.components.post_generation_neural_pipeline.status, "available");
+assert.equal(status.components.post_generation_neural_pipeline.modules.length, 1);
+assert.equal(
+  status.components.post_generation_neural_pipeline.modules[0].name,
+  "run_final_polisher",
+);
+assert.equal(
+  status.components.post_generation_neural_pipeline.modules[0].required_status,
+  "available",
+);
+assert.equal(
+  status.components.post_generation_neural_pipeline.modules[0].status,
+  "available",
+);
 assert.equal(status.components.governance_policy.status, "available");
 
 for (const relativePath of watchedPaths) {
@@ -71,3 +86,4 @@ for (const relativePath of watchedPaths) {
 }
 
 console.log("Engine component registry test passed.");
+
