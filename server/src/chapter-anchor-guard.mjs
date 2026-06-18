@@ -229,6 +229,19 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
   for (const name of anchor.allowed_supporting_characters || []) addKnownName(name);
   for (const name of forbidden) addKnownName(name);
 
+  // Phase22N-Lite: small current-arc canonical character whitelist.
+  // Keep this curated and local; do not import the full entity registry into this lightweight guard.
+  const phase22LiteKnownCharacterNames = [
+    "朝日奈千夜", "千夜", "九逃", "貓狼", "雪弟", "御先",
+    "伊吹沙耶", "沙耶", "岬戶霖", "岬戶", "宇月",
+    "槐野理子", "槐野", "理子",
+    "梶浦澄斗", "梶浦", "澄斗",
+    "霧生棋乃", "霧生", "棋乃",
+    "段篠折", "篠折",
+    "白瀨零夜", "零夜",
+  ];
+  for (const name of phase22LiteKnownCharacterNames) addKnownName(name);
+
   const nonCharacterTerms = new Set([
     "醫療組", "處置室", "醫療終端", "終端", "裁判組", "值勤教官", "電子牌", "訓練館", "醫療樓",
     "走廊", "擔架", "安全牆", "第一日", "第一場", "候場區", "觀眾", "觀眾席", "警界", "戰鬥紀錄",

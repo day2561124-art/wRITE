@@ -76,4 +76,17 @@ function makeBundle() {
   assert(Array.isArray(p1.detected_names) && p1.detected_names.length >= 3, "P1 must expose detected_names for debugging");
   assert(res.blocked === false, "P1 must remain non-blocking");
 }
+
+// Phase22N-Lite regression: known current-arc short names with role suffixes must not trigger P1.
+{
+  const bundle = makeBundle();
+  const candidate = [
+    "朝日奈千夜與九逃在醫療後座確認九逃勝，裁定中止沒有改變。",
+    "岬戶老師看了終端，槐野同學補上紀錄，梶浦同學和霧生同學在觀眾席外安靜等候。",
+    "沙耶同學沒有插話，只提醒千夜明日複查前不要逞強。",
+  ].join("\n");
+  const res = evaluateCandidateAgainstAnchor(bundle, candidate);
+  assert(!res.guard_report.some((r) => r.code === "P1_TOO_MANY_NEW_NAMES"), "Known current-arc short names must not trigger P1_TOO_MANY_NEW_NAMES");
+  assert(res.blocked === false, "Known current-arc short names must not be blocked");
+}
 console.log("phase22d-result-alignment tests OK");
