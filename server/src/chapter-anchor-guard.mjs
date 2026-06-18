@@ -114,36 +114,55 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
     const lockedWinner = extractWinner(lockedResultToken) || String(lockedResultToken).trim();
     const winnerLc = String(lockedWinner).toLocaleLowerCase("zh-Hant");
 
-    // candidate explicitly shows locked winner as winning
-    const winnerWinPatterns = [
-      new RegExp(`${winnerLc}\\s*(?:勝|獲勝|勝利)`),
-      new RegExp(`勝者[^\n]{0,20}${winnerLc}`),
-      new RegExp(`${winnerLc}[^\n]{0,6}勝`),
-    ];
+    const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const aliasesFor = (name) => {
+      const normalized = String(name || "").toLocaleLowerCase("zh-Hant").replace(/\s+/gu, "");
+      const aliases = new Set([normalized]);
+      const hanOnly = normalized.replace(/[^\p{Script=Han}]/gu, "");
+      if (hanOnly.length >= 2) aliases.add(hanOnly);
+      if (hanOnly.length > 2) aliases.add(hanOnly.slice(-2));
+      if (hanOnly.length > 3) aliases.add(hanOnly.slice(-3));
+      return [...aliases].filter(Boolean);
+    };
+
+    const hasOutcomeNearName = (name, outcomePattern) => {
+      return aliasesFor(name).some((alias) => {
+        const escaped = escapeRegExp(alias);
+        return new RegExp(`${escaped}[^\n]{0,6}${outcomePattern}`, "u").test(candidateTextLc);
+      });
+    };
+
+    const winnerAliases = aliasesFor(winnerLc);
+
+    // candidate explicitly shows locked winner as winning -> aligned
+    const winnerWinPatterns = winnerAliases.flatMap((alias) => {
+      const escaped = escapeRegExp(alias);
+      return [
+        new RegExp(`${escaped}\\s*(?:勝|獲勝|勝利)`, "u"),
+        new RegExp(`勝者[^\\n]{0,20}${escaped}`, "u"),
+        new RegExp(`${escaped}[^\\n]{0,6}勝`, "u"),
+      ];
+    });
     for (const p of winnerWinPatterns) if (p.test(candidateTextLc)) return { aligned: true, conflict: false };
 
     // candidate explicitly shows some other core character losing -> aligned
     for (const name of required) {
-      const nameLc = String(name).toLocaleLowerCase("zh-Hant");
-      if (nameLc === winnerLc) continue;
-      if (new RegExp(`${nameLc}[^\n]{0,6}(?:敗|落敗|輸)`).test(candidateTextLc)) return { aligned: true, conflict: false };
+      if (aliasesFor(name).some((alias) => winnerAliases.includes(alias))) continue;
+      if (hasOutcomeNearName(name, "(?:敗|落敗|輸)")) return { aligned: true, conflict: false };
     }
 
     // candidate explicitly shows locked winner losing -> conflict
-    if (new RegExp(`${winnerLc}[^\n]{0,6}(?:敗|落敗|輸)`).test(candidateTextLc)) return { aligned: false, conflict: true };
+    if (hasOutcomeNearName(winnerLc, "(?:敗|落敗|輸)")) return { aligned: false, conflict: true };
 
     // candidate names a forbidden character as winner -> conflict
     for (const f of forbidden) {
-      const fLc = String(f).toLocaleLowerCase("zh-Hant");
-      if (new RegExp(`${fLc}[^\n]{0,6}(?:勝|獲勝|勝利)`).test(candidateTextLc)) return { aligned: false, conflict: true };
+      if (hasOutcomeNearName(f, "(?:勝|獲勝|勝利)")) return { aligned: false, conflict: true };
     }
 
-    // candidate contains explicit opposite-win phrases for other obvious core names
+    // candidate contains explicit opposite-win phrases for other required core names.
     for (const name of required) {
-      const nameLc = String(name).toLocaleLowerCase("zh-Hant");
-      if (new RegExp(`${nameLc}[^\n]{0,6}(?:勝|獲勝|勝利)`).test(candidateTextLc) && nameLc !== winnerLc) {
-        return { aligned: false, conflict: true };
-      }
+      if (aliasesFor(name).some((alias) => winnerAliases.includes(alias))) continue;
+      if (hasOutcomeNearName(name, "(?:勝|獲勝|勝利)")) return { aligned: false, conflict: true };
     }
 
     // ambiguous: contains result-related keywords but no clear alignment or conflict
@@ -153,37 +172,109 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
 
     return { aligned: false, conflict: false };
   }
-
-  // P0_RESULT_CONFLICT: locked_result mismatch (use alignment helper)
+  // P0_RESULT_CONFLICT: locked_result mismatch (use alignment helper plus explicit fallback checks)
   const lockedResult = anchor.locked_result;
   if (lockedResult) {
     const check = resultAlignmentCheck(lockedResult, lc);
-    if (check.conflict) {
+
+    const normalizeOutcomeName = (name) => String(name || "").toLocaleLowerCase("zh-Hant").replace(/\s+/gu, "");
+    const escapeOutcomeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const outcomeAliasesFor = (name) => {
+      const normalized = normalizeOutcomeName(name);
+      const aliases = new Set([normalized]);
+      const hanOnly = normalized.replace(/[^\p{Script=Han}]/gu, "");
+      if (hanOnly.length >= 2) aliases.add(hanOnly);
+      if (hanOnly.length > 2) aliases.add(hanOnly.slice(-2));
+      if (hanOnly.length > 3) aliases.add(hanOnly.slice(-3));
+      return [...aliases].filter(Boolean);
+    };
+    const lockedWinner = extractWinner(lockedResult) || String(lockedResult).trim();
+    const winnerAliases = outcomeAliasesFor(lockedWinner);
+    const sameAsWinner = (name) => outcomeAliasesFor(name).some((alias) => winnerAliases.includes(alias));
+    const hasOutcome = (name, outcomePattern) => outcomeAliasesFor(name).some((alias) => {
+      const escaped = escapeOutcomeRegExp(alias);
+      return new RegExp(`${escaped}[^\\n]{0,6}${outcomePattern}`, "u").test(lc);
+    });
+
+    const fallbackConflict =
+      hasOutcome(lockedWinner, "(?:敗|落敗|輸)") ||
+      required.some((name) => !sameAsWinner(name) && hasOutcome(name, "(?:勝|獲勝|勝利)")) ||
+      forbidden.some((name) => hasOutcome(name, "(?:勝|獲勝|勝利)"));
+
+    if (check.conflict || fallbackConflict) {
       report.push({ code: "P0_RESULT_CONFLICT", message: "Candidate result conflicts with locked_result." });
     }
     // if aligned -> no report; if ambiguous -> do not escalate to P0
   }
 
-  // P1_TOO_MANY_NEW_NAMES: count distinct new CJK name-like tokens, excluding stopwords/whitelist
-  const rawNameMatches = candidateText.match(/(?:\p{Script=Han}){2,4}/gu) || [];
-  const stopwords = new Set([
-    "醫療組", "處置室", "醫療終端", "終端", "裁判組", "值勤教官", "電子牌", "訓練館", "醫療樓",
-    "走廊", "擔架", "安全牆", "第一日", "第一場", "候場區", "觀眾", "警界", "戰鬥紀錄",
-    "代表資格", "正式名額", "醫療後座", "短期疼痛與訓練限制", "觀眾反應", "候場區",
-  ].map((s) => s.toLocaleLowerCase("zh-Hant")));
-  const filteredNames = [...new Set(rawNameMatches.map((n) => n.toLocaleLowerCase("zh-Hant")))].filter(Boolean).filter((n) => {
-    if (required.map((r) => r.toLocaleLowerCase("zh-Hant")).includes(n)) return false;
-    if ((anchor.allowed_supporting_characters || []).map((r) => r.toLocaleLowerCase("zh-Hant")).includes(n)) return false;
-    if (stopwords.has(n)) return false;
-    // ignore purely numeric-like or single char tokens
-    if (/^\d+$/.test(n)) return false;
-    return true;
-  });
-  const newNamesCount = Math.max(0, filteredNames.length - (anchor.allowed_supporting_characters?.length ?? 0) - required.length);
-  if (newNamesCount > 2) {
-    report.push({ code: "P1_TOO_MANY_NEW_NAMES", message: `Candidate adds ${newNamesCount} new names beyond allowed.` });
-  }
+  // P1_TOO_MANY_NEW_NAMES: detect explicit new character-name introductions only.
+  // Do not scan arbitrary 2-4 Han character spans; normal Chinese prose creates massive false positives.
+  const normalizeNameToken = (token) => String(token || "")
+    .replace(/[「」『』《》〈〉（）()，。、：:；;！!？?\s]/gu, "")
+    .toLocaleLowerCase("zh-Hant");
 
+  const knownNameLc = new Set();
+  const addKnownName = (name) => {
+    const normalized = normalizeNameToken(name);
+    if (!normalized) return;
+    knownNameLc.add(normalized);
+    const hanOnly = normalized.replace(/[^\p{Script=Han}]/gu, "");
+    if (hanOnly.length >= 2) knownNameLc.add(hanOnly);
+    // Allow short forms for established long names, e.g. 朝日奈千夜 -> 千夜.
+    if (hanOnly.length > 2) knownNameLc.add(hanOnly.slice(-2));
+    if (hanOnly.length > 3) knownNameLc.add(hanOnly.slice(-3));
+  };
+
+  for (const name of required) addKnownName(name);
+  for (const name of anchor.allowed_supporting_characters || []) addKnownName(name);
+  for (const name of forbidden) addKnownName(name);
+
+  const nonCharacterTerms = new Set([
+    "醫療組", "處置室", "醫療終端", "終端", "裁判組", "值勤教官", "電子牌", "訓練館", "醫療樓",
+    "走廊", "擔架", "安全牆", "第一日", "第一場", "候場區", "觀眾", "觀眾席", "警界", "戰鬥紀錄",
+    "代表資格", "正式名額", "醫療後座", "短期疼痛", "訓練限制", "明日複查", "換藥", "換藥櫃",
+    "長椅", "燈光", "南側", "一號帶", "本體顯現", "裁定中止", "不能沾水", "傷勢", "疼痛",
+  ].map((s) => normalizeNameToken(s)));
+
+  const genericNonNamePrefix = /^(醫療|處置|終端|裁判|值勤|電子|訓練|安全|觀眾|警界|戰鬥|代表|正式|候場|短期|疼痛|限制|明日|複查|換藥|場地|走廊|擔架|長椅|燈光|南側|本體|靈力|傷勢|紀錄|後座|流程|測試|候選|章節|正文|標籤|輸出|內容|結果|第一|第二|第三|第四|第五|第六|第七|第八|第九|第十)/u;
+  const genericNonNameSuffix = /(室|館|樓|區|牆|牌|組|櫃|床|椅|門|窗|燈|光|水|痛|傷|限制|流程|結果|資格|名額|紀錄|場|日|章|段|行|字|頁)$/u;
+
+  const isLikelyNewCharacterName = (token) => {
+    const name = normalizeNameToken(token);
+    if (!name) return false;
+    if (knownNameLc.has(name)) return false;
+    if (nonCharacterTerms.has(name)) return false;
+    if (name.length < 2 || name.length > 8) return false;
+    if (/^\d+$/u.test(name)) return false;
+    if (genericNonNamePrefix.test(name)) return false;
+    if (genericNonNameSuffix.test(name)) return false;
+    return true;
+  };
+
+  const possibleNameTokens = [];
+  const collectPattern = (pattern) => {
+    for (const match of candidateText.matchAll(pattern)) {
+      possibleNameTokens.push(match[1]);
+    }
+  };
+
+  // Explicit introduction contexts. These are far safer than arbitrary Han-token scanning for long-form Chinese prose.
+  collectPattern(/(?:名叫|叫做|叫作|名字是|自稱|登錄為|登記為|代號是|稱為|被稱為)\s*[「『“"]?([\p{Script=Han}·・]{2,8})/gu);
+  collectPattern(/([\p{Script=Han}·・]{2,6})(?:老師|教官|醫師|醫生|同學|學姊|學長|學妹|學弟|主任|院長|組長|裁判長)/gu);
+
+  const possibleNewNames = [...new Set(possibleNameTokens
+    .map((n) => normalizeNameToken(n))
+    .filter((n) => isLikelyNewCharacterName(n)))];
+
+  if (possibleNewNames.length > 2) {
+    const examples = possibleNewNames.slice(0, 20).join(", ");
+    const suffix = possibleNewNames.length > 20 ? ", ..." : "";
+    report.push({
+      code: "P1_TOO_MANY_NEW_NAMES",
+      message: "Candidate adds " + possibleNewNames.length + " possible new names beyond allowed: " + examples + suffix + ".",
+      detected_names: possibleNewNames.slice(0, 50),
+    });
+  }
   return { guard_report: report, blocked: report.some((r) => r.code && r.code.startsWith("P0")) };
 }
 
