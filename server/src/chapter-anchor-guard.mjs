@@ -264,20 +264,39 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
     return true;
   };
 
-  const possibleNameTokens = [];
-  const collectPattern = (pattern) => {
+  const possibleNameDetails = [];
+  const collectPattern = (pattern, reason) => {
     for (const match of candidateText.matchAll(pattern)) {
-      possibleNameTokens.push(match[1]);
+      const rawName = match[1];
+      const normalizedName = normalizeNameToken(rawName);
+      if (!isLikelyNewCharacterName(normalizedName)) continue;
+      possibleNameDetails.push({
+        name: normalizedName,
+        reason,
+        evidence: String(match[0] || rawName).trim(),
+        whitelist_status: "not_in_known_name_whitelist",
+      });
     }
   };
 
   // Explicit introduction contexts. These are far safer than arbitrary Han-token scanning for long-form Chinese prose.
-  collectPattern(/(?:名叫|叫做|叫作|名字是|自稱|登錄為|登記為|代號是|稱為|被稱為)\s*[「『“"]?([\p{Script=Han}·・]{2,8})/gu);
-  collectPattern(/([\p{Script=Han}·・]{2,6})(?:老師|教官|醫師|醫生|同學|學姊|學長|學妹|學弟|主任|院長|組長|裁判長)/gu);
+  collectPattern(
+    /(?:名叫|叫做|叫作|名字是|自稱|登錄為|登記為|代號是|稱為|被稱為)\s*[「『“"]?([\p{Script=Han}·・]{2,8})/gu,
+    "explicit_introduction",
+  );
+  collectPattern(
+    /([\p{Script=Han}·・]{2,6})(?:老師|教官|醫師|醫生|同學|學姊|學長|學妹|學弟|主任|院長|組長|裁判長)/gu,
+    "role_suffix",
+  );
 
-  const possibleNewNames = [...new Set(possibleNameTokens
-    .map((n) => normalizeNameToken(n))
-    .filter((n) => isLikelyNewCharacterName(n)))];
+  const dedupedNameDetails = [];
+  const seenNewNames = new Set();
+  for (const detail of possibleNameDetails) {
+    if (seenNewNames.has(detail.name)) continue;
+    seenNewNames.add(detail.name);
+    dedupedNameDetails.push(detail);
+  }
+  const possibleNewNames = dedupedNameDetails.map((detail) => detail.name);
 
   if (possibleNewNames.length > 2) {
     const examples = possibleNewNames.slice(0, 20).join(", ");
@@ -286,6 +305,7 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
       code: "P1_TOO_MANY_NEW_NAMES",
       message: "Candidate adds " + possibleNewNames.length + " possible new names beyond allowed: " + examples + suffix + ".",
       detected_names: possibleNewNames.slice(0, 50),
+      detected_name_details: dedupedNameDetails.slice(0, 50),
     });
   }
   return { guard_report: report, blocked: report.some((r) => r.code && r.code.startsWith("P0")) };
