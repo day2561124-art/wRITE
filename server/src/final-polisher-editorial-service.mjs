@@ -168,8 +168,21 @@ function evaluateStructuralGate(rawDraftText, input) {
   });
 }
 
+function normalizeChinesePunctuation(text) {
+  return String(text ?? "")
+    .replace(/。{2,}/gu, "。")
+    .replace(/！{2,}/gu, "！")
+    .replace(/？{2,}/gu, "？")
+    .replace(/，{2,}/gu, "，")
+    .replace(/、{2,}/gu, "、")
+    .replace(/；{2,}/gu, "；")
+    .replace(/：{2,}/gu, "：")
+    .replace(/。([」』])/gu, "。$1")
+    .replace(/([。！？])。([」』])/gu, "$1$2");
+}
+
 function applyHumanDictionPolish(text) {
-  return text
+  return normalizeChinesePunctuation(text
     .replaceAll("我感受到一種難以言喻的壓迫感在胸口蔓延", "我胸口悶了一下")
     .replaceAll("感受到一種難以言喻的壓迫感在胸口蔓延", "胸口悶了一下")
     .replaceAll("她感到一種無法被命名的情緒在胸口擴散", "她胸口悶了一下，話卡在裡面。")
@@ -178,7 +191,7 @@ function applyHumanDictionPolish(text) {
     .replaceAll("空氣變得沉重", "冷氣聲忽然變得很清楚")
     .replace(/[ \t]+\n/gu, "\n")
     .replace(/\n{3,}/gu, "\n\n")
-    .trim();
+    .trim());
 }
 
 function evaluateCharacterVoice(text) {

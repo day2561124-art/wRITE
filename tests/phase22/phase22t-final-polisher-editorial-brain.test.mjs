@@ -87,6 +87,8 @@ async function main() {
     assert.equal(completed.needs_structural_revision, false);
     assert(completed.polished_text.includes("胸口悶了一下"));
     assert(!completed.polished_text.includes("難以言喻的壓迫感"));
+    assert(!/[。！？]{2,}/u.test(completed.polished_text), "Polished text contains duplicate sentence punctuation.");
+    assert(!completed.polished_text.includes("這事不對。。"), "Human diction polish left duplicate punctuation.");
     assert.equal(completed.revision_report.raw_draft_hash, hash(rawDraft));
     assert.equal(completed.revision_report.polished_text_hash, hash(completed.polished_text));
     assert.equal(completed.revision_report.human_diction_pass.status, "revised");
@@ -115,6 +117,7 @@ async function main() {
     });
     assert(detail.content.includes("胸口悶了一下"), "Candidate did not save polished_text.");
     assert(!detail.content.includes("難以言喻的壓迫感"), "Candidate saved raw draft text.");
+    assert(!/[。！？]{2,}/u.test(detail.content), "Candidate polished_text contains duplicate sentence punctuation.");
     assert.equal(detail.metadata.raw_draft_hash, hash(rawDraft));
     assert.equal(detail.metadata.polished_text_hash, saved.candidate_hash);
     assert.equal(detail.metadata.final_polisher_revision_report.human_diction_pass.status, "revised");
