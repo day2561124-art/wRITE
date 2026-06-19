@@ -32,6 +32,7 @@ const steps = [
   ["Phase 22 neural trace materialization", ["tests/phase22/phase22g-writing-context-trace.test.mjs", "tests/phase22/phase22h-neural-trace-option-exposure.test.mjs"]],
   ["Phase 22 guard report explainability", ["tests/phase22/phase22o-guard-report-explainability.test.mjs", "tests/phase22/phase22p-guard-report-display-polish.test.mjs"]],
   ["Phase 22 final polisher editorial brain", ["tests/phase22/phase22t-final-polisher-editorial-brain.test.mjs"]],
+  ["Phase 22 full neural writing orchestrator", ["tests/phase22/phase22u-full-neural-writing-orchestrator.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
