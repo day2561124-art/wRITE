@@ -103,6 +103,25 @@ function normalizeInput(rawInput = {}) {
   };
 }
 
+function normalizeExistingContextResult(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("existingContextResult must be an object.");
+  }
+  const bundle = value.bundle;
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) {
+    throw new Error("existingContextResult.bundle must be an object.");
+  }
+  if (typeof bundle.bundle_id !== "string" || !bundle.bundle_id.trim()) {
+    throw new Error("existingContextResult.bundle.bundle_id is required.");
+  }
+  return {
+    bundle,
+    context_bundle_path: String(value.context_bundle_path ?? value.contextBundlePath ?? ""),
+    context_for_chat_path: String(value.context_for_chat_path ?? value.contextForChatPath ?? ""),
+  };
+}
+
 function pipelineStageFor({ rawDraftText, finalPolisherResult }) {
   if (!rawDraftText) return "pre_generation_ready";
   if (finalPolisherResult?.needs_structural_revision === true) return "structural_revision_required";
@@ -113,7 +132,10 @@ function pipelineStageFor({ rawDraftText, finalPolisherResult }) {
 export async function buildFullNeuralWritingOrchestration(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
 
-  const contextResult = await buildGptWritingContext({
+  const existingContextResult = normalizeExistingContextResult(
+    options.existingContextResult ?? options.existing_context_result,
+  );
+  const contextResult = existingContextResult ?? await buildGptWritingContext({
     task_prompt: input.taskPrompt,
     generation_context: input.generationContext,
     retrieval_context: input.retrievalContext,
@@ -136,6 +158,8 @@ export async function buildFullNeuralWritingOrchestration(rawInput = {}, options
       raw_draft_text: input.rawDraftText,
       writing_card_director_context: bundle.content?.writing_card_director_context ?? null,
       structural_signals: input.structuralSignals,
+    }, {
+      editorialAdapter: options.finalPolisherEditorialAdapter,
     });
 
     if (

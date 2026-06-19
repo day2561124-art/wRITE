@@ -7,6 +7,7 @@ import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import { evaluateCandidateAgainstAnchor } from "./chapter-anchor-guard.mjs";
 import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
 import { runFinalPolisherEditorialBrain } from "./final-polisher-editorial-service.mjs";
+import { buildFullNeuralWritingOrchestration } from "./full-neural-writing-orchestrator-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -158,14 +159,68 @@ function publicResult(metadata) {
   };
 }
 
+function finalPolisherResultFromOrchestration(orchestrationResult) {
+  return {
+    status: orchestrationResult.post_generation.status,
+    polished_text: orchestrationResult.candidate_output.final_candidate_text,
+    revision_report: orchestrationResult.post_generation.final_polisher_revision_report,
+    needs_structural_revision: orchestrationResult.post_generation.needs_structural_revision,
+    suggested_return_stage: orchestrationResult.post_generation.suggested_return_stage,
+    warnings: orchestrationResult.orchestration_report.warnings ?? [],
+    orchestration_report: orchestrationResult.orchestration_report,
+  };
+}
+
 async function resolveCandidateOutputText(input, trace, options) {
   if (!input.rawDraftText) {
     return {
       candidateText: input.chatOutputText,
       finalPolisherResult: null,
+      orchestrationResult: null,
       warnings: [],
     };
   }
+
+  if (trace.bundle) {
+    const orchestrationResult = await buildFullNeuralWritingOrchestration({
+      task_prompt: input.taskPrompt || trace.bundle.task_prompt || "Save ChatGPT raw draft as writing candidate.",
+      generation_context: trace.bundle.inputs?.generation_context ?? {},
+      retrieval_context: trace.bundle.inputs?.retrieval_context ?? {},
+      raw_draft_text: input.rawDraftText,
+      chapter_mode: trace.bundle.chapter_mode ?? "next_chapter",
+      output_mode: "candidate_save_later",
+      include_writing_card_director: true,
+    }, {
+      ...options,
+      existingContextResult: {
+        bundle: trace.bundle,
+        context_bundle_path: trace.source_bundle_path,
+        context_for_chat_path: trace.context_for_chat_path,
+      },
+      finalPolisherEditorialAdapter: options.finalPolisherEditorialAdapter,
+    });
+
+    const finalPolisherResult = finalPolisherResultFromOrchestration(orchestrationResult);
+    if (!orchestrationResult.candidate_output.ready) {
+      return {
+        candidateText: "",
+        finalPolisherResult,
+        orchestrationResult,
+        warnings: [
+          "full_neural_orchestrator_did_not_produce_candidate",
+          ...(orchestrationResult.orchestration_report.warnings ?? []),
+        ],
+      };
+    }
+
+    return {
+      candidateText: orchestrationResult.candidate_output.final_candidate_text,
+      finalPolisherResult,
+      orchestrationResult,
+      warnings: orchestrationResult.orchestration_report.warnings ?? [],
+    };
+  }
+
   const result = runFinalPolisherEditorialBrain({
     raw_draft_text: input.rawDraftText,
     writing_card_director_context: trace.bundle?.content?.writing_card_director_context ?? null,
@@ -178,6 +233,7 @@ async function resolveCandidateOutputText(input, trace, options) {
     return {
       candidateText: "",
       finalPolisherResult: result,
+      orchestrationResult: null,
       warnings: [
         "final_polisher_did_not_complete",
         ...(result.warnings ?? []),
@@ -187,6 +243,7 @@ async function resolveCandidateOutputText(input, trace, options) {
   return {
     candidateText: result.polished_text,
     finalPolisherResult: result,
+    orchestrationResult: null,
     warnings: result.warnings ?? [],
   };
 }
@@ -199,6 +256,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     candidateText,
     finalPolisherResult,
     warnings: finalPolisherWarnings,
+    orchestrationResult,
   } = await resolveCandidateOutputText(input, trace, options);
   if (input.rawDraftText && (!candidateText || finalPolisherResult?.status !== "completed")) {
     return {
@@ -209,6 +267,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       proofed: false,
       source_bundle_id: trace.source_bundle_id,
       final_polisher_result: finalPolisherResult,
+      full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
       needs_structural_revision: finalPolisherResult?.needs_structural_revision === true,
       suggested_return_stage: finalPolisherResult?.suggested_return_stage ?? null,
       warnings: finalPolisherWarnings,
@@ -260,6 +319,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       settled: false,
       proofed: false,
       final_polisher_result: finalPolisherResult,
+      full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
       warnings,
     };
   }
@@ -285,6 +345,10 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     polished_text_hash: finalPolisherResult ? sha256(candidateText) : null,
     final_polisher_status: finalPolisherResult?.status ?? null,
     final_polisher_revision_report: finalPolisherResult?.revision_report ?? null,
+    full_neural_orchestrator_version:
+      orchestrationResult?.orchestration_report?.orchestration_version ?? null,
+    full_neural_pipeline_stage: orchestrationResult?.pipeline_stage ?? null,
+    full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
     candidate_hash: candidateHash,
     candidate_chars: candidateText.length,
     canon_status: "candidate_only",
@@ -327,11 +391,12 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   await commitFileTransaction("save-chat-output-writing-candidate", [
     { filePath: paths.content, content: `${candidateText}\n` },
     { filePath: paths.metadata, content: `${JSON.stringify(metadata, null, 2)}\n` },
-  ], { candidate_id: candidateId, phase: "phase_22t_final_polisher_editorial_brain" });
+  ], { candidate_id: candidateId, phase: "phase_22v_orchestrator_candidate_save_bridge" });
   return {
     ...publicResult(metadata),
     candidate_created: true,
     final_polisher_result: finalPolisherResult,
+    full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
     warnings,
     // NOTE: do not set top-level `blocked` here — saving a candidate should succeed and
     // record guard_report in metadata so readiness/adoption gates can block later.
