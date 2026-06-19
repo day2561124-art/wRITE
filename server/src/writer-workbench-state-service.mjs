@@ -133,6 +133,30 @@ export async function buildWriterWorkbenchState() {
   const candidateGuardReport = candidate?.guard_report ?? [];
   const candidateGuardReportDisplay = candidateDetail?.guard_report_display
     ?? formatGuardReportForDisplay(candidateGuardReport);
+  const fullNeuralReport = candidate?.full_neural_orchestration_report ?? null;
+  const fullNeural = {
+    used: Boolean(
+      fullNeuralReport
+      || candidate?.full_neural_orchestrator_version
+      || candidate?.full_neural_pipeline_stage,
+    ),
+    orchestrator_version:
+      candidate?.full_neural_orchestrator_version
+      ?? fullNeuralReport?.orchestration_version
+      ?? null,
+    pipeline_stage:
+      candidate?.full_neural_pipeline_stage
+      ?? fullNeuralReport?.pipeline_stage
+      ?? null,
+    context_bundle_id:
+      fullNeuralReport?.context_bundle_id
+      ?? candidate?.source_bundle_id
+      ?? null,
+    writing_pipeline_complete: fullNeuralReport?.writing_pipeline_complete ?? null,
+    candidate_only: fullNeuralReport?.candidate_only ?? candidate?.canon_status === "candidate_only",
+    active_engine_update_allowed: fullNeuralReport?.active_engine_update_allowed ?? false,
+    canon_update_allowed: fullNeuralReport?.canon_update_allowed ?? false,
+  };
   const proof = candidate
     ? proofs.find((item) => item.candidate_id === candidate.candidate_id && !isFixture(item)) ?? null
     : null;
@@ -208,6 +232,7 @@ export async function buildWriterWorkbenchState() {
       entity_id: candidate?.candidate_id,
       blocked_reason: workflowRunId ? null : "尚無正文候選，無法保存。",
       next_action: "save_chat_output_candidate",
+      full_neural: fullNeural,
     }),
     step("proofread", "驗稿 / 校對", proof ? "completed" : candidate ? "ready" : "blocked", {
       entity_id: proof?.proof_report_id,
@@ -288,6 +313,8 @@ export async function buildWriterWorkbenchState() {
       has_pending_engine_candidate: Boolean(pending),
       guard_report: candidateGuardReport,
       guard_report_display: candidateGuardReportDisplay,
+      full_neural: fullNeural,
+      full_neural_orchestrator_used: fullNeural.used,
     },
     workflow: {
       current_step: nextStep.key,
@@ -341,6 +368,10 @@ export async function buildWriterWorkbenchState() {
       approval_queue_pending: pendingApprovals.length,
       active_engine_hash: active?.sha256 ?? active?.hash ?? null,
       compressed_rules_hash: sha256(compressedRules),
+      full_neural_orchestrator: fullNeural.used
+        ? fullNeural.pipeline_stage ?? "used"
+        : "not_used",
+      full_neural_orchestrator_version: fullNeural.orchestrator_version,
       not_ready_reasons: [
         ...(!outputsComplete ? ["outputs 缺失"] : []),
         ...(!promptsComplete ? ["prompts 缺失"] : []),

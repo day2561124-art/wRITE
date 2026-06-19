@@ -35,6 +35,7 @@ const steps = [
   ["Phase 22 full neural writing orchestrator", ["tests/phase22/phase22u-full-neural-writing-orchestrator.test.mjs"]],
   ["Phase 22 orchestrator candidate save bridge", ["tests/phase22/phase22v-orchestrator-candidate-save-bridge.test.mjs"]],
   ["Phase 22 bridge orchestrator surface", ["tests/phase22/phase22w-bridge-orchestrator-surface.test.mjs"]],
+  ["Phase 22 UI orchestrator status", ["tests/phase22/phase22x-ui-orchestrator-status.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

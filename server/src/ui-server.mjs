@@ -2238,6 +2238,11 @@ async function handleRequest(request, response) {
       const candidate = await saveChatOutputAsWritingCandidate({
         sourceBundleId: input.sourceBundleId ?? input.source_bundle_id,
         chatOutputText: input.chatOutputText ?? input.chat_output_text,
+        rawDraftText:
+          input.rawDraftText
+          ?? input.raw_draft_text
+          ?? input.chatOutputText
+          ?? input.chat_output_text,
         title: input.title,
         chapterLabel: input.chapterLabel ?? input.chapter_label,
       });

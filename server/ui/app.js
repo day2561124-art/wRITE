@@ -656,6 +656,25 @@ function renderOperatorOverview() {
     }
     const actionState = new Map((wb.next_actions ?? []).map((item) => [item.key, item]));
     const lineage = wb.lineage ?? {};
+    const fullNeural = wb.chapter?.full_neural ?? {};
+    const fullNeuralUsed = fullNeural.used === true;
+    let neuralStatus = $("#workbench-neural-status", workbenchPanel);
+    if (!neuralStatus) {
+      neuralStatus = document.createElement("div");
+      neuralStatus.id = "workbench-neural-status";
+      neuralStatus.className = "status-card";
+      workbenchPanel.appendChild(neuralStatus);
+    }
+    neuralStatus.innerHTML = `
+      <strong>Full Neural Orchestrator</strong>
+      <span class="trust-badge${fullNeuralUsed ? "" : " is-warning"}">${fullNeuralUsed ? "已使用" : "未使用"}</span>
+      <small>
+        version: ${escapeHtml(fullNeural.orchestrator_version ?? "--")}
+        · stage: ${escapeHtml(fullNeural.pipeline_stage ?? "--")}
+        · candidate_only: ${escapeHtml(String(fullNeural.candidate_only ?? true))}
+        · canon_update: ${escapeHtml(String(fullNeural.canon_update_allowed ?? false))}
+      </small>
+    `;
     const canSaveCandidate = actionState.get("save_chat_output_candidate")?.enabled === true;
     const hasCandidate = Boolean(lineage.candidate_id);
     const hasProofReport = Boolean(lineage.proof_report_id);
@@ -712,6 +731,7 @@ function bindOverviewWorkbenchActions() {
         body: JSON.stringify({
           sourceBundleId: state.workbench?.lineage?.workflow_run_id ?? "",
           chatOutputText,
+          rawDraftText: chatOutputText,
           title: state.workbench?.chapter?.title ?? "",
           chapterLabel: state.workbench?.chapter?.chapter_id ?? state.workbench?.chapter?.title ?? "",
         }),
@@ -810,7 +830,8 @@ function bindWriterWorkbenchActions() {
   });
   $("#writer-save-candidate").addEventListener("click", async () => {
     try {
-      const body = { chatOutputText: $("#draft-text")?.value ?? "測試候選內容" };
+      const draftText = $("#draft-text")?.value ?? "測試候選內容";
+      const body = { chatOutputText: draftText, rawDraftText: draftText };
       const result = await api("/api/writer-workbench/save-chat-output-candidate", { method: "POST", body: JSON.stringify(body) });
       toast("candidate 建立: " + (result.candidate?.writing_candidate_id ?? "-"));
       refreshWriterWorkbenchState().catch(() => {});
