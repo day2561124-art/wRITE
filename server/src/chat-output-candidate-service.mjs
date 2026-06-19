@@ -6,6 +6,7 @@ import { buildEnginePipelineMetadata } from "./engine-pipeline-metadata.mjs";
 import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import { evaluateCandidateAgainstAnchor } from "./chapter-anchor-guard.mjs";
 import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
+import { runFinalPolisherEditorialBrain } from "./final-polisher-editorial-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -59,17 +60,24 @@ function normalizeInput(input = {}) {
   }
   const source = optionalText(input.source, "source", 100) || "chatgpt";
   if (!allowedSources.has(source)) throw new Error(`Unknown source: ${source}`);
+  const rawDraftText = optionalText(
+    input.raw_draft_text ?? input.rawDraftText,
+    "raw_draft_text",
+    chatOutputMaxLength,
+  );
+  const suppliedChatOutput = input.chat_output_text ?? input.chatOutputText;
+  const chatOutputText = suppliedChatOutput === undefined || suppliedChatOutput === null
+    ? ""
+    : requiredText(suppliedChatOutput, "chat_output_text", chatOutputMaxLength);
+  if (!chatOutputText && !rawDraftText) throw new Error("chat_output_text is required.");
   return {
     sourceBundleId: optionalText(
       input.source_bundle_id ?? input.sourceBundleId,
       "source_bundle_id",
       200,
     ),
-    chatOutputText: requiredText(
-      input.chat_output_text ?? input.chatOutputText,
-      "chat_output_text",
-      chatOutputMaxLength,
-    ),
+    chatOutputText,
+    rawDraftText,
     title: optionalText(input.title, "title", 500),
     chapterLabel: optionalText(
       input.chapter_label ?? input.chapterLabel,
@@ -150,11 +158,63 @@ function publicResult(metadata) {
   };
 }
 
+async function resolveCandidateOutputText(input, trace, options) {
+  if (!input.rawDraftText) {
+    return {
+      candidateText: input.chatOutputText,
+      finalPolisherResult: null,
+      warnings: [],
+    };
+  }
+  const result = runFinalPolisherEditorialBrain({
+    raw_draft_text: input.rawDraftText,
+    writing_card_director_context: trace.bundle?.content?.writing_card_director_context ?? null,
+    generation_context: trace.bundle?.inputs?.generation_context ?? {},
+    retrieval_context: trace.bundle?.inputs?.retrieval_context ?? {},
+  }, {
+    editorialAdapter: options.finalPolisherEditorialAdapter,
+  });
+  if (result.status !== "completed" || !result.polished_text) {
+    return {
+      candidateText: "",
+      finalPolisherResult: result,
+      warnings: [
+        "final_polisher_did_not_complete",
+        ...(result.warnings ?? []),
+      ],
+    };
+  }
+  return {
+    candidateText: result.polished_text,
+    finalPolisherResult: result,
+    warnings: result.warnings ?? [],
+  };
+}
+
 export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   const input = normalizeInput(rawInput);
   const roots = rootsFor(options);
   const trace = await bundleTrace(input.sourceBundleId, options);
-  const candidateHash = sha256(input.chatOutputText);
+  const {
+    candidateText,
+    finalPolisherResult,
+    warnings: finalPolisherWarnings,
+  } = await resolveCandidateOutputText(input, trace, options);
+  if (input.rawDraftText && (!candidateText || finalPolisherResult?.status !== "completed")) {
+    return {
+      candidate_created: false,
+      canon_status: "blocked",
+      adopted: false,
+      settled: false,
+      proofed: false,
+      source_bundle_id: trace.source_bundle_id,
+      final_polisher_result: finalPolisherResult,
+      needs_structural_revision: finalPolisherResult?.needs_structural_revision === true,
+      suggested_return_stage: finalPolisherResult?.suggested_return_stage ?? null,
+      warnings: finalPolisherWarnings,
+    };
+  }
+  const candidateHash = sha256(candidateText);
   // Attempt to inherit any neural trace / neural modules used info from the
   // source context bundle so candidate metadata reflects actual traces when
   // present. We normalize module names to the base module name (without the
@@ -187,6 +247,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   const warnings = [
     ...(trace.warning ? [trace.warning] : []),
     ...pipelineMetadata.warnings,
+    ...finalPolisherWarnings,
   ];
   if (input.dryRun) {
     return {
@@ -198,6 +259,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       adopted: false,
       settled: false,
       proofed: false,
+      final_polisher_result: finalPolisherResult,
       warnings,
     };
   }
@@ -219,8 +281,12 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     chapter_label: input.chapterLabel,
     task_prompt: input.taskPrompt,
     notes: input.notes,
+    raw_draft_hash: input.rawDraftText ? sha256(input.rawDraftText) : null,
+    polished_text_hash: finalPolisherResult ? sha256(candidateText) : null,
+    final_polisher_status: finalPolisherResult?.status ?? null,
+    final_polisher_revision_report: finalPolisherResult?.revision_report ?? null,
     candidate_hash: candidateHash,
-    candidate_chars: input.chatOutputText.length,
+    candidate_chars: candidateText.length,
     canon_status: "candidate_only",
     adopted: false,
     settled: false,
@@ -241,11 +307,11 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   // Run Wrong-Cast guard evaluation if we have bundle context
   try {
     if (trace.bundle && typeof evaluateCandidateAgainstAnchor === "function") {
-      const evalResult = evaluateCandidateAgainstAnchor(trace.bundle, input.chatOutputText);
+      const evalResult = evaluateCandidateAgainstAnchor(trace.bundle, candidateText);
       if (process.env.DEBUG_BRIDGE === "1" || process.env.BRIDGE_VERBOSE === "1") {
         console.error("DEBUG_BRIDGE: evaluateCandidateAgainstAnchor result:", JSON.stringify(evalResult, null, 2));
         console.error("DEBUG_BRIDGE: extracted chapter_anchor:", JSON.stringify(trace.bundle.content?.chapter_anchor ?? {}, null, 2));
-        console.error("DEBUG_BRIDGE: candidate text preview:", input.chatOutputText.slice(0, 200));
+        console.error("DEBUG_BRIDGE: candidate text preview:", candidateText.slice(0, 200));
       }
       metadata.guard_report = evalResult.guard_report || [];
       metadata.guard_report_display = formatGuardReportForDisplay(metadata.guard_report);
@@ -259,12 +325,13 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     metadata.warnings.push(`guard_evaluation_failed: ${err.message}`);
   }
   await commitFileTransaction("save-chat-output-writing-candidate", [
-    { filePath: paths.content, content: `${input.chatOutputText}\n` },
+    { filePath: paths.content, content: `${candidateText}\n` },
     { filePath: paths.metadata, content: `${JSON.stringify(metadata, null, 2)}\n` },
-  ], { candidate_id: candidateId, phase: "phase_8c_chat_output_candidate" });
+  ], { candidate_id: candidateId, phase: "phase_22t_final_polisher_editorial_brain" });
   return {
     ...publicResult(metadata),
     candidate_created: true,
+    final_polisher_result: finalPolisherResult,
     warnings,
     // NOTE: do not set top-level `blocked` here — saving a candidate should succeed and
     // record guard_report in metadata so readiness/adoption gates can block later.

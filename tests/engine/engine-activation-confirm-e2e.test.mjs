@@ -47,6 +47,44 @@ function hash(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isInside(parent, target) {
+  const relative = path.relative(parent, target);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function safeRm(target) {
+  const retryable = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(target, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+      return;
+    } catch (error) {
+      if (!retryable.has(error.code) || attempt === 7) {
+        throw error;
+      }
+      await sleep(100 * (attempt + 1));
+    }
+  }
+}
+
+async function cleanupTestPaths() {
+  await safeRm(root);
+  for (const [key, target] of Object.entries(options)) {
+    if (key === "activeEnginePath") continue;
+    if (target === root || isInside(root, target)) continue;
+    await safeRm(target);
+  }
+}
+
 const REQUIRED_NEURAL_MODULES = [
   "run_scene_planner",
   "run_character_simulator",
@@ -67,12 +105,7 @@ async function markCandidateNeuralTraceComplete(candidateId) {
 async function main() {
   const productionHash = hash(await readFile(projectPaths.activeEngine));
   const activeText = "# Phase 8I E2E Engine\n\nRule 1: stable.\n";
-  await Promise.all([
-    rm(root, { recursive: true, force: true }),
-    ...Object.entries(options)
-      .filter(([key]) => key !== "activeEnginePath")
-      .map(([, target]) => rm(target, { recursive: true, force: true })),
-  ]);
+  await cleanupTestPaths();
   await mkdir(root, { recursive: true });
   await writeFile(options.activeEnginePath, activeText, "utf8");
   try {
@@ -163,12 +196,7 @@ async function main() {
     assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Production engine changed.");
     console.log("Engine activation confirm E2E test passed.");
   } finally {
-    await Promise.all([
-      rm(root, { recursive: true, force: true }),
-      ...Object.entries(options)
-        .filter(([key]) => key !== "activeEnginePath")
-        .map(([, target]) => rm(target, { recursive: true, force: true })),
-    ]);
+    await cleanupTestPaths();
   }
 }
 
