@@ -1795,6 +1795,8 @@ const toolDefinitions = [
       limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
       sourceBundleId: { type: "string" },
       chatOutputText: { type: "string" },
+      rawDraftText: { type: "string" },
+      raw_draft_text: { type: "string" },
       title: { type: "string" },
       chapterLabel: { type: "string" },
       notes: { type: "string" },
@@ -2017,6 +2019,8 @@ const toolDefinitions = [
     inputSchema: baseSchema({
       sourceBundleId: { type: "string" },
       chatOutputText: { type: "string" },
+      rawDraftText: { type: "string" },
+      raw_draft_text: { type: "string" },
       title: { type: "string" },
       chapter: { type: "string" },
       taskPrompt: { type: "string" },
@@ -2206,6 +2210,8 @@ const toolDefinitions = [
     inputSchema: baseSchema({
       sourceBundleId: { type: "string" },
       chatOutputText: { type: "string" },
+      rawDraftText: { type: "string" },
+      raw_draft_text: { type: "string" },
       title: { type: "string" },
       chapterLabel: { type: "string" },
       taskPrompt: { type: "string" },

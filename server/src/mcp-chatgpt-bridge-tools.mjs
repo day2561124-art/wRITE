@@ -22,16 +22,76 @@ import {
   runVisualLibraryMcpReadonlyToolPreview,
 } from "./visual-library-mcp-readonly-tool-service.mjs";
 
+function summarizeFullNeuralSurface(result = {}) {
+  const existingSummary = result?.full_neural_orchestration_summary ?? null;
+  if (existingSummary) {
+    return {
+      used: existingSummary.used === true,
+      orchestrator_version: existingSummary.orchestrator_version ?? null,
+      pipeline_stage: existingSummary.pipeline_stage ?? null,
+      context_bundle_id: existingSummary.context_bundle_id ?? result?.source_bundle_id ?? null,
+      writing_pipeline_complete: existingSummary.writing_pipeline_complete ?? null,
+      candidate_only: existingSummary.candidate_only ?? true,
+      active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
+      canon_update_allowed: existingSummary.canon_update_allowed ?? false,
+    };
+  }
+
+  const report = result?.full_neural_orchestration_report
+    ?? result?.final_polisher_result?.orchestration_report
+    ?? null;
+
+  if (!report) {
+    return {
+      used: result?.full_neural_orchestrator_used === true,
+      orchestrator_version: result?.full_neural_orchestrator_version ?? null,
+      pipeline_stage: result?.full_neural_pipeline_stage ?? null,
+      context_bundle_id: result?.source_bundle_id ?? null,
+      writing_pipeline_complete: null,
+      candidate_only: true,
+      active_engine_update_allowed: false,
+      canon_update_allowed: false,
+    };
+  }
+
+  return {
+    used: true,
+    orchestrator_version: report.orchestration_version ?? null,
+    pipeline_stage: report.pipeline_stage ?? null,
+    context_bundle_id: report.context_bundle_id ?? result?.source_bundle_id ?? null,
+    writing_pipeline_complete: report.writing_pipeline_complete ?? null,
+    candidate_only: report.candidate_only ?? true,
+    active_engine_update_allowed: report.active_engine_update_allowed ?? false,
+    canon_update_allowed: report.canon_update_allowed ?? false,
+  };
+}
+
+function withFullNeuralSurface(result = {}) {
+  const summary = summarizeFullNeuralSurface(result);
+  return {
+    ...result,
+    full_neural_orchestrator_used: summary.used,
+    full_neural_orchestrator_version: summary.orchestrator_version,
+    full_neural_pipeline_stage: summary.pipeline_stage,
+    full_neural_orchestration_summary: summary,
+  };
+}
+
 function response(toolName, permission, result, created = []) {
+  const surfacedResult = withFullNeuralSurface(result ?? {});
+  const fullNeuralSummary = summarizeFullNeuralSurface(surfacedResult);
+
   return {
     ok: result?.ok !== false,
     tool_name: toolName,
     permission,
-    result,
+    result: surfacedResult,
     created,
     warnings: result?.warnings ?? [],
     blocked: result?.blocked === true,
     blocked_reason: result?.blocked_reason ?? null,
+    full_neural_orchestrator_used: fullNeuralSummary.used === true,
+    full_neural_orchestration_summary: fullNeuralSummary,
     safety: chatgptBridgeSafety,
   };
 }
@@ -88,11 +148,17 @@ export const chatgpt_bridge_save_candidate = tool(
   "chatgpt_bridge_save_candidate",
   "write_low_risk",
   saveChatgptBridgeCandidate,
-  (result) => result.candidate_created ? [{
-    label: "writing_candidate",
-    target_id: result.candidate_id,
-    canon_status: "candidate_only",
-  }] : [],
+  (result) => {
+    const fullNeuralSummary = summarizeFullNeuralSurface(result);
+    return result.candidate_created ? [{
+      label: "writing_candidate",
+      target_id: result.candidate_id,
+      canon_status: "candidate_only",
+      full_neural_orchestrator_used: fullNeuralSummary.used === true,
+      full_neural_orchestrator_version: fullNeuralSummary.orchestrator_version ?? null,
+      full_neural_pipeline_stage: fullNeuralSummary.pipeline_stage ?? null,
+    }] : [];
+  },
 );
 
 export const chatgpt_bridge_build_proofing_context = tool(

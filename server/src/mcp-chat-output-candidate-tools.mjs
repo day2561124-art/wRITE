@@ -23,6 +23,18 @@ function blocked(toolName, error) {
 export async function save_chat_output_as_writing_candidate(input = {}, options = {}) {
   try {
     const result = await saveChatOutputAsWritingCandidate(input, options);
+    const fullNeuralReport = result.full_neural_orchestration_report ?? null;
+    const fullNeuralSummary = fullNeuralReport ? {
+      used: true,
+      orchestrator_version: fullNeuralReport.orchestration_version ?? null,
+      pipeline_stage: fullNeuralReport.pipeline_stage ?? null,
+      context_bundle_id: fullNeuralReport.context_bundle_id ?? result.source_bundle_id ?? null,
+      writing_pipeline_complete: fullNeuralReport.writing_pipeline_complete ?? null,
+      candidate_only: fullNeuralReport.candidate_only ?? true,
+      active_engine_update_allowed: fullNeuralReport.active_engine_update_allowed ?? false,
+      canon_update_allowed: fullNeuralReport.canon_update_allowed ?? false,
+    } : null;
+
     return {
       ok: true,
       tool_name: "save_chat_output_as_writing_candidate",
@@ -33,10 +45,15 @@ export async function save_chat_output_as_writing_candidate(input = {}, options 
         target_id: result.candidate_id,
         source_path: result.candidate_path,
         canon_status: "candidate_only",
+        full_neural_orchestrator_used: fullNeuralSummary?.used === true,
+        full_neural_orchestrator_version: fullNeuralSummary?.orchestrator_version ?? null,
+        full_neural_pipeline_stage: fullNeuralSummary?.pipeline_stage ?? null,
       }] : [],
       warnings: result.warnings,
       blocked: false,
       blocked_reason: null,
+      full_neural_orchestrator_used: fullNeuralSummary?.used === true,
+      full_neural_orchestration_summary: fullNeuralSummary,
     };
   } catch (error) {
     return blocked("save_chat_output_as_writing_candidate", error);
