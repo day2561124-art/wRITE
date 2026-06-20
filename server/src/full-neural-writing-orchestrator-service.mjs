@@ -198,6 +198,14 @@ export async function buildFullNeuralWritingOrchestration(rawInput = {}, options
     context_bundle_id: bundle.bundle_id,
     context_bundle_path: contextResult.context_bundle_path,
     context_for_chat_path: contextResult.context_for_chat_path,
+    character_voice_registry_loaded: bundle.character_voice_registry_loaded === true,
+    character_voice_registry_path: bundle.character_voice_registry_path ?? null,
+    character_voice_registry_hash_sha256:
+      bundle.character_voice_registry_hash_sha256 ?? null,
+    character_voice_registry_source_type:
+      bundle.character_voice_registry_source_type ?? "read_only_derived_index",
+    character_voice_registry_authority:
+      bundle.character_voice_registry_authority ?? "below_canon_db",
     required_modules: moduleSummary.required_modules,
     pre_generation_required_modules: moduleSummary.pre_generation_required_modules,
     post_generation_required_modules: moduleSummary.post_generation_required_modules,
@@ -223,6 +231,11 @@ export async function buildFullNeuralWritingOrchestration(rawInput = {}, options
       chapter_anchor_present: Boolean(bundle.content?.chapter_anchor),
       guard_severity: bundle.guard_severity ?? null,
       neural_trace_complete: bundle.neural_trace_complete ?? null,
+      character_voice_registry_loaded: bundle.character_voice_registry_loaded === true,
+      character_voice_registry_source_type:
+        bundle.character_voice_registry_source_type ?? "read_only_derived_index",
+      character_voice_registry_authority:
+        bundle.character_voice_registry_authority ?? "below_canon_db",
     },
     raw_generation: {
       status: input.rawDraftText ? "raw_draft_received" : "waiting_for_gpt_raw_draft",

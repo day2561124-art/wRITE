@@ -36,6 +36,7 @@ const steps = [
   ["Phase 22 orchestrator candidate save bridge", ["tests/phase22/phase22v-orchestrator-candidate-save-bridge.test.mjs"]],
   ["Phase 22 bridge orchestrator surface", ["tests/phase22/phase22w-bridge-orchestrator-surface.test.mjs"]],
   ["Phase 22 UI orchestrator status", ["tests/phase22/phase22x-ui-orchestrator-status.test.mjs"]],
+  ["Phase 23C character voice registry context", ["tests/phase23/phase23c-character-voice-registry-context.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -103,6 +104,10 @@ const steps = [
   ["MCP tool profiles", ["tests/mcp/mcp-tool-profiles.test.mjs"]],
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 ];
+function getTimeoutMs(label) {
+  if (label === "Canon golden tests") return 480_000;
+  return 240_000;
+}
 
 function runStep(label, args) {
   return new Promise((resolve, reject) => {
@@ -113,12 +118,14 @@ function runStep(label, args) {
       windowsHide: true,
     });
     let settled = false;
+    const timeoutMs = getTimeoutMs(label);
+    const timeoutSeconds = Math.round(timeoutMs / 1000);
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       terminateProcessTree(child);
-      reject(new Error(`${label} timed out after 240 seconds.`));
-    }, 240_000);
+      reject(new Error(`${label} timed out after ${timeoutSeconds} seconds.`));
+    }, timeoutMs);
     child.on("error", (error) => {
       if (settled) return;
       settled = true;

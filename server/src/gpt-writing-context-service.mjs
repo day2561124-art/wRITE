@@ -202,6 +202,26 @@ function serializeContext(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function characterVoiceRegistryMetadata(source) {
+  return {
+    loaded: source.exists === true,
+    path: source.path,
+    hash_sha256: source.hash,
+    bytes: source.exists === true ? Buffer.byteLength(source.content, "utf8") : null,
+    source_type: "read_only_derived_index",
+    authority: "below_canon_db",
+    usage: "supporting_voice_guidance_only",
+    content_key: "character_voice_registry_content",
+  };
+}
+
+function contextWithCharacterVoiceRegistry(context, metadata) {
+  return {
+    ...context,
+    character_voice_registry: metadata,
+  };
+}
+
 function allocateContent(sections, maxChars) {
   let remaining = maxChars;
   const content = {};
@@ -296,6 +316,16 @@ function chatMarkdown(bundle) {
     "",
     bundle.content.longline_excerpt_or_reference || "[not included or missing]",
     "",
+    "## Character Voice Registry (Supporting Guidance Only)",
+    "",
+    `- loaded: ${bundle.character_voice_registry_loaded}`,
+    `- source type: ${bundle.character_voice_registry_source_type}`,
+    `- authority: ${bundle.character_voice_registry_authority}`,
+    `- path: ${bundle.character_voice_registry_path}`,
+    `- SHA-256: ${bundle.character_voice_registry_hash_sha256 ?? "none"}`,
+    "",
+    bundle.content.character_voice_registry_content || "[missing]",
+    "",
     "## Retrieval Context",
     "",
     bundle.content.retrieval_context_for_chat,
@@ -361,6 +391,13 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   const activeEnginePath = options.activeEnginePath
     ? assertPathInside(options.activeEnginePath, projectPaths.canonDb, "active engine test path")
     : projectPaths.activeEngine;
+  const characterVoiceRegistryPath = options.characterVoiceRegistryPath
+    ? assertPathInside(
+      options.characterVoiceRegistryPath,
+      projectPaths.characterProfileDb,
+      "character voice registry test path",
+    )
+    : projectPaths.characterVoiceRegistry;
   const sourceList = await Promise.all([
     sourceSnapshot("active_engine", activeEnginePath, input.includeActiveEngine, "active"),
     sourceSnapshot(
@@ -381,9 +418,31 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       input.includeLongline,
       "reference",
     ),
+    sourceSnapshot(
+      "character_voice_registry",
+      characterVoiceRegistryPath,
+      true,
+      "read_only_derived_index",
+    ),
   ]);
   const byLabel = Object.fromEntries(sourceList.map((source) => [source.label, source]));
+  const characterVoiceRegistry = characterVoiceRegistryMetadata(
+    byLabel.character_voice_registry,
+  );
+  const generationContext = contextWithCharacterVoiceRegistry(
+    input.generationContext,
+    characterVoiceRegistry,
+  );
+  const retrievalContext = contextWithCharacterVoiceRegistry(
+    input.retrievalContext,
+    characterVoiceRegistry,
+  );
   const allocated = allocateContent([
+    {
+      key: "character_voice_registry_content",
+      text: byLabel.character_voice_registry.content,
+      reference: byLabel.character_voice_registry.path,
+    },
     {
       key: "active_engine_excerpt_or_reference",
       text: byLabel.active_engine.content,
@@ -406,12 +465,12 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     },
     {
       key: "retrieval_context",
-      text: serializeContext(input.retrievalContext),
+      text: serializeContext(retrievalContext),
       reference: "input.retrieval_context",
     },
     {
       key: "generation_context",
-      text: serializeContext(input.generationContext),
+      text: serializeContext(generationContext),
       reference: "input.generation_context",
     },
   ], input.maxContextChars);
@@ -454,9 +513,15 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     adoption_allowed: false,
     settlement_allowed: false,
     approval_required_for_any_canon_change: true,
+    character_voice_registry_loaded: characterVoiceRegistry.loaded,
+    character_voice_registry_path: characterVoiceRegistry.path,
+    character_voice_registry_hash_sha256: characterVoiceRegistry.hash_sha256,
+    character_voice_registry_bytes: characterVoiceRegistry.bytes,
+    character_voice_registry_source_type: characterVoiceRegistry.source_type,
+    character_voice_registry_authority: characterVoiceRegistry.authority,
     inputs: {
-      generation_context: input.generationContext,
-      retrieval_context: input.retrievalContext,
+      generation_context: generationContext,
+      retrieval_context: retrievalContext,
     },
     sources: publicSources,
     chat_instructions: {
@@ -476,8 +541,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
         allocated.content.proofing_card_excerpt_or_reference,
       longline_excerpt_or_reference:
         allocated.content.longline_excerpt_or_reference,
-      retrieval_context: input.retrievalContext,
-      generation_context: input.generationContext,
+      character_voice_registry_content:
+        allocated.content.character_voice_registry_content,
+      retrieval_context: retrievalContext,
+      generation_context: generationContext,
       retrieval_context_for_chat: allocated.content.retrieval_context,
       generation_context_for_chat: allocated.content.generation_context,
       writing_card_director_context: null,
@@ -492,8 +559,8 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     try {
       const director = buildWritingCardDirectorContext({
         taskPrompt: input.taskPrompt,
-        generationContext: input.generationContext,
-        retrievalContext: input.retrievalContext,
+        generationContext,
+        retrievalContext,
         writingCardText: byLabel.active_writing_card.content,
       });
       bundle.content.writing_card_director_context = director;
@@ -573,8 +640,9 @@ export async function buildGptWritingContext(rawInput, options = {}) {
           try {
             await wrapper({
               task_prompt: input.taskPrompt,
-              generation_context: input.generationContext,
-              retrieval_context: input.retrievalContext,
+              generation_context: generationContext,
+              retrieval_context: retrievalContext,
+              character_voice_registry: characterVoiceRegistry,
             }, { run_id: runId, task_type: "draft_generation", adapter });
           } catch (err) {
             // record but do not block bundle creation

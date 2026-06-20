@@ -77,6 +77,13 @@ export const projectPaths = {
   entityRegistryBuildReport: path.join(projectRoot, "data", "entity_registry", "entity_registry_build_report.json"),
   entityRegistryConflictReport: path.join(projectRoot, "data", "entity_registry", "conflict_report.json"),
   entityRegistryProvenance: path.join(projectRoot, "data", "entity_registry", "provenance.json"),
+  characterProfileDb: path.join(projectRoot, "data", "character_profile_db"),
+  characterVoiceRegistry: path.join(
+    projectRoot,
+    "data",
+    "character_profile_db",
+    "active_character_voice_registry.md",
+  ),
   cleanupRoot: path.join(projectRoot, "data", "cleanup"),
   cleanupProposals: path.join(projectRoot, "data", "cleanup", "proposals"),
   cleanupLogs: path.join(projectRoot, "data", "cleanup", "logs"),
