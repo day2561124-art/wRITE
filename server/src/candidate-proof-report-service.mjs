@@ -12,6 +12,10 @@ import {
   normalizeProjectPath,
   projectPaths,
 } from "./project-paths.mjs";
+import {
+  characterVoiceGuardMetadata,
+  evaluateCharacterVoiceDrift,
+} from "./character-voice-drift-guard-service.mjs";
 
 const proofReportIdPattern = /^proof_report_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const verdicts = new Set(["pass", "needs_revision", "blocked"]);
@@ -118,6 +122,18 @@ function publicResult(metadata) {
     canon_status: metadata.canon_status,
     adopted: metadata.adopted,
     settled: metadata.settled,
+    character_voice_guard_used: metadata.character_voice_guard_used,
+    character_voice_registry_loaded: metadata.character_voice_registry_loaded,
+    character_voice_registry_hash_sha256:
+      metadata.character_voice_registry_hash_sha256,
+    character_voice_registry_source_type:
+      metadata.character_voice_registry_source_type,
+    character_voice_registry_authority:
+      metadata.character_voice_registry_authority,
+    character_voice_guard_verdict: metadata.character_voice_guard_verdict,
+    character_voice_guard_severity: metadata.character_voice_guard_severity,
+    character_voice_guard_findings_count:
+      metadata.character_voice_guard_findings_count,
   };
 }
 
@@ -131,6 +147,11 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
     }
   }
   const reportHash = sha256(input.proofReportText);
+  const candidatePaths = resolveWritingCandidatePaths(input.candidateId, options);
+  const candidateText = await readFile(candidatePaths.content, "utf8");
+  const characterVoiceGuard = candidate.metadata.character_voice_guard
+    ?? await evaluateCharacterVoiceDrift({ candidate_text: candidateText }, options);
+  const characterVoiceMetadata = characterVoiceGuardMetadata(characterVoiceGuard);
   if (input.dryRun) {
     return {
       dry_run: true,
@@ -143,6 +164,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
       canon_status: "candidate_only",
       adopted: false,
       settled: false,
+      ...characterVoiceMetadata,
     };
   }
 
@@ -150,7 +172,6 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
   await mkdir(roots.proofReports, { recursive: true });
   const proofReportId = createProofReportId();
   const paths = proofReportPaths(proofReportId, roots);
-  const candidatePaths = resolveWritingCandidatePaths(input.candidateId, options);
   const existingReportIds = Array.isArray(candidate.metadata.proof_report_ids)
     ? candidate.metadata.proof_report_ids.filter((value) => typeof value === "string")
     : [];
@@ -177,6 +198,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
     canon_update_allowed: false,
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
+    ...characterVoiceMetadata,
     proof_report_path: normalizeProjectPath(paths.report),
     metadata_path: normalizeProjectPath(paths.metadata),
   };
@@ -194,6 +216,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
     canon_update_allowed: false,
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
+    ...characterVoiceMetadata,
   };
   await commitFileTransaction("save-chat-output-proof-report", [
     { filePath: paths.report, content: `${input.proofReportText}\n` },

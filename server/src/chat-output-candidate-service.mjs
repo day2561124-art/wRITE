@@ -9,6 +9,10 @@ import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
 import { runFinalPolisherEditorialBrain } from "./final-polisher-editorial-service.mjs";
 import { buildFullNeuralWritingOrchestration } from "./full-neural-writing-orchestrator-service.mjs";
 import {
+  characterVoiceGuardMetadata,
+  evaluateCharacterVoiceDrift,
+} from "./character-voice-drift-guard-service.mjs";
+import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
@@ -308,6 +312,11 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     ...pipelineMetadata.warnings,
     ...finalPolisherWarnings,
   ];
+  const characterVoiceGuard = await evaluateCharacterVoiceDrift({
+    candidate_text: candidateText,
+    context_bundle: trace.bundle,
+  }, options);
+  const characterVoiceMetadata = characterVoiceGuardMetadata(characterVoiceGuard);
   if (input.dryRun) {
     return {
       dry_run: true,
@@ -320,6 +329,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       proofed: false,
       final_polisher_result: finalPolisherResult,
       full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
+      ...characterVoiceMetadata,
       warnings,
     };
   }
@@ -360,6 +370,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
     local_generation_used: false,
+    ...characterVoiceMetadata,
     ...pipelineMetadata,
     // Inherit writing_card_director context if present in source bundle
     writing_card_director_context: trace.bundle?.content?.writing_card_director_context ?? null,
@@ -402,6 +413,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     // record guard_report in metadata so readiness/adoption gates can block later.
     guard_report: metadata.guard_report ?? [],
     guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
+    ...characterVoiceMetadata,
   };
 }
 

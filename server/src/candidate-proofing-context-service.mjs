@@ -378,6 +378,22 @@ export async function buildCandidateProofingContext(rawInput, options = {}) {
     adoption_allowed: false,
     settlement_allowed: false,
     approval_item_creation_allowed: false,
+    character_voice_guard_used: candidate.metadata.character_voice_guard_used ?? false,
+    character_voice_registry_loaded:
+      candidate.metadata.character_voice_registry_loaded ?? false,
+    character_voice_registry_hash_sha256:
+      candidate.metadata.character_voice_registry_hash_sha256 ?? null,
+    character_voice_registry_source_type:
+      candidate.metadata.character_voice_registry_source_type ?? "read_only_derived_index",
+    character_voice_registry_authority:
+      candidate.metadata.character_voice_registry_authority ?? "below_canon_db",
+    character_voice_guard_verdict:
+      candidate.metadata.character_voice_guard_verdict ?? null,
+    character_voice_guard_severity:
+      candidate.metadata.character_voice_guard_severity ?? null,
+    character_voice_guard_findings_count:
+      candidate.metadata.character_voice_guard_findings_count ?? 0,
+    character_voice_guard: candidate.metadata.character_voice_guard ?? null,
     candidate_metadata: candidate.metadata,
     inputs: {
       retrieval_context: input.retrievalContext,
