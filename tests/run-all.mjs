@@ -42,6 +42,7 @@ const steps = [
   ["Phase 23H character voice adoption gate", ["tests/phase23/phase23h-character-voice-adoption-gate.test.mjs"]],
   ["Phase 23I character voice live adoption smoke", ["tests/phase23/phase23i-character-voice-live-adoption-smoke.test.mjs"]],
   ["Phase 24A backend full recursive writing pipeline", ["tests/phase24/phase24a-backend-full-recursive-writing-pipeline.test.mjs"]],
+  ["Phase 24B backend generation provider bridge", ["tests/phase24/phase24b-backend-generation-provider-bridge.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -110,7 +111,9 @@ const steps = [
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 ];
 function getTimeoutMs(label) {
-  if (label === "Canon golden tests") return 480_000;
+  if (label === "Canon golden tests" || label === "JSON/codeblock validation") {
+    return 480_000;
+  }
   return 240_000;
 }
 

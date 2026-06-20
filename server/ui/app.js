@@ -726,12 +726,18 @@ function renderOperatorOverview() {
         · candidate_only: ${escapeHtml(String(fullNeural.candidate_only ?? true))}
         · canon_update: ${escapeHtml(String(fullNeural.canon_update_allowed ?? false))}
         · backend recursive: ${escapeHtml(fullNeural.backend_recursive_writing_pipeline_status ?? "--")}
+        · provider: ${escapeHtml(fullNeural.backend_generation_provider_type ?? "--")}
+        · provider status: ${escapeHtml(fullNeural.backend_generation_provider_status ?? "--")}
+        · provider available: ${escapeHtml(String(fullNeural.backend_generation_provider_available ?? false))}
+        · endpoint configured: ${escapeHtml(String(fullNeural.backend_generation_endpoint_configured ?? false))}
         · final source: ${escapeHtml(fullNeural.final_candidate_source ?? "--")}
         · revision rounds: ${escapeHtml(String(fullNeural.revision_rounds_attempted ?? 0))}
         · voice guard: ${escapeHtml(fullNeural.character_voice_guard_status ?? "--")}
       </small>
-      <p>${fullNeural.final_text_ready
+      <p>${fullNeural.final_text_ready || fullNeural.can_output_to_chat
         ? "可回傳聊天欄"
+        : fullNeural.backend_generation_provider_error
+          ? `Provider error: ${escapeHtml(fullNeural.backend_generation_provider_error)}`
         : fullNeural.backend_recursive_writing_pipeline_status === "structural_revision_required"
           ? "後端修稿失敗，未產生 final text"
           : "尚無後端 final text"}</p>

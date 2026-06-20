@@ -166,7 +166,7 @@ try {
   assert.equal(bridge.ok, true);
   assert(bridge.result.final_candidate_text);
   assert.equal(bridge.result.output_mode, "chat_text");
-  assert.match(bridge.result.next_action, /Output final_candidate_text directly/);
+  assert.equal(bridge.result.next_action, "output_final_candidate_text_to_chat");
 
   const failedBridge = await chatgpt_bridge_run_full_recursive_writing_pipeline(
     baseInput,
@@ -175,7 +175,7 @@ try {
   assert.equal(failedBridge.ok, true);
   assert.equal(failedBridge.result.final_candidate_text, "");
   assert.equal(failedBridge.result.stop_reason, "generation_provider_required");
-  assert.match(failedBridge.result.next_action, /Do not output fabricated prose/);
+  assert.equal(failedBridge.result.next_action, "configure_backend_generation_provider");
 
   const serverSource = await readFile(
     path.join(root, "server", "src", "mcp-server.mjs"),

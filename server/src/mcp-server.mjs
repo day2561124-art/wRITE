@@ -2043,9 +2043,16 @@ const toolDefinitions = [
       task_prompt: { type: "string", maxLength: 12000 },
       generation_context: { type: "object" },
       retrieval_context: { type: "object" },
+      provider_type: {
+        type: "string",
+        enum: ["disabled", "deterministic_test", "local_http", "remote_http"],
+      },
+      provider_id: { type: "string", maxLength: 160 },
+      model_name: { type: "string", maxLength: 240 },
       save_candidate: { type: "boolean", default: false },
       max_revision_rounds: { type: "integer", minimum: 1, maximum: 8, default: 2 },
       enable_character_voice_guard: { type: "boolean", default: true },
+      output_mode: { type: "string", enum: ["chat_text"], default: "chat_text" },
     }, ["task_prompt"]),
     handler: async (args) => jsonContent(
       await chatgpt_bridge_run_full_recursive_writing_pipeline(args),

@@ -719,15 +719,38 @@ export async function runChatgptBridgeFullRecursiveWritingPipeline(input = {}, o
     ...input,
     output_mode: "chat_text",
   }, options);
+  const nextActionByStopReason = {
+    generation_provider_required: "configure_backend_generation_provider",
+    generation_provider_secret_missing: "configure_backend_generation_provider",
+    revision_provider_required: "configure_backend_revision_provider",
+    provider_http_error: "check_backend_generation_provider",
+    provider_timeout: "check_backend_generation_provider",
+    provider_empty_text: "check_backend_generation_provider",
+    provider_invalid_response: "check_backend_generation_provider",
+    structural_revision_required: "review_revision_failure",
+    max_revision_rounds_exhausted: "review_revision_failure",
+  };
+  const canOutputToChat = Boolean(result.final_candidate_text);
   return {
     ...result,
     output_mode: "chat_text",
+    can_output_to_chat: canOutputToChat,
+    generation_provider: result.generation_provider ?? {
+      available: false,
+      provider_type: result.backend_generation_provider_type,
+      provider_id: result.backend_generation_provider_id,
+      status: result.backend_generation_provider_status,
+      model_name: null,
+      model_version: null,
+      endpoint_url_present: false,
+      token_present: false,
+    },
     revision_rounds_attempted: result.recursive_revision?.rounds_attempted ?? 0,
     character_voice_guard_display: result.character_voice_guard?.display ?? null,
     warnings: result.report?.warnings ?? [],
-    next_action: result.final_candidate_text
-      ? "Output final_candidate_text directly in the chat; do not generate a separate raw draft."
-      : `Do not output fabricated prose. Stop reason: ${result.stop_reason ?? "pipeline_failed"}.`,
+    next_action: canOutputToChat
+      ? "output_final_candidate_text_to_chat"
+      : (nextActionByStopReason[result.stop_reason] ?? "review_revision_failure"),
     safety: chatgptBridgeSafety,
   };
 }

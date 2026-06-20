@@ -4,6 +4,11 @@ import { runFinalPolisherEditorialBrain } from "./final-polisher-editorial-servi
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { evaluateCharacterVoiceDrift } from "./character-voice-drift-guard-service.mjs";
 import { formatCharacterVoiceGuardForDisplay } from "./character-voice-guard-display.mjs";
+import {
+  buildGenerationAdapterFromProvider,
+  buildRevisionAdapterFromProvider,
+  resolveBackendGenerationProvider,
+} from "./backend-generation-provider-service.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
@@ -155,6 +160,17 @@ function baseResult(input, now) {
     direct_adoption_allowed: false,
     adoption_requires_approval_queue: false,
     final_text_can_be_displayed: false,
+    can_output_to_chat: false,
+    backend_generation_provider_used: false,
+    backend_generation_provider_type: null,
+    backend_generation_provider_id: null,
+    backend_generation_provider_status: "not_resolved",
+    backend_revision_provider_used: false,
+    backend_revision_provider_type: null,
+    provider_trace_ids: [],
+    generation_provider: null,
+    generation_provider_required: false,
+    revision_provider_required: false,
     generation: {
       adapter_used: false,
       raw_draft_hash: "",
@@ -185,7 +201,7 @@ function baseResult(input, now) {
     },
     report: {
       pipeline_name: "full_recursive_writing_pipeline",
-      phase: "24A",
+      phase: "24B",
       built_at: now.toISOString(),
       context_hash: "",
       retrieval_hash: sha256(JSON.stringify(input.retrievalContext)),
@@ -201,13 +217,34 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     ? options.now()
     : options.now instanceof Date ? options.now : new Date();
   const result = baseResult(input, now);
-
-  if (typeof options.generationAdapter !== "function") {
+  const provider = resolveBackendGenerationProvider(rawInput, options);
+  let generationAdapter = options.generationAdapter;
+  let revisionAdapter = options.revisionAdapter;
+  if (typeof generationAdapter !== "function" && provider.generation_available) {
+    generationAdapter = buildGenerationAdapterFromProvider(provider, options.providerCallOptions);
+    result.backend_generation_provider_used = true;
+  }
+  result.backend_generation_provider_type = provider.provider_type;
+  result.backend_generation_provider_id = provider.provider_id;
+  result.backend_generation_provider_status = provider.status;
+  result.generation_provider = {
+    available: provider.available,
+    provider_type: provider.provider_type,
+    provider_id: provider.provider_id,
+    status: provider.status,
+    model_name: provider.model_name,
+    model_version: provider.model_version,
+    endpoint_url_present: provider.endpoint_url_present,
+    token_env_name: provider.token_env_name,
+    token_present: provider.token_present,
+  };
+  if (typeof generationAdapter !== "function") {
     result.pipeline_stage = "generation_provider_required";
-    result.stop_reason = "generation_provider_required";
-    result.generation.status = "generation_provider_required";
-    result.recursive_revision.stop_reason = "generation_provider_required";
-    result.report.warnings.push("generation_provider_required");
+    result.stop_reason = provider.status;
+    result.generation.status = provider.status;
+    result.recursive_revision.stop_reason = provider.status;
+    result.generation_provider_required = true;
+    result.report.warnings.push(...provider.warnings, provider.status);
     return result;
   }
 
@@ -238,17 +275,30 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     ...(orchestration.orchestration_report.neural_modules_used ?? []),
   ].filter(Boolean);
 
-  const generated = await callAdapter(options.generationAdapter, {
-    task_prompt: input.taskPrompt,
-    generation_context: input.generationContext,
-    retrieval_context: input.retrievalContext,
-    writing_context: writingContext,
-    neural_pre_generation_report: orchestration.pre_generation,
-    writing_card_director: writingCardDirector,
-  });
+  let generated;
+  try {
+    generated = await callAdapter(generationAdapter, {
+      task_prompt: input.taskPrompt,
+      generation_context: input.generationContext,
+      retrieval_context: input.retrievalContext,
+      writing_context: writingContext,
+      neural_pre_generation_report: orchestration.pre_generation,
+      writing_card_director: writingCardDirector,
+    });
+  } catch (error) {
+    result.pipeline_stage = "generation_failed";
+    result.stop_reason = error?.provider_status ?? "provider_http_error";
+    result.generation.status = result.stop_reason;
+    result.recursive_revision.stop_reason = result.stop_reason;
+    result.report.warnings.push(result.stop_reason);
+    return result;
+  }
+  if (generated.provider_trace_id) {
+    result.provider_trace_ids.push(generated.provider_trace_id);
+  }
   result.generation = {
     adapter_used: true,
-    adapter_name: generated.adapter_name ?? options.generationAdapter.name ?? "generation_adapter",
+    adapter_name: generated.adapter_name ?? generationAdapter.name ?? "generation_adapter",
     model_name: generated.model_name ?? null,
     model_version: generated.model_version ?? null,
     raw_draft_hash: generated.text ? sha256(generated.text) : "",
@@ -276,9 +326,15 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
 
   if (polisher.needs_structural_revision === true) {
     result.recursive_revision.used = true;
-    if (typeof options.revisionAdapter !== "function") {
+    if (typeof revisionAdapter !== "function" && provider.revision_available) {
+      revisionAdapter = buildRevisionAdapterFromProvider(provider, options.providerCallOptions);
+      result.backend_revision_provider_used = true;
+      result.backend_revision_provider_type = provider.provider_type;
+    }
+    if (typeof revisionAdapter !== "function") {
       result.pipeline_stage = "structural_revision_required";
-      result.stop_reason = "revision_adapter_required";
+      result.stop_reason = "revision_provider_required";
+      result.revision_provider_required = true;
       result.recursive_revision.stop_reason = result.stop_reason;
       result.report.warnings.push(result.stop_reason);
       return result;
@@ -286,15 +342,29 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     for (let round = 1; round <= input.maxRevisionRounds; round += 1) {
       const critique = buildCritique(polisher);
       const revisionPlan = buildRevisionPlan(critique);
-      const revised = await callAdapter(options.revisionAdapter, {
-        round,
-        draft_text: draft,
-        critique,
-        revision_plan: revisionPlan,
-        writing_context: writingContext,
-        neural_pre_generation_report: orchestration.pre_generation,
-        writing_card_director: writingCardDirector,
-      });
+      let revised;
+      try {
+        revised = await callAdapter(revisionAdapter, {
+          round,
+          task_prompt: input.taskPrompt,
+          generation_context: input.generationContext,
+          retrieval_context: input.retrievalContext,
+          draft_text: draft,
+          critique,
+          revision_plan: revisionPlan,
+          writing_context: writingContext,
+          neural_pre_generation_report: orchestration.pre_generation,
+          writing_card_director: writingCardDirector,
+        });
+      } catch (error) {
+        result.stop_reason = error?.provider_status ?? "provider_http_error";
+        result.recursive_revision.stop_reason = result.stop_reason;
+        result.report.warnings.push(result.stop_reason);
+        break;
+      }
+      if (revised.provider_trace_id) {
+        result.provider_trace_ids.push(revised.provider_trace_id);
+      }
       const roundReport = {
         round,
         input_hash: sha256(draft),
@@ -359,6 +429,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   result.final_candidate_hash = sha256(result.final_candidate_text);
   result.final_candidate_source = finalSource;
   result.final_text_can_be_displayed = true;
+  result.can_output_to_chat = true;
   result.recursive_revision.status = result.recursive_revision.used ? "revised" : "not_needed";
   result.recursive_revision.stop_reason = result.recursive_revision.used ? "accepted" : "not_needed";
   result.final_polisher = {
