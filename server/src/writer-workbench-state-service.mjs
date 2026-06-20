@@ -169,6 +169,14 @@ export async function buildWriterWorkbenchState(options = {}) {
     candidate_only: fullNeuralReport?.candidate_only ?? candidate?.canon_status === "candidate_only",
     active_engine_update_allowed: fullNeuralReport?.active_engine_update_allowed ?? false,
     canon_update_allowed: fullNeuralReport?.canon_update_allowed ?? false,
+    backend_recursive_writing_pipeline_status:
+      candidate?.backend_recursive_writing_pipeline_status ?? null,
+    final_candidate_source: candidate?.final_candidate_source ?? null,
+    revision_rounds_attempted:
+      candidate?.recursive_revision_rounds_attempted ?? 0,
+    character_voice_guard_status:
+      candidateCharacterVoiceGuardDisplay.status_label,
+    final_text_ready: Boolean(candidate?.candidate_hash),
   };
   const proof = candidate
     ? proofs.find((item) => item.candidate_id === candidate.candidate_id && !isFixture(item)) ?? null

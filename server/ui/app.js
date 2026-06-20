@@ -725,7 +725,16 @@ function renderOperatorOverview() {
         · stage: ${escapeHtml(fullNeural.pipeline_stage ?? "--")}
         · candidate_only: ${escapeHtml(String(fullNeural.candidate_only ?? true))}
         · canon_update: ${escapeHtml(String(fullNeural.canon_update_allowed ?? false))}
+        · backend recursive: ${escapeHtml(fullNeural.backend_recursive_writing_pipeline_status ?? "--")}
+        · final source: ${escapeHtml(fullNeural.final_candidate_source ?? "--")}
+        · revision rounds: ${escapeHtml(String(fullNeural.revision_rounds_attempted ?? 0))}
+        · voice guard: ${escapeHtml(fullNeural.character_voice_guard_status ?? "--")}
       </small>
+      <p>${fullNeural.final_text_ready
+        ? "可回傳聊天欄"
+        : fullNeural.backend_recursive_writing_pipeline_status === "structural_revision_required"
+          ? "後端修稿失敗，未產生 final text"
+          : "尚無後端 final text"}</p>
     `;
     let voiceGuardStatus = $("#workbench-character-voice-guard", workbenchPanel);
     if (!voiceGuardStatus) {

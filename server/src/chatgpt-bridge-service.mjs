@@ -10,6 +10,7 @@ import { buildCandidateProofingContext } from "./candidate-proofing-context-serv
 import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
+import { runFullRecursiveWritingPipeline } from "./full-recursive-writing-pipeline-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -709,6 +710,24 @@ export async function saveChatgptBridgeSettlementReport(input = {}, options = {}
     ...result,
     pending_engine_candidate_created: false,
     active_engine_modified: false,
+    safety: chatgptBridgeSafety,
+  };
+}
+
+export async function runChatgptBridgeFullRecursiveWritingPipeline(input = {}, options = {}) {
+  const result = await runFullRecursiveWritingPipeline({
+    ...input,
+    output_mode: "chat_text",
+  }, options);
+  return {
+    ...result,
+    output_mode: "chat_text",
+    revision_rounds_attempted: result.recursive_revision?.rounds_attempted ?? 0,
+    character_voice_guard_display: result.character_voice_guard?.display ?? null,
+    warnings: result.report?.warnings ?? [],
+    next_action: result.final_candidate_text
+      ? "Output final_candidate_text directly in the chat; do not generate a separate raw draft."
+      : `Do not output fabricated prose. Stop reason: ${result.stop_reason ?? "pipeline_failed"}.`,
     safety: chatgptBridgeSafety,
   };
 }

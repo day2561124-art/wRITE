@@ -26,6 +26,7 @@ const publicToolNames = [
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
+  "chatgpt_bridge_run_full_recursive_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
   "chatgpt_bridge_request_adoption",
@@ -115,7 +116,7 @@ const listRequest = {
 
 const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
-assert.equal(fullNames.length, 65, "full profile tool count changed");
+assert.equal(fullNames.length, 66, "full profile tool count changed");
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }

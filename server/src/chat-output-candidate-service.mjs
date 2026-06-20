@@ -62,6 +62,14 @@ function optionalInteger(value, fallback, label, maximum) {
   return value;
 }
 
+function optionalObject(value, label) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value;
+}
+
 function normalizeInput(input = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("input must be an object.");
@@ -96,6 +104,11 @@ function normalizeInput(input = {}) {
     notes: optionalText(input.notes, "notes", 10_000),
     source,
     dryRun: input.dry_run === true || input.dryRun === true,
+    fullRecursiveWritingPipelineReport: optionalObject(
+      input.full_recursive_writing_pipeline_report
+        ?? input.fullRecursiveWritingPipelineReport,
+      "full_recursive_writing_pipeline_report",
+    ),
   };
 }
 
@@ -367,6 +380,16 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       orchestrationResult?.orchestration_report?.orchestration_version ?? null,
     full_neural_pipeline_stage: orchestrationResult?.pipeline_stage ?? null,
     full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
+    full_recursive_writing_pipeline_report:
+      Object.keys(input.fullRecursiveWritingPipelineReport).length
+        ? input.fullRecursiveWritingPipelineReport
+        : null,
+    backend_recursive_writing_pipeline_status:
+      input.fullRecursiveWritingPipelineReport.pipeline_stage ?? null,
+    final_candidate_source:
+      input.fullRecursiveWritingPipelineReport.final_candidate_source ?? null,
+    recursive_revision_rounds_attempted:
+      input.fullRecursiveWritingPipelineReport.recursive_revision?.rounds_attempted ?? 0,
     candidate_hash: candidateHash,
     candidate_chars: candidateText.length,
     canon_status: "candidate_only",

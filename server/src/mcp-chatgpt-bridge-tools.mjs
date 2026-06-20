@@ -6,6 +6,7 @@ import {
   getChatgptBridgeCurrentInputs,
   getChatgptBridgeWorkbenchStatus,
   requestChatgptBridgeAdoption,
+  runChatgptBridgeFullRecursiveWritingPipeline,
   saveChatgptBridgeCandidate,
   saveChatgptBridgeProofReport,
   saveChatgptBridgeSettlementReport,
@@ -161,6 +162,17 @@ export const chatgpt_bridge_save_candidate = tool(
   },
 );
 
+export const chatgpt_bridge_run_full_recursive_writing_pipeline = tool(
+  "chatgpt_bridge_run_full_recursive_writing_pipeline",
+  "write_low_risk",
+  runChatgptBridgeFullRecursiveWritingPipeline,
+  (result) => result.candidate_created ? [{
+    label: "writing_candidate",
+    target_id: result.candidate_id,
+    canon_status: "candidate_only",
+  }] : [],
+);
+
 export const chatgpt_bridge_build_proofing_context = tool(
   "chatgpt_bridge_build_proofing_context",
   "write_low_risk",
@@ -257,6 +269,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_get_current_inputs,
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_save_candidate,
+  chatgpt_bridge_run_full_recursive_writing_pipeline,
   chatgpt_bridge_build_proofing_context,
   chatgpt_bridge_save_proof_report,
   chatgpt_bridge_request_adoption,
@@ -298,6 +311,14 @@ export const chatgptBridgeToolMetadata = {
     projectPaths.writingCandidates,
     projectPaths.outputLogs,
   ]),
+  chatgpt_bridge_run_full_recursive_writing_pipeline: writeMetadata([
+    projectPaths.gptWritingContexts,
+    projectPaths.writingCandidates,
+    projectPaths.outputLogs,
+  ], {
+    generation_preview_when_save_candidate_false: true,
+    candidate_only_when_saved: true,
+  }),
   chatgpt_bridge_build_proofing_context: writeMetadata([
     projectPaths.proofingContexts,
     projectPaths.outputLogs,

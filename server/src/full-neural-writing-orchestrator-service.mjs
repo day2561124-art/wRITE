@@ -215,6 +215,12 @@ export async function buildFullNeuralWritingOrchestration(rawInput = {}, options
       ...(bundle.warnings ?? []).map((warning) => `context:${warning}`),
       ...(finalPolisherResult?.warnings ?? []).map((warning) => `final_polisher:${warning}`),
     ],
+    backend_generation_mode: false,
+    generation_provider_required: false,
+    recursive_revision_loop_status: "not_used",
+    final_candidate_source: input.rawDraftText && candidateOutputReady
+      ? "raw_final_polisher"
+      : null,
   };
 
   return {
