@@ -4,6 +4,7 @@ import { runFinalPolisherEditorialBrain } from "./final-polisher-editorial-servi
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { evaluateCharacterVoiceDrift } from "./character-voice-drift-guard-service.mjs";
 import { formatCharacterVoiceGuardForDisplay } from "./character-voice-guard-display.mjs";
+import { buildCharacterMindStateLedgerContext } from "./character-mind-state-ledger-service.mjs";
 import {
   buildGenerationAdapterFromProvider,
   buildRevisionAdapterFromProvider,
@@ -16,6 +17,20 @@ function sha256(value) {
 
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function arrayOfText(value, maximum = 20) {
+  const raw = Array.isArray(value) ? value : [];
+  return raw
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        return text(item.character_name ?? item.characterName ?? item.canonical_name ?? item.name);
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .slice(0, maximum);
 }
 
 function object(value) {
@@ -52,6 +67,13 @@ function normalizeInput(raw = {}) {
       raw.enable_character_voice_guard !== false
       && raw.enableCharacterVoiceGuard !== false,
     outputMode: text(raw.output_mode ?? raw.outputMode) || "chat_text",
+    includeCharacterMindStateLedger:
+      raw.include_character_mind_state_ledger !== false
+      && raw.includeCharacterMindStateLedger !== false,
+    characterNames: arrayOfText(
+      raw.character_names ?? raw.characterNames ?? raw.characters,
+      24,
+    ),
   };
 }
 
@@ -75,13 +97,14 @@ async function callAdapter(adapter, payload) {
   };
 }
 
-async function runPolisher(draftText, writingCardDirector, input, options) {
+async function runPolisher(draftText, writingCardDirector, input, options, characterMindStateLedger = null) {
   if (typeof options.finalPolisherAdapter === "function") {
     const adapted = await options.finalPolisherAdapter({
       raw_draft_text: draftText,
       writing_card_director_context: writingCardDirector,
       generation_context: input.generationContext,
       retrieval_context: input.retrievalContext,
+      character_mind_state_ledger: characterMindStateLedger,
     });
     return {
       status: adapted?.status ?? "completed",
@@ -97,6 +120,7 @@ async function runPolisher(draftText, writingCardDirector, input, options) {
     writing_card_director_context: writingCardDirector,
     generation_context: input.generationContext,
     retrieval_context: input.retrievalContext,
+    character_mind_state_ledger: characterMindStateLedger,
   }, {
     editorialAdapter: options.finalPolisherEditorialAdapter,
   });
@@ -199,6 +223,19 @@ function baseResult(input, now) {
       blocking: false,
       display: formatCharacterVoiceGuardForDisplay(null),
     },
+    character_mind_state_ledger: {
+      used: false,
+      phase: "25A",
+      version: "character_mind_state_ledger_v1",
+      status: "not_started",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      characters: [],
+      warnings: [],
+    },
     report: {
       pipeline_name: "full_recursive_writing_pipeline",
       phase: "24B",
@@ -275,6 +312,44 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     ...(orchestration.orchestration_report.neural_modules_used ?? []),
   ].filter(Boolean);
 
+  const characterMindStateLedger = input.includeCharacterMindStateLedger
+    ? await buildCharacterMindStateLedgerContext({
+      task_prompt: input.taskPrompt,
+      generation_context: input.generationContext,
+      retrieval_context: input.retrievalContext,
+      source_bundle: bundle ?? input.sourceBundle,
+      writing_context: writingContext,
+      character_names: input.characterNames,
+    }, options)
+    : {
+      used: false,
+      phase: "25A",
+      version: "character_mind_state_ledger_v1",
+      status: "disabled",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      characters: [],
+      warnings: [],
+    };
+
+  result.character_mind_state_ledger = {
+    ...characterMindStateLedger,
+    characters: characterMindStateLedger.characters ?? [],
+    warnings: characterMindStateLedger.warnings ?? [],
+  };
+
+  if (characterMindStateLedger.trace_id) {
+    result.report.trace_ids.push(characterMindStateLedger.trace_id);
+  }
+
+  result.report.character_mind_state_ledger_used = characterMindStateLedger.used === true;
+  result.report.character_mind_state_ledger_status = characterMindStateLedger.status ?? null;
+  result.report.character_mind_state_ledger_candidate_only = characterMindStateLedger.candidate_only !== false;
+  result.report.character_mind_state_ledger_no_auto_persist = characterMindStateLedger.no_auto_persist !== false;
+
   let generated;
   try {
     generated = await callAdapter(generationAdapter, {
@@ -284,6 +359,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
       writing_context: writingContext,
       neural_pre_generation_report: orchestration.pre_generation,
       writing_card_director: writingCardDirector,
+      character_mind_state_ledger: characterMindStateLedger,
     });
   } catch (error) {
     result.pipeline_stage = "generation_failed";
@@ -315,7 +391,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   }
 
   let draft = generated.text;
-  let polisher = await runPolisher(draft, writingCardDirector, input, options);
+  let polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger);
   let finalSource = "backend_generation";
   result.final_polisher = {
     status: polisher.status,
@@ -355,6 +431,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           writing_context: writingContext,
           neural_pre_generation_report: orchestration.pre_generation,
           writing_card_director: writingCardDirector,
+          character_mind_state_ledger: characterMindStateLedger,
         });
       } catch (error) {
         result.stop_reason = error?.provider_status ?? "provider_http_error";
@@ -385,7 +462,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         break;
       }
       draft = revised.text;
-      polisher = await runPolisher(draft, writingCardDirector, input, options);
+      polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger);
       roundReport.final_polisher_status = polisher.status;
       roundReport.needs_structural_revision = polisher.needs_structural_revision === true;
       roundReport.accepted = polisher.status === "completed"
@@ -476,6 +553,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         pipeline_stage: result.pipeline_stage,
         final_candidate_source: result.final_candidate_source,
         recursive_revision: result.recursive_revision,
+        character_mind_state_ledger: result.character_mind_state_ledger,
         report: result.report,
       },
     }, options);
