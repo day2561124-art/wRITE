@@ -429,6 +429,50 @@ function guardReportDisplayHtml(display) {
   `;
 }
 
+function characterVoiceStatusClass(display) {
+  return ["is-pass", "is-warning", "is-blocked", "is-missing"].includes(display?.badge_class)
+    ? display.badge_class
+    : "is-missing";
+}
+
+function renderCharacterVoiceGuard(display) {
+  const normalized = display ?? {
+    status_label: "尚未執行",
+    registry_loaded: false,
+    findings_count: 0,
+    blocking: false,
+    findings: [],
+  };
+  const findings = Array.isArray(normalized.findings) ? normalized.findings.slice(0, 5) : [];
+  return `
+    <section class="voice-guard-card ${characterVoiceStatusClass(normalized)}">
+      <div class="guard-report-heading">
+        <strong>Character Voice Guard</strong>
+        <span class="candidate-status ${normalized.blocking ? "candidate-status-blocked" : "candidate-status-candidate"}">${escapeHtml(normalized.status_label)}</span>
+      </div>
+      <div class="voice-guard-facts">
+        <span>Registry：${normalized.registry_loaded ? "已載入" : "未載入"}</span>
+        <span>Findings：${escapeHtml(normalized.findings_count ?? 0)}</span>
+        <span>Blocking：${normalized.blocking ? "是" : "否"}</span>
+      </div>
+      ${normalized.blocking ? `
+        <div class="blocked-panel">角色語氣守門判定為高風險。此候選仍可保存，但採用前必須修稿或人工確認。</div>
+      ` : ""}
+      ${findings.length ? `
+        <div class="voice-guard-findings">
+          ${findings.map((finding) => `
+            <article class="voice-guard-finding">
+              <strong>${escapeHtml(finding.character_label ?? "未指定角色")} · ${escapeHtml(finding.code ?? "")} · ${escapeHtml(finding.severity_label ?? finding.severity ?? "")}</strong>
+              <span>Evidence：${escapeHtml(finding.evidence || "無")}</span>
+              <small>Recommendation：${escapeHtml(finding.recommendation || "無")}</small>
+            </article>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
 async function refreshWriterWorkbenchState() {
   const [payload, feedbackPayload] = await Promise.all([
     api("/api/writer-workbench/state"),
@@ -463,11 +507,14 @@ async function refreshWriterWorkbenchState() {
   // risk panel
   const risk = workbench.risk ?? {};
   const guardDisplay = risk.candidate_guard_report_display ?? workbench.chapter?.guard_report_display;
+  const voiceGuardDisplay = risk.character_voice_guard_display
+    ?? workbench.chapter?.character_voice_guard_display;
   riskPanel.innerHTML = `
     <strong>高風險操作提醒</strong>
     <p>引擎啟用與採用確認仍須經確認佇列；本頁不會直接修改正式引擎。</p>
     ${risk.base_hash_mismatch ? '<div class="warning-panel">引擎候選基準已變動，請先重新審查差異。</div>' : ""}
     ${guardReportDisplayHtml(guardDisplay)}
+    ${renderCharacterVoiceGuard(voiceGuardDisplay)}
   `;
 
   // approval panel
@@ -675,6 +722,15 @@ function renderOperatorOverview() {
         · canon_update: ${escapeHtml(String(fullNeural.canon_update_allowed ?? false))}
       </small>
     `;
+    let voiceGuardStatus = $("#workbench-character-voice-guard", workbenchPanel);
+    if (!voiceGuardStatus) {
+      voiceGuardStatus = document.createElement("div");
+      voiceGuardStatus.id = "workbench-character-voice-guard";
+      neuralStatus.insertAdjacentElement("afterend", voiceGuardStatus);
+    }
+    voiceGuardStatus.innerHTML = renderCharacterVoiceGuard(
+      wb.chapter?.character_voice_guard_display,
+    );
     const canSaveCandidate = actionState.get("save_chat_output_candidate")?.enabled === true;
     const hasCandidate = Boolean(lineage.candidate_id);
     const hasProofReport = Boolean(lineage.proof_report_id);

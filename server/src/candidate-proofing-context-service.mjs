@@ -7,6 +7,9 @@ import {
 } from "./chat-output-candidate-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
+  formatCharacterVoiceGuardForDisplay,
+} from "./character-voice-guard-display.mjs";
+import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
@@ -226,6 +229,12 @@ function proofingMarkdown(context) {
   const sourceLines = Object.values(context.sources).map((source) => (
     `- ${source.label}: included=${source.included}, exists=${source.exists}, hash=${source.hash ?? "none"}, path=${source.path}`
   ));
+  const voiceGuard = context.character_voice_guard_display;
+  const voiceFindings = (voiceGuard?.findings ?? []).flatMap((finding) => [
+    `- ${finding.code} / ${finding.severity ?? "none"} / ${finding.character_label}`,
+    `  - Evidence: ${finding.evidence || "none"}`,
+    `  - Recommendation: ${finding.recommendation || "none"}`,
+  ]);
   return [
     "# Writing Candidate Proofing Context",
     "",
@@ -237,6 +246,16 @@ function proofingMarkdown(context) {
     "```json",
     JSON.stringify(context.candidate_metadata, null, 2),
     "```",
+    "",
+    "## Character Voice Drift Guard",
+    "",
+    `- Used: ${voiceGuard.used}`,
+    `- Registry loaded: ${voiceGuard.registry_loaded}`,
+    `- Verdict: ${voiceGuard.verdict ?? "none"}`,
+    `- Severity: ${voiceGuard.severity ?? "none"}`,
+    `- Blocking: ${voiceGuard.blocking}`,
+    `- Findings count: ${voiceGuard.findings_count}`,
+    ...(voiceFindings.length ? ["", ...voiceFindings] : []),
     "",
     "## Candidate Content",
     "",
@@ -363,6 +382,9 @@ export async function buildCandidateProofingContext(rawInput, options = {}) {
     source.label,
     source,
   ]));
+  const characterVoiceGuardDisplay = formatCharacterVoiceGuardForDisplay(
+    candidate.metadata.character_voice_guard,
+  );
   const context = {
     proofing_context_id: contextId,
     context_kind: "writing_candidate_proofing_context",
@@ -394,6 +416,7 @@ export async function buildCandidateProofingContext(rawInput, options = {}) {
     character_voice_guard_findings_count:
       candidate.metadata.character_voice_guard_findings_count ?? 0,
     character_voice_guard: candidate.metadata.character_voice_guard ?? null,
+    character_voice_guard_display: characterVoiceGuardDisplay,
     candidate_metadata: candidate.metadata,
     inputs: {
       retrieval_context: input.retrievalContext,

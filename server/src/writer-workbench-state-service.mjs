@@ -17,6 +17,9 @@ import {
 } from "./engine-candidate-service.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
+import {
+  formatCharacterVoiceGuardForDisplay,
+} from "./character-voice-guard-display.mjs";
 
 const fixturePattern = /(?:^|[_\-\s])(ui[_-]?test|e2e|fixture|demo)(?:$|[_\-\s])/iu;
 const invalidCandidateStatuses = new Set([
@@ -110,12 +113,12 @@ function action(key, label, endpoint, enabled, reason = "") {
   };
 }
 
-export async function buildWriterWorkbenchState() {
+export async function buildWriterWorkbenchState(options = {}) {
   const [active, bundles, candidates, proofs, adopted, settlements, approvals] = await Promise.all([
     activeEngineStatus(),
-    listGptWritingContextBundles({ limit: 100 }),
-    listWritingCandidates({ limit: 100 }),
-    listProofReports({ limit: 100 }),
+    listGptWritingContextBundles({ limit: 100 }, options),
+    listWritingCandidates({ limit: 100 }, options),
+    listProofReports({ limit: 100 }, options),
     listAdoptedChapters(),
     listSettlementReports({ limit: 100 }),
     listApprovalItems(),
@@ -127,12 +130,16 @@ export async function buildWriterWorkbenchState() {
     ? candidates.find((item) => item.source_bundle_id === workflowRunId && !isFixture(item)) ?? null
     : null;
   const candidateDetail = candidateSummary
-    ? await getWritingCandidateDetail(candidateSummary.candidate_id)
+    ? await getWritingCandidateDetail(candidateSummary.candidate_id, options)
     : null;
   const candidate = candidateDetail?.metadata ?? null;
   const candidateGuardReport = candidate?.guard_report ?? [];
   const candidateGuardReportDisplay = candidateDetail?.guard_report_display
     ?? formatGuardReportForDisplay(candidateGuardReport);
+  const candidateCharacterVoiceGuard = candidate?.character_voice_guard ?? null;
+  const candidateCharacterVoiceGuardDisplay = formatCharacterVoiceGuardForDisplay(
+    candidateCharacterVoiceGuard,
+  );
   const fullNeuralReport = candidate?.full_neural_orchestration_report ?? null;
   const fullNeural = {
     used: Boolean(
@@ -313,6 +320,8 @@ export async function buildWriterWorkbenchState() {
       has_pending_engine_candidate: Boolean(pending),
       guard_report: candidateGuardReport,
       guard_report_display: candidateGuardReportDisplay,
+      character_voice_guard: candidateCharacterVoiceGuard,
+      character_voice_guard_display: candidateCharacterVoiceGuardDisplay,
       full_neural: fullNeural,
       full_neural_orchestrator_used: fullNeural.used,
     },
@@ -372,6 +381,14 @@ export async function buildWriterWorkbenchState() {
         ? fullNeural.pipeline_stage ?? "used"
         : "not_used",
       full_neural_orchestrator_version: fullNeural.orchestrator_version,
+      character_voice_guard: !candidateCharacterVoiceGuardDisplay.used
+        ? "not_used"
+        : !candidateCharacterVoiceGuardDisplay.registry_loaded
+          ? "missing_registry"
+          : candidateCharacterVoiceGuardDisplay.verdict,
+      character_voice_registry_loaded: candidate
+        ? candidateCharacterVoiceGuardDisplay.registry_loaded
+        : null,
       not_ready_reasons: [
         ...(!outputsComplete ? ["outputs 缺失"] : []),
         ...(!promptsComplete ? ["prompts 缺失"] : []),
@@ -385,6 +402,9 @@ export async function buildWriterWorkbenchState() {
     risk: {
       candidate_guard_report: candidateGuardReport,
       candidate_guard_report_display: candidateGuardReportDisplay,
+      character_voice_guard: candidateCharacterVoiceGuard,
+      character_voice_guard_display: candidateCharacterVoiceGuardDisplay,
+      character_voice_guard_blocking: candidateCharacterVoiceGuardDisplay.blocking,
       activation_requires_approval: true,
       direct_activation_allowed: false,
       direct_canon_mutation_allowed: false,

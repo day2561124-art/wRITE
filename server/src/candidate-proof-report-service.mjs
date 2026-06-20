@@ -16,6 +16,9 @@ import {
   characterVoiceGuardMetadata,
   evaluateCharacterVoiceDrift,
 } from "./character-voice-drift-guard-service.mjs";
+import {
+  formatCharacterVoiceGuardForDisplay,
+} from "./character-voice-guard-display.mjs";
 
 const proofReportIdPattern = /^proof_report_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const verdicts = new Set(["pass", "needs_revision", "blocked"]);
@@ -134,6 +137,9 @@ function publicResult(metadata) {
     character_voice_guard_severity: metadata.character_voice_guard_severity,
     character_voice_guard_findings_count:
       metadata.character_voice_guard_findings_count,
+    character_voice_guard_display: formatCharacterVoiceGuardForDisplay(
+      metadata.character_voice_guard,
+    ),
   };
 }
 
@@ -152,6 +158,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
   const characterVoiceGuard = candidate.metadata.character_voice_guard
     ?? await evaluateCharacterVoiceDrift({ candidate_text: candidateText }, options);
   const characterVoiceMetadata = characterVoiceGuardMetadata(characterVoiceGuard);
+  const characterVoiceGuardDisplay = formatCharacterVoiceGuardForDisplay(characterVoiceGuard);
   if (input.dryRun) {
     return {
       dry_run: true,
@@ -165,6 +172,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
       adopted: false,
       settled: false,
       ...characterVoiceMetadata,
+      character_voice_guard_display: characterVoiceGuardDisplay,
     };
   }
 
@@ -199,6 +207,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
     ...characterVoiceMetadata,
+    character_voice_guard_display: characterVoiceGuardDisplay,
     proof_report_path: normalizeProjectPath(paths.report),
     metadata_path: normalizeProjectPath(paths.metadata),
   };
@@ -217,6 +226,7 @@ export async function saveChatOutputAsProofReport(rawInput, options = {}) {
     adoption_allowed_without_approval: false,
     settlement_allowed_without_adoption: false,
     ...characterVoiceMetadata,
+    character_voice_guard_display: characterVoiceGuardDisplay,
   };
   await commitFileTransaction("save-chat-output-proof-report", [
     { filePath: paths.report, content: `${input.proofReportText}\n` },

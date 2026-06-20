@@ -13,6 +13,9 @@ import {
   evaluateCharacterVoiceDrift,
 } from "./character-voice-drift-guard-service.mjs";
 import {
+  formatCharacterVoiceGuardForDisplay,
+} from "./character-voice-guard-display.mjs";
+import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
@@ -160,6 +163,9 @@ function publicResult(metadata) {
     settled: metadata.settled,
     proofed: metadata.proofed,
     guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
+    character_voice_guard_display: formatCharacterVoiceGuardForDisplay(
+      metadata.character_voice_guard,
+    ),
   };
 }
 
@@ -317,6 +323,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     context_bundle: trace.bundle,
   }, options);
   const characterVoiceMetadata = characterVoiceGuardMetadata(characterVoiceGuard);
+  const characterVoiceGuardDisplay = formatCharacterVoiceGuardForDisplay(characterVoiceGuard);
   if (input.dryRun) {
     return {
       dry_run: true,
@@ -330,6 +337,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
       final_polisher_result: finalPolisherResult,
       full_neural_orchestration_report: orchestrationResult?.orchestration_report ?? null,
       ...characterVoiceMetadata,
+      character_voice_guard_display: characterVoiceGuardDisplay,
       warnings,
     };
   }
@@ -371,6 +379,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     settlement_allowed_without_adoption: false,
     local_generation_used: false,
     ...characterVoiceMetadata,
+    character_voice_guard_display: characterVoiceGuardDisplay,
     ...pipelineMetadata,
     // Inherit writing_card_director context if present in source bundle
     writing_card_director_context: trace.bundle?.content?.writing_card_director_context ?? null,
@@ -414,6 +423,7 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
     guard_report: metadata.guard_report ?? [],
     guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
     ...characterVoiceMetadata,
+    character_voice_guard_display: characterVoiceGuardDisplay,
   };
 }
 
@@ -440,6 +450,9 @@ export async function getWritingCandidateDetail(candidateId, options = {}) {
   return {
     metadata,
     guard_report_display: formatGuardReportForDisplay(metadata.guard_report ?? []),
+    character_voice_guard_display: formatCharacterVoiceGuardForDisplay(
+      metadata.character_voice_guard,
+    ),
     content,
     content_included: includeContent,
     content_truncated: contentTruncated,

@@ -559,6 +559,57 @@
   resize: vertical;
 }
 
+.voice-guard-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #7b8794;
+  background: var(--surface);
+}
+
+.voice-guard-card.is-pass {
+  border-left-color: #28704a;
+  background: #effaf4;
+}
+
+.voice-guard-card.is-warning {
+  border-left-color: #b97819;
+  background: #fff8e9;
+}
+
+.voice-guard-card.is-blocked {
+  border-left-color: #9a2929;
+  background: #fff2f2;
+}
+
+.voice-guard-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.voice-guard-findings {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-guard-finding {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.voice-guard-finding span,
+.voice-guard-finding small {
+  overflow-wrap: anywhere;
+}
+
 .reminder-cards { display: grid; gap: 12px; }
 .reminder-card { padding: 12px; }
 .reminder-card ul { margin: 8px 0 0 18px; color: var(--muted); }
