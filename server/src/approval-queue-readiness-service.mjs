@@ -7,6 +7,9 @@ import { getCandidateProofingContext } from "./candidate-proofing-context-servic
 import { getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import { projectPaths } from "./project-paths.mjs";
 import { listAdoptedWritings } from "./writing-candidate-adoption-service.mjs";
+import {
+  buildCharacterVoiceAdoptionGate,
+} from "./character-voice-adoption-gate-service.mjs";
 
 const maximumPreviewChars = 20_000;
 const defaultPreviewChars = 4_000;
@@ -126,6 +129,8 @@ export async function validateApprovalQueueBridgeRequest(request, options = {}) 
   const approvalConfirmed =
     Boolean(request.status?.confirmed_at) || snapshot.approval_confirmed === true;
   const adoptionConfirmed = adoptedChapterCreated || snapshot.adoption_confirmed === true;
+  const characterVoiceGate = request.details?.character_voice_adoption_gate
+    ?? buildCharacterVoiceAdoptionGate(candidate.detail, proofReport.detail);
 
   const blockingReasons = [];
   if (status !== "pending") blockingReasons.push("request_not_pending");
@@ -188,6 +193,14 @@ export async function validateApprovalQueueBridgeRequest(request, options = {}) 
     verified_by: request.verified_by ?? null,
     status,
     risk_level: request.risk_level ?? null,
+    character_voice_adoption_gate: characterVoiceGate,
+    character_voice_guard_status: characterVoiceGate.status,
+    character_voice_guard_blocking: characterVoiceGate.blocking,
+    character_voice_guard_findings_count: characterVoiceGate.findings_count,
+    character_voice_required_confirmation_text:
+      characterVoiceGate.requires_exact_confirmation_text
+        ? characterVoiceGate.exact_confirmation_text
+        : null,
     decision: blockingReasons.length === 0 ? "ready_for_human_review" : "blocked",
     blocking_reasons: blockingReasons,
     lineage: {
@@ -233,7 +246,9 @@ export async function validateApprovalQueueBridgeRequest(request, options = {}) 
     },
     operator_requirements: request.operator_readiness ?? null,
     operator_next_action: blockingReasons.length === 0
-      ? "Review candidate and proof report manually before confirming in the existing approval flow."
+      ? characterVoiceGate.blocking
+        ? "Character Voice Guard 高風險：需進 Approval Queue 二次確認，或先修稿後重新驗稿。"
+        : "Review candidate and proof report manually before confirming in the existing approval flow."
       : "Do not confirm this request until blocking issues are resolved.",
   };
 

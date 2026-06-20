@@ -29,6 +29,9 @@ import {
   listProofReports,
 } from "./writing-workflow-service.mjs";
 import { adoptWritingCandidateAfterApproval } from "./writing-candidate-adoption-service.mjs";
+import {
+  buildCharacterVoiceAdoptionGate,
+} from "./character-voice-adoption-gate-service.mjs";
 
 export const approvalItemIdPattern =
   /^approval_item_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -265,6 +268,15 @@ export async function createApprovalItem(input = {}, options = {}) {
   );
   if (existing) return existing;
 
+  const characterVoiceGate = actionType === "adopt_writing_candidate"
+    ? input.details?.character_voice_adoption_gate
+      ?? buildCharacterVoiceAdoptionGate(
+        input.candidate ?? input.candidateMetadata ?? input.candidate_metadata
+          ?? input.details?.candidate_metadata,
+        input.proof ?? input.proofMetadata ?? input.proof_metadata
+          ?? input.details?.proof_metadata,
+      )
+    : null;
   const approvalItemId = createId();
   const now = new Date().toISOString();
   const item = {
@@ -276,10 +288,19 @@ export async function createApprovalItem(input = {}, options = {}) {
     target_id: targetId,
     source_chapter: optionalText(input.sourceChapter ?? input.source_chapter, 500),
     title: optionalText(input.title, 500),
-    summary: optionalText(input.summary, 5_000),
-    risk_level: optionalText(input.riskLevel ?? input.risk_level, 50) || "unknown",
+    summary: optionalText(
+      characterVoiceGate?.blocking === true
+        ? `${input.summary ?? ""}${input.summary ? " " : ""}Character Voice Guard 判定為高風險；採用前必須二次確認。`
+        : input.summary,
+      5_000,
+    ),
+    risk_level: characterVoiceGate?.blocking === true
+      ? "high"
+      : optionalText(input.riskLevel ?? input.risk_level, 50) || "unknown",
     requires_second_confirmation:
-      input.requiresSecondConfirmation === true || input.requires_second_confirmation === true,
+      input.requiresSecondConfirmation === true
+      || input.requires_second_confirmation === true
+      || characterVoiceGate?.requires_second_confirmation === true,
     requires_neural_success:
       input.requiresNeuralSuccess === true || input.requires_neural_success === true,
     neural_status: optionalText(input.neuralStatus ?? input.neural_status, 100) || "not_required",
@@ -293,11 +314,14 @@ export async function createApprovalItem(input = {}, options = {}) {
     proof_verdict: input.proofVerdict ?? input.proof_verdict ?? null,
     proof_severity: input.proofSeverity ?? input.proof_severity ?? null,
     reason: optionalText(input.reason, 5_000),
-    requires_user_confirmation:
-      input.requiresUserConfirmation === true || input.requires_user_confirmation === true,
+    requires_user_confirmation: actionType === "adopt_writing_candidate"
+      || input.requiresUserConfirmation === true
+      || input.requires_user_confirmation === true,
     can_execute_without_user_confirmation:
-      input.canExecuteWithoutUserConfirmation === true
-      || input.can_execute_without_user_confirmation === true,
+      actionType === "adopt_writing_candidate"
+        ? false
+        : input.canExecuteWithoutUserConfirmation === true
+          || input.can_execute_without_user_confirmation === true,
     created_by: optionalText(input.createdBy ?? input.created_by, 200),
     request_kind: optionalText(input.requestKind ?? input.request_kind, 100) || null,
     source: optionalText(input.source, 100) || null,
@@ -317,7 +341,12 @@ export async function createApprovalItem(input = {}, options = {}) {
       draft_id: input.links?.draft_id ?? null,
       proposal_id: input.links?.proposal_id ?? null,
     },
-    details: input.details ?? {},
+    details: characterVoiceGate ? {
+      ...(input.details ?? {}),
+      character_voice_adoption_gate: characterVoiceGate,
+      character_voice_guard_display: characterVoiceGate.display,
+      character_voice_findings: characterVoiceGate.display.findings,
+    } : input.details ?? {},
   };
   const status = baseStatus(
     input.status === "blocked" || item.blocked_reason ? "blocked" : "pending",
@@ -625,6 +654,27 @@ export async function confirmApprovalItem(
     if (!["pending", "deferred"].includes(item.status.status)) {
       throw errorWithStatus(`Approval item cannot be confirmed: ${item.status.status}`, 409);
     }
+    const characterVoiceGate = item.details?.character_voice_adoption_gate;
+    if (
+      item.action_type === "adopt_writing_candidate"
+      && characterVoiceGate?.blocking === true
+      && secondConfirm !== true
+    ) {
+      throw errorWithStatus(
+        "Character Voice Guard high-risk adoption requires second confirmation.",
+        409,
+      );
+    }
+    if (
+      item.action_type === "adopt_writing_candidate"
+      && characterVoiceGate?.blocking === true
+      && approvalText !== characterVoiceGate.exact_confirmation_text
+    ) {
+      throw errorWithStatus(
+        "Character Voice Guard high-risk adoption requires exact confirmation text.",
+        409,
+      );
+    }
     if (item.requires_second_confirmation === true && secondConfirm !== true) {
       throw errorWithStatus("This approval requires second confirmation.", 409);
     }
@@ -681,7 +731,11 @@ export async function confirmApprovalItem(
         proofReportId: item.proof_report_id || item.links?.proof_report_id,
         confirmedBy: approvedBy,
         reason: item.reason,
-      }, { ...targetOptions(options), approvalConfirmed: true });
+      }, {
+        ...targetOptions(options),
+        approvalConfirmed: true,
+        approvalItem: item,
+      });
     } else if (item.action_type === "approve_cleanup_proposal") {
       assertCleanupProposalId(item.target_id);
       result = await approveCleanupProposal(item.target_id, {

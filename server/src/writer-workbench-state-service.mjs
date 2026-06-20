@@ -20,6 +20,9 @@ import { formatGuardReportForDisplay } from "./guard-report-display.mjs";
 import {
   formatCharacterVoiceGuardForDisplay,
 } from "./character-voice-guard-display.mjs";
+import {
+  buildCharacterVoiceAdoptionGate,
+} from "./character-voice-adoption-gate-service.mjs";
 
 const fixturePattern = /(?:^|[_\-\s])(ui[_-]?test|e2e|fixture|demo)(?:$|[_\-\s])/iu;
 const invalidCandidateStatuses = new Set([
@@ -139,6 +142,9 @@ export async function buildWriterWorkbenchState(options = {}) {
   const candidateCharacterVoiceGuard = candidate?.character_voice_guard ?? null;
   const candidateCharacterVoiceGuardDisplay = formatCharacterVoiceGuardForDisplay(
     candidateCharacterVoiceGuard,
+  );
+  const characterVoiceAdoptionGate = buildCharacterVoiceAdoptionGate(
+    candidateDetail,
   );
   const fullNeuralReport = candidate?.full_neural_orchestration_report ?? null;
   const fullNeural = {
@@ -322,6 +328,7 @@ export async function buildWriterWorkbenchState(options = {}) {
       guard_report_display: candidateGuardReportDisplay,
       character_voice_guard: candidateCharacterVoiceGuard,
       character_voice_guard_display: candidateCharacterVoiceGuardDisplay,
+      character_voice_adoption_gate: characterVoiceAdoptionGate,
       full_neural: fullNeural,
       full_neural_orchestrator_used: fullNeural.used,
     },
@@ -389,6 +396,7 @@ export async function buildWriterWorkbenchState(options = {}) {
       character_voice_registry_loaded: candidate
         ? candidateCharacterVoiceGuardDisplay.registry_loaded
         : null,
+      character_voice_adoption_gate: characterVoiceAdoptionGate.status,
       not_ready_reasons: [
         ...(!outputsComplete ? ["outputs 缺失"] : []),
         ...(!promptsComplete ? ["prompts 缺失"] : []),
@@ -405,6 +413,9 @@ export async function buildWriterWorkbenchState(options = {}) {
       character_voice_guard: candidateCharacterVoiceGuard,
       character_voice_guard_display: candidateCharacterVoiceGuardDisplay,
       character_voice_guard_blocking: candidateCharacterVoiceGuardDisplay.blocking,
+      character_voice_adoption_gate: characterVoiceAdoptionGate,
+      character_voice_requires_second_confirmation:
+        characterVoiceAdoptionGate.requires_second_confirmation,
       activation_requires_approval: true,
       direct_activation_allowed: false,
       direct_canon_mutation_allowed: false,

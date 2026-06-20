@@ -12,6 +12,9 @@ import {
 import { getProofReportDetail } from "./candidate-proof-report-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { projectPaths } from "./project-paths.mjs";
+import {
+  buildCharacterVoiceAdoptionGate,
+} from "./character-voice-adoption-gate-service.mjs";
 
 const riskLevels = new Set(["low", "medium", "high"]);
 const riskRanks = { low: 1, medium: 2, high: 3 };
@@ -108,7 +111,7 @@ function safety() {
   };
 }
 
-function blockedResult(candidateId, reason) {
+function blockedResult(candidateId, reason, characterVoiceGate = null) {
   return {
     ok: false,
     request_id: null,
@@ -122,6 +125,7 @@ function blockedResult(candidateId, reason) {
     blocked: true,
     blocked_reason: reason,
     blocked_reasons: Array.isArray(reason) ? reason : (reason ? [reason] : []),
+    character_voice_adoption_gate: characterVoiceGate,
     safety: safety(),
     next_action: blockedAdoptionNextAction,
   };
@@ -213,6 +217,7 @@ async function bridgeRequestMetadata(input, candidate, proof) {
 }
 
 function publicResult(item, candidate, proof, warnings = []) {
+  const gate = item.details?.character_voice_adoption_gate ?? null;
   return {
     ok: item.status.status !== "blocked",
     request_id: item.approval_item_id,
@@ -232,9 +237,19 @@ function publicResult(item, candidate, proof, warnings = []) {
     safety_snapshot: item.safety_snapshot,
     operator_readiness: item.operator_readiness,
     candidate_status: candidateStatus(candidate.metadata),
+    character_voice_adoption_gate: gate,
+    character_voice_guard_status: gate?.status ?? null,
+    character_voice_guard_blocking: gate?.blocking === true,
+    character_voice_guard_findings_count: gate?.findings_count ?? 0,
+    character_voice_required_confirmation_text:
+      gate?.requires_exact_confirmation_text === true
+        ? gate.exact_confirmation_text
+        : null,
+    can_confirm_adoption: gate?.blocking === true ? false : undefined,
     safety: safety(),
-    next_action:
-      "User must confirm this adoption request in the approval queue UI before the candidate can be adopted.",
+    next_action: gate?.blocking === true
+      ? "Character Voice Guard 高風險：需進 Approval Queue 二次確認，或先修稿後重新驗稿。"
+      : "User must confirm this adoption request in the approval queue UI before the candidate can be adopted.",
   };
 }
 
@@ -254,8 +269,13 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
     }
 
     const proof = await resolveProof(candidate, input, options);
+    const characterVoiceGate = buildCharacterVoiceAdoptionGate(candidate, proof);
     if ((!proof || candidate.metadata.proofed !== true) && !input.allowWithoutProof) {
-      return blockedResult(input.candidateId, "Candidate has no proof report.");
+      return blockedResult(
+        input.candidateId,
+        "Candidate has no proof report.",
+        characterVoiceGate,
+      );
     }
     const derived = derivedRisk(proof, input.allowWithoutProof);
     const riskLevel = resolvedRisk(input.riskLevel, derived);
@@ -305,6 +325,14 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
         blocked: blockingReasons.length > 0,
         blocked_reason: blockingReasons.length ? blockingReasons.join("; ") : null,
         blocked_reasons: blockingReasons,
+        character_voice_adoption_gate: characterVoiceGate,
+        character_voice_guard_status: characterVoiceGate.status,
+        character_voice_guard_blocking: characterVoiceGate.blocking,
+        character_voice_guard_findings_count: characterVoiceGate.findings_count,
+        character_voice_required_confirmation_text:
+          characterVoiceGate.requires_exact_confirmation_text
+            ? characterVoiceGate.exact_confirmation_text
+            : null,
         warnings,
         candidate_status: candidateStatus(candidate.metadata),
         safety: safety(),
@@ -316,7 +344,7 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
 
     // For non-dry runs, any blocking reason must prevent creation of approval item
     if (blockingReasons.length) {
-      return blockedResult(input.candidateId, blockingReasons);
+      return blockedResult(input.candidateId, blockingReasons, characterVoiceGate);
     }
 
     const requestMetadata = await bridgeRequestMetadata(input, candidate, proof);
@@ -346,6 +374,8 @@ export async function requestWritingCandidateAdoption(rawInput, options = {}) {
         allow_without_proof: input.allowWithoutProof,
         proof_summary: proof?.metadata.summary ?? null,
       },
+      candidate,
+      proof,
       candidateId: input.candidateId,
       candidateHash: candidate.metadata.candidate_hash,
       candidatePath: candidate.metadata.content_path,

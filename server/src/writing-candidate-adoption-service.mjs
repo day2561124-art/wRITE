@@ -13,6 +13,9 @@ import {
   normalizeProjectPath,
   projectPaths,
 } from "./project-paths.mjs";
+import {
+  assertCharacterVoiceAdoptionAllowed,
+} from "./character-voice-adoption-gate-service.mjs";
 
 const adoptedChapterIdPattern = /^adopted_chapter_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 
@@ -141,7 +144,8 @@ export async function adoptWritingCandidateAfterApproval(rawInput, options = {})
   if (options.approvalConfirmed !== true) {
     throw new Error("Adoption execution requires approval queue confirmation.");
   }
-  const approvalItem = await getApprovalItem(input.approvalItemId, options);
+  const approvalItem = options.approvalItem
+    ?? await getApprovalItem(input.approvalItemId, options);
   assertApproval(approvalItem, input);
   const candidate = await getWritingCandidateDetail(input.candidateId, options);
   if (candidate.metadata.canon_status !== "candidate_only") {
@@ -165,6 +169,11 @@ export async function adoptWritingCandidateAfterApproval(rawInput, options = {})
     && approvalItem.proof_report_hash !== proof.metadata.proof_report_hash) {
     throw new Error("Proof report changed after the adoption request.");
   }
+  const characterVoiceGate = assertCharacterVoiceAdoptionAllowed({
+    candidate,
+    proof,
+    approvalItem,
+  });
 
   if (input.dryRun) {
     return {
@@ -177,6 +186,9 @@ export async function adoptWritingCandidateAfterApproval(rawInput, options = {})
       active_engine_modified: false,
       settlement_created: false,
       pending_engine_candidate_created: false,
+      character_voice_adoption_gate: characterVoiceGate,
+      character_voice_guard_display: characterVoiceGate.display,
+      character_voice_guard_blocking: characterVoiceGate.blocking,
     };
   }
 
@@ -204,6 +216,10 @@ export async function adoptWritingCandidateAfterApproval(rawInput, options = {})
     settlement_created: false,
     pending_engine_candidate_created: false,
     active_engine_modified: false,
+    character_voice_adoption_gate: characterVoiceGate,
+    character_voice_guard_display: characterVoiceGate.display,
+    character_voice_guard_blocking: characterVoiceGate.blocking,
+    character_voice_guard_override_confirmed: characterVoiceGate.blocking === true,
     content_path: normalizeProjectPath(paths.chapter),
     adoption_path: normalizeProjectPath(paths.adoption),
   };
@@ -248,6 +264,9 @@ export async function adoptWritingCandidateAfterApproval(rawInput, options = {})
     settlement_created: false,
     pending_engine_candidate_created: false,
     active_engine_modified: false,
+    character_voice_adoption_gate: characterVoiceGate,
+    character_voice_guard_display: characterVoiceGate.display,
+    character_voice_guard_blocking: characterVoiceGate.blocking,
     next_action: "Build settlement candidate in a separate user-requested phase.",
   };
 }

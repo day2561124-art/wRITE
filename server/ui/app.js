@@ -435,7 +435,7 @@ function characterVoiceStatusClass(display) {
     : "is-missing";
 }
 
-function renderCharacterVoiceGuard(display) {
+function renderCharacterVoiceGuard(display, adoptionGate = null) {
   const normalized = display ?? {
     status_label: "尚未執行",
     registry_loaded: false,
@@ -456,7 +456,10 @@ function renderCharacterVoiceGuard(display) {
         <span>Blocking：${normalized.blocking ? "是" : "否"}</span>
       </div>
       ${normalized.blocking ? `
-        <div class="blocked-panel">角色語氣守門判定為高風險。此候選仍可保存，但採用前必須修稿或人工確認。</div>
+        <div class="blocked-panel">
+          <strong>採用前需二次確認</strong>
+          <span>確認文字：${escapeHtml(adoptionGate?.exact_confirmation_text ?? "確認採用高風險角色語氣候選")}</span>
+        </div>
       ` : ""}
       ${findings.length ? `
         <div class="voice-guard-findings">
@@ -509,12 +512,14 @@ async function refreshWriterWorkbenchState() {
   const guardDisplay = risk.candidate_guard_report_display ?? workbench.chapter?.guard_report_display;
   const voiceGuardDisplay = risk.character_voice_guard_display
     ?? workbench.chapter?.character_voice_guard_display;
+  const voiceAdoptionGate = risk.character_voice_adoption_gate
+    ?? workbench.chapter?.character_voice_adoption_gate;
   riskPanel.innerHTML = `
     <strong>高風險操作提醒</strong>
     <p>引擎啟用與採用確認仍須經確認佇列；本頁不會直接修改正式引擎。</p>
     ${risk.base_hash_mismatch ? '<div class="warning-panel">引擎候選基準已變動，請先重新審查差異。</div>' : ""}
     ${guardReportDisplayHtml(guardDisplay)}
-    ${renderCharacterVoiceGuard(voiceGuardDisplay)}
+    ${renderCharacterVoiceGuard(voiceGuardDisplay, voiceAdoptionGate)}
   `;
 
   // approval panel
@@ -1758,13 +1763,19 @@ function renderApprovalQueue() {
     || Boolean(item.blocked_reason);
   const resolved = item && ["resolved", "confirmed", "rejected"].includes(item.status.status);
   const needsSecond = item?.requires_second_confirmation === true;
+  const characterVoiceGate = item?.details?.character_voice_adoption_gate;
   const typedHighRisk = needsSecond
-    && ["activate_engine_candidate", "setting_change_proposal"].includes(item?.action_type);
+    && (
+      ["activate_engine_candidate", "setting_change_proposal"].includes(item?.action_type)
+      || characterVoiceGate?.requires_exact_confirmation_text === true
+    );
   $("#approval-second-confirm-panel").hidden = !needsSecond;
   $("#approval-confirm-text-field").hidden = !typedHighRisk;
-  const confirmationText = item?.action_type === "setting_change_proposal"
-    ? "確認設定修改"
-    : "確認啟用";
+  const confirmationText = characterVoiceGate?.requires_exact_confirmation_text === true
+    ? characterVoiceGate.exact_confirmation_text
+    : item?.action_type === "setting_change_proposal"
+      ? "確認設定修改"
+      : "確認啟用";
   $("#approval-confirm-text-field span").textContent = `輸入「${confirmationText}」`;
   $("#approval-confirm-message").textContent = !item
     ? "此操作將呼叫既有安全流程，不會直接寫 active_engine。"
@@ -1772,6 +1783,8 @@ function renderApprovalQueue() {
       ? "缺少必要 neural success trace。此項不可確認，只能延後或拒絕。"
       : item.action_type === "activate_engine_candidate"
         ? "這會使用 Phase 3 安全流程：snapshot → archive → active_engine → activation_log。"
+        : characterVoiceGate?.blocking === true
+          ? `Character Voice Guard 判定為高風險；採用前需二次確認。確認文字：${characterVoiceGate.exact_confirmation_text}`
         : item.action_type === "setting_change_proposal"
           ? "核准只會完成 proposal 人工審核，本階段不會套用 active_engine、Canon DB 或 compressed_rules。"
         : item.action_type === "rollback_active_engine"

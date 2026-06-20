@@ -39,6 +39,7 @@ const steps = [
   ["Phase 23C character voice registry context", ["tests/phase23/phase23c-character-voice-registry-context.test.mjs"]],
   ["Phase 23F character voice drift guard", ["tests/phase23/phase23f-character-voice-drift-guard.test.mjs"]],
   ["Phase 23G character voice guard surface", ["tests/phase23/phase23g-character-voice-guard-surface.test.mjs"]],
+  ["Phase 23H character voice adoption gate", ["tests/phase23/phase23h-character-voice-adoption-gate.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
