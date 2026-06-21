@@ -4,6 +4,7 @@ import {
   buildChatgptBridgeWritingContext,
   chatgptBridgeSafety,
   getChatgptBridgeCurrentInputs,
+  getChatgptBridgeForeshadowingSettlementSurface,
   getChatgptBridgeWorkbenchStatus,
   requestChatgptBridgeAdoption,
   runChatgptBridgeFullRecursiveWritingPipeline,
@@ -19,6 +20,8 @@ import {
   chatgpt_bridge_get_entity_registry_provenance as _get_registry_provenance_handler,
 } from "./chatgpt-bridge-entity-registry-tools.mjs";
 import { normalizeProjectPath, projectPaths } from "./project-paths.mjs";
+import { getAdoptedWritingSettlementContext } from "./adopted-writing-settlement-service.mjs";
+import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
 import {
   runVisualLibraryMcpReadonlyToolPreview,
 } from "./visual-library-mcp-readonly-tool-service.mjs";
@@ -122,6 +125,20 @@ function tool(name, permission, handler, createdFor = () => []) {
   };
 }
 
+async function getChatgptBridgeForeshadowingSettlementSurfaceForMcp(input = {}, options = {}) {
+  const bundle = await getAdoptedWritingSettlementContext(
+    input.id ?? input.settlement_context_id ?? input.settlementContextId,
+    options,
+  );
+  return {
+    ...buildForeshadowingSettlementSurface(bundle),
+    generated_locally: false,
+    bridge_surface: "chatgpt_bridge",
+    active_engine_modified: false,
+    pending_engine_candidate_created: false,
+  };
+}
+
 export const chatgpt_bridge_get_workbench_status = tool(
   "chatgpt_bridge_get_workbench_status",
   "read_only",
@@ -217,6 +234,12 @@ export const chatgpt_bridge_build_settlement_context = tool(
   }] : [],
 );
 
+export const chatgpt_bridge_get_foreshadowing_settlement_surface = tool(
+  "chatgpt_bridge_get_foreshadowing_settlement_surface",
+  "read_only",
+  getChatgptBridgeForeshadowingSettlementSurfaceForMcp,
+);
+
 export const chatgpt_bridge_save_settlement_report = tool(
   "chatgpt_bridge_save_settlement_report",
   "write_low_risk",
@@ -274,6 +297,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_save_proof_report,
   chatgpt_bridge_request_adoption,
   chatgpt_bridge_build_settlement_context,
+  chatgpt_bridge_get_foreshadowing_settlement_surface,
   chatgpt_bridge_save_settlement_report,
   chatgpt_bridge_visual_library_ui_import_flow_preview,
   chatgpt_bridge_get_entity_registry_summary,
@@ -341,6 +365,12 @@ export const chatgptBridgeToolMetadata = {
     projectPaths.adoptedWritings,
     projectPaths.outputLogs,
   ]),
+  chatgpt_bridge_get_foreshadowing_settlement_surface: {
+    ...readMetadata,
+    permission: "read",
+    writes_files: false,
+    writes_only_to: [],
+  },
   chatgpt_bridge_save_settlement_report: writeMetadata([
     projectPaths.adoptedWritingSettlementReports,
     projectPaths.adoptedWritings,

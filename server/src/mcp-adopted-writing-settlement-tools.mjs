@@ -8,6 +8,7 @@ import {
   saveChatOutputAsSettlementReport,
 } from "./adopted-writing-settlement-service.mjs";
 import { normalizeProjectPath, projectPaths } from "./project-paths.mjs";
+import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
 
 function blocked(toolName, error) {
   return {
@@ -64,6 +65,21 @@ export async function get_adopted_writing_settlement_context(input = {}, options
     );
   } catch (error) {
     return blocked("get_adopted_writing_settlement_context", error);
+  }
+}
+
+export async function get_foreshadowing_settlement_surface(input = {}, options = {}) {
+  try {
+    const bundle = await getAdoptedWritingSettlementContext(
+      input.id ?? input.settlement_context_id ?? input.settlementContextId,
+      options,
+    );
+    return success(
+      "get_foreshadowing_settlement_surface",
+      buildForeshadowingSettlementSurface(bundle),
+    );
+  } catch (error) {
+    return blocked("get_foreshadowing_settlement_surface", error);
   }
 }
 
@@ -143,6 +159,7 @@ export async function build_pending_engine_candidate_from_settlement_report(
 export const adoptedWritingSettlementTools = {
   build_adopted_writing_settlement_context,
   get_adopted_writing_settlement_context,
+  get_foreshadowing_settlement_surface,
   list_adopted_writing_settlement_contexts,
   save_chat_output_as_settlement_report,
   get_settlement_report_detail,
@@ -187,6 +204,7 @@ const readMetadata = {
 export const adoptedWritingSettlementToolMetadata = {
   build_adopted_writing_settlement_context: { ...writeMetadata },
   get_adopted_writing_settlement_context: { ...readMetadata },
+  get_foreshadowing_settlement_surface: { ...readMetadata },
   list_adopted_writing_settlement_contexts: { ...readMetadata },
   save_chat_output_as_settlement_report: { ...writeMetadata },
   get_settlement_report_detail: { ...readMetadata },

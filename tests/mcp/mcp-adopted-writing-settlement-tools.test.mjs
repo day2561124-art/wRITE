@@ -19,6 +19,7 @@ async function main() {
   const names = [
     "build_adopted_writing_settlement_context",
     "get_adopted_writing_settlement_context",
+    "get_foreshadowing_settlement_surface",
     "list_adopted_writing_settlement_contexts",
     "save_chat_output_as_settlement_report",
     "get_settlement_report_detail",

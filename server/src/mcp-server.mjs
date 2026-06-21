@@ -53,6 +53,7 @@ import {
   build_adopted_writing_settlement_context,
   build_pending_engine_candidate_from_settlement_report,
   get_adopted_writing_settlement_context,
+  get_foreshadowing_settlement_surface,
   get_settlement_report_detail,
   list_adopted_writing_settlement_contexts,
   list_settlement_reports,
@@ -74,6 +75,7 @@ import {
   chatgpt_bridge_get_entity_conflicts,
   chatgpt_bridge_get_entity_registry_provenance,
   chatgpt_bridge_get_current_inputs,
+  chatgpt_bridge_get_foreshadowing_settlement_surface,
   chatgpt_bridge_get_workbench_status,
   chatgpt_bridge_request_adoption,
   chatgpt_bridge_run_full_recursive_writing_pipeline,
@@ -2154,6 +2156,16 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_build_settlement_context(args)),
   },
   {
+    name: "chatgpt_bridge_get_foreshadowing_settlement_surface",
+    description: "Read a compact Phase 27G foreshadowing settlement surface for ChatGPT from a settlement context.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      id: { type: "string" },
+    }, ["id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_get_foreshadowing_settlement_surface(args)),
+  },
+  {
     name: "chatgpt_bridge_save_settlement_report",
     description: "Save a settlement report without creating a pending engine candidate.",
     risk: "low-risk-write",
@@ -2464,6 +2476,16 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await get_adopted_writing_settlement_context(args)),
   },
   {
+    name: "get_foreshadowing_settlement_surface",
+    description: "Read a compact Phase 27G foreshadowing settlement surface from an adopted-writing settlement context.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      id: { type: "string" },
+    }, ["id"]),
+    handler: async (args) => jsonContent(await get_foreshadowing_settlement_surface(args)),
+  },
+  {
     name: "list_adopted_writing_settlement_contexts",
     description: "List adopted-writing settlement context summaries.",
     risk: "read",
@@ -2609,6 +2631,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_save_proof_report",
   "chatgpt_bridge_request_adoption",
   "chatgpt_bridge_build_settlement_context",
+  "chatgpt_bridge_get_foreshadowing_settlement_surface",
   "chatgpt_bridge_save_settlement_report",
   "approval_queue_bridge_readiness_report",
 ]);
@@ -2670,6 +2693,7 @@ const permissionSources = {
   list_adopted_writings: ["adopted_writing_records"],
   build_adopted_writing_settlement_context: ["adopted_writing_records", "registered_project_sources", "user_input"],
   get_adopted_writing_settlement_context: ["adopted_writing_settlement_context_records"],
+  get_foreshadowing_settlement_surface: ["adopted_writing_settlement_context_records", "foreshadowing_settlement_proposal_bridge"],
   list_adopted_writing_settlement_contexts: ["adopted_writing_settlement_context_records"],
   save_chat_output_as_settlement_report: ["user_input", "adopted_writing_records", "adopted_writing_settlement_context_records"],
   get_settlement_report_detail: ["adopted_writing_settlement_report_records"],
@@ -2698,6 +2722,7 @@ const permissionSources = {
   chatgpt_bridge_save_proof_report: ["user_input", "writing_candidate_records", "candidate_proofing_context_records"],
   chatgpt_bridge_request_adoption: ["writing_candidate_records", "candidate_proof_report_records", "user_input"],
   chatgpt_bridge_build_settlement_context: ["adopted_writing_records", "registered_project_sources", "user_input"],
+  chatgpt_bridge_get_foreshadowing_settlement_surface: ["adopted_writing_settlement_context_records", "foreshadowing_settlement_proposal_bridge"],
   chatgpt_bridge_save_settlement_report: ["user_input", "adopted_writing_records", "adopted_writing_settlement_context_records"],
   approval_queue_bridge_readiness_report: [
     "approval_queue",

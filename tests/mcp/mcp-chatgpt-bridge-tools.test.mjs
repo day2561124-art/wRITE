@@ -64,6 +64,7 @@ async function main() {
       "chatgpt_bridge_save_proof_report",
       "chatgpt_bridge_request_adoption",
       "chatgpt_bridge_build_settlement_context",
+      "chatgpt_bridge_get_foreshadowing_settlement_surface",
       "chatgpt_bridge_save_settlement_report",
     ];
     for (const name of toolNames) {

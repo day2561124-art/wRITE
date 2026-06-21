@@ -5,6 +5,7 @@ import {
   buildAdoptedWritingSettlementContext,
   saveChatOutputAsSettlementReport,
 } from "./adopted-writing-settlement-service.mjs";
+import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
 import { requestWritingCandidateAdoption } from "./candidate-adoption-request-service.mjs";
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
 import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mjs";
@@ -699,6 +700,18 @@ export async function buildChatgptBridgeSettlementContext(input = {}, options = 
       ?? false,
   }, options);
   return { ...result, generated_locally: false, safety: chatgptBridgeSafety };
+}
+
+export async function getChatgptBridgeForeshadowingSettlementSurface(input = {}, options = {}) {
+  const bundle = await getAdoptedWritingSettlementContext(
+    input.id ?? input.settlement_context_id ?? input.settlementContextId,
+    options,
+  );
+  return {
+    ...buildForeshadowingSettlementSurface(bundle),
+    generated_locally: false,
+    safety: chatgptBridgeSafety,
+  };
 }
 
 export async function saveChatgptBridgeSettlementReport(input = {}, options = {}) {
