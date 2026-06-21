@@ -50,6 +50,7 @@ const steps = [
   ["Phase 27B foreshadowing payoff guard", ["tests/phase27/phase27b-foreshadowing-payoff-guard.test.mjs"]],
   ["Phase 27C foreshadowing payoff repair planner", ["tests/phase27/phase27c-foreshadowing-payoff-repair-planner.test.mjs"]],
   ["Phase 27D foreshadowing payoff acceptance gate", ["tests/phase27/phase27d-foreshadowing-payoff-acceptance-gate.test.mjs"]],
+  ["Phase 27E foreshadowing settlement diff preview", ["tests/phase27/phase27e-foreshadowing-settlement-diff-preview.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
