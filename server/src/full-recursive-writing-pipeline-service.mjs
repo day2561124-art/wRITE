@@ -6,7 +6,6 @@ import { evaluateCharacterVoiceDrift } from "./character-voice-drift-guard-servi
 import { formatCharacterVoiceGuardForDisplay } from "./character-voice-guard-display.mjs";
 import { buildCharacterMindStateLedgerContext } from "./character-mind-state-ledger-service.mjs";
 import { buildDramaticConflictManagerContext } from "./dramatic-conflict-manager-service.mjs";
-import { buildForeshadowingCausalGraphContext } from "./foreshadowing-causal-graph-service.mjs";
 import {
   buildGenerationAdapterFromProvider,
   buildRevisionAdapterFromProvider,
@@ -37,6 +36,67 @@ function arrayOfText(value, maximum = 20) {
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function phase27bObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function optionObjectEnabled(value) {
+  if (value === true) return true;
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function shouldUseForeshadowingCausalGraph(rawInput, input, options) {
+  return input.includeForeshadowingCausalGraph === true
+    || optionObjectEnabled(options.foreshadowingCausalGraph)
+    || optionObjectEnabled(options.foreshadowing_causal_graph);
+}
+
+function shouldUseForeshadowingPayoffGuard(rawInput, input, options) {
+  return input.includeForeshadowingPayoffGuard === true
+    || optionObjectEnabled(options.foreshadowingPayoffGuard)
+    || optionObjectEnabled(options.foreshadowing_payoff_guard);
+}
+
+function disabledForeshadowingPayoffGuard(status = "disabled") {
+  return {
+    used: false,
+    phase: "27B",
+    version: "foreshadowing_payoff_guard_v1",
+    status,
+    read_only: true,
+    candidate_only: true,
+    no_auto_persist: true,
+    no_canon_update: true,
+    no_active_engine_update: true,
+    detected_payoffs: [],
+    fake_payoffs: [],
+    unpaid_required_debts: [],
+    unresolved_promises: [],
+    payoff_quality_score: 0,
+    blocking: false,
+    warnings: [],
+  };
+}
+
+async function buildForeshadowingCausalGraphContextLazy(payload, options) {
+  const { buildForeshadowingCausalGraphContext } = await import("./foreshadowing-causal-graph-service.mjs");
+  return buildForeshadowingCausalGraphContext(payload, options);
+}
+
+async function buildForeshadowingPayoffGuardContextLazy(payload, options) {
+  const { buildForeshadowingPayoffGuardContext } = await import("./foreshadowing-payoff-guard-service.mjs");
+  return buildForeshadowingPayoffGuardContext(payload, options);
+}
+
+function collectForeshadowingPayoffs(...sources) {
+  const payoffs = [];
+  for (const source of sources) {
+    const value = source?.foreshadowing_payoffs ?? source?.foreshadowingPayoffs ?? source?.detected_payoffs ?? source?.detectedPayoffs;
+    if (Array.isArray(value)) payoffs.push(...value);
+  }
+  return payoffs;
 }
 
 function integer(value, fallback, maximum = 8) {
@@ -76,8 +136,11 @@ function normalizeInput(raw = {}) {
       raw.include_dramatic_conflict_manager !== false
       && raw.includeDramaticConflictManager !== false,
     includeForeshadowingCausalGraph:
-      raw.include_foreshadowing_causal_graph !== false
-      && raw.includeForeshadowingCausalGraph !== false,
+      raw.include_foreshadowing_causal_graph === true
+      || raw.includeForeshadowingCausalGraph === true,
+    includeForeshadowingPayoffGuard:
+      raw.include_foreshadowing_payoff_guard === true
+      || raw.includeForeshadowingPayoffGuard === true,
     characterNames: arrayOfText(
       raw.character_names ?? raw.characterNames ?? raw.characters,
       24,
@@ -105,7 +168,7 @@ async function callAdapter(adapter, payload) {
   };
 }
 
-async function runPolisher(draftText, writingCardDirector, input, options, characterMindStateLedger = null, dramaticConflictManager = null, foreshadowingCausalGraph = null) {
+async function runPolisher(draftText, writingCardDirector, input, options, characterMindStateLedger = null, dramaticConflictManager = null, foreshadowingCausalGraph = null, foreshadowingPayoffGuard = null) {
   if (typeof options.finalPolisherAdapter === "function") {
     const adapted = await options.finalPolisherAdapter({
       raw_draft_text: draftText,
@@ -115,6 +178,7 @@ async function runPolisher(draftText, writingCardDirector, input, options, chara
       character_mind_state_ledger: characterMindStateLedger,
       dramatic_conflict_manager: dramaticConflictManager,
       foreshadowing_causal_graph: foreshadowingCausalGraph,
+      foreshadowing_payoff_guard: foreshadowingPayoffGuard,
     });
     return {
       status: adapted?.status ?? "completed",
@@ -123,6 +187,7 @@ async function runPolisher(draftText, writingCardDirector, input, options, chara
       needs_structural_revision: adapted?.needs_structural_revision === true,
       suggested_return_stage: adapted?.suggested_return_stage ?? null,
       warnings: Array.isArray(adapted?.warnings) ? adapted.warnings : [],
+      foreshadowing_payoffs: Array.isArray(adapted?.foreshadowing_payoffs) ? adapted.foreshadowing_payoffs : [],
     };
   }
   return runFinalPolisherEditorialBrain({
@@ -133,6 +198,7 @@ async function runPolisher(draftText, writingCardDirector, input, options, chara
     character_mind_state_ledger: characterMindStateLedger,
     dramatic_conflict_manager: dramaticConflictManager,
     foreshadowing_causal_graph: foreshadowingCausalGraph,
+      foreshadowing_payoff_guard: foreshadowingPayoffGuard,
   }, {
     editorialAdapter: options.finalPolisherEditorialAdapter,
   });
@@ -273,7 +339,8 @@ function baseResult(input, now) {
       no_active_engine_update: true,
       graph: null,
       warnings: [],
-    },
+    },    foreshadowing_payoff_guard: disabledForeshadowingPayoffGuard("not_started"),
+
     report: {
       pipeline_name: "full_recursive_writing_pipeline",
       phase: "24B",
@@ -427,8 +494,8 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   result.report.dramatic_conflict_manager_no_auto_persist = dramaticConflictManager.no_auto_persist !== false;
   result.report.one_chapter_one_change_contract = dramaticConflictManager.one_chapter_one_change_contract ?? null;
 
-  const foreshadowingCausalGraph = input.includeForeshadowingCausalGraph
-    ? await buildForeshadowingCausalGraphContext({
+  const foreshadowingCausalGraph = shouldUseForeshadowingCausalGraph(rawInput, input, options)
+    ? await buildForeshadowingCausalGraphContextLazy({
       task_prompt: input.taskPrompt,
       generation_context: input.generationContext,
       retrieval_context: input.retrievalContext,
@@ -467,6 +534,50 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   result.report.foreshadowing_causal_graph_no_auto_persist = foreshadowingCausalGraph.no_auto_persist !== false;
   result.report.foreshadowing_provider_guidance = foreshadowingCausalGraph.provider_guidance ?? null;
 
+  let foreshadowingPayoffGuard = disabledForeshadowingPayoffGuard();
+  result.foreshadowing_payoff_guard = foreshadowingPayoffGuard;
+  const refreshForeshadowingPayoffGuard = async (candidateTextValue, payoffs = []) => {
+    if (!shouldUseForeshadowingPayoffGuard(rawInput, input, options)) {
+      foreshadowingPayoffGuard = disabledForeshadowingPayoffGuard();
+    } else {
+      const optionConfig = phase27bObject(options.foreshadowingPayoffGuard ?? options.foreshadowing_payoff_guard);
+      foreshadowingPayoffGuard = await buildForeshadowingPayoffGuardContextLazy({
+        task_prompt: input.taskPrompt,
+        generation_context: input.generationContext,
+        retrieval_context: input.retrievalContext,
+        candidate_text: candidateTextValue,
+        foreshadowing_causal_graph: optionConfig.foreshadowing_causal_graph
+          ?? optionConfig.foreshadowingCausalGraph
+          ?? foreshadowingCausalGraph,
+        foreshadowing_payoffs: payoffs,
+        include_foreshadowing_payoff_guard: true,
+      }, {
+        ...options,
+        foreshadowingPayoffGuard: {
+          ...optionConfig,
+          foreshadowing_causal_graph: optionConfig.foreshadowing_causal_graph
+            ?? optionConfig.foreshadowingCausalGraph
+            ?? foreshadowingCausalGraph,
+          payoffs,
+        },
+      });
+    }
+    result.foreshadowing_payoff_guard = {
+      ...foreshadowingPayoffGuard,
+      warnings: foreshadowingPayoffGuard.warnings ?? [],
+    };
+    if (foreshadowingPayoffGuard.trace_id && !result.report.trace_ids.includes(foreshadowingPayoffGuard.trace_id)) {
+      result.report.trace_ids.push(foreshadowingPayoffGuard.trace_id);
+    }
+    result.report.foreshadowing_payoff_guard_used = foreshadowingPayoffGuard.used === true;
+    result.report.foreshadowing_payoff_guard_status = foreshadowingPayoffGuard.status ?? null;
+    result.report.foreshadowing_payoff_guard_candidate_only = foreshadowingPayoffGuard.candidate_only !== false;
+    result.report.foreshadowing_payoff_guard_no_auto_persist = foreshadowingPayoffGuard.no_auto_persist !== false;
+    result.report.foreshadowing_payoff_guard_blocking = foreshadowingPayoffGuard.blocking === true;
+    result.report.foreshadowing_payoff_provider_guidance = foreshadowingPayoffGuard.provider_guidance ?? null;
+    return foreshadowingPayoffGuard;
+  };
+
   let generated;
   try {
     generated = await callAdapter(generationAdapter, {
@@ -479,6 +590,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
       character_mind_state_ledger: characterMindStateLedger,
       dramatic_conflict_manager: dramaticConflictManager,
       foreshadowing_causal_graph: foreshadowingCausalGraph,
+      foreshadowing_payoff_guard: foreshadowingPayoffGuard,
     });
   } catch (error) {
     result.pipeline_stage = "generation_failed";
@@ -510,7 +622,11 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   }
 
   let draft = generated.text;
-  let polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager, foreshadowingCausalGraph);
+  let providerForeshadowingPayoffs = collectForeshadowingPayoffs(generated);
+  foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
+  let polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager, foreshadowingCausalGraph, foreshadowingPayoffGuard);
+  providerForeshadowingPayoffs = collectForeshadowingPayoffs(generated, polisher);
+  foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
   let finalSource = "backend_generation";
   result.final_polisher = {
     status: polisher.status,
@@ -553,6 +669,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           character_mind_state_ledger: characterMindStateLedger,
           dramatic_conflict_manager: dramaticConflictManager,
           foreshadowing_causal_graph: foreshadowingCausalGraph,
+      foreshadowing_payoff_guard: foreshadowingPayoffGuard,
         });
       } catch (error) {
         result.stop_reason = error?.provider_status ?? "provider_http_error";
@@ -583,7 +700,11 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         break;
       }
       draft = revised.text;
-      polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager, foreshadowingCausalGraph);
+      providerForeshadowingPayoffs = collectForeshadowingPayoffs(generated, revised);
+      foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
+      polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager, foreshadowingCausalGraph, foreshadowingPayoffGuard);
+      providerForeshadowingPayoffs = collectForeshadowingPayoffs(generated, revised, polisher);
+      foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
       roundReport.final_polisher_status = polisher.status;
       roundReport.needs_structural_revision = polisher.needs_structural_revision === true;
       roundReport.accepted = polisher.status === "completed"
@@ -637,6 +758,31 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     warnings: polisher.warnings ?? [],
   };
 
+  if (foreshadowingPayoffGuard.blocking === true) {
+
+
+    result.adoption_requires_approval_queue = true;
+
+
+    result.direct_adoption_allowed = false;
+
+
+    result.report.foreshadowing_payoff_guard_blocking = true;
+
+
+    result.report.adoption_requires_approval_queue = true;
+
+
+    result.report.direct_adoption_allowed = false;
+
+
+    result.report.warnings.push(...(foreshadowingPayoffGuard.warnings ?? []));
+
+
+  }
+
+
+
   if (input.enableCharacterVoiceGuard) {
     const guard = typeof options.characterVoiceGuardAdapter === "function"
       ? await options.characterVoiceGuardAdapter({
@@ -677,6 +823,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         character_mind_state_ledger: result.character_mind_state_ledger,
         dramatic_conflict_manager: result.dramatic_conflict_manager,
         foreshadowing_causal_graph: result.foreshadowing_causal_graph,
+        foreshadowing_payoff_guard: result.foreshadowing_payoff_guard,
         report: result.report,
       },
     }, options);

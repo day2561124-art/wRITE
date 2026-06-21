@@ -47,6 +47,7 @@ const steps = [
   ["Phase 25A character mind-state ledger", ["tests/phase25/phase25a-character-mind-state-ledger.test.mjs"]],
   ["Phase 26A dramatic conflict manager", ["tests/phase26/phase26a-dramatic-conflict-manager.test.mjs"]],
   ["Phase 27A foreshadowing causal graph", ["tests/phase27/phase27a-foreshadowing-causal-graph.test.mjs"]],
+  ["Phase 27B foreshadowing payoff guard", ["tests/phase27/phase27b-foreshadowing-payoff-guard.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
