@@ -14,6 +14,7 @@ import {
   projectRoot,
 } from "./project-paths.mjs";
 import { getAdoptedWritingDetail } from "./writing-candidate-adoption-service.mjs";
+import { buildForeshadowingSettlementProposalBridgeContext } from "./foreshadowing-settlement-proposal-bridge-service.mjs";
 
 const contextIdPattern = /^settlement_ctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const reportIdPattern = /^settlement_report_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -209,6 +210,10 @@ function allocateContent(sections, maxChars) {
   };
 }
 
+function compactJsonBlock(value) {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
 function settlementMarkdown(context) {
   const sourceLines = Object.values(context.sources).map((source) => (
     `- ${source.label}: included=${source.included}, exists=${source.exists}, hash=${source.hash ?? "none"}, path=${source.path}`
@@ -244,6 +249,11 @@ function settlementMarkdown(context) {
     "",
     "## Generation Context",
     context.content.generation_context,
+    "",
+    "## Foreshadowing Settlement Proposal Bridge",
+    context.foreshadowing_settlement_proposal_bridge?.used
+      ? context.foreshadowing_settlement_proposal_bridge.chat_markdown
+      : "[not included]",
     "",
     "## Sources",
     ...sourceLines,
@@ -333,6 +343,16 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
       rawInput.generation_context ?? rawInput.generationContext,
       "generation_context",
     ),
+    foreshadowingSettlementDiffPreview: optionalObject(
+      rawInput.foreshadowing_settlement_diff_preview ?? rawInput.foreshadowingSettlementDiffPreview,
+      "foreshadowing_settlement_diff_preview",
+    ),
+    includeForeshadowingSettlementProposalBridge: optionalBoolean(
+      rawInput.include_foreshadowing_settlement_proposal_bridge
+        ?? rawInput.includeForeshadowingSettlementProposalBridge,
+      false,
+      "include_foreshadowing_settlement_proposal_bridge",
+    ),
     settlementMode,
     maxContextChars: optionalInteger(
       rawInput.max_context_chars ?? rawInput.maxContextChars,
@@ -370,7 +390,16 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
       "reference",
     ),
   ]);
-  const byLabel = Object.fromEntries(sourceList.map((source) => [source.label, source]));
+  const byLabel = Object.fromEntries(sourceList.map((source) => [source.label, source]));  const foreshadowingBridgeRequested = input.includeForeshadowingSettlementProposalBridge
+    || Object.keys(input.foreshadowingSettlementDiffPreview).length > 0
+    || options.foreshadowingSettlementProposalBridge
+    || options.foreshadowing_settlement_proposal_bridge;
+  const foreshadowingSettlementProposalBridge = await buildForeshadowingSettlementProposalBridgeContext({
+    include_foreshadowing_settlement_proposal_bridge: Boolean(foreshadowingBridgeRequested),
+    foreshadowing_settlement_diff_preview: input.foreshadowingSettlementDiffPreview,
+  }, options);
+
+
   const allocated = allocateContent([
     {
       key: "adopted_content",
@@ -407,6 +436,13 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
       text: JSON.stringify(input.generationContext, null, 2),
       reference: "input.generation_context",
     },
+    {
+      key: "foreshadowing_settlement_proposal_bridge",
+      text: foreshadowingSettlementProposalBridge.used
+        ? compactJsonBlock(foreshadowingSettlementProposalBridge)
+        : "",
+      reference: "foreshadowing_settlement_proposal_bridge",
+    },
   ], input.maxContextChars);
   const warnings = sourceList
     .filter((source) => source.included && source.exists === false)
@@ -416,6 +452,9 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
   }
   if (adopted.adoption.latest_pending_engine_candidate_id) {
     warnings.push("Adopted writing already has a pending settlement candidate.");
+  }
+  if (foreshadowingSettlementProposalBridge.used === true) {
+    warnings.push(...(foreshadowingSettlementProposalBridge.warnings ?? []));
   }
   const contextId = createId("settlement_ctx");
   const paths = contextPaths(contextId, roots);
@@ -443,6 +482,12 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
     engine_activation_requested: false,
     approval_required_for_engine_activation: true,
     settled: false,
+    foreshadowing_settlement_proposal_bridge: foreshadowingSettlementProposalBridge,
+    foreshadowing_settlement_diff_preview: foreshadowingSettlementProposalBridge.settlement_diff_preview,
+    foreshadowing_settlement_proposal_bridge_used: foreshadowingSettlementProposalBridge.used === true,
+    foreshadowing_settlement_proposal_bridge_preview_only: foreshadowingSettlementProposalBridge.preview_only !== false,
+    foreshadowing_settlement_proposal_bridge_no_canon_update: foreshadowingSettlementProposalBridge.no_canon_update !== false,
+    foreshadowing_settlement_proposal_bridge_no_active_engine_update: foreshadowingSettlementProposalBridge.no_active_engine_update !== false,
     sources: publicSources,
     content: allocated.content,
     inputs: {
@@ -460,6 +505,16 @@ export async function buildAdoptedWritingSettlementContext(rawInput, options = {
       do_not_activate_engine: true,
       do_not_create_approval_item: true,
       do_not_treat_pending_candidate_as_active: true,
+    },
+    settlement_proposal_bridge_contract: {
+      foreshadowing_settlement_proposal_bridge: foreshadowingSettlementProposalBridge.used === true,
+      preview_only: foreshadowingSettlementProposalBridge.preview_only !== false,
+      candidate_only: foreshadowingSettlementProposalBridge.candidate_only !== false,
+      no_auto_persist: foreshadowingSettlementProposalBridge.no_auto_persist !== false,
+      no_canon_update: foreshadowingSettlementProposalBridge.no_canon_update !== false,
+      no_active_engine_update: foreshadowingSettlementProposalBridge.no_active_engine_update !== false,
+      pending_engine_candidate_created: false,
+      requires_human_settlement_review: true,
     },
   };
   const adoption = {
