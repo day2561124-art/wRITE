@@ -5,6 +5,7 @@ import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-servic
 import { evaluateCharacterVoiceDrift } from "./character-voice-drift-guard-service.mjs";
 import { formatCharacterVoiceGuardForDisplay } from "./character-voice-guard-display.mjs";
 import { buildCharacterMindStateLedgerContext } from "./character-mind-state-ledger-service.mjs";
+import { buildDramaticConflictManagerContext } from "./dramatic-conflict-manager-service.mjs";
 import {
   buildGenerationAdapterFromProvider,
   buildRevisionAdapterFromProvider,
@@ -70,6 +71,9 @@ function normalizeInput(raw = {}) {
     includeCharacterMindStateLedger:
       raw.include_character_mind_state_ledger !== false
       && raw.includeCharacterMindStateLedger !== false,
+    includeDramaticConflictManager:
+      raw.include_dramatic_conflict_manager !== false
+      && raw.includeDramaticConflictManager !== false,
     characterNames: arrayOfText(
       raw.character_names ?? raw.characterNames ?? raw.characters,
       24,
@@ -97,7 +101,7 @@ async function callAdapter(adapter, payload) {
   };
 }
 
-async function runPolisher(draftText, writingCardDirector, input, options, characterMindStateLedger = null) {
+async function runPolisher(draftText, writingCardDirector, input, options, characterMindStateLedger = null, dramaticConflictManager = null) {
   if (typeof options.finalPolisherAdapter === "function") {
     const adapted = await options.finalPolisherAdapter({
       raw_draft_text: draftText,
@@ -105,6 +109,7 @@ async function runPolisher(draftText, writingCardDirector, input, options, chara
       generation_context: input.generationContext,
       retrieval_context: input.retrievalContext,
       character_mind_state_ledger: characterMindStateLedger,
+      dramatic_conflict_manager: dramaticConflictManager,
     });
     return {
       status: adapted?.status ?? "completed",
@@ -121,6 +126,7 @@ async function runPolisher(draftText, writingCardDirector, input, options, chara
     generation_context: input.generationContext,
     retrieval_context: input.retrievalContext,
     character_mind_state_ledger: characterMindStateLedger,
+    dramatic_conflict_manager: dramaticConflictManager,
   }, {
     editorialAdapter: options.finalPolisherEditorialAdapter,
   });
@@ -234,6 +240,19 @@ function baseResult(input, now) {
       no_canon_update: true,
       no_active_engine_update: true,
       characters: [],
+      warnings: [],
+    },
+    dramatic_conflict_manager: {
+      used: false,
+      phase: "26A",
+      version: "dramatic_conflict_manager_v1",
+      status: "not_started",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      plan: null,
       warnings: [],
     },
     report: {
@@ -350,6 +369,45 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   result.report.character_mind_state_ledger_candidate_only = characterMindStateLedger.candidate_only !== false;
   result.report.character_mind_state_ledger_no_auto_persist = characterMindStateLedger.no_auto_persist !== false;
 
+  const dramaticConflictManager = input.includeDramaticConflictManager
+    ? await buildDramaticConflictManagerContext({
+      task_prompt: input.taskPrompt,
+      generation_context: input.generationContext,
+      retrieval_context: input.retrievalContext,
+      source_bundle: bundle ?? input.sourceBundle,
+      writing_context: writingContext,
+      character_names: input.characterNames,
+      character_mind_state_ledger: characterMindStateLedger,
+    }, options)
+    : {
+      used: false,
+      phase: "26A",
+      version: "dramatic_conflict_manager_v1",
+      status: "disabled",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      plan: null,
+      warnings: [],
+    };
+
+  result.dramatic_conflict_manager = {
+    ...dramaticConflictManager,
+    warnings: dramaticConflictManager.warnings ?? [],
+  };
+
+  if (dramaticConflictManager.trace_id) {
+    result.report.trace_ids.push(dramaticConflictManager.trace_id);
+  }
+
+  result.report.dramatic_conflict_manager_used = dramaticConflictManager.used === true;
+  result.report.dramatic_conflict_manager_status = dramaticConflictManager.status ?? null;
+  result.report.dramatic_conflict_manager_candidate_only = dramaticConflictManager.candidate_only !== false;
+  result.report.dramatic_conflict_manager_no_auto_persist = dramaticConflictManager.no_auto_persist !== false;
+  result.report.one_chapter_one_change_contract = dramaticConflictManager.one_chapter_one_change_contract ?? null;
+
   let generated;
   try {
     generated = await callAdapter(generationAdapter, {
@@ -360,6 +418,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
       neural_pre_generation_report: orchestration.pre_generation,
       writing_card_director: writingCardDirector,
       character_mind_state_ledger: characterMindStateLedger,
+      dramatic_conflict_manager: dramaticConflictManager,
     });
   } catch (error) {
     result.pipeline_stage = "generation_failed";
@@ -391,7 +450,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   }
 
   let draft = generated.text;
-  let polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger);
+  let polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager);
   let finalSource = "backend_generation";
   result.final_polisher = {
     status: polisher.status,
@@ -432,6 +491,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           neural_pre_generation_report: orchestration.pre_generation,
           writing_card_director: writingCardDirector,
           character_mind_state_ledger: characterMindStateLedger,
+          dramatic_conflict_manager: dramaticConflictManager,
         });
       } catch (error) {
         result.stop_reason = error?.provider_status ?? "provider_http_error";
@@ -462,7 +522,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         break;
       }
       draft = revised.text;
-      polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger);
+      polisher = await runPolisher(draft, writingCardDirector, input, options, characterMindStateLedger, dramaticConflictManager);
       roundReport.final_polisher_status = polisher.status;
       roundReport.needs_structural_revision = polisher.needs_structural_revision === true;
       roundReport.accepted = polisher.status === "completed"
@@ -554,6 +614,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         final_candidate_source: result.final_candidate_source,
         recursive_revision: result.recursive_revision,
         character_mind_state_ledger: result.character_mind_state_ledger,
+        dramatic_conflict_manager: result.dramatic_conflict_manager,
         report: result.report,
       },
     }, options);

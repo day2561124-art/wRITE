@@ -45,6 +45,7 @@ const steps = [
   ["Phase 24B backend generation provider bridge", ["tests/phase24/phase24b-backend-generation-provider-bridge.test.mjs"]],
   ["Phase 24C provider live smoke ChatGPT output path", ["tests/phase24/phase24c-provider-live-smoke-chatgpt-output-path.test.mjs"]],
   ["Phase 25A character mind-state ledger", ["tests/phase25/phase25a-character-mind-state-ledger.test.mjs"]],
+  ["Phase 26A dramatic conflict manager", ["tests/phase26/phase26a-dramatic-conflict-manager.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
