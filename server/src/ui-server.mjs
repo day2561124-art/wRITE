@@ -149,6 +149,9 @@ import {
 import {
   listCompressedRuleApplications,
 } from "./compressed-rule-update-confirm-service.mjs";
+import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
+import { buildForeshadowingSettlementOperatorReviewPanel } from "./foreshadowing-settlement-operator-review-panel-service.mjs";
+import { buildForeshadowingSettlementOperatorReviewPanelUi } from "./foreshadowing-settlement-operator-review-panel-ui-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1287,6 +1290,69 @@ async function serveStatic(response, pathname) {
   createReadStream(filePath).pipe(response);
 }
 
+
+function approvalItemStatus(item) {
+  return item?.status?.status ?? item?.status ?? null;
+}
+
+function readinessFromApprovalItems(items = []) {
+  const latest = items.find((item) => (
+    item.action_type === "adopt_writing_candidate"
+    || item.action_type === "foreshadowing_settlement_adoption"
+    || item.source === "chatgpt_bridge"
+    || item.details?.source === "chatgpt_bridge"
+  )) ?? items.find((item) => approvalItemStatus(item) === "blocked") ?? null;
+  const status = approvalItemStatus(latest);
+  const blockedReasons = [
+    latest?.blocked_reason,
+    latest?.status?.reason,
+    ...(Array.isArray(latest?.blocking_reasons) ? latest.blocking_reasons : []),
+  ].filter(Boolean);
+  return {
+    ok: latest ? status !== "blocked" && blockedReasons.length === 0 : null,
+    decision: latest
+      ? status === "blocked" || blockedReasons.length ? "blocked" : status ?? "ready"
+      : "not_available",
+    approval_item_id: latest?.approval_item_id ?? latest?.item_id ?? null,
+    blocking_reasons: blockedReasons,
+    safety: {
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      bridge_can_modify_active_engine: false,
+      bridge_can_modify_compressed_rules: false,
+    },
+  };
+}
+
+async function latestForeshadowingSettlementOperatorPanelUiPayload() {
+  const [contexts, approvalItems] = await Promise.all([
+    listSettlementContexts(),
+    listApprovalItems(),
+  ]);
+  let surface = buildForeshadowingSettlementSurface({});
+  const latestContext = contexts[0] ?? null;
+  if (latestContext?.settlement_context_id) {
+    try {
+      const detail = await getSettlementContext(latestContext.settlement_context_id);
+      surface = buildForeshadowingSettlementSurface({
+        context: {
+          ...detail.metadata,
+          ...detail.status,
+        },
+      });
+    } catch {
+      surface = buildForeshadowingSettlementSurface({});
+    }
+  }
+  const readiness = readinessFromApprovalItems(approvalItems);
+  const panel = buildForeshadowingSettlementOperatorReviewPanel({ surface, readiness });
+  return {
+    operator_panel: panel,
+    operator_panel_ui: buildForeshadowingSettlementOperatorReviewPanelUi(panel),
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1798,6 +1864,21 @@ async function handleRequest(request, response) {
         ok: false,
         error: "Unable to read feedback learning state.",
       });
+    }
+    return;
+  }
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-review-panel"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorPanelUiPayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
     }
     return;
   }

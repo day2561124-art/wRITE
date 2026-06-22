@@ -272,6 +272,9 @@ async function main() {
     assert(indexText.includes('id="feedback-learning-panel"'), "UI index is missing the Feedback Learning panel.");
     assert(indexText.includes("此面板只讀"), "Feedback Learning panel is missing its read-only warning.");
     assert(indexText.includes("待確認更新請到確認佇列處理"), "Feedback Learning panel is missing its Approval Queue guidance.");
+    assert(indexText.includes('id="foreshadowing-settlement-operator-panel"'), "UI index is missing the foreshadowing settlement operator panel.");
+    assert(indexText.includes("Foreshadowing Settlement Operator Review"), "UI index is missing the foreshadowing settlement operator review heading.");
+    assert(indexText.includes("does not approve"), "Foreshadowing settlement operator panel is missing bridge safety guidance.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -486,6 +489,30 @@ async function main() {
     assert(
       unsafeFeedbackState.status >= 400 && unsafeFeedbackState.status < 500,
       "Feedback Learning traversal path was not rejected.",
+    );
+
+    const operatorPanelResult = await readJson(await fetch(
+      `${baseUrl}/api/writer-workbench/foreshadowing-settlement-operator-review-panel`,
+    ));
+    assert(operatorPanelResult.response.ok, "Foreshadowing settlement operator panel API did not return 200.");
+    assert(operatorPanelResult.payload.ok === true, "Foreshadowing settlement operator panel API missing ok=true.");
+    const operatorPanelUi = operatorPanelResult.payload.operator_panel_ui;
+    assert(operatorPanelUi.phase === "27K", "Foreshadowing settlement operator panel UI phase mismatch.");
+    assert(operatorPanelUi.version === "foreshadowing_settlement_operator_review_panel_ui_v1", "Foreshadowing settlement operator panel UI version mismatch.");
+    assert(Array.isArray(operatorPanelUi.cards), "Foreshadowing settlement operator panel cards must be an array.");
+    assert(operatorPanelUi.safety.read_only === true, "Foreshadowing operator panel is not read-only.");
+    assert(operatorPanelUi.safety.no_canon_update === true, "Foreshadowing operator panel can update Canon DB.");
+    assert(operatorPanelUi.safety.no_active_engine_update === true, "Foreshadowing operator panel can update active_engine.");
+    assert(operatorPanelUi.safety.bridge_can_approve === false, "Foreshadowing operator panel allows bridge approval.");
+    assert(operatorPanelUi.safety.bridge_can_confirm_adoption === false, "Foreshadowing operator panel allows bridge adoption confirmation.");
+    assert(operatorPanelUi.safety.bridge_can_activate_engine === false, "Foreshadowing operator panel allows bridge active_engine activation.");
+    assert(
+      (await readOptionalBuffer(activeEnginePath)).content.equals(activeEngineBefore),
+      "Foreshadowing settlement operator panel API changed active_engine.md.",
+    );
+    assert(
+      (await readOptionalBuffer(compressedRulesPath)).content.equals(compressedRulesBefore.content),
+      "Foreshadowing settlement operator panel API changed compressed_rules.md.",
     );
 
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));

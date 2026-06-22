@@ -51,6 +51,7 @@ const state = {
     traces: [],
   },
   workbench: null,
+  foreshadowingSettlementOperatorPanel: null,
   visualFilters: {
     character: "",
     category: "",
@@ -477,9 +478,10 @@ function renderCharacterVoiceGuard(display, adoptionGate = null) {
 }
 
 async function refreshWriterWorkbenchState() {
-  const [payload, feedbackPayload] = await Promise.all([
+  const [payload, feedbackPayload, foreshadowingPayload] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-review-panel"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -490,6 +492,7 @@ async function refreshWriterWorkbenchState() {
   if (!pre || !timeline || !nextPanel || !riskPanel) return;
   const workbench = payload.state ?? {};
   state.workbench = workbench;
+  state.foreshadowingSettlementOperatorPanel = foreshadowingPayload.operator_panel_ui ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -550,8 +553,78 @@ async function refreshWriterWorkbenchState() {
 
   // show raw JSON for debug (hidden by default)
   pre.textContent = JSON.stringify(workbench, null, 2);
+  renderForeshadowingSettlementOperatorPanel();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
+}
+
+
+function operatorPanelToneClass(tone) {
+  return {
+    blocked: "candidate-status-blocked",
+    ready: "candidate-status-candidate",
+    warning: "candidate-status-rejected",
+    empty: "candidate-status-rejected",
+    neutral: "candidate-status-candidate",
+  }[tone] ?? "candidate-status-candidate";
+}
+
+function renderForeshadowingSettlementOperatorPanel(panel = state.foreshadowingSettlementOperatorPanel) {
+  const root = $("#foreshadowing-settlement-operator-panel");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-panel-status");
+  const summary = $("#foreshadowing-settlement-operator-panel-summary");
+  const cards = $("#foreshadowing-settlement-operator-panel-cards");
+  const nextAction = $("#foreshadowing-settlement-operator-panel-next-action");
+  const raw = $("#foreshadowing-settlement-operator-panel-raw");
+  const data = panel ?? {
+    headline: "Foreshadowing settlement operator panel is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    safety: {
+      read_only: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+    next_operator_action: {
+      label: "Build foreshadowing settlement preview surface",
+      reason: "No data has been loaded yet.",
+      ui_target: "settlement",
+    },
+  };
+
+  status.textContent = data.status_badge?.label ?? data.status ?? "unknown";
+  status.className = `workflow-status ${data.status_badge?.class_name ?? ""}`.trim();
+  summary.innerHTML = `
+    <article class="feedback-learning-card">
+      <strong>${escapeHtml(data.headline ?? "Foreshadowing Settlement Operator Review")}</strong>
+      <span>${escapeHtml(data.summary ?? "")}</span>
+      <small>read_only=${data.safety?.read_only === true} | no_canon_update=${data.safety?.no_canon_update === true} | no_active_engine_update=${data.safety?.no_active_engine_update === true}</small>
+      <small>bridge_can_approve=${data.safety?.bridge_can_approve === true} | bridge_can_confirm_adoption=${data.safety?.bridge_can_confirm_adoption === true} | bridge_can_activate_engine=${data.safety?.bridge_can_activate_engine === true}</small>
+    </article>
+  `;
+  cards.innerHTML = (data.cards ?? []).length
+    ? data.cards.map((card) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(card.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(card.tone)}">${escapeHtml(card.value)}</span>
+        </div>
+        <small>${escapeHtml(card.summary ?? "")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No foreshadowing settlement operator panel cards.</div>';
+
+  nextAction.innerHTML = `
+    <strong>${escapeHtml(data.next_operator_action?.label ?? "Next operator action")}</strong>
+    <p>${escapeHtml(data.next_operator_action?.reason ?? "")}</p>
+    <button class="button secondary" type="button" data-go-view="${escapeHtml(data.next_operator_action?.ui_target ?? "settlement")}">Open target</button>
+  `;
+  raw.textContent = JSON.stringify(data.raw_panel ?? data, null, 2);
 }
 
 function feedbackRecordId(record) {
