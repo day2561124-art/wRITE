@@ -53,6 +53,7 @@ const steps = [
   ["Phase 27E foreshadowing settlement diff preview", ["tests/phase27/phase27e-foreshadowing-settlement-diff-preview.test.mjs"]],
   ["Phase 27F foreshadowing settlement proposal bridge", ["tests/phase27/phase27f-foreshadowing-settlement-proposal-bridge.test.mjs"]],
   ["Phase 27G foreshadowing settlement surface", ["tests/phase27/phase27g-foreshadowing-settlement-surface.test.mjs"]],
+  ["Phase 27H foreshadowing settlement full workflow smoke", ["tests/phase27/phase27h-foreshadowing-settlement-full-workflow-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
