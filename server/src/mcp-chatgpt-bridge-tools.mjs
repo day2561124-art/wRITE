@@ -23,6 +23,27 @@ import { normalizeProjectPath, projectPaths } from "./project-paths.mjs";
 import { getAdoptedWritingSettlementContext } from "./adopted-writing-settlement-service.mjs";
 import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
 import {
+  buildForeshadowingSettlementOperatorReviewPanel,
+} from "./foreshadowing-settlement-operator-review-panel-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorReviewPanelUi,
+} from "./foreshadowing-settlement-operator-review-panel-ui-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorHandoffPacket,
+} from "./foreshadowing-settlement-operator-handoff-packet-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorHandoffAuditReceipt,
+} from "./foreshadowing-settlement-operator-handoff-audit-receipt-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorDecisionLedger,
+} from "./foreshadowing-settlement-operator-decision-ledger-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorLedgerUi,
+} from "./foreshadowing-settlement-operator-ledger-ui-service.mjs";
+import {
+  buildForeshadowingSettlementOperatorLedgerBridgeSurface,
+} from "./foreshadowing-settlement-operator-ledger-bridge-service.mjs";
+import {
   runVisualLibraryMcpReadonlyToolPreview,
 } from "./visual-library-mcp-readonly-tool-service.mjs";
 
@@ -139,6 +160,48 @@ async function getChatgptBridgeForeshadowingSettlementSurfaceForMcp(input = {}, 
   };
 }
 
+async function getChatgptBridgeForeshadowingSettlementOperatorLedgerSurfaceForMcp(
+  input = {},
+  options = {},
+) {
+  const settlementContextId = input.id ?? input.settlement_context_id ?? input.settlementContextId;
+  const bundle = await getAdoptedWritingSettlementContext(settlementContextId, options);
+  const settlementSurface = buildForeshadowingSettlementSurface(bundle);
+  const operatorPanel = buildForeshadowingSettlementOperatorReviewPanel({
+    surface: settlementSurface,
+    readiness: input.readiness_report ?? input.readiness ?? input.approval_readiness ?? {},
+  });
+  const operatorPanelUi = buildForeshadowingSettlementOperatorReviewPanelUi(operatorPanel);
+  const handoffPacket = buildForeshadowingSettlementOperatorHandoffPacket({
+    operator_panel_ui: operatorPanelUi,
+  });
+  const auditReceipt = buildForeshadowingSettlementOperatorHandoffAuditReceipt({
+    handoff_packet: handoffPacket,
+  });
+  const decisionLedger = buildForeshadowingSettlementOperatorDecisionLedger({
+    audit_receipt: auditReceipt,
+  });
+  const ledgerUi = buildForeshadowingSettlementOperatorLedgerUi({
+    operator_decision_ledger: decisionLedger,
+  });
+
+  return {
+    ...buildForeshadowingSettlementOperatorLedgerBridgeSurface({
+      operator_ledger_ui: ledgerUi,
+      operator_decision_ledger: decisionLedger,
+      settlement_context_id: settlementContextId,
+      approval_item_id: operatorPanel.approval_item_id,
+      include_raw: input.include_raw ?? input.includeRaw,
+      include_markdown: input.include_markdown ?? input.includeMarkdown,
+      max_rows: input.max_rows ?? input.maxRows,
+    }),
+    generated_locally: false,
+    bridge_surface: "chatgpt_bridge_mcp",
+    active_engine_modified: false,
+    pending_engine_candidate_created: false,
+  };
+}
+
 export const chatgpt_bridge_get_workbench_status = tool(
   "chatgpt_bridge_get_workbench_status",
   "read_only",
@@ -240,6 +303,12 @@ export const chatgpt_bridge_get_foreshadowing_settlement_surface = tool(
   getChatgptBridgeForeshadowingSettlementSurfaceForMcp,
 );
 
+export const chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface = tool(
+  "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
+  "read_only",
+  getChatgptBridgeForeshadowingSettlementOperatorLedgerSurfaceForMcp,
+);
+
 export const chatgpt_bridge_save_settlement_report = tool(
   "chatgpt_bridge_save_settlement_report",
   "write_low_risk",
@@ -298,6 +367,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_request_adoption,
   chatgpt_bridge_build_settlement_context,
   chatgpt_bridge_get_foreshadowing_settlement_surface,
+  chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface,
   chatgpt_bridge_save_settlement_report,
   chatgpt_bridge_visual_library_ui_import_flow_preview,
   chatgpt_bridge_get_entity_registry_summary,
@@ -370,6 +440,13 @@ export const chatgptBridgeToolMetadata = {
     permission: "read",
     writes_files: false,
     writes_only_to: [],
+  },
+  chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface: {
+    ...readMetadata,
+    permission: "read",
+    writes_files: false,
+    writes_only_to: [],
+    bridge_surface_phase: "phase_27p",
   },
   chatgpt_bridge_save_settlement_report: writeMetadata([
     projectPaths.adoptedWritingSettlementReports,

@@ -188,6 +188,7 @@ const expectedTools = [
   "chatgpt_bridge_request_adoption",
   "chatgpt_bridge_build_settlement_context",
   "chatgpt_bridge_get_foreshadowing_settlement_surface",
+  "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "chatgpt_bridge_save_settlement_report",
   "build_gpt_writing_context",
   "get_gpt_writing_context_bundle",
@@ -251,6 +252,7 @@ const readOnlyTools = new Set([
   "list_adopted_writings",
   "get_adopted_writing_settlement_context",
   "chatgpt_bridge_get_foreshadowing_settlement_surface",
+  "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "get_foreshadowing_settlement_surface",
   "list_adopted_writing_settlement_contexts",
   "get_settlement_report_detail",
@@ -751,6 +753,17 @@ const integerMaximumFixtures = [
     expectedMaximum: 250000,
     arguments: { maxChars: 250001 },
     expectedMessage: "maxChars must be an integer less than or equal to 250000.",
+  },
+  {
+    label: "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface max_rows over maximum",
+    name: "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
+    field: "max_rows",
+    expectedMaximum: 100,
+    arguments: {
+      id: "settlement_ctx_20260622-000000-00000000",
+      max_rows: 101,
+    },
+    expectedMessage: "max_rows must be an integer less than or equal to 100.",
   },
   ...[
     ["chatgpt_bridge_build_writing_context", {}],
@@ -1448,7 +1461,15 @@ const crossFieldConstraintFixtures = [
       latest: true,
     },
     expectedMessage: "Use --list without selectors, or choose exactly one selector: --error-id, --feedback-id or --latest.",
+  },  {
+    label: "operator ledger surface missing settlement context id",
+    name: "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
+    arguments: {
+      include_markdown: true,
+    },
+    expectedMessage: "Provide exactly one settlement context id: id, settlement_context_id, or settlementContextId.",
   },
+
 ];
 
 const expectedCrossFieldMetadata = new Map([
@@ -1476,7 +1497,15 @@ const expectedCrossFieldMetadata = new Map([
       fields: ["version", "candidate"],
       message: "Provide exactly one candidate source: --version or --candidate.",
     }],
+  ],  [
+    "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
+    [{
+      type: "exactlyOne",
+      fields: ["id", "settlement_context_id", "settlementContextId"],
+      message: "Provide exactly one settlement context id: id, settlement_context_id, or settlementContextId.",
+    }],
   ],
+
 ]);
 
 const expectedConfirmationMetadata = new Map([
@@ -1651,6 +1680,11 @@ const expectedDefaultMetadata = new Map([
     source: "chatgpt",
     dryRun: false,
   }],
+  ["chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface", {
+    include_raw: false,
+    include_markdown: true,
+    max_rows: 50,
+  }],
   ["build_gpt_writing_context", {
     run_neural_traces: false,
     runNeuralTraces: false,
@@ -1768,6 +1802,7 @@ const expectedIntegerMaximumMetadata = new Map([
   ["run_creative_task:limit", 100],
   ["run_creative_task:maxContextChars", 250000],
   ["chatgpt_bridge_get_current_inputs:maxChars", 250000],
+  ["chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface:max_rows", 100],
   ["approval_queue_bridge_readiness_report:maxPreviewChars", 20000],
   ["chatgpt_bridge_build_writing_context:maxContextChars", 250000],
   ["chatgpt_bridge_build_proofing_context:maxContextChars", 250000],
@@ -3684,7 +3719,7 @@ async function runSmokeTest(options) {
     + sizeConstraintFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
     + stringArrayBlankFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
     + requiredConstraintFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
-    + crossFieldConstraintFixtures.length
+    + crossFieldConstraintFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
     + highRiskArgumentErrorFixtures.length
     + optionalNullDefaultFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
     + optionalBlankStringFixtures.filter((fixture) => !readOnlyTools.has(fixture.name)).length
@@ -6247,12 +6282,15 @@ async function runSmokeTest(options) {
   const crossFieldConstraintAudits = newAuditRecords.filter(
     (record) => record.actor === "mcp-smoke-cross-field-constraint",
   );
+  const auditedCrossFieldConstraintFixtures = crossFieldConstraintFixtures.filter(
+    (fixture) => !readOnlyTools.has(fixture.name),
+  );
   assert(
-    crossFieldConstraintAudits.length === crossFieldConstraintFixtures.length,
-    `Expected ${crossFieldConstraintFixtures.length} cross-field constraint audits, got ${crossFieldConstraintAudits.length}.`,
+    crossFieldConstraintAudits.length === auditedCrossFieldConstraintFixtures.length,
+    `Expected ${auditedCrossFieldConstraintFixtures.length} cross-field constraint audits, got ${crossFieldConstraintAudits.length}.`,
   );
   const expectedCrossFieldConstraintCounts = new Map();
-  for (const fixture of crossFieldConstraintFixtures) {
+  for (const fixture of auditedCrossFieldConstraintFixtures) {
     expectedCrossFieldConstraintCounts.set(
       fixture.name,
       (expectedCrossFieldConstraintCounts.get(fixture.name) ?? 0) + 1,

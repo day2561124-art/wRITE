@@ -25,6 +25,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+assert.strictEqual = (actual, expected, message) => {
+  assert(Object.is(actual, expected), message ?? `Expected ${actual} to strictly equal ${expected}.`);
+};
+assert.equal = assert.strictEqual;
+
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -65,6 +70,7 @@ async function main() {
       "chatgpt_bridge_request_adoption",
       "chatgpt_bridge_build_settlement_context",
       "chatgpt_bridge_get_foreshadowing_settlement_surface",
+      "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
       "chatgpt_bridge_save_settlement_report",
     ];
     for (const name of toolNames) {
@@ -182,6 +188,20 @@ async function main() {
       include_longline: false,
     }, options);
     assert(settlement.ok && settlement.result.context, "Settlement context failed.");
+
+    const ledgerSurface = await chatgptBridgeTools.chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface({
+      settlement_context_id: settlement.result.context.settlement_context_id,
+      include_raw: false,
+      include_markdown: true,
+      max_rows: 10,
+    }, options);
+    assert(ledgerSurface.ok, "Ledger bridge surface failed.");
+    assert.strictEqual(ledgerSurface.result.phase, "27P", "Ledger bridge surface phase drifted.");
+    assert.equal(ledgerSurface.result.bridge_metadata.read_only_tool, true, "Ledger bridge surface is not read-only.");
+    assert.equal(ledgerSurface.result.bridge_metadata.writes_files, false, "Ledger bridge surface writes files.");
+    assert.equal(ledgerSurface.result.safety.mcp_can_approve, false, "Ledger bridge surface can approve.");
+    assert.equal(ledgerSurface.result.safety.mcp_can_confirm_adoption, false, "Ledger bridge surface can confirm adoption.");
+    assert.equal(ledgerSurface.result.safety.mcp_can_activate_engine, false, "Ledger bridge surface can activate engine.");
 
     const report = await chatgptBridgeTools.chatgpt_bridge_save_settlement_report({
       adopted_chapter_id: adoptedChapterId,
