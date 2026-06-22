@@ -59,6 +59,7 @@ const steps = [
   ["Phase 27K foreshadowing settlement operator review panel UI", ["tests/phase27/phase27k-foreshadowing-settlement-operator-review-panel-ui.test.mjs"]],
   ["Phase 27L foreshadowing settlement operator handoff packet", ["tests/phase27/phase27l-foreshadowing-settlement-operator-handoff-packet.test.mjs"]],
   ["Phase 27M foreshadowing settlement operator handoff audit receipt", ["tests/phase27/phase27m-foreshadowing-settlement-operator-handoff-audit-receipt.test.mjs"]],
+  ["Phase 27N foreshadowing settlement operator decision ledger", ["tests/phase27/phase27n-foreshadowing-settlement-operator-decision-ledger.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
