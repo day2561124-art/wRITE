@@ -52,6 +52,7 @@ const state = {
   },
   workbench: null,
   foreshadowingSettlementOperatorPanel: null,
+  foreshadowingSettlementOperatorLedgerUi: null,
   visualFilters: {
     character: "",
     category: "",
@@ -478,10 +479,11 @@ function renderCharacterVoiceGuard(display, adoptionGate = null) {
 }
 
 async function refreshWriterWorkbenchState() {
-  const [payload, feedbackPayload, foreshadowingPayload] = await Promise.all([
+  const [payload, feedbackPayload, foreshadowingPayload, foreshadowingLedgerPayload] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-review-panel"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-ledger-ui"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -493,6 +495,7 @@ async function refreshWriterWorkbenchState() {
   const workbench = payload.state ?? {};
   state.workbench = workbench;
   state.foreshadowingSettlementOperatorPanel = foreshadowingPayload.operator_panel_ui ?? null;
+  state.foreshadowingSettlementOperatorLedgerUi = foreshadowingLedgerPayload.operator_ledger_ui ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -554,6 +557,7 @@ async function refreshWriterWorkbenchState() {
   // show raw JSON for debug (hidden by default)
   pre.textContent = JSON.stringify(workbench, null, 2);
   renderForeshadowingSettlementOperatorPanel();
+  renderForeshadowingSettlementOperatorLedgerUi();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
 }
@@ -625,6 +629,96 @@ function renderForeshadowingSettlementOperatorPanel(panel = state.foreshadowingS
     <button class="button secondary" type="button" data-go-view="${escapeHtml(data.next_operator_action?.ui_target ?? "settlement")}">Open target</button>
   `;
   raw.textContent = JSON.stringify(data.raw_panel ?? data, null, 2);
+}
+
+function renderForeshadowingSettlementOperatorLedgerUi(ui = state.foreshadowingSettlementOperatorLedgerUi) {
+  const root = $("#foreshadowing-settlement-operator-ledger-ui");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-ledger-ui-status");
+  const summary = $("#foreshadowing-settlement-operator-ledger-ui-summary");
+  const cards = $("#foreshadowing-settlement-operator-ledger-ui-cards");
+  const filters = $("#foreshadowing-settlement-operator-ledger-ui-filters");
+  const rows = $("#foreshadowing-settlement-operator-ledger-ui-rows");
+  const nextAction = $("#foreshadowing-settlement-operator-ledger-ui-next-action");
+  const raw = $("#foreshadowing-settlement-operator-ledger-ui-raw");
+  const data = ui ?? {
+    headline: "Foreshadowing settlement decision ledger is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    filters: [],
+    rows: [],
+    next_operator_actions: [],
+    safety: {
+      read_only: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      ledger_can_approve: false,
+      ledger_can_confirm_adoption: false,
+      ledger_can_activate_engine: false,
+      ui_can_approve: false,
+      ui_can_confirm_adoption: false,
+      ui_can_activate_engine: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+  };
+
+  status.textContent = data.status_badge?.label ?? data.status ?? "unknown";
+  status.className = `workflow-status ${data.status_badge?.class_name ?? ""}`.trim();
+  summary.innerHTML = `
+    <article class="feedback-learning-card">
+      <strong>${escapeHtml(data.headline ?? "Foreshadowing Settlement Operator Ledger")}</strong>
+      <span>${escapeHtml(data.summary ?? "")}</span>
+      <small>ledger_id=${escapeHtml(data.ledger_id ?? "none")}</small>
+      <small>read_only=${data.safety?.read_only === true} | no_canon_update=${data.safety?.no_canon_update === true} | no_active_engine_update=${data.safety?.no_active_engine_update === true}</small>
+      <small>ledger_can_approve=${data.safety?.ledger_can_approve === true} | ledger_can_confirm_adoption=${data.safety?.ledger_can_confirm_adoption === true} | ledger_can_activate_engine=${data.safety?.ledger_can_activate_engine === true}</small>
+      <small>ui_can_approve=${data.safety?.ui_can_approve === true} | ui_can_confirm_adoption=${data.safety?.ui_can_confirm_adoption === true} | ui_can_activate_engine=${data.safety?.ui_can_activate_engine === true}</small>
+    </article>
+  `;
+  cards.innerHTML = (data.cards ?? []).length
+    ? data.cards.map((card) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(card.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(card.tone)}">${escapeHtml(card.value)}</span>
+        </div>
+        <small>${escapeHtml(card.summary ?? "")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No foreshadowing settlement ledger cards.</div>';
+
+  filters.innerHTML = (data.filters ?? []).length
+    ? data.filters.map((filter) => `
+      <article class="feedback-learning-record">
+        <strong>${escapeHtml(filter.label)}</strong>
+        <small>${(filter.options ?? []).map((option) => `${escapeHtml(option.label)}=${escapeHtml(option.count)}`).join(" · ") || "no options"}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No ledger filter index.</div>';
+
+  rows.innerHTML = (data.rows ?? []).length
+    ? data.rows.map((row) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(row.row_id)}</strong>
+          <span class="candidate-status ${row.status_badge?.class_name ?? operatorPanelToneClass(row.status_badge?.tone)}">${escapeHtml(row.ledger_status)}</span>
+        </div>
+        <small>decision=${escapeHtml(row.decision)} · packet=${escapeHtml(row.packet_status)} · receipt=${escapeHtml(row.source_receipt_id ?? "none")}</small>
+        <small>settlement_context=${escapeHtml(row.settlement_context_id ?? "none")} · approval_item=${escapeHtml(row.approval_item_id ?? "none")}</small>
+        <small>next=${escapeHtml(row.next_operator_action?.label ?? "inspect source")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No ledger rows.</div>';
+
+  nextAction.innerHTML = (data.next_operator_actions ?? []).length
+    ? data.next_operator_actions.map((action) => `
+      <article class="feedback-learning-record">
+        <strong>${escapeHtml(action.label)}</strong>
+        <small>${escapeHtml(action.entry_count ?? 0)} entries · ${escapeHtml((action.ledger_statuses ?? []).join(", "))}</small>
+        <button class="button secondary" type="button" data-go-view="${escapeHtml(action.ui_target ?? String(action.route ?? "#settlement").replace(/^#/u, ""))}">Open target</button>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No next operator action.</div>';
+  raw.textContent = JSON.stringify(data.raw_ledger ?? data, null, 2);
 }
 
 function feedbackRecordId(record) {

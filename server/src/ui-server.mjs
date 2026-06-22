@@ -152,6 +152,10 @@ import {
 import { buildForeshadowingSettlementSurface } from "./foreshadowing-settlement-surface-service.mjs";
 import { buildForeshadowingSettlementOperatorReviewPanel } from "./foreshadowing-settlement-operator-review-panel-service.mjs";
 import { buildForeshadowingSettlementOperatorReviewPanelUi } from "./foreshadowing-settlement-operator-review-panel-ui-service.mjs";
+import { buildForeshadowingSettlementOperatorHandoffPacket } from "./foreshadowing-settlement-operator-handoff-packet-service.mjs";
+import { buildForeshadowingSettlementOperatorHandoffAuditReceipt } from "./foreshadowing-settlement-operator-handoff-audit-receipt-service.mjs";
+import { buildForeshadowingSettlementOperatorDecisionLedger } from "./foreshadowing-settlement-operator-decision-ledger-service.mjs";
+import { buildForeshadowingSettlementOperatorLedgerUi } from "./foreshadowing-settlement-operator-ledger-ui-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1353,6 +1357,26 @@ async function latestForeshadowingSettlementOperatorPanelUiPayload() {
   };
 }
 
+async function latestForeshadowingSettlementOperatorLedgerUiPayload() {
+  const panelPayload = await latestForeshadowingSettlementOperatorPanelUiPayload();
+  const handoffPacket = buildForeshadowingSettlementOperatorHandoffPacket({
+    operator_panel_ui: panelPayload.operator_panel_ui,
+  });
+  const handoffAuditReceipt = buildForeshadowingSettlementOperatorHandoffAuditReceipt({
+    handoff_packet: handoffPacket,
+  });
+  const decisionLedger = buildForeshadowingSettlementOperatorDecisionLedger({
+    audit_receipt: handoffAuditReceipt,
+  });
+  return {
+    ...panelPayload,
+    operator_handoff_packet: handoffPacket,
+    operator_handoff_audit_receipt: handoffAuditReceipt,
+    operator_decision_ledger: decisionLedger,
+    operator_ledger_ui: buildForeshadowingSettlementOperatorLedgerUi(decisionLedger),
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1582,6 +1606,21 @@ async function handleRequest(request, response) {
       });
     } catch (error) {
       sendError(response, 500, error);
+    }
+    return;
+  }
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-ledger-ui"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorLedgerUiPayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
     }
     return;
   }
