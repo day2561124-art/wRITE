@@ -54,6 +54,7 @@ const state = {
   foreshadowingSettlementOperatorPanel: null,
   foreshadowingSettlementOperatorLedgerUi: null,
   foreshadowingSettlementOperatorReadinessDashboard: null,
+  foreshadowingSettlementOperatorAdoptionGateSurface: null,
   visualFilters: {
     character: "",
     category: "",
@@ -480,12 +481,20 @@ function renderCharacterVoiceGuard(display, adoptionGate = null) {
 }
 
 async function refreshWriterWorkbenchState() {
-  const [payload, feedbackPayload, foreshadowingPayload, foreshadowingLedgerPayload, foreshadowingDashboardPayload] = await Promise.all([
+  const [
+    payload,
+    feedbackPayload,
+    foreshadowingPayload,
+    foreshadowingLedgerPayload,
+    foreshadowingDashboardPayload,
+    foreshadowingAdoptionGatePayload,
+  ] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-review-panel"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-ledger-ui"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -499,6 +508,7 @@ async function refreshWriterWorkbenchState() {
   state.foreshadowingSettlementOperatorPanel = foreshadowingPayload.operator_panel_ui ?? null;
   state.foreshadowingSettlementOperatorLedgerUi = foreshadowingLedgerPayload.operator_ledger_ui ?? null;
   state.foreshadowingSettlementOperatorReadinessDashboard = foreshadowingDashboardPayload.operator_readiness_dashboard ?? null;
+  state.foreshadowingSettlementOperatorAdoptionGateSurface = foreshadowingAdoptionGatePayload.operator_adoption_gate_surface ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -562,6 +572,7 @@ async function refreshWriterWorkbenchState() {
   renderForeshadowingSettlementOperatorPanel();
   renderForeshadowingSettlementOperatorLedgerUi();
   renderForeshadowingSettlementOperatorReadinessDashboard();
+  renderForeshadowingSettlementOperatorAdoptionGateSurface();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
 }
@@ -829,6 +840,111 @@ function renderForeshadowingSettlementOperatorReadinessDashboard(
     `).join("")
     : '<div class="empty-state">No next operator action.</div>';
   raw.textContent = JSON.stringify(data.raw_smoke ?? data, null, 2);
+}
+
+function renderForeshadowingSettlementOperatorAdoptionGateSurface(
+  surface = state.foreshadowingSettlementOperatorAdoptionGateSurface,
+) {
+  const root = $("#foreshadowing-settlement-operator-adoption-gate-surface");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-adoption-gate-surface-status");
+  const summary = $("#foreshadowing-settlement-operator-adoption-gate-surface-summary");
+  const cards = $("#foreshadowing-settlement-operator-adoption-gate-surface-cards");
+  const blockers = $("#foreshadowing-settlement-operator-adoption-gate-surface-blockers");
+  const nextAction = $("#foreshadowing-settlement-operator-adoption-gate-surface-next-action");
+  const safety = $("#foreshadowing-settlement-operator-adoption-gate-surface-safety");
+  const raw = $("#foreshadowing-settlement-operator-adoption-gate-surface-raw");
+  const data = surface ?? {
+    headline: "Foreshadowing settlement adoption gate surface is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    blocking_reasons: [],
+    next_operator_actions: [],
+    safety: {
+      read_only: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      pending_engine_candidate_created: false,
+      active_engine_modified: false,
+      canon_modified: false,
+      compressed_rules_modified: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+  };
+
+  const gate = data.adoption_readiness_gate
+    ?? data.adoption_gate
+    ?? data.gate
+    ?? data.raw_gate_json
+    ?? {};
+  const badge = data.status_badge ?? gate.status_badge ?? {};
+  status.textContent = badge.label ?? data.gate_status ?? data.decision ?? "unknown";
+  status.className = ("workflow-status " + (badge.class_name ?? "")).trim();
+
+  summary.innerHTML = [
+    '<article class="feedback-learning-card">',
+    '<strong>' + escapeHtml(data.headline ?? "Foreshadowing Settlement Operator Adoption Gate") + '</strong>',
+    '<span>' + escapeHtml(data.summary ?? gate.summary ?? "") + '</span>',
+    '<small>surface_phase=' + escapeHtml(data.phase ?? "27U") + ' · source_phase=' + escapeHtml(data.source_phase ?? gate.phase ?? "27T") + '</small>',
+    '<small>gate_status=' + escapeHtml(data.gate_status ?? gate.gate_status ?? "not_available") + ' · decision=' + escapeHtml(data.decision ?? gate.decision ?? "not_available") + '</small>',
+    '<small>can_enter_manual_adoption_review=' + String(Boolean(gate.can_enter_manual_adoption_review ?? data.can_enter_manual_adoption_review)) + '</small>',
+    '</article>',
+  ].join("");
+
+  const cardList = Array.isArray(data.cards) && data.cards.length
+    ? data.cards
+    : Array.isArray(gate.cards) ? gate.cards : [];
+  cards.innerHTML = cardList.length
+    ? cardList.map((card) => [
+      '<article class="feedback-learning-record">',
+      '<div>',
+      '<strong>' + escapeHtml(card.title ?? card.key ?? "card") + '</strong>',
+      '<span class="candidate-status ' + operatorPanelToneClass(card.tone) + '">' + escapeHtml(card.value ?? card.status ?? "") + '</span>',
+      '</div>',
+      '<small>' + escapeHtml(card.summary ?? "") + '</small>',
+      '</article>',
+    ].join("")).join("")
+    : '<div class="empty-state">No adoption gate cards.</div>';
+
+  const blockingReasons = Array.isArray(data.blocking_reasons) && data.blocking_reasons.length
+    ? data.blocking_reasons
+    : Array.isArray(gate.blocking_reasons) ? gate.blocking_reasons : [];
+  blockers.innerHTML = blockingReasons.length
+    ? blockingReasons.map((reason) => [
+      '<article class="feedback-learning-record">',
+      '<strong>' + escapeHtml(reason) + '</strong>',
+      '<small>Resolve this before entering manual adoption review.</small>',
+      '</article>',
+    ].join("")).join("")
+    : '<div class="empty-state">No blocking reasons.</div>';
+
+  const actions = Array.isArray(data.next_operator_actions) && data.next_operator_actions.length
+    ? data.next_operator_actions
+    : Array.isArray(gate.next_operator_actions) ? gate.next_operator_actions : [];
+  nextAction.innerHTML = actions.length
+    ? actions.map((action) => [
+      '<article class="feedback-learning-record">',
+      '<strong>' + escapeHtml(action.label ?? action.key ?? "Next action") + '</strong>',
+      '<small>' + escapeHtml(action.reason ?? "") + '</small>',
+      '<button class="button secondary" type="button" data-go-view="' + escapeHtml(action.ui_target ?? String(action.route ?? "#approval").replace(/^#/u, "")) + '">Open target</button>',
+      '</article>',
+    ].join("")).join("")
+    : '<div class="empty-state">No next operator action.</div>';
+
+  const safetyData = data.safety ?? gate.safety ?? {};
+  safety.innerHTML = [
+    '<article class="feedback-learning-record">',
+    '<strong>Safety boundary</strong>',
+    '<small>read_only=' + String(safetyData.read_only === true) + ' · preview_only=' + String(safetyData.preview_only === true) + ' · no_auto_persist=' + String(safetyData.no_auto_persist === true) + '</small>',
+    '<small>bridge_can_approve=' + String(safetyData.bridge_can_approve === true) + ' · bridge_can_confirm_adoption=' + String(safetyData.bridge_can_confirm_adoption === true) + ' · bridge_can_activate_engine=' + String(safetyData.bridge_can_activate_engine === true) + '</small>',
+    '<small>active_engine_modified=' + String(safetyData.active_engine_modified === true) + ' · canon_modified=' + String(safetyData.canon_modified === true) + ' · compressed_rules_modified=' + String(safetyData.compressed_rules_modified === true) + '</small>',
+    '</article>',
+  ].join("");
+
+  raw.textContent = JSON.stringify(data.raw_gate_json ?? data.adoption_gate ?? gate ?? data, null, 2);
 }
 
 function feedbackRecordId(record) {

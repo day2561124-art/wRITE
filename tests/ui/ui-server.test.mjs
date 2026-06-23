@@ -560,6 +560,38 @@ async function main() {
       "Foreshadowing settlement operator readiness dashboard API changed compressed_rules.md.",
     );
 
+
+    const adoptionGateSurfaceResult = await readJson(await fetch(
+      baseUrl + "/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface",
+    ));
+    assert(adoptionGateSurfaceResult.response.ok, "Foreshadowing settlement adoption gate surface API did not return 200.");
+    assert(adoptionGateSurfaceResult.payload.ok === true, "Foreshadowing adoption gate surface API missing ok=true.");
+    const adoptionGateSurface = adoptionGateSurfaceResult.payload.operator_adoption_gate_surface;
+    const adoptionGate = adoptionGateSurface.adoption_gate
+      ?? adoptionGateSurface.adoption_readiness_gate
+      ?? adoptionGateSurface.gate
+      ?? adoptionGateSurface.raw_gate_json;
+    const adoptionGateSafety = adoptionGateSurface.safety ?? adoptionGate?.safety ?? {};
+    assert(adoptionGateSurface.phase === "27U", "Foreshadowing adoption gate surface phase mismatch.");
+    assert(adoptionGateSurface.source_phase === "27T" || adoptionGate?.phase === "27T", "Foreshadowing adoption gate surface source phase mismatch.");
+    assert(Array.isArray(adoptionGateSurface.cards), "Foreshadowing adoption gate surface cards must be an array.");
+    assert(Array.isArray(adoptionGateSurface.blocking_reasons), "Foreshadowing adoption gate surface blocking reasons must be an array.");
+    assert(Array.isArray(adoptionGateSurface.next_operator_actions), "Foreshadowing adoption gate surface next actions must be an array.");
+    assert(adoptionGateSafety.read_only === true, "Foreshadowing adoption gate surface is not read-only.");
+    assert(adoptionGateSafety.no_canon_update === true, "Foreshadowing adoption gate surface can update Canon DB.");
+    assert(adoptionGateSafety.no_active_engine_update === true, "Foreshadowing adoption gate surface can update active_engine.");
+    assert(adoptionGateSafety.bridge_can_approve === false, "Foreshadowing adoption gate surface allows bridge approval.");
+    assert(adoptionGateSafety.bridge_can_confirm_adoption === false, "Foreshadowing adoption gate surface allows bridge adoption confirmation.");
+    assert(adoptionGateSafety.bridge_can_activate_engine === false, "Foreshadowing adoption gate surface allows bridge active_engine activation.");
+    assert(
+      (await readOptionalBuffer(activeEnginePath)).content.equals(activeEngineBefore),
+      "Foreshadowing settlement adoption gate surface API changed active_engine.md.",
+    );
+    assert(
+      (await readOptionalBuffer(compressedRulesPath)).content.equals(compressedRulesBefore.content),
+      "Foreshadowing settlement adoption gate surface API changed compressed_rules.md.",
+    );
+
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));
     assert(visualsResult.response.ok && visualsResult.payload.ok, "Visuals API failed.");
     assert(

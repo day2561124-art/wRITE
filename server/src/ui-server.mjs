@@ -157,6 +157,8 @@ import { buildForeshadowingSettlementOperatorHandoffAuditReceipt } from "./fores
 import { buildForeshadowingSettlementOperatorDecisionLedger } from "./foreshadowing-settlement-operator-decision-ledger-service.mjs";
 import { buildForeshadowingSettlementOperatorLedgerUi } from "./foreshadowing-settlement-operator-ledger-ui-service.mjs";
 import { buildForeshadowingSettlementOperatorReadinessDashboard } from "./foreshadowing-settlement-operator-readiness-dashboard-service.mjs";
+import { buildForeshadowingSettlementOperatorAdoptionReadinessGate } from "./foreshadowing-settlement-operator-adoption-readiness-gate-service.mjs";
+import * as foreshadowingSettlementOperatorAdoptionGateSurfaceService from "./foreshadowing-settlement-operator-adoption-gate-surface-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1396,6 +1398,103 @@ async function latestForeshadowingSettlementOperatorReadinessDashboardPayload() 
   };
 }
 
+
+function fallbackForeshadowingSettlementOperatorAdoptionGateSurface(input = {}) {
+  const gate = input.adoption_readiness_gate ?? input.adoption_gate ?? input.gate ?? {};
+  const safety = gate && typeof gate.safety === "object" && !Array.isArray(gate.safety)
+    ? gate.safety
+    : {};
+  const blockingReasons = Array.isArray(gate.blocking_reasons) ? gate.blocking_reasons : [];
+  const nextOperatorActions = Array.isArray(gate.next_operator_actions)
+    ? gate.next_operator_actions
+    : [];
+  return {
+    ok: gate.ok === true,
+    used: true,
+    phase: "27U",
+    version: "foreshadowing_settlement_operator_adoption_gate_surface_v1",
+    surface_kind: "foreshadowing_settlement_operator_adoption_gate_ui_bridge_surface",
+    source_phase: gate.phase ?? "27T",
+    gate_status: gate.gate_status ?? gate.decision ?? "not_available",
+    decision: gate.decision ?? gate.gate_status ?? "not_available",
+    headline: "Foreshadowing Settlement Operator Adoption Gate",
+    summary: gate.summary ?? "Read-only UI / bridge surface for the Phase 27T adoption readiness gate.",
+    status_badge: gate.status_badge ?? {
+      label: gate.gate_status ?? gate.decision ?? "not available",
+      class_name: gate.ok === true ? "candidate-status-activated" : "candidate-status-blocked",
+      tone: gate.ok === true ? "ready" : "blocked",
+    },
+    cards: Array.isArray(gate.cards) ? gate.cards : [],
+    blocking_reasons: blockingReasons,
+    next_operator_actions: nextOperatorActions,
+    safety: {
+      read_only: true,
+      preview_only: true,
+      no_auto_persist: true,
+      no_canon_update: safety.no_canon_update === true,
+      no_active_engine_update: safety.no_active_engine_update === true,
+      no_compressed_rules_update: safety.compressed_rules_modified === false,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      ui_can_approve: false,
+      ui_can_confirm_adoption: false,
+      ui_can_activate_engine: false,
+      pending_engine_candidate_created: false,
+      active_engine_modified: false,
+      canon_modified: false,
+      compressed_rules_modified: false,
+      automatic_adoption_performed: false,
+    },
+    bridge_readability: {
+      readable: true,
+      endpoint: "/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface",
+      payload_key: "operator_adoption_gate_surface",
+      raw_gate_json_available: true,
+    },
+    adoption_gate: gate,
+    raw_gate_json: gate,
+    surface_markdown: gate.surface_markdown ?? "",
+  };
+}
+
+function buildForeshadowingSettlementOperatorAdoptionGateSurface(input = {}) {
+  const builder =
+    foreshadowingSettlementOperatorAdoptionGateSurfaceService
+      .buildForeshadowingSettlementOperatorAdoptionGateSurface
+    ?? foreshadowingSettlementOperatorAdoptionGateSurfaceService
+      .buildForeshadowingSettlementOperatorAdoptionGateUiBridgeSurface
+    ?? foreshadowingSettlementOperatorAdoptionGateSurfaceService
+      .buildForeshadowingSettlementOperatorAdoptionGateBridgeSurface
+    ?? foreshadowingSettlementOperatorAdoptionGateSurfaceService.default;
+
+  if (typeof builder === "function") return builder(input);
+  return fallbackForeshadowingSettlementOperatorAdoptionGateSurface(input);
+}
+
+async function latestForeshadowingSettlementOperatorAdoptionGateSurfacePayload() {
+  const dashboardPayload = await latestForeshadowingSettlementOperatorReadinessDashboardPayload();
+  const adoptionGate = buildForeshadowingSettlementOperatorAdoptionReadinessGate({
+    readiness_dashboard: dashboardPayload.operator_readiness_dashboard,
+    include_raw: true,
+    include_markdown: true,
+  });
+  const adoptionGateSurface = await buildForeshadowingSettlementOperatorAdoptionGateSurface({
+    adoption_readiness_gate: adoptionGate,
+    adoption_gate: adoptionGate,
+    gate: adoptionGate,
+    readiness_dashboard: dashboardPayload.operator_readiness_dashboard,
+    operator_readiness_dashboard: dashboardPayload.operator_readiness_dashboard,
+    include_raw: true,
+    include_markdown: true,
+  });
+  return {
+    ...dashboardPayload,
+    operator_adoption_readiness_gate: adoptionGate,
+    operator_adoption_gate_surface: adoptionGateSurface,
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1652,6 +1751,22 @@ async function handleRequest(request, response) {
       sendJson(response, 200, {
         ok: true,
         ...await latestForeshadowingSettlementOperatorReadinessDashboardPayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorAdoptionGateSurfacePayload(),
       });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);
