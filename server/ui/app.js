@@ -53,6 +53,7 @@ const state = {
   workbench: null,
   foreshadowingSettlementOperatorPanel: null,
   foreshadowingSettlementOperatorLedgerUi: null,
+  foreshadowingSettlementOperatorReadinessDashboard: null,
   visualFilters: {
     character: "",
     category: "",
@@ -479,11 +480,12 @@ function renderCharacterVoiceGuard(display, adoptionGate = null) {
 }
 
 async function refreshWriterWorkbenchState() {
-  const [payload, feedbackPayload, foreshadowingPayload, foreshadowingLedgerPayload] = await Promise.all([
+  const [payload, feedbackPayload, foreshadowingPayload, foreshadowingLedgerPayload, foreshadowingDashboardPayload] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-review-panel"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-ledger-ui"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -496,6 +498,7 @@ async function refreshWriterWorkbenchState() {
   state.workbench = workbench;
   state.foreshadowingSettlementOperatorPanel = foreshadowingPayload.operator_panel_ui ?? null;
   state.foreshadowingSettlementOperatorLedgerUi = foreshadowingLedgerPayload.operator_ledger_ui ?? null;
+  state.foreshadowingSettlementOperatorReadinessDashboard = foreshadowingDashboardPayload.operator_readiness_dashboard ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -558,6 +561,7 @@ async function refreshWriterWorkbenchState() {
   pre.textContent = JSON.stringify(workbench, null, 2);
   renderForeshadowingSettlementOperatorPanel();
   renderForeshadowingSettlementOperatorLedgerUi();
+  renderForeshadowingSettlementOperatorReadinessDashboard();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
 }
@@ -719,6 +723,112 @@ function renderForeshadowingSettlementOperatorLedgerUi(ui = state.foreshadowingS
     `).join("")
     : '<div class="empty-state">No next operator action.</div>';
   raw.textContent = JSON.stringify(data.raw_ledger ?? data, null, 2);
+}
+
+function renderForeshadowingSettlementOperatorReadinessDashboard(
+  dashboard = state.foreshadowingSettlementOperatorReadinessDashboard,
+) {
+  const root = $("#foreshadowing-settlement-operator-readiness-dashboard");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-readiness-dashboard-status");
+  const summary = $("#foreshadowing-settlement-operator-readiness-dashboard-summary");
+  const cards = $("#foreshadowing-settlement-operator-readiness-dashboard-cards");
+  const stages = $("#foreshadowing-settlement-operator-readiness-dashboard-stages");
+  const handoff = $("#foreshadowing-settlement-operator-readiness-dashboard-handoff");
+  const chatgpt = $("#foreshadowing-settlement-operator-readiness-dashboard-chatgpt");
+  const nextAction = $("#foreshadowing-settlement-operator-readiness-dashboard-next-action");
+  const raw = $("#foreshadowing-settlement-operator-readiness-dashboard-raw");
+  const data = dashboard ?? {
+    headline: "Foreshadowing settlement operator readiness dashboard is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    stage_cards: [],
+    handoff_cards: [],
+    chatgpt_surface_cards: [],
+    next_operator_actions: [],
+    safety: {
+      read_only: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      pending_engine_candidate_created: false,
+      active_engine_modified: false,
+      canon_modified: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+  };
+
+  status.textContent = data.status_badge?.label ?? data.dashboard_status ?? "unknown";
+  status.className = `workflow-status ${data.status_badge?.class_name ?? ""}`.trim();
+  summary.innerHTML = `
+    <article class="feedback-learning-card">
+      <strong>${escapeHtml(data.headline ?? "Foreshadowing Settlement Operator Readiness Dashboard")}</strong>
+      <span>${escapeHtml(data.summary ?? "")}</span>
+      <small>source_phase=${escapeHtml(data.source_phase ?? "27Q")} · dashboard_status=${escapeHtml(data.dashboard_status ?? "not_loaded")}</small>
+      <small>read_only=${data.safety?.read_only === true} | no_canon_update=${data.safety?.no_canon_update === true} | no_active_engine_update=${data.safety?.no_active_engine_update === true}</small>
+      <small>bridge_can_approve=${data.safety?.bridge_can_approve === true} | bridge_can_confirm_adoption=${data.safety?.bridge_can_confirm_adoption === true} | bridge_can_activate_engine=${data.safety?.bridge_can_activate_engine === true}</small>
+      <small>pending_engine_candidate_created=${data.safety?.pending_engine_candidate_created === true} | active_engine_modified=${data.safety?.active_engine_modified === true} | canon_modified=${data.safety?.canon_modified === true}</small>
+    </article>
+  `;
+  cards.innerHTML = (data.cards ?? []).length
+    ? data.cards.map((card) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(card.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(card.tone)}">${escapeHtml(card.value)}</span>
+        </div>
+        <small>${escapeHtml(card.summary ?? "")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No readiness dashboard cards.</div>';
+
+  stages.innerHTML = (data.stage_cards ?? []).length
+    ? data.stage_cards.map((stage) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(stage.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(stage.tone)}">${escapeHtml(stage.phase)} / ${escapeHtml(stage.expected_phase)}</span>
+        </div>
+        <small>${escapeHtml(stage.summary ?? "")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No stage lineage cards.</div>';
+
+  handoff.innerHTML = (data.handoff_cards ?? []).length
+    ? data.handoff_cards.map((item) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(item.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(item.tone)}">${escapeHtml(item.value)}</span>
+        </div>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No handoff continuity cards.</div>';
+
+  chatgpt.innerHTML = (data.chatgpt_surface_cards ?? []).length
+    ? data.chatgpt_surface_cards.map((item) => `
+      <article class="feedback-learning-record">
+        <div>
+          <strong>${escapeHtml(item.title)}</strong>
+          <span class="candidate-status ${operatorPanelToneClass(item.tone)}">${escapeHtml(item.value)}</span>
+        </div>
+        <small>${escapeHtml(item.summary ?? "")}</small>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No ChatGPT surface readability cards.</div>';
+
+  nextAction.innerHTML = (data.next_operator_actions ?? []).length
+    ? data.next_operator_actions.map((action) => `
+      <article class="feedback-learning-record">
+        <strong>${escapeHtml(action.label)}</strong>
+        <small>${escapeHtml(action.reason ?? "")}</small>
+        <button class="button secondary" type="button" data-go-view="${escapeHtml(action.ui_target ?? String(action.route ?? "#writer-workbench").replace(/^#/u, ""))}">Open target</button>
+      </article>
+    `).join("")
+    : '<div class="empty-state">No next operator action.</div>';
+  raw.textContent = JSON.stringify(data.raw_smoke ?? data, null, 2);
 }
 
 function feedbackRecordId(record) {

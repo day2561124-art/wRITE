@@ -275,6 +275,15 @@ async function main() {
     assert(indexText.includes('id="foreshadowing-settlement-operator-panel"'), "UI index is missing the foreshadowing settlement operator panel.");
     assert(indexText.includes("Foreshadowing Settlement Operator Review"), "UI index is missing the foreshadowing settlement operator review heading.");
     assert(indexText.includes("does not approve"), "Foreshadowing settlement operator panel is missing bridge safety guidance.");
+    assert(
+      indexText.includes('id="foreshadowing-settlement-operator-readiness-dashboard"'),
+      "UI index is missing the foreshadowing settlement operator readiness dashboard.",
+    );
+    assert(
+      indexText.includes("Foreshadowing Settlement Operator Readiness Dashboard"),
+      "UI index is missing the foreshadowing settlement operator readiness dashboard heading.",
+    );
+    assert(indexText.includes("27Q full bridge smoke"), "Readiness dashboard is missing the 27Q smoke label.");
 
     const appResponse = await fetch(`${baseUrl}/app.js`);
     const appText = await appResponse.text();
@@ -300,6 +309,14 @@ async function main() {
     assert(appText.includes("renderFeedbackLearning"), "UI app.js is missing Feedback Learning rendering.");
     assert(appText.includes("primaryNextStep"), "UI app.js is missing operator next-step derivation.");
     assert(appText.includes("operatorStatusLabel"), "UI app.js is missing localized status rendering.");
+    assert(
+      appText.includes("renderForeshadowingSettlementOperatorReadinessDashboard"),
+      "UI app.js is missing the foreshadowing readiness dashboard renderer.",
+    );
+    assert(
+      appText.includes("/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"),
+      "UI app.js is missing the foreshadowing readiness dashboard API loading.",
+    );
     assert(appText.includes("可稍後處理"), "Approval Queue is missing deferred grouping guidance.");
     assert(
       appText.includes("/api/writer-workbench/feedback-learning-state"),
@@ -513,6 +530,34 @@ async function main() {
     assert(
       (await readOptionalBuffer(compressedRulesPath)).content.equals(compressedRulesBefore.content),
       "Foreshadowing settlement operator panel API changed compressed_rules.md.",
+    );
+
+    const operatorDashboardResult = await readJson(await fetch(
+      `${baseUrl}/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard`,
+    ));
+    assert(operatorDashboardResult.response.ok, "Foreshadowing settlement operator readiness dashboard API did not return 200.");
+    assert(operatorDashboardResult.payload.ok === true, "Foreshadowing readiness dashboard API missing ok=true.");
+    const operatorDashboard = operatorDashboardResult.payload.operator_readiness_dashboard;
+    assert(operatorDashboard.phase === "27R", "Foreshadowing readiness dashboard phase mismatch.");
+    assert(operatorDashboard.version === "foreshadowing_settlement_operator_readiness_dashboard_v1", "Foreshadowing readiness dashboard version mismatch.");
+    assert(operatorDashboard.source_phase === "27Q", "Foreshadowing readiness dashboard source phase mismatch.");
+    assert(Array.isArray(operatorDashboard.cards), "Foreshadowing readiness dashboard cards must be an array.");
+    assert(Array.isArray(operatorDashboard.stage_cards), "Foreshadowing readiness dashboard stage cards must be an array.");
+    assert(Array.isArray(operatorDashboard.handoff_cards), "Foreshadowing readiness dashboard handoff cards must be an array.");
+    assert(Array.isArray(operatorDashboard.chatgpt_surface_cards), "Foreshadowing readiness dashboard ChatGPT cards must be an array.");
+    assert(operatorDashboard.safety.read_only === true, "Foreshadowing readiness dashboard is not read-only.");
+    assert(operatorDashboard.safety.no_canon_update === true, "Foreshadowing readiness dashboard can update Canon DB.");
+    assert(operatorDashboard.safety.no_active_engine_update === true, "Foreshadowing readiness dashboard can update active_engine.");
+    assert(operatorDashboard.safety.bridge_can_approve === false, "Foreshadowing readiness dashboard allows bridge approval.");
+    assert(operatorDashboard.safety.bridge_can_confirm_adoption === false, "Foreshadowing readiness dashboard allows bridge adoption confirmation.");
+    assert(operatorDashboard.safety.bridge_can_activate_engine === false, "Foreshadowing readiness dashboard allows bridge active_engine activation.");
+    assert(
+      (await readOptionalBuffer(activeEnginePath)).content.equals(activeEngineBefore),
+      "Foreshadowing settlement operator readiness dashboard API changed active_engine.md.",
+    );
+    assert(
+      (await readOptionalBuffer(compressedRulesPath)).content.equals(compressedRulesBefore.content),
+      "Foreshadowing settlement operator readiness dashboard API changed compressed_rules.md.",
     );
 
     const visualsResult = await readJson(await fetch(`${baseUrl}/api/visuals`));

@@ -156,6 +156,7 @@ import { buildForeshadowingSettlementOperatorHandoffPacket } from "./foreshadowi
 import { buildForeshadowingSettlementOperatorHandoffAuditReceipt } from "./foreshadowing-settlement-operator-handoff-audit-receipt-service.mjs";
 import { buildForeshadowingSettlementOperatorDecisionLedger } from "./foreshadowing-settlement-operator-decision-ledger-service.mjs";
 import { buildForeshadowingSettlementOperatorLedgerUi } from "./foreshadowing-settlement-operator-ledger-ui-service.mjs";
+import { buildForeshadowingSettlementOperatorReadinessDashboard } from "./foreshadowing-settlement-operator-readiness-dashboard-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1377,6 +1378,24 @@ async function latestForeshadowingSettlementOperatorLedgerUiPayload() {
   };
 }
 
+async function latestForeshadowingSettlementOperatorReadinessDashboardPayload() {
+  const ledgerPayload = await latestForeshadowingSettlementOperatorLedgerUiPayload();
+  const dashboard = buildForeshadowingSettlementOperatorReadinessDashboard({
+    operator_review_panel: ledgerPayload.operator_panel,
+    operator_panel_ui: ledgerPayload.operator_panel_ui,
+    handoff_packet: ledgerPayload.operator_handoff_packet,
+    audit_receipt: ledgerPayload.operator_handoff_audit_receipt,
+    operator_decision_ledger: ledgerPayload.operator_decision_ledger,
+    operator_ledger_ui: ledgerPayload.operator_ledger_ui,
+    include_raw: false,
+    include_markdown: true,
+  });
+  return {
+    ...ledgerPayload,
+    operator_readiness_dashboard: dashboard,
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1618,6 +1637,21 @@ async function handleRequest(request, response) {
       sendJson(response, 200, {
         ok: true,
         ...await latestForeshadowingSettlementOperatorLedgerUiPayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorReadinessDashboardPayload(),
       });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);

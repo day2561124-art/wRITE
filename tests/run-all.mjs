@@ -63,6 +63,7 @@ const steps = [
   ["Phase 27O foreshadowing settlement operator ledger UI", ["tests/phase27/phase27o-foreshadowing-settlement-operator-ledger-ui.test.mjs"]],
   ["Phase 27P foreshadowing settlement operator ledger bridge surface", ["tests/phase27/phase27p-foreshadowing-settlement-operator-ledger-bridge-surface.test.mjs"]],
   ["Phase 27Q foreshadowing settlement operator full bridge smoke", ["tests/phase27/phase27q-foreshadowing-settlement-operator-full-bridge-smoke.test.mjs"]],
+  ["Phase 27R foreshadowing settlement operator readiness dashboard", ["tests/phase27/phase27r-foreshadowing-settlement-operator-readiness-dashboard.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
