@@ -161,6 +161,7 @@ import { buildForeshadowingSettlementOperatorAdoptionReadinessGate } from "./for
 import * as foreshadowingSettlementOperatorAdoptionGateSurfaceService from "./foreshadowing-settlement-operator-adoption-gate-surface-service.mjs";
 import { buildForeshadowingSettlementOperatorManualAdoptionReviewEntryPacket } from "./foreshadowing-settlement-operator-manual-adoption-review-entry-packet-service.mjs";
 import { buildForeshadowingSettlementOperatorManualAdoptionReviewEntryUiSurface } from "./foreshadowing-settlement-operator-manual-adoption-review-entry-ui-surface-service.mjs";
+import { buildForeshadowingSettlementOperatorReviewChainIndex } from "./foreshadowing-settlement-operator-review-chain-index-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1517,6 +1518,21 @@ async function latestForeshadowingSettlementOperatorManualAdoptionReviewEntrySur
   };
 }
 
+async function latestForeshadowingSettlementOperatorReviewChainIndexPayload() {
+  const reviewEntryPayload = await latestForeshadowingSettlementOperatorManualAdoptionReviewEntrySurfacePayload();
+  const reviewChainIndex = buildForeshadowingSettlementOperatorReviewChainIndex({
+    ...reviewEntryPayload,
+    operator_manual_adoption_review_entry_surface:
+      reviewEntryPayload.operator_manual_adoption_review_entry_surface,
+    include_raw: true,
+    include_markdown: true,
+  });
+  return {
+    ...reviewEntryPayload,
+    operator_review_chain_index: reviewChainIndex,
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1805,6 +1821,21 @@ async function handleRequest(request, response) {
       sendJson(response, 200, {
         ok: true,
         ...await latestForeshadowingSettlementOperatorManualAdoptionReviewEntrySurfacePayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-review-chain-index-surface"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorReviewChainIndexPayload(),
       });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);

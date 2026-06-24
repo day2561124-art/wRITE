@@ -56,6 +56,7 @@ const state = {
   foreshadowingSettlementOperatorReadinessDashboard: null,
   foreshadowingSettlementOperatorAdoptionGateSurface: null,
   foreshadowingSettlementOperatorManualAdoptionReviewEntrySurface: null,
+  foreshadowingSettlementOperatorReviewChainIndexSurface: null,
   visualFilters: {
     character: "",
     category: "",
@@ -490,6 +491,7 @@ async function refreshWriterWorkbenchState() {
     foreshadowingDashboardPayload,
     foreshadowingAdoptionGatePayload,
     foreshadowingManualReviewEntryPayload,
+    foreshadowingReviewChainIndexPayload,
   ] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
@@ -498,6 +500,7 @@ async function refreshWriterWorkbenchState() {
     api("/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-manual-adoption-review-entry-surface"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-review-chain-index-surface"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -513,6 +516,7 @@ async function refreshWriterWorkbenchState() {
   state.foreshadowingSettlementOperatorReadinessDashboard = foreshadowingDashboardPayload.operator_readiness_dashboard ?? null;
   state.foreshadowingSettlementOperatorAdoptionGateSurface = foreshadowingAdoptionGatePayload.operator_adoption_gate_surface ?? null;
   state.foreshadowingSettlementOperatorManualAdoptionReviewEntrySurface = foreshadowingManualReviewEntryPayload.operator_manual_adoption_review_entry_surface ?? null;
+  state.foreshadowingSettlementOperatorReviewChainIndexSurface = foreshadowingReviewChainIndexPayload.operator_review_chain_index ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -578,6 +582,7 @@ async function refreshWriterWorkbenchState() {
   renderForeshadowingSettlementOperatorReadinessDashboard();
   renderForeshadowingSettlementOperatorAdoptionGateSurface();
   renderForeshadowingSettlementOperatorManualAdoptionReviewEntrySurface();
+  renderForeshadowingSettlementOperatorReviewChainIndexSurface();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
 }
@@ -1052,6 +1057,127 @@ function renderForeshadowingSettlementOperatorManualAdoptionReviewEntrySurface(
   ].join(""));
 
   raw.textContent = JSON.stringify(data.raw_packet ?? data, null, 2);
+}
+
+function renderReviewChainIndexRowList(items, emptyLabel, mapper = (item) => item) {
+  return Array.isArray(items) && items.length
+    ? items.map((item) => {
+      const row = mapper(item);
+      return [
+        '<article class="feedback-learning-record">',
+        '<div>',
+        '<strong>' + escapeHtml(row.title ?? row.label ?? row.key ?? "item") + '</strong>',
+        '<span class="candidate-status ' + operatorPanelToneClass(row.tone ?? (row.ready === false ? "blocked" : "ready")) + '">' + escapeHtml(row.value ?? row.status ?? row.phase ?? "") + '</span>',
+        '</div>',
+        '<small>' + escapeHtml(row.summary ?? row.reason ?? "") + '</small>',
+        row.route || row.ui_target
+          ? '<button class="button secondary" type="button" data-go-view="' + escapeHtml(row.ui_target ?? String(row.route ?? "#writer-workbench").replace(/^#/u, "")) + '">Open target</button>'
+          : '',
+        '</article>',
+      ].join("");
+    }).join("")
+    : '<div class="empty-state">' + escapeHtml(emptyLabel) + '</div>';
+}
+
+function renderForeshadowingSettlementOperatorReviewChainIndexSurface(
+  index = state.foreshadowingSettlementOperatorReviewChainIndexSurface,
+) {
+  const root = $("#foreshadowing-settlement-operator-review-chain-index-surface");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-review-chain-index-surface-status");
+  const summary = $("#foreshadowing-settlement-operator-review-chain-index-surface-summary");
+  const cards = $("#foreshadowing-settlement-operator-review-chain-index-surface-cards");
+  const chain = $("#foreshadowing-settlement-operator-review-chain-index-surface-chain");
+  const phases = $("#foreshadowing-settlement-operator-review-chain-index-surface-phases");
+  const entrypoints = $("#foreshadowing-settlement-operator-review-chain-index-surface-entrypoints");
+  const prohibited = $("#foreshadowing-settlement-operator-review-chain-index-surface-prohibited");
+  const safety = $("#foreshadowing-settlement-operator-review-chain-index-surface-safety");
+  const raw = $("#foreshadowing-settlement-operator-review-chain-index-surface-raw");
+  const data = index ?? {
+    headline: "Foreshadowing settlement operator review chain index is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    chain_segments: [],
+    phase_rows: [],
+    operator_entrypoints: [],
+    prohibited_actions: [],
+    safety: {
+      read_only: true,
+      preview_only: true,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      index_can_approve: false,
+      index_can_confirm_adoption: false,
+      index_can_activate_engine: false,
+      active_engine_modified: false,
+      canon_modified: false,
+      compressed_rules_modified: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+    index_markdown: "",
+  };
+
+  const badge = data.status_badge ?? {};
+  status.textContent = badge.label ?? data.index_status ?? data.decision ?? "unknown";
+  status.className = ("workflow-status " + (badge.class_name ?? "")).trim();
+
+  summary.innerHTML = [
+    '<article class="feedback-learning-card">',
+    '<strong>' + escapeHtml(data.headline ?? "Foreshadowing Settlement Operator Review Chain Index") + '</strong>',
+    '<span>' + escapeHtml(data.summary ?? "") + '</span>',
+    '<small>index_phase=' + escapeHtml(data.phase ?? "28A") + ' · source_phase=' + escapeHtml(data.source_phase ?? "27Z") + ' · index_status=' + escapeHtml(data.index_status ?? "not_loaded") + '</small>',
+    '<small>can_open_review_surfaces=' + String(data.can_open_review_surfaces === true) + ' · can_approve=' + String(data.can_approve === true) + ' · can_confirm_adoption=' + String(data.can_confirm_adoption === true) + ' · can_activate_engine=' + String(data.can_activate_engine === true) + '</small>',
+    '<small>review_index_only=' + String(data.review_index_only === true) + ' · manual_review_only=' + String(data.manual_review_only === true) + '</small>',
+    '</article>',
+  ].join("");
+
+  cards.innerHTML = renderReviewChainIndexRowList(data.cards, "No review chain index cards.");
+  chain.innerHTML = renderReviewChainIndexRowList(
+    data.chain_segments,
+    "No review chain segments.",
+    (item) => ({
+      ...item,
+      title: item.label ?? item.key,
+      value: item.status ?? (item.ready ? "ready" : "blocked"),
+      tone: item.ready ? "ready" : "blocked",
+      summary: ((item.phases ?? []).join(" → ") + (item.summary ? " · " + item.summary : "")).trim(),
+    }),
+  );
+  phases.innerHTML = renderReviewChainIndexRowList(
+    data.phase_rows,
+    "No indexed phase rows.",
+    (row) => ({
+      ...row,
+      title: row.label ?? row.key,
+      value: (row.phase ?? "not_loaded") + "/" + (row.expected_phase ?? "unknown"),
+      tone: row.loaded === false ? "blocked" : "ready",
+      summary: [row.status, row.summary, row.test_path].filter(Boolean).join(" · "),
+    }),
+  );
+  entrypoints.innerHTML = renderReviewChainIndexRowList(data.operator_entrypoints, "No operator entrypoints.");
+  prohibited.innerHTML = renderReviewChainIndexRowList(
+    data.prohibited_actions,
+    "No prohibited actions.",
+    (item) => ({
+      ...item,
+      title: item.label ?? item.key,
+      value: item.allowed === false ? "locked" : "allowed",
+      tone: item.allowed === false ? "ready" : "blocked",
+    }),
+  );
+
+  const safetyData = data.safety ?? {};
+  safety.innerHTML = [
+    '<article class="feedback-learning-record">',
+    '<strong>Safety boundary</strong>',
+    '<small>read_only=' + String(safetyData.read_only === true) + ' · preview_only=' + String(safetyData.preview_only === true) + ' · no_auto_persist=' + String(safetyData.no_auto_persist === true) + '</small>',
+    '<small>bridge_can_approve=' + String(safetyData.bridge_can_approve === true) + ' · bridge_can_confirm_adoption=' + String(safetyData.bridge_can_confirm_adoption === true) + ' · bridge_can_activate_engine=' + String(safetyData.bridge_can_activate_engine === true) + '</small>',
+    '<small>index_can_approve=' + String(safetyData.index_can_approve === true) + ' · index_can_confirm_adoption=' + String(safetyData.index_can_confirm_adoption === true) + ' · index_can_activate_engine=' + String(safetyData.index_can_activate_engine === true) + '</small>',
+    '<small>active_engine_modified=' + String(safetyData.active_engine_modified === true) + ' · canon_modified=' + String(safetyData.canon_modified === true) + ' · compressed_rules_modified=' + String(safetyData.compressed_rules_modified === true) + '</small>',
+    '</article>',
+  ].join("");
+  raw.textContent = JSON.stringify({ ...data, index_markdown: data.index_markdown ?? "" }, null, 2);
 }
 
 function feedbackRecordId(record) {
