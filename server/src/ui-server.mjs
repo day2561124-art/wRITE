@@ -159,6 +159,8 @@ import { buildForeshadowingSettlementOperatorLedgerUi } from "./foreshadowing-se
 import { buildForeshadowingSettlementOperatorReadinessDashboard } from "./foreshadowing-settlement-operator-readiness-dashboard-service.mjs";
 import { buildForeshadowingSettlementOperatorAdoptionReadinessGate } from "./foreshadowing-settlement-operator-adoption-readiness-gate-service.mjs";
 import * as foreshadowingSettlementOperatorAdoptionGateSurfaceService from "./foreshadowing-settlement-operator-adoption-gate-surface-service.mjs";
+import { buildForeshadowingSettlementOperatorManualAdoptionReviewEntryPacket } from "./foreshadowing-settlement-operator-manual-adoption-review-entry-packet-service.mjs";
+import { buildForeshadowingSettlementOperatorManualAdoptionReviewEntryUiSurface } from "./foreshadowing-settlement-operator-manual-adoption-review-entry-ui-surface-service.mjs";
 import { buildWriterWorkbenchState } from "./writer-workbench-state-service.mjs";
 import { buildCanonSettingsCatalog } from "./canon-settings-service.mjs";
 import {
@@ -1495,6 +1497,26 @@ async function latestForeshadowingSettlementOperatorAdoptionGateSurfacePayload()
   };
 }
 
+async function latestForeshadowingSettlementOperatorManualAdoptionReviewEntrySurfacePayload() {
+  const adoptionGatePayload = await latestForeshadowingSettlementOperatorAdoptionGateSurfacePayload();
+  const reviewEntryPacket = buildForeshadowingSettlementOperatorManualAdoptionReviewEntryPacket({
+    ...adoptionGatePayload,
+    operator_adoption_gate_surface: adoptionGatePayload.operator_adoption_gate_surface,
+    include_raw: true,
+    include_markdown: true,
+  });
+  const reviewEntrySurface = buildForeshadowingSettlementOperatorManualAdoptionReviewEntryUiSurface({
+    operator_manual_adoption_review_entry_packet: reviewEntryPacket,
+    include_raw: true,
+    include_markdown: true,
+  });
+  return {
+    ...adoptionGatePayload,
+    operator_manual_adoption_review_entry_packet: reviewEntryPacket,
+    operator_manual_adoption_review_entry_surface: reviewEntrySurface,
+  };
+}
+
 async function handleRequest(request, response) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -1767,6 +1789,22 @@ async function handleRequest(request, response) {
       sendJson(response, 200, {
         ok: true,
         ...await latestForeshadowingSettlementOperatorAdoptionGateSurfacePayload(),
+      });
+    } catch (error) {
+      sendError(response, error.statusCode ?? 500, error);
+    }
+    return;
+  }
+
+
+  if (
+    request.method === "GET"
+    && url.pathname === "/api/writer-workbench/foreshadowing-settlement-operator-manual-adoption-review-entry-surface"
+  ) {
+    try {
+      sendJson(response, 200, {
+        ok: true,
+        ...await latestForeshadowingSettlementOperatorManualAdoptionReviewEntrySurfacePayload(),
       });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);

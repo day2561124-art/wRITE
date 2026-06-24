@@ -55,6 +55,7 @@ const state = {
   foreshadowingSettlementOperatorLedgerUi: null,
   foreshadowingSettlementOperatorReadinessDashboard: null,
   foreshadowingSettlementOperatorAdoptionGateSurface: null,
+  foreshadowingSettlementOperatorManualAdoptionReviewEntrySurface: null,
   visualFilters: {
     character: "",
     category: "",
@@ -488,6 +489,7 @@ async function refreshWriterWorkbenchState() {
     foreshadowingLedgerPayload,
     foreshadowingDashboardPayload,
     foreshadowingAdoptionGatePayload,
+    foreshadowingManualReviewEntryPayload,
   ] = await Promise.all([
     api("/api/writer-workbench/state"),
     api("/api/writer-workbench/feedback-learning-state"),
@@ -495,6 +497,7 @@ async function refreshWriterWorkbenchState() {
     api("/api/writer-workbench/foreshadowing-settlement-operator-ledger-ui"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-readiness-dashboard"),
     api("/api/writer-workbench/foreshadowing-settlement-operator-adoption-gate-surface"),
+    api("/api/writer-workbench/foreshadowing-settlement-operator-manual-adoption-review-entry-surface"),
   ]);
   const pre = $("#writer-workbench-state");
   const timeline = $("#workbench-timeline");
@@ -509,6 +512,7 @@ async function refreshWriterWorkbenchState() {
   state.foreshadowingSettlementOperatorLedgerUi = foreshadowingLedgerPayload.operator_ledger_ui ?? null;
   state.foreshadowingSettlementOperatorReadinessDashboard = foreshadowingDashboardPayload.operator_readiness_dashboard ?? null;
   state.foreshadowingSettlementOperatorAdoptionGateSurface = foreshadowingAdoptionGatePayload.operator_adoption_gate_surface ?? null;
+  state.foreshadowingSettlementOperatorManualAdoptionReviewEntrySurface = foreshadowingManualReviewEntryPayload.operator_manual_adoption_review_entry_surface ?? null;
   // render timeline
   const steps = workflowSteps(workbench);
   timeline.innerHTML = steps.map((s) => `
@@ -573,6 +577,7 @@ async function refreshWriterWorkbenchState() {
   renderForeshadowingSettlementOperatorLedgerUi();
   renderForeshadowingSettlementOperatorReadinessDashboard();
   renderForeshadowingSettlementOperatorAdoptionGateSurface();
+  renderForeshadowingSettlementOperatorManualAdoptionReviewEntrySurface();
   renderFeedbackLearning(feedbackPayload.feedback_learning ?? {});
   renderOperatorOverview();
 }
@@ -945,6 +950,108 @@ function renderForeshadowingSettlementOperatorAdoptionGateSurface(
   ].join("");
 
   raw.textContent = JSON.stringify(data.raw_gate_json ?? data.adoption_gate ?? gate ?? data, null, 2);
+}
+
+function renderPhase27XCardList(items, emptyLabel) {
+  return Array.isArray(items) && items.length
+    ? items.map((item) => [
+      '<article class="feedback-learning-record">',
+      '<div>',
+      '<strong>' + escapeHtml(item.title ?? item.label ?? item.key ?? "item") + '</strong>',
+      '<span class="candidate-status ' + operatorPanelToneClass(item.tone) + '">' + escapeHtml(item.value ?? item.status ?? "") + '</span>',
+      '</div>',
+      '<small>' + escapeHtml(item.summary ?? item.reason ?? "") + '</small>',
+      item.route || item.ui_target
+        ? '<button class="button secondary" type="button" data-go-view="' + escapeHtml(item.ui_target ?? String(item.route ?? "#approval").replace(/^#/u, "")) + '">Open target</button>'
+        : '',
+      '</article>',
+    ].join("")).join("")
+    : '<div class="empty-state">' + escapeHtml(emptyLabel) + '</div>';
+}
+
+function renderForeshadowingSettlementOperatorManualAdoptionReviewEntrySurface(
+  surface = state.foreshadowingSettlementOperatorManualAdoptionReviewEntrySurface,
+) {
+  const root = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface");
+  if (!root) return;
+  const status = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-status");
+  const summary = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-summary");
+  const cards = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-cards");
+  const evidence = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-evidence");
+  const blockers = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-blockers");
+  const steps = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-steps");
+  const prohibited = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-prohibited");
+  const safety = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-safety");
+  const nextAction = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-next-action");
+  const raw = $("#foreshadowing-settlement-operator-manual-adoption-review-entry-surface-raw");
+  const data = surface ?? {
+    headline: "Foreshadowing settlement manual adoption review entry surface is not loaded",
+    summary: "Refresh the writer workbench state.",
+    cards: [],
+    required_evidence: [],
+    blocking_reason_cards: [],
+    manual_review_steps: [],
+    prohibited_actions: [],
+    safety_badges: [],
+    next_operator_actions: [],
+    safety: {
+      read_only: true,
+      preview_only: true,
+      bridge_can_approve: false,
+      bridge_can_confirm_adoption: false,
+      bridge_can_activate_engine: false,
+      active_engine_modified: false,
+      canon_modified: false,
+      compressed_rules_modified: false,
+    },
+    status_badge: { label: "not loaded", class_name: "candidate-status-rejected" },
+  };
+
+  const badge = data.status_badge ?? {};
+  status.textContent = badge.label ?? data.surface_status ?? data.decision ?? "unknown";
+  status.className = ("workflow-status " + (badge.class_name ?? "")).trim();
+
+  summary.innerHTML = [
+    '<article class="feedback-learning-card">',
+    '<strong>' + escapeHtml(data.headline ?? "Foreshadowing Settlement Manual Adoption Review Entry") + '</strong>',
+    '<span>' + escapeHtml(data.summary ?? "") + '</span>',
+    '<small>surface_phase=' + escapeHtml(data.phase ?? "27X") + ' · source_phase=' + escapeHtml(data.source_phase ?? "27W") + ' · packet_phase=' + escapeHtml(data.packet_phase ?? "27W") + '</small>',
+    '<small>packet_status=' + escapeHtml(data.packet_status ?? "not_available") + ' · decision=' + escapeHtml(data.decision ?? "not_available") + '</small>',
+    '<small>can_enter_manual_adoption_review=' + String(data.can_enter_manual_adoption_review === true) + ' · can_approve=' + String(data.can_approve === true) + ' · can_confirm_adoption=' + String(data.can_confirm_adoption === true) + ' · can_activate_engine=' + String(data.can_activate_engine === true) + '</small>',
+    '</article>',
+  ].join("");
+
+  cards.innerHTML = renderPhase27XCardList(data.cards, "No manual review entry cards.");
+  evidence.innerHTML = renderPhase27XCardList(data.required_evidence, "No required evidence.");
+  blockers.innerHTML = renderPhase27XCardList(data.blocking_reason_cards ?? data.blocking_reasons?.map((reason) => ({ title: reason, value: "blocked", tone: "blocked" })), "No blocking reasons.");
+  steps.innerHTML = renderPhase27XCardList(data.manual_review_steps, "No manual review steps.");
+  prohibited.innerHTML = renderPhase27XCardList(data.prohibited_actions, "No prohibited actions.");
+  safety.innerHTML = renderPhase27XCardList(data.safety_badges, "No safety badges.");
+
+  const actions = Array.isArray(data.next_operator_actions) && data.next_operator_actions.length
+    ? data.next_operator_actions
+    : data.manual_review_steps ?? [];
+  nextAction.innerHTML = actions.length
+    ? actions.map((action) => [
+      '<article class="feedback-learning-record">',
+      '<strong>' + escapeHtml(action.title ?? action.label ?? action.key ?? "Next action") + '</strong>',
+      '<small>' + escapeHtml(action.summary ?? action.reason ?? "") + '</small>',
+      '<button class="button secondary" type="button" data-go-view="' + escapeHtml(action.ui_target ?? String(action.route ?? "#approval").replace(/^#/u, "")) + '">Open target</button>',
+      '</article>',
+    ].join("")).join("")
+    : '<div class="empty-state">No next operator action.</div>';
+
+  const safetyData = data.safety ?? {};
+  safety.insertAdjacentHTML("afterbegin", [
+    '<article class="feedback-learning-record">',
+    '<strong>Safety boundary</strong>',
+    '<small>read_only=' + String(safetyData.read_only === true) + ' · preview_only=' + String(safetyData.preview_only === true) + ' · no_auto_persist=' + String(safetyData.no_auto_persist === true) + '</small>',
+    '<small>bridge_can_approve=' + String(safetyData.bridge_can_approve === true) + ' · bridge_can_confirm_adoption=' + String(safetyData.bridge_can_confirm_adoption === true) + ' · bridge_can_activate_engine=' + String(safetyData.bridge_can_activate_engine === true) + '</small>',
+    '<small>active_engine_modified=' + String(safetyData.active_engine_modified === true) + ' · canon_modified=' + String(safetyData.canon_modified === true) + ' · compressed_rules_modified=' + String(safetyData.compressed_rules_modified === true) + '</small>',
+    '</article>',
+  ].join(""));
+
+  raw.textContent = JSON.stringify(data.raw_packet ?? data, null, 2);
 }
 
 function feedbackRecordId(record) {

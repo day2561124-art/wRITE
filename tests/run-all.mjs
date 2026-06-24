@@ -69,6 +69,7 @@ const steps = [
   ["Phase 27U foreshadowing settlement operator adoption gate UI bridge surface", ["tests/phase27/phase27u-foreshadowing-settlement-operator-adoption-gate-ui-bridge-surface.test.mjs"]],
   ["Phase 27V foreshadowing settlement operator adoption gate live UI smoke", ["tests/phase27/phase27v-foreshadowing-settlement-operator-adoption-gate-live-ui-smoke.test.mjs"]],
   ["Phase 27W foreshadowing settlement operator manual adoption review entry packet", ["tests/phase27/phase27w-foreshadowing-settlement-operator-manual-adoption-review-entry-packet.test.mjs"]],
+  ["Phase 27X foreshadowing settlement operator manual adoption review entry UI surface", ["tests/phase27/phase27x-foreshadowing-settlement-operator-manual-adoption-review-entry-ui-surface.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
