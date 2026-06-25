@@ -78,6 +78,7 @@ const steps = [
   ["Phase 28D foreshadowing settlement operator review chain index final bridge smoke", ["tests/phase28/phase28d-foreshadowing-settlement-operator-review-chain-index-final-bridge-smoke.test.mjs"]],
   ["Phase 28E foreshadowing settlement operator review chain index navigation hardening", ["tests/phase28/phase28e-foreshadowing-settlement-operator-review-chain-index-navigation-hardening.test.mjs"]],
   ["Phase 28F foreshadowing settlement operator review chain index recovery guide", ["tests/phase28/phase28f-foreshadowing-settlement-operator-review-chain-index-recovery-guide.test.mjs"]],
+  ["Phase 28G foreshadowing settlement operator review chain index evidence packet export contract", ["tests/phase28/phase28g-foreshadowing-settlement-operator-review-chain-index-evidence-packet-export-contract.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
