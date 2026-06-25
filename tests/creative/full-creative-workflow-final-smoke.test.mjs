@@ -60,6 +60,44 @@ async function names(directory) {
   }
 }
 
+
+function isPathInside(basePath, targetPath) {
+  const relative = path.relative(basePath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function wait(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function rmWithWindowsRetry(target, attempts = 6) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!["EPERM", "EBUSY", "ENOTEMPTY"].includes(error.code)) {
+        throw error;
+      }
+      await wait(50 * attempt);
+    }
+  }
+  throw lastError;
+}
+
+async function cleanupFixturePaths() {
+  const outsideRootTargets = Object.entries(options)
+    .map(([, target]) => target)
+    .filter((target) => !isPathInside(root, target));
+
+  for (const target of outsideRootTargets) {
+    await rmWithWindowsRetry(target);
+  }
+
+  await rmWithWindowsRetry(root);
+}
 const REQUIRED_NEURAL_MODULES = [
   "run_scene_planner",
   "run_character_simulator",
@@ -80,10 +118,7 @@ async function markCandidateNeuralTraceComplete(candidateId) {
 async function main() {
   const productionHash = hash(await readFile(projectPaths.activeEngine));
   const activeText = "# Phase 8J E2E Engine\n\nRule 1: stable.\n";
-  await Promise.all([
-    rm(root, { recursive: true, force: true }),
-    ...Object.entries(options).map(([, target]) => rm(target, { recursive: true, force: true })),
-  ]);
+  await cleanupFixturePaths();
   await mkdir(root, { recursive: true });
   await writeFile(options.activeEnginePath, activeText, "utf8");
   try {
