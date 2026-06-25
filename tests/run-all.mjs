@@ -83,6 +83,7 @@ const steps = [
   ["Phase 28I foreshadowing settlement operator review chain index evidence packet bridge preview contract", ["tests/phase28/phase28i-foreshadowing-settlement-operator-review-chain-index-evidence-packet-bridge-preview-contract.test.mjs"]],
   ["Phase 28J foreshadowing settlement operator review chain index evidence packet operator handoff final smoke", ["tests/phase28/phase28j-foreshadowing-settlement-operator-review-chain-index-evidence-packet-operator-handoff-final-smoke.test.mjs"]],
   ["Phase 28K foreshadowing settlement operator review chain index evidence packet archive readiness contract", ["tests/phase28/phase28k-foreshadowing-settlement-operator-review-chain-index-evidence-packet-archive-readiness-contract.test.mjs"]],
+  ["Phase 28L foreshadowing settlement operator review chain index evidence packet archive manifest UI preview contract", ["tests/phase28/phase28l-foreshadowing-settlement-operator-review-chain-index-evidence-packet-archive-manifest-ui-preview-contract.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -204,3 +205,4 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
