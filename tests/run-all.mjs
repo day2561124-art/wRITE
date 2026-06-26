@@ -95,6 +95,7 @@ const steps = [
   ["Phase 29C reader response simulator bridge preview", ["tests/phase29/phase29c-reader-response-simulator-bridge-preview.test.mjs"]],
   ["Phase 30A aesthetic memory registry contract", ["tests/phase30/phase30a-aesthetic-memory-registry-contract.test.mjs"]],
   ["Phase 30B aesthetic memory registry UI surface", ["tests/phase30/phase30b-aesthetic-memory-registry-ui-surface.test.mjs"]],
+  ["Phase 30C aesthetic memory bridge preview", ["tests/phase30/phase30c-aesthetic-memory-bridge-preview.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -216,6 +217,7 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
 
 
 
