@@ -92,6 +92,7 @@ const steps = [
   ["Phase 28R foreshadowing settlement operator review chain index evidence packet archive manifest checklist bridge preview final smoke", ["tests/phase28/phase28r-foreshadowing-settlement-operator-review-chain-index-evidence-packet-archive-manifest-checklist-bridge-preview-final-smoke.test.mjs"]],
   ["Phase 29A reader response simulator contract", ["tests/phase29/phase29a-reader-response-simulator-contract.test.mjs"]],
   ["Phase 29B reader response simulator UI surface", ["tests/phase29/phase29b-reader-response-simulator-ui-surface.test.mjs"]],
+  ["Phase 29C reader response simulator bridge preview", ["tests/phase29/phase29c-reader-response-simulator-bridge-preview.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
