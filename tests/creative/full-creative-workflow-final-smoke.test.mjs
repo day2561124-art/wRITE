@@ -270,10 +270,7 @@ async function main() {
     assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Production active_engine.md changed");
     console.log("Full creative workflow final smoke test passed.");
   } finally {
-    await Promise.all([
-      rm(root, { recursive: true, force: true }),
-      ...Object.entries(options).map(([, target]) => rm(target, { recursive: true, force: true })),
-    ]);
+    await cleanupFixturePaths();
   }
 }
 
