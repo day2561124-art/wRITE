@@ -106,6 +106,7 @@ const steps = [
   ["Phase 31H aesthetic memory context builder bridge final smoke", ["tests/phase31/phase31h-aesthetic-memory-context-builder-bridge-final-smoke.test.mjs"]],
   ["Phase 31I aesthetic memory context builder bridge stability guard", ["tests/phase31/phase31i-aesthetic-memory-context-builder-bridge-stability-guard.test.mjs"]],
   ["Phase 31J aesthetic memory context builder operator review packet", ["tests/phase31/phase31j-aesthetic-memory-context-builder-operator-review-packet.test.mjs"]],
+  ["Phase 31K aesthetic memory context builder operator review packet UI surface", ["tests/phase31/phase31k-aesthetic-memory-context-builder-operator-review-packet-ui-surface.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
