@@ -103,6 +103,7 @@ const steps = [
   ["Phase 31E aesthetic memory context builder readiness gate", ["tests/phase31/phase31e-aesthetic-memory-context-builder-readiness-gate.test.mjs"]],
   ["Phase 31F aesthetic memory context builder preview surface", ["tests/phase31/phase31f-aesthetic-memory-context-builder-preview-surface.test.mjs"]],
   ["Phase 31G aesthetic memory context builder bridge preview", ["tests/phase31/phase31g-aesthetic-memory-context-builder-bridge-preview.test.mjs"]],
+  ["Phase 31H aesthetic memory context builder bridge final smoke", ["tests/phase31/phase31h-aesthetic-memory-context-builder-bridge-final-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -224,6 +225,7 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
 
 
 

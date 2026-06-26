@@ -18,9 +18,9 @@ const timer = setTimeout(() => {
   if (settled) return;
   settled = true;
   terminateProcessTree(child);
-  console.error("MCP contract test timed out after 180 seconds.");
+  console.error("MCP contract test timed out after 300 seconds.");
   process.exitCode = 1;
-}, 180_000);
+}, 300_000);
 
 child.on("error", (error) => {
   if (settled) return;

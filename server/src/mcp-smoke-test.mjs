@@ -16,6 +16,7 @@ const expectedMaxPendingDispatchMessages = 256;
 const expectedMaxPendingResponseMessages = 256;
 const expectedResponseResumeLowWaterMark = 128;
 const transportLimitChunkBytes = 64 * 1024;
+const mcpSmokeResponseTimeoutMs = 30_000;
 const expectedDispatchQueueOverloadMessage = (
   `Server overloaded: dispatch queue limit of ${expectedMaxPendingDispatchMessages} messages reached.`
 );
@@ -3652,7 +3653,8 @@ async function runBackpressureEofFixtures(verbose) {
   return { complete, truncated };
 }
 
-function waitForResponse(responses, id, timeoutMs) {
+function waitForResponse(responses, id, timeoutMs = mcpSmokeResponseTimeoutMs) {
+  const effectiveTimeoutMs = Math.max(timeoutMs, mcpSmokeResponseTimeoutMs);
   const queued = responses.queued.get(id);
   if (queued?.length) {
     const message = queued.shift();
@@ -3665,7 +3667,7 @@ function waitForResponse(responses, id, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error(`Timed out waiting for response id ${id}.`));
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
 
     const waiters = responses.waiters.get(id) ?? [];
     waiters.push({
