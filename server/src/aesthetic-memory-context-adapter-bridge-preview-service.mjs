@@ -3,6 +3,13 @@ import { buildAestheticMemoryContextAdapterPreview } from "./aesthetic-memory-co
 
 export const aestheticMemoryContextAdapterBridgePreviewVersion = "aesthetic_memory_context_adapter_bridge_preview_v1";
 
+export const aestheticMemoryContextAdapterBridgePreviewContextPathTokens = [
+  "writing_context.aesthetic_memory",
+  "revision_context.aesthetic_memory",
+  "final_polisher_context.aesthetic_memory",
+  "reader_response_context.aesthetic_memory",
+];
+
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
 }
@@ -396,4 +403,5 @@ export async function buildAestheticMemoryContextAdapterBridgePreview(rawInput =
 }
 
 export default buildAestheticMemoryContextAdapterBridgePreview;
+
 
