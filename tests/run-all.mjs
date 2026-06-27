@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
@@ -115,6 +115,7 @@ const steps = [
   ["Phase 31Q aesthetic memory context builder operator review packet bridge evidence packet UI preview", ["tests/phase31/phase31q-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-ui-preview.test.mjs"]],
   ["Phase 31R aesthetic memory context builder operator review packet bridge evidence packet UI live smoke", ["tests/phase31/phase31r-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-ui-live-smoke.test.mjs"]],
   ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31s-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-bridge-preview.test.mjs"]],
+  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31t-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-bridge-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -236,6 +237,7 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
 
 
 
