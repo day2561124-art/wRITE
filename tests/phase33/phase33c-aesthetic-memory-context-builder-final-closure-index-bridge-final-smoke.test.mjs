@@ -36,7 +36,7 @@ const PHASE_33B_BRIDGE_PREVIEW_DIGEST =
   'sha256:3eaaf69f6c18ed3ddb14a9f8729d028f1bb8078dfc079a921ad7a65d25e42867';
 
 const PHASE_33C_FINAL_SMOKE_DIGEST =
-  'sha256:7b7cf40f88e64af1bc8692f7fcb71c4d2c51f97a12a6ae533abf2f719f75cd82';
+  'sha256:0051d3c1c7c114052bc57f3c9088a415f42f0d08cdcc8fda6d15ec17b10ed411';
 
 const REQUIRED_FALSE_SAFETY_FLAGS = [
   'external_llm_called',
@@ -253,3 +253,4 @@ test('Phase33C final smoke is deterministic and registered in run-all', () => {
     'Phase33C test must be registered in tests/run-all.mjs',
   );
 });
+
