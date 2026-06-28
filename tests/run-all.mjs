@@ -129,7 +129,8 @@ const steps = [
   ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32e-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-recovery-guide-final-smoke.test.mjs"]],
   ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32f-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-closure-guard.test.mjs"]],
   ["Phase 33A aesthetic memory context builder final closure index", ["tests/phase33/phase33a-aesthetic-memory-context-builder-final-closure-index.test.mjs",
-  "tests/phase33/phase33b-aesthetic-memory-context-builder-final-closure-index-bridge-preview.test.mjs"]],
+  "tests/phase33/phase33b-aesthetic-memory-context-builder-final-closure-index-bridge-preview.test.mjs",
+  "tests/phase33/phase33c-aesthetic-memory-context-builder-final-closure-index-bridge-final-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -251,6 +252,7 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
 
 
 
