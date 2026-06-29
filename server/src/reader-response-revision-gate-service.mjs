@@ -323,6 +323,8 @@ export function buildReaderResponseRevisionGate(raw = {}, options = {}) {
     && metrics.pacingPressureScore >= 70
     && metrics.dialogueTensionScore >= 60
     && metrics.emotionalCurveScore >= 70
+    && metrics.chapterTurnScore >= 60
+    && metrics.hookStrengthScore >= 60
     && candidateText.length >= 180;
 
   const triggers = buildTriggers(readerResponse, metrics, softAcceptableAfterRevision);

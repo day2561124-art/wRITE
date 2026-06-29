@@ -942,7 +942,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         retrieval_context: input.retrievalContext,
         candidate_text: candidateTextValue,
         dramatic_conflict_plan: conflictPlan,
-        dramatic_conflict_manager: dramaticConflictManager,
+        dramatic_conflict_manager: dramaticConflictManager.used === true ? dramaticConflictManager : null,
         reader_questions_to_carry_forward:
           optionConfig.reader_questions_to_carry_forward
           ?? optionConfig.readerQuestionsToCarryForward
@@ -950,7 +950,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           ?? rawInput.readerQuestionsToCarryForward,
       }, {
         ...options,
-        dramaticConflictManager,
+        dramaticConflictManager: dramaticConflictManager.used === true ? dramaticConflictManager : null,
         candidateText: candidateTextValue,
       });
 
@@ -1113,7 +1113,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           neural_pre_generation_report: orchestration.pre_generation,
           writing_card_director: writingCardDirector,
           character_mind_state_ledger: characterMindStateLedger,
-          dramatic_conflict_manager: dramaticConflictManager,
+          dramatic_conflict_manager: dramaticConflictManager.used === true ? dramaticConflictManager : null,
           foreshadowing_causal_graph: foreshadowingCausalGraph,
       foreshadowing_payoff_guard: foreshadowingPayoffGuard,
       foreshadowing_payoff_repair_planner: foreshadowingPayoffRepairPlanner,
