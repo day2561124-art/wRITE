@@ -142,6 +142,7 @@ const steps = [
   ["Phase 34C reader response revision gate", ["tests/phase34/phase34c-reader-response-revision-gate.test.mjs"]],
   ["Phase 34D full pipeline acceptance evidence packet", ["tests/phase34/phase34d-full-pipeline-acceptance-evidence-packet.test.mjs"]],
   ["Phase 34E full pipeline acceptance evidence packet bridge surface", ["tests/phase34/phase34e-full-pipeline-acceptance-evidence-packet-bridge-surface.test.mjs"]],
+  ["Phase 34F full pipeline live writing smoke", ["tests/phase34/phase34f-full-pipeline-live-writing-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
