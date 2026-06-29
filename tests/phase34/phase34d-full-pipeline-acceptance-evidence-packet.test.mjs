@@ -1,0 +1,241 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import path from "node:path";
+import {
+  buildFullPipelineAcceptanceEvidencePacket,
+  disabledFullPipelineAcceptanceEvidencePacket,
+  fullPipelineAcceptanceEvidencePacketVersion,
+} from "../../server/src/full-pipeline-acceptance-evidence-packet-service.mjs";
+import { runFullRecursiveWritingPipeline } from "../../server/src/full-recursive-writing-pipeline-service.mjs";
+import { projectPaths } from "../../server/src/project-paths.mjs";
+
+const root = process.cwd();
+const protectedFiles = [
+  projectPaths.activeEngine,
+  path.join(root, "data", "writing_policy_db", "active_writing_card.md"),
+  path.join(root, "data", "proofing_policy_db", "active_proofing_card.md"),
+  path.join(root, "data", "longline_db", "active_longline.md"),
+  projectPaths.compressedRules,
+];
+
+const transactionDir = path.join(projectPaths.outputLogs, "transactions");
+
+function hash(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function names(directory) {
+  try {
+    return new Set(await readdir(directory));
+  } catch (error) {
+    if (error.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
+async function removeNew(directory, before) {
+  for (const name of await names(directory)) {
+    if (!before.has(name)) {
+      await rm(path.join(directory, name), { recursive: true, force: true });
+    }
+  }
+}
+
+function assertPacketSafety(packet) {
+  assert.equal(packet.read_only, true);
+  assert.equal(packet.integration_only, true);
+  assert.equal(packet.candidate_only, true);
+  assert.equal(packet.report_only, true);
+  assert.equal(packet.no_generation, true);
+  assert.equal(packet.no_auto_persist, true);
+  assert.equal(packet.no_candidate_save, true);
+  assert.equal(packet.no_approval, true);
+  assert.equal(packet.no_adoption, true);
+  assert.equal(packet.no_canon_update, true);
+  assert.equal(packet.no_active_engine_update, true);
+  assert.equal(packet.no_compressed_rules_update, true);
+  assert.equal(packet.no_settlement_update, true);
+  assert.equal(packet.safety_boundary.can_generate, false);
+  assert.equal(packet.safety_boundary.can_auto_persist, false);
+  assert.equal(packet.safety_boundary.can_save_candidate, false);
+  assert.equal(packet.safety_boundary.can_create_approval, false);
+  assert.equal(packet.safety_boundary.can_confirm_adoption, false);
+  assert.equal(packet.safety_boundary.can_write_canon, false);
+  assert.equal(packet.safety_boundary.can_update_active_engine, false);
+  assert.equal(packet.safety_boundary.can_update_compressed_rules, false);
+  assert.equal(packet.safety_boundary.can_update_settlement, false);
+  assert.equal(packet.no_mutation_snapshot.active_engine_modified, false);
+  assert.equal(packet.no_mutation_snapshot.compressed_rules_modified, false);
+  assert.equal(packet.no_mutation_snapshot.canon_written, false);
+  assert.equal(packet.no_mutation_snapshot.settlement_written, false);
+  assert.equal(packet.no_mutation_snapshot.candidate_saved, false);
+  assert.equal(packet.no_mutation_snapshot.approval_item_created, false);
+  assert.equal(packet.no_mutation_snapshot.adoption_confirmed, false);
+}
+
+const disabled = disabledFullPipelineAcceptanceEvidencePacket("not_started");
+assert.equal(disabled.used, false);
+assert.equal(disabled.phase, "34D");
+assert.equal(disabled.version, fullPipelineAcceptanceEvidencePacketVersion);
+assertPacketSafety(disabled);
+
+const conflictPlan = {
+  protagonist: "千夜",
+  protagonist_want: "在門禁鎖死前進入下一條路線",
+  opposition: "九逃與即將封閉的門禁系統",
+  opposition_pressure: "九逃想阻止她，門禁系統會關閉退路",
+  stakes: "等待會失去前進路線，進入會失去退路",
+  reversal_or_reveal: "開門不是安全，而是刪除舊退路",
+  required_choice: "千夜必須在等待支援與強行進入之間選擇",
+  cost_or_payment: "舊路徑從終端上消失",
+  new_status_quo: "隊伍被迫進入不能回頭的新戰場",
+  ending_hook: "門內有人先一步喊出千夜的名字",
+};
+
+const weakText = [
+  "千夜確認資料。九逃確認流程。終端顯示目前狀態，門禁系統依照規則進行更新，所有資訊都被整理成可以判讀的項目。",
+  "大家看著狀態，依序理解目前的狀況，相關條件也都逐項成立。於是她們知道接下來應該處理門禁、路線、支援與回報。",
+  "事情好像差不多，畫面安靜下來。",
+].join("\n\n");
+
+const strongText = [
+  "千夜在門禁燈第二次閃紅之前把手按上去。九逃叫她等，聲音壓得很低，不是命令，是他已經看見退路會被鎖死。",
+  "她沒有回頭，只把終端轉給他看。地圖上的舊路線正在一格一格熄滅，像有人從背後把橋抽走。",
+  "『現在不進去，下一道門就會關。』千夜說。『進去的話，我們也回不來。』九逃回她。",
+  "選擇在那一秒變成代價。門開了，舊路徑從終端上消失，九逃罵了一聲，還是跟著她跨進去。",
+  "他們沒有贏，只是把戰場推到不能回頭的地方。門在身後合上時，裡面有人先一步喊出了千夜的名字。",
+].join("\n\n");
+
+const protectedBefore = new Map();
+for (const file of protectedFiles) protectedBefore.set(file, hash(await readFile(file, "utf8")));
+const transactionsBefore = await names(transactionDir);
+const tempRoot = await mkdtemp(path.join(root, "data", "outputs", ".phase34d-"));
+
+const baseInput = {
+  task_prompt: "Phase34D full pipeline acceptance evidence packet smoke.",
+  generation_context: {
+    scene: "night corridor",
+    chapter_turn: "terminal warning forces a visible decision",
+  },
+  retrieval_context: {
+    scope: "candidate only",
+  },
+  dramatic_conflict_plan: conflictPlan,
+  save_candidate: false,
+  max_revision_rounds: 2,
+  enable_character_voice_guard: false,
+  include_character_mind_state_ledger: false,
+  include_dramatic_conflict_manager: false,
+  include_foreshadowing_causal_graph: false,
+  include_foreshadowing_payoff_guard: false,
+  include_foreshadowing_payoff_repair_planner: false,
+  include_foreshadowing_payoff_acceptance_gate: false,
+  include_foreshadowing_settlement_diff_preview: false,
+  include_reader_response_revision_gate: true,
+};
+
+const deterministicFinalPolisherAdapter = async ({ raw_draft_text }) => ({
+  status: "completed",
+  polished_text: raw_draft_text,
+  needs_structural_revision: false,
+  suggested_return_stage: null,
+  revision_report: {
+    structural_gate: {
+      reasons: [],
+      suggested_return_stage: null,
+    },
+    risk_flags: [],
+  },
+  warnings: [],
+});
+
+try {
+  let capturedRevisionPayload = null;
+  const result = await runFullRecursiveWritingPipeline(baseInput, {
+    gptWritingContexts: path.join(tempRoot, "contexts"),
+    writingCandidates: path.join(tempRoot, "candidates"),
+    generationAdapter: async () => ({ text: weakText }),
+    finalPolisherAdapter: deterministicFinalPolisherAdapter,
+    revisionAdapter: async (payload) => {
+      capturedRevisionPayload = payload;
+      return { text: strongText };
+    },
+  });
+
+  assert(capturedRevisionPayload, "revision adapter should be called.");
+  assert.equal(result.status, "completed");
+  assert.equal(result.pipeline_stage, "final_candidate_ready_after_revision");
+  assert.equal(result.recursive_revision.used, true);
+  assert.equal(result.recursive_revision.rounds_attempted, 1);
+  assert.equal(result.reader_response_revision_gate.revision_required, false);
+  assert.equal(result.candidate_created, false);
+  assert.equal(result.active_engine_update_allowed, false);
+  assert.equal(result.canon_update_allowed, false);
+
+  const packet = result.full_pipeline_acceptance_evidence_packet;
+  assert(packet, "pipeline result should include Phase34D evidence packet.");
+  assert.equal(packet.used, true);
+  assert.equal(packet.phase, "34D");
+  assert.equal(packet.version, fullPipelineAcceptanceEvidencePacketVersion);
+  assert.equal(packet.packet_kind, "full_pipeline_acceptance_evidence_packet");
+  assert.equal(packet.status, "accepted");
+  assertPacketSafety(packet);
+
+  assert.equal(packet.pipeline_source.pipeline_stage, "final_candidate_ready_after_revision");
+  assert.equal(packet.pipeline_source.candidate_created, false);
+  assert.equal(packet.pipeline_source.adopted, false);
+  assert.equal(packet.pipeline_source.settled, false);
+
+  assert.equal(packet.acceptance_summary.accepted, true);
+  assert.equal(packet.acceptance_summary.soft_acceptance_reached, true);
+  assert.equal(packet.acceptance_summary.revision_required_initially, true);
+  assert.equal(packet.acceptance_summary.revision_required_finally, false);
+  assert.equal(packet.acceptance_summary.recursive_revision_used, true);
+  assert.equal(packet.acceptance_summary.rounds_attempted, 1);
+  assert.equal(packet.acceptance_summary.final_status, "accepted_after_revision");
+
+  assert.equal(packet.decision_chain.reader_response_simulator.phase, "29A");
+  assert.equal(packet.decision_chain.reader_response_revision_gate.phase, "34C");
+  assert.equal(packet.decision_chain.reader_response_revision_gate.revision_required, true);
+  assert.equal(packet.decision_chain.recursive_revision_policy.phase, "34B");
+  assert.equal(packet.decision_chain.recursive_revision_policy.reader_response_revision_gate.phase, "34C");
+  assert.equal(packet.decision_chain.revision_plan.reader_response_revision_gate.phase, "34C");
+  assert.equal(packet.decision_chain.revision_rounds.length, 1);
+  assert.equal(packet.decision_chain.revision_rounds[0].reader_response_revision_gate.phase, "34C");
+  assert.equal(packet.decision_chain.revision_rounds[0].reader_response_revision_gate.revision_required, true);
+  assert.equal(packet.decision_chain.final_reader_response_revision_gate.phase, "34C");
+  assert.equal(packet.decision_chain.final_reader_response_revision_gate.revision_required, false);
+
+  assert(packet.operator_findings.length > 0, "operator findings should explain why revision happened.");
+  assert(packet.operator_findings.some((finding) => finding.source === "reader_response_revision_gate"));
+  assert(packet.operator_findings.some((finding) => Array.isArray(finding.rewrite_targets)));
+  assert(packet.operator_summary.some((line) => line.includes("accepted") || line.includes("acceptance")));
+
+  const rebuiltPacket = buildFullPipelineAcceptanceEvidencePacket(result, {
+    status: "manual_rebuild",
+    built_at: "2026-06-30T00:00:00.000Z",
+  });
+  assert.equal(rebuiltPacket.status, "manual_rebuild");
+  assert.equal(rebuiltPacket.acceptance_summary.final_status, "accepted_after_revision");
+  assert.equal(rebuiltPacket.decision_chain.reader_response_revision_gate.revision_required, true);
+  assertPacketSafety(rebuiltPacket);
+
+  const runAllText = await readFile(path.join(root, "tests", "run-all.mjs"), "utf8");
+  const phase34c = "tests/phase34/phase34c-reader-response-revision-gate.test.mjs";
+  const phase34d = "tests/phase34/phase34d-full-pipeline-acceptance-evidence-packet.test.mjs";
+  const daily = "tests/scripts/daily-scripts.test.mjs";
+  assert(runAllText.includes(phase34c), "run-all missing Phase34C predecessor.");
+  assert(runAllText.includes(phase34d), "run-all missing Phase34D registration.");
+  assert(runAllText.indexOf(phase34c) < runAllText.indexOf(phase34d), "Phase34D should run after Phase34C.");
+  assert(runAllText.indexOf(phase34d) < runAllText.indexOf(daily), "Phase34D should run before Daily scripts.");
+
+  for (const file of protectedFiles) {
+    assert.equal(hash(await readFile(file, "utf8")), protectedBefore.get(file));
+  }
+
+  console.log("Phase34D full pipeline acceptance evidence packet tests passed.");
+} finally {
+  await rm(tempRoot, { recursive: true, force: true });
+  await removeNew(transactionDir, transactionsBefore);
+}

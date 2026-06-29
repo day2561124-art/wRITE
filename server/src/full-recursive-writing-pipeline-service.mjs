@@ -22,6 +22,10 @@ import {
   buildReaderResponseRevisionGate,
   disabledReaderResponseRevisionGate,
 } from "./reader-response-revision-gate-service.mjs";
+import {
+  buildFullPipelineAcceptanceEvidencePacket,
+  disabledFullPipelineAcceptanceEvidencePacket,
+} from "./full-pipeline-acceptance-evidence-packet-service.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
@@ -526,6 +530,7 @@ function baseResult(input, now) {
 
     reader_response_simulator: disabledReaderResponseSimulator("not_started"),
     reader_response_revision_gate: disabledReaderResponseRevisionGate("not_started"),
+    full_pipeline_acceptance_evidence_packet: disabledFullPipelineAcceptanceEvidencePacket("not_started"),
 
     report: {
       pipeline_name: "full_recursive_writing_pipeline",
@@ -545,6 +550,13 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     ? options.now()
     : options.now instanceof Date ? options.now : new Date();
   const result = baseResult(input, now);
+  const refreshFullPipelineAcceptanceEvidencePacket = (status = "generated") => {
+    result.full_pipeline_acceptance_evidence_packet = buildFullPipelineAcceptanceEvidencePacket(result, {
+      status,
+      built_at: now.toISOString(),
+    });
+    return result.full_pipeline_acceptance_evidence_packet;
+  };
   const provider = resolveBackendGenerationProvider(rawInput, options);
   let generationAdapter = options.generationAdapter;
   let revisionAdapter = options.revisionAdapter;
@@ -1186,6 +1198,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
       warnings: polisher.warnings ?? [],
     };
     result.report.warnings.push(...(polisher.warnings ?? []), result.stop_reason);
+    refreshFullPipelineAcceptanceEvidencePacket("revision_required");
     return result;
   }
 
@@ -1335,6 +1348,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     result.report.warnings.push(...(saved.warnings ?? []));
   }
   result.report.warnings.push(...result.generation.warnings, ...result.final_polisher.warnings);
+  refreshFullPipelineAcceptanceEvidencePacket("accepted");
   return result;
 }
 
