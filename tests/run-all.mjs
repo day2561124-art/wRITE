@@ -139,6 +139,7 @@ const steps = [
   "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs"]],
   ["Phase 34A full neural writing pipeline single entry bridge", ["tests/phase34/phase34a-full-neural-writing-pipeline-single-entry-bridge.test.mjs"]],
   ["Phase 34B recursive revision policy hardening", ["tests/phase34/phase34b-recursive-revision-policy-hardening.test.mjs"]],
+  ["Phase 34C reader response revision gate", ["tests/phase34/phase34c-reader-response-revision-gate.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

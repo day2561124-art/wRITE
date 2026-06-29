@@ -14,6 +14,14 @@ import {
 import {
   buildRecursiveRevisionPolicy,
 } from "./recursive-revision-policy-service.mjs";
+import {
+  buildReaderResponseSimulatorReport,
+  readerResponseSimulatorVersion,
+} from "./reader-response-simulator-service.mjs";
+import {
+  buildReaderResponseRevisionGate,
+  disabledReaderResponseRevisionGate,
+} from "./reader-response-revision-gate-service.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
@@ -90,6 +98,12 @@ function shouldUseForeshadowingSettlementDiffPreview(rawInput, input, options) {
   return input.includeForeshadowingSettlementDiffPreview === true
     || optionObjectEnabled(options.foreshadowingSettlementDiffPreview)
     || optionObjectEnabled(options.foreshadowing_settlement_diff_preview);
+}
+
+function shouldUseReaderResponseRevisionGate(rawInput, input, options) {
+  return input.includeReaderResponseRevisionGate === true
+    || optionObjectEnabled(options.readerResponseRevisionGate)
+    || optionObjectEnabled(options.reader_response_revision_gate);
 }
 
 function disabledForeshadowingPayoffGuard(status = "disabled") {
@@ -184,6 +198,25 @@ function disabledForeshadowingSettlementDiffPreview(status = "disabled") {
   };
 }
 
+function disabledReaderResponseSimulator(status = "disabled") {
+  return {
+    used: false,
+    phase: "29A",
+    version: readerResponseSimulatorVersion,
+    status,
+    read_only: true,
+    preview_only: true,
+    candidate_only: true,
+    no_generation: true,
+    no_auto_persist: true,
+    no_candidate_save: true,
+    no_approval: true,
+    no_canon_update: true,
+    no_active_engine_update: true,
+    warnings: [],
+  };
+}
+
 async function buildForeshadowingCausalGraphContextLazy(payload, options) {
   const { buildForeshadowingCausalGraphContext } = await import("./foreshadowing-causal-graph-service.mjs");
   return buildForeshadowingCausalGraphContext(payload, options);
@@ -269,6 +302,9 @@ function normalizeInput(raw = {}) {
     includeForeshadowingSettlementDiffPreview:
       raw.include_foreshadowing_settlement_diff_preview === true
       || raw.includeForeshadowingSettlementDiffPreview === true,
+    includeReaderResponseRevisionGate:
+      raw.include_reader_response_revision_gate === true
+      || raw.includeReaderResponseRevisionGate === true,
     characterNames: arrayOfText(
       raw.character_names ?? raw.characterNames ?? raw.characters,
       24,
@@ -487,6 +523,9 @@ function baseResult(input, now) {
     foreshadowing_payoff_acceptance_gate: disabledForeshadowingPayoffAcceptanceGate("not_started"),
 
     foreshadowing_settlement_diff_preview: disabledForeshadowingSettlementDiffPreview("not_started"),
+
+    reader_response_simulator: disabledReaderResponseSimulator("not_started"),
+    reader_response_revision_gate: disabledReaderResponseRevisionGate("not_started"),
 
     report: {
       pipeline_name: "full_recursive_writing_pipeline",
@@ -867,6 +906,87 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     return foreshadowingSettlementDiffPreview;
   };
 
+  let readerResponseSimulator = disabledReaderResponseSimulator();
+  let readerResponseRevisionGate = disabledReaderResponseRevisionGate();
+  result.reader_response_simulator = readerResponseSimulator;
+  result.reader_response_revision_gate = readerResponseRevisionGate;
+
+  const refreshReaderResponseRevisionGate = async (candidateTextValue) => {
+    if (!shouldUseReaderResponseRevisionGate(rawInput, input, options)) {
+      readerResponseSimulator = disabledReaderResponseSimulator();
+      readerResponseRevisionGate = disabledReaderResponseRevisionGate();
+    } else {
+      const optionConfig = object(options.readerResponseRevisionGate ?? options.reader_response_revision_gate);
+      const conflictPlan = optionConfig.dramatic_conflict_plan
+        ?? optionConfig.dramaticConflictPlan
+        ?? rawInput.dramatic_conflict_plan
+        ?? rawInput.dramaticConflictPlan
+        ?? dramaticConflictManager.plan
+        ?? dramaticConflictManager;
+
+      readerResponseSimulator = await buildReaderResponseSimulatorReport({
+        task_prompt: input.taskPrompt,
+        generation_context: input.generationContext,
+        retrieval_context: input.retrievalContext,
+        candidate_text: candidateTextValue,
+        dramatic_conflict_plan: conflictPlan,
+        dramatic_conflict_manager: dramaticConflictManager,
+        reader_questions_to_carry_forward:
+          optionConfig.reader_questions_to_carry_forward
+          ?? optionConfig.readerQuestionsToCarryForward
+          ?? rawInput.reader_questions_to_carry_forward
+          ?? rawInput.readerQuestionsToCarryForward,
+      }, {
+        ...options,
+        dramaticConflictManager,
+        candidateText: candidateTextValue,
+      });
+
+      readerResponseRevisionGate = buildReaderResponseRevisionGate({
+        task_prompt: input.taskPrompt,
+        candidate_text: candidateTextValue,
+        reader_response_simulator: readerResponseSimulator,
+      }, options);
+    }
+
+    result.reader_response_simulator = readerResponseSimulator;
+    result.reader_response_revision_gate = readerResponseRevisionGate;
+
+    if (readerResponseRevisionGate.trace_id && !result.report.trace_ids.includes(readerResponseRevisionGate.trace_id)) {
+      result.report.trace_ids.push(readerResponseRevisionGate.trace_id);
+    }
+
+    result.report.reader_response_simulator_used = readerResponseSimulator.used === true;
+    result.report.reader_response_simulator_status = readerResponseSimulator.status ?? null;
+    result.report.reader_response_revision_gate_used = readerResponseRevisionGate.used === true;
+    result.report.reader_response_revision_gate_status = readerResponseRevisionGate.status ?? null;
+    result.report.reader_response_revision_gate_revision_required = readerResponseRevisionGate.revision_required === true;
+    result.report.reader_response_revision_gate_revision_type = readerResponseRevisionGate.revision_type ?? null;
+    result.report.reader_response_revision_gate_return_stage = readerResponseRevisionGate.return_stage ?? null;
+    result.report.reader_response_revision_gate_candidate_only = readerResponseRevisionGate.candidate_only !== false;
+    result.report.reader_response_revision_gate_no_auto_persist = readerResponseRevisionGate.no_auto_persist !== false;
+    result.report.reader_response_revision_gate_no_canon_update = readerResponseRevisionGate.no_canon_update !== false;
+    result.report.reader_response_revision_gate_no_active_engine_update = readerResponseRevisionGate.no_active_engine_update !== false;
+
+    return readerResponseRevisionGate;
+  };
+
+  const applyReaderResponseRevisionGate = (polisherResult) => {
+    if (readerResponseRevisionGate.revision_required !== true) return polisherResult;
+    return {
+      ...polisherResult,
+      needs_structural_revision: true,
+      suggested_return_stage:
+        readerResponseRevisionGate.return_stage
+        ?? polisherResult.suggested_return_stage
+        ?? "raw_generation",
+      warnings: [
+        ...(polisherResult.warnings ?? []),
+        "reader_response_revision_required",
+      ],
+    };
+  };
+
   let generated;
   try {
     generated = await callAdapter(generationAdapter, {
@@ -923,6 +1043,8 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
   foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
   foreshadowingPayoffRepairPlanner = await refreshForeshadowingPayoffRepairPlanner(draft);
   polisher = applyForeshadowingPayoffRepairGate(polisher);
+  readerResponseRevisionGate = await refreshReaderResponseRevisionGate(polisher.polished_text || draft);
+  polisher = applyReaderResponseRevisionGate(polisher);
   let finalSource = "backend_generation";
   result.final_polisher = {
     status: polisher.status,
@@ -955,6 +1077,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         suggested_return_stage: polisher.suggested_return_stage,
         polisher,
         foreshadowing_payoff_repair_planner: foreshadowingPayoffRepairPlanner,
+        reader_response_revision_gate: readerResponseRevisionGate,
       });
       const revisionPlan = buildRevisionPlan(critique, recursiveRevisionPolicy);
       let revised;
@@ -967,8 +1090,11 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           draft_text: draft,
           critique,
           recursive_revision_policy: recursiveRevisionPolicy,
+          reader_response_simulator: readerResponseSimulator,
+          reader_response_revision_gate: readerResponseRevisionGate,
           revision_plan: {
             ...revisionPlan,
+            reader_response_revision_gate: readerResponseRevisionGate,
             foreshadowing_payoff_repair: foreshadowingPayoffRepairPlanner.revision_plan_patch,
           },
           writing_context: writingContext,
@@ -996,7 +1122,12 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         input_hash: sha256(draft),
         critique,
         recursive_revision_policy: recursiveRevisionPolicy,
-        revision_plan: revisionPlan,
+        revision_plan: {
+          ...revisionPlan,
+          reader_response_revision_gate: readerResponseRevisionGate,
+        },
+        reader_response_simulator: readerResponseSimulator,
+        reader_response_revision_gate: readerResponseRevisionGate,
         revised_draft_hash: revised.text ? sha256(revised.text) : "",
         revised_draft_chars: revised.text.length,
         final_polisher_status: "not_run",
@@ -1021,6 +1152,8 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
       foreshadowingPayoffGuard = await refreshForeshadowingPayoffGuard(draft, providerForeshadowingPayoffs);
       foreshadowingPayoffRepairPlanner = await refreshForeshadowingPayoffRepairPlanner(draft);
       polisher = applyForeshadowingPayoffRepairGate(polisher);
+      readerResponseRevisionGate = await refreshReaderResponseRevisionGate(polisher.polished_text || draft);
+      polisher = applyReaderResponseRevisionGate(polisher);
       roundReport.final_polisher_status = polisher.status;
       roundReport.needs_structural_revision = polisher.needs_structural_revision === true;
       roundReport.accepted = polisher.status === "completed"
@@ -1189,6 +1322,8 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         foreshadowing_payoff_repair_planner: result.foreshadowing_payoff_repair_planner,
         foreshadowing_payoff_acceptance_gate: result.foreshadowing_payoff_acceptance_gate,
         foreshadowing_settlement_diff_preview: result.foreshadowing_settlement_diff_preview,
+        reader_response_simulator: result.reader_response_simulator,
+        reader_response_revision_gate: result.reader_response_revision_gate,
         report: result.report,
       },
     }, options);

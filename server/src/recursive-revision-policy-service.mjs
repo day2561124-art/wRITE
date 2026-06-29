@@ -28,6 +28,10 @@ function normalizeInput(raw = {}) {
     raw.foreshadowing_payoff_repair_planner
       ?? raw.foreshadowingPayoffRepairPlanner,
   );
+  const readerResponseRevisionGate = object(
+    raw.reader_response_revision_gate
+      ?? raw.readerResponseRevisionGate,
+  );
   const round = Number.isInteger(raw.round) && raw.round > 0 ? raw.round : 1;
   const maxRevisionRounds = Number.isInteger(raw.max_revision_rounds)
     ? raw.max_revision_rounds
@@ -37,11 +41,14 @@ function normalizeInput(raw = {}) {
     critique,
     polisher,
     repairPlanner,
+    readerResponseRevisionGate,
     round,
     maxRevisionRounds,
     suggestedReturnStage: text(
       raw.suggested_return_stage
         ?? raw.suggestedReturnStage
+        ?? readerResponseRevisionGate.return_stage
+        ?? readerResponseRevisionGate.suggested_return_stage
         ?? critique.suggested_return_stage
         ?? polisher.suggested_return_stage,
     ),
@@ -56,6 +63,12 @@ function classifyRevisionType(input) {
 
   if (input.repairPlanner.revision_required === true) {
     return "foreshadowing_payoff_repair";
+  }
+
+  if (input.readerResponseRevisionGate.revision_required === true) {
+    const gateRevisionType = text(input.readerResponseRevisionGate.revision_type);
+    if (gateRevisionType && gateRevisionType !== "none") return gateRevisionType;
+    return "structural_scene_rewrite";
   }
 
   if (
@@ -128,8 +141,9 @@ function returnStageFor(revisionType, suggestedReturnStage) {
   }[revisionType] ?? "raw_generation";
 }
 
-function targetsFor(revisionType, critique, repairPlanner) {
+function targetsFor(revisionType, critique, repairPlanner, readerResponseRevisionGate = {}) {
   const base = [];
+
   if (revisionType === "foreshadowing_payoff_repair") {
     base.push(
       "repair unpaid foreshadowing debts",
@@ -140,6 +154,16 @@ function targetsFor(revisionType, critique, repairPlanner) {
       if (typeof task === "string") base.push(task);
       else if (task && typeof task === "object") base.push(text(task.summary ?? task.label ?? task.key));
     }
+  }
+
+  for (const target of array(readerResponseRevisionGate.rewrite_targets)) {
+    base.push(text(target));
+  }
+
+  for (const trigger of array(readerResponseRevisionGate.triggers)) {
+    const normalizedTrigger = object(trigger);
+    const key = text(normalizedTrigger.key ?? normalizedTrigger.reason);
+    if (key) base.push("address reader response trigger: " + key);
   }
 
   if (revisionType === "conflict_reframe") {
@@ -194,10 +218,11 @@ function targetsFor(revisionType, critique, repairPlanner) {
   return unique(base);
 }
 
-function revisionRequiredFor(revisionType, critique, polisher, repairPlanner) {
+function revisionRequiredFor(revisionType, critique, polisher, repairPlanner, readerResponseRevisionGate) {
   return revisionType !== "none"
     || polisher.needs_structural_revision === true
     || repairPlanner.revision_required === true
+    || readerResponseRevisionGate.revision_required === true
     || array(critique.structural_reasons).length > 0
     || array(critique.risk_flags).length > 0;
 }
@@ -210,6 +235,7 @@ export function buildRecursiveRevisionPolicy(raw = {}) {
     input.critique,
     input.polisher,
     input.repairPlanner,
+    input.readerResponseRevisionGate,
   );
   const returnStage = returnStageFor(revisionType, input.suggestedReturnStage);
   const retryAllowed = input.round < input.maxRevisionRounds;
@@ -240,7 +266,23 @@ export function buildRecursiveRevisionPolicy(raw = {}) {
     revision_required: revisionRequired,
     revision_type: revisionType,
     return_stage: returnStage,
-    rewrite_targets: targetsFor(revisionType, input.critique, input.repairPlanner),
+    reader_response_revision_gate: input.readerResponseRevisionGate.used === true ? {
+      used: true,
+      phase: input.readerResponseRevisionGate.phase ?? "34C",
+      version: input.readerResponseRevisionGate.version ?? null,
+      status: input.readerResponseRevisionGate.status ?? null,
+      revision_required: input.readerResponseRevisionGate.revision_required === true,
+      revision_type: input.readerResponseRevisionGate.revision_type ?? null,
+      return_stage: input.readerResponseRevisionGate.return_stage ?? null,
+      triggers: array(input.readerResponseRevisionGate.triggers),
+      trace_id: input.readerResponseRevisionGate.trace_id ?? null,
+    } : null,
+    rewrite_targets: targetsFor(
+      revisionType,
+      input.critique,
+      input.repairPlanner,
+      input.readerResponseRevisionGate,
+    ),
     preserve_constraints: [
       "preserve_canon_facts",
       "preserve_candidate_only_scope",
