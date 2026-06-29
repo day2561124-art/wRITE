@@ -59,6 +59,13 @@ function summarizeFullNeuralSurface(result = {}) {
       pipeline_stage: existingSummary.pipeline_stage ?? null,
       context_bundle_id: existingSummary.context_bundle_id ?? result?.source_bundle_id ?? null,
       writing_pipeline_complete: existingSummary.writing_pipeline_complete ?? null,
+      acceptance_evidence_packet_bridge_surface_used:
+        existingSummary.acceptance_evidence_packet_bridge_surface_used
+        ?? result?.full_pipeline_acceptance_evidence_packet_bridge_surface?.used === true,
+      acceptance_evidence_final_status:
+        existingSummary.acceptance_evidence_final_status
+        ?? result?.full_pipeline_acceptance_evidence_packet_bridge_surface?.acceptance_summary?.final_status
+        ?? null,
       candidate_only: existingSummary.candidate_only ?? true,
       active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
       canon_update_allowed: existingSummary.canon_update_allowed ?? false,

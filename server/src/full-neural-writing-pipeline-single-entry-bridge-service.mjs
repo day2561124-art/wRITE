@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
 import { runFullRecursiveWritingPipeline } from "./full-recursive-writing-pipeline-service.mjs";
 import { buildReaderResponseSimulatorReport } from "./reader-response-simulator-service.mjs";
+import {
+  buildFullPipelineAcceptanceEvidencePacketBridgeSurface,
+  disabledFullPipelineAcceptanceEvidencePacketBridgeSurface,
+} from "./full-pipeline-acceptance-evidence-packet-bridge-surface-service.mjs";
 
 export const fullNeuralWritingPipelineSingleEntryBridgeVersion =
   "full_neural_writing_pipeline_single_entry_bridge_v1";
@@ -144,6 +148,12 @@ function normalizeInput(raw = {}) {
       "include_reader_response_simulator",
       "includeReaderResponseSimulator",
       true,
+    ),
+    includeReaderResponseRevisionGate: bool(
+      raw,
+      "include_reader_response_revision_gate",
+      "includeReaderResponseRevisionGate",
+      false,
     ),
     includeAestheticMemoryContext: bool(
       raw,
@@ -302,6 +312,11 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     include_foreshadowing_payoff_repair_planner: input.includeForeshadowingPayoffRepairPlanner,
     include_foreshadowing_payoff_acceptance_gate: input.includeForeshadowingPayoffAcceptanceGate,
     include_foreshadowing_settlement_diff_preview: input.includeForeshadowingSettlementDiffPreview,
+    include_reader_response_revision_gate: input.includeReaderResponseRevisionGate,
+    dramatic_conflict_plan: Object.keys(input.readerResponseConflictPlan).length
+      ? input.readerResponseConflictPlan
+      : (rawInput.dramatic_conflict_plan ?? rawInput.dramaticConflictPlan),
+    reader_questions_to_carry_forward: input.readerQuestionsToCarryForward,
     output_mode: "chat_text",
   }, options);
 
@@ -356,12 +371,29 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     );
   }
 
+  const evidencePacketBridgeSurface = pipeline.full_pipeline_acceptance_evidence_packet
+    ? buildFullPipelineAcceptanceEvidencePacketBridgeSurface({
+      full_pipeline_acceptance_evidence_packet: pipeline.full_pipeline_acceptance_evidence_packet,
+      pipeline_result: pipeline,
+    }, {
+      bridge_surface: "chatgpt_bridge_single_entry",
+    })
+    : disabledFullPipelineAcceptanceEvidencePacketBridgeSurface("source_packet_unavailable");
+
   const workflowSteps = buildWorkflowSteps(
     pipeline,
     readerResponse,
     proofingContext,
     aestheticMemoryContext,
   );
+
+  workflowSteps.splice(6, 0, {
+    key: "acceptance_evidence_packet_bridge_surface",
+    label: "Surface acceptance evidence packet",
+    completed: evidencePacketBridgeSurface.used === true,
+    status: evidencePacketBridgeSurface.status,
+    final_status: evidencePacketBridgeSurface.acceptance_summary?.final_status ?? null,
+  });
 
   const finalCandidateHash = pipeline.final_candidate_hash || (
     pipeline.final_candidate_text
@@ -418,6 +450,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       foreshadowing_payoff_repair_planner: pipeline.foreshadowing_payoff_repair_planner?.used === true,
       foreshadowing_payoff_acceptance_gate: pipeline.foreshadowing_payoff_acceptance_gate?.used === true,
       reader_response_simulator: readerResponse.used === true,
+      full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface.used === true,
       aesthetic_memory_context: aestheticMemoryContext.used === true,
       final_polisher: pipeline.final_polisher?.status === "completed",
       candidate_save_bridge: pipeline.candidate_created === true || input.saveCandidate === false,
@@ -425,6 +458,8 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     },
     aesthetic_memory_context: aestheticMemoryContext,
     reader_response_simulator: readerResponse,
+    full_pipeline_acceptance_evidence_packet: pipeline.full_pipeline_acceptance_evidence_packet ?? null,
+    full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface,
     proofing_context: proofingContext,
     pipeline_result: pipeline,
     full_neural_orchestration_summary: {
@@ -433,6 +468,8 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       pipeline_stage: pipeline.pipeline_stage,
       context_bundle_id: pipeline.report?.trace_ids?.[0] ?? null,
       writing_pipeline_complete: pipeline.status === "completed",
+      acceptance_evidence_packet_bridge_surface_used: evidencePacketBridgeSurface.used === true,
+      acceptance_evidence_final_status: evidencePacketBridgeSurface.acceptance_summary?.final_status ?? null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
