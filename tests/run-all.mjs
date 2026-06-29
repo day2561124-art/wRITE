@@ -137,7 +137,14 @@ const steps = [
   "tests/phase33/phase33g-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist.test.mjs",
   "tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs",
   "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs"]],
-  "tests/phase33/phase33j-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure-readiness.test.mjs",
+  [
+    "
+Phase 33J aesthetic memory context builder final closure readiness
+",
+    ["
+tests/phase33/phase33j-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure-readiness.test.mjs
+"],
+  ],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
