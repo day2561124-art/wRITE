@@ -26,7 +26,7 @@ const PHASE_33A_DETERMINISTIC_DIGEST =
   'sha256:8643ab81616d762b73452c6b3b94732e93539cc2ca15caeff1b7bc6056cfceb7';
 
 const PHASE_33B_BRIDGE_PREVIEW_DIGEST =
-  'sha256:3eaaf69f6c18ed3ddb14a9f8729d028f1bb8078dfc079a921ad7a65d25e42867';
+  'sha256:925edf8aa3776b69589ae8d22a8121aa5c7f5dbe09b8d02770dd03121ebf75d9';
 
 const FORBIDDEN_WRITE_INTENTS = [
   'save_settlement_context',
@@ -249,3 +249,4 @@ test('Phase33B bridge preview is deterministic and registered in run-all', () =>
     'Phase33B test must be registered in tests/run-all.mjs',
   );
 });
+

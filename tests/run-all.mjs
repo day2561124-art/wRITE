@@ -135,7 +135,8 @@ const steps = [
   "tests/phase33/phase33e-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-smoke.test.mjs",
   "tests/phase33/phase33f-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure.test.mjs",
   "tests/phase33/phase33g-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist.test.mjs",
-  "tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs"]],
+  "tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs",
+  "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -257,6 +258,7 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+
 
 
 
