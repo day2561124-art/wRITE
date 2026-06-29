@@ -46,6 +46,9 @@ import {
 import {
   runVisualLibraryMcpReadonlyToolPreview,
 } from "./visual-library-mcp-readonly-tool-service.mjs";
+import {
+  runFullNeuralWritingPipelineSingleEntryBridge,
+} from "./full-neural-writing-pipeline-single-entry-bridge-service.mjs";
 
 function summarizeFullNeuralSurface(result = {}) {
   const existingSummary = result?.full_neural_orchestration_summary ?? null;
@@ -253,6 +256,18 @@ export const chatgpt_bridge_run_full_recursive_writing_pipeline = tool(
   }] : [],
 );
 
+export const chatgpt_bridge_run_full_neural_writing_pipeline = tool(
+  "chatgpt_bridge_run_full_neural_writing_pipeline",
+  "write_low_risk",
+  runFullNeuralWritingPipelineSingleEntryBridge,
+  (result) => result.candidate_created ? [{
+    label: "writing_candidate",
+    target_id: result.candidate_id,
+    canon_status: "candidate_only",
+    full_neural_single_entry_bridge_used: true,
+    proofing_context_built: result.proofing_context?.built === true,
+  }] : [],
+);
 export const chatgpt_bridge_build_proofing_context = tool(
   "chatgpt_bridge_build_proofing_context",
   "write_low_risk",
