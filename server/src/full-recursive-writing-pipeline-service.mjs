@@ -11,6 +11,9 @@ import {
   buildRevisionAdapterFromProvider,
   resolveBackendGenerationProvider,
 } from "./backend-generation-provider-service.mjs";
+import {
+  buildRecursiveRevisionPolicy,
+} from "./recursive-revision-policy-service.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
@@ -357,7 +360,7 @@ function buildCritique(polisher) {
   };
 }
 
-function buildRevisionPlan(critique) {
+function buildRevisionPlan(critique, recursiveRevisionPolicy = null) {
   return {
     preserve_canon_facts: true,
     preserve_character_state: true,
@@ -370,6 +373,13 @@ function buildRevisionPlan(critique) {
     strengthen_ending_event_hook: critique.weak_ending_hook || critique.pretty_but_empty_ending,
     keep_dialogue_natural: true,
     avoid_administrative_prose: true,
+    recursive_revision_policy: recursiveRevisionPolicy,
+    revision_type: recursiveRevisionPolicy?.revision_type ?? null,
+    return_stage: recursiveRevisionPolicy?.return_stage ?? critique.suggested_return_stage ?? null,
+    rewrite_targets: recursiveRevisionPolicy?.rewrite_targets ?? [],
+    preserve_constraints: recursiveRevisionPolicy?.preserve_constraints ?? [],
+    stop_conditions: recursiveRevisionPolicy?.stop_conditions ?? [],
+    escalation_reason: recursiveRevisionPolicy?.escalation_reason ?? null,
   };
 }
 
@@ -938,7 +948,15 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
     }
     for (let round = 1; round <= input.maxRevisionRounds; round += 1) {
       const critique = buildCritique(polisher);
-      const revisionPlan = buildRevisionPlan(critique);
+      const recursiveRevisionPolicy = buildRecursiveRevisionPolicy({
+        critique,
+        round,
+        max_revision_rounds: input.maxRevisionRounds,
+        suggested_return_stage: polisher.suggested_return_stage,
+        polisher,
+        foreshadowing_payoff_repair_planner: foreshadowingPayoffRepairPlanner,
+      });
+      const revisionPlan = buildRevisionPlan(critique, recursiveRevisionPolicy);
       let revised;
       try {
         revised = await callAdapter(revisionAdapter, {
@@ -948,6 +966,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
           retrieval_context: input.retrievalContext,
           draft_text: draft,
           critique,
+          recursive_revision_policy: recursiveRevisionPolicy,
           revision_plan: {
             ...revisionPlan,
             foreshadowing_payoff_repair: foreshadowingPayoffRepairPlanner.revision_plan_patch,
@@ -976,6 +995,7 @@ export async function runFullRecursiveWritingPipeline(rawInput = {}, options = {
         round,
         input_hash: sha256(draft),
         critique,
+        recursive_revision_policy: recursiveRevisionPolicy,
         revision_plan: revisionPlan,
         revised_draft_hash: revised.text ? sha256(revised.text) : "",
         revised_draft_chars: revised.text.length,
