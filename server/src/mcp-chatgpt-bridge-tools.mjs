@@ -101,6 +101,22 @@ function summarizeFullNeuralSurface(result = {}) {
         ?? (result?.final_response_for_chat?.used === true
           ? result.final_response_for_chat.body_hash
           : null),
+      final_response_handoff_used:
+        existingSummary.final_response_handoff_used
+        ?? result?.final_response_handoff_for_chat?.used === true,
+      final_response_handoff_valid:
+        existingSummary.final_response_handoff_valid
+        ?? result?.final_response_handoff_for_chat?.contract_valid === true,
+      final_response_handoff_kind:
+        existingSummary.final_response_handoff_kind
+        ?? (result?.final_response_handoff_for_chat?.used === true
+          ? result.final_response_handoff_for_chat.response_kind
+          : null),
+      final_response_handoff_body_hash:
+        existingSummary.final_response_handoff_body_hash
+        ?? (result?.final_response_handoff_for_chat?.used === true
+          ? result.final_response_handoff_for_chat.body_hash
+          : null),
       candidate_only: existingSummary.candidate_only ?? true,
       active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
       canon_update_allowed: existingSummary.canon_update_allowed ?? false,
@@ -125,6 +141,15 @@ function summarizeFullNeuralSurface(result = {}) {
       final_response_body_hash: result?.final_response_for_chat?.used === true
         ? result.final_response_for_chat.body_hash
         : null,
+      final_response_handoff_used: result?.final_response_handoff_for_chat?.used === true,
+      final_response_handoff_valid:
+        result?.final_response_handoff_for_chat?.contract_valid === true,
+      final_response_handoff_kind: result?.final_response_handoff_for_chat?.used === true
+        ? result.final_response_handoff_for_chat.response_kind
+        : null,
+      final_response_handoff_body_hash: result?.final_response_handoff_for_chat?.used === true
+        ? result.final_response_handoff_for_chat.body_hash
+        : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
@@ -143,6 +168,15 @@ function summarizeFullNeuralSurface(result = {}) {
       : null,
     final_response_body_hash: result?.final_response_for_chat?.used === true
       ? result.final_response_for_chat.body_hash
+      : null,
+    final_response_handoff_used: result?.final_response_handoff_for_chat?.used === true,
+    final_response_handoff_valid:
+      result?.final_response_handoff_for_chat?.contract_valid === true,
+    final_response_handoff_kind: result?.final_response_handoff_for_chat?.used === true
+      ? result.final_response_handoff_for_chat.response_kind
+      : null,
+    final_response_handoff_body_hash: result?.final_response_handoff_for_chat?.used === true
+      ? result.final_response_handoff_for_chat.body_hash
       : null,
     candidate_only: report.candidate_only ?? true,
     active_engine_update_allowed: report.active_engine_update_allowed ?? false,

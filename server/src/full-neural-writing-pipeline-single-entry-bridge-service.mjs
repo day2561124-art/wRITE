@@ -520,6 +520,154 @@ function buildFinalResponseForChat(successOutputForChat, failureOutputForChat) {
   };
 }
 
+
+function sha256Text(value) {
+  return createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
+function invalidFinalResponseHandoffForChat(validationErrors, finalResponseForChat = null) {
+  const errors = Array.isArray(validationErrors)
+    ? validationErrors.filter(Boolean)
+    : [String(validationErrors ?? "unknown_contract_error")];
+  const reason = errors.join(",");
+  const body =
+    "Final response handoff blocked: " + reason
+    + ". Operator action: inspect final_response_for_chat contract, then rerun or repair the ChatGPT bridge pipeline.";
+
+  return {
+    used: true,
+    phase: "34P",
+    surface_kind: "chatgpt_bridge_final_response_handoff_contract",
+    status: "blocked_contract_invalid",
+    response_kind: "contract_invalid_notice",
+    can_output_to_chat: false,
+    can_emit_response_to_chat: true,
+    chatgpt_must_output_body: true,
+    final_output_source: null,
+    body,
+    body_hash: sha256Text(body),
+    source_surface: "final_response_for_chat",
+    source_response_kind: finalResponseForChat?.response_kind ?? null,
+    source_response_surface: finalResponseForChat?.source_surface ?? null,
+    must_output_body_exactly: true,
+    may_include_extra_explanation: false,
+    may_rewrite: false,
+    may_summarize: false,
+    may_output_story_text: false,
+    may_fallback_to_final_candidate_text: false,
+    may_fallback_to_success_output: false,
+    may_fallback_to_failure_output: false,
+    may_construct_response: false,
+    contract_valid: false,
+    validation_errors: errors,
+    operator_action: "inspect_final_response_for_chat_contract",
+    safety: finalResponseSafetyBoundary(),
+  };
+}
+
+export function buildFinalResponseHandoffForChat(finalResponseForChat) {
+  const errors = [];
+
+  if (finalResponseForChat?.used !== true) {
+    errors.push("final_response_for_chat_used_false_or_missing");
+  }
+
+  const body = typeof finalResponseForChat?.body === "string"
+    ? finalResponseForChat.body
+    : "";
+  const expectedHash = sha256Text(body);
+  const responseKind = finalResponseForChat?.response_kind ?? null;
+
+  if (!body) errors.push("final_response_body_missing");
+  if (finalResponseForChat?.body_hash !== expectedHash) {
+    errors.push("final_response_body_hash_mismatch");
+  }
+
+  if (!["final_candidate_text", "pipeline_failure_notice"].includes(responseKind)) {
+    errors.push("final_response_kind_invalid");
+  }
+
+  if (
+    responseKind === "final_candidate_text"
+    && finalResponseForChat?.source_surface !== "success_output_for_chat"
+  ) {
+    errors.push("final_candidate_text_source_surface_invalid");
+  }
+
+  if (
+    responseKind === "pipeline_failure_notice"
+    && finalResponseForChat?.source_surface !== "failure_output_for_chat"
+  ) {
+    errors.push("pipeline_failure_notice_source_surface_invalid");
+  }
+
+  if (finalResponseForChat?.must_output_body_exactly !== true) {
+    errors.push("must_output_body_exactly_not_true");
+  }
+
+  if (finalResponseForChat?.may_include_extra_explanation !== false) {
+    errors.push("may_include_extra_explanation_not_false");
+  }
+
+  if (finalResponseForChat?.may_rewrite !== false) {
+    errors.push("may_rewrite_not_false");
+  }
+
+  if (finalResponseForChat?.may_summarize !== false) {
+    errors.push("may_summarize_not_false");
+  }
+
+  if (
+    responseKind === "final_candidate_text"
+    && finalResponseForChat?.may_output_story_text !== true
+  ) {
+    errors.push("final_candidate_text_story_output_not_allowed");
+  }
+
+  if (
+    responseKind === "pipeline_failure_notice"
+    && finalResponseForChat?.may_output_story_text !== false
+  ) {
+    errors.push("pipeline_failure_notice_story_output_allowed");
+  }
+
+  if (errors.length) {
+    return invalidFinalResponseHandoffForChat(errors, finalResponseForChat);
+  }
+
+  return {
+    used: true,
+    phase: "34P",
+    surface_kind: "chatgpt_bridge_final_response_handoff_contract",
+    status: responseKind === "final_candidate_text"
+      ? "ready_to_handoff_final_candidate_text"
+      : "ready_to_handoff_pipeline_failure_notice",
+    response_kind: responseKind,
+    can_output_to_chat: finalResponseForChat.can_output_to_chat === true,
+    can_emit_response_to_chat: true,
+    chatgpt_must_output_body: true,
+    final_output_source: "final_response_for_chat.body",
+    body,
+    body_hash: expectedHash,
+    source_surface: "final_response_for_chat",
+    source_response_kind: responseKind,
+    source_response_surface: finalResponseForChat.source_surface,
+    must_output_body_exactly: true,
+    may_include_extra_explanation: false,
+    may_rewrite: false,
+    may_summarize: false,
+    may_output_story_text: responseKind === "final_candidate_text",
+    may_fallback_to_final_candidate_text: false,
+    may_fallback_to_success_output: false,
+    may_fallback_to_failure_output: false,
+    may_construct_response: false,
+    contract_valid: true,
+    validation_errors: [],
+    operator_action: null,
+    safety: finalResponseSafetyBoundary(),
+  };
+}
+
 function buildAestheticMemoryContext(input) {
   const hasPayload = Object.keys(input.aestheticMemoryContext).length > 0;
   return {
@@ -728,6 +876,8 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     failureOutputForChat,
   );
 
+  const finalResponseHandoffForChat = buildFinalResponseHandoffForChat(finalResponseForChat);
+
   const summary = {
     phase: "34A",
     version: fullNeuralWritingPipelineSingleEntryBridgeVersion,
@@ -747,6 +897,10 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     final_response_surface_used: finalResponseForChat.used === true,
     final_response_kind: finalResponseForChat.used === true ? finalResponseForChat.response_kind : null,
     final_response_body_hash: finalResponseForChat.used === true ? finalResponseForChat.body_hash : null,
+    final_response_handoff_used: finalResponseHandoffForChat.used === true,
+    final_response_handoff_valid: finalResponseHandoffForChat.contract_valid === true,
+    final_response_handoff_kind: finalResponseHandoffForChat.used === true ? finalResponseHandoffForChat.response_kind : null,
+    final_response_handoff_body_hash: finalResponseHandoffForChat.used === true ? finalResponseHandoffForChat.body_hash : null,
     active_engine_update_allowed: false,
     canon_update_allowed: false,
   };
@@ -799,6 +953,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     failure_output_for_chat: failureOutputForChat,
     success_output_for_chat: successOutputForChat,
     final_response_for_chat: finalResponseForChat,
+    final_response_handoff_for_chat: finalResponseHandoffForChat,
     proofing_context: proofingContext,
     pipeline_result: pipeline,
     full_neural_orchestration_summary: {
@@ -818,6 +973,10 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       final_response_surface_used: finalResponseForChat.used === true,
       final_response_kind: finalResponseForChat.used === true ? finalResponseForChat.response_kind : null,
       final_response_body_hash: finalResponseForChat.used === true ? finalResponseForChat.body_hash : null,
+      final_response_handoff_used: finalResponseHandoffForChat.used === true,
+      final_response_handoff_valid: finalResponseHandoffForChat.contract_valid === true,
+      final_response_handoff_kind: finalResponseHandoffForChat.used === true ? finalResponseHandoffForChat.response_kind : null,
+      final_response_handoff_body_hash: finalResponseHandoffForChat.used === true ? finalResponseHandoffForChat.body_hash : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
