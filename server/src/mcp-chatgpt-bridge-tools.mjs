@@ -80,12 +80,14 @@ function summarizeFullNeuralSurface(result = {}) {
         ?? result?.success_output_for_chat?.used === true,
       success_output_next_action:
         existingSummary.success_output_next_action
-        ?? result?.success_output_for_chat?.next_action
-        ?? null,
+        ?? (result?.success_output_for_chat?.used === true
+          ? result.success_output_for_chat.next_action
+          : null),
       success_output_final_candidate_hash:
         existingSummary.success_output_final_candidate_hash
-        ?? result?.success_output_for_chat?.final_candidate_hash
-        ?? null,
+        ?? (result?.success_output_for_chat?.used === true
+          ? result.success_output_for_chat.final_candidate_hash
+          : null),
       candidate_only: existingSummary.candidate_only ?? true,
       active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
       canon_update_allowed: existingSummary.canon_update_allowed ?? false,
