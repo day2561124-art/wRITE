@@ -149,6 +149,7 @@ const steps = [
   ["Phase 34J ChatGPT bridge final candidate output contract", ["tests/phase34/phase34j-chatgpt-bridge-final-candidate-output-contract.test.mjs"]],
   ["Phase 34K ChatGPT bridge failure output contract", ["tests/phase34/phase34k-chatgpt-bridge-failure-output-contract.test.mjs"]],
   ["Phase 34L ChatGPT bridge failure readable surface", ["tests/phase34/phase34l-chatgpt-bridge-failure-readable-surface.test.mjs"]],
+  ["Phase 34M ChatGPT bridge success readable surface", ["tests/phase34/phase34m-chatgpt-bridge-success-readable-surface.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

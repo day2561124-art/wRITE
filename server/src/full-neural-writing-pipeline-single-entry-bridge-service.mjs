@@ -320,6 +320,122 @@ function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofi
   };
 }
 
+function buildSuccessOutputForChat(
+  pipeline,
+  evidencePacketBridgeSurface,
+  readerResponse,
+  proofingContext,
+  finalCandidateHash,
+) {
+  const hasFinalCandidate = Boolean(pipeline.final_candidate_text);
+  const action = nextAction(pipeline, proofingContext);
+
+  if (!hasFinalCandidate) {
+    return {
+      used: false,
+      phase: "34M",
+      surface_kind: "chatgpt_bridge_success_output_human_readable_surface",
+      status: "not_available",
+      reason: "final_candidate_text_missing",
+      can_output_to_chat: false,
+      must_output_exact_final_candidate_text: false,
+      next_action: action,
+      warnings: [],
+    };
+  }
+
+  const evidenceAvailable = evidencePacketBridgeSurface?.used === true;
+  const evidenceFinalStatus = evidencePacketBridgeSurface?.acceptance_summary?.final_status ?? null;
+  const accepted = evidencePacketBridgeSurface?.acceptance_summary?.accepted === true;
+  const revisionRoundsAttempted = pipeline.recursive_revision?.rounds_attempted ?? 0;
+  const maxRevisionRounds = pipeline.recursive_revision?.max_revision_rounds ?? null;
+  const finalCandidateSource = pipeline.final_candidate_source ?? null;
+
+  return {
+    used: true,
+    phase: "34M",
+    surface_kind: "chatgpt_bridge_success_output_human_readable_surface",
+    status: action === "output_final_candidate_text_to_chat"
+      ? "ready_to_output_final_candidate_text"
+      : "final_candidate_available_review_required",
+    pipeline_stage: pipeline.pipeline_stage ?? "unknown_stage",
+    stop_reason: pipeline.stop_reason ?? null,
+    next_action: action,
+    can_output_to_chat: true,
+    must_output_exact_final_candidate_text: action === "output_final_candidate_text_to_chat",
+    must_output_exact_final_candidate_text_reason:
+      action === "output_final_candidate_text_to_chat"
+        ? "final_candidate_text_ready_after_full_pipeline_acceptance"
+        : "next_action_requires_review_before_output",
+    final_candidate_text_to_output: pipeline.final_candidate_text,
+    final_candidate_hash: finalCandidateHash,
+    final_candidate_source: finalCandidateSource,
+    final_candidate_length: pipeline.final_candidate_text.length,
+    final_candidate_ready_summary:
+      `Final candidate text is ready from ${finalCandidateSource ?? "unknown_source"} at ${pipeline.pipeline_stage ?? "unknown_stage"}.`,
+    success_summary_for_chat:
+      action === "output_final_candidate_text_to_chat"
+        ? "The full neural writing pipeline produced an accepted final candidate. ChatGPT should output final_candidate_text exactly as provided, without rewriting, summarizing, or saving it as canon."
+        : "The full neural writing pipeline produced final candidate text, but the next action requires review before direct output.",
+    reader_acceptance_summary_for_chat: {
+      reader_response_used: readerResponse.used === true,
+      reader_response_status: readerResponse.status ?? null,
+      accepted,
+      final_status: evidenceFinalStatus,
+      revision_required_initially:
+        evidencePacketBridgeSurface?.acceptance_summary?.revision_required_initially ?? null,
+      revision_required_finally:
+        evidencePacketBridgeSurface?.acceptance_summary?.revision_required_finally ?? null,
+      soft_acceptance_reached:
+        evidencePacketBridgeSurface?.acceptance_summary?.soft_acceptance_reached ?? null,
+    },
+    revision_summary_for_chat: {
+      recursive_revision_used:
+        evidencePacketBridgeSurface?.acceptance_summary?.recursive_revision_used ?? false,
+      revision_rounds_attempted: revisionRoundsAttempted,
+      max_revision_rounds: maxRevisionRounds,
+      final_candidate_source: finalCandidateSource,
+    },
+    evidence_packet_summary_for_chat: {
+      evidence_surface_available: evidenceAvailable,
+      evidence_final_status: evidenceFinalStatus,
+      bridge_surface_status: evidencePacketBridgeSurface?.status ?? null,
+      operator_findings_count: Array.isArray(evidencePacketBridgeSurface?.operator_findings)
+        ? evidencePacketBridgeSurface.operator_findings.length
+        : 0,
+      rewrite_targets_count: Array.isArray(evidencePacketBridgeSurface?.rewrite_targets)
+        ? evidencePacketBridgeSurface.rewrite_targets.length
+        : 0,
+    },
+    candidate_output_contract: {
+      output_field: "final_candidate_text",
+      must_output_exact: action === "output_final_candidate_text_to_chat",
+      may_rewrite: false,
+      may_summarize: false,
+      may_save_candidate: false,
+      may_approve: false,
+      may_adopt: false,
+      may_update_canon: false,
+      may_update_active_engine: false,
+      output_mode: "chat_text",
+      final_candidate_hash: finalCandidateHash,
+      final_candidate_source: finalCandidateSource,
+    },
+    safety: {
+      candidate_only: true,
+      no_candidate_save: true,
+      no_approval: true,
+      no_adoption: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      can_modify_active_engine: false,
+      can_update_canon: false,
+      can_confirm_adoption: false,
+    },
+    warnings: Array.isArray(pipeline.report?.warnings) ? pipeline.report.warnings : [],
+  };
+}
+
 function buildAestheticMemoryContext(input) {
   const hasPayload = Object.keys(input.aestheticMemoryContext).length > 0;
   return {
@@ -515,6 +631,14 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     proofingContext,
   );
 
+  const successOutputForChat = buildSuccessOutputForChat(
+    pipeline,
+    evidencePacketBridgeSurface,
+    readerResponse,
+    proofingContext,
+    finalCandidateHash,
+  );
+
   const summary = {
     phase: "34A",
     version: fullNeuralWritingPipelineSingleEntryBridgeVersion,
@@ -528,6 +652,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     failure_output_surface_used: failureOutputForChat.used === true,
     failure_output_next_action: failureOutputForChat.used === true ? failureOutputForChat.next_action : null,
     failure_output_blocked_stage: failureOutputForChat.used === true ? failureOutputForChat.blocked_stage : null,
+    success_output_surface_used: successOutputForChat.used === true,
+    success_output_next_action: successOutputForChat.used === true ? successOutputForChat.next_action : null,
+    success_output_final_candidate_hash: successOutputForChat.used === true ? successOutputForChat.final_candidate_hash : null,
     active_engine_update_allowed: false,
     canon_update_allowed: false,
   };
@@ -578,6 +705,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     full_pipeline_acceptance_evidence_packet: pipeline.full_pipeline_acceptance_evidence_packet ?? null,
     full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface,
     failure_output_for_chat: failureOutputForChat,
+    success_output_for_chat: successOutputForChat,
     proofing_context: proofingContext,
     pipeline_result: pipeline,
     full_neural_orchestration_summary: {
@@ -591,6 +719,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       failure_output_surface_used: failureOutputForChat.used === true,
       failure_output_next_action: failureOutputForChat.used === true ? failureOutputForChat.next_action : null,
       failure_output_blocked_stage: failureOutputForChat.used === true ? failureOutputForChat.blocked_stage : null,
+      success_output_surface_used: successOutputForChat.used === true,
+      success_output_next_action: successOutputForChat.used === true ? successOutputForChat.next_action : null,
+      success_output_final_candidate_hash: successOutputForChat.used === true ? successOutputForChat.final_candidate_hash : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
