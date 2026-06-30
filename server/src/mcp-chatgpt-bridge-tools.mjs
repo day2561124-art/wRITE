@@ -88,6 +88,19 @@ function summarizeFullNeuralSurface(result = {}) {
         ?? (result?.success_output_for_chat?.used === true
           ? result.success_output_for_chat.final_candidate_hash
           : null),
+      final_response_surface_used:
+        existingSummary.final_response_surface_used
+        ?? result?.final_response_for_chat?.used === true,
+      final_response_kind:
+        existingSummary.final_response_kind
+        ?? (result?.final_response_for_chat?.used === true
+          ? result.final_response_for_chat.response_kind
+          : null),
+      final_response_body_hash:
+        existingSummary.final_response_body_hash
+        ?? (result?.final_response_for_chat?.used === true
+          ? result.final_response_for_chat.body_hash
+          : null),
       candidate_only: existingSummary.candidate_only ?? true,
       active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
       canon_update_allowed: existingSummary.canon_update_allowed ?? false,
@@ -105,6 +118,13 @@ function summarizeFullNeuralSurface(result = {}) {
       pipeline_stage: result?.full_neural_pipeline_stage ?? null,
       context_bundle_id: result?.source_bundle_id ?? null,
       writing_pipeline_complete: null,
+      final_response_surface_used: result?.final_response_for_chat?.used === true,
+      final_response_kind: result?.final_response_for_chat?.used === true
+        ? result.final_response_for_chat.response_kind
+        : null,
+      final_response_body_hash: result?.final_response_for_chat?.used === true
+        ? result.final_response_for_chat.body_hash
+        : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
@@ -117,6 +137,13 @@ function summarizeFullNeuralSurface(result = {}) {
     pipeline_stage: report.pipeline_stage ?? null,
     context_bundle_id: report.context_bundle_id ?? result?.source_bundle_id ?? null,
     writing_pipeline_complete: report.writing_pipeline_complete ?? null,
+    final_response_surface_used: result?.final_response_for_chat?.used === true,
+    final_response_kind: result?.final_response_for_chat?.used === true
+      ? result.final_response_for_chat.response_kind
+      : null,
+    final_response_body_hash: result?.final_response_for_chat?.used === true
+      ? result.final_response_for_chat.body_hash
+      : null,
     candidate_only: report.candidate_only ?? true,
     active_engine_update_allowed: report.active_engine_update_allowed ?? false,
     canon_update_allowed: report.canon_update_allowed ?? false,

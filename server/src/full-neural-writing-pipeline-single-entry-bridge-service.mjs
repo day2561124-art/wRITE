@@ -436,6 +436,90 @@ function buildSuccessOutputForChat(
   };
 }
 
+
+function finalResponseSafetyBoundary() {
+  return {
+    candidate_only: true,
+    no_candidate_save: true,
+    no_approval: true,
+    no_adoption: true,
+    no_canon_update: true,
+    no_active_engine_update: true,
+    can_modify_active_engine: false,
+    can_update_canon: false,
+    can_confirm_adoption: false,
+  };
+}
+
+function buildFinalResponseForChat(successOutputForChat, failureOutputForChat) {
+  if (successOutputForChat?.used === true) {
+    const body = successOutputForChat.final_candidate_text_to_output ?? "";
+    const bodyHash = successOutputForChat.final_candidate_hash || (
+      body ? createHash("sha256").update(body).digest("hex") : ""
+    );
+
+    return {
+      used: true,
+      phase: "34O",
+      surface_kind: "chatgpt_bridge_final_response_renderer_contract",
+      response_kind: "final_candidate_text",
+      can_output_to_chat: true,
+      body,
+      body_hash: bodyHash,
+      source_surface: "success_output_for_chat",
+      must_output_body_exactly: true,
+      may_include_extra_explanation: false,
+      may_rewrite: false,
+      may_summarize: false,
+      may_output_story_text: true,
+      safety: finalResponseSafetyBoundary(),
+    };
+  }
+
+  if (failureOutputForChat?.used === true) {
+    const body = [
+      failureOutputForChat.failure_summary_for_chat,
+      failureOutputForChat.recommended_operator_action
+        ? "Recommended operator action: " + failureOutputForChat.recommended_operator_action
+        : "",
+    ].filter(Boolean).join("\n\n");
+
+    return {
+      used: true,
+      phase: "34O",
+      surface_kind: "chatgpt_bridge_final_response_renderer_contract",
+      response_kind: "pipeline_failure_notice",
+      can_output_to_chat: false,
+      body,
+      body_hash: body ? createHash("sha256").update(body).digest("hex") : "",
+      source_surface: "failure_output_for_chat",
+      must_output_body_exactly: true,
+      may_include_extra_explanation: false,
+      may_rewrite: false,
+      may_summarize: false,
+      may_output_story_text: false,
+      safety: finalResponseSafetyBoundary(),
+    };
+  }
+
+  return {
+    used: false,
+    phase: "34O",
+    surface_kind: "chatgpt_bridge_final_response_renderer_contract",
+    response_kind: "unavailable",
+    can_output_to_chat: false,
+    body: "",
+    body_hash: "",
+    source_surface: null,
+    must_output_body_exactly: false,
+    may_include_extra_explanation: false,
+    may_rewrite: false,
+    may_summarize: false,
+    may_output_story_text: false,
+    safety: finalResponseSafetyBoundary(),
+  };
+}
+
 function buildAestheticMemoryContext(input) {
   const hasPayload = Object.keys(input.aestheticMemoryContext).length > 0;
   return {
@@ -639,6 +723,11 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     finalCandidateHash,
   );
 
+  const finalResponseForChat = buildFinalResponseForChat(
+    successOutputForChat,
+    failureOutputForChat,
+  );
+
   const summary = {
     phase: "34A",
     version: fullNeuralWritingPipelineSingleEntryBridgeVersion,
@@ -655,6 +744,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     success_output_surface_used: successOutputForChat.used === true,
     success_output_next_action: successOutputForChat.used === true ? successOutputForChat.next_action : null,
     success_output_final_candidate_hash: successOutputForChat.used === true ? successOutputForChat.final_candidate_hash : null,
+    final_response_surface_used: finalResponseForChat.used === true,
+    final_response_kind: finalResponseForChat.used === true ? finalResponseForChat.response_kind : null,
+    final_response_body_hash: finalResponseForChat.used === true ? finalResponseForChat.body_hash : null,
     active_engine_update_allowed: false,
     canon_update_allowed: false,
   };
@@ -706,6 +798,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface,
     failure_output_for_chat: failureOutputForChat,
     success_output_for_chat: successOutputForChat,
+    final_response_for_chat: finalResponseForChat,
     proofing_context: proofingContext,
     pipeline_result: pipeline,
     full_neural_orchestration_summary: {
@@ -722,6 +815,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       success_output_surface_used: successOutputForChat.used === true,
       success_output_next_action: successOutputForChat.used === true ? successOutputForChat.next_action : null,
       success_output_final_candidate_hash: successOutputForChat.used === true ? successOutputForChat.final_candidate_hash : null,
+      final_response_surface_used: finalResponseForChat.used === true,
+      final_response_kind: finalResponseForChat.used === true ? finalResponseForChat.response_kind : null,
+      final_response_body_hash: finalResponseForChat.used === true ? finalResponseForChat.body_hash : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
