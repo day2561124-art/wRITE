@@ -117,6 +117,27 @@ function summarizeFullNeuralSurface(result = {}) {
         ?? (result?.final_response_handoff_for_chat?.used === true
           ? result.final_response_handoff_for_chat.body_hash
           : null),
+      extracted_chatgpt_final_output_used:
+        existingSummary.extracted_chatgpt_final_output_used
+        ?? result?.extracted_chatgpt_final_output?.used === true,
+      extracted_chatgpt_final_output_valid:
+        existingSummary.extracted_chatgpt_final_output_valid
+        ?? result?.extracted_chatgpt_final_output?.extraction_contract_valid === true,
+      extracted_chatgpt_final_output_kind:
+        existingSummary.extracted_chatgpt_final_output_kind
+        ?? (result?.extracted_chatgpt_final_output?.used === true
+          ? result.extracted_chatgpt_final_output.response_kind
+          : null),
+      extracted_chatgpt_final_output_hash:
+        existingSummary.extracted_chatgpt_final_output_hash
+        ?? (result?.extracted_chatgpt_final_output?.used === true
+          ? result.extracted_chatgpt_final_output.output_hash
+          : null),
+      extracted_chatgpt_final_output_source:
+        existingSummary.extracted_chatgpt_final_output_source
+        ?? (result?.extracted_chatgpt_final_output?.used === true
+          ? result.extracted_chatgpt_final_output.output_source
+          : null),
       candidate_only: existingSummary.candidate_only ?? true,
       active_engine_update_allowed: existingSummary.active_engine_update_allowed ?? false,
       canon_update_allowed: existingSummary.canon_update_allowed ?? false,
@@ -150,6 +171,18 @@ function summarizeFullNeuralSurface(result = {}) {
       final_response_handoff_body_hash: result?.final_response_handoff_for_chat?.used === true
         ? result.final_response_handoff_for_chat.body_hash
         : null,
+      extracted_chatgpt_final_output_used: result?.extracted_chatgpt_final_output?.used === true,
+      extracted_chatgpt_final_output_valid:
+        result?.extracted_chatgpt_final_output?.extraction_contract_valid === true,
+      extracted_chatgpt_final_output_kind: result?.extracted_chatgpt_final_output?.used === true
+        ? result.extracted_chatgpt_final_output.response_kind
+        : null,
+      extracted_chatgpt_final_output_hash: result?.extracted_chatgpt_final_output?.used === true
+        ? result.extracted_chatgpt_final_output.output_hash
+        : null,
+      extracted_chatgpt_final_output_source: result?.extracted_chatgpt_final_output?.used === true
+        ? result.extracted_chatgpt_final_output.output_source
+        : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
@@ -177,6 +210,18 @@ function summarizeFullNeuralSurface(result = {}) {
       : null,
     final_response_handoff_body_hash: result?.final_response_handoff_for_chat?.used === true
       ? result.final_response_handoff_for_chat.body_hash
+      : null,
+    extracted_chatgpt_final_output_used: result?.extracted_chatgpt_final_output?.used === true,
+    extracted_chatgpt_final_output_valid:
+      result?.extracted_chatgpt_final_output?.extraction_contract_valid === true,
+    extracted_chatgpt_final_output_kind: result?.extracted_chatgpt_final_output?.used === true
+      ? result.extracted_chatgpt_final_output.response_kind
+      : null,
+    extracted_chatgpt_final_output_hash: result?.extracted_chatgpt_final_output?.used === true
+      ? result.extracted_chatgpt_final_output.output_hash
+      : null,
+    extracted_chatgpt_final_output_source: result?.extracted_chatgpt_final_output?.used === true
+      ? result.extracted_chatgpt_final_output.output_source
       : null,
     candidate_only: report.candidate_only ?? true,
     active_engine_update_allowed: report.active_engine_update_allowed ?? false,
