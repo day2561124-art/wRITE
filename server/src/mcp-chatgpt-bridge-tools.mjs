@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   buildChatgptBridgeProofingContext,
   buildChatgptBridgeSettlementContext,
@@ -240,14 +241,168 @@ function withFullNeuralSurface(result = {}) {
   };
 }
 
+
+function sha256(value) {
+  return createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
+const chatgptFinalOutputToolSurfaceKind = "chatgpt_bridge_final_output_tool_surface_contract";
+const chatgptFinalOutputToolSurfaceSource = "result.extracted_chatgpt_final_output.output_text";
+
+function buildChatgptFinalOutputLockFields() {
+  return {
+    must_emit_exactly: true,
+    no_extra_text: true,
+    no_fallback: true,
+    may_rewrite: false,
+    may_summarize: false,
+    may_include_extra_explanation: false,
+    may_fallback_to_final_candidate_text: false,
+    may_fallback_to_success_output: false,
+    may_fallback_to_failure_output: false,
+    may_fallback_to_final_response: false,
+    may_fallback_to_final_response_handoff: false,
+    may_fallback_to_extracted_chatgpt_final_output: false,
+    may_fallback_to_extracted_output_recomposition: false,
+    may_construct_response: false,
+  };
+}
+
+function buildChatgptFinalOutputSafety(sourceSafety = {}) {
+  return {
+    ...chatgptBridgeSafety,
+    ...(sourceSafety ?? {}),
+    candidate_only: true,
+    no_candidate_save: true,
+    no_approval: true,
+    no_adoption: true,
+    no_canon_update: true,
+    no_active_engine_update: true,
+    can_modify_active_engine: false,
+    can_update_canon: false,
+    can_confirm_adoption: false,
+  };
+}
+
+function buildUnusedChatgptFinalOutputToolSurface() {
+  return {
+    used: false,
+    phase: "34R",
+    surface_kind: chatgptFinalOutputToolSurfaceKind,
+    reason: "not_a_chatgpt_final_output_tool_result",
+  };
+}
+
+export function buildChatgptFinalOutputToolSurface(surfacedResult = {}) {
+  const extracted = surfacedResult?.extracted_chatgpt_final_output ?? null;
+  const validationErrors = [];
+
+  if (extracted?.used !== true) {
+    validationErrors.push("extracted_chatgpt_final_output_used_false_or_missing");
+  }
+
+  if (extracted?.extraction_contract_valid !== true) {
+    validationErrors.push("extracted_chatgpt_final_output_contract_invalid");
+  }
+
+  if (typeof extracted?.output_text !== "string") {
+    validationErrors.push("output_text_missing_or_not_string");
+  }
+
+  if (typeof extracted?.output_hash !== "string" || extracted.output_hash.length === 0) {
+    validationErrors.push("output_hash_missing");
+  } else if (typeof extracted?.output_text === "string" && extracted.output_hash !== sha256(extracted.output_text)) {
+    validationErrors.push("output_hash_mismatch");
+  }
+
+  if (extracted?.must_emit_exactly !== true) {
+    validationErrors.push("extracted_must_emit_exactly_not_true");
+  }
+
+  if (extracted?.no_extra_text !== true) {
+    validationErrors.push("extracted_no_extra_text_not_true");
+  }
+
+  if (extracted?.no_fallback !== true) {
+    validationErrors.push("extracted_no_fallback_not_true");
+  }
+
+  if (validationErrors.length > 0) {
+    const outputText = [
+      "ChatGPT bridge final output tool surface contract invalid.",
+      "blocked_stage: chatgpt_final_output",
+      "operator_action: inspect_result_extracted_chatgpt_final_output_contract",
+    ].join("\n");
+
+    return {
+      used: true,
+      phase: "34R",
+      surface_kind: chatgptFinalOutputToolSurfaceKind,
+      contract_valid: false,
+      validation_errors: validationErrors,
+      status: "ready_to_emit_tool_surface_contract_invalid_notice",
+      response_kind: "tool_surface_contract_invalid_notice",
+      can_emit_response_to_chat: true,
+      can_output_to_chat: false,
+      may_output_story_text: false,
+      output_text: outputText,
+      output_hash: sha256(outputText),
+      output_source: "chatgpt_final_output.tool_surface_contract_invalid_notice",
+      final_output_source: "chatgpt_final_output.tool_surface_contract_invalid_notice",
+      source: "chatgpt_final_output.tool_surface_contract_invalid_notice",
+      source_surface: "chatgpt_final_output",
+      source_response_kind: extracted?.response_kind ?? null,
+      source_status: extracted?.status ?? null,
+      source_output_hash: extracted?.output_hash ?? null,
+      source_output_source: extracted?.output_source ?? null,
+      ...buildChatgptFinalOutputLockFields(),
+      safety: buildChatgptFinalOutputSafety(extracted?.safety),
+    };
+  }
+
+  return {
+    used: true,
+    phase: "34R",
+    surface_kind: chatgptFinalOutputToolSurfaceKind,
+    contract_valid: true,
+    validation_errors: [],
+    status: "ready_to_emit_chatgpt_final_output",
+    response_kind: extracted.response_kind ?? null,
+    can_emit_response_to_chat: true,
+    can_output_to_chat: extracted.can_output_to_chat === true,
+    may_output_story_text: extracted.may_output_story_text === true,
+    output_text: extracted.output_text,
+    output_hash: extracted.output_hash,
+    output_source: chatgptFinalOutputToolSurfaceSource,
+    final_output_source: chatgptFinalOutputToolSurfaceSource,
+    source: chatgptFinalOutputToolSurfaceSource,
+    source_surface: "result.extracted_chatgpt_final_output",
+    source_response_kind: extracted.response_kind ?? null,
+    source_status: extracted.status ?? null,
+    source_output_hash: extracted.output_hash,
+    source_output_source: extracted.output_source ?? null,
+    ...buildChatgptFinalOutputLockFields(),
+    safety: buildChatgptFinalOutputSafety(extracted?.safety),
+  };
+}
+
+function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
+  return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
+    || surfacedResult?.extracted_chatgpt_final_output != null;
+}
+
 function response(toolName, permission, result, created = []) {
   const surfacedResult = withFullNeuralSurface(result ?? {});
   const fullNeuralSummary = summarizeFullNeuralSurface(surfacedResult);
+  const chatgptFinalOutput = shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult)
+    ? buildChatgptFinalOutputToolSurface(surfacedResult)
+    : buildUnusedChatgptFinalOutputToolSurface();
 
   return {
     ok: result?.ok !== false,
     tool_name: toolName,
     permission,
+    chatgpt_final_output: chatgptFinalOutput,
     result: surfacedResult,
     created,
     warnings: result?.warnings ?? [],
