@@ -1454,6 +1454,315 @@ export function acceptChatgptFinalOutputFromLiveToolCall(toolResponse = {}) {
   return buildChatgptFinalOutputLiveToolCallAcceptanceSmoke(toolResponse).accepted_chatgpt_output_text;
 }
 
+
+const chatgptFinalOutputRealActionSurfaceReadinessKind = "chatgpt_final_output_real_action_surface_readiness";
+const chatgptFinalOutputRealActionSurfaceEntrypoint = "acceptChatgptFinalOutputFromLiveToolCall(tool_response)";
+const chatgptFinalOutputRealActionCanonicalEntrypoint = "emitChatgptFinalOutputText(tool_response)";
+const chatgptFinalOutputRealActionConsumableField = "tool_response.chatgpt_final_output.output_text";
+
+export function buildChatgptFinalOutputRealActionSurfaceReadiness(toolResponse = {}) {
+  const liveAcceptance = buildChatgptFinalOutputLiveToolCallAcceptanceSmoke(toolResponse);
+  const acceptedText = acceptChatgptFinalOutputFromLiveToolCall(toolResponse);
+  const rootOutput = toolResponse?.chatgpt_final_output ?? null;
+  const topLevelKeys = toolResponse != null && typeof toolResponse === "object" ? Object.keys(toolResponse) : [];
+  const rootIndex = topLevelKeys.indexOf("chatgpt_final_output");
+  const resultIndex = topLevelKeys.indexOf("result");
+  const validationErrors = [];
+
+  if (toolResponse == null || typeof toolResponse !== "object") {
+    validationErrors.push("tool_response_missing_or_not_object");
+  }
+
+  if (toolResponse?.ok !== true) {
+    validationErrors.push("tool_response_ok_not_true");
+  }
+
+  if (toolResponse?.tool_name !== "chatgpt_bridge_run_full_neural_writing_pipeline") {
+    validationErrors.push("tool_response_tool_name_not_full_neural_pipeline");
+  }
+
+  if (toolResponse?.permission !== "write_low_risk") {
+    validationErrors.push("tool_response_permission_not_write_low_risk");
+  }
+
+  if (toolResponse?.blocked !== false) {
+    validationErrors.push("tool_response_blocked_not_false");
+  }
+
+  if (!Array.isArray(toolResponse?.created)) {
+    validationErrors.push("tool_response_created_not_array");
+  }
+
+  if (rootIndex < 0) {
+    validationErrors.push("root_chatgpt_final_output_top_level_missing");
+  }
+
+  if (resultIndex < 0) {
+    validationErrors.push("result_top_level_missing");
+  }
+
+  if (rootIndex >= 0 && resultIndex >= 0 && rootIndex > resultIndex) {
+    validationErrors.push("root_chatgpt_final_output_should_precede_result");
+  }
+
+  if (rootOutput?.used !== true) {
+    validationErrors.push("root_chatgpt_final_output_used_false_or_missing");
+  }
+
+  if (rootOutput?.contract_valid !== true) {
+    validationErrors.push("root_chatgpt_final_output_contract_invalid");
+  }
+
+  if (typeof rootOutput?.output_text !== "string") {
+    validationErrors.push("root_chatgpt_final_output_text_missing_or_not_string");
+  }
+
+  if (typeof rootOutput?.output_hash !== "string" || rootOutput.output_hash.length === 0) {
+    validationErrors.push("root_chatgpt_final_output_hash_missing");
+  } else if (typeof rootOutput?.output_text === "string" && rootOutput.output_hash !== sha256(rootOutput.output_text)) {
+    validationErrors.push("root_chatgpt_final_output_hash_mismatch");
+  }
+
+  if (liveAcceptance?.used !== true) {
+    validationErrors.push("live_acceptance_used_false_or_missing");
+  }
+
+  if (liveAcceptance?.contract_valid !== true) {
+    validationErrors.push("live_acceptance_contract_invalid");
+  }
+
+  if (liveAcceptance?.final_unique_output_entrypoint !== chatgptFinalOutputRealActionCanonicalEntrypoint) {
+    validationErrors.push("live_acceptance_canonical_entrypoint_mismatch");
+  }
+
+  if (liveAcceptance?.root_tool_surface !== chatgptFinalOutputRealActionConsumableField) {
+    validationErrors.push("live_acceptance_root_tool_surface_mismatch");
+  }
+
+  if (liveAcceptance?.must_emit_accepted_text_exactly !== true) {
+    validationErrors.push("live_acceptance_must_emit_accepted_text_exactly_not_true");
+  }
+
+  if (liveAcceptance?.must_not_emit_index !== true) {
+    validationErrors.push("live_acceptance_must_not_emit_index_not_true");
+  }
+
+  if (liveAcceptance?.must_not_emit_operator_checklist !== true) {
+    validationErrors.push("live_acceptance_must_not_emit_operator_checklist_not_true");
+  }
+
+  if (liveAcceptance?.must_not_emit_result_surface !== true) {
+    validationErrors.push("live_acceptance_must_not_emit_result_surface_not_true");
+  }
+
+  if (liveAcceptance?.no_new_output_layer !== true) {
+    validationErrors.push("live_acceptance_no_new_output_layer_not_true");
+  }
+
+  if (liveAcceptance?.acceptance_smoke_is_reference_only !== true) {
+    validationErrors.push("live_acceptance_reference_only_not_true");
+  }
+
+  if (liveAcceptance?.acceptance_smoke_must_not_replace_final_output !== true) {
+    validationErrors.push("live_acceptance_replace_guard_not_true");
+  }
+
+  if (typeof acceptedText !== "string") {
+    validationErrors.push("accepted_text_missing_or_not_string");
+  }
+
+  if (typeof rootOutput?.output_text === "string" && acceptedText !== rootOutput.output_text) {
+    validationErrors.push("accepted_text_root_output_text_mismatch");
+  }
+
+  if (typeof liveAcceptance?.accepted_chatgpt_output_text === "string" && acceptedText !== liveAcceptance.accepted_chatgpt_output_text) {
+    validationErrors.push("accepted_text_live_acceptance_mismatch");
+  }
+
+  if (liveAcceptance?.may_read_tool_response_result !== false) {
+    validationErrors.push("live_acceptance_may_read_tool_response_result_not_false");
+  }
+
+  if (liveAcceptance?.may_rewrite !== false) {
+    validationErrors.push("live_acceptance_may_rewrite_not_false");
+  }
+
+  if (liveAcceptance?.may_summarize !== false) {
+    validationErrors.push("live_acceptance_may_summarize_not_false");
+  }
+
+  if (liveAcceptance?.may_include_extra_explanation !== false) {
+    validationErrors.push("live_acceptance_extra_explanation_not_false");
+  }
+
+  if (liveAcceptance?.may_construct_response !== false) {
+    validationErrors.push("live_acceptance_construct_response_not_false");
+  }
+
+  if (liveAcceptance?.may_update_canon !== false) {
+    validationErrors.push("live_acceptance_update_canon_not_false");
+  }
+
+  if (liveAcceptance?.may_update_active_engine !== false) {
+    validationErrors.push("live_acceptance_update_active_engine_not_false");
+  }
+
+  const forbiddenSources = [
+    "tool_response.result",
+    "tool_response.result.final_candidate_text",
+    "tool_response.result.success_output_for_chat",
+    "tool_response.result.failure_output_for_chat",
+    "tool_response.result.final_response_for_chat",
+    "tool_response.result.final_response_handoff_for_chat",
+    "tool_response.result.extracted_chatgpt_final_output",
+    "buildChatgptFinalOutputOperatorHandoffChecklist(tool_response)",
+    "buildChatgptFinalOutputContractFinalClosureIndex(tool_response)",
+    "buildChatgptFinalOutputLiveToolCallAcceptanceSmoke(tool_response)",
+  ];
+
+  if (validationErrors.length > 0) {
+    const outputText = [
+      "ChatGPT final output real action surface readiness invalid.",
+      "blocked_stage: final_output_real_action_surface_readiness",
+      "operator_action: inspect_real_action_tool_response_surface",
+    ].join("\n");
+
+    return {
+      used: true,
+      phase: "34X",
+      surface_kind: chatgptFinalOutputRealActionSurfaceReadinessKind,
+      contract_valid: false,
+      validation_errors: validationErrors,
+      status: "ready_to_emit_real_action_surface_readiness_invalid_notice",
+      response_kind: "real_action_surface_readiness_invalid_notice",
+      can_emit_response_to_chat: true,
+      can_output_to_chat: false,
+      may_output_story_text: false,
+      real_action_surface_ready: false,
+      real_action_surface_shape: "chatgpt_action_mcp_tool_response_wrapper",
+      final_action_output_entrypoint: chatgptFinalOutputRealActionSurfaceEntrypoint,
+      canonical_final_output_entrypoint: chatgptFinalOutputRealActionCanonicalEntrypoint,
+      required_chatgpt_consumable_field: chatgptFinalOutputRealActionConsumableField,
+      accepted_chatgpt_output_text: outputText,
+      accepted_chatgpt_output_hash: sha256(outputText),
+      accepted_chatgpt_output_source: "real_action_surface_readiness.invalid_notice",
+      output_text: outputText,
+      output_hash: sha256(outputText),
+      output_source: "real_action_surface_readiness.invalid_notice",
+      final_output_source: "real_action_surface_readiness.invalid_notice",
+      source: "real_action_surface_readiness.invalid_notice",
+      source_surface: "chatgpt_final_output_real_action_surface_readiness",
+      source_response_kind: liveAcceptance?.response_kind ?? null,
+      source_status: liveAcceptance?.status ?? null,
+      source_output_hash: liveAcceptance?.accepted_chatgpt_output_hash ?? null,
+      source_output_source: liveAcceptance?.accepted_chatgpt_output_source ?? null,
+      root_chatgpt_final_output_present: rootIndex >= 0,
+      root_chatgpt_final_output_before_result: rootIndex >= 0 && resultIndex >= 0 && rootIndex < resultIndex,
+      result_surface_present_but_not_required: resultIndex >= 0,
+      action_consumer_requires_result_read: false,
+      action_consumer_requires_result_extraction: false,
+      action_consumer_requires_index_read: false,
+      action_consumer_requires_operator_checklist_read: false,
+      action_consumer_requires_response_recomposition: false,
+      action_must_emit_accepted_text_exactly: true,
+      action_must_not_emit_readiness_surface: true,
+      action_must_not_emit_live_acceptance_surface: true,
+      action_must_not_emit_final_closure_index: true,
+      action_must_not_emit_operator_checklist: true,
+      action_must_not_emit_result_surface: true,
+      forbidden_sources: forbiddenSources,
+      no_new_output_layer: true,
+      readiness_surface_is_reference_only: true,
+      readiness_surface_must_not_replace_final_output: true,
+      no_extra_text: true,
+      no_fallback: true,
+      may_rewrite: false,
+      may_summarize: false,
+      may_include_extra_explanation: false,
+      may_construct_response: false,
+      may_read_tool_response_result: false,
+      may_save_candidate: false,
+      may_approve_candidate: false,
+      may_adopt_candidate: false,
+      may_update_canon: false,
+      may_update_active_engine: false,
+      ...buildChatgptFinalOutputLockFields(),
+      safety: buildChatgptFinalOutputSafety(liveAcceptance?.safety),
+    };
+  }
+
+  return {
+    used: true,
+    phase: "34X",
+    surface_kind: chatgptFinalOutputRealActionSurfaceReadinessKind,
+    contract_valid: true,
+    validation_errors: [],
+    status: "ready_for_real_chatgpt_action_final_output",
+    response_kind: liveAcceptance.response_kind ?? null,
+    can_emit_response_to_chat: true,
+    can_output_to_chat: liveAcceptance.can_output_to_chat === true,
+    may_output_story_text: liveAcceptance.may_output_story_text === true,
+    real_action_surface_ready: true,
+    real_action_surface_shape: "chatgpt_action_mcp_tool_response_wrapper",
+    tool_name: toolResponse.tool_name,
+    permission: toolResponse.permission,
+    final_action_output_entrypoint: chatgptFinalOutputRealActionSurfaceEntrypoint,
+    canonical_final_output_entrypoint: chatgptFinalOutputRealActionCanonicalEntrypoint,
+    required_chatgpt_consumable_field: chatgptFinalOutputRealActionConsumableField,
+    accepted_chatgpt_output_text: acceptedText,
+    accepted_chatgpt_output_hash: sha256(acceptedText),
+    accepted_chatgpt_output_source: chatgptFinalOutputRealActionSurfaceEntrypoint,
+    output_text: acceptedText,
+    output_hash: sha256(acceptedText),
+    output_source: chatgptFinalOutputRealActionSurfaceEntrypoint,
+    final_output_source: chatgptFinalOutputRealActionSurfaceEntrypoint,
+    source: chatgptFinalOutputRealActionSurfaceEntrypoint,
+    source_surface: "chatgpt_final_output_real_action_surface_readiness",
+    source_response_kind: liveAcceptance.response_kind ?? null,
+    source_status: liveAcceptance.status ?? null,
+    source_output_hash: liveAcceptance.accepted_chatgpt_output_hash,
+    source_output_source: liveAcceptance.accepted_chatgpt_output_source ?? null,
+    root_chatgpt_final_output_present: true,
+    root_chatgpt_final_output_before_result: rootIndex < resultIndex,
+    root_tool_surface: chatgptFinalOutputRealActionConsumableField,
+    root_output_text_hash: rootOutput.output_hash,
+    result_surface_present_but_not_required: resultIndex >= 0,
+    action_consumer_requires_result_read: false,
+    action_consumer_requires_result_extraction: false,
+    action_consumer_requires_index_read: false,
+    action_consumer_requires_operator_checklist_read: false,
+    action_consumer_requires_response_recomposition: false,
+    action_must_emit_accepted_text_exactly: true,
+    action_must_not_emit_readiness_surface: true,
+    action_must_not_emit_live_acceptance_surface: true,
+    action_must_not_emit_final_closure_index: true,
+    action_must_not_emit_operator_checklist: true,
+    action_must_not_emit_result_surface: true,
+    forbidden_sources: forbiddenSources,
+    no_new_output_layer: true,
+    readiness_surface_is_reference_only: true,
+    readiness_surface_must_not_replace_final_output: true,
+    no_extra_text: true,
+    no_fallback: true,
+    may_rewrite: false,
+    may_summarize: false,
+    may_include_extra_explanation: false,
+    may_construct_response: false,
+    may_read_tool_response_result: false,
+    may_save_candidate: false,
+    may_approve_candidate: false,
+    may_adopt_candidate: false,
+    may_update_canon: false,
+    may_update_active_engine: false,
+    ...buildChatgptFinalOutputLockFields(),
+    safety: buildChatgptFinalOutputSafety(liveAcceptance.safety),
+  };
+}
+
+export function acceptChatgptFinalOutputFromRealActionSurface(toolResponse = {}) {
+  return buildChatgptFinalOutputRealActionSurfaceReadiness(toolResponse).accepted_chatgpt_output_text;
+}
+
 function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
   return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
     || surfacedResult?.extracted_chatgpt_final_output != null;
