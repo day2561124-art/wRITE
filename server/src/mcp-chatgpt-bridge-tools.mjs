@@ -515,6 +515,157 @@ export function buildChatgptFinalOutputConsumerEmission(toolResponse = {}) {
   };
 }
 
+
+const chatgptFinalOutputE2EComplianceSurfaceKind = "chatgpt_final_output_end_to_end_compliance_smoke";
+const chatgptFinalOutputE2EComplianceSource = "buildChatgptFinalOutputConsumerEmission.output_text";
+
+export function buildChatgptFinalOutputE2EComplianceEmission(toolResponse = {}) {
+  const consumer = buildChatgptFinalOutputConsumerEmission(toolResponse);
+  const validationErrors = [];
+
+  if (consumer?.used !== true) {
+    validationErrors.push("consumer_emission_used_false_or_missing");
+  }
+
+  if (consumer?.contract_valid !== true) {
+    validationErrors.push("consumer_emission_contract_invalid");
+  }
+
+  if (typeof consumer?.output_text !== "string") {
+    validationErrors.push("consumer_output_text_missing_or_not_string");
+  }
+
+  if (typeof consumer?.output_hash !== "string" || consumer.output_hash.length === 0) {
+    validationErrors.push("consumer_output_hash_missing");
+  } else if (typeof consumer?.output_text === "string" && consumer.output_hash !== sha256(consumer.output_text)) {
+    validationErrors.push("consumer_output_hash_mismatch");
+  }
+
+  if (consumer?.consumer_must_emit_output_text_exactly !== true) {
+    validationErrors.push("consumer_must_emit_output_text_exactly_not_true");
+  }
+
+  if (consumer?.consumer_output_source !== "chatgpt_final_output.output_text") {
+    validationErrors.push("consumer_output_source_not_root_chatgpt_final_output");
+  }
+
+  if (consumer?.consumer_may_read_result !== false) {
+    validationErrors.push("consumer_may_read_result_not_false");
+  }
+
+  if (consumer?.consumer_may_recompose_from_result !== false) {
+    validationErrors.push("consumer_may_recompose_from_result_not_false");
+  }
+
+  if (consumer?.must_emit_exactly !== true) {
+    validationErrors.push("consumer_must_emit_exactly_not_true");
+  }
+
+  if (consumer?.no_extra_text !== true) {
+    validationErrors.push("consumer_no_extra_text_not_true");
+  }
+
+  if (consumer?.no_fallback !== true) {
+    validationErrors.push("consumer_no_fallback_not_true");
+  }
+
+  if (consumer?.may_rewrite !== false) {
+    validationErrors.push("consumer_may_rewrite_not_false");
+  }
+
+  if (consumer?.may_summarize !== false) {
+    validationErrors.push("consumer_may_summarize_not_false");
+  }
+
+  if (consumer?.may_include_extra_explanation !== false) {
+    validationErrors.push("consumer_extra_explanation_not_false");
+  }
+
+  if (validationErrors.length > 0) {
+    const outputText = [
+      "ChatGPT final output E2E compliance contract invalid.",
+      "blocked_stage: final_chatgpt_output_emit",
+      "operator_action: inspect_consumer_emission_contract",
+    ].join("\n");
+
+    return {
+      used: true,
+      phase: "34T",
+      surface_kind: chatgptFinalOutputE2EComplianceSurfaceKind,
+      contract_valid: false,
+      validation_errors: validationErrors,
+      status: "ready_to_emit_e2e_contract_invalid_notice",
+      response_kind: "e2e_contract_invalid_notice",
+      can_emit_response_to_chat: true,
+      can_output_to_chat: false,
+      may_output_story_text: false,
+      output_text: outputText,
+      output_hash: sha256(outputText),
+      output_source: "final_chatgpt_output_emit.e2e_contract_invalid_notice",
+      final_output_source: "final_chatgpt_output_emit.e2e_contract_invalid_notice",
+      source: "final_chatgpt_output_emit.e2e_contract_invalid_notice",
+      source_surface: "final_chatgpt_output_emit",
+      source_response_kind: consumer?.response_kind ?? null,
+      source_status: consumer?.status ?? null,
+      source_output_hash: consumer?.output_hash ?? null,
+      source_output_source: consumer?.output_source ?? null,
+      final_chatgpt_output_text: outputText,
+      final_chatgpt_output_hash: sha256(outputText),
+      final_chatgpt_output_source: "final_chatgpt_output_emit.e2e_contract_invalid_notice",
+      final_must_emit_exactly: true,
+      final_no_extra_text: true,
+      final_no_fallback: true,
+      final_may_read_tool_response_result: false,
+      final_may_rewrite: false,
+      final_may_summarize: false,
+      final_may_include_extra_explanation: false,
+      final_may_construct_response: false,
+      ...buildChatgptFinalOutputLockFields(),
+      safety: buildChatgptFinalOutputSafety(consumer?.safety),
+    };
+  }
+
+  return {
+    used: true,
+    phase: "34T",
+    surface_kind: chatgptFinalOutputE2EComplianceSurfaceKind,
+    contract_valid: true,
+    validation_errors: [],
+    status: "ready_to_emit_final_chatgpt_output_text",
+    response_kind: consumer.response_kind ?? null,
+    can_emit_response_to_chat: true,
+    can_output_to_chat: consumer.can_output_to_chat === true,
+    may_output_story_text: consumer.may_output_story_text === true,
+    output_text: consumer.output_text,
+    output_hash: consumer.output_hash,
+    output_source: chatgptFinalOutputE2EComplianceSource,
+    final_output_source: chatgptFinalOutputE2EComplianceSource,
+    source: chatgptFinalOutputE2EComplianceSource,
+    source_surface: "chatgpt_final_output_consumer",
+    source_response_kind: consumer.response_kind ?? null,
+    source_status: consumer.status ?? null,
+    source_output_hash: consumer.output_hash,
+    source_output_source: consumer.output_source ?? null,
+    final_chatgpt_output_text: consumer.output_text,
+    final_chatgpt_output_hash: consumer.output_hash,
+    final_chatgpt_output_source: chatgptFinalOutputE2EComplianceSource,
+    final_must_emit_exactly: true,
+    final_no_extra_text: true,
+    final_no_fallback: true,
+    final_may_read_tool_response_result: false,
+    final_may_rewrite: false,
+    final_may_summarize: false,
+    final_may_include_extra_explanation: false,
+    final_may_construct_response: false,
+    ...buildChatgptFinalOutputLockFields(),
+    safety: buildChatgptFinalOutputSafety(consumer.safety),
+  };
+}
+
+export function emitChatgptFinalOutputText(toolResponse = {}) {
+  return buildChatgptFinalOutputE2EComplianceEmission(toolResponse).output_text;
+}
+
 function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
   return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
     || surfacedResult?.extracted_chatgpt_final_output != null;
