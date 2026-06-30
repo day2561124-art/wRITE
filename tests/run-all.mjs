@@ -158,6 +158,7 @@ const steps = [
   ["Phase 34S ChatGPT bridge final output consumer contract", ["tests/phase34/phase34s-chatgpt-bridge-final-output-consumer-contract.test.mjs"]],
   ["Phase 34T ChatGPT final output E2E compliance smoke", ["tests/phase34/phase34t-chatgpt-final-output-e2e-compliance-smoke.test.mjs"]],
   ["Phase 34U ChatGPT final output operator handoff checklist", ["tests/phase34/phase34u-chatgpt-final-output-operator-handoff-checklist.test.mjs"]],
+  ["Phase 34V ChatGPT final output contract final closure index", ["tests/phase34/phase34v-chatgpt-final-output-contract-final-closure-index.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
