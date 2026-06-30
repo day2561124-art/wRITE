@@ -145,6 +145,7 @@ const steps = [
   ["Phase 34F full pipeline live writing smoke", ["tests/phase34/phase34f-full-pipeline-live-writing-smoke.test.mjs"]],
   ["Phase 34G recursive revision policy stress matrix", ["tests/phase34/phase34g-recursive-revision-policy-stress-matrix.test.mjs"]],
   ["Phase 34H full pipeline reader acceptance regression matrix", ["tests/phase34/phase34h-full-pipeline-reader-acceptance-regression-matrix.test.mjs"]],
+  ["Phase 34I full pipeline revision evidence bridge regression", ["tests/phase34/phase34i-full-pipeline-revision-evidence-bridge-regression.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
