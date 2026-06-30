@@ -212,6 +212,114 @@ function nextAction(pipeline, proofingContext) {
   return "output_final_candidate_text_to_chat";
 }
 
+function blockedStageFor(pipeline) {
+  const byStopReason = {
+    generation_provider_required: "generation_provider_configuration",
+    generation_provider_secret_missing: "generation_provider_configuration",
+    revision_provider_required: "revision_provider_configuration",
+    structural_revision_required: "structural_revision_review",
+    max_revision_rounds_exhausted: "recursive_revision_exhausted",
+  };
+  return byStopReason[pipeline.stop_reason] ?? pipeline.pipeline_stage ?? "pipeline_failure";
+}
+
+function failureReasonFor(stopReason, pipelineStage) {
+  const reason = text(stopReason) || text(pipelineStage) || "unknown_failure";
+  const reasons = {
+    generation_provider_required: "Backend generation provider is not configured.",
+    generation_provider_secret_missing: "Backend generation provider secret is missing.",
+    revision_provider_required: "Backend revision provider is not configured.",
+    structural_revision_required: "The candidate still requires structural revision.",
+    max_revision_rounds_exhausted: "Recursive revision reached the maximum round limit before acceptance.",
+  };
+  return reasons[reason] ?? `Pipeline stopped before a final candidate was available: ${reason}.`;
+}
+
+function recommendedOperatorActionFor(nextActionValue) {
+  const actions = {
+    configure_backend_generation_provider:
+      "Configure backend generation provider, then rerun the full neural writing pipeline.",
+    configure_backend_revision_provider:
+      "Configure backend revision provider, then rerun the full neural writing pipeline.",
+    review_revision_failure:
+      "Review recursive revision failure evidence before deciding whether to adjust revision policy or retry manually.",
+    review_pipeline_failure:
+      "Review pipeline failure state and warnings before retrying.",
+  };
+  return actions[nextActionValue] ?? "Review pipeline failure state before retrying.";
+}
+
+function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofingContext) {
+  const hasFinalCandidate = Boolean(pipeline.final_candidate_text);
+  if (hasFinalCandidate) {
+    return {
+      used: false,
+      phase: "34L",
+      surface_kind: "chatgpt_bridge_failure_output_human_readable_surface",
+      status: "not_needed",
+      reason: "final_candidate_available",
+      can_output_to_chat: true,
+      must_not_output_candidate: false,
+      next_action: nextAction(pipeline, proofingContext),
+      warnings: [],
+    };
+  }
+
+  const action = nextAction(pipeline, proofingContext);
+  const stopReason = text(pipeline.stop_reason) || "unknown_failure";
+  const pipelineStage = text(pipeline.pipeline_stage) || "unknown_stage";
+  const evidenceAvailable = evidencePacketBridgeSurface?.used === true;
+  const evidenceFinalStatus = evidencePacketBridgeSurface?.acceptance_summary?.final_status ?? null;
+  const revisionRoundsAttempted = pipeline.recursive_revision?.rounds_attempted ?? 0;
+  const maxRevisionRounds = pipeline.recursive_revision?.max_revision_rounds ?? null;
+
+  return {
+    used: true,
+    phase: "34L",
+    surface_kind: "chatgpt_bridge_failure_output_human_readable_surface",
+    status: pipeline.status ?? "failed",
+    pipeline_stage: pipelineStage,
+    stop_reason: stopReason,
+    blocked_stage: blockedStageFor(pipeline),
+    next_action: action,
+    can_output_to_chat: false,
+    must_not_output_candidate: true,
+    must_not_output_candidate_reason: "final_candidate_text_missing",
+    failure_summary_for_chat:
+      `The writing pipeline stopped at ${pipelineStage} because ${stopReason}. No final candidate text is available, so ChatGPT must not output story text.`,
+    failure_reason_for_operator: failureReasonFor(stopReason, pipelineStage),
+    recommended_operator_action: recommendedOperatorActionFor(action),
+    can_retry_after_configuration:
+      action === "configure_backend_generation_provider"
+      || action === "configure_backend_revision_provider",
+    can_continue_revision:
+      action === "review_revision_failure"
+      && stopReason !== "max_revision_rounds_exhausted",
+    evidence_surface_available: evidenceAvailable,
+    evidence_final_status: evidenceFinalStatus,
+    rewrite_targets: Array.isArray(evidencePacketBridgeSurface?.rewrite_targets)
+      ? evidencePacketBridgeSurface.rewrite_targets
+      : [],
+    operator_findings_count: Array.isArray(evidencePacketBridgeSurface?.operator_findings)
+      ? evidencePacketBridgeSurface.operator_findings.length
+      : 0,
+    revision_rounds_attempted: revisionRoundsAttempted,
+    max_revision_rounds: maxRevisionRounds,
+    safety: {
+      candidate_only: true,
+      no_candidate_save: true,
+      no_approval: true,
+      no_adoption: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      can_modify_active_engine: false,
+      can_update_canon: false,
+      can_confirm_adoption: false,
+    },
+    warnings: Array.isArray(pipeline.report?.warnings) ? pipeline.report.warnings : [],
+  };
+}
+
 function buildAestheticMemoryContext(input) {
   const hasPayload = Object.keys(input.aestheticMemoryContext).length > 0;
   return {
@@ -401,6 +509,12 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       : ""
   );
 
+  const failureOutputForChat = buildFailureOutputForChat(
+    pipeline,
+    evidencePacketBridgeSurface,
+    proofingContext,
+  );
+
   const summary = {
     phase: "34A",
     version: fullNeuralWritingPipelineSingleEntryBridgeVersion,
@@ -411,6 +525,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     candidate_created: pipeline.candidate_created === true,
     proofing_context_built: proofingContext.built === true,
     reader_response_used: readerResponse.used === true,
+    failure_output_surface_used: failureOutputForChat.used === true,
+    failure_output_next_action: failureOutputForChat.used === true ? failureOutputForChat.next_action : null,
+    failure_output_blocked_stage: failureOutputForChat.used === true ? failureOutputForChat.blocked_stage : null,
     active_engine_update_allowed: false,
     canon_update_allowed: false,
   };
@@ -460,6 +577,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     reader_response_simulator: readerResponse,
     full_pipeline_acceptance_evidence_packet: pipeline.full_pipeline_acceptance_evidence_packet ?? null,
     full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface,
+    failure_output_for_chat: failureOutputForChat,
     proofing_context: proofingContext,
     pipeline_result: pipeline,
     full_neural_orchestration_summary: {
@@ -470,6 +588,9 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       writing_pipeline_complete: pipeline.status === "completed",
       acceptance_evidence_packet_bridge_surface_used: evidencePacketBridgeSurface.used === true,
       acceptance_evidence_final_status: evidencePacketBridgeSurface.acceptance_summary?.final_status ?? null,
+      failure_output_surface_used: failureOutputForChat.used === true,
+      failure_output_next_action: failureOutputForChat.used === true ? failureOutputForChat.next_action : null,
+      failure_output_blocked_stage: failureOutputForChat.used === true ? failureOutputForChat.blocked_stage : null,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,
