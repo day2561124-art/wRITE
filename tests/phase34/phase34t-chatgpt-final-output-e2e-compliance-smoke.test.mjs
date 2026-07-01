@@ -309,6 +309,8 @@ const baseInput = {
     project: "武裝學院的二三事",
     chapter_mode: "candidate only",
     phase34t_final_output_e2e_compliance_smoke: true,
+    character_names: ["朝日奈千夜", "九逃"],
+    dramatic_conflict_plan: conflictPlan,
   },
   retrieval_context: {
     scope: "candidate only",
@@ -321,19 +323,27 @@ const baseInput = {
     "門內的人為什麼知道朝日奈千夜的名字？",
     "九逃記住的熄滅路線之後能不能變成逃生線？",
   ],
+  aesthetic_memory_context: {
+    principles: [
+      "一章一變局。",
+      "普通行動先直寫，幽默只能加味。",
+      "角色對話不能公告式交接。",
+      "結尾必須留下事件鉤子，不靠漂亮句子收尾。",
+    ],
+  },
   save_candidate: false,
   build_proofing_context: false,
   enable_character_voice_guard: false,
-  include_character_mind_state_ledger: false,
-  include_dramatic_conflict_manager: false,
-  include_foreshadowing_causal_graph: false,
+  include_character_mind_state_ledger: true,
+  include_dramatic_conflict_manager: true,
+  include_foreshadowing_causal_graph: true,
   include_foreshadowing_payoff_guard: false,
   include_foreshadowing_payoff_repair_planner: false,
   include_foreshadowing_payoff_acceptance_gate: false,
   include_foreshadowing_settlement_diff_preview: false,
   include_reader_response_revision_gate: true,
   include_reader_response_simulator: true,
-  include_aesthetic_memory_context: false,
+  include_aesthetic_memory_context: true,
 };
 
 function inputWith(overrides = {}) {
@@ -388,6 +398,47 @@ function baseOptions(label, tempRoot, extra = {}) {
     gptWritingContexts: path.join(tempRoot, label, "contexts"),
     writingCandidates: path.join(tempRoot, label, "candidates"),
     proofingContexts: path.join(tempRoot, label, "proofing"),
+    characterMindStateLedger: {
+      version: "phase34t-test-ledger-v1",
+      updated_at: "2026-07-01T00:00:00.000Z",
+      characters: [
+        {
+          character_name: "朝日奈千夜",
+          current_emotion: "急迫但冷靜",
+          body_state: "手掌按上門禁感應板",
+          unspoken_pressure: "知道開門會切斷退路，但不開門線索就會消失",
+          recent_event_traces: ["門禁燈第二次閃紅", "撤離線正在熄滅"],
+          relationship_attitudes: {
+            "九逃": "相信他會記住退路，也接受他會反對自己",
+          },
+          visible_reactions_allowed: ["按上感應板", "把終端固定到九逃掌心", "跨進門內"],
+          hidden_reactions_reserved: ["害怕自己判斷錯卻不能停下"],
+          continuity_constraints: ["不得把門禁倒數寫成流程確認"],
+          evidence_refs: ["phase34t-final-output-e2e"],
+        },
+        {
+          character_name: "九逃",
+          current_emotion: "焦躁且警戒",
+          body_state: "抓住千夜袖口、盯著撤離線",
+          unspoken_pressure: "知道自己阻止不了她，只能把代價記下來",
+          recent_event_traces: ["看見撤離路線一格一格熄滅"],
+          relationship_attitudes: {
+            "朝日奈千夜": "嘴上阻止但仍跟著她跨進門",
+          },
+          visible_reactions_allowed: ["抓住袖口", "低聲阻止", "罵了一聲仍追上去"],
+          hidden_reactions_reserved: ["擔心這次真的回不來"],
+          continuity_constraints: ["吐槽不能消解危機代價"],
+          evidence_refs: ["phase34t-final-output-e2e"],
+        },
+      ],
+    },
+    readerResponseRevisionGate: {
+      dramatic_conflict_plan: conflictPlan,
+      reader_questions_to_carry_forward: [
+        "門內的人為什麼知道朝日奈千夜的名字？",
+        "九逃記住的熄滅路線之後能不能變成逃生線？",
+      ],
+    },
     env: {},
     ...extra,
   };

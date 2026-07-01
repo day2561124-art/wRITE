@@ -6,6 +6,9 @@ import {
   buildFullPipelineAcceptanceEvidencePacketBridgeSurface,
   disabledFullPipelineAcceptanceEvidencePacketBridgeSurface,
 } from "./full-pipeline-acceptance-evidence-packet-bridge-surface-service.mjs";
+import {
+  buildNeuralWritingBrainRequiredModulesContract,
+} from "./neural-writing-brain-required-modules-contract-service.mjs";
 
 export const fullNeuralWritingPipelineSingleEntryBridgeVersion =
   "full_neural_writing_pipeline_single_entry_bridge_v1";
@@ -195,7 +198,11 @@ function disabledReaderResponse(status, reason = null) {
   };
 }
 
-function nextAction(pipeline, proofingContext) {
+function nextAction(pipeline, proofingContext, brainContract = null) {
+  if (pipeline.final_candidate_text && brainContract?.contract_valid === false) {
+    return "inspect_neural_writing_brain_required_modules_contract";
+  }
+
   if (!pipeline.final_candidate_text) {
     const byStopReason = {
       generation_provider_required: "configure_backend_generation_provider",
@@ -249,8 +256,50 @@ function recommendedOperatorActionFor(nextActionValue) {
   return actions[nextActionValue] ?? "Review pipeline failure state before retrying.";
 }
 
-function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofingContext) {
+function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofingContext, brainContract = null) {
   const hasFinalCandidate = Boolean(pipeline.final_candidate_text);
+
+  if (hasFinalCandidate && brainContract?.contract_valid === false) {
+    return {
+      used: true,
+      phase: "36A",
+      surface_kind: "chatgpt_bridge_failure_output_human_readable_surface",
+      status: "blocked_required_brain_modules_contract_invalid",
+      pipeline_stage: pipeline.pipeline_stage ?? "unknown_stage",
+      stop_reason: "required_brain_modules_contract_invalid",
+      blocked_stage: "neural_writing_brain_required_modules_contract",
+      next_action: "inspect_neural_writing_brain_required_modules_contract",
+      can_output_to_chat: false,
+      must_not_output_candidate: true,
+      must_not_output_candidate_reason: "required_brain_modules_contract_invalid",
+      failure_summary_for_chat:
+        "Neural writing brain required modules contract invalid. ChatGPT must not output story text because one or more required brain modules were not loaded, used, evidenced, or linked to the final candidate decision.",
+      failure_reason_for_operator:
+        "Phase36A requires all seven neural writing brain modules to be loaded, used, evidenced, and linked to the final candidate before final output can be valid.",
+      recommended_operator_action:
+        "Inspect neural_writing_brain_required_modules_contract.missing_required_brain_modules and rerun the full neural writing pipeline with every required brain module enabled.",
+      can_retry_after_configuration: true,
+      can_continue_revision: false,
+      evidence_surface_available: evidencePacketBridgeSurface?.used === true,
+      evidence_final_status: evidencePacketBridgeSurface?.acceptance_summary?.final_status ?? null,
+      required_brain_modules_contract_valid: false,
+      missing_required_brain_modules: brainContract.missing_required_brain_modules ?? [],
+      validation_errors: brainContract.validation_errors ?? [],
+      safety: {
+        candidate_only: true,
+        no_candidate_save: true,
+        no_approval: true,
+        no_adoption: true,
+        no_canon_update: true,
+        no_active_engine_update: true,
+        can_modify_active_engine: false,
+        can_update_canon: false,
+        can_confirm_adoption: false,
+      },
+      warnings: Array.isArray(pipeline.report?.warnings) ? pipeline.report.warnings : [],
+    };
+  }
+
   if (hasFinalCandidate) {
     return {
       used: false,
@@ -326,9 +375,24 @@ function buildSuccessOutputForChat(
   readerResponse,
   proofingContext,
   finalCandidateHash,
+  brainContract = null,
 ) {
   const hasFinalCandidate = Boolean(pipeline.final_candidate_text);
-  const action = nextAction(pipeline, proofingContext);
+  const action = nextAction(pipeline, proofingContext, brainContract);
+
+  if (hasFinalCandidate && brainContract?.contract_valid === false) {
+    return {
+      used: false,
+      phase: "34M",
+      surface_kind: "chatgpt_bridge_success_output_human_readable_surface",
+      status: "not_available",
+      reason: "required_brain_modules_contract_invalid",
+      can_output_to_chat: false,
+      must_output_exact_final_candidate_text: false,
+      next_action: "inspect_neural_writing_brain_required_modules_contract",
+      warnings: [],
+    };
+  }
 
   if (!hasFinalCandidate) {
     return {
@@ -1042,10 +1106,28 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       : ""
   );
 
+  const brainContract = buildNeuralWritingBrainRequiredModulesContract({
+    pipeline_result: pipeline,
+    reader_response_simulator: readerResponse,
+    aesthetic_memory_context: aestheticMemoryContext,
+    workflow: {
+      name: "context_to_candidate_to_optional_proofing",
+      steps: workflowSteps,
+    },
+    final_candidate_text: pipeline.final_candidate_text,
+    final_candidate_hash: finalCandidateHash,
+    final_candidate_decision: nextAction(pipeline, proofingContext),
+    final_candidate_decision_source: "runFullNeuralWritingPipelineSingleEntryBridge.nextAction",
+    single_entry_bridge: true,
+    single_entry_bridge_version: fullNeuralWritingPipelineSingleEntryBridgeVersion,
+    single_entry_status: pipeline.status,
+  });
+
   const failureOutputForChat = buildFailureOutputForChat(
     pipeline,
     evidencePacketBridgeSurface,
     proofingContext,
+    brainContract,
   );
 
   const successOutputForChat = buildSuccessOutputForChat(
@@ -1054,6 +1136,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     readerResponse,
     proofingContext,
     finalCandidateHash,
+    brainContract,
   );
 
   const finalResponseForChat = buildFinalResponseForChat(
@@ -1092,6 +1175,10 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     extracted_chatgpt_final_output_kind: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.response_kind : null,
     extracted_chatgpt_final_output_hash: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.output_hash : null,
     extracted_chatgpt_final_output_source: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.output_source : null,
+    neural_writing_brain_required_modules_contract_valid: brainContract.contract_valid === true,
+    required_brain_modules_count: brainContract.required_brain_modules_count,
+    missing_required_brain_modules: brainContract.missing_required_brain_modules,
+    brain_contract_can_emit_final_output: brainContract.can_emit_final_output === true,
     active_engine_update_allowed: false,
     canon_update_allowed: false,
   };
@@ -1115,8 +1202,8 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     adopted: false,
     settled: false,
     output_mode: "chat_text",
-    can_output_to_chat: Boolean(pipeline.final_candidate_text),
-    next_action: nextAction(pipeline, proofingContext),
+    can_output_to_chat: Boolean(pipeline.final_candidate_text) && brainContract.can_emit_final_output === true,
+    next_action: nextAction(pipeline, proofingContext, brainContract),
     workflow: {
       name: "context_to_candidate_to_optional_proofing",
       steps: workflowSteps,
@@ -1132,6 +1219,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       foreshadowing_payoff_acceptance_gate: pipeline.foreshadowing_payoff_acceptance_gate?.used === true,
       reader_response_simulator: readerResponse.used === true,
       full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface.used === true,
+      neural_writing_brain_required_modules_contract: brainContract.used === true,
       aesthetic_memory_context: aestheticMemoryContext.used === true,
       final_polisher: pipeline.final_polisher?.status === "completed",
       candidate_save_bridge: pipeline.candidate_created === true || input.saveCandidate === false,
@@ -1141,6 +1229,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
     reader_response_simulator: readerResponse,
     full_pipeline_acceptance_evidence_packet: pipeline.full_pipeline_acceptance_evidence_packet ?? null,
     full_pipeline_acceptance_evidence_packet_bridge_surface: evidencePacketBridgeSurface,
+    neural_writing_brain_required_modules_contract: brainContract,
     failure_output_for_chat: failureOutputForChat,
     success_output_for_chat: successOutputForChat,
     final_response_for_chat: finalResponseForChat,
@@ -1174,6 +1263,10 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       extracted_chatgpt_final_output_kind: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.response_kind : null,
       extracted_chatgpt_final_output_hash: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.output_hash : null,
       extracted_chatgpt_final_output_source: extractedChatgptFinalOutput.used === true ? extractedChatgptFinalOutput.output_source : null,
+      neural_writing_brain_required_modules_contract_valid: brainContract.contract_valid === true,
+      required_brain_modules_count: brainContract.required_brain_modules_count,
+      missing_required_brain_modules: brainContract.missing_required_brain_modules,
+      brain_contract_can_emit_final_output: brainContract.can_emit_final_output === true,
       candidate_only: true,
       active_engine_update_allowed: false,
       canon_update_allowed: false,

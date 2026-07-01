@@ -18,13 +18,20 @@ function parseArgs(argv) {
   throw new Error(`Unknown argument: ${argv[0]}`);
 }
 
+function shouldSkipDirectory(name, path) {
+  const normalized = path.replaceAll("\\", "/");
+  if (name === 'node_modules' || name === '.git') return true;
+  if (normalized.endsWith('/data/backups')) return true;
+  return false;
+}
+
 async function collectFiles(dir, exts = ['.md', '.jsonl']) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   let files = [];
   for (const e of entries) {
     const p = join(dir, e.name);
     if (e.isDirectory()) {
-      if (e.name === 'node_modules' || e.name === '.git') continue;
+      if (shouldSkipDirectory(e.name, p)) continue;
       files = files.concat(await collectFiles(p, exts));
     } else if (exts.includes(extname(p).toLowerCase())) {
       files.push(p);

@@ -199,26 +199,38 @@ const baseInput = {
   generation_context: {
     scene: "night corridor",
     chapter_turn: "terminal warning forces a visible decision",
+    character_names: ["千夜", "九逃"],
+    dramatic_conflict_plan: conflictPlan,
   },
   retrieval_context: {
     scope: "candidate only",
+    canon_write_allowed: false,
+    character_names: ["千夜", "九逃"],
   },
+  character_names: ["千夜", "九逃"],
   reader_response_conflict_plan: conflictPlan,
   reader_questions_to_carry_forward: ["門內的人為什麼知道千夜的名字？"],
+  aesthetic_memory_context: {
+    principles: [
+      "一章一變局。",
+      "普通行動先直寫。",
+      "結尾必須留下事件鉤子，不靠漂亮句子收尾。",
+    ],
+  },
   save_candidate: false,
   build_proofing_context: false,
   max_revision_rounds: 2,
   enable_character_voice_guard: false,
-  include_character_mind_state_ledger: false,
-  include_dramatic_conflict_manager: false,
-  include_foreshadowing_causal_graph: false,
+  include_character_mind_state_ledger: true,
+  include_dramatic_conflict_manager: true,
+  include_foreshadowing_causal_graph: true,
   include_foreshadowing_payoff_guard: false,
   include_foreshadowing_payoff_repair_planner: false,
   include_foreshadowing_payoff_acceptance_gate: false,
   include_foreshadowing_settlement_diff_preview: false,
   include_reader_response_revision_gate: true,
   include_reader_response_simulator: true,
-  include_aesthetic_memory_context: false,
+  include_aesthetic_memory_context: true,
 };
 
 const deterministicFinalPolisherAdapter = async ({ raw_draft_text }) => ({
@@ -242,6 +254,44 @@ try {
     gptWritingContexts: path.join(tempRoot, "contexts"),
     writingCandidates: path.join(tempRoot, "candidates"),
     proofingContexts: path.join(tempRoot, "proofing"),
+    characterMindStateLedger: {
+      version: "phase34e-test-ledger-v1",
+      updated_at: "2026-07-01T00:00:00.000Z",
+      characters: [
+        {
+          character_name: "千夜",
+          current_emotion: "急迫但清醒",
+          body_state: "手按門禁感應板",
+          unspoken_pressure: "知道前進會刪除退路",
+          recent_event_traces: ["門禁燈第二次閃紅"],
+          relationship_attitudes: {
+            "九逃": "相信對方會理解代價但仍需要被說服",
+          },
+          visible_reactions_allowed: ["按上感應板", "把終端轉給九逃看"],
+          hidden_reactions_reserved: ["不想承認自己也害怕回不來"],
+          continuity_constraints: ["不能把門禁危機寫成行政確認流程"],
+          evidence_refs: ["phase34e-smoke"],
+        },
+        {
+          character_name: "九逃",
+          current_emotion: "焦躁且警戒",
+          body_state: "壓低聲音阻止千夜",
+          unspoken_pressure: "已經看見退路會被鎖死",
+          recent_event_traces: ["舊路線正在熄滅"],
+          relationship_attitudes: {
+            "千夜": "嘴上反對但仍跟著跨進去",
+          },
+          visible_reactions_allowed: ["叫千夜等", "低聲反駁", "跟著跨進門"],
+          hidden_reactions_reserved: ["知道自己其實沒有更好的選擇"],
+          continuity_constraints: ["吐槽不能消解危機代價"],
+          evidence_refs: ["phase34e-smoke"],
+        },
+      ],
+    },
+    readerResponseRevisionGate: {
+      dramatic_conflict_plan: conflictPlan,
+      reader_questions_to_carry_forward: ["門內的人為什麼知道千夜的名字？"],
+    },
     generationAdapter: async () => ({ text: weakText }),
     finalPolisherAdapter: deterministicFinalPolisherAdapter,
     revisionAdapter: async (payload) => {

@@ -1,0 +1,361 @@
+import { createHash } from "node:crypto";
+
+export const neuralWritingBrainRequiredModulesContractVersion =
+  "neural_writing_brain_required_modules_contract_v1";
+
+export const requiredNeuralWritingBrainModules = Object.freeze([
+  "one_click_writing_orchestrator",
+  "recursive_self_rewrite_loop",
+  "character_psychological_state_tracker",
+  "dramatic_conflict_tension_manager",
+  "reader_experience_simulator",
+  "foreshadowing_causality_graph",
+  "long_term_aesthetic_memory",
+]);
+
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function sha256Json(value) {
+  return createHash("sha256")
+    .update(JSON.stringify(value ?? null))
+    .digest("hex");
+}
+
+function text(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasObjectEvidence(value) {
+  return isObject(value) && Object.keys(value).length > 0;
+}
+
+function surfaceStatus(value) {
+  if (!isObject(value)) return "";
+  return text(
+    value.status
+    ?? value.final_status
+    ?? value.acceptance_status
+    ?? value.state
+    ?? value.result
+    ?? value.outcome
+    ?? "",
+  );
+}
+
+function isDisabledSurface(value) {
+  if (!isObject(value)) return false;
+
+  if (value.used === false) return true;
+  if (value.enabled === false) return true;
+  if (value.included === false) return true;
+
+  const status = surfaceStatus(value);
+  if (!status) return false;
+
+  return /disabled|skipped|omitted|not_requested|not_enabled|bypassed|unavailable/iu
+    .test(status);
+}
+
+function surfaceLoaded(value) {
+  return hasObjectEvidence(value) && !isDisabledSurface(value);
+}
+
+function surfaceUsed(value) {
+  if (!surfaceLoaded(value)) return false;
+
+  if (value.used === true) return true;
+  if (value.used === false) return false;
+
+  if (value.ok === true) return true;
+  if (value.completed === true) return true;
+  if (value.contract_valid === true) return true;
+
+  const status = surfaceStatus(value);
+  if (status.length > 0) return true;
+
+  return Object.keys(value).some((key) => {
+    if (["used", "enabled", "included"].includes(key)) return false;
+    return value[key] !== null && value[key] !== undefined;
+  });
+}
+
+function surfaceHasEvidence(value) {
+  if (!surfaceLoaded(value)) return false;
+
+  const status = surfaceStatus(value);
+  if (status.length > 0) return true;
+
+  return Object.keys(value).some((key) => {
+    if (["used", "enabled", "included"].includes(key)) return false;
+    return value[key] !== null && value[key] !== undefined;
+  });
+}
+
+function compactEvidence(value) {
+  if (!isObject(value)) return null;
+  return {
+    used: value.used ?? null,
+    phase: value.phase ?? null,
+    version: value.version ?? null,
+    status: value.status ?? value.final_status ?? value.acceptance_status ?? null,
+    read_only: value.read_only ?? null,
+    candidate_only: value.candidate_only ?? null,
+    no_auto_persist: value.no_auto_persist ?? null,
+    no_canon_update: value.no_canon_update ?? null,
+    no_active_engine_update: value.no_active_engine_update ?? null,
+    trace_id: value.trace_id ?? null,
+    warnings_count: Array.isArray(value.warnings) ? value.warnings.length : 0,
+  };
+}
+
+function moduleEntry({
+  key,
+  label,
+  phase,
+  source,
+  loaded,
+  used,
+  evidence,
+  linkedToFinalCandidate,
+  evidenceSurface = null,
+}) {
+  const missingReasons = [];
+
+  if (loaded !== true) missingReasons.push("not_loaded");
+  if (used !== true) missingReasons.push("not_used");
+  if (evidence !== true) missingReasons.push("evidence_missing");
+  if (linkedToFinalCandidate !== true) missingReasons.push("not_linked_to_final_candidate");
+
+  return {
+    key,
+    label,
+    phase,
+    source,
+    loaded: loaded === true,
+    used: used === true,
+    evidence: evidence === true,
+    linked_to_final_candidate: linkedToFinalCandidate === true,
+    contract_valid:
+      loaded === true
+      && used === true
+      && evidence === true
+      && linkedToFinalCandidate === true,
+    missing_reasons: missingReasons,
+    evidence_hash: evidence === true ? sha256Json(evidenceSurface) : null,
+    evidence_summary: evidence === true ? compactEvidence(evidenceSurface) : null,
+  };
+}
+
+function buildValidationErrors(entries, finalCandidateAvailable) {
+  const errors = [];
+
+  if (entries.length !== requiredNeuralWritingBrainModules.length) {
+    errors.push("required_brain_modules_count_mismatch");
+  }
+
+  if (!finalCandidateAvailable) {
+    errors.push("final_candidate_missing_for_brain_contract");
+  }
+
+  for (const required of requiredNeuralWritingBrainModules) {
+    const entry = entries.find((item) => item.key === required);
+    if (!entry) {
+      errors.push(`required_brain_module_missing:${required}`);
+      continue;
+    }
+
+    for (const reason of entry.missing_reasons) {
+      errors.push(`required_brain_module_${reason}:${required}`);
+    }
+  }
+
+  return errors;
+}
+
+export function buildNeuralWritingBrainRequiredModulesContract(payload = {}) {
+  const pipeline = payload.pipeline_result ?? payload.pipelineResult ?? {};
+  const readerResponse = payload.reader_response_simulator ?? payload.readerResponseSimulator ?? {};
+  const aestheticMemory = payload.aesthetic_memory_context ?? payload.aestheticMemoryContext ?? {};
+  const workflow = payload.workflow ?? {};
+  const finalCandidateText = text(payload.final_candidate_text ?? payload.finalCandidateText ?? pipeline.final_candidate_text);
+  const finalCandidateHash = text(payload.final_candidate_hash ?? payload.finalCandidateHash ?? pipeline.final_candidate_hash);
+  const finalCandidateAvailable = finalCandidateText.length > 0 && finalCandidateHash.length > 0;
+  const linkedToFinalCandidate = finalCandidateAvailable;
+
+  const recursiveRevision = pipeline.recursive_revision ?? {};
+  const recursiveRevisionStatus = surfaceStatus(recursiveRevision);
+  const recursiveRevisionUsed =
+    surfaceUsed(recursiveRevision)
+    || ["not_needed", "revised", "failed", "completed"].includes(recursiveRevisionStatus)
+    || Number.isInteger(recursiveRevision.rounds_attempted);
+  const recursiveRevisionLoaded =
+    hasObjectEvidence(recursiveRevision)
+    && recursiveRevisionStatus.length > 0
+    && !["disabled", "not_started"].includes(recursiveRevisionStatus);
+  const recursiveRevisionEvidence =
+    recursiveRevisionLoaded
+    && (
+      surfaceHasEvidence(recursiveRevision)
+      || ["not_needed", "revised", "completed", "failed"].includes(recursiveRevisionStatus)
+      || Number.isInteger(recursiveRevision.rounds_attempted)
+    );
+
+  const oneClickEvidence = {
+    used: payload.single_entry_bridge === true || payload.one_click_writing_orchestrator_used === true,
+    phase: "34A-36A",
+    version: payload.single_entry_bridge_version ?? null,
+    status: payload.single_entry_status ?? pipeline.status ?? null,
+    workflow,
+    pipeline_stage: pipeline.pipeline_stage ?? null,
+  };
+
+  const entries = [
+    moduleEntry({
+      key: "one_click_writing_orchestrator",
+      label: "完整一鍵寫作總控",
+      phase: "34A-36A",
+      source: "runFullNeuralWritingPipelineSingleEntryBridge",
+      loaded: true,
+      used: payload.single_entry_bridge === true || payload.one_click_writing_orchestrator_used === true,
+      evidence: hasObjectEvidence(workflow),
+      linkedToFinalCandidate,
+      evidenceSurface: oneClickEvidence,
+    }),
+    moduleEntry({
+      key: "recursive_self_rewrite_loop",
+      label: "多輪自我重寫迴路",
+      phase: "24A-36A",
+      source: "pipeline_result.recursive_revision",
+      loaded: recursiveRevisionLoaded,
+      used: recursiveRevisionUsed,
+      evidence: recursiveRevisionEvidence,
+      linkedToFinalCandidate,
+      evidenceSurface: recursiveRevision,
+    }),
+    moduleEntry({
+      key: "character_psychological_state_tracker",
+      label: "角色心理狀態持續追蹤",
+      phase: "25A-36A",
+      source: "pipeline_result.character_mind_state_ledger",
+      loaded: surfaceLoaded(pipeline.character_mind_state_ledger),
+      used: surfaceUsed(pipeline.character_mind_state_ledger),
+      evidence: surfaceHasEvidence(pipeline.character_mind_state_ledger),
+      linkedToFinalCandidate,
+      evidenceSurface: pipeline.character_mind_state_ledger,
+    }),
+    moduleEntry({
+      key: "dramatic_conflict_tension_manager",
+      label: "戲劇衝突與章節張力管理器",
+      phase: "26A-36A",
+      source: "pipeline_result.dramatic_conflict_manager",
+      loaded: surfaceLoaded(pipeline.dramatic_conflict_manager),
+      used: surfaceUsed(pipeline.dramatic_conflict_manager),
+      evidence: surfaceHasEvidence(pipeline.dramatic_conflict_manager),
+      linkedToFinalCandidate,
+      evidenceSurface: pipeline.dramatic_conflict_manager,
+    }),
+    moduleEntry({
+      key: "reader_experience_simulator",
+      label: "讀者體感模擬器",
+      phase: "29A-36A",
+      source: "reader_response_simulator",
+      loaded: surfaceLoaded(readerResponse),
+      used: surfaceUsed(readerResponse),
+      evidence: surfaceHasEvidence(readerResponse),
+      linkedToFinalCandidate,
+      evidenceSurface: readerResponse,
+    }),
+    moduleEntry({
+      key: "foreshadowing_causality_graph",
+      label: "伏筆與因果圖",
+      phase: "27A-36A",
+      source: "pipeline_result.foreshadowing_causal_graph",
+      loaded: surfaceLoaded(pipeline.foreshadowing_causal_graph),
+      used: surfaceUsed(pipeline.foreshadowing_causal_graph),
+      evidence: surfaceHasEvidence(pipeline.foreshadowing_causal_graph),
+      linkedToFinalCandidate,
+      evidenceSurface: pipeline.foreshadowing_causal_graph,
+    }),
+    moduleEntry({
+      key: "long_term_aesthetic_memory",
+      label: "長期審美記憶",
+      phase: "30A-33J-36A",
+      source: "aesthetic_memory_context",
+      loaded: surfaceLoaded(aestheticMemory),
+      used: surfaceUsed(aestheticMemory),
+      evidence: surfaceHasEvidence(aestheticMemory),
+      linkedToFinalCandidate,
+      evidenceSurface: aestheticMemory,
+    }),
+  ];
+
+  const validationErrors = buildValidationErrors(entries, finalCandidateAvailable);
+  const missingRequiredBrainModules = entries
+    .filter((entry) => entry.contract_valid !== true)
+    .map((entry) => entry.key);
+
+  const allRequiredBrainModulesLoaded = entries.every((entry) => entry.loaded === true);
+  const allRequiredBrainModulesUsed = entries.every((entry) => entry.used === true);
+  const allRequiredBrainModulesHaveEvidence = entries.every((entry) => entry.evidence === true);
+  const allRequiredBrainModulesLinkedToFinalCandidate = entries.every((entry) => entry.linked_to_final_candidate === true);
+  const contractValid =
+    finalCandidateAvailable
+    && entries.length === requiredNeuralWritingBrainModules.length
+    && allRequiredBrainModulesLoaded
+    && allRequiredBrainModulesUsed
+    && allRequiredBrainModulesHaveEvidence
+    && allRequiredBrainModulesLinkedToFinalCandidate;
+
+  return {
+    used: true,
+    phase: "36A",
+    surface_kind: "neural_writing_brain_required_modules_contract",
+    version: neuralWritingBrainRequiredModulesContractVersion,
+    contract_valid: contractValid,
+    validation_errors: validationErrors,
+    status: contractValid
+      ? "required_brain_modules_contract_valid"
+      : "blocked_required_brain_modules_contract_invalid",
+    response_kind: contractValid
+      ? "required_brain_modules_contract_reference"
+      : "required_brain_modules_contract_invalid_reference",
+
+    required_brain_modules_count: requiredNeuralWritingBrainModules.length,
+    required_brain_modules: requiredNeuralWritingBrainModules,
+    required_brain_module_entries: entries,
+
+    all_required_brain_modules_loaded: allRequiredBrainModulesLoaded,
+    all_required_brain_modules_used: allRequiredBrainModulesUsed,
+    all_required_brain_modules_have_evidence: allRequiredBrainModulesHaveEvidence,
+    all_required_brain_modules_linked_to_final_candidate: allRequiredBrainModulesLinkedToFinalCandidate,
+    missing_required_brain_modules: missingRequiredBrainModules,
+
+    final_candidate_available: finalCandidateAvailable,
+    final_candidate_hash: finalCandidateAvailable ? finalCandidateHash : null,
+    final_candidate_decision: payload.final_candidate_decision ?? payload.finalCandidateDecision ?? null,
+    final_candidate_decision_source: payload.final_candidate_decision_source ?? payload.finalCandidateDecisionSource ?? null,
+
+    can_emit_final_output: contractValid,
+    can_output_to_chat: contractValid,
+    may_output_story_text: contractValid,
+    must_block_final_output_when_invalid: true,
+    block_reason_when_invalid: contractValid ? null : "required_brain_modules_contract_invalid",
+    operator_action_when_invalid: contractValid
+      ? null
+      : "inspect_neural_writing_brain_required_modules_contract",
+
+    safety: {
+      candidate_only: true,
+      no_candidate_save: true,
+      no_approval: true,
+      no_adoption: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      can_modify_active_engine: false,
+      can_update_canon: false,
+      can_confirm_adoption: false,
+    },
+  };
+}
