@@ -260,6 +260,25 @@ function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofi
   const hasFinalCandidate = Boolean(pipeline.final_candidate_text);
 
   if (hasFinalCandidate && brainContract?.contract_valid === false) {
+    const operatorDiagnostics = brainContract.operator_diagnostics ?? brainContract.readable_diagnostics ?? null;
+    const diagnosticChecklistForOperator = Array.isArray(operatorDiagnostics?.diagnostic_checklist_for_operator)
+      ? operatorDiagnostics.diagnostic_checklist_for_operator
+      : [];
+    const diagnosticChecklistText = diagnosticChecklistForOperator.length
+      ? "\n\nDiagnostic checklist: " + diagnosticChecklistForOperator.join(" ")
+      : "";
+    const diagnosticSummaryForChat =
+      (
+        operatorDiagnostics?.summary_for_chat
+        ?? "Neural writing brain required modules contract invalid. ChatGPT must not output story text because one or more required brain modules were not loaded, used, evidenced, or linked to the final candidate decision."
+      ) + diagnosticChecklistText;
+    const diagnosticSummaryForOperator =
+      operatorDiagnostics?.summary_for_operator
+      ?? "Phase36A requires all seven neural writing brain modules to be loaded, used, evidenced, and linked to the final candidate before final output can be valid.";
+    const diagnosticOperatorAction =
+      operatorDiagnostics?.first_operator_action
+      ?? "Inspect neural_writing_brain_required_modules_contract.missing_required_brain_modules and rerun the full neural writing pipeline with every required brain module enabled.";
+
     return {
       used: true,
       phase: "36A",
@@ -272,12 +291,18 @@ function buildFailureOutputForChat(pipeline, evidencePacketBridgeSurface, proofi
       can_output_to_chat: false,
       must_not_output_candidate: true,
       must_not_output_candidate_reason: "required_brain_modules_contract_invalid",
-      failure_summary_for_chat:
-        "Neural writing brain required modules contract invalid. ChatGPT must not output story text because one or more required brain modules were not loaded, used, evidenced, or linked to the final candidate decision.",
-      failure_reason_for_operator:
-        "Phase36A requires all seven neural writing brain modules to be loaded, used, evidenced, and linked to the final candidate before final output can be valid.",
-      recommended_operator_action:
-        "Inspect neural_writing_brain_required_modules_contract.missing_required_brain_modules and rerun the full neural writing pipeline with every required brain module enabled.",
+      failure_summary_for_chat: diagnosticSummaryForChat,
+      failure_reason_for_operator: diagnosticSummaryForOperator,
+      recommended_operator_action: diagnosticOperatorAction,
+      diagnostic_summary_for_chat: diagnosticSummaryForChat,
+      diagnostic_summary_for_operator: diagnosticSummaryForOperator,
+      operator_diagnostics: operatorDiagnostics,
+      blocked_module_diagnostics: Array.isArray(operatorDiagnostics?.blocked_module_diagnostics)
+        ? operatorDiagnostics.blocked_module_diagnostics
+        : [],
+      diagnostic_checklist_for_operator: Array.isArray(operatorDiagnostics?.diagnostic_checklist_for_operator)
+        ? operatorDiagnostics.diagnostic_checklist_for_operator
+        : [],
       can_retry_after_configuration: true,
       can_continue_revision: false,
       evidence_surface_available: evidencePacketBridgeSurface?.used === true,
