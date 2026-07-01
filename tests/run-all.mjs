@@ -163,6 +163,7 @@ const steps = [
   ["Phase 34X ChatGPT final output real action surface readiness", ["tests/phase34/phase34x-chatgpt-final-output-real-action-surface-readiness.test.mjs"]],
   ["Phase 34Y ChatGPT final output real action final smoke", ["tests/phase34/phase34y-chatgpt-final-output-real-action-final-smoke.test.mjs"]],
   ["Phase 34Z ChatGPT final output final closure seal", ["tests/phase34/phase34z-chatgpt-final-output-final-closure-seal.test.mjs"]],
+  ["Phase 35A ChatGPT real action final output operator runtime contract", ["tests/phase35/phase35a-chatgpt-real-action-final-output-operator-runtime-contract.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
