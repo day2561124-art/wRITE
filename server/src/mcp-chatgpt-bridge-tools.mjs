@@ -3911,6 +3911,162 @@ export function buildChatgptFinalOutputRuntimeFinalSeal(toolResponse = {}) {
   };
 }
 
+
+const chatgptOperatorCompactDiagnosticsSurfaceKind =
+  "chatgpt_bridge_operator_compact_diagnostics_surface";
+const chatgptOperatorCompactDiagnosticsVersion =
+  "chatgpt_bridge_operator_compact_diagnostics_surface_v1";
+
+function compactStringArray(value, maximum = 12) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => typeof item === "string" ? item.trim() : "")
+    .filter(Boolean)
+    .slice(0, maximum);
+}
+
+function compactBlockedChecks(blockedModules = []) {
+  return (Array.isArray(blockedModules) ? blockedModules : [])
+    .flatMap((item) => compactStringArray(item?.missing_reasons, 8)
+      .map((reason) => `${item.key}:${reason}`))
+    .slice(0, 32);
+}
+
+function compactModuleRows(blockedModules = []) {
+  return (Array.isArray(blockedModules) ? blockedModules : [])
+    .map((item) => ({
+      key: item.key ?? null,
+      label: item.label ?? null,
+      missing_reasons: compactStringArray(item.missing_reasons, 8),
+      missing_requirements: compactStringArray(item.missing_requirements, 8),
+      recommended_operator_action: item.recommended_operator_action ?? null,
+    }))
+    .slice(0, 12);
+}
+
+function compactDiagnosticsText({
+  blocked,
+  summaryForChat,
+  missingModules,
+  blockedChecks,
+  operatorNextSteps,
+}) {
+  if (!blocked) {
+    return [
+      "READY: required brain modules diagnostics clear.",
+      summaryForChat,
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    "BLOCKED: required brain modules contract invalid.",
+    summaryForChat,
+    "missing_modules: " + (missingModules.length ? missingModules.join(", ") : "none"),
+    "blocked_checks: " + (blockedChecks.length ? blockedChecks.join(", ") : "unknown"),
+    "operator_next_steps: " + (operatorNextSteps.length ? operatorNextSteps.join(" | ") : "Inspect required brain module diagnostics."),
+  ].filter(Boolean).join("\n");
+}
+
+export function buildChatgptOperatorCompactDiagnosticsSurface(
+  surfacedResult = {},
+  chatgptFinalOutput = null,
+) {
+  const brainContract =
+    surfacedResult?.neural_writing_brain_required_modules_contract ?? null;
+  const diagnostics =
+    brainContract?.operator_diagnostics
+    ?? brainContract?.readable_diagnostics
+    ?? null;
+
+  if (diagnostics?.used !== true) {
+    return {
+      used: false,
+      phase: "36C",
+      surface_kind: chatgptOperatorCompactDiagnosticsSurfaceKind,
+      version: chatgptOperatorCompactDiagnosticsVersion,
+      reason: "required_brain_modules_operator_diagnostics_missing",
+      contract_valid: false,
+      compact_surface_valid: false,
+      blocked: false,
+      can_output_to_chat: chatgptFinalOutput?.can_output_to_chat === true,
+      may_output_story_text: chatgptFinalOutput?.may_output_story_text === true,
+      safety: buildChatgptFinalOutputSafety(chatgptFinalOutput?.safety),
+    };
+  }
+
+  const blockedModules = Array.isArray(diagnostics.blocked_module_diagnostics)
+    ? diagnostics.blocked_module_diagnostics
+    : [];
+  const missingModules = compactStringArray(
+    diagnostics.missing_required_brain_modules,
+    12,
+  );
+  const blockedChecks = compactBlockedChecks(blockedModules);
+  const operatorNextSteps = compactStringArray(
+    diagnostics.diagnostic_checklist_for_operator,
+    12,
+  );
+  const blocked = diagnostics.blocked === true || diagnostics.contract_valid !== true;
+  const summaryForChat = diagnostics.summary_for_chat ?? "";
+  const summaryForOperator = diagnostics.summary_for_operator ?? "";
+  const outputText = compactDiagnosticsText({
+    blocked,
+    summaryForChat,
+    missingModules,
+    blockedChecks,
+    operatorNextSteps,
+  });
+
+  return {
+    used: true,
+    phase: "36C",
+    surface_kind: chatgptOperatorCompactDiagnosticsSurfaceKind,
+    version: chatgptOperatorCompactDiagnosticsVersion,
+    status: blocked
+      ? "operator_compact_diagnostics_blocked"
+      : "operator_compact_diagnostics_clear",
+    contract_valid: true,
+    compact_surface_valid: true,
+    source_contract_valid: brainContract?.contract_valid === true,
+    source_diagnostics_valid: diagnostics.diagnostics_valid === true,
+    source_phase: diagnostics.phase ?? null,
+    source_surface_kind: diagnostics.surface_kind ?? null,
+
+    blocked,
+    blocked_reason: blocked ? diagnostics.blocked_reason ?? "required_brain_modules_contract_invalid" : null,
+    response_kind: chatgptFinalOutput?.response_kind ?? null,
+    can_output_to_chat: blocked ? false : chatgptFinalOutput?.can_output_to_chat === true,
+    may_output_story_text: blocked ? false : chatgptFinalOutput?.may_output_story_text === true,
+    must_not_output_candidate: blocked,
+    must_not_output_candidate_reason: blocked ? "required_brain_modules_contract_invalid" : null,
+
+    summary_for_chat: summaryForChat,
+    summary_for_operator: summaryForOperator,
+    missing_modules: missingModules,
+    blocked_checks: blockedChecks,
+    blocked_module_count: Number.isInteger(diagnostics.blocked_module_count)
+      ? diagnostics.blocked_module_count
+      : blockedModules.length,
+    blocked_module_summaries: compactModuleRows(blockedModules),
+    operator_next_steps: operatorNextSteps,
+    first_operator_action: diagnostics.first_operator_action ?? null,
+
+    compact_diagnostics_text: outputText,
+    compact_diagnostics_hash: sha256(outputText),
+    compact_diagnostics_source:
+      "tool_response.result.neural_writing_brain_required_modules_contract.operator_diagnostics",
+
+    root_chatgpt_final_output_present: chatgptFinalOutput?.used === true,
+    root_output_hash: chatgptFinalOutput?.output_hash ?? null,
+    root_output_source: chatgptFinalOutput?.output_source ?? null,
+    compact_surface_is_reference_only: true,
+    compact_surface_must_not_replace_final_output: true,
+    compact_surface_must_not_be_emitted_as_story_text: true,
+    final_output_must_still_use_root_chatgpt_final_output: true,
+
+    safety: buildChatgptFinalOutputSafety(chatgptFinalOutput?.safety),
+  };
+}
+
 function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
   return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
     || surfacedResult?.extracted_chatgpt_final_output != null;
@@ -3922,12 +4078,15 @@ function response(toolName, permission, result, created = []) {
   const chatgptFinalOutput = shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult)
     ? buildChatgptFinalOutputToolSurface(surfacedResult)
     : buildUnusedChatgptFinalOutputToolSurface();
+  const operatorCompactDiagnostics =
+    buildChatgptOperatorCompactDiagnosticsSurface(surfacedResult, chatgptFinalOutput);
 
   return {
     ok: result?.ok !== false,
     tool_name: toolName,
     permission,
     chatgpt_final_output: chatgptFinalOutput,
+    chatgpt_operator_compact_diagnostics: operatorCompactDiagnostics,
     result: surfacedResult,
     created,
     warnings: result?.warnings ?? [],

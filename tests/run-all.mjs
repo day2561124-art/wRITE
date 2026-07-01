@@ -169,6 +169,7 @@ const steps = [
   ["Phase 35D ChatGPT real action final output runtime final seal", ["tests/phase35/phase35d-chatgpt-real-action-final-output-runtime-final-seal.test.mjs"]],
   ["Phase 36A neural writing brain required modules contract", ["tests/phase36/phase36a-neural-writing-brain-required-modules-contract.test.mjs"]],
   ["Phase 36B neural writing brain required modules readable diagnostics", ["tests/phase36/phase36b-neural-writing-brain-required-modules-readable-diagnostics.test.mjs"]],
+  ["Phase 36C ChatGPT bridge operator compact diagnostics surface", ["tests/phase36/phase36c-chatgpt-bridge-operator-compact-diagnostics-surface.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
