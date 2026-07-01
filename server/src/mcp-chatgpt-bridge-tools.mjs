@@ -2055,6 +2055,388 @@ export function buildChatgptFinalOutputRealActionFinalSmoke(toolResponse = {}) {
   };
 }
 
+
+const chatgptFinalOutputFinalClosureSealKind = "chatgpt_final_output_final_closure_seal";
+const chatgptFinalOutputFinalClosureSealEntrypoint = "acceptChatgptFinalOutputFromRealActionSurface(tool_response)";
+const chatgptFinalOutputFinalClosureSealCanonicalEntrypoint = "emitChatgptFinalOutputText(tool_response)";
+const chatgptFinalOutputFinalClosureSealRootField = "tool_response.chatgpt_final_output.output_text";
+const chatgptFinalOutputFinalClosureSealFinalSmoke = "buildChatgptFinalOutputRealActionFinalSmoke(tool_response)";
+
+function buildChatgptFinalOutputFinalClosureSealEntries() {
+  return [
+    {
+      phase: "34J",
+      name: "ChatGPT bridge final candidate output contract",
+      test_path: "tests/phase34/phase34j-chatgpt-bridge-final-candidate-output-contract.test.mjs",
+      role: "candidate_success_output_contract",
+    },
+    {
+      phase: "34K",
+      name: "ChatGPT bridge failure output contract",
+      test_path: "tests/phase34/phase34k-chatgpt-bridge-failure-output-contract.test.mjs",
+      role: "pipeline_failure_output_contract",
+    },
+    {
+      phase: "34L",
+      name: "ChatGPT bridge failure readable surface",
+      test_path: "tests/phase34/phase34l-chatgpt-bridge-failure-readable-surface.test.mjs",
+      role: "failure_output_readable_surface",
+    },
+    {
+      phase: "34M",
+      name: "ChatGPT bridge success readable surface",
+      test_path: "tests/phase34/phase34m-chatgpt-bridge-success-readable-surface.test.mjs",
+      role: "success_output_readable_surface",
+    },
+    {
+      phase: "34N",
+      name: "ChatGPT bridge output surface symmetry regression",
+      test_path: "tests/phase34/phase34n-chatgpt-bridge-output-surface-symmetry-regression.test.mjs",
+      role: "success_failure_surface_symmetry_regression",
+    },
+    {
+      phase: "34O",
+      name: "ChatGPT bridge final response renderer contract",
+      test_path: "tests/phase34/phase34o-chatgpt-bridge-final-response-renderer-contract.test.mjs",
+      role: "final_response_for_chat_renderer_contract",
+    },
+    {
+      phase: "34P",
+      name: "ChatGPT bridge final response handoff contract",
+      test_path: "tests/phase34/phase34p-chatgpt-bridge-final-response-handoff-contract.test.mjs",
+      role: "final_response_handoff_for_chat_contract",
+    },
+    {
+      phase: "34Q",
+      name: "ChatGPT bridge final output live extraction contract",
+      test_path: "tests/phase34/phase34q-chatgpt-bridge-final-output-live-extraction-contract.test.mjs",
+      role: "extracted_chatgpt_final_output_contract",
+    },
+    {
+      phase: "34R",
+      name: "ChatGPT bridge final output tool surface contract",
+      test_path: "tests/phase34/phase34r-chatgpt-bridge-final-output-tool-surface-contract.test.mjs",
+      role: "root_chatgpt_final_output_tool_surface_contract",
+    },
+    {
+      phase: "34S",
+      name: "ChatGPT bridge final output consumer contract",
+      test_path: "tests/phase34/phase34s-chatgpt-bridge-final-output-consumer-contract.test.mjs",
+      role: "consumer_emission_contract",
+    },
+    {
+      phase: "34T",
+      name: "ChatGPT final output E2E compliance smoke",
+      test_path: "tests/phase34/phase34t-chatgpt-final-output-e2e-compliance-smoke.test.mjs",
+      role: "final_chatgpt_output_e2e_compliance_smoke",
+    },
+    {
+      phase: "34U",
+      name: "ChatGPT final output operator handoff checklist",
+      test_path: "tests/phase34/phase34u-chatgpt-final-output-operator-handoff-checklist.test.mjs",
+      role: "operator_handoff_checklist",
+    },
+    {
+      phase: "34V",
+      name: "ChatGPT final output contract final closure index",
+      test_path: "tests/phase34/phase34v-chatgpt-final-output-contract-final-closure-index.test.mjs",
+      role: "contract_final_closure_index",
+    },
+    {
+      phase: "34W",
+      name: "ChatGPT final output live tool call acceptance smoke",
+      test_path: "tests/phase34/phase34w-chatgpt-final-output-live-tool-call-acceptance-smoke.test.mjs",
+      role: "live_tool_call_acceptance_smoke",
+    },
+    {
+      phase: "34X",
+      name: "ChatGPT final output real action surface readiness",
+      test_path: "tests/phase34/phase34x-chatgpt-final-output-real-action-surface-readiness.test.mjs",
+      role: "real_action_surface_readiness",
+    },
+    {
+      phase: "34Y",
+      name: "ChatGPT final output real action final smoke",
+      test_path: "tests/phase34/phase34y-chatgpt-final-output-real-action-final-smoke.test.mjs",
+      role: "real_action_final_smoke_endpoint",
+    },
+  ];
+}
+
+function buildChatgptFinalOutputFinalClosureSealForbiddenSources() {
+  return [
+    "tool_response.result",
+    "tool_response.result.final_candidate_text",
+    "tool_response.result.success_output_for_chat",
+    "tool_response.result.failure_output_for_chat",
+    "tool_response.result.final_response_for_chat",
+    "tool_response.result.final_response_handoff_for_chat",
+    "tool_response.result.extracted_chatgpt_final_output",
+    "buildChatgptFinalOutputOperatorHandoffChecklist(tool_response)",
+    "buildChatgptFinalOutputContractFinalClosureIndex(tool_response)",
+    "buildChatgptFinalOutputLiveToolCallAcceptanceSmoke(tool_response)",
+    "buildChatgptFinalOutputRealActionSurfaceReadiness(tool_response)",
+    "buildChatgptFinalOutputRealActionFinalSmoke(tool_response)",
+    "buildChatgptFinalOutputFinalClosureSeal(tool_response)",
+  ];
+}
+
+export function buildChatgptFinalOutputFinalClosureSeal(toolResponse = {}) {
+  const finalSmoke = buildChatgptFinalOutputRealActionFinalSmoke(toolResponse);
+  const finalText = acceptChatgptFinalOutputFromRealActionSurface(toolResponse);
+  const canonicalText = emitChatgptFinalOutputText(toolResponse);
+  const rootOutput = toolResponse?.chatgpt_final_output ?? null;
+  const sealEntries = buildChatgptFinalOutputFinalClosureSealEntries();
+  const forbiddenSources = buildChatgptFinalOutputFinalClosureSealForbiddenSources();
+  const expectedPhases = [
+    "34J", "34K", "34L", "34M", "34N", "34O", "34P", "34Q", "34R",
+    "34S", "34T", "34U", "34V", "34W", "34X", "34Y",
+  ];
+  const validationErrors = [];
+
+  if (finalSmoke?.used !== true) {
+    validationErrors.push("real_action_final_smoke_used_false_or_missing");
+  }
+
+  if (finalSmoke?.phase !== "34Y") {
+    validationErrors.push("real_action_final_smoke_phase_not_34y");
+  }
+
+  if (finalSmoke?.contract_valid !== true) {
+    validationErrors.push("real_action_final_smoke_contract_invalid");
+  }
+
+  if (finalSmoke?.real_action_final_smoke_passed !== true) {
+    validationErrors.push("real_action_final_smoke_not_passed");
+  }
+
+  if (finalSmoke?.final_action_output_entrypoint !== chatgptFinalOutputFinalClosureSealEntrypoint) {
+    validationErrors.push("final_action_output_entrypoint_mismatch");
+  }
+
+  if (finalSmoke?.canonical_final_output_entrypoint !== chatgptFinalOutputFinalClosureSealCanonicalEntrypoint) {
+    validationErrors.push("canonical_final_output_entrypoint_mismatch");
+  }
+
+  if (finalSmoke?.required_chatgpt_consumable_field !== chatgptFinalOutputFinalClosureSealRootField) {
+    validationErrors.push("required_chatgpt_consumable_field_mismatch");
+  }
+
+  if (rootOutput?.used !== true) {
+    validationErrors.push("root_chatgpt_final_output_used_false_or_missing");
+  }
+
+  if (rootOutput?.contract_valid !== true) {
+    validationErrors.push("root_chatgpt_final_output_contract_invalid");
+  }
+
+  if (typeof rootOutput?.output_text !== "string") {
+    validationErrors.push("root_chatgpt_final_output_text_missing_or_not_string");
+  }
+
+  if (typeof rootOutput?.output_hash !== "string" || rootOutput.output_hash.length === 0) {
+    validationErrors.push("root_chatgpt_final_output_hash_missing");
+  } else if (typeof rootOutput?.output_text === "string" && rootOutput.output_hash !== sha256(rootOutput.output_text)) {
+    validationErrors.push("root_chatgpt_final_output_hash_mismatch");
+  }
+
+  if (typeof finalText !== "string") {
+    validationErrors.push("final_entrypoint_text_missing_or_not_string");
+  }
+
+  if (typeof canonicalText !== "string") {
+    validationErrors.push("canonical_entrypoint_text_missing_or_not_string");
+  }
+
+  if (typeof finalText === "string" && typeof canonicalText === "string" && finalText !== canonicalText) {
+    validationErrors.push("final_entrypoint_canonical_entrypoint_mismatch");
+  }
+
+  if (typeof finalText === "string" && typeof rootOutput?.output_text === "string" && finalText !== rootOutput.output_text) {
+    validationErrors.push("final_entrypoint_root_output_text_mismatch");
+  }
+
+  if (typeof finalText === "string" && typeof finalSmoke?.final_smoke_output_text === "string" && finalText !== finalSmoke.final_smoke_output_text) {
+    validationErrors.push("final_entrypoint_final_smoke_output_text_mismatch");
+  }
+
+  if (finalSmoke?.final_smoke_output_matches_root !== true) {
+    validationErrors.push("final_smoke_output_matches_root_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_output_matches_canonical_emit !== true) {
+    validationErrors.push("final_smoke_output_matches_canonical_emit_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_is_reference_only !== true) {
+    validationErrors.push("final_smoke_reference_only_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_must_not_replace_final_output !== true) {
+    validationErrors.push("final_smoke_replace_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_must_not_be_emitted_as_chat_output !== true) {
+    validationErrors.push("final_smoke_emit_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_must_emit_final_text_exactly !== true) {
+    validationErrors.push("final_smoke_exact_text_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_requires_no_result_read !== true) {
+    validationErrors.push("final_smoke_no_result_read_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_requires_no_index_read !== true) {
+    validationErrors.push("final_smoke_no_index_read_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_requires_no_checklist_read !== true) {
+    validationErrors.push("final_smoke_no_checklist_read_guard_not_true");
+  }
+
+  if (finalSmoke?.final_smoke_requires_no_recomposition !== true) {
+    validationErrors.push("final_smoke_no_recomposition_guard_not_true");
+  }
+
+  if (finalSmoke?.must_not_emit_readiness_surface !== true) {
+    validationErrors.push("must_not_emit_readiness_surface_not_true");
+  }
+
+  if (finalSmoke?.must_not_emit_live_acceptance_surface !== true) {
+    validationErrors.push("must_not_emit_live_acceptance_surface_not_true");
+  }
+
+  if (finalSmoke?.must_not_emit_final_closure_index !== true) {
+    validationErrors.push("must_not_emit_final_closure_index_not_true");
+  }
+
+  if (finalSmoke?.must_not_emit_operator_checklist !== true) {
+    validationErrors.push("must_not_emit_operator_checklist_not_true");
+  }
+
+  if (finalSmoke?.must_not_emit_result_surface !== true) {
+    validationErrors.push("must_not_emit_result_surface_not_true");
+  }
+
+  if (finalSmoke?.may_read_tool_response_result !== false) {
+    validationErrors.push("final_smoke_may_read_tool_response_result_not_false");
+  }
+
+  if (finalSmoke?.may_rewrite !== false) {
+    validationErrors.push("final_smoke_may_rewrite_not_false");
+  }
+
+  if (finalSmoke?.may_summarize !== false) {
+    validationErrors.push("final_smoke_may_summarize_not_false");
+  }
+
+  if (finalSmoke?.may_include_extra_explanation !== false) {
+    validationErrors.push("final_smoke_extra_explanation_not_false");
+  }
+
+  if (finalSmoke?.may_construct_response !== false) {
+    validationErrors.push("final_smoke_may_construct_response_not_false");
+  }
+
+  if (finalSmoke?.may_save_candidate !== false) {
+    validationErrors.push("final_smoke_may_save_candidate_not_false");
+  }
+
+  if (finalSmoke?.may_approve_candidate !== false) {
+    validationErrors.push("final_smoke_may_approve_candidate_not_false");
+  }
+
+  if (finalSmoke?.may_adopt_candidate !== false) {
+    validationErrors.push("final_smoke_may_adopt_candidate_not_false");
+  }
+
+  if (finalSmoke?.may_update_canon !== false) {
+    validationErrors.push("final_smoke_may_update_canon_not_false");
+  }
+
+  if (finalSmoke?.may_update_active_engine !== false) {
+    validationErrors.push("final_smoke_may_update_active_engine_not_false");
+  }
+
+  if (!sealEntries.every((entry) => entry.phase && entry.name && entry.test_path && entry.role)) {
+    validationErrors.push("final_closure_seal_entry_shape_invalid");
+  }
+
+  const actualPhases = sealEntries.map((entry) => entry.phase);
+  if (JSON.stringify(actualPhases) !== JSON.stringify(expectedPhases)) {
+    validationErrors.push("final_closure_seal_phase_order_mismatch");
+  }
+
+  if (actualPhases.at(-1) !== "34Y") {
+    validationErrors.push("final_closure_seal_endpoint_not_34y");
+  }
+
+  const contractValid = validationErrors.length === 0;
+  const referenceText = contractValid ? finalText : null;
+
+  return {
+    used: true,
+    phase: "34Z",
+    surface_kind: chatgptFinalOutputFinalClosureSealKind,
+    contract_valid: contractValid,
+    validation_errors: validationErrors,
+    status: contractValid
+      ? "final_output_final_closure_sealed"
+      : "final_output_final_closure_seal_invalid",
+    response_kind: contractValid
+      ? "final_closure_seal_reference"
+      : "final_closure_seal_invalid_reference",
+    can_emit_response_to_chat: false,
+    can_output_to_chat: false,
+    may_output_story_text: false,
+    phase_range: "34J-34Y",
+    covered_phases: expectedPhases,
+    final_smoke_endpoint_phase: "34Y",
+    final_smoke_endpoint: chatgptFinalOutputFinalClosureSealFinalSmoke,
+    real_action_final_smoke: chatgptFinalOutputFinalClosureSealFinalSmoke,
+    final_unique_entrypoint: chatgptFinalOutputFinalClosureSealEntrypoint,
+    final_action_output_entrypoint: chatgptFinalOutputFinalClosureSealEntrypoint,
+    canonical_final_output_entrypoint: chatgptFinalOutputFinalClosureSealCanonicalEntrypoint,
+    root_consumable_field: chatgptFinalOutputFinalClosureSealRootField,
+    reference_final_output_text: referenceText,
+    reference_final_output_hash: typeof referenceText === "string" ? sha256(referenceText) : null,
+    reference_final_output_source: contractValid ? chatgptFinalOutputFinalClosureSealEntrypoint : null,
+    reference_final_output_matches_root: contractValid && referenceText === rootOutput?.output_text,
+    reference_final_output_matches_canonical_emit: contractValid && referenceText === canonicalText,
+    reference_final_output_matches_final_smoke: contractValid && referenceText === finalSmoke?.final_smoke_output_text,
+    final_seal_is_reference_only: true,
+    final_seal_must_not_replace_final_output: true,
+    final_seal_must_not_be_emitted_as_chat_output: true,
+    final_seal_may_not_be_read_for_chat_output: true,
+    final_output_must_still_use_entrypoint: true,
+    final_seal_adds_output_layer: false,
+    no_new_output_layer: true,
+    seal_contract_invalid_notice: contractValid ? null : [
+      "ChatGPT final output final closure seal invalid.",
+      "blocked_stage: final_output_final_closure_seal",
+      "operator_action: inspect_phase34_real_action_final_smoke",
+    ].join("\n"),
+    forbidden_sources: forbiddenSources,
+    final_closure_seal_entries: sealEntries,
+    no_extra_text: true,
+    no_fallback: true,
+    may_rewrite: false,
+    may_summarize: false,
+    may_include_extra_explanation: false,
+    may_construct_response: false,
+    may_read_tool_response_result: false,
+    may_save_candidate: false,
+    may_approve_candidate: false,
+    may_adopt_candidate: false,
+    may_update_canon: false,
+    may_update_active_engine: false,
+    ...buildChatgptFinalOutputLockFields(),
+    safety: buildChatgptFinalOutputSafety(finalSmoke?.safety),
+  };
+}
+
 function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
   return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
     || surfacedResult?.extracted_chatgpt_final_output != null;
