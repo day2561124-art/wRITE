@@ -172,6 +172,7 @@ const steps = [
   ["Phase 36C ChatGPT bridge operator compact diagnostics surface", ["tests/phase36/phase36c-chatgpt-bridge-operator-compact-diagnostics-surface.test.mjs"]],
   ["Phase 36D ChatGPT bridge operator compact diagnostics consumer renderer contract", ["tests/phase36/phase36d-chatgpt-bridge-operator-compact-diagnostics-consumer-renderer-contract.test.mjs"]],
   ["Phase 36E ChatGPT bridge operator compact diagnostics final closure index", ["tests/phase36/phase36e-chatgpt-bridge-operator-compact-diagnostics-final-closure-index.test.mjs"]],
+  ["Phase 36F ChatGPT bridge operator compact diagnostics live tool-call acceptance smoke", ["tests/phase36/phase36f-chatgpt-bridge-operator-compact-diagnostics-live-tool-call-acceptance-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
