@@ -8404,6 +8404,394 @@ export function buildChatgptOperatorCompactDiagnosticsRealChatgptLiveMcpFinalEmi
 }
 
 
+
+export const chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceKind =
+  "chatgpt_bridge_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance";
+
+export const chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceVersion =
+  "chatgpt_bridge_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_v1";
+
+export const chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredField =
+  "tool_response.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal.real_chatgpt_live_mcp_operator_extraction_message_text";
+
+function buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredTopLevelKeys() {
+  return [
+    "tool_name",
+    "permission",
+    "chatgpt_final_output",
+    "chatgpt_operator_compact_diagnostics",
+    "chatgpt_operator_compact_diagnostics_consumer",
+    "chatgpt_operator_compact_diagnostics_final_closure_index",
+    "chatgpt_operator_compact_diagnostics_live_tool_call_acceptance_smoke",
+    "chatgpt_operator_compact_diagnostics_runtime_final_seal",
+    "chatgpt_operator_compact_diagnostics_operator_handoff_final_checklist",
+    "chatgpt_operator_compact_diagnostics_real_chatgpt_writing_entry_smoke",
+    "chatgpt_operator_compact_diagnostics_final_operator_emission_hard_seal",
+    "chatgpt_operator_compact_diagnostics_public_contract_freeze",
+    "chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke",
+    "chatgpt_operator_compact_diagnostics_final_emission_operator_checklist",
+    "chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke",
+    "chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal",
+    "result",
+  ];
+}
+
+function buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceForbiddenSources() {
+  return [
+    "tool_response.result.*",
+    "tool_response.result.final_candidate_text",
+    "tool_response.result.extracted_chatgpt_final_output.output_text",
+    "tool_response.chatgpt_final_output.output_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke.live_extracted_operator_message_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_final_emission_operator_checklist.final_emission_operator_checklist_message_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.live_mcp_final_emission_contract_message_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke.output_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_final_emission_operator_checklist.output_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.output_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal.output_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke.operator_display_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_final_emission_operator_checklist.operator_display_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.operator_display_text",
+    "tool_response.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal.operator_display_text",
+    "nested result candidate text",
+    "nested brain contract text",
+    "recomposed/summarized/generated response text",
+  ];
+}
+
+function buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceItems() {
+  return [
+    {
+      id: "must_read_phase37b_operator_extraction_message_text",
+      status: "required",
+      instruction:
+        "Read the final operator message only from Phase37B real_chatgpt_live_mcp_operator_extraction_message_text.",
+      required_read_field:
+        chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredField,
+      required_value: true,
+    },
+    {
+      id: "must_not_read_result_or_chatgpt_final_output",
+      status: "required",
+      instruction:
+        "Do not read result.*, chatgpt_final_output.output_text, or nested candidate text.",
+      required_value: true,
+    },
+    {
+      id: "must_not_directly_read_phase36l_36m_or_37a",
+      status: "required",
+      instruction:
+        "Do not directly read Phase36L, Phase36M, or Phase37A message fields from the final consumer path.",
+      forbidden_read_fields: [
+        "tool_response.chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke.live_extracted_operator_message_text",
+        "tool_response.chatgpt_operator_compact_diagnostics_final_emission_operator_checklist.final_emission_operator_checklist_message_text",
+        "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.live_mcp_final_emission_contract_message_text",
+      ],
+      required_value: true,
+    },
+    {
+      id: "must_ignore_output_text_and_operator_display_decoys",
+      status: "required",
+      instruction:
+        "Ignore output_text/operator_display_text decoys on 36L, 36M, 37A, and 37B diagnostics surfaces.",
+      required_value: true,
+    },
+    {
+      id: "must_preserve_final_consumer_contract_reference_only",
+      status: "required",
+      instruction:
+        "The final operator message consumer contract is reference-only and must not become a story/candidate output layer.",
+      required_value: true,
+    },
+  ];
+}
+
+export function acceptChatgptOperatorCompactDiagnosticsFromRealChatgptFinalOperatorMessageConsumerContractAcceptance(toolResponse = {}) {
+  return toolResponse
+    ?.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal
+    ?.real_chatgpt_live_mcp_operator_extraction_message_text;
+}
+
+export function buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance(toolResponse = {}) {
+  const phase37B =
+    toolResponse
+      ?.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal
+    ?? null;
+  const topLevelKeys = toolResponse != null && typeof toolResponse === "object"
+    ? Object.keys(toolResponse)
+    : [];
+  const resultIndex = topLevelKeys.indexOf("result");
+  const phase37BIndex =
+    topLevelKeys.indexOf("chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal");
+  const phase37CIndex =
+    topLevelKeys.indexOf("chatgpt_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance");
+  const requiredTopLevelKeys =
+    buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredTopLevelKeys();
+  const forbiddenSources =
+    buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceForbiddenSources();
+  const acceptanceItems =
+    buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceItems();
+  const acceptedText =
+    acceptChatgptOperatorCompactDiagnosticsFromRealChatgptFinalOperatorMessageConsumerContractAcceptance(toolResponse);
+  const validationErrors = [];
+
+  if (toolResponse == null || typeof toolResponse !== "object") {
+    validationErrors.push("tool_response_missing_or_not_object");
+  }
+
+  if (toolResponse?.tool_name !== "chatgpt_bridge_run_full_neural_writing_pipeline") {
+    validationErrors.push("tool_response_tool_name_not_full_neural_pipeline");
+  }
+
+  for (const key of requiredTopLevelKeys) {
+    if (!topLevelKeys.includes(key)) {
+      validationErrors.push("top_level_key_missing:" + key);
+    }
+  }
+
+  for (let index = 1; index < requiredTopLevelKeys.length; index += 1) {
+    const previousKey = requiredTopLevelKeys[index - 1];
+    const currentKey = requiredTopLevelKeys[index];
+    const previousIndex = topLevelKeys.indexOf(previousKey);
+    const currentIndex = topLevelKeys.indexOf(currentKey);
+    if (previousIndex >= 0 && currentIndex >= 0 && previousIndex > currentIndex) {
+      validationErrors.push("top_level_key_order_invalid:" + previousKey + ">" + currentKey);
+    }
+  }
+
+  for (const key of requiredTopLevelKeys) {
+    const keyIndex = topLevelKeys.indexOf(key);
+    if (resultIndex >= 0 && keyIndex >= 0 && keyIndex > resultIndex) {
+      validationErrors.push("top_level_key_should_precede_result:" + key);
+    }
+  }
+
+  if (phase37BIndex < 0) {
+    validationErrors.push("top_level_phase37b_operator_extraction_consumer_hard_seal_missing");
+  }
+
+  if (phase37BIndex >= 0 && phase37CIndex >= 0 && phase37BIndex > phase37CIndex) {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_should_precede_phase37c_final_consumer_acceptance");
+  }
+
+  if (resultIndex >= 0 && phase37CIndex >= 0 && phase37CIndex > resultIndex) {
+    validationErrors.push("phase37c_final_consumer_acceptance_should_precede_result");
+  }
+
+  if (phase37B?.used !== true) {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_used_false_or_missing");
+  }
+
+  if (phase37B?.phase !== "37B") {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_phase_not_37b");
+  }
+
+  if (phase37B?.contract_valid !== true) {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_invalid");
+  }
+
+  if (
+    phase37B?.real_chatgpt_live_mcp_operator_extraction_required_read_field
+    !== "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.live_mcp_final_emission_contract_message_text"
+  ) {
+    validationErrors.push("phase37b_operator_extraction_required_read_field_mismatch");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_must_read_exact_field !== true) {
+    validationErrors.push("phase37b_operator_extraction_exact_field_guard_not_true");
+  }
+
+  if (typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_text !== "string") {
+    validationErrors.push("phase37b_operator_extraction_message_text_missing_or_not_string");
+  }
+
+  if (
+    typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_hash !== "string"
+    || phase37B.real_chatgpt_live_mcp_operator_extraction_message_hash.length === 0
+  ) {
+    validationErrors.push("phase37b_operator_extraction_message_hash_missing");
+  } else if (
+    typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_text === "string"
+    && phase37B.real_chatgpt_live_mcp_operator_extraction_message_hash
+      !== sha256(phase37B.real_chatgpt_live_mcp_operator_extraction_message_text)
+  ) {
+    validationErrors.push("phase37b_operator_extraction_message_hash_mismatch");
+  }
+
+  if (
+    phase37B?.real_chatgpt_live_mcp_operator_extraction_message_source
+    !== "tool_response.chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke.live_mcp_final_emission_contract_message_text"
+  ) {
+    validationErrors.push("phase37b_operator_extraction_message_source_not_phase37a_reference");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_is_reference_only !== true) {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_reference_only_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_adds_output_layer !== false) {
+    validationErrors.push("phase37b_operator_extraction_consumer_hard_seal_adds_output_layer_not_false");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_result_read !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_result_read_guard_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_chatgpt_final_output_text_read !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_chatgpt_final_output_text_guard_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_phase36l_direct_read !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_phase36l_direct_read_guard_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_phase36m_direct_read !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_phase36m_direct_read_guard_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_recomposition !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_recomposition_guard_not_true");
+  }
+
+  if (phase37B?.real_chatgpt_live_mcp_operator_extraction_consumer_hard_seal_requires_no_fallback !== true) {
+    validationErrors.push("phase37b_operator_extraction_no_fallback_guard_not_true");
+  }
+
+  if (typeof acceptedText !== "string") {
+    validationErrors.push("accepted_final_operator_message_text_missing_or_not_string");
+  }
+
+  if (
+    typeof acceptedText === "string"
+    && typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_text === "string"
+    && acceptedText !== phase37B.real_chatgpt_live_mcp_operator_extraction_message_text
+  ) {
+    validationErrors.push("accepted_final_operator_message_text_phase37b_mismatch");
+  }
+
+  const contractValid = validationErrors.length === 0;
+  const blocked = contractValid ? phase37B.blocked === true : true;
+  const acceptedOperatorMessageText = contractValid
+    ? acceptedText
+    : [
+      "ChatGPT real ChatGPT final operator message consumer contract acceptance invalid.",
+      "blocked_stage: operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance",
+      "operator_action: inspect_phase37b_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal",
+    ].join("\n");
+
+  return {
+    used: true,
+    phase: "37C",
+    surface_kind:
+      chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceKind,
+    version:
+      chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceVersion,
+    contract_valid: contractValid,
+    validation_errors: validationErrors,
+    status: contractValid
+      ? blocked
+        ? "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_blocked"
+        : "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_clear"
+      : "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_invalid",
+    response_kind: contractValid
+      ? "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_reference"
+      : "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_invalid_reference",
+
+    real_chatgpt_final_operator_message_consumer_dependency_chain:
+      ["36A", "36B", "36C", "36D", "36E", "36F", "36G", "36H", "36I", "36J", "36K", "36L", "36M", "37A", "37B", "37C"],
+    real_chatgpt_final_operator_message_consumer_dependency_chain_complete: contractValid,
+    real_chatgpt_final_operator_message_consumer_required_read_field:
+      chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredField,
+    real_chatgpt_final_operator_message_consumer_must_read_exact_field: true,
+    real_chatgpt_final_operator_message_consumer_acceptance_function:
+      "acceptChatgptOperatorCompactDiagnosticsFromRealChatgptFinalOperatorMessageConsumerContractAcceptance(tool_response)",
+    real_chatgpt_final_operator_message_consumer_accepted_source:
+      chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredField,
+
+    blocked,
+    blocked_reason: contractValid
+      ? phase37B.blocked_reason ?? null
+      : "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_invalid",
+    can_emit_operator_message: contractValid,
+    can_output_to_chat: false,
+    may_output_story_text: false,
+    must_not_output_candidate: true,
+    must_not_output_candidate_reason: blocked
+      ? phase37B?.must_not_output_candidate_reason ?? "required_brain_modules_contract_invalid"
+      : "real_chatgpt_final_operator_message_consumer_contract_acceptance_is_reference_only",
+
+    real_chatgpt_final_operator_message_consumer_acceptance_items: acceptanceItems,
+    real_chatgpt_final_operator_message_consumer_acceptance_items_complete: contractValid,
+    real_chatgpt_final_operator_message_consumer_accepted_message_text: acceptedOperatorMessageText,
+    real_chatgpt_final_operator_message_consumer_accepted_message_hash: sha256(acceptedOperatorMessageText),
+    real_chatgpt_final_operator_message_consumer_accepted_message_source: contractValid
+      ? chatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptanceRequiredField
+      : "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance.invalid_notice",
+    real_chatgpt_final_operator_message_consumer_accepted_message_matches_phase37b_operator_extraction_consumer_hard_seal: contractValid
+      && typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_text === "string"
+      && acceptedOperatorMessageText === phase37B.real_chatgpt_live_mcp_operator_extraction_message_text,
+    real_chatgpt_final_operator_message_consumer_accepted_message_hash_matches_phase37b_operator_extraction_consumer_hard_seal: contractValid
+      && typeof phase37B?.real_chatgpt_live_mcp_operator_extraction_message_hash === "string"
+      && sha256(acceptedOperatorMessageText) === phase37B.real_chatgpt_live_mcp_operator_extraction_message_hash,
+    real_chatgpt_final_operator_message_consumer_accepted_message_is_blocked_notice:
+      contractValid && blocked && acceptedOperatorMessageText.includes("BLOCKED:"),
+    real_chatgpt_final_operator_message_consumer_accepted_message_is_clear_notice:
+      contractValid && !blocked && acceptedOperatorMessageText.includes("READY:"),
+
+    phase37b_operator_extraction_status: phase37B?.status ?? null,
+    phase37b_operator_extraction_hash:
+      phase37B?.real_chatgpt_live_mcp_operator_extraction_message_hash ?? null,
+    phase37b_operator_extraction_source:
+      phase37B?.real_chatgpt_live_mcp_operator_extraction_message_source ?? null,
+
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_is_reference_only: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_adds_output_layer: false,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_must_not_replace_final_output: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_must_not_be_emitted_as_story_text: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_must_not_be_used_as_candidate_text: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_phase37b_operator_extraction_consumer_hard_seal: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_result_read: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_chatgpt_final_output_text_read: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase36l_direct_read: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase36m_direct_read: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase37a_direct_read: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_recomposition: true,
+    real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_fallback: true,
+
+    must_not_read_result: true,
+    must_not_read_chatgpt_final_output_text_for_real_chatgpt_final_operator_message_consumer: true,
+    must_not_read_phase36l_final_live_extraction_message_text: true,
+    must_not_read_phase36m_final_emission_operator_checklist_message_text: true,
+    must_not_read_phase37a_live_mcp_final_emission_contract_message_text: true,
+    must_not_read_phase37b_output_text_decoy: true,
+    must_not_read_nested_result_candidate_text: true,
+    must_not_read_nested_brain_contract: true,
+    must_not_recompose_response: true,
+
+    forbidden_sources: forbiddenSources,
+    no_new_output_layer: true,
+    no_extra_text: true,
+    no_fallback: true,
+    may_rewrite: false,
+    may_summarize: false,
+    may_include_extra_explanation: false,
+    may_construct_response: false,
+    may_read_tool_response_result: false,
+    may_read_chatgpt_final_output_text: false,
+    may_read_phase36l_final_live_extraction_message_text: false,
+    may_read_phase36m_final_emission_operator_checklist_message_text: false,
+    may_read_phase37a_live_mcp_final_emission_contract_message_text: false,
+    may_save_candidate: false,
+    may_approve_candidate: false,
+    may_adopt_candidate: false,
+    may_update_canon: false,
+    may_update_active_engine: false,
+    ...buildChatgptFinalOutputLockFields(),
+    safety: buildChatgptFinalOutputSafety(toolResponse?.chatgpt_final_output?.safety),
+  };
+}
+
+
 function shouldRequireChatgptFinalOutputToolSurface(toolName, surfacedResult = {}) {
   return toolName === "chatgpt_bridge_run_full_neural_writing_pipeline"
     || surfacedResult?.extracted_chatgpt_final_output != null;
@@ -9038,6 +9426,101 @@ function response(toolName, permission, result, created = []) {
     };
   }
 
+  let operatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance;
+  try {
+    operatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance =
+      buildChatgptOperatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance({
+        ok: result?.ok !== false,
+        tool_name: toolName,
+        permission,
+        chatgpt_final_output: chatgptFinalOutput,
+        chatgpt_operator_compact_diagnostics: operatorCompactDiagnostics,
+        chatgpt_operator_compact_diagnostics_consumer: operatorCompactDiagnosticsConsumer,
+        chatgpt_operator_compact_diagnostics_final_closure_index: operatorCompactDiagnosticsFinalClosure,
+        chatgpt_operator_compact_diagnostics_live_tool_call_acceptance_smoke: operatorCompactDiagnosticsLiveAcceptance,
+        chatgpt_operator_compact_diagnostics_runtime_final_seal: operatorCompactDiagnosticsRuntimeFinalSeal,
+        chatgpt_operator_compact_diagnostics_operator_handoff_final_checklist:
+          operatorCompactDiagnosticsOperatorHandoffFinalChecklist,
+        chatgpt_operator_compact_diagnostics_real_chatgpt_writing_entry_smoke:
+          operatorCompactDiagnosticsRealChatgptWritingEntrySmoke,
+        chatgpt_operator_compact_diagnostics_final_operator_emission_hard_seal:
+          operatorCompactDiagnosticsFinalOperatorEmissionHardSeal,
+        chatgpt_operator_compact_diagnostics_public_contract_freeze:
+          operatorCompactDiagnosticsPublicContractFreeze,
+        chatgpt_operator_compact_diagnostics_public_contract_final_live_extraction_smoke:
+          operatorCompactDiagnosticsPublicContractFinalLiveExtractionSmoke,
+        chatgpt_operator_compact_diagnostics_final_emission_operator_checklist:
+          operatorCompactDiagnosticsFinalEmissionOperatorChecklist,
+        chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke:
+          operatorCompactDiagnosticsLiveMcpFinalEmissionContractSmoke,
+        chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal:
+          operatorCompactDiagnosticsRealChatgptLiveMcpFinalEmissionOperatorExtractionConsumerHardSeal,
+        result: surfacedResult,
+      });
+  } catch (error) {
+    const invalidText = [
+      "ChatGPT real ChatGPT final operator message consumer contract acceptance invalid.",
+      "blocked_stage: operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance",
+      "operator_action: inspect_phase37b_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal",
+    ].join("\n");
+    operatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance = {
+      used: true,
+      phase: "37C",
+      surface_kind:
+        "chatgpt_bridge_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance",
+      version:
+        "chatgpt_bridge_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_v1",
+      contract_valid: false,
+      validation_errors: [
+        "real_chatgpt_final_operator_message_consumer_contract_acceptance_builder_threw",
+        String(error?.message ?? error),
+      ],
+      status: "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_invalid",
+      response_kind:
+        "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance_invalid_reference",
+      real_chatgpt_final_operator_message_consumer_required_read_field:
+        "tool_response.chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal.real_chatgpt_live_mcp_operator_extraction_message_text",
+      blocked: true,
+      blocked_reason: "real_chatgpt_final_operator_message_consumer_contract_acceptance_builder_threw",
+      can_emit_operator_message: false,
+      can_output_to_chat: false,
+      may_output_story_text: false,
+      must_not_output_candidate: true,
+      real_chatgpt_final_operator_message_consumer_accepted_message_text: invalidText,
+      real_chatgpt_final_operator_message_consumer_accepted_message_hash: sha256(invalidText),
+      real_chatgpt_final_operator_message_consumer_accepted_message_source:
+        "operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance.invalid_notice",
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_is_reference_only: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_adds_output_layer: false,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_must_not_replace_final_output: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_phase37b_operator_extraction_consumer_hard_seal: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_result_read: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_chatgpt_final_output_text_read: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase36l_direct_read: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase36m_direct_read: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_phase37a_direct_read: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_recomposition: true,
+      real_chatgpt_final_operator_message_consumer_contract_acceptance_requires_no_fallback: true,
+      no_new_output_layer: true,
+      no_extra_text: true,
+      no_fallback: true,
+      may_rewrite: false,
+      may_summarize: false,
+      may_include_extra_explanation: false,
+      may_construct_response: false,
+      may_read_tool_response_result: false,
+      may_read_chatgpt_final_output_text: false,
+      may_read_phase36l_final_live_extraction_message_text: false,
+      may_read_phase36m_final_emission_operator_checklist_message_text: false,
+      may_read_phase37a_live_mcp_final_emission_contract_message_text: false,
+      may_save_candidate: false,
+      may_approve_candidate: false,
+      may_adopt_candidate: false,
+      may_update_canon: false,
+      may_update_active_engine: false,
+    };
+  }
+
   return {
     ok: result?.ok !== false,
     tool_name: toolName,
@@ -9057,6 +9540,8 @@ function response(toolName, permission, result, created = []) {
     chatgpt_operator_compact_diagnostics_live_mcp_final_emission_contract_smoke: operatorCompactDiagnosticsLiveMcpFinalEmissionContractSmoke,
     chatgpt_operator_compact_diagnostics_real_chatgpt_live_mcp_final_emission_operator_extraction_consumer_hard_seal:
       operatorCompactDiagnosticsRealChatgptLiveMcpFinalEmissionOperatorExtractionConsumerHardSeal,
+    chatgpt_operator_compact_diagnostics_real_chatgpt_final_operator_message_consumer_contract_acceptance:
+      operatorCompactDiagnosticsRealChatgptFinalOperatorMessageConsumerContractAcceptance,
     result: surfacedResult,
     created,
     warnings: result?.warnings ?? [],
