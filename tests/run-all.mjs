@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
@@ -180,6 +180,7 @@ const steps = [
   ["Phase 36K ChatGPT bridge final response public contract freeze", ["tests/phase36/phase36k-chatgpt-bridge-final-response-public-contract-freeze.test.mjs"]],
   ["Phase 36L ChatGPT bridge public contract final live extraction smoke", ["tests/phase36/phase36l-chatgpt-bridge-public-contract-final-live-extraction-smoke.test.mjs"]],
   ["Phase 36M ChatGPT bridge final emission operator checklist", ["tests/phase36/phase36m-chatgpt-bridge-final-emission-operator-checklist.test.mjs"]],
+  ["Phase 37A ChatGPT bridge live MCP final emission contract smoke", ["tests/phase37/phase37a-chatgpt-bridge-live-mcp-final-emission-contract-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -301,3 +302,4 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
+

@@ -1,4 +1,4 @@
-import { readFile, stat, rm, writeFile } from "node:fs/promises";
+﻿import { readFile, stat, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   createProjectBackup,
@@ -92,7 +92,7 @@ async function main() {
     assert(threw, "resolveProjectPath did not reject traversal");
 
     console.log("Backup export service test passed.");
-    process.exit(0);
+
     } finally {
     // cleanup
     await rm(dir, { recursive: true, force: true });
@@ -107,3 +107,4 @@ main().catch((error) => {
   console.error(`Backup export service test failed: ${error.message}`);
   process.exitCode = 1;
 });
+
