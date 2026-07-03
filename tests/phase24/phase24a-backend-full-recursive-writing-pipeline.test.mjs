@@ -181,7 +181,14 @@ try {
     path.join(root, "server", "src", "mcp-server.mjs"),
     "utf8",
   );
-  assert(serverSource.includes("chatgpt_bridge_run_full_recursive_writing_pipeline"));
+  assert(
+    serverSource.includes("chatgpt_bridge_run_full_neural_writing_pipeline"),
+    "MCP server should expose the ChatGPT-facing full neural writing pipeline entry after Phase38C.",
+  );
+  assert(
+    !serverSource.includes('name: "chatgpt_bridge_run_full_recursive_writing_pipeline"'),
+    "MCP server should not expose the legacy recursive pipeline as the ChatGPT-facing tool name after Phase38C.",
+  );
   assert(serverSource.includes("save_candidate"));
   assert(serverSource.includes("max_revision_rounds"));
   assert(serverSource.includes("task_prompt"));

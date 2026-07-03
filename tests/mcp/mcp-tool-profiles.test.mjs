@@ -26,7 +26,7 @@ const publicToolNames = [
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
-  "chatgpt_bridge_run_full_recursive_writing_pipeline",
+  "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
   "chatgpt_bridge_request_adoption",
@@ -163,6 +163,36 @@ assert.deepEqual(
 );
 
 const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+const publicNeuralPipelineTool = publicToolMap.get(
+  "chatgpt_bridge_run_full_neural_writing_pipeline",
+);
+assert(
+  publicNeuralPipelineTool,
+  "chatgpt_public missing chatgpt_bridge_run_full_neural_writing_pipeline",
+);
+assert.match(
+  publicNeuralPipelineTool.description ?? "",
+  /full neural|neural writing|story|chapter|scene|final output|正文|下一章|正式續寫/i,
+  "chatgpt_bridge_run_full_neural_writing_pipeline description should advertise full neural story generation routing",
+);
+assert.match(
+  publicNeuralPipelineTool.description ?? "",
+  /extracted_chatgpt_final_output\.output_text|output_text|emit.*exactly|must.*exact/i,
+  "chatgpt_bridge_run_full_neural_writing_pipeline description should document exact final output emission",
+);
+
+const publicContextTool = publicToolMap.get("chatgpt_bridge_build_writing_context");
+assert.match(
+  publicContextTool?.description ?? "",
+  /context-only|context only|not.*final.*story|do not use.*final/i,
+  "chatgpt_bridge_build_writing_context description should warn it is context-only and not final story output",
+);
+assert.match(
+  publicContextTool?.description ?? "",
+  /chatgpt_bridge_run_full_neural_writing_pipeline/i,
+  "chatgpt_bridge_build_writing_context description should route final story output to the full neural pipeline",
+);
+
 const publicWritingContextSchema = publicToolMap.get(
   "chatgpt_bridge_build_writing_context",
 )?.inputSchema?.properties;

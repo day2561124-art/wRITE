@@ -79,7 +79,7 @@ import {
   chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface,
   chatgpt_bridge_get_workbench_status,
   chatgpt_bridge_request_adoption,
-  chatgpt_bridge_run_full_recursive_writing_pipeline,
+  chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_save_candidate,
   chatgpt_bridge_save_proof_report,
   chatgpt_bridge_visual_library_ui_import_flow_preview,
@@ -1974,7 +1974,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_writing_context",
-    description: "Build a ChatGPT-facing writing context from current workbench inputs without generation. Optional: set run_neural_traces (boolean, default: false) to request neural trace materialization; when no legal adapter is available, the context records skipped/warning trace status instead of faking success.",
+    description: "[low-risk-write] Context-only Writer Workbench writing context builder. Do not use this tool to produce final story, chapter, or scene text. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests, use chatgpt_bridge_run_full_neural_writing_pipeline instead.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       run_neural_traces: {
@@ -2039,8 +2039,8 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_save_candidate(args)),
   },
   {
-    name: "chatgpt_bridge_run_full_recursive_writing_pipeline",
-    description: "Run backend generation, critique, recursive revision, final polish, and character voice guard; returns final_candidate_text without direct Canon adoption.",
+    name: "chatgpt_bridge_run_full_neural_writing_pipeline",
+    description: "[low-risk-write] Canonical ChatGPT-facing full neural story writing pipeline entry. Use this tool whenever the user asks Writer Workbench to write, continue, draft, generate, formally continue, output 正文, write 下一章, 只輸出正文, 從章名開始, or produce a story chapter/scene. On success, ChatGPT must emit extracted_chatgpt_final_output.output_text exactly, with no rewrite, summary, extra explanation, direct Canon adoption, or active_engine update.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
@@ -2058,7 +2058,7 @@ const toolDefinitions = [
       output_mode: { type: "string", enum: ["chat_text"], default: "chat_text" },
     }, ["task_prompt"]),
     handler: async (args) => jsonContent(
-      await chatgpt_bridge_run_full_recursive_writing_pipeline(args),
+      await chatgpt_bridge_run_full_neural_writing_pipeline(args),
     ),
   },
   {
@@ -2648,7 +2648,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
-  "chatgpt_bridge_run_full_recursive_writing_pipeline",
+  "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
   "chatgpt_bridge_request_adoption",
@@ -2735,7 +2735,7 @@ const permissionSources = {
   chatgpt_bridge_get_entity_registry_provenance: ["entity_registry", "registered_project_sources"],
   chatgpt_bridge_build_writing_context: ["generated_context", "retrieval_context", "task_prompt", "registered_project_sources", "user_input"],
   chatgpt_bridge_save_candidate: ["user_input", "gpt_writing_context_records"],
-  chatgpt_bridge_run_full_recursive_writing_pipeline: [
+  chatgpt_bridge_run_full_neural_writing_pipeline: [
     "user_input",
     "registered_project_sources",
     "generation_provider",

@@ -11858,7 +11858,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_get_current_inputs,
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_save_candidate,
-  chatgpt_bridge_run_full_recursive_writing_pipeline,
+  chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_build_proofing_context,
   chatgpt_bridge_save_proof_report,
   chatgpt_bridge_request_adoption,
@@ -11897,7 +11897,13 @@ export const chatgptBridgeToolMetadata = {
   chatgpt_bridge_build_writing_context: writeMetadata([
     projectPaths.gptWritingContexts,
     projectPaths.outputLogs,
-  ]),
+  ], {
+    context_only: true,
+    not_final_story_output_tool: true,
+    use_for_final_story_output: "chatgpt_bridge_run_full_neural_writing_pipeline",
+    context_tool_routing_warning:
+      "Context-only. Do not use this tool to produce final story, chapter, or scene text. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests, use chatgpt_bridge_run_full_neural_writing_pipeline.",
+  }),
   chatgpt_bridge_save_candidate: writeMetadata([
     projectPaths.writingCandidates,
     projectPaths.outputLogs,
@@ -11909,6 +11915,35 @@ export const chatgptBridgeToolMetadata = {
   ], {
     generation_preview_when_save_candidate_false: true,
     candidate_only_when_saved: true,
+    legacy_recursive_pipeline_entry: true,
+    prefer_for_chatgpt_story_generation: "chatgpt_bridge_run_full_neural_writing_pipeline",
+  }),
+  chatgpt_bridge_run_full_neural_writing_pipeline: writeMetadata([
+    projectPaths.gptWritingContexts,
+    projectPaths.writingCandidates,
+    projectPaths.outputLogs,
+  ], {
+    chatgpt_story_generation_primary_entry: true,
+    canonical_chatgpt_full_neural_pipeline_entry: true,
+    canonical_final_output_field: "extracted_chatgpt_final_output.output_text",
+    must_emit_extracted_final_output_exactly: true,
+    no_rewrite: true,
+    no_summary: true,
+    no_extra_explanation: true,
+    candidate_only_when_saved: true,
+    generation_preview_when_save_candidate_false: true,
+    use_when_user_asks_for: [
+      "正式續寫",
+      "下一章",
+      "只輸出正文",
+      "從章名開始",
+      "write",
+      "continue",
+      "draft",
+      "generate",
+      "story chapter",
+      "story scene",
+    ],
   }),
   chatgpt_bridge_build_proofing_context: writeMetadata([
     projectPaths.proofingContexts,

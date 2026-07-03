@@ -190,6 +190,7 @@ const steps = [
   ["Phase 37H ChatGPT bridge final response consumer handoff packet closure seal", ["tests/phase37/phase37h-chatgpt-bridge-final-response-consumer-handoff-packet-closure-seal.test.mjs"]],
   ["Phase 38A ChatGPT bridge personal live writing acceptance smoke", ["tests/phase38/phase38a-chatgpt-bridge-personal-live-writing-acceptance-smoke.test.mjs"]],
   ["Phase 38B settlement pending safety personal acceptance", ["tests/phase38/phase38b-settlement-pending-safety-personal-acceptance.test.mjs"]],
+  ["Phase 38C ChatGPT full pipeline usable surface calibration", ["tests/phase38/phase38c-chatgpt-full-pipeline-usable-surface-calibration.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
