@@ -115,19 +115,19 @@ const steps = [
   ["Phase 31Q aesthetic memory context builder operator review packet bridge evidence packet UI preview", ["tests/phase31/phase31q-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-ui-preview.test.mjs"]],
   ["Phase 31R aesthetic memory context builder operator review packet bridge evidence packet UI live smoke", ["tests/phase31/phase31r-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-ui-live-smoke.test.mjs"]],
   ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31s-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-bridge-preview.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31t-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-bridge-smoke.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31u-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-readiness.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31v-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-operator-checklist.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31w-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-checklist-bridge-preview.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31x-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-checklist-bridge-final-smoke.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31y-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-readiness.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase31/phase31z-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-operator-checklist.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32a-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-preview.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32b-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-smoke.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32c-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-stability-guard.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32d-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-recovery-guide.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32e-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-recovery-guide-final-smoke.test.mjs"]],
-  ["Phase 31S aesthetic memory context builder operator review packet bridge evidence packet bridge preview", ["tests/phase32/phase32f-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-closure-guard.test.mjs"]],
+  ["Phase 31T aesthetic memory context builder operator review packet bridge evidence packet final bridge smoke", ["tests/phase31/phase31t-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-bridge-smoke.test.mjs"]],
+  ["Phase 31U aesthetic memory context builder operator review packet bridge evidence packet final acceptance readiness", ["tests/phase31/phase31u-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-readiness.test.mjs"]],
+  ["Phase 31V aesthetic memory context builder operator review packet bridge evidence packet final acceptance operator checklist", ["tests/phase31/phase31v-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-operator-checklist.test.mjs"]],
+  ["Phase 31W aesthetic memory context builder operator review packet bridge evidence packet final acceptance checklist bridge preview", ["tests/phase31/phase31w-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-checklist-bridge-preview.test.mjs"]],
+  ["Phase 31X aesthetic memory context builder operator review packet bridge evidence packet final acceptance checklist bridge final smoke", ["tests/phase31/phase31x-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-checklist-bridge-final-smoke.test.mjs"]],
+  ["Phase 31Y aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff readiness", ["tests/phase31/phase31y-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-readiness.test.mjs"]],
+  ["Phase 31Z aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff operator checklist", ["tests/phase31/phase31z-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-operator-checklist.test.mjs"]],
+  ["Phase 32A aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge preview", ["tests/phase32/phase32a-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-preview.test.mjs"]],
+  ["Phase 32B aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge final smoke", ["tests/phase32/phase32b-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-smoke.test.mjs"]],
+  ["Phase 32C aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge stability guard", ["tests/phase32/phase32c-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-stability-guard.test.mjs"]],
+  ["Phase 32D aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge recovery guide", ["tests/phase32/phase32d-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-recovery-guide.test.mjs"]],
+  ["Phase 32E aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge recovery guide final smoke", ["tests/phase32/phase32e-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-recovery-guide-final-smoke.test.mjs"]],
+  ["Phase 32F aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge final closure guard", ["tests/phase32/phase32f-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-closure-guard.test.mjs"]],
   ["Phase 33A aesthetic memory context builder final closure index", ["tests/phase33/phase33a-aesthetic-memory-context-builder-final-closure-index.test.mjs",
   "tests/phase33/phase33b-aesthetic-memory-context-builder-final-closure-index-bridge-preview.test.mjs",
   "tests/phase33/phase33c-aesthetic-memory-context-builder-final-closure-index-bridge-final-smoke.test.mjs",
@@ -185,6 +185,7 @@ const steps = [
   ["Phase 37C ChatGPT bridge real ChatGPT final operator message consumer contract acceptance", ["tests/phase37/phase37c-chatgpt-bridge-real-chatgpt-final-operator-message-consumer-contract-acceptance.test.mjs"]],
   ["Phase 37D ChatGPT bridge final response emission consumer seal", ["tests/phase37/phase37d-chatgpt-bridge-final-response-emission-consumer-seal.test.mjs"]],
   ["Phase 37E ChatGPT bridge final response non-candidate leakage regression seal", ["tests/phase37/phase37e-chatgpt-bridge-final-response-non-candidate-leakage-regression-seal.test.mjs"]],
+  ["Phase 37F ChatGPT bridge final response consumer closure index", ["tests/phase37/phase37f-chatgpt-bridge-final-response-consumer-closure-index.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -253,7 +254,11 @@ const steps = [
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 ];
 function getTimeoutMs(label) {
-  if (label === "Canon golden tests" || label === "JSON/codeblock validation") {
+  if (
+    label === "Canon golden tests"
+    || label === "JSON/codeblock validation"
+    || label === "Phase 32C aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge stability guard"
+  ) {
     return 480_000;
   }
   return 240_000;
