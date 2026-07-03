@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildAestheticMemoryContextBuilderBridgePreview } from "./aesthetic-memory-context-builder-bridge-preview-service.mjs";
 import { buildCandidateProofingContext } from "./candidate-proofing-context-service.mjs";
 import { runFullRecursiveWritingPipeline } from "./full-recursive-writing-pipeline-service.mjs";
 import { buildReaderResponseSimulatorReport } from "./reader-response-simulator-service.mjs";
@@ -942,15 +943,89 @@ export function buildExtractedChatGptFinalOutput(finalResponseHandoffForChat) {
   };
 }
 
-function buildAestheticMemoryContext(input) {
+async function buildAestheticMemoryContext(input, options = {}) {
   const hasPayload = Object.keys(input.aestheticMemoryContext).length > 0;
+
+  if (!input.includeAestheticMemoryContext) {
+    return {
+      used: false,
+      loaded: false,
+      evidence: false,
+      phase: "30A-33J-38E",
+      version: "aesthetic_memory_single_entry_context_reference_v2",
+      status: "disabled",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_context_build: true,
+      no_context_attach_to_canon: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      context: null,
+      evidence_hash: null,
+      evidence_summary: null,
+      evidence_refs: [],
+    };
+  }
+
+  if (hasPayload) {
+    const evidenceHash = createHash("sha256")
+      .update(JSON.stringify(input.aestheticMemoryContext))
+      .digest("hex");
+
+    return {
+      used: true,
+      loaded: true,
+      evidence: true,
+      phase: "30A-33J-38E",
+      version: "aesthetic_memory_single_entry_context_reference_v2",
+      status: "attached_to_single_entry_payload",
+      read_only: true,
+      candidate_only: true,
+      no_auto_persist: true,
+      no_context_build: true,
+      no_context_attach_to_canon: true,
+      no_canon_update: true,
+      no_active_engine_update: true,
+      source: "single_entry_payload",
+      context: input.aestheticMemoryContext,
+      evidence_hash: evidenceHash,
+      evidence_summary: "Aesthetic memory context was supplied by the single-entry payload and is linked as read-only evidence.",
+      evidence_refs: ["single_entry_payload:aesthetic_memory_context"],
+    };
+  }
+
+  const builderBridge = await buildAestheticMemoryContextBuilderBridgePreview({
+    task_prompt: input.taskPrompt,
+    generation_context: input.generationContext,
+    retrieval_context: input.retrievalContext,
+    include_raw: false,
+    include_markdown: false,
+  }, options);
+
+  const bridgeStatus = String(
+    builderBridge.bridge_status
+      ?? builderBridge.preview_status
+      ?? builderBridge.status
+      ?? "",
+  ).trim();
+
+  const ready = builderBridge.used === true
+    && (bridgeStatus === "ready" || bridgeStatus === "watch");
+
+  const evidenceHash = createHash("sha256")
+    .update(JSON.stringify(builderBridge ?? null))
+    .digest("hex");
+
   return {
-    used: input.includeAestheticMemoryContext && hasPayload,
-    phase: "30A-33J",
-    version: "aesthetic_memory_single_entry_context_reference_v1",
-    status: input.includeAestheticMemoryContext
-      ? (hasPayload ? "attached_to_single_entry_payload" : "available_upstream_not_attached")
-      : "disabled",
+    used: ready,
+    loaded: ready,
+    evidence: ready,
+    phase: "30A-33J-38E",
+    version: "aesthetic_memory_single_entry_context_reference_v2",
+    status: ready
+      ? "auto_loaded_from_builder_bridge_preview"
+      : "builder_bridge_preview_not_ready",
     read_only: true,
     candidate_only: true,
     no_auto_persist: true,
@@ -958,7 +1033,19 @@ function buildAestheticMemoryContext(input) {
     no_context_attach_to_canon: true,
     no_canon_update: true,
     no_active_engine_update: true,
-    context: hasPayload ? input.aestheticMemoryContext : null,
+    source: "aesthetic_memory_context_builder_bridge_preview",
+    source_phase: builderBridge.phase ?? null,
+    source_version: builderBridge.version ?? null,
+    source_status: bridgeStatus || null,
+    context: builderBridge,
+    evidence_hash: evidenceHash,
+    evidence_summary: ready
+      ? "Aesthetic memory builder bridge preview auto-loaded for ChatGPT full neural single-entry output readiness."
+      : "Aesthetic memory builder bridge preview was attempted but was not ready.",
+    evidence_refs: [
+      "phase38e:chatgpt_full_neural_aesthetic_memory_context_readiness",
+      builderBridge.bridge_preview_digest ? `builder_bridge:${builderBridge.bridge_preview_digest}` : `builder_bridge:${evidenceHash}`,
+    ],
   };
 }
 
@@ -1023,9 +1110,67 @@ function buildWorkflowSteps(pipeline, readerResponse, proofingContext, aesthetic
   ];
 }
 
+
+const phase38d_chatgpt_provider_args_readiness = true;
+
+function firstNonBlankText(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function buildRecursivePipelineOptionsForChatgptProvider(rawInput = {}, options = {}) {
+  const provider = {
+    ...(options.provider && typeof options.provider === "object" ? options.provider : {}),
+  };
+
+  const providerType = firstNonBlankText(
+    provider.provider_type,
+    provider.providerType,
+    rawInput.provider_type,
+    rawInput.providerType,
+  );
+
+  const providerId = firstNonBlankText(
+    provider.provider_id,
+    provider.providerId,
+    rawInput.provider_id,
+    rawInput.providerId,
+  );
+
+  const modelName = firstNonBlankText(
+    provider.model_name,
+    provider.modelName,
+    rawInput.model_name,
+    rawInput.modelName,
+  );
+
+  if (providerType) provider.provider_type = providerType;
+  if (providerId) provider.provider_id = providerId;
+  if (modelName) provider.model_name = modelName;
+
+  const explicitDeterministicPreview =
+    providerType === "deterministic_test"
+    && rawInput.save_candidate !== true
+    && rawInput.saveCandidate !== true;
+
+  return {
+    ...options,
+    provider,
+    providerSource: options.providerSource
+      ?? (providerType ? "chatgpt_mcp_args" : undefined),
+    allowDeterministicTestProvider:
+      options.allowDeterministicTestProvider === true || explicitDeterministicPreview,
+  };
+}
+
 export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
-  const aestheticMemoryContext = buildAestheticMemoryContext(input);
+  const aestheticMemoryContext = await buildAestheticMemoryContext(input, options);
+
+  const recursivePipelineOptions = buildRecursivePipelineOptionsForChatgptProvider(rawInput, options);
 
   const pipeline = await runFullRecursiveWritingPipeline({
     ...rawInput,
@@ -1048,7 +1193,7 @@ export async function runFullNeuralWritingPipelineSingleEntryBridge(rawInput = {
       : (rawInput.dramatic_conflict_plan ?? rawInput.dramaticConflictPlan),
     reader_questions_to_carry_forward: input.readerQuestionsToCarryForward,
     output_mode: "chat_text",
-  }, options);
+  }, recursivePipelineOptions);
 
   let readerResponse = disabledReaderResponse("skipped", "final_candidate_text_missing");
   if (input.includeReaderResponseSimulator && pipeline.final_candidate_text) {
