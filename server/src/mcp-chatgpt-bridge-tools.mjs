@@ -50,6 +50,7 @@ import {
 import {
   runFullNeuralWritingPipelineSingleEntryBridge,
 } from "./full-neural-writing-pipeline-single-entry-bridge-service.mjs";
+import { buildChatgptNativeNeuralWritingHandoff } from "./chatgpt-native-neural-writing-handoff-service.mjs";
 
 function summarizeFullNeuralSurface(result = {}) {
   const existingSummary = result?.full_neural_orchestration_summary ?? null;
@@ -11750,6 +11751,13 @@ export const chatgpt_bridge_run_full_neural_writing_pipeline = tool(
     proofing_context_built: result.proofing_context?.built === true,
   }] : [],
 );
+export const chatgpt_bridge_build_full_neural_writing_handoff = tool(
+  "chatgpt_bridge_build_full_neural_writing_handoff",
+  "write_low_risk",
+  buildChatgptNativeNeuralWritingHandoff,
+  () => [],
+);
+
 export const chatgpt_bridge_build_proofing_context = tool(
   "chatgpt_bridge_build_proofing_context",
   "write_low_risk",
@@ -11858,6 +11866,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_get_current_inputs,
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_save_candidate,
+  chatgpt_bridge_build_full_neural_writing_handoff,
   chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_build_proofing_context,
   chatgpt_bridge_save_proof_report,
@@ -11918,6 +11927,27 @@ export const chatgptBridgeToolMetadata = {
     legacy_recursive_pipeline_entry: true,
     prefer_for_chatgpt_story_generation: "chatgpt_bridge_run_full_neural_writing_pipeline",
   }),
+  chatgpt_bridge_build_full_neural_writing_handoff: writeMetadata([
+    projectPaths.gptWritingContexts,
+    projectPaths.outputLogs,
+  ], {
+    chatgpt_native_writing_handoff_entry: true,
+    chatgpt_native_story_generation_entry: true,
+    tool_returns_handoff_only: true,
+    tool_must_not_generate_story_text: true,
+    chatgpt_must_generate_after_handoff: true,
+    no_backend_generation_provider_required: true,
+    no_local_generation_provider_required: true,
+    save_candidate_forced_false: true,
+    candidate_created: false,
+    canon_update_allowed: false,
+    active_engine_update_allowed: false,
+    adoption_allowed: false,
+    settlement_allowed: false,
+    final_instruction_field: "chatgpt_native_writing_handoff.final_chatgpt_writing_instruction",
+    context_field: "chatgpt_native_writing_handoff.writing_context",
+  }),
+
   chatgpt_bridge_run_full_neural_writing_pipeline: writeMetadata([
     projectPaths.gptWritingContexts,
     projectPaths.writingCandidates,

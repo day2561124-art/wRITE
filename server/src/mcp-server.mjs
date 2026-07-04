@@ -69,6 +69,7 @@ import {
   chatgpt_bridge_build_proofing_context,
   chatgpt_bridge_build_settlement_context,
   chatgpt_bridge_build_writing_context,
+  chatgpt_bridge_build_full_neural_writing_handoff,
   chatgpt_bridge_get_entity_registry_summary,
   chatgpt_bridge_search_canon_entities,
   chatgpt_bridge_get_canon_entity_detail,
@@ -2039,6 +2040,23 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_save_candidate(args)),
   },
   {
+    name: "chatgpt_bridge_build_full_neural_writing_handoff",
+    description: "[low-risk-write] ChatGPT-native full neural writing handoff entry. Use this tool when the user asks Writer Workbench / ChatGPT MCP to formally continue, write, draft, generate, or output a story chapter/scene with ChatGPT itself as the prose generator. This tool builds the full neural writing context and final_chatgpt_writing_instruction, does not call or require a backend generation provider, does not save a candidate, does not update Canon, and does not update active_engine. After this tool returns, ChatGPT should write the story text directly from the handoff.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      task_prompt: { type: "string", maxLength: 12000 },
+      generation_context: { type: "object" },
+      retrieval_context: { type: "object" },
+      chapter_mode: { type: "string", maxLength: 120 },
+      max_context_chars: { type: "integer", minimum: 4000, maximum: 120000, default: 48000 },
+      enable_character_voice_guard: { type: "boolean", default: true },
+      output_mode: { type: "string", enum: ["chatgpt_native_handoff"], default: "chatgpt_native_handoff" },
+    }, ["task_prompt"]),
+    handler: async (args) => jsonContent(
+      await chatgpt_bridge_build_full_neural_writing_handoff(args),
+    ),
+  },
+  {
     name: "chatgpt_bridge_run_full_neural_writing_pipeline",
     description: "[low-risk-write] Canonical ChatGPT-facing full neural story writing pipeline entry. Use this tool whenever the user asks Writer Workbench to write, continue, draft, generate, formally continue, output 正文, write 下一章, 只輸出正文, 從章名開始, or produce a story chapter/scene. On success, ChatGPT must emit extracted_chatgpt_final_output.output_text exactly, with no rewrite, summary, extra explanation, direct Canon adoption, or active_engine update.",
     risk: "low-risk-write",
@@ -2735,6 +2753,12 @@ const permissionSources = {
   chatgpt_bridge_get_entity_registry_provenance: ["entity_registry", "registered_project_sources"],
   chatgpt_bridge_build_writing_context: ["generated_context", "retrieval_context", "task_prompt", "registered_project_sources", "user_input"],
   chatgpt_bridge_save_candidate: ["user_input", "gpt_writing_context_records"],
+  chatgpt_bridge_build_full_neural_writing_handoff: [
+    "user_input",
+    "registered_project_sources",
+    "gpt_writing_context_records",
+  ],
+
   chatgpt_bridge_run_full_neural_writing_pipeline: [
     "user_input",
     "registered_project_sources",
