@@ -1,4 +1,4 @@
-﻿import { spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
@@ -193,6 +193,7 @@ const steps = [
   ["Phase 38C ChatGPT full pipeline usable surface calibration", ["tests/phase38/phase38c-chatgpt-full-pipeline-usable-surface-calibration.test.mjs"]],
   ["Phase 38D ChatGPT full neural provider args readiness", ["tests/phase38/phase38d-chatgpt-full-neural-provider-args-readiness.test.mjs"]],
   ["Phase 38E ChatGPT full neural aesthetic memory context readiness", ["tests/phase38/phase38e-chatgpt-full-neural-aesthetic-memory-context-readiness.test.mjs"]],
+  ["Phase 38G local generation provider OpenAI-compatible wrapper", ["tests/phase38/phase38g-local-generation-provider-openai-compatible-wrapper.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
@@ -318,4 +319,3 @@ main().catch((error) => {
   console.error(`\nTest suite failed: ${error.message}`);
   process.exitCode = 1;
 });
-
