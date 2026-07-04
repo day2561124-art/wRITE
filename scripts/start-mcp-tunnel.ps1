@@ -60,6 +60,40 @@ function Require-Command {
   return $cmd
 }
 
+function Set-BackendGenerationProviderDefaults {
+  if (-not $env:WRITER_BACKEND_GENERATION_PROVIDER) {
+    $env:WRITER_BACKEND_GENERATION_PROVIDER = "local_http"
+  }
+
+  if (-not $env:WRITER_BACKEND_GENERATION_PROVIDER_ID) {
+    $env:WRITER_BACKEND_GENERATION_PROVIDER_ID = "local-smoke-provider"
+  }
+
+  if (-not $env:WRITER_BACKEND_GENERATION_ENDPOINT) {
+    $env:WRITER_BACKEND_GENERATION_ENDPOINT = "http://127.0.0.1:8799/writer"
+  }
+
+  if (-not $env:WRITER_BACKEND_GENERATION_MODEL) {
+    $env:WRITER_BACKEND_GENERATION_MODEL = "writer-local-provider-smoke"
+  }
+
+  if (-not $env:WRITER_BACKEND_GENERATION_VERSION) {
+    $env:WRITER_BACKEND_GENERATION_VERSION = "smoke-1"
+  }
+
+  if (-not $env:WRITER_BACKEND_GENERATION_TIMEOUT_MS) {
+    $env:WRITER_BACKEND_GENERATION_TIMEOUT_MS = "60000"
+  }
+
+  Write-Host "`n=== Backend generation provider ==="
+  Write-Host "WRITER_BACKEND_GENERATION_PROVIDER=$env:WRITER_BACKEND_GENERATION_PROVIDER"
+  Write-Host "WRITER_BACKEND_GENERATION_PROVIDER_ID=$env:WRITER_BACKEND_GENERATION_PROVIDER_ID"
+  Write-Host "WRITER_BACKEND_GENERATION_ENDPOINT=$env:WRITER_BACKEND_GENERATION_ENDPOINT"
+  Write-Host "WRITER_BACKEND_GENERATION_MODEL=$env:WRITER_BACKEND_GENERATION_MODEL"
+  Write-Host "WRITER_BACKEND_GENERATION_VERSION=$env:WRITER_BACKEND_GENERATION_VERSION"
+  Write-Host "WRITER_BACKEND_GENERATION_TIMEOUT_MS=$env:WRITER_BACKEND_GENERATION_TIMEOUT_MS"
+}
+
 Push-Location $Root
 try {
   New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -74,6 +108,8 @@ try {
   if (-not $cloudflared) { exit 1 }
 
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+
+  Set-BackendGenerationProviderDefaults
 
   Write-Host "`n=== 1. MCP HTTP server ==="
   $mcpListener = Get-McpListener
