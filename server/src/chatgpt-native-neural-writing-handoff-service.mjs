@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
+import {
+  executeChatgptNativeTraceOnlyNeuralModules,
+} from "./chatgpt-native-trace-only-neural-execution-service.mjs";
 
 const HANDOFF_TOOL_NAME = "chatgpt_bridge_build_full_neural_writing_handoff";
 const HANDOFF_SURFACE_KIND = "chatgpt_native_full_neural_writing_handoff";
@@ -142,7 +145,7 @@ function buildFinalChatgptWritingInstruction(input) {
   return [
     "你現在是 ChatGPT 原生正文生成器；Writer Workbench 只提供神經寫作上下文與防錯 handoff，不代替你生成正文。",
     "",
-    "請閱讀 chatgpt_native_writing_handoff 內的 writing_context、constraints、forbidden_mistakes、neural_modules_diagnostics 後，直接依使用者任務輸出正文。",
+    "請閱讀 chatgpt_native_writing_handoff 內的 writing_context、neural_module_execution_results、neural_trace_summary、constraints、forbidden_mistakes、neural_modules_diagnostics 後，直接依使用者任務輸出正文。",
     "",
     "使用者任務：" + input.taskPrompt,
     "",
@@ -236,7 +239,7 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     ?? contextResult?.gpt_writing_context
     ?? contextResult;
 
-  const diagnostics = neuralDiagnostics(bundle);
+  let diagnostics = neuralDiagnostics(bundle);
 
   const writingContext = {
     gpt_writing_context_bundle_id: bundle?.bundle_id ?? contextResult?.bundle_id ?? null,
@@ -254,6 +257,30 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     foreshadowing_context: sectionText(bundle, "foreshadowing_context"),
     reader_simulator_context: sectionText(bundle, "reader_simulator_context"),
     compact_bundle_excerpt: compactObject(bundle, 24000),
+  };
+
+  const neuralExecution = await executeChatgptNativeTraceOnlyNeuralModules({
+    task_prompt: input.taskPrompt,
+    generation_context: input.generationContext,
+    retrieval_context: input.retrievalContext,
+    chapter_mode: input.chapterMode,
+    bundle,
+    writing_context: writingContext,
+    required_modules: diagnostics.required_neural_modules,
+    include_writing_card_director: true,
+    include_final_polisher: true,
+  }, options);
+
+  diagnostics = {
+    ...diagnostics,
+    required_modules_executed: neuralExecution.required_modules_executed,
+    chatgpt_native_neural_modules_executed:
+      neuralExecution.chatgpt_native_neural_modules_executed,
+    module_results_attached_to_handoff:
+      neuralExecution.module_results_attached_to_handoff,
+    neural_trace_created: neuralExecution.neural_trace_created,
+    neural_trace_run_id: neuralExecution.run_id,
+    neural_execution_status: neuralExecution.status,
   };
 
   const constraints = {
@@ -279,6 +306,16 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     chatgpt_native_consumer_contract: buildChatgptNativeConsumerContract(input),
     writing_context: writingContext,
     neural_modules_diagnostics: diagnostics,
+    neural_module_execution_results:
+      neuralExecution.neural_module_execution_results,
+    neural_trace_summary:
+      neuralExecution.neural_trace_summary,
+    chatgpt_native_neural_modules_executed:
+      neuralExecution.chatgpt_native_neural_modules_executed,
+    module_results_attached_to_handoff:
+      neuralExecution.module_results_attached_to_handoff,
+    neural_trace_created:
+      neuralExecution.neural_trace_created,
     character_voice_guard_constraints: {
       enabled: input.enableCharacterVoiceGuard === true,
       must_respect_character_voice_registry: true,
