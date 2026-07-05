@@ -196,6 +196,7 @@ const steps = [
   ["Phase 38G local generation provider OpenAI-compatible wrapper", ["tests/phase38/phase38g-local-generation-provider-openai-compatible-wrapper.test.mjs"]],
   ["Phase 38H ChatGPT native full neural writing handoff mode", ["tests/phase38/phase38h-chatgpt-native-full-neural-writing-handoff-mode.test.mjs"]],
   ["Phase 38I ChatGPT native handoff live MCP acceptance smoke", ["tests/phase38/phase38i-chatgpt-native-handoff-live-mcp-acceptance-smoke.test.mjs"]],
+  ["Phase 38J ChatGPT native handoff instruction consumer smoke", ["tests/phase38/phase38j-chatgpt-native-handoff-instruction-consumer-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

@@ -159,6 +159,61 @@ function buildFinalChatgptWritingInstruction(input) {
   ].join("\n");
 }
 
+
+function buildChatgptNativeConsumerContract(input) {
+  const mustStartFromTitle = /只輸出正文|從章名開始|正文/u.test(input.taskPrompt);
+
+  return {
+    used: true,
+    phase: "38J",
+    surface_kind: "chatgpt_native_handoff_instruction_consumer_contract",
+    response_owner: "ChatGPT",
+    required_response_kind: "story_text_only",
+    story_text_source: "chatgpt_native_generation_after_handoff",
+    must_emit_story_text_directly: true,
+    must_start_from_title_when_requested: mustStartFromTitle,
+    must_not_emit_handoff_summary: true,
+    must_not_emit_engineering_explanation: true,
+    must_not_emit_json_or_codeblock: true,
+    must_not_request_backend_provider: true,
+    must_not_request_local_provider: true,
+    must_not_request_lm_studio_or_ollama: true,
+    must_not_save_candidate: true,
+    must_not_update_canon: true,
+    must_not_update_active_engine: true,
+    must_not_enter_adoption_or_settlement: true,
+    forbidden_output_markers: [
+      "Writer Workbench",
+      "handoff",
+      "MCP",
+      "provider",
+      "provider_type",
+      "generation provider",
+      "local generation provider",
+      "LM Studio",
+      "Ollama",
+      "candidate",
+      "Canon",
+      "active_engine",
+      "adoption",
+      "settlement",
+      "工程說明",
+      "以下是",
+      "我無法直接",
+      "請先啟動",
+    ],
+    allowed_output_surface: {
+      plain_text: true,
+      story_prose: true,
+      chapter_title_allowed: true,
+      markdown_codeblock: false,
+      json: false,
+      diagnostics: false,
+      handoff_echo: false,
+      backend_generation_provider_output: false,
+    },
+  };
+}
 export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
   const buildContext = options.buildGptWritingContextFn ?? buildGptWritingContext;
@@ -221,6 +276,7 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     contract_valid: true,
     surface_kind: HANDOFF_SURFACE_KIND,
     final_chatgpt_writing_instruction: buildFinalChatgptWritingInstruction(input),
+    chatgpt_native_consumer_contract: buildChatgptNativeConsumerContract(input),
     writing_context: writingContext,
     neural_modules_diagnostics: diagnostics,
     character_voice_guard_constraints: {
