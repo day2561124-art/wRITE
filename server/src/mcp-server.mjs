@@ -1975,7 +1975,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_writing_context",
-    description: "[low-risk-write] Context-only Writer Workbench writing context builder. Do not use this tool to produce final story, chapter, or scene text. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests, use chatgpt_bridge_run_full_neural_writing_pipeline instead.",
+    description: "[low-risk-write] Context-only Writer Workbench writing context builder. Do not use this tool to produce final story, chapter, or scene text. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests where ChatGPT is the prose generator, use chatgpt_bridge_build_full_neural_writing_handoff instead.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       run_neural_traces: {
@@ -2058,7 +2058,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_run_full_neural_writing_pipeline",
-    description: "[low-risk-write] Canonical ChatGPT-facing full neural story writing pipeline entry. Use this tool whenever the user asks Writer Workbench to write, continue, draft, generate, formally continue, output 正文, write 下一章, 只輸出正文, 從章名開始, or produce a story chapter/scene. On success, ChatGPT must emit extracted_chatgpt_final_output.output_text exactly, with no rewrite, summary, extra explanation, direct Canon adoption, or active_engine update.",
+    description: "[low-risk-write] Optional fallback full neural story writing pipeline entry for backend/local generation-provider workflows. Do not use as the primary route when ChatGPT itself should write the prose. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests where ChatGPT is the prose generator, use chatgpt_bridge_build_full_neural_writing_handoff instead. This provider pipeline may require provider_type and can emit extracted_chatgpt_final_output.output_text on success, but it is not the ChatGPT-native mainline.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
@@ -2666,6 +2666,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
+  "chatgpt_bridge_build_full_neural_writing_handoff",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",

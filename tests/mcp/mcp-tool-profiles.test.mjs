@@ -26,6 +26,7 @@ const publicToolNames = [
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
+    "chatgpt_bridge_build_full_neural_writing_handoff",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
@@ -163,24 +164,63 @@ assert.deepEqual(
 );
 
 const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+const publicNativeHandoffTool = publicToolMap.get(
+  "chatgpt_bridge_build_full_neural_writing_handoff",
+);
+assert(
+  publicNativeHandoffTool,
+  "chatgpt_public missing chatgpt_bridge_build_full_neural_writing_handoff",
+);
+assert.match(
+  publicNativeHandoffTool.description ?? "",
+  /ChatGPT-native|ChatGPT itself as the prose generator|final_chatgpt_writing_instruction|After this tool returns, ChatGPT should write/i,
+  "chatgpt_bridge_build_full_neural_writing_handoff description should advertise ChatGPT-native writing handoff routing",
+);
+assert.match(
+  publicNativeHandoffTool.description ?? "",
+  /does not call or require a backend generation provider|does not save a candidate|does not update Canon|does not update active_engine/i,
+  "chatgpt_bridge_build_full_neural_writing_handoff description should preserve no-provider/no-canon/no-candidate safety",
+);
+
+const nativeHandoffSchema = publicNativeHandoffTool.inputSchema?.properties ?? {};
+for (const forbiddenField of ["provider_type", "provider_id", "model_name", "save_candidate", "generation_provider"]) {
+  assert.equal(
+    Object.hasOwn(nativeHandoffSchema, forbiddenField),
+    false,
+    `native handoff schema leaked provider/candidate field ${forbiddenField}`,
+  );
+}
+
+const nativePermission = publicNativeHandoffTool._meta?.["armed-academy/permission"];
+assert.equal(nativePermission?.permission_level, "write_low_risk");
+assert.equal(nativePermission?.can_modify_canon, false);
+assert.equal(nativePermission?.can_modify_active_engine, false);
+assert(nativePermission?.allowed_sources?.includes("user_input"));
+assert(nativePermission?.allowed_sources?.includes("registered_project_sources"));
+assert(nativePermission?.allowed_sources?.includes("gpt_writing_context_records"));
+assert.equal(
+  nativePermission?.allowed_sources?.includes("generation_provider"),
+  false,
+  "native handoff permissionSources must not require generation_provider",
+);
+
 const publicNeuralPipelineTool = publicToolMap.get(
   "chatgpt_bridge_run_full_neural_writing_pipeline",
 );
 assert(
   publicNeuralPipelineTool,
-  "chatgpt_public missing chatgpt_bridge_run_full_neural_writing_pipeline",
+  "chatgpt_public missing chatgpt_bridge_run_full_neural_writing_pipeline fallback",
 );
 assert.match(
   publicNeuralPipelineTool.description ?? "",
-  /full neural|neural writing|story|chapter|scene|final output|正文|下一章|正式續寫/i,
-  "chatgpt_bridge_run_full_neural_writing_pipeline description should advertise full neural story generation routing",
+  /Optional fallback|generation-provider|provider_type|not the ChatGPT-native mainline/i,
+  "chatgpt_bridge_run_full_neural_writing_pipeline should be documented as optional provider fallback",
 );
 assert.match(
   publicNeuralPipelineTool.description ?? "",
-  /extracted_chatgpt_final_output\.output_text|output_text|emit.*exactly|must.*exact/i,
-  "chatgpt_bridge_run_full_neural_writing_pipeline description should document exact final output emission",
+  /use chatgpt_bridge_build_full_neural_writing_handoff instead/i,
+  "provider pipeline description should route ChatGPT-native writing to the native handoff tool",
 );
-
 const publicContextTool = publicToolMap.get("chatgpt_bridge_build_writing_context");
 assert.match(
   publicContextTool?.description ?? "",
@@ -189,8 +229,8 @@ assert.match(
 );
 assert.match(
   publicContextTool?.description ?? "",
-  /chatgpt_bridge_run_full_neural_writing_pipeline/i,
-  "chatgpt_bridge_build_writing_context description should route final story output to the full neural pipeline",
+  /chatgpt_bridge_build_full_neural_writing_handoff/i,
+  "chatgpt_bridge_build_writing_context description should route final story output to the ChatGPT-native handoff tool",
 );
 
 const publicWritingContextSchema = publicToolMap.get(
