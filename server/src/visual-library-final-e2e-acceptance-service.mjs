@@ -71,6 +71,10 @@ const trueFields = [
   "bridge_read_only",
   "bridge_preview_only",
 ];
+const formalBaselineCountPolicies = new Set([
+  "fixed_config",
+  "visual_index_asset_parity",
+]);
 const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64",
@@ -104,6 +108,17 @@ function sha256Lf(value) {
 
 function lineCount(value) {
   return normalizeLf(value).split("\n").filter((line) => line.trim()).length;
+}
+
+function normalizeFormalBaselineCountPolicy(value = "fixed_config") {
+  const policy = requireString(value, "formal_baseline_count_policy");
+  if (!formalBaselineCountPolicies.has(policy)) {
+    throw new Error(
+      "formal_baseline_count_policy must be one of fixed_config, "
+      + "visual_index_asset_parity.",
+    );
+  }
+  return policy;
 }
 
 async function directorySnapshot(root) {
@@ -217,6 +232,9 @@ export function validateVisualLibraryFinalE2eAcceptanceConfig(config) {
   if (config.mode !== "visual_library_final_e2e_safety_acceptance") {
     throw new Error("mode must be visual_library_final_e2e_safety_acceptance.");
   }
+  config.formal_baseline_count_policy = normalizeFormalBaselineCountPolicy(
+    config.formal_baseline_count_policy ?? "fixed_config",
+  );
   for (const field of [
     "intake_config_path",
     "simulation_config_path",
@@ -304,6 +322,39 @@ export function validateVisualLibraryFinalForbiddenSideEffects(input) {
   return { passed: violations.length === 0, violations };
 }
 
+function resolveFormalBaselineExpectedCounts(input, actual) {
+  const policy = normalizeFormalBaselineCountPolicy(
+    input.formal_baseline_count_policy ?? "fixed_config",
+  );
+  if (policy === "visual_index_asset_parity") {
+    return {
+      policy,
+      expectedIndexLines: actual.indexLines,
+      expectedImageCount: actual.indexLines,
+    };
+  }
+  return {
+    policy,
+    expectedIndexLines: input.expected_visual_index_line_count,
+    expectedImageCount: input.expected_visual_assets_image_count,
+  };
+}
+
+function decideFormalBaselineAcceptance(input) {
+  if (input.passed) {
+    return input.policy === "visual_index_asset_parity"
+      ? "formal_visual_library_index_asset_parity_accepted"
+      : "formal_visual_library_configured_baseline_accepted";
+  }
+  if (!input.hashPassed) return "blocked_active_engine_hash_mismatch";
+  if (input.policy === "visual_index_asset_parity") {
+    return "blocked_visual_index_asset_parity_mismatch";
+  }
+  return input.indexLines !== input.expectedIndexLines
+    ? "blocked_visual_index_baseline_mismatch"
+    : "blocked_visual_assets_baseline_mismatch";
+}
+
 export async function runVisualLibraryFormalBaselineAcceptance(input) {
   const index = await readFile(input.visual_index_path);
   const assets = await directorySnapshot(input.visual_assets_root);
@@ -315,12 +366,14 @@ export async function runVisualLibraryFormalBaselineAcceptance(input) {
     ?? assets.filter((item) => item.image).length;
   const hashPassed = input.fixture?.active_engine_hash_passed
     ?? actualHash === input.expected_engine_hash;
-  const expectedIndexLines = input.expected_visual_index_line_count;
-  const expectedImageCount = input.expected_visual_assets_image_count;
-  const passed = indexLines === expectedIndexLines
-    && imageCount === expectedImageCount
-    && hashPassed;
+  const { policy, expectedIndexLines, expectedImageCount } =
+    resolveFormalBaselineExpectedCounts(input, { indexLines, imageCount });
+  const countPassed = policy === "visual_index_asset_parity"
+    ? imageCount === indexLines
+    : indexLines === expectedIndexLines && imageCount === expectedImageCount;
+  const passed = countPassed && hashPassed;
   return {
+    formal_baseline_count_policy: policy,
     visual_index_line_count: indexLines,
     visual_assets_image_count: imageCount,
     expected_visual_index_line_count: expectedIndexLines,
@@ -336,14 +389,17 @@ export async function runVisualLibraryFormalBaselineAcceptance(input) {
     formal_gallery_empty_baseline: indexLines === 0 && imageCount === 0,
     formal_gallery_configured_baseline:
       indexLines === expectedIndexLines && imageCount === expectedImageCount,
+    formal_visual_library_index_asset_parity: imageCount === indexLines,
     passed,
-    decision: passed
-      ? "formal_visual_library_configured_baseline_accepted"
-      : !hashPassed
-        ? "blocked_active_engine_hash_mismatch"
-        : indexLines !== expectedIndexLines
-          ? "blocked_visual_index_baseline_mismatch"
-          : "blocked_visual_assets_baseline_mismatch",
+    decision: decideFormalBaselineAcceptance({
+      policy,
+      passed,
+      hashPassed,
+      indexLines,
+      imageCount,
+      expectedIndexLines,
+      expectedImageCount,
+    }),
   };
 }
 
@@ -897,9 +953,17 @@ export async function runVisualLibraryBridgeReadinessAcceptance(input) {
 
 export function buildVisualLibraryFinalAcceptanceMatrix(input) {
   const preview = input.preview_chain_acceptance;
+  const formalExpected = input.formal_baseline_acceptance.formal_baseline_count_policy
+    === "visual_index_asset_parity"
+    ? "formal_visual_library_index_asset_parity_accepted"
+    : "formal_visual_library_configured_baseline_accepted";
+  const formalArea = input.formal_baseline_acceptance.formal_baseline_count_policy
+    === "visual_index_asset_parity"
+    ? "formal visual library index/assets parity"
+    : "formal configured gallery baseline";
   const rows = [
-    ["19E-18A", "18A", "formal configured gallery baseline",
-      "formal_visual_library_configured_baseline_accepted",
+    ["19E-18A", "18A", formalArea,
+      formalExpected,
       input.formal_baseline_acceptance.decision,
       input.formal_baseline_acceptance.passed],
     ["19E-18B", "18B", "rebuild intake preview",
@@ -974,18 +1038,28 @@ export function evaluateVisualLibraryFinalE2eAcceptanceDecision(input) {
   if (input.forbidden_execute_argument) {
     return "blocked_forbidden_execute_argument";
   }
-  if (!input.formal_baseline_acceptance.active_engine_hash_passed) {
+  const formal = input.formal_baseline_acceptance;
+  if (!formal.active_engine_hash_passed) {
     return "blocked_active_engine_hash_mismatch";
   }
   if (
-    input.formal_baseline_acceptance.visual_index_line_count
-    !== input.formal_baseline_acceptance.expected_visual_index_line_count
+    formal.decision === "blocked_visual_index_asset_parity_mismatch"
+    || (
+      formal.formal_baseline_count_policy === "visual_index_asset_parity"
+      && formal.visual_index_line_count !== formal.visual_assets_image_count
+    )
+  ) {
+    return "blocked_visual_index_asset_parity_mismatch";
+  }
+  if (
+    formal.visual_index_line_count
+    !== formal.expected_visual_index_line_count
   ) {
     return "blocked_visual_index_baseline_mismatch";
   }
   if (
-    input.formal_baseline_acceptance.visual_assets_image_count
-    !== input.formal_baseline_acceptance.expected_visual_assets_image_count
+    formal.visual_assets_image_count
+    !== formal.expected_visual_assets_image_count
   ) {
     return "blocked_visual_assets_baseline_mismatch";
   }
@@ -1026,10 +1100,14 @@ export function compileVisualLibraryFinalE2eAcceptanceSummary(payload) {
     phases_covered: payload.acceptance_matrix.map((item) => item.phase_source),
     sandbox_included:
       payload.sandbox_confirmed_import_acceptance.executed === true,
+    formal_baseline_count_policy:
+      payload.formal_baseline_acceptance.formal_baseline_count_policy,
     formal_gallery_empty_baseline:
       payload.formal_baseline_acceptance.formal_gallery_empty_baseline,
     formal_gallery_configured_baseline:
       payload.formal_baseline_acceptance.formal_gallery_configured_baseline,
+    formal_visual_library_index_asset_parity:
+      payload.formal_baseline_acceptance.formal_visual_library_index_asset_parity,
     final_acceptance_decision: payload.final_acceptance_decision,
   };
 }
@@ -1088,6 +1166,7 @@ export async function runVisualLibraryFinalE2eAcceptancePreview(options = {}) {
         config.expected_formal_visual_index_non_empty_lines,
       expected_visual_assets_image_count:
         config.expected_formal_assets_image_count,
+      formal_baseline_count_policy: config.formal_baseline_count_policy,
       fixture: options.formalBaselineFixture,
     });
     const previewChain = await runVisualLibraryPreviewChainAcceptance({

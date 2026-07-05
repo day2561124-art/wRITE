@@ -198,6 +198,7 @@ const steps = [
   ["Phase 38I ChatGPT native handoff live MCP acceptance smoke", ["tests/phase38/phase38i-chatgpt-native-handoff-live-mcp-acceptance-smoke.test.mjs"]],
   ["Phase 38J ChatGPT native handoff instruction consumer smoke", ["tests/phase38/phase38j-chatgpt-native-handoff-instruction-consumer-smoke.test.mjs"]],
   ["Phase 39A ChatGPT native neural module execution handoff", ["tests/phase39/phase39a-chatgpt-native-neural-module-execution-handoff.test.mjs"]],
+  ["Phase 39D visual upload formal baseline parity hardening", ["tests/phase39/phase39d-visual-upload-formal-baseline-parity-hardening.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
