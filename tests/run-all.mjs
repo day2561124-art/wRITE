@@ -210,6 +210,7 @@ const steps = [
   ["Phase 39M visual reference consumer guard report bridge preview", ["tests/phase39/phase39m-visual-reference-consumer-guard-report-bridge-preview.test.mjs"]],
   ["Phase 39N visual reference consumer guard tool exposure readiness", ["tests/phase39/phase39n-visual-reference-consumer-guard-tool-exposure-readiness.test.mjs"]],
   ["Phase 39O visual reference consumer guard readonly MCP tool registration smoke", ["tests/phase39/phase39o-visual-reference-consumer-guard-readonly-mcp-tool-registration-smoke.test.mjs"]],
+  ["Phase 39P visual reference consumer guard MCP public profile exposure smoke", ["tests/phase39/phase39p-visual-reference-consumer-guard-mcp-public-profile-exposure-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

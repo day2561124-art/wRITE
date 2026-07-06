@@ -89,6 +89,7 @@ import {
 import {
   approval_queue_bridge_readiness_report,
 } from "./mcp-approval-queue-readiness-tools.mjs";
+import { readonlyTools } from "./mcp-readonly-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
@@ -2656,6 +2657,42 @@ const toolDefinitions = [
     }, ["pendingEngineCandidateId"]),
     handler: async (args) => jsonContent(await request_pending_engine_candidate_activation(args)),
   },
+  {
+    name: "preview_visual_reference_consumer_output_guard",
+    description: "Read-only ChatGPT public profile preview of the visual reference consumer output guard readiness packet.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      outputText: {
+        type: "string",
+        maxLength: 300000,
+        description: "Final ChatGPT output text to check against the visual-only reference consumer contract.",
+      },
+      consumerContract: {
+        type: "object",
+        description: "chatgpt_native_consumer_contract from the native writing handoff.",
+      },
+      packetId: {
+        type: "string",
+        description: "Optional preview packet id for UI/operator correlation.",
+      },
+      maxExcerptChars: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100000,
+        default: 600,
+      },
+    }, ["outputText", "consumerContract"]),
+    handler: async (args) => {
+      assertObject(args);
+      return jsonContent(await readonlyTools.preview_visual_reference_consumer_output_guard({
+        outputText: args.outputText,
+        consumerContract: args.consumerContract,
+        packetId: args.packetId,
+        maxExcerptChars: args.maxExcerptChars,
+      }));
+    },
+  },
 ];
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
@@ -2676,6 +2713,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "chatgpt_bridge_save_settlement_report",
   "approval_queue_bridge_readiness_report",
+  "preview_visual_reference_consumer_output_guard",
 ]);
 
 const toolProfiles = new Map([
@@ -2785,6 +2823,11 @@ const permissionSources = {
     "gpt_writing_context_records",
     "active_engine",
     "compressed_rules",
+  ],
+  preview_visual_reference_consumer_output_guard: [
+    "visual_reference_consumer_guard",
+    "mcp_readonly_preview",
+    "user_input",
   ],
 };
 
