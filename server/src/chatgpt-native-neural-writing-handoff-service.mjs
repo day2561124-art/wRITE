@@ -456,6 +456,83 @@ export function buildChatgptNativeConsumerOutputVisualReferenceGuardBridgePrevie
     report,
   };
 }
+export function buildChatgptNativeConsumerOutputVisualReferenceGuardToolExposureReadiness(outputText, consumerContract = {}, options = {}) {
+  const toolName = text(options.tool_name ?? options.toolName)
+    || "chatgpt_bridge_preview_visual_reference_consumer_output_guard";
+  const preview = buildChatgptNativeConsumerOutputVisualReferenceGuardBridgePreview(
+    outputText,
+    consumerContract,
+    options,
+  );
+  const toolPacket = preview.tool_facing_packet ?? {};
+  const safetyFlags = preview.safety_flags ?? {};
+  const readOnly = toolPacket.read_only === true;
+  const noMutation = toolPacket.must_not_generate_story_text === true
+    && toolPacket.must_not_save_candidate === true
+    && toolPacket.must_not_update_canon === true
+    && toolPacket.must_not_update_active_engine === true
+    && toolPacket.must_not_enter_adoption_or_settlement === true
+    && safetyFlags.candidate_created === false
+    && safetyFlags.canon_updated === false
+    && safetyFlags.active_engine_updated === false
+    && safetyFlags.adopted === false
+    && safetyFlags.settled === false;
+  const displayReady = preview.ui_preview?.display_ready === true
+    && toolPacket.may_display_to_operator === true
+    && toolPacket.may_display_in_ui === true;
+  const mcpPreviewReady = preview.bridge_packet_ready === true
+    && preview.report_attached === true
+    && toolPacket.may_feed_mcp_preview === true;
+  const toolExposureReady = readOnly && noMutation && displayReady && mcpPreviewReady;
+
+  return {
+    used: true,
+    phase: "39N",
+    surface_kind: "chatgpt_native_consumer_output_visual_reference_guard_tool_exposure_readiness",
+    readiness_kind: "visual_reference_consumer_guard_tool_exposure_readiness",
+    tool_name: toolName,
+    tool_profile: "readonly_preview",
+    tool_exposure_ready: toolExposureReady,
+    mcp_preview_ready: mcpPreviewReady,
+    bridge_packet_ready: preview.bridge_packet_ready === true,
+    report_attached: preview.report_attached === true,
+    read_only: readOnly,
+    no_mutation_guarantee: noMutation,
+    operator_review_ready: preview.operator_review && typeof preview.operator_review === "object",
+    ui_preview_ready: preview.ui_preview?.display_ready === true,
+    accepted: preview.accepted === true,
+    blocked: preview.blocked === true,
+    severity: preview.severity,
+    error_count: preview.error_count,
+    misuse_details: preview.misuse_details,
+    exposure_contract: {
+      may_expose_as_readonly_tool: toolExposureReady,
+      may_expose_to_mcp: mcpPreviewReady && readOnly && noMutation,
+      may_display_to_operator: toolPacket.may_display_to_operator === true,
+      may_display_in_ui: toolPacket.may_display_in_ui === true,
+      may_feed_mcp_preview: toolPacket.may_feed_mcp_preview === true,
+      must_not_generate_story_text: true,
+      must_not_save_candidate: true,
+      must_not_update_canon: true,
+      must_not_update_active_engine: true,
+      must_not_enter_adoption_or_settlement: true,
+    },
+    safety_flags: {
+      ...safetyFlags,
+      visual_reference_guard_tool_exposure_readiness_ready: toolExposureReady,
+      visual_reference_guard_tool_exposure_readonly: readOnly,
+      visual_reference_guard_tool_exposure_no_mutation: noMutation,
+      visual_reference_guard_tool_exposure_mcp_preview_ready: mcpPreviewReady,
+      visual_reference_guard_tool_exposure_ui_preview_ready: preview.ui_preview?.display_ready === true,
+      candidate_created: false,
+      canon_updated: false,
+      active_engine_updated: false,
+      adopted: false,
+      settled: false,
+    },
+    bridge_preview: preview,
+  };
+}
 export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
   const buildContext = options.buildGptWritingContextFn ?? buildGptWritingContext;

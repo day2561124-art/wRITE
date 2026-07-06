@@ -208,6 +208,7 @@ const steps = [
   ["Phase 39K visual reference consumer output misuse fixture", ["tests/phase39/phase39k-visual-reference-consumer-output-misuse-fixture.test.mjs"]],
   ["Phase 39L visual reference consumer output guard report surface", ["tests/phase39/phase39l-visual-reference-consumer-output-guard-report-surface.test.mjs"]],
   ["Phase 39M visual reference consumer guard report bridge preview", ["tests/phase39/phase39m-visual-reference-consumer-guard-report-bridge-preview.test.mjs"]],
+  ["Phase 39N visual reference consumer guard tool exposure readiness", ["tests/phase39/phase39n-visual-reference-consumer-guard-tool-exposure-readiness.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
