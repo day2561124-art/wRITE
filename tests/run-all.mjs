@@ -200,6 +200,7 @@ const steps = [
   ["Phase 39A ChatGPT native neural module execution handoff", ["tests/phase39/phase39a-chatgpt-native-neural-module-execution-handoff.test.mjs"]],
   ["Phase 39D visual upload formal baseline parity hardening", ["tests/phase39/phase39d-visual-upload-formal-baseline-parity-hardening.test.mjs"]],
   ["Phase 39E visual uploaded reference metadata enrichment", ["tests/phase39/phase39e-visual-uploaded-reference-metadata-enrichment.test.mjs"]],
+  ["Phase 39F visual uploaded reference metadata safe auto application", ["tests/phase39/phase39f-visual-uploaded-reference-metadata-safe-auto-application.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

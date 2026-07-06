@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import {
   normalizeProjectPath,
   projectPaths,
@@ -10,6 +10,32 @@ const requiredReferenceCanonStatus = "reference";
 const requiredVisualOnlyAbilityState = "visual_only";
 const visualOnlySafetyNote =
   "Preview only: visual uploaded references may guide appearance, pose, style, and atmosphere, but must not establish canon facts, ability mechanics, relationships, ranks, or timeline events.";
+const safeAutoApplicationMetadataSource = "manual_mapping";
+const safeAutoApplicationUsageScope = "visual_only_reference";
+const safeAutoApplicationAllowedFields = new Set([
+  "description",
+  "tags",
+  "metadata_source",
+  "metadata_enriched_at",
+  "visual_usage_scope",
+]);
+const safeAutoApplicationForbiddenFields = new Set([
+  "canon_status",
+  "ability_state",
+  "ability",
+  "abilities",
+  "soul_weapon",
+  "weapon",
+  "rank",
+  "relationship",
+  "relationships",
+  "faction",
+  "timeline",
+  "chapter",
+  "events",
+]);
+const safeAutoApplicationSafetyNote =
+  "Safe auto-application: user-uploaded visual references are already user-confirmed for formal visual reference use. The service may write visual-only metadata, but must not infer canon facts, ability mechanics, relationships, ranks, factions, or timeline events.";
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -145,6 +171,187 @@ export function analyzeVisualUploadedReferenceMetadata(record) {
     decision,
   };
 }
+
+
+export function serializeVisualUploadedReferenceMetadataJsonl(records) {
+  return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+}
+
+function buildMergedVisualOnlyTags(record) {
+  const currentTags = Array.isArray(record.tags) ? record.tags : [];
+  return uniqueStrings([
+    ...currentTags,
+    ...buildRecommendedVisualOnlyTags(record),
+  ]);
+}
+
+function assertSafeAutoApplicationPatch(patch) {
+  for (const field of Object.keys(patch)) {
+    if (!safeAutoApplicationAllowedFields.has(field)) {
+      throw new Error(`Unsafe visual metadata auto-application field: ${field}`);
+    }
+    if (safeAutoApplicationForbiddenFields.has(field)) {
+      throw new Error(`Forbidden visual metadata auto-application field: ${field}`);
+    }
+  }
+}
+
+export function buildVisualUploadedReferenceMetadataSafeAutoPatch(
+  record,
+  options = {},
+) {
+  const analysis = analyzeVisualUploadedReferenceMetadata(record);
+  const patch = {};
+  if (analysis.decision !== "visual_uploaded_reference_metadata_enrichment_preview_accepted") {
+    return {
+      visual_id: record.visual_id ?? null,
+      character: record.character ?? null,
+      application_allowed: false,
+      patch,
+      changed_fields: [],
+      analysis_decision: analysis.decision,
+      decision: analysis.decision,
+    };
+  }
+
+  if (!hasText(record.description)) {
+    patch.description = buildRecommendedVisualOnlyDescription(record);
+  }
+
+  const mergedTags = buildMergedVisualOnlyTags(record);
+  if (JSON.stringify(Array.isArray(record.tags) ? record.tags : [])
+    !== JSON.stringify(mergedTags)) {
+    patch.tags = mergedTags;
+  }
+
+  if (record.metadata_source !== safeAutoApplicationMetadataSource) {
+    patch.metadata_source = safeAutoApplicationMetadataSource;
+  }
+
+  const appliedAt = normalizeString(options.appliedAt) || new Date().toISOString();
+  if (!hasText(record.metadata_enriched_at)) {
+    patch.metadata_enriched_at = appliedAt;
+  }
+
+  if (record.visual_usage_scope !== safeAutoApplicationUsageScope) {
+    patch.visual_usage_scope = safeAutoApplicationUsageScope;
+  }
+
+  assertSafeAutoApplicationPatch(patch);
+  const changedFields = Object.keys(patch);
+  return {
+    visual_id: record.visual_id ?? null,
+    character: record.character ?? null,
+    application_allowed: true,
+    patch,
+    changed_fields: changedFields,
+    analysis_decision: analysis.decision,
+    decision: changedFields.length > 0
+      ? "visual_uploaded_reference_metadata_safe_auto_application_ready"
+      : "visual_uploaded_reference_metadata_safe_auto_application_noop",
+  };
+}
+
+export function applyVisualUploadedReferenceMetadataSafeAutoPatch(
+  record,
+  patchInfo,
+) {
+  assertSafeAutoApplicationPatch(patchInfo.patch ?? {});
+  if (!patchInfo.application_allowed) return { ...record };
+  return {
+    ...record,
+    ...patchInfo.patch,
+  };
+}
+
+function summarizeSafeAutoApplication(records, items, writeRequested, didWrite) {
+  const allowedItems = items.filter((item) => item.application_allowed);
+  const readyItems = allowedItems.filter((item) => item.decision
+    === "visual_uploaded_reference_metadata_safe_auto_application_ready");
+  const blockedItems = items.filter((item) => !item.application_allowed);
+  return {
+    total_record_count: records.length,
+    ignored_non_user_uploaded_count:
+      records.filter((record) => record.source !== uploadedReferenceSource).length,
+    user_uploaded_reference_count: items.length,
+    application_allowed_count: allowedItems.length,
+    ready_count: readyItems.length,
+    applied_count: didWrite ? readyItems.length : 0,
+    no_op_count: allowedItems.filter((item) => item.decision
+      === "visual_uploaded_reference_metadata_safe_auto_application_noop").length,
+    blocked_count: blockedItems.length,
+    write_requested: writeRequested,
+    dry_run: !writeRequested,
+    writes_visual_index: didWrite,
+    writes_visual_assets: false,
+    updates_active_engine: false,
+    updates_canon_db: false,
+  };
+}
+
+export async function runVisualUploadedReferenceMetadataSafeAutoApplication(
+  options = {},
+) {
+  const visualIndexPath = options.visualIndexPath
+    ? resolveProjectPath(options.visualIndexPath, "visual index path")
+    : projectPaths.visualIndex;
+  const visualIndexText = options.visualIndexText
+    ?? await readFile(visualIndexPath, "utf8");
+  const records = options.records
+    ?? parseVisualUploadedReferenceMetadataJsonl(visualIndexText);
+  const writeRequested = options.write === true;
+  const items = [];
+  const nextRecords = records.map((record) => {
+    if (record.source !== uploadedReferenceSource) return record;
+    const patchInfo = buildVisualUploadedReferenceMetadataSafeAutoPatch(
+      record,
+      { appliedAt: options.appliedAt },
+    );
+    items.push(patchInfo);
+    return patchInfo.application_allowed
+      ? applyVisualUploadedReferenceMetadataSafeAutoPatch(record, patchInfo)
+      : record;
+  });
+  const nextVisualIndexText = serializeVisualUploadedReferenceMetadataJsonl(nextRecords);
+  const readyCount = items.filter((item) => item.decision
+    === "visual_uploaded_reference_metadata_safe_auto_application_ready").length;
+  const blockedCount = items.filter((item) => !item.application_allowed).length;
+  const didWrite = writeRequested && blockedCount === 0 && readyCount > 0;
+  if (didWrite) {
+    await writeFile(visualIndexPath, nextVisualIndexText, "utf8");
+  }
+  const summary = summarizeSafeAutoApplication(records, items, writeRequested, didWrite);
+  return {
+    schema_version: 1,
+    phase: "39F",
+    mode: "visual_uploaded_reference_metadata_safe_auto_application",
+    visual_index_path: normalizeProjectPath(visualIndexPath),
+    source_filter: uploadedReferenceSource,
+    allowed_auto_application_fields: [...safeAutoApplicationAllowedFields],
+    forbidden_auto_application_fields: [...safeAutoApplicationForbiddenFields],
+    write_requested: writeRequested,
+    dry_run: !writeRequested,
+    side_effect_summary: {
+      writes_visual_index: didWrite,
+      writes_visual_assets: false,
+      updates_active_engine: false,
+      updates_canon_db: false,
+      contract_passed: true,
+    },
+    items,
+    summary,
+    next_visual_index_text: options.includeOutputText ? nextVisualIndexText : undefined,
+    safety_notes: [safeAutoApplicationSafetyNote],
+    decision: blockedCount > 0
+      ? "blocked_visual_uploaded_reference_metadata_safe_auto_application"
+      : didWrite
+        ? "visual_uploaded_reference_metadata_safe_auto_application_applied"
+        : readyCount > 0
+          ? "visual_uploaded_reference_metadata_safe_auto_application_ready"
+          : "visual_uploaded_reference_metadata_safe_auto_application_noop",
+  };
+}
+
 
 function summarizeMetadataEnrichment(records, items) {
   return {

@@ -164,8 +164,10 @@ try {
   assert.equal(repoPreview.summary.user_uploaded_reference_count, 7);
   assert.equal(repoPreview.summary.accepted_count, 7);
   assert.equal(repoPreview.summary.blocked_count, 0);
-  assert.equal(repoPreview.summary.missing_description_count, 7);
-  assert.equal(repoPreview.summary.missing_tags_count, 7);
+  assert.equal(repoPreview.summary.missing_description_count, 0);
+  assert.equal(repoPreview.summary.missing_tags_count, 0);
+  assert.equal(repoPreview.items.every((entry) => entry.description_present), true);
+  assert.equal(repoPreview.items.every((entry) => entry.tags_present), true);
   assert.equal(repoPreview.items.every((entry) => entry.source === "user_imported"), true);
   assert.equal(repoPreview.items.every((entry) => entry.canon_status === "reference"), true);
   assert.equal(repoPreview.items.every((entry) => entry.ability_state === "visual_only"), true);
