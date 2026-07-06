@@ -389,6 +389,73 @@ export function buildChatgptNativeConsumerOutputVisualReferenceGuardReport(outpu
       : output.slice(0, maxExcerptChars) + "\n...[truncated:" + (output.length - maxExcerptChars) + "]",
   };
 }
+export function buildChatgptNativeConsumerOutputVisualReferenceGuardBridgePreview(outputText, consumerContract = {}, options = {}) {
+  const packetId = text(options.packet_id ?? options.packetId)
+    || "visual-reference-consumer-guard-report-bridge-preview";
+  const report = buildChatgptNativeConsumerOutputVisualReferenceGuardReport(
+    outputText,
+    consumerContract,
+    options,
+  );
+  const blocked = report.blocked === true;
+
+  return {
+    used: true,
+    phase: "39M",
+    surface_kind: "chatgpt_native_consumer_output_visual_reference_guard_bridge_preview",
+    preview_kind: "visual_reference_consumer_guard_report_bridge_preview",
+    packet_id: packetId,
+    bridge_packet_ready: true,
+    report_attached: true,
+    report_surface_kind: report.surface_kind,
+    source_report_kind: report.report_kind,
+    source_classifier: report.source_classifier,
+    accepted: report.accepted === true,
+    blocked,
+    severity: report.severity,
+    error_count: report.error_count,
+    misuse_details: report.misuse_details,
+    visual_usage_scope: report.visual_usage_scope,
+    operator_review: {
+      required: blocked,
+      reason: blocked
+        ? "visual_only_reference_misuse_detected"
+        : "no_visual_only_reference_misuse_detected",
+      misuse_details: report.misuse_details,
+      summary: report.operator_summary,
+    },
+    ui_preview: {
+      display_ready: true,
+      title: "Visual Reference Consumer Output Guard",
+      status: blocked ? "blocked" : "accepted",
+      severity: report.severity,
+      summary: report.operator_summary,
+      output_excerpt: report.output_excerpt,
+    },
+    tool_facing_packet: {
+      read_only: true,
+      may_display_to_operator: true,
+      may_display_in_ui: true,
+      may_feed_mcp_preview: true,
+      must_not_generate_story_text: true,
+      must_not_save_candidate: true,
+      must_not_update_canon: true,
+      must_not_update_active_engine: true,
+      must_not_enter_adoption_or_settlement: true,
+    },
+    safety_flags: {
+      ...report.safety_flags,
+      visual_reference_guard_bridge_preview_ready: true,
+      visual_reference_guard_report_attached: true,
+      candidate_created: false,
+      canon_updated: false,
+      active_engine_updated: false,
+      adopted: false,
+      settled: false,
+    },
+    report,
+  };
+}
 export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
   const buildContext = options.buildGptWritingContextFn ?? buildGptWritingContext;
