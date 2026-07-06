@@ -158,6 +158,12 @@ function buildFinalChatgptWritingInstruction(input) {
     "- 不要把本 handoff 本身當成正文。",
     "- 若使用者要求「只輸出正文」或「從章名開始」，tool 後的 ChatGPT 回覆應直接輸出正文，不加工程說明。",
     "",
+    "Visual-only reference usage hardening:",
+    "- 若 writing_context.retrieval_context 或 generation_context 含 visual_uploaded_references，僅可作外觀、姿態、服裝／造型、畫面氣質與氛圍參考。",
+    "- 不得從上傳圖推斷、建立或確認正史能力、能力機制、能力限制、異能武裝、角色關係、階級、陣營、時間線或章節事件。",
+    "- 不得把 visual-only reference 寫成 Canon facts，也不得用它改寫 Canon DB 或 active_engine。",
+    "- 若圖片資訊與 active_engine、Canon DB、主核對表或文字設定衝突，必須以文字正史資料為準；圖片僅保留為視覺參考。",
+    "",
     "handoff_mode: " + input.requestedOutputMode,
   ].join("\n");
 }
@@ -296,6 +302,10 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     backend_provider_required: false,
     local_provider_required: false,
     provider_type_required: false,
+    visual_reference_final_instruction_hardened: true,
+    visual_reference_canon_inference_allowed: false,
+    visual_reference_active_engine_update_allowed: false,
+    visual_reference_canon_db_update_allowed: false,
   };
 
   const handoff = {
@@ -321,6 +331,35 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
       must_respect_character_voice_registry: true,
       must_not_flatten_characters_into_operator_voice: true,
     },
+    visual_reference_final_writing_instruction_guard: {
+      enabled: true,
+      phase: "39I",
+      source_scope: "visual_uploaded_references",
+      visual_usage_scope: "visual_only_reference",
+      allowed_usage: [
+        "appearance guidance",
+        "pose guidance",
+        "outfit/design guidance",
+        "style guidance",
+        "atmosphere guidance",
+      ],
+      forbidden_inference: [
+        "canon abilities",
+        "ability mechanics",
+        "ability limits",
+        "soul weapons",
+        "relationships",
+        "ranks",
+        "factions",
+        "timeline events",
+        "chapter events",
+        "chapter outcomes",
+      ],
+      must_prefer_text_canon_over_visual_reference: true,
+      must_not_establish_canon_from_visual_reference: true,
+      must_not_update_active_engine_from_visual_reference: true,
+      must_not_update_canon_db_from_visual_reference: true,
+    },
     constraints,
     forbidden_mistakes: [
       "Do not call or require backend generation provider.",
@@ -331,6 +370,9 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
       "Do not mark adopted or settled.",
       "Do not treat this handoff as final story text.",
       "ChatGPT must generate the prose after reading this handoff.",
+      "Do not infer canon abilities, Soul-Weapons, relationships, ranks, factions, timeline events, or chapter outcomes from visual-only references.",
+      "Use uploaded visual references only for appearance, pose, style, outfit/design, and atmosphere guidance.",
+      "Text canon, Canon DB, and active_engine override visual-only references.",
     ],
     handoff_hash_sha256: sha256(JSON.stringify({
       task_prompt: input.taskPrompt,
