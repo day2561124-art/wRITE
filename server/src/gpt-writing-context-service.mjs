@@ -21,6 +21,10 @@ import {
   projectPaths,
   projectRoot,
 } from "./project-paths.mjs";
+import {
+  buildVisualUploadedReferencesWritingContextInjection,
+  serializeVisualUploadedReferencesWritingContextMarkdown,
+} from "./visual-uploaded-reference-writing-context-service.mjs";
 
 const bundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const chapterModes = new Set(["next_chapter", "specific_scene", "rewrite_candidate"]);
@@ -119,6 +123,11 @@ function normalizeInput(input = {}) {
       input.include_longline ?? input.includeLongline,
       true,
       "include_longline",
+    ),
+    includeVisualReferences: optionalBoolean(
+      input.include_visual_references ?? input.includeVisualReferences,
+      true,
+      "include_visual_references",
     ),
     maxContextChars: optionalInteger(
       input.max_context_chars ?? input.maxContextChars,
@@ -222,6 +231,39 @@ function contextWithCharacterVoiceRegistry(context, metadata) {
   };
 }
 
+function disabledVisualUploadedReferencesContext() {
+  return {
+    schema_version: 1,
+    phase: "39G",
+    mode: "visual_uploaded_references_writing_context_injection_disabled",
+    loaded: false,
+    reference_count: 0,
+    blocked_reference_count: 0,
+    items: [],
+    safety_contract: {
+      visual_only: true,
+      must_not_establish_canon: true,
+      must_not_update_active_engine: true,
+      must_not_update_canon_db: true,
+    },
+    decision: "visual_uploaded_references_writing_context_injection_disabled",
+  };
+}
+
+function contextWithVisualUploadedReferences(context, packet) {
+  return {
+    ...context,
+    visual_uploaded_references: {
+      loaded: packet.loaded === true,
+      reference_count: packet.reference_count ?? 0,
+      injection_scope: packet.injection_scope ?? "writing_context_visual_only",
+      canon_status: packet.canon_status ?? "reference_only",
+      safety_contract: packet.safety_contract ?? {},
+      items: packet.items ?? [],
+    },
+  };
+}
+
 function allocateContent(sections, maxChars) {
   let remaining = maxChars;
   const content = {};
@@ -264,6 +306,7 @@ function chatMarkdown(bundle) {
   const requiredNeuralModules = bundle.required_neural_modules
     .map((moduleName) => `  - ${moduleName}`);
   const writingCardDirectorPresent = bundle.content && bundle.content.writing_card_director_context ? "present" : "absent";
+  const visualUploadedReferences = bundle.visual_uploaded_references ?? { loaded: false, reference_count: 0 };
   return [
     "# GPT Writing Context Bundle",
     "",
@@ -325,6 +368,19 @@ function chatMarkdown(bundle) {
     `- SHA-256: ${bundle.character_voice_registry_hash_sha256 ?? "none"}`,
     "",
     bundle.content.character_voice_registry_content || "[missing]",
+    "",
+    "## Visual Uploaded References (Visual-only)",
+    "",
+    `- loaded: ${visualUploadedReferences.loaded === true}`,
+    `- reference count: ${visualUploadedReferences.reference_count ?? 0}`,
+    `- injection scope: ${visualUploadedReferences.injection_scope ?? "writing_context_visual_only"}`,
+    "- authority: below canon; visual reference only",
+    "- usage: appearance, pose, style, and atmosphere guidance only",
+    "- forbidden: canon facts, ability mechanics, soul weapons, relationships, ranks, factions, timeline events, chapter outcomes",
+    "- active_engine update permission: none",
+    "- canon update permission: none",
+    "",
+    bundle.content.visual_uploaded_reference_context || "[missing]",
     "",
     "## Retrieval Context",
     "",
@@ -424,24 +480,46 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       true,
       "read_only_derived_index",
     ),
+    sourceSnapshot(
+      "visual_index",
+      projectPaths.visualIndex,
+      input.includeVisualReferences,
+      "visual_only_reference",
+    ),
   ]);
   const byLabel = Object.fromEntries(sourceList.map((source) => [source.label, source]));
   const characterVoiceRegistry = characterVoiceRegistryMetadata(
     byLabel.character_voice_registry,
   );
-  const generationContext = contextWithCharacterVoiceRegistry(
-    input.generationContext,
-    characterVoiceRegistry,
+  const visualUploadedReferences = input.includeVisualReferences
+    ? await buildVisualUploadedReferencesWritingContextInjection(
+      options.visualUploadedReferencesOptions ?? {},
+    )
+    : disabledVisualUploadedReferencesContext();
+  const generationContext = contextWithVisualUploadedReferences(
+    contextWithCharacterVoiceRegistry(
+      input.generationContext,
+      characterVoiceRegistry,
+    ),
+    visualUploadedReferences,
   );
-  const retrievalContext = contextWithCharacterVoiceRegistry(
-    input.retrievalContext,
-    characterVoiceRegistry,
+  const retrievalContext = contextWithVisualUploadedReferences(
+    contextWithCharacterVoiceRegistry(
+      input.retrievalContext,
+      characterVoiceRegistry,
+    ),
+    visualUploadedReferences,
   );
   const allocated = allocateContent([
     {
       key: "character_voice_registry_content",
       text: byLabel.character_voice_registry.content,
       reference: byLabel.character_voice_registry.path,
+    },
+    {
+      key: "visual_uploaded_reference_context",
+      text: serializeVisualUploadedReferencesWritingContextMarkdown(visualUploadedReferences),
+      reference: byLabel.visual_index.path,
     },
     {
       key: "active_engine_excerpt_or_reference",
@@ -519,6 +597,11 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     character_voice_registry_bytes: characterVoiceRegistry.bytes,
     character_voice_registry_source_type: characterVoiceRegistry.source_type,
     character_voice_registry_authority: characterVoiceRegistry.authority,
+    visual_uploaded_references_loaded: visualUploadedReferences.loaded === true,
+    visual_uploaded_references_path: visualUploadedReferences.visual_index_path ?? byLabel.visual_index.path,
+    visual_uploaded_references_hash_sha256: visualUploadedReferences.visual_index_hash_sha256 ?? byLabel.visual_index.hash,
+    visual_uploaded_references_count: visualUploadedReferences.reference_count ?? 0,
+    visual_uploaded_references: visualUploadedReferences,
     inputs: {
       generation_context: generationContext,
       retrieval_context: retrievalContext,
@@ -543,6 +626,8 @@ export async function buildGptWritingContext(rawInput, options = {}) {
         allocated.content.longline_excerpt_or_reference,
       character_voice_registry_content:
         allocated.content.character_voice_registry_content,
+      visual_uploaded_reference_context:
+        allocated.content.visual_uploaded_reference_context,
       retrieval_context: retrievalContext,
       generation_context: generationContext,
       retrieval_context_for_chat: allocated.content.retrieval_context,
