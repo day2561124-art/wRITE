@@ -39,6 +39,9 @@ import {
   projectRoot,
 } from "./project-paths.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
+import {
+  buildChatgptNativeConsumerOutputVisualReferenceGuardToolExposureReadiness,
+} from "./chatgpt-native-neural-writing-handoff-service.mjs";
 
 const readonlyNames = [
   "get_project_status",
@@ -58,6 +61,7 @@ const readonlyNames = [
   "get_approval_queue_status",
   "get_neural_usage_for_run",
   "get_cleanup_proposals",
+  "preview_visual_reference_consumer_output_guard",
 ];
 
 function sha256(value) {
@@ -565,6 +569,37 @@ export async function get_cleanup_proposals(_input = {}, options = {}) {
   }, [], warnings, "cleanup_proposal");
 }
 
+export async function preview_visual_reference_consumer_output_guard(input = {}) {
+  const outputText = input.output_text ?? input.outputText ?? "";
+  const consumerContract = input.consumer_contract ?? input.consumerContract ?? {};
+  const packetId = input.packet_id ?? input.packetId ?? "mcp-preview-visual-reference-consumer-output-guard";
+  const maxExcerptChars = input.max_excerpt_chars ?? input.maxExcerptChars ?? 600;
+  const readiness = buildChatgptNativeConsumerOutputVisualReferenceGuardToolExposureReadiness(
+    outputText,
+    consumerContract,
+    {
+      packet_id: packetId,
+      tool_name: "chatgpt_bridge_preview_visual_reference_consumer_output_guard",
+      max_excerpt_chars: maxExcerptChars,
+    },
+  );
+
+  return baseResult(
+    "preview_visual_reference_consumer_output_guard",
+    {
+      ...readiness,
+      active_canon: false,
+      mcp_tool_registered: true,
+      mcp_tool_permission: "read_only",
+      mcp_tool_writes_files: false,
+      mcp_tool_can_modify_active_engine: false,
+      mcp_tool_requires_user_confirmation: false,
+    },
+    [],
+    [],
+    "readonly_preview",
+  );
+}
 async function countDirectories(directory, predicate = () => true) {
   return (await safeReadDirectory(directory))
     .filter((entry) => entry.isDirectory() && predicate(entry.name)).length;
@@ -617,6 +652,7 @@ export const readonlyTools = {
   get_approval_queue_status,
   get_neural_usage_for_run,
   get_cleanup_proposals,
+  preview_visual_reference_consumer_output_guard,
 };
 
 export const readonlyToolMetadata = Object.fromEntries(readonlyNames.map((name) => [name, {
