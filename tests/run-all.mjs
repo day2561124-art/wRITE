@@ -204,6 +204,7 @@ const steps = [
   ["Phase 39G visual uploaded references writing context injection", ["tests/phase39/phase39g-visual-uploaded-references-writing-context-injection.test.mjs"]],
   ["Phase 39H visual reference native handoff live smoke", ["tests/phase39/phase39h-visual-reference-native-handoff-live-smoke.test.mjs"]],
   ["Phase 39I visual reference final writing instruction hardening", ["tests/phase39/phase39i-visual-reference-final-writing-instruction-hardening.test.mjs"]],
+  ["Phase 39J visual reference consumer contract hardening", ["tests/phase39/phase39j-visual-reference-consumer-contract-hardening.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
