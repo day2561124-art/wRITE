@@ -264,6 +264,59 @@ function buildChatgptNativeConsumerContract(input) {
     },
   };
 }
+export function classifyChatgptNativeConsumerOutputAgainstVisualReferenceContract(outputText, consumerContract = {}) {
+  const output = text(outputText);
+  const visualContract = consumerContract?.visual_reference_consumer_contract ?? {};
+  const contractEnabled = consumerContract?.visual_reference_consumer_contract_hardened === true
+    || visualContract?.enabled === true;
+  const errors = [];
+
+  const misusePatterns = [
+    {
+      code: "visual_reference_canon_or_story_inference",
+      pattern: /(?:因為|根據|依據|從)?(?:上傳圖|參考圖|圖片).*?(?:確認|推斷|建立|判定|證明).*?(?:正史|Canon|能力|異能武裝|Soul-Weapon|武裝|關係|階級|陣營|時間線|章節事件|章節結果|chapter outcome)/iu,
+    },
+    {
+      code: "visual_reference_english_canon_or_story_inference",
+      pattern: /visual-only reference.*?(?:confirms|establishes|infers|creates|proves).*?(?:canon|ability|soul[- ]?weapon|relationship|rank|faction|timeline|chapter outcome)/iu,
+    },
+    {
+      code: "visual_reference_canon_db_or_active_engine_update",
+      pattern: /(?:(?:上傳圖|參考圖|圖片).*?(?:改寫|更新).*?(?:Canon DB|Canon|active_engine)|(?:改寫|更新).*?(?:Canon DB|Canon|active_engine).*?(?:上傳圖|參考圖|圖片))/iu,
+    },
+    {
+      code: "visual_reference_english_canon_db_or_active_engine_update",
+      pattern: /visual-only reference.*?(?:updates|rewrites).*?(?:Canon DB|Canon|active_engine)/iu,
+    },
+  ];
+
+  if (contractEnabled) {
+    for (const item of misusePatterns) {
+      if (item.pattern.test(output)) {
+        errors.push({
+          code: "visual_reference_consumer_output_misuse",
+          detail: item.code,
+        });
+      }
+    }
+  }
+
+  return {
+    checked: true,
+    contract_enabled: contractEnabled,
+    accepted: errors.length === 0,
+    errors,
+    visual_usage_scope: visualContract?.visual_usage_scope ?? null,
+    canon_inference_allowed: visualContract?.canon_inference_allowed === true,
+    ability_inference_allowed: visualContract?.ability_inference_allowed === true,
+    soul_weapon_inference_allowed: visualContract?.soul_weapon_inference_allowed === true,
+    relationship_inference_allowed: visualContract?.relationship_inference_allowed === true,
+    timeline_event_inference_allowed: visualContract?.timeline_event_inference_allowed === true,
+    chapter_outcome_inference_allowed: visualContract?.chapter_outcome_inference_allowed === true,
+    canon_db_update_allowed: visualContract?.canon_db_update_allowed === true,
+    active_engine_update_allowed: visualContract?.active_engine_update_allowed === true,
+  };
+}
 export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
   const buildContext = options.buildGptWritingContextFn ?? buildGptWritingContext;
