@@ -317,6 +317,78 @@ export function classifyChatgptNativeConsumerOutputAgainstVisualReferenceContrac
     active_engine_update_allowed: visualContract?.active_engine_update_allowed === true,
   };
 }
+export function buildChatgptNativeConsumerOutputVisualReferenceGuardReport(outputText, consumerContract = {}, options = {}) {
+  const output = text(outputText);
+  const maxExcerptChars = Number.isFinite(Number(options.max_excerpt_chars ?? options.maxExcerptChars))
+    ? Math.max(0, Number(options.max_excerpt_chars ?? options.maxExcerptChars))
+    : 600;
+  const classification = classifyChatgptNativeConsumerOutputAgainstVisualReferenceContract(
+    output,
+    consumerContract,
+  );
+  const errors = Array.isArray(classification.errors) ? classification.errors : [];
+  const misuseDetails = [...new Set(errors.map((error) => text(error?.detail)).filter(Boolean))];
+
+  return {
+    used: true,
+    phase: "39L",
+    surface_kind: "chatgpt_native_consumer_output_visual_reference_guard_report",
+    report_kind: "visual_reference_consumer_output_guard_report",
+    source_classifier: "classifyChatgptNativeConsumerOutputAgainstVisualReferenceContract",
+    checked: classification.checked === true,
+    contract_enabled: classification.contract_enabled === true,
+    accepted: classification.accepted === true,
+    blocked: classification.accepted !== true,
+    severity: classification.accepted === true ? "pass" : "error",
+    error_count: errors.length,
+    errors,
+    misuse_details: misuseDetails,
+    visual_usage_scope: classification.visual_usage_scope ?? null,
+    safety_flags: {
+      visual_reference_consumer_contract_hardened:
+        consumerContract?.visual_reference_consumer_contract_hardened === true,
+      visual_reference_consumer_output_checked: classification.checked === true,
+      visual_reference_consumer_output_accepted: classification.accepted === true,
+      visual_reference_consumer_output_blocked: classification.accepted !== true,
+      canon_inference_allowed: classification.canon_inference_allowed === true,
+      ability_inference_allowed: classification.ability_inference_allowed === true,
+      soul_weapon_inference_allowed: classification.soul_weapon_inference_allowed === true,
+      relationship_inference_allowed: classification.relationship_inference_allowed === true,
+      timeline_event_inference_allowed: classification.timeline_event_inference_allowed === true,
+      chapter_outcome_inference_allowed: classification.chapter_outcome_inference_allowed === true,
+      canon_db_update_allowed: classification.canon_db_update_allowed === true,
+      active_engine_update_allowed: classification.active_engine_update_allowed === true,
+    },
+    allowed_final_output_use: [
+      "appearance guidance",
+      "pose guidance",
+      "outfit/design guidance",
+      "style guidance",
+      "atmosphere guidance",
+    ],
+    forbidden_final_output_inference: [
+      "canon facts",
+      "canon abilities",
+      "ability mechanics",
+      "ability limits",
+      "soul weapons",
+      "relationships",
+      "ranks",
+      "factions",
+      "timeline events",
+      "chapter events",
+      "chapter outcomes",
+      "Canon DB updates",
+      "active_engine updates",
+    ],
+    operator_summary: classification.accepted === true
+      ? "Visual reference consumer output accepted: no visual-only reference misuse detected."
+      : "Visual reference consumer output rejected: visual-only reference misuse detected.",
+    output_excerpt: output.length <= maxExcerptChars
+      ? output
+      : output.slice(0, maxExcerptChars) + "\n...[truncated:" + (output.length - maxExcerptChars) + "]",
+  };
+}
 export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, options = {}) {
   const input = normalizeInput(rawInput);
   const buildContext = options.buildGptWritingContextFn ?? buildGptWritingContext;
