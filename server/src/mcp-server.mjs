@@ -2867,14 +2867,78 @@ function permissionMetadata(tool) {
   };
 }
 
+function chatgptActionSurfaceMetadata(tool, permission) {
+  if (tool.name !== "preview_visual_reference_consumer_output_guard") {
+    return null;
+  }
+
+  const readOnly = permission.permission_level === "read_only"
+    && permission.read_or_write === "read"
+    && permission.requires_user_confirmation === false
+    && permission.requires_backup_before_write === false
+    && permission.can_modify_canon === false
+    && permission.can_modify_active_engine === false
+    && permission.can_modify_story_graph === false
+    && permission.can_modify_memory === false
+    && permission.log_required === false;
+
+  return {
+    used: true,
+    phase: "39Q",
+    surface_kind: "visual_reference_consumer_guard_chatgpt_action_surface_final_smoke",
+    action_surface_kind: "chatgpt_action_surface_readonly_guard_preview",
+    tool_name: tool.name,
+    source_tool_profile: "chatgpt_public",
+    action_surface_ready: readOnly,
+    listed_in_chatgpt_public: true,
+    callable_via_tools_call: true,
+    exposes_guard_preview: true,
+    read_only: true,
+    permission_level: permission.permission_level,
+    read_or_write: permission.read_or_write,
+    requires_user_confirmation: false,
+    requires_backup_before_write: false,
+    can_modify_canon: false,
+    can_modify_active_engine: false,
+    can_modify_story_graph: false,
+    can_modify_memory: false,
+    log_required: false,
+    no_mutation_guarantee: readOnly,
+    must_not_generate_story_text: true,
+    must_not_save_candidate: true,
+    must_not_update_canon: true,
+    must_not_update_active_engine: true,
+    must_not_enter_adoption_or_settlement: true,
+    must_not_create_approval_request: true,
+    must_not_create_pending_engine_candidate: true,
+    must_not_write_files: true,
+    output_is_reference_only: true,
+    action_surface_must_not_replace_final_output: true,
+    action_surface_must_not_be_emitted_as_story_text: true,
+    allowed_sources: permission.allowed_sources,
+    forbidden_sources: permission.forbidden_sources,
+    safety_flags: {
+      visual_reference_guard_chatgpt_action_surface_final_smoke_ready: readOnly,
+      candidate_created: false,
+      canon_updated: false,
+      active_engine_updated: false,
+      adopted: false,
+      settled: false,
+    },
+  };
+}
 function publicToolDefinition(tool) {
+  const permission = permissionMetadata(tool);
+  const actionSurface = chatgptActionSurfaceMetadata(tool, permission);
+
   return {
     name: tool.name,
     description: `[${tool.risk}] ${tool.description}`,
     inputSchema: tool.inputSchema,
     annotations: tool.annotations,
     _meta: {
-      "armed-academy/permission": permissionMetadata(tool),
+      "armed-academy/permission": permission,
+      ...(actionSurface ? { "armed-academy/chatgpt_action_surface": actionSurface } : {}),
     },
   };
 }
