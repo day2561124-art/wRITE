@@ -212,6 +212,7 @@ const steps = [
   ["Phase 39O visual reference consumer guard readonly MCP tool registration smoke", ["tests/phase39/phase39o-visual-reference-consumer-guard-readonly-mcp-tool-registration-smoke.test.mjs"]],
   ["Phase 39P visual reference consumer guard MCP public profile exposure smoke", ["tests/phase39/phase39p-visual-reference-consumer-guard-mcp-public-profile-exposure-smoke.test.mjs"]],
   ["Phase 39Q visual reference consumer guard ChatGPT action surface final smoke", ["tests/phase39/phase39q-visual-reference-consumer-guard-chatgpt-action-surface-final-smoke.test.mjs"]],
+  ["Phase 39R visual reference consumer guard full public action E2E final closure", ["tests/phase39/phase39r-visual-reference-consumer-guard-full-public-action-e2e-final-closure.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],

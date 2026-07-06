@@ -2927,9 +2927,107 @@ function chatgptActionSurfaceMetadata(tool, permission) {
     },
   };
 }
+function visualReferenceGuardPublicActionE2eFinalClosureMetadata(tool, permission, actionSurface) {
+  if (tool.name !== "preview_visual_reference_consumer_output_guard") {
+    return null;
+  }
+
+  const permissionReady = permission.permission_level === "read_only"
+    && permission.read_or_write === "read"
+    && permission.risk_level === "read"
+    && permission.requires_user_confirmation === false
+    && permission.requires_backup_before_write === false
+    && permission.can_modify_canon === false
+    && permission.can_modify_active_engine === false
+    && permission.can_modify_story_graph === false
+    && permission.can_modify_memory === false
+    && permission.log_required === false;
+
+  const actionSurfaceReady = actionSurface?.used === true
+    && actionSurface.phase === "39Q"
+    && actionSurface.action_surface_ready === true
+    && actionSurface.listed_in_chatgpt_public === true
+    && actionSurface.callable_via_tools_call === true
+    && actionSurface.read_only === true
+    && actionSurface.no_mutation_guarantee === true
+    && actionSurface.must_not_generate_story_text === true
+    && actionSurface.must_not_save_candidate === true
+    && actionSurface.must_not_update_canon === true
+    && actionSurface.must_not_update_active_engine === true
+    && actionSurface.must_not_enter_adoption_or_settlement === true
+    && actionSurface.must_not_create_approval_request === true
+    && actionSurface.must_not_create_pending_engine_candidate === true
+    && actionSurface.must_not_write_files === true;
+
+  const ready = permissionReady && actionSurfaceReady;
+
+  return {
+    used: true,
+    phase: "39R",
+    surface_kind: "visual_reference_consumer_guard_full_public_action_e2e_final_closure",
+    closure_kind: "chatgpt_public_action_e2e_final_closure",
+    tool_name: tool.name,
+    source_tool_profile: "chatgpt_public",
+    depends_on_phase: "39Q",
+    metadata_sources: [
+      "armed-academy/permission",
+      "armed-academy/chatgpt_action_surface",
+    ],
+    full_public_action_e2e_final_closure_ready: ready,
+    tools_list_permission_metadata_ready: permissionReady,
+    tools_list_action_surface_metadata_ready: actionSurfaceReady,
+    tools_call_valid_payload_required: true,
+    tools_call_blocked_payload_required: true,
+    tools_call_disabled_contract_payload_required: true,
+    no_mutation_snapshot_required: true,
+    run_all_registration_required: true,
+    read_only: true,
+    permission_level: permission.permission_level,
+    read_or_write: permission.read_or_write,
+    risk_level: permission.risk_level,
+    listed_in_chatgpt_public: true,
+    callable_via_tools_call: true,
+    exposes_guard_preview: true,
+    output_is_reference_only: true,
+    closure_must_not_replace_final_output: true,
+    closure_must_not_be_emitted_as_story_text: true,
+    no_mutation_guarantee: ready,
+    must_not_generate_story_text: true,
+    must_not_save_candidate: true,
+    must_not_update_canon: true,
+    must_not_update_active_engine: true,
+    must_not_enter_adoption_or_settlement: true,
+    must_not_create_approval_request: true,
+    must_not_create_pending_engine_candidate: true,
+    must_not_write_files: true,
+    closure_contract: {
+      valid_payload_must_accept: true,
+      invalid_payload_must_return_readonly_blocked_result: true,
+      disabled_contract_payload_must_accept_without_mutation: true,
+      must_preserve_permission_metadata: true,
+      must_preserve_action_surface_metadata: true,
+      must_preserve_no_mutation_snapshot: true,
+    },
+    safety_flags: {
+      visual_reference_guard_full_public_action_e2e_final_closure_ready: ready,
+      candidate_created: false,
+      canon_updated: false,
+      active_engine_updated: false,
+      approval_request_created: false,
+      pending_engine_candidate_created: false,
+      adopted: false,
+      settled: false,
+    },
+  };
+}
 function publicToolDefinition(tool) {
   const permission = permissionMetadata(tool);
   const actionSurface = chatgptActionSurfaceMetadata(tool, permission);
+  const visualReferenceGuardFinalClosure = visualReferenceGuardPublicActionE2eFinalClosureMetadata(
+    tool,
+    permission,
+    actionSurface,
+  );
 
   return {
     name: tool.name,
@@ -2939,6 +3037,9 @@ function publicToolDefinition(tool) {
     _meta: {
       "armed-academy/permission": permission,
       ...(actionSurface ? { "armed-academy/chatgpt_action_surface": actionSurface } : {}),
+      ...(visualReferenceGuardFinalClosure ? {
+        "armed-academy/visual_reference_guard_public_action_e2e_final_closure": visualReferenceGuardFinalClosure,
+      } : {}),
     },
   };
 }
