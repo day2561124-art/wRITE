@@ -3020,6 +3020,208 @@ function visualReferenceGuardPublicActionE2eFinalClosureMetadata(tool, permissio
     },
   };
 }
+
+const visualReferenceConsumerGuardFinalClosurePhaseIndex = Object.freeze([
+  ["39H", "phase39h-visual-reference-native-handoff-live-smoke.test.mjs", "visual_reference_native_handoff_live_smoke", "visual reference enters ChatGPT native handoff as reference-only context"],
+  ["39I", "phase39i-visual-reference-final-writing-instruction-hardening.test.mjs", "visual_reference_final_writing_instruction_guard", "hardens final ChatGPT writing instruction against visual-only misuse"],
+  ["39J", "phase39j-visual-reference-consumer-contract-hardening.test.mjs", "visual_reference_consumer_contract_guard", "structural ChatGPT-native consumer contract for visual-only reference limits"],
+  ["39K", "phase39k-visual-reference-consumer-output-misuse-fixture.test.mjs", "visual_reference_consumer_output_misuse_classifier_fixture", "detects final-output misuse of visual-only references"],
+  ["39L", "phase39l-visual-reference-consumer-output-guard-report-surface.test.mjs", "visual_reference_consumer_output_guard_report_surface", "surfaces classifier result as readonly guard report"],
+  ["39M", "phase39m-visual-reference-consumer-guard-report-bridge-preview.test.mjs", "visual_reference_consumer_guard_report_bridge_preview", "wraps guard report as bridge-facing readonly preview packet"],
+  ["39N", "phase39n-visual-reference-consumer-guard-tool-exposure-readiness.test.mjs", "visual_reference_consumer_guard_tool_exposure_readiness", "marks readonly tool/MCP exposure readiness without mutation authority"],
+  ["39O", "phase39o-visual-reference-consumer-guard-readonly-mcp-tool-registration-smoke.test.mjs", "visual_reference_consumer_guard_readonly_mcp_tool_registration_smoke", "registers preview_visual_reference_consumer_output_guard as readonly MCP tool"],
+  ["39P", "phase39p-visual-reference-consumer-guard-mcp-public-profile-exposure-smoke.test.mjs", "visual_reference_consumer_guard_mcp_public_profile_exposure_smoke", "exposes readonly guard preview through chatgpt_public profile"],
+  ["39Q", "phase39q-visual-reference-consumer-guard-chatgpt-action-surface-final-smoke.test.mjs", "visual_reference_consumer_guard_chatgpt_action_surface_final_smoke", "seals ChatGPT action surface metadata as readonly guard preview"],
+  ["39R", "phase39r-visual-reference-consumer-guard-full-public-action-e2e-final-closure.test.mjs", "visual_reference_consumer_guard_full_public_action_e2e_final_closure", "closes full public action E2E guard chain with permission/action/closure/tools-call/no-mutation coverage"],
+].map(([phase, fileName, surfaceKind, safetyRole]) => Object.freeze({
+  phase,
+  phase_id: "Phase" + phase,
+  test_path: "tests/phase39/" + fileName,
+  surface_kind: surfaceKind,
+  safety_role: safetyRole,
+  no_mutation_guarantee: true,
+  must_not_generate_story_text: true,
+  must_not_save_candidate: true,
+  must_not_update_canon: true,
+  must_not_update_active_engine: true,
+  must_not_enter_adoption_or_settlement: true,
+  safety_flags: {
+    candidate_created: false,
+    canon_updated: false,
+    active_engine_updated: false,
+    approval_request_created: false,
+    pending_engine_candidate_created: false,
+    adopted: false,
+    settled: false,
+  },
+})));
+
+function visualReferenceConsumerGuardFinalClosureIndexAndOperatorHandoffSealMetadata(
+  tool,
+  permission,
+  actionSurface,
+  publicActionFinalClosure,
+) {
+  if (tool.name !== "preview_visual_reference_consumer_output_guard") {
+    return null;
+  }
+
+  const requiredPhases = ["39H", "39I", "39J", "39K", "39L", "39M", "39N", "39O", "39P", "39Q", "39R"];
+  const indexedPhases = visualReferenceConsumerGuardFinalClosurePhaseIndex.map((entry) => entry.phase);
+  const phaseOrderReady = requiredPhases.length === indexedPhases.length
+    && requiredPhases.every((phase, index) => indexedPhases[index] === phase);
+
+  const indexSafetyReady = visualReferenceConsumerGuardFinalClosurePhaseIndex.every((entry) => (
+    entry.no_mutation_guarantee === true
+    && entry.must_not_generate_story_text === true
+    && entry.must_not_save_candidate === true
+    && entry.must_not_update_canon === true
+    && entry.must_not_update_active_engine === true
+    && entry.must_not_enter_adoption_or_settlement === true
+    && entry.safety_flags.candidate_created === false
+    && entry.safety_flags.canon_updated === false
+    && entry.safety_flags.active_engine_updated === false
+    && entry.safety_flags.approval_request_created === false
+    && entry.safety_flags.pending_engine_candidate_created === false
+    && entry.safety_flags.adopted === false
+    && entry.safety_flags.settled === false
+  ));
+
+  const permissionReady = permission.permission_level === "read_only"
+    && permission.read_or_write === "read"
+    && permission.risk_level === "read"
+    && permission.requires_user_confirmation === false
+    && permission.requires_backup_before_write === false
+    && permission.can_modify_canon === false
+    && permission.can_modify_active_engine === false
+    && permission.can_modify_story_graph === false
+    && permission.can_modify_memory === false
+    && permission.log_required === false;
+
+  const actionSurfaceReady = actionSurface?.used === true
+    && actionSurface.phase === "39Q"
+    && actionSurface.action_surface_ready === true
+    && actionSurface.read_only === true
+    && actionSurface.no_mutation_guarantee === true
+    && actionSurface.must_not_generate_story_text === true
+    && actionSurface.must_not_save_candidate === true
+    && actionSurface.must_not_update_canon === true
+    && actionSurface.must_not_update_active_engine === true
+    && actionSurface.must_not_enter_adoption_or_settlement === true
+    && actionSurface.must_not_create_approval_request === true
+    && actionSurface.must_not_create_pending_engine_candidate === true
+    && actionSurface.must_not_write_files === true;
+
+  const publicActionFinalClosureReady = publicActionFinalClosure?.used === true
+    && publicActionFinalClosure.phase === "39R"
+    && publicActionFinalClosure.full_public_action_e2e_final_closure_ready === true
+    && publicActionFinalClosure.read_only === true
+    && publicActionFinalClosure.no_mutation_guarantee === true
+    && publicActionFinalClosure.must_not_generate_story_text === true
+    && publicActionFinalClosure.must_not_save_candidate === true
+    && publicActionFinalClosure.must_not_update_canon === true
+    && publicActionFinalClosure.must_not_update_active_engine === true
+    && publicActionFinalClosure.must_not_enter_adoption_or_settlement === true
+    && publicActionFinalClosure.must_not_create_approval_request === true
+    && publicActionFinalClosure.must_not_create_pending_engine_candidate === true
+    && publicActionFinalClosure.must_not_write_files === true
+    && publicActionFinalClosure.safety_flags.candidate_created === false
+    && publicActionFinalClosure.safety_flags.canon_updated === false
+    && publicActionFinalClosure.safety_flags.active_engine_updated === false
+    && publicActionFinalClosure.safety_flags.approval_request_created === false
+    && publicActionFinalClosure.safety_flags.pending_engine_candidate_created === false
+    && publicActionFinalClosure.safety_flags.adopted === false
+    && publicActionFinalClosure.safety_flags.settled === false;
+
+  const ready = phaseOrderReady
+    && indexSafetyReady
+    && permissionReady
+    && actionSurfaceReady
+    && publicActionFinalClosureReady;
+
+  const forbiddenMutationFlags = {
+    candidate_created: false,
+    canon_updated: false,
+    active_engine_updated: false,
+    approval_request_created: false,
+    pending_engine_candidate_created: false,
+    adopted: false,
+    settled: false,
+    writes_files: false,
+  };
+
+  return {
+    used: true,
+    phase: "39S",
+    surface_kind: "visual_reference_consumer_guard_final_closure_index_and_operator_handoff_seal",
+    closure_index_kind: "visual_reference_public_action_guard_chain_index",
+    operator_handoff_seal_kind: "visual_reference_consumer_guard_operator_handoff_seal",
+    tool_name: tool.name,
+    source_tool_profile: "chatgpt_public",
+    depends_on_phase: "39R",
+    required_phase_range: "Phase39H-Phase39R",
+    metadata_sources: [
+      "armed-academy/permission",
+      "armed-academy/chatgpt_action_surface",
+      "armed-academy/visual_reference_guard_public_action_e2e_final_closure",
+    ],
+    final_closure_index_ready: ready,
+    operator_handoff_seal_ready: ready,
+    phase_order_ready: phaseOrderReady,
+    index_safety_ready: indexSafetyReady,
+    tools_list_permission_metadata_ready: permissionReady,
+    tools_list_action_surface_metadata_ready: actionSurfaceReady,
+    full_public_action_e2e_final_closure_ready: publicActionFinalClosureReady,
+    test_paths_registered_required: true,
+    test_paths_exist_required: true,
+    no_mutation_snapshot_required: true,
+    run_all_registration_required: true,
+    read_only: true,
+    permission_level: permission.permission_level,
+    read_or_write: permission.read_or_write,
+    risk_level: permission.risk_level,
+    listed_in_chatgpt_public: true,
+    callable_via_tools_call: true,
+    exposes_guard_preview: true,
+    output_is_reference_only: true,
+    no_mutation_guarantee: ready,
+    must_not_generate_story_text: true,
+    must_not_save_candidate: true,
+    must_not_update_canon: true,
+    must_not_update_active_engine: true,
+    must_not_enter_adoption_or_settlement: true,
+    must_not_create_approval_request: true,
+    must_not_create_pending_engine_candidate: true,
+    must_not_write_files: true,
+    seal_flags: {
+      visual_reference_chain_sealed: ready,
+      public_action_guard_sealed: ready,
+      readonly_guard_preview_sealed: ready,
+      no_canon_active_engine_mutation_sealed: ready,
+      no_story_generation_sealed: true,
+      no_candidate_save_sealed: true,
+      no_adoption_settlement_sealed: true,
+    },
+    forbidden_mutation_flags: forbiddenMutationFlags,
+    phases_indexed: indexedPhases,
+    phase_count: visualReferenceConsumerGuardFinalClosurePhaseIndex.length,
+    index: visualReferenceConsumerGuardFinalClosurePhaseIndex,
+    operator_handoff: {
+      status: ready ? "sealed" : "not_ready",
+      safe_to_treat_visual_reference_guard_chain_as_closed: ready,
+      next_engineer_instruction: "Use this metadata as the final readonly closure index for Phase39H-Phase39R visual reference consumer guard chain.",
+      must_not_use_visual_reference_as_canon_source: true,
+      must_not_use_visual_reference_as_ability_source: true,
+      must_not_use_visual_reference_as_relationship_source: true,
+      must_not_use_visual_reference_as_timeline_source: true,
+    },
+    safety_flags: {
+      visual_reference_consumer_guard_final_closure_index_and_operator_handoff_seal_ready: ready,
+      ...forbiddenMutationFlags,
+    },
+  };
+}
+
 function publicToolDefinition(tool) {
   const permission = permissionMetadata(tool);
   const actionSurface = chatgptActionSurfaceMetadata(tool, permission);
@@ -3028,6 +3230,13 @@ function publicToolDefinition(tool) {
     permission,
     actionSurface,
   );
+  const visualReferenceGuardClosureIndexSeal =
+    visualReferenceConsumerGuardFinalClosureIndexAndOperatorHandoffSealMetadata(
+      tool,
+      permission,
+      actionSurface,
+      visualReferenceGuardFinalClosure,
+    );
 
   return {
     name: tool.name,
@@ -3039,6 +3248,9 @@ function publicToolDefinition(tool) {
       ...(actionSurface ? { "armed-academy/chatgpt_action_surface": actionSurface } : {}),
       ...(visualReferenceGuardFinalClosure ? {
         "armed-academy/visual_reference_guard_public_action_e2e_final_closure": visualReferenceGuardFinalClosure,
+      } : {}),
+      ...(visualReferenceGuardClosureIndexSeal ? {
+        "armed-academy/visual_reference_consumer_guard_final_closure_index_operator_handoff_seal": visualReferenceGuardClosureIndexSeal,
       } : {}),
     },
   };
