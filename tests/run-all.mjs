@@ -215,6 +215,7 @@ const steps = [
   ["Phase 39R visual reference consumer guard full public action E2E final closure", ["tests/phase39/phase39r-visual-reference-consumer-guard-full-public-action-e2e-final-closure.test.mjs"]],
   ["Phase 39S visual reference consumer guard final closure index operator handoff seal", ["tests/phase39/phase39s-visual-reference-consumer-guard-final-closure-index-operator-handoff-seal.test.mjs"]],
   ["Phase 40A visual reference sealed chain native writing route acceptance smoke", ["tests/phase40/phase40a-visual-reference-sealed-chain-native-writing-route-acceptance-smoke.test.mjs"]],
+  ["Phase 40B visual reference native route consumer guard post-output acceptance seal", ["tests/phase40/phase40b-visual-reference-native-route-consumer-guard-post-output-acceptance-seal.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
