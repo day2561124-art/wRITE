@@ -240,4 +240,3 @@ function previewExplicitCandidateWorkflowIntake({
 console.log(
   "Phase41B explicit candidate workflow intake boundary smoke tests passed."
 );
-
