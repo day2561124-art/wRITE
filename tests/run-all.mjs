@@ -217,6 +217,7 @@ const steps = [
   ["Phase 40A visual reference sealed chain native writing route acceptance smoke", ["tests/phase40/phase40a-visual-reference-sealed-chain-native-writing-route-acceptance-smoke.test.mjs"]],
   ["Phase 40B visual reference native route consumer guard post-output acceptance seal", ["tests/phase40/phase40b-visual-reference-native-route-consumer-guard-post-output-acceptance-seal.test.mjs"]],
   ["Phase 40C visual reference native route final closure index operator handoff seal", ["tests/phase40/phase40c-visual-reference-native-route-final-closure-index-operator-handoff-seal.test.mjs"]],
+  ["Phase 41A ChatGPT native writing output adoption settlement boundary final smoke", ["tests/phase41/phase41a-chatgpt-native-writing-output-adoption-settlement-boundary-final-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
