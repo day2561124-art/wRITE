@@ -226,6 +226,7 @@ const steps = [
   ["Phase 41A ChatGPT native writing output adoption settlement boundary final smoke", ["tests/phase41/phase41g-explicit-candidate-runtime-write-minimal-implementation-smoke.test.mjs"]],
   ["Phase 41A ChatGPT native writing output adoption settlement boundary final smoke", ["tests/phase41/phase41h-explicit-candidate-runtime-write-service-integration-boundary-smoke.test.mjs"]],
   ["Phase 41A ChatGPT native writing output adoption settlement boundary final smoke", ["tests/phase41/phase41i-explicit-candidate-runtime-write-production-guard-smoke.test.mjs"]],
+  ["Phase 41J explicit candidate runtime write promotion dry-run smoke", ["tests/phase41/phase41j-explicit-candidate-runtime-write-promotion-dry-run-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
