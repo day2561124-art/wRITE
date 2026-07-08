@@ -31,14 +31,36 @@ function sha256Text(text) {
   return crypto.createHash("sha256").update(String(text), "utf8").digest("hex");
 }
 
+function mutationFlag(snapshot, legacyField, performedField) {
+  if (Object.prototype.hasOwnProperty.call(snapshot, legacyField)) {
+    return snapshot[legacyField];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(snapshot, performedField)) {
+    return snapshot[performedField];
+  }
+
+  return undefined;
+}
+
 function assertNoProductionMutation(snapshot) {
   assert.equal(snapshot.production_candidate_saved, false);
   assert.equal(snapshot.approval_request_created, false);
   assert.equal(snapshot.pending_engine_candidate_created, false);
   assert.equal(snapshot.adoption_performed, false);
   assert.equal(snapshot.settlement_performed, false);
-  assert.equal(snapshot.canon_updated, false);
-  assert.equal(snapshot.active_engine_updated, false);
+  assert.equal(
+    mutationFlag(snapshot, "canon_updated", "canon_update_performed"),
+    false
+  );
+  assert.equal(
+    mutationFlag(
+      snapshot,
+      "active_engine_updated",
+      "active_engine_update_performed"
+    ),
+    false
+  );
 }
 
 function assertNoWriteMutation(snapshot) {
