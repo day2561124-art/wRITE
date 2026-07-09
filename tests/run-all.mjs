@@ -238,6 +238,7 @@ const steps = [
 ["Phase 42F production candidate store promotion gate guard token pre-consumption boundary smoke", ["tests/phase42/phase42f-production-candidate-store-promotion-gate-guard-token-pre-consumption-boundary-smoke.test.mjs"]],
   ["Phase 42G production candidate store promotion gate guard token consumption denial smoke", ["tests/phase42/phase42g-production-candidate-store-promotion-gate-guard-token-consumption-denial-smoke.test.mjs"]],
   ["Phase 42H production candidate store promotion gate approval request preflight boundary smoke", ["tests/phase42/phase42h-production-candidate-store-promotion-gate-approval-request-preflight-boundary-smoke.test.mjs"]],
+  ["Phase 42I production candidate store promotion gate approval request creation denial smoke", ["tests/phase42/phase42i-production-candidate-store-promotion-gate-approval-request-creation-denial-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
