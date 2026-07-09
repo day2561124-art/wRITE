@@ -230,6 +230,7 @@ const steps = [
   ["Phase 41K explicit candidate runtime write promotion persistence readiness smoke", ["tests/phase41/phase41k-explicit-candidate-runtime-write-promotion-persistence-readiness-smoke.test.mjs"]],
   ["Phase 41L explicit candidate runtime write promotion dry-run proof seal smoke", ["tests/phase41/phase41l-explicit-candidate-runtime-write-promotion-dry-run-proof-seal-smoke.test.mjs"]],
   ["Phase 41M explicit candidate runtime write promotion boundary final closure operator handoff seal", ["tests/phase41/phase41m-explicit-candidate-runtime-write-promotion-boundary-final-closure-operator-handoff-seal.test.mjs"]],
+  ["Phase 42A production candidate store promotion gate readiness index", ["tests/phase42/phase42a-production-candidate-store-promotion-gate-readiness-index.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
