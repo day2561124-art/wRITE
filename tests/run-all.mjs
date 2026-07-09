@@ -235,6 +235,7 @@ const steps = [
   ["Phase 42C production candidate store promotion gate preflight contract smoke", ["tests/phase42/phase42c-production-candidate-store-promotion-gate-preflight-contract-smoke.test.mjs"]],
   ["Phase 42D production candidate store promotion gate operator confirmation boundary smoke", ["tests/phase42/phase42d-production-candidate-store-promotion-gate-operator-confirmation-boundary-smoke.test.mjs"]],
   ["Phase 42E production candidate store promotion gate operator confirmation final readiness smoke", ["tests/phase42/phase42e-production-candidate-store-promotion-gate-operator-confirmation-final-readiness-smoke.test.mjs"]],
+["Phase 42F production candidate store promotion gate guard token pre-consumption boundary smoke", ["tests/phase42/phase42f-production-candidate-store-promotion-gate-guard-token-pre-consumption-boundary-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
   ["Compressed rule update confirm service", ["tests/feedback/compressed-rule-update-confirm-service.test.mjs"]],
