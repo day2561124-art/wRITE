@@ -490,6 +490,9 @@ const steps = [
 
   ["Phase 42N production candidate store promotion gate production promotion preflight boundary smoke", ["tests/phase42/phase42n-production-candidate-store-promotion-gate-production-promotion-preflight-boundary-smoke.test.mjs"]],
 
+  ["Phase 42O production candidate store promotion gate production promotion execution denial smoke", ["tests/phase42/phase42o-production-candidate-store-promotion-gate-production-promotion-execution-denial-smoke.test.mjs"]],
+
+
 
 
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
