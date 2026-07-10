@@ -481,6 +481,8 @@ const steps = [
   ["Phase 42I production candidate store promotion gate approval request creation denial smoke", ["tests/phase42/phase42i-production-candidate-store-promotion-gate-approval-request-creation-denial-smoke.test.mjs"]],
 
   ["Phase 42J production candidate store promotion gate pending engine candidate preflight boundary smoke", ["tests/phase42/phase42j-production-candidate-store-promotion-gate-pending-engine-candidate-preflight-boundary-smoke.test.mjs"]],
+
+  ["Phase 42K production candidate store promotion gate pending engine candidate creation denial smoke", ["tests/phase42/phase42k-production-candidate-store-promotion-gate-pending-engine-candidate-creation-denial-smoke.test.mjs"]],
   ["Daily scripts and docs", ["tests/scripts/daily-scripts.test.mjs"]],
 
   ["Feedback learning service", ["tests/feedback/feedback-learning-service.test.mjs"]],
