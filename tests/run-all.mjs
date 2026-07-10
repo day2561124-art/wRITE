@@ -499,6 +499,7 @@ const steps = [
   ["Phase 42S production candidate store promotion gate backup snapshot creation denial smoke", ["tests/phase42/phase42s-production-candidate-store-promotion-gate-backup-snapshot-creation-denial-smoke.test.mjs"]],
   ["Phase 42T production candidate store promotion gate rollback restore execution denial smoke", ["tests/phase42/phase42t-production-candidate-store-promotion-gate-rollback-restore-execution-denial-smoke.test.mjs"]],
   ["Phase 42U production candidate store promotion gate final closure index", ["tests/phase42/phase42u-production-candidate-store-promotion-gate-final-closure-index.test.mjs"]],
+  ["Phase 42V production candidate store promotion gate final closure operator handoff seal", ["tests/phase42/phase42v-production-candidate-store-promotion-gate-final-closure-operator-handoff-seal.test.mjs"]],
 
 
 
