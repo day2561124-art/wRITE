@@ -497,6 +497,7 @@ const steps = [
   ["Phase 42Q production candidate store promotion gate production gate open execution denial smoke", ["tests/phase42/phase42q-production-candidate-store-promotion-gate-production-gate-open-execution-denial-smoke.test.mjs"]],
   ["Phase 42R production candidate store promotion gate audit receipt creation denial smoke", ["tests/phase42/phase42r-production-candidate-store-promotion-gate-audit-receipt-creation-denial-smoke.test.mjs"]],
   ["Phase 42S production candidate store promotion gate backup snapshot creation denial smoke", ["tests/phase42/phase42s-production-candidate-store-promotion-gate-backup-snapshot-creation-denial-smoke.test.mjs"]],
+  ["Phase 42T production candidate store promotion gate rollback restore execution denial smoke", ["tests/phase42/phase42t-production-candidate-store-promotion-gate-rollback-restore-execution-denial-smoke.test.mjs"]],
 
 
 
