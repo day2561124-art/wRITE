@@ -502,6 +502,7 @@ const steps = [
   ["Phase 42V production candidate store promotion gate final closure operator handoff seal", ["tests/phase42/phase42v-production-candidate-store-promotion-gate-final-closure-operator-handoff-seal.test.mjs"]],
   ["Phase 43A production candidate store promotion gate sealed chain explicit scope acceptance smoke", ["tests/phase43/phase43a-production-candidate-store-promotion-gate-sealed-chain-explicit-scope-acceptance-smoke.test.mjs"]],
   ["Phase 43B production candidate store promotion gate sealed chain read-only status inspection capability contract smoke", ["tests/phase43/phase43b-production-candidate-store-promotion-gate-sealed-chain-read-only-status-inspection-capability-contract-smoke.test.mjs"]],
+  ["Phase 43C production candidate store promotion gate sealed chain metadata-only read-only status inspection capability implementation readiness smoke", ["tests/phase43/phase43c-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-implementation-readiness-smoke.test.mjs"]],
 
 
 
