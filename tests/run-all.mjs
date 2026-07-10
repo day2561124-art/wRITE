@@ -509,6 +509,7 @@ const steps = [
   ["Phase 43G production candidate store promotion gate sealed chain metadata-only read-only status inspection capability invocation execution readiness smoke", ["tests/phase43/phase43g-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-invocation-execution-readiness-smoke.test.mjs"]],
   ["Phase 43H production candidate store promotion gate sealed chain metadata-only read-only status inspection capability invocation execution authorization smoke", ["tests/phase43/phase43h-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-invocation-execution-authorization-smoke.test.mjs"]],
   ["Phase 43I production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation execution smoke", ["tests/phase43/phase43i-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-execution-smoke.test.mjs"]],
+  ["Phase 43J production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation final acceptance closure", ["tests/phase43/phase43j-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-final-acceptance-closure.test.mjs"]],
 
 
 
