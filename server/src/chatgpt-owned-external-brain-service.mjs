@@ -75,11 +75,19 @@ function bundleId(input = {}) {
   return input.writing_context_bundle_id ?? input.bundle_id;
 }
 
+function compactText(value, maxChars = 240) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxChars);
+}
+
 function deterministicAdapter(capabilityName, rawStoryText = null) {
   return async (capabilityInput) => {
+    const moduleName = capabilityName.slice(4);
+    const taskPrompt = compactText(capabilityInput.task_prompt);
+    const writingContext = capabilityInput.writing_context ?? {};
     const base = {
       capability_name: capabilityName,
-      module_name: capabilityName,
+      module_name: moduleName,
       orchestration_mode: externalBrainOwnership.orchestration_mode,
       orchestration_owner: externalBrainOwnership.orchestration_owner,
       runtime_host: externalBrainOwnership.runtime_host,
@@ -97,10 +105,71 @@ function deterministicAdapter(capabilityName, rawStoryText = null) {
         ],
       };
     }
+    const semanticOutputs = {
+      run_scene_planner: {
+        result_type: "scene_plan",
+        objective: taskPrompt,
+        scene_beats: [
+          "Open on concrete sensory action and immediate pressure.",
+          "Escalate through a character choice with a visible consequence.",
+          "Close the movement on a readable turn that advances the chapter.",
+        ],
+        continuity_anchor_present: Boolean(writingContext.content?.chapter_anchor),
+      },
+      run_character_simulator: {
+        result_type: "character_simulation",
+        dramatic_situation: taskPrompt,
+        behavior_constraints: [
+          "Let each character act from current knowledge, position, and relationship pressure.",
+          "Carry tension through gesture, silence, hesitation, and subtext instead of queue-style dialogue.",
+          "Preserve distinct character agency; do not flatten the ensemble into an operator voice.",
+        ],
+        voice_registry_loaded: writingContext.character_voice_registry_loaded === true,
+      },
+      run_neural_critic: {
+        result_type: "neural_critique",
+        critique_focus: taskPrompt,
+        risks: [
+          "Avoid engineering, provider, workflow, and handoff language in story prose.",
+          "Preserve causal continuity and do not invent unsupported canon facts.",
+          "Prefer dramatized action over abstract explanation or theme-first summary.",
+        ],
+      },
+      run_style_drift_detector: {
+        result_type: "style_drift_report",
+        target: taskPrompt,
+        drift_risk: "monitor",
+        drift_signals: [
+          "Administrative or checklist-like narration.",
+          "Over-short punchlines that break long-form cadence.",
+          "Abstract exposition replacing concrete action, sensory detail, or natural dialogue.",
+        ],
+      },
+      run_over_governance_detector: {
+        result_type: "over_governance_report",
+        target: taskPrompt,
+        governance_risk: "guardrails_must_remain_invisible",
+        release_constraints: [
+          "Use governance context as invisible boundaries, never as visible story vocabulary.",
+          "Do not turn dramatic conflict into policy, tool, or process debate.",
+          "Keep character agency and scene momentum alive inside the canon constraints.",
+        ],
+      },
+      run_writing_card_director: {
+        result_type: "writing_card_director_context",
+        direction: taskPrompt,
+        director_notes: [
+          "Write direct story prose with vivid scene motion and living character reactions.",
+          "Maintain high-density chapter progression and a concrete chapter-level turn.",
+          "When story-only output is requested, begin with the chapter title or prose rather than a handoff summary.",
+        ],
+        writing_card_context: writingContext.content?.writing_card_director_context ?? null,
+      },
+    };
     return {
       ...base,
       generation_boundary: "pre_generation",
-      guidance: `Writer Workbench executed ${capabilityName} for ChatGPT to integrate before prose generation.`,
+      ...semanticOutputs[capabilityName],
     };
   };
 }
@@ -196,20 +265,27 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     ? await finalizeAgentRun(runId, { output: execution.output })
     : null;
   return {
+    ok: execution.trace?.status === "success",
     tool_name: `chatgpt_bridge_use_${capabilityName.slice(4)}`,
+    architecture_route: externalBrainOwnership.orchestration_mode,
     capability_name: capabilityName,
-    requested_capability: capabilityName,
-    returned_capability: capabilityName,
     generation_boundary: generationBoundary,
-    ...externalBrainOwnership,
+    orchestration_owner: "ChatGPT",
+    prose_generator: "ChatGPT",
+    full_neural_orchestrator_used: false,
     external_brain_session_id: runId,
-    agent_run_id: runId,
-    neural_trace_run_id: runId,
     writing_context_bundle_id: contextBundleId,
-    raw_story_sha256: isFinalPolisher ? sha256(rawStoryText) : null,
-    capability_result: execution.output,
-    trace: execution.trace,
+    ...(isFinalPolisher ? { raw_story_sha256: sha256(rawStoryText) } : {}),
+    capability_output: execution.output,
+    trace: {
+      trace_id: execution.trace?.trace_id ?? null,
+      run_id: execution.trace?.run_id ?? runId,
+      module_name: execution.trace?.module_name ?? capabilityName.slice(4),
+      status: execution.trace?.status ?? "failed",
+      output_hash: execution.trace?.output_hash ?? null,
+    },
     agent_run_status: finalizedRun?.status ?? run.status,
+    mutation_guards: { ...safety },
     ...safety,
   };
 }

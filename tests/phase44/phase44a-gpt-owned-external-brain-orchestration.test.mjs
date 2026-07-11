@@ -131,18 +131,16 @@ try {
       },
     }));
     assert.equal(called.tool_name, toolName);
-    assert.equal(called.result.tool_name, toolName);
-    assert.equal(called.result.requested_capability, `run_${capability}`);
-    assert.equal(called.result.returned_capability, `run_${capability}`);
-    assert.equal(called.result.generation_boundary, "pre_generation");
-    assert.equal(called.result.external_brain_session_id, session.external_brain_session_id);
-    assert.equal(called.result.trace.run_id, session.external_brain_session_id);
-    assert.equal(called.result.trace.module_name, capability);
-    assert.equal(called.result.trace.status, "success");
-    assert.match(called.result.trace.trace_id, /^neural_trace_/u);
-    assert.match(called.result.trace.input_hash, /^[a-f0-9]{64}$/u);
-    assert.match(called.result.trace.output_hash, /^[a-f0-9]{64}$/u);
-    traces.push(called.result.trace.trace_id);
+    assert.equal(called.capability_name, `run_${capability}`);
+    assert.equal(called.generation_boundary, "pre_generation");
+    assert.equal(called.external_brain_session_id, session.external_brain_session_id);
+    assert.equal(called.trace.run_id, session.external_brain_session_id);
+    assert.equal(called.trace.module_name, capability);
+    assert.equal(called.trace.status, "success");
+    assert.match(called.trace.trace_id, /^neural_trace_/u);
+    assert.match(called.trace.output_hash, /^[a-f0-9]{64}$/u);
+    assert(called.capability_output && typeof called.capability_output === "object");
+    traces.push(called.trace.trace_id);
   }
 
   const polished = payload(await request("tools/call", {
@@ -154,20 +152,19 @@ try {
     },
   }));
   assert.equal(polished.tool_name, "chatgpt_bridge_use_final_polisher");
-  assert.equal(polished.result.tool_name, polished.tool_name);
-  assert.equal(polished.result.capability_name, "run_final_polisher");
-  assert.equal(polished.result.generation_boundary, "post_generation");
-  assert.equal(polished.result.raw_story_sha256, sha256(rawStory));
-  assert.equal(polished.result.capability_result.raw_story_sha256, sha256(rawStory));
-  assert.equal(polished.result.capability_result.polished_text, rawStory);
-  assert.equal(polished.result.trace.module_name, "final_polisher");
-  assert.equal(polished.result.trace.status, "success");
-  assert.equal(polished.result.trace.run_id, session.external_brain_session_id);
-  assert.equal(polished.result.agent_run_status, "success");
-  traces.push(polished.result.trace.trace_id);
+  assert.equal(polished.capability_name, "run_final_polisher");
+  assert.equal(polished.generation_boundary, "post_generation");
+  assert.equal(polished.raw_story_sha256, sha256(rawStory));
+  assert.equal(polished.capability_output.raw_story_sha256, sha256(rawStory));
+  assert.equal(polished.capability_output.polished_text, rawStory);
+  assert.equal(polished.trace.module_name, "final_polisher");
+  assert.equal(polished.trace.status, "success");
+  assert.equal(polished.trace.run_id, session.external_brain_session_id);
+  assert.equal(polished.agent_run_status, "success");
+  traces.push(polished.trace.trace_id);
   assert.equal(new Set(traces).size, 7);
 
-  for (const result of [session, polished.result]) {
+  for (const result of [session, polished]) {
     assert.equal(result.candidate_created, false);
     assert.equal(result.canon_updated, false);
     assert.equal(result.active_engine_updated, false);

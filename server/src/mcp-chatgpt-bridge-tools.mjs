@@ -11784,12 +11784,27 @@ export async function chatgpt_bridge_begin_external_brain_writing_session(input 
 }
 
 function externalBrainCapabilityTool(name, capabilityName) {
-  return tool(
-    name,
-    "write_low_risk",
-    (input, options) => useChatgptOwnedExternalBrainCapability(capabilityName, input, options),
-    () => [],
-  );
+  return async (input = {}, options = {}) => {
+    try {
+      // GPT-owned individual capabilities have their own compact semantic handoff.
+      // They are not full-neural final-output tools and must never enter response().
+      return await useChatgptOwnedExternalBrainCapability(capabilityName, input, options);
+    } catch (error) {
+      return {
+        ok: false,
+        tool_name: name,
+        architecture_route: "chatgpt_owned_external_brain",
+        capability_name: capabilityName,
+        generation_boundary: capabilityName === "run_final_polisher" ? "post_generation" : "pre_generation",
+        orchestration_owner: "ChatGPT",
+        prose_generator: "ChatGPT",
+        full_neural_orchestrator_used: false,
+        blocked: true,
+        blocked_reason: error.message,
+        mutation_guards: { ...chatgptBridgeSafety },
+      };
+    }
+  };
 }
 
 export const chatgpt_bridge_use_scene_planner = externalBrainCapabilityTool(

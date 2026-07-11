@@ -125,10 +125,10 @@ try {
       },
     }));
     assert.equal(called.ok, true);
-    assert.equal(called.result.external_brain_session_id, begin.external_brain_session_id);
-    assert.equal(called.result.writing_context_bundle_id, begin.writing_context_bundle_id);
-    assert.equal(called.result.trace.module_name, capability);
-    assert.equal(called.result.trace.status, "success");
+    assert.equal(called.external_brain_session_id, begin.external_brain_session_id);
+    assert.equal(called.writing_context_bundle_id, begin.writing_context_bundle_id);
+    assert.equal(called.trace.module_name, capability);
+    assert.equal(called.trace.status, "success");
   }
 
   console.log(
