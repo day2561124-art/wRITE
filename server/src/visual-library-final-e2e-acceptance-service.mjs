@@ -46,6 +46,7 @@ import {
 import {
   runVisualLibraryBridgeReadinessPreview,
 } from "./visual-library-bridge-readiness-service.mjs";
+import { extractDirectMcpToolNames } from "./mcp-tool-inventory.mjs";
 
 const acceptanceConfigPath = path.join(
   projectRoot,
@@ -215,14 +216,7 @@ async function countMcpTools() {
     path.join(projectRoot, "server", "src", "mcp-server.mjs"),
     "utf8",
   );
-  const start = source.indexOf("const toolDefinitions = [");
-  const end = source.indexOf(
-    "const toolRegistry = new Map",
-    start,
-  );
-  if (start < 0 || end < 0) return null;
-  return [...source.slice(start, end).matchAll(/^\s{4}name:\s*"[^"]+",$/gmu)]
-    .length;
+  return extractDirectMcpToolNames(source)?.length ?? null;
 }
 
 export function validateVisualLibraryFinalE2eAcceptanceConfig(config) {

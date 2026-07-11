@@ -112,7 +112,7 @@ try {
   assert.equal(preview.preview_chain_acceptance.passed, true);
   assert.equal(preview.ui_flow_acceptance.passed, true);
   assert.equal(preview.bridge_readiness_acceptance.passed, true);
-  assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 70);
+  assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 71);
   assert.equal(preview.acceptance_matrix.length, 11);
   for (const phase of [
     "18B",
