@@ -651,6 +651,8 @@ const steps = [
 
   ["Phase 44A GPT-owned external brain orchestration", ["tests/phase44/phase44a-gpt-owned-external-brain-orchestration.test.mjs"]],
 
+  ["Phase 44C HTTP MCP session lifecycle regression", ["tests/phase44/phase44c-http-mcp-session-lifecycle-regression.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];
