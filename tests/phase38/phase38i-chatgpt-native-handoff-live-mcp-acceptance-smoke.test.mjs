@@ -181,12 +181,13 @@ const tools = listResponse.result.tools;
 const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
 
 assert(toolMap.has("chatgpt_bridge_build_full_neural_writing_handoff"));
+assert(toolMap.has("chatgpt_bridge_begin_external_brain_writing_session"));
 assert(toolMap.has("chatgpt_bridge_run_full_neural_writing_pipeline"));
 
 const nativeTool = toolMap.get("chatgpt_bridge_build_full_neural_writing_handoff");
 assert.match(
   nativeTool.description ?? "",
-  /ChatGPT-native|ChatGPT itself as the prose generator|After this tool returns, ChatGPT should write/i,
+  /aggregate compatibility|ChatGPT remains orchestration owner and final prose generator/i,
 );
 assert.match(
   nativeTool.description ?? "",
@@ -220,7 +221,7 @@ assert.match(
 );
 assert.match(
   oldProviderTool.description ?? "",
-  /use chatgpt_bridge_build_full_neural_writing_handoff instead/i,
+  /chatgpt_bridge_begin_external_brain_writing_session/i,
 );
 
 const handoffResponse = responses.find((response) => response.id === "native-handoff-call");
@@ -342,7 +343,7 @@ for (const [relativePath, beforeSnapshot] of protectedDirSnapshotsBefore.entries
 const serverSource = await readFile(path.join(rootDir, "server", "src", "mcp-server.mjs"), "utf8");
 assert.match(
   serverSource,
-  /For 正式續寫, 下一章, 只輸出正文, 從章名開始[\s\S]*chatgpt_bridge_build_full_neural_writing_handoff instead/u,
+  /architecture-primary route begins with chatgpt_bridge_begin_external_brain_writing_session/u,
 );
 assert.match(
   serverSource,

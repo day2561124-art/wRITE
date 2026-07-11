@@ -26,7 +26,15 @@ const publicToolNames = [
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
-    "chatgpt_bridge_build_full_neural_writing_handoff",
+  "chatgpt_bridge_build_full_neural_writing_handoff",
+  "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_use_scene_planner",
+  "chatgpt_bridge_use_character_simulator",
+  "chatgpt_bridge_use_neural_critic",
+  "chatgpt_bridge_use_style_drift_detector",
+  "chatgpt_bridge_use_over_governance_detector",
+  "chatgpt_bridge_use_writing_card_director",
+  "chatgpt_bridge_use_final_polisher",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
@@ -120,7 +128,7 @@ const listRequest = {
 
 const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
-assert.equal(fullNames.length, 71, "full profile tool count changed");
+assert.equal(fullNames.length, 79, "full profile tool count changed");
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }
@@ -174,8 +182,8 @@ assert(
 );
 assert.match(
   publicNativeHandoffTool.description ?? "",
-  /ChatGPT-native|ChatGPT itself as the prose generator|final_chatgpt_writing_instruction|After this tool returns, ChatGPT should write/i,
-  "chatgpt_bridge_build_full_neural_writing_handoff description should advertise ChatGPT-native writing handoff routing",
+  /aggregate compatibility|not the architecture-primary route/i,
+  "aggregate handoff description should preserve compatibility semantics",
 );
 assert.match(
   publicNativeHandoffTool.description ?? "",
@@ -219,8 +227,8 @@ assert.match(
 );
 assert.match(
   publicNeuralPipelineTool.description ?? "",
-  /use chatgpt_bridge_build_full_neural_writing_handoff instead/i,
-  "provider pipeline description should route ChatGPT-native writing to the native handoff tool",
+  /not the ChatGPT-native mainline/i,
+  "provider pipeline description should not claim primary ChatGPT orchestration ownership",
 );
 const publicContextTool = publicToolMap.get("chatgpt_bridge_build_writing_context");
 assert.match(
@@ -230,9 +238,16 @@ assert.match(
 );
 assert.match(
   publicContextTool?.description ?? "",
-  /chatgpt_bridge_build_full_neural_writing_handoff/i,
-  "chatgpt_bridge_build_writing_context description should route final story output to the ChatGPT-native handoff tool",
+  /chatgpt_bridge_begin_external_brain_writing_session/i,
+  "context tool should route formal writing to the GPT-owned external brain entry",
 );
+
+const primaryEntry = publicToolMap.get("chatgpt_bridge_begin_external_brain_writing_session");
+assert.match(primaryEntry?.description ?? "", /Architecture-primary formal writing entry/i);
+for (const name of [
+  "scene_planner", "character_simulator", "neural_critic", "style_drift_detector",
+  "over_governance_detector", "writing_card_director", "final_polisher",
+]) assert(publicToolMap.has(`chatgpt_bridge_use_${name}`), `missing individual capability ${name}`);
 
 const publicWritingContextSchema = publicToolMap.get(
   "chatgpt_bridge_build_writing_context",

@@ -10,6 +10,7 @@ const mcpServerPath = path.join(rootDir, "server", "src", "mcp-server.mjs");
 
 const STATUS_TOOL = "chatgpt_bridge_get_workbench_status";
 const HANDOFF_TOOL = "chatgpt_bridge_build_full_neural_writing_handoff";
+const PRIMARY_TOOL = "chatgpt_bridge_begin_external_brain_writing_session";
 const EXPECTED_MODULES = [
   "run_scene_planner",
   "run_character_simulator",
@@ -177,9 +178,11 @@ const toolListResponse = responseById(messages, 2);
 const tools = toolListResponse?.result?.tools ?? [];
 const statusTool = tools.find((tool) => tool?.name === STATUS_TOOL);
 const handoffTool = tools.find((tool) => tool?.name === HANDOFF_TOOL);
+const primaryTool = tools.find((tool) => tool?.name === PRIMARY_TOOL);
 
 assert.ok(statusTool, `${STATUS_TOOL} must be exposed`);
 assert.ok(handoffTool, `${HANDOFF_TOOL} must be exposed`);
+assert.ok(primaryTool, `${PRIMARY_TOOL} must be exposed`);
 
 assert.match(
   statusTool.description ?? "",
@@ -187,20 +190,21 @@ assert.match(
 );
 assert.match(
   statusTool.description ?? "",
-  /chatgpt_bridge_build_full_neural_writing_handoff directly/u,
+  /chatgpt_bridge_begin_external_brain_writing_session/u,
 );
 assert.match(
   handoffTool.description ?? "",
-  /Use this tool directly/u,
+  /aggregate compatibility/u,
 );
 assert.match(
   handoffTool.description ?? "",
-  /Do not preflight with or substitute chatgpt_bridge_get_workbench_status/u,
+  /not the architecture-primary route/u,
 );
 assert.match(
-  handoffTool.description ?? "",
-  /verify the returned tool_name and result\.tool_name/u,
+  primaryTool.description ?? "",
+  /Architecture-primary formal writing entry/u,
 );
+assert.match(primaryTool.description ?? "", /ChatGPT individually orchestrates six pre-generation/u);
 
 const statusPayload = parseToolPayload(responseById(messages, 3));
 const handoffPayload = parseToolPayload(responseById(messages, 4));
@@ -220,10 +224,19 @@ assert.equal(
   handoffPayload?.result?.output_mode,
   "chatgpt_native_handoff",
 );
+assert.equal(
+  handoffPayload?.result?.orchestration_mode,
+  "writer_workbench_aggregate_compatibility",
+);
+assert.equal(handoffPayload?.result?.architecture_primary_route, false);
 
 const handoff = handoffPayload?.result?.chatgpt_native_writing_handoff;
 assert.equal(handoff?.used, true);
 assert.equal(handoff?.contract_valid, true);
+assert.equal(handoff?.orchestration_mode, "writer_workbench_aggregate_compatibility");
+assert.equal(handoff?.orchestration_owner, "writer_workbench");
+assert.equal(handoff?.runtime_host, "writer_workbench_runtime");
+assert.equal(handoff?.final_prose_generator, "chatgpt");
 assert.equal(handoffPayload?.result?.candidate_created, false);
 assert.equal(handoffPayload?.result?.canon_updated, false);
 assert.equal(handoffPayload?.result?.active_engine_updated, false);

@@ -623,6 +623,15 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
   const handoff = {
     used: true,
     contract_valid: true,
+    architecture_role: "gpt_external_brain",
+    orchestration_mode: "writer_workbench_aggregate_compatibility",
+    orchestration_owner: "writer_workbench",
+    capability_consumer: "chatgpt",
+    capability_provider: "writer_workbench",
+    runtime_host: "writer_workbench_runtime",
+    final_prose_generator: "chatgpt",
+    architecture_primary_route: false,
+    compatibility_aggregate_surface: true,
     surface_kind: HANDOFF_SURFACE_KIND,
     final_chatgpt_writing_instruction: buildFinalChatgptWritingInstruction(input),
     chatgpt_native_consumer_contract: buildChatgptNativeConsumerContract(input),
@@ -697,6 +706,8 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
 
   return {
     tool_name: HANDOFF_TOOL_NAME,
+    orchestration_mode: "writer_workbench_aggregate_compatibility",
+    architecture_primary_route: false,
     status: "ready_for_chatgpt_native_generation",
     output_mode: "chatgpt_native_handoff",
     created_at: new Date().toISOString(),

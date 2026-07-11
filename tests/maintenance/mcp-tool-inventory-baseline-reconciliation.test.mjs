@@ -17,9 +17,19 @@ const historicalCommit = "4b4ec1e5c9fbe3347eb12b526680e542bcc201a5";
 const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
-const expectedDirectDigest = "a98f749a3a60e212f8df9b7232a4debd8cda27617e14de5ef5a0a0e44c5eed09";
+const externalBrainToolNames = [
+  "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_use_scene_planner",
+  "chatgpt_bridge_use_character_simulator",
+  "chatgpt_bridge_use_neural_critic",
+  "chatgpt_bridge_use_style_drift_detector",
+  "chatgpt_bridge_use_over_governance_detector",
+  "chatgpt_bridge_use_writing_card_director",
+  "chatgpt_bridge_use_final_polisher",
+];
+const expectedDirectDigest = "c2158ab55f337bef810861aaeeb1ee445ac285f517a68e64731052a191748531";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "db04340efd514ab9dfa8888c37e9eca5f8ca201ca4cdbb41500ce53944abf2a5";
+const expectedPublicDigest = "d9ba57f22adeb7493701bd705ba30aba22ff7166e3a8d9429b451f2bb64618eb";
 const expectedPublicNames = [
   "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
@@ -28,6 +38,7 @@ const expectedPublicNames = [
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_full_neural_writing_handoff",
+  ...externalBrainToolNames,
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
@@ -125,10 +136,13 @@ const directNames = extractDirectMcpToolNames(currentSource);
 assert(historicalNames);
 assert(directNames);
 assert.equal(historicalNames.length, 70);
-assert.equal(directNames.length, 71);
+assert.equal(directNames.length, 79);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
-assert.deepEqual(directNames.filter((name) => !historicalNames.includes(name)), [addedToolName]);
+assert.deepEqual(
+  directNames.filter((name) => !historicalNames.includes(name)),
+  [...externalBrainToolNames, addedToolName],
+);
 assert.deepEqual(historicalNames.filter((name) => !directNames.includes(name)), []);
 assert.equal(digest(directNames), expectedDirectDigest);
 
@@ -175,7 +189,7 @@ const [fullTools, publicTools] = await Promise.all([
 ]);
 const fullNames = fullTools.map((tool) => tool.name);
 const publicNames = publicTools.map((tool) => tool.name);
-assert.equal(fullNames.length, 71);
+assert.equal(fullNames.length, 79);
 assert.deepEqual(duplicates(fullNames), []);
 assert.equal(digest(fullNames), expectedRuntimeDigest);
 assert.deepEqual(publicNames, expectedPublicNames);
@@ -196,8 +210,8 @@ assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_canon, f
 assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_active_engine, false);
 
 const preview = await runVisualLibraryFinalE2eAcceptancePreview();
-assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 71);
-assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 71);
+assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 79);
+assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 79);
 assert.equal(preview.bridge_readiness_acceptance.passed, true);
 assert.equal(preview.final_acceptance_decision, "visual_library_final_e2e_preview_acceptance_passed");
 

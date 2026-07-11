@@ -51,6 +51,10 @@ import {
   runFullNeuralWritingPipelineSingleEntryBridge,
 } from "./full-neural-writing-pipeline-single-entry-bridge-service.mjs";
 import { buildChatgptNativeNeuralWritingHandoff } from "./chatgpt-native-neural-writing-handoff-service.mjs";
+import {
+  beginChatgptOwnedExternalBrainWritingSession,
+  useChatgptOwnedExternalBrainCapability,
+} from "./chatgpt-owned-external-brain-service.mjs";
 
 function summarizeFullNeuralSurface(result = {}) {
   const existingSummary = result?.full_neural_orchestration_summary ?? null;
@@ -11758,6 +11762,44 @@ export const chatgpt_bridge_build_full_neural_writing_handoff = tool(
   () => [],
 );
 
+export const chatgpt_bridge_begin_external_brain_writing_session = tool(
+  "chatgpt_bridge_begin_external_brain_writing_session",
+  "write_low_risk",
+  beginChatgptOwnedExternalBrainWritingSession,
+  () => [],
+);
+
+function externalBrainCapabilityTool(name, capabilityName) {
+  return tool(
+    name,
+    "write_low_risk",
+    (input, options) => useChatgptOwnedExternalBrainCapability(capabilityName, input, options),
+    () => [],
+  );
+}
+
+export const chatgpt_bridge_use_scene_planner = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_scene_planner", "run_scene_planner",
+);
+export const chatgpt_bridge_use_character_simulator = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_character_simulator", "run_character_simulator",
+);
+export const chatgpt_bridge_use_neural_critic = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_neural_critic", "run_neural_critic",
+);
+export const chatgpt_bridge_use_style_drift_detector = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_style_drift_detector", "run_style_drift_detector",
+);
+export const chatgpt_bridge_use_over_governance_detector = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_over_governance_detector", "run_over_governance_detector",
+);
+export const chatgpt_bridge_use_writing_card_director = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_writing_card_director", "run_writing_card_director",
+);
+export const chatgpt_bridge_use_final_polisher = externalBrainCapabilityTool(
+  "chatgpt_bridge_use_final_polisher", "run_final_polisher",
+);
+
 export const chatgpt_bridge_build_proofing_context = tool(
   "chatgpt_bridge_build_proofing_context",
   "write_low_risk",
@@ -11867,6 +11909,14 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_save_candidate,
   chatgpt_bridge_build_full_neural_writing_handoff,
+  chatgpt_bridge_begin_external_brain_writing_session,
+  chatgpt_bridge_use_scene_planner,
+  chatgpt_bridge_use_character_simulator,
+  chatgpt_bridge_use_neural_critic,
+  chatgpt_bridge_use_style_drift_detector,
+  chatgpt_bridge_use_over_governance_detector,
+  chatgpt_bridge_use_writing_card_director,
+  chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_build_proofing_context,
   chatgpt_bridge_save_proof_report,
@@ -11947,6 +11997,39 @@ export const chatgptBridgeToolMetadata = {
     final_instruction_field: "chatgpt_native_writing_handoff.final_chatgpt_writing_instruction",
     context_field: "chatgpt_native_writing_handoff.writing_context",
   }),
+  chatgpt_bridge_begin_external_brain_writing_session: writeMetadata([
+    projectPaths.gptWritingContexts,
+    projectPaths.agentRuns,
+  ], {
+    architecture_primary_route: true,
+    orchestration_mode: "chatgpt_owned_external_brain",
+    orchestration_owner: "chatgpt",
+    runtime_host: "writer_workbench_runtime",
+    final_prose_generator: "chatgpt",
+  }),
+  ...Object.fromEntries([
+    "scene_planner",
+    "character_simulator",
+    "neural_critic",
+    "style_drift_detector",
+    "over_governance_detector",
+    "writing_card_director",
+    "final_polisher",
+  ].map((name) => [`chatgpt_bridge_use_${name}`, writeMetadata([
+    projectPaths.agentRuns,
+    projectPaths.neuralTraces,
+  ], {
+    individual_external_brain_capability: true,
+    orchestration_mode: "chatgpt_owned_external_brain",
+    orchestration_owner: "chatgpt",
+    runtime_host: "writer_workbench_runtime",
+    final_prose_generator: "chatgpt",
+    candidate_created: false,
+    canon_update_allowed: false,
+    active_engine_update_allowed: false,
+    adoption_allowed: false,
+    settlement_allowed: false,
+  })])),
 
   chatgpt_bridge_run_full_neural_writing_pipeline: writeMetadata([
     projectPaths.gptWritingContexts,

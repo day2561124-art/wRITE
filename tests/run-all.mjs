@@ -649,6 +649,8 @@ const steps = [
 
   ["MCP tool profiles", ["tests/mcp/mcp-tool-profiles.test.mjs"]],
 
+  ["Phase 44A GPT-owned external brain orchestration", ["tests/phase44/phase44a-gpt-owned-external-brain-orchestration.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];

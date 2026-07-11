@@ -70,6 +70,14 @@ import {
   chatgpt_bridge_build_settlement_context,
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_build_full_neural_writing_handoff,
+  chatgpt_bridge_begin_external_brain_writing_session,
+  chatgpt_bridge_use_scene_planner,
+  chatgpt_bridge_use_character_simulator,
+  chatgpt_bridge_use_neural_critic,
+  chatgpt_bridge_use_style_drift_detector,
+  chatgpt_bridge_use_over_governance_detector,
+  chatgpt_bridge_use_writing_card_director,
+  chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_get_entity_registry_summary,
   chatgpt_bridge_search_canon_entities,
   chatgpt_bridge_get_canon_entity_detail,
@@ -1854,7 +1862,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_get_workbench_status",
-    description: "[read] Read bounded Writer Workbench workflow counts and protected-file hashes for ChatGPT. Status inspection only: do not use or substitute this tool for formal story writing, continue, draft, generate, 正式續寫, 下一章, 只輸出正文, or 從章名開始 requests; those must call chatgpt_bridge_build_full_neural_writing_handoff directly.",
+    description: "[read] Read bounded Writer Workbench workflow counts and protected-file hashes for ChatGPT. Status inspection only: do not use or substitute this tool for formal story writing, continue, draft, generate, 正式續寫, 下一章, 只輸出正文, or 從章名開始 requests. The architecture-primary formal writing route is ChatGPT-owned external brain orchestration beginning with chatgpt_bridge_begin_external_brain_writing_session.",
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
@@ -1976,7 +1984,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_writing_context",
-    description: "[low-risk-write] Context-only Writer Workbench writing context builder. Do not use this tool to produce final story, chapter, or scene text. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests where ChatGPT is the prose generator, use chatgpt_bridge_build_full_neural_writing_handoff instead.",
+    description: "[low-risk-write] Context-only Writer Workbench writing context builder. Do not use this tool to produce final story, chapter, or scene text. The primary formal writing architecture is ChatGPT-owned external brain orchestration beginning with chatgpt_bridge_begin_external_brain_writing_session.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       run_neural_traces: {
@@ -2042,7 +2050,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_full_neural_writing_handoff",
-    description: "[low-risk-write] ChatGPT-native full neural writing handoff entry. Use this tool directly when the user asks Writer Workbench / ChatGPT MCP to formally continue, write, draft, generate, or output a story chapter/scene with ChatGPT itself as the prose generator. Do not preflight with or substitute chatgpt_bridge_get_workbench_status for a formal writing request. This tool builds the full neural writing context and final_chatgpt_writing_instruction, does not call or require a backend generation provider, does not save a candidate, does not update Canon, and does not update active_engine. After this tool returns, ChatGPT must verify the returned tool_name and result.tool_name are chatgpt_bridge_build_full_neural_writing_handoff, then read neural_trace_summary and write the story text directly from the handoff.",
+    description: "[low-risk-write] ChatGPT-native full neural writing handoff retained as a Workbench-owned aggregate compatibility orchestration macro. It preserves the legacy 7/7 full neural handoff contract, but is not the architecture-primary route and is not equivalent to ChatGPT-owned orchestration. It does not call or require a backend generation provider, does not save a candidate, does not update Canon, and does not update active_engine. For formal writing, prefer chatgpt_bridge_begin_external_brain_writing_session and individually call the exposed cognitive capabilities; ChatGPT remains orchestration owner and final prose generator.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
@@ -2058,8 +2066,75 @@ const toolDefinitions = [
     ),
   },
   {
+    name: "chatgpt_bridge_begin_external_brain_writing_session",
+    description: "[low-risk-write] Architecture-primary formal writing entry. Build persistent Writer Workbench context and begin one ChatGPT-owned external brain session. ChatGPT individually orchestrates six pre-generation cognitive capabilities, generates raw prose itself, optionally sends raw_story_text to the post-generation final polisher, and emits final prose. Writer Workbench hosts capability implementations only; no candidate, Canon, active_engine, adoption, or settlement mutation occurs.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      task_prompt: { type: "string", maxLength: 12000 },
+      generation_context: { type: "object" },
+      retrieval_context: { type: "object" },
+      chapter_mode: { type: "string", enum: ["next_chapter", "specific_scene", "rewrite_candidate"] },
+      max_context_chars: { type: "integer", minimum: 4000, maximum: 120000, default: 48000 },
+    }, ["task_prompt"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_begin_external_brain_writing_session(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_scene_planner",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_scene_planner in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_scene_planner(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_character_simulator",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_character_simulator in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_character_simulator(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_neural_critic",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_neural_critic in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_neural_critic(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_style_drift_detector",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_style_drift_detector in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_style_drift_detector(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_over_governance_detector",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_over_governance_detector in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_over_governance_detector(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_writing_card_director",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_writing_card_director in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_writing_card_director(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_final_polisher",
+    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. Call only after ChatGPT has generated raw story prose; raw_story_text is required and its raw_story_sha256 is returned with a dedicated final_polisher neural trace. Writer Workbench returns a polish result to ChatGPT, while ChatGPT remains final prose generator and emitter. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      external_brain_session_id: { type: "string" },
+      writing_context_bundle_id: { type: "string" },
+      raw_story_text: { type: "string", maxLength: 250000 },
+      capability_input: { type: "object" },
+    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_use_final_polisher(args)),
+  },
+  {
     name: "chatgpt_bridge_run_full_neural_writing_pipeline",
-    description: "[low-risk-write] Optional fallback full neural story writing pipeline entry for backend/local generation-provider workflows. Do not use as the primary route when ChatGPT itself should write the prose. For 正式續寫, 下一章, 只輸出正文, 從章名開始, write, continue, draft, or generate requests where ChatGPT is the prose generator, use chatgpt_bridge_build_full_neural_writing_handoff instead. This provider pipeline may require provider_type and can emit extracted_chatgpt_final_output.output_text on success, but it is not the ChatGPT-native mainline.",
+    description: "[low-risk-write] Optional fallback full neural story writing pipeline entry for backend/local generation-provider workflows. Do not use as the primary route when ChatGPT itself should write the prose. The architecture-primary route begins with chatgpt_bridge_begin_external_brain_writing_session. This provider pipeline may require provider_type and can emit extracted_chatgpt_final_output.output_text on success, but it is not the ChatGPT-native mainline.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
@@ -2704,6 +2779,14 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_full_neural_writing_handoff",
+  "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_use_scene_planner",
+  "chatgpt_bridge_use_character_simulator",
+  "chatgpt_bridge_use_neural_critic",
+  "chatgpt_bridge_use_style_drift_detector",
+  "chatgpt_bridge_use_over_governance_detector",
+  "chatgpt_bridge_use_writing_card_director",
+  "chatgpt_bridge_use_final_polisher",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
@@ -2797,6 +2880,15 @@ const permissionSources = {
     "registered_project_sources",
     "gpt_writing_context_records",
   ],
+  chatgpt_bridge_begin_external_brain_writing_session: [
+    "user_input", "registered_project_sources", "gpt_writing_context_records",
+  ],
+  ...Object.fromEntries([
+    "scene_planner", "character_simulator", "neural_critic", "style_drift_detector",
+    "over_governance_detector", "writing_card_director", "final_polisher",
+  ].map((name) => [`chatgpt_bridge_use_${name}`, [
+    "user_input", "gpt_writing_context_records", "agent_run_records", "neural_trace_records",
+  ]])),
 
   chatgpt_bridge_run_full_neural_writing_pipeline: [
     "user_input",
