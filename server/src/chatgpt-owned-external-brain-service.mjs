@@ -49,6 +49,15 @@ const safety = Object.freeze({
   settled: false,
 });
 
+const compactBootstrapCapabilities = Object.freeze([
+  "scene_planner",
+  "character_simulator",
+  "neural_critic",
+  "style_drift_detector",
+  "over_governance_detector",
+  "writing_card_director",
+]);
+
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
 }
@@ -123,18 +132,16 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
     }),
   });
   return {
+    ok: true,
     tool_name: "chatgpt_bridge_begin_external_brain_writing_session",
     status: "ready_for_chatgpt_owned_orchestration",
-    ...externalBrainOwnership,
+    architecture_route: externalBrainOwnership.orchestration_mode,
     external_brain_session_id: run.run_id,
-    agent_run_id: run.run_id,
-    neural_trace_run_id: run.run_id,
     writing_context_bundle_id: context.bundle.bundle_id,
-    writing_context: context.bundle,
-    context_for_chat: await getGptWritingContextBundle(context.bundle.bundle_id, options),
-    pre_generation_capabilities: [...externalBrainPreGenerationCapabilities],
-    post_generation_capability: "run_final_polisher",
-    next_action: "ChatGPT individually calls the pre-generation capabilities, generates raw prose, then calls final_polisher with raw_story_text.",
+    orchestration_owner: "ChatGPT",
+    prose_generator: "ChatGPT",
+    next_capabilities: [...compactBootstrapCapabilities],
+    mutation_guards: { ...safety },
     ...safety,
   };
 }

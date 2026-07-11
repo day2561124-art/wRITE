@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const endpointPath = "/api/system/inspect-sealed-chain-closure-metadata";
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
-const expectedPublicDigest = "db04340efd514ab9dfa8888c37e9eca5f8ca201ca4cdbb41500ce53944abf2a5";
+const expectedPublicDigest = "d9ba57f22adeb7493701bd705ba30aba22ff7166e3a8d9429b451f2bb64618eb";
 const requiredIdentities = {
   capability_id: "inspect_sealed_chain_closure_metadata",
   capability_kind: "read_only_status_inspection",
@@ -188,7 +188,7 @@ assert.match(uiSource, /\/api\/system\/inspect-sealed-chain-closure-metadata/u);
 const canonBefore = await directoryDigest(path.join(rootDir, "data", "canon_db"));
 const activeEngineBefore = await readFile(activeEnginePath);
 const publicNamesBefore = await listPublicToolNames();
-assert.equal(publicNamesBefore.length, 16);
+assert.equal(publicNamesBefore.length, 24);
 assert.equal(sha256(publicNamesBefore.join("\n")), expectedPublicDigest);
 assert.equal(publicNamesBefore.includes("inspect_sealed_chain_closure_metadata"), false);
 assert.equal(publicNamesBefore.includes("inspectSealedChainClosureMetadata"), false);

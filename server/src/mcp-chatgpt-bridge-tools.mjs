@@ -11762,12 +11762,26 @@ export const chatgpt_bridge_build_full_neural_writing_handoff = tool(
   () => [],
 );
 
-export const chatgpt_bridge_begin_external_brain_writing_session = tool(
-  "chatgpt_bridge_begin_external_brain_writing_session",
-  "write_low_risk",
-  beginChatgptOwnedExternalBrainWritingSession,
-  () => [],
-);
+export async function chatgpt_bridge_begin_external_brain_writing_session(input = {}, options = {}) {
+  try {
+    // This architecture-primary bootstrap deliberately bypasses the legacy bridge
+    // diagnostics envelope. The opaque IDs must remain at the top level of a small
+    // connector handoff; the persisted bundle stays inside Writer Workbench.
+    return await beginChatgptOwnedExternalBrainWritingSession(input, options);
+  } catch (error) {
+    return {
+      ok: false,
+      tool_name: "chatgpt_bridge_begin_external_brain_writing_session",
+      architecture_route: "chatgpt_owned_external_brain",
+      external_brain_session_id: null,
+      writing_context_bundle_id: null,
+      orchestration_owner: "ChatGPT",
+      prose_generator: "ChatGPT",
+      blocked: true,
+      blocked_reason: error.message,
+    };
+  }
+}
 
 function externalBrainCapabilityTool(name, capabilityName) {
   return tool(

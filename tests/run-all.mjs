@@ -651,7 +651,11 @@ const steps = [
 
   ["Phase 44A GPT-owned external brain orchestration", ["tests/phase44/phase44a-gpt-owned-external-brain-orchestration.test.mjs"]],
 
+  ["Phase 44C compact external brain bootstrap handoff", ["tests/phase44/phase44c-external-brain-compact-bootstrap-handoff.test.mjs"]],
+
   ["Phase 44C HTTP MCP session lifecycle regression", ["tests/phase44/phase44c-http-mcp-session-lifecycle-regression.test.mjs"]],
+
+  ["Phase 44C production HTTP MCP compact bootstrap handoff regression", ["tests/phase44/phase44c-http-mcp-compact-bootstrap-handoff-regression.test.mjs"]],
 
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 

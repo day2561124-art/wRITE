@@ -111,16 +111,13 @@ try {
     arguments: { task_prompt: "以 GPT 為唯一寫作者，寫一個雨夜場景。", chapter_mode: "specific_scene" },
   }));
   assert.equal(begin.tool_name, "chatgpt_bridge_begin_external_brain_writing_session");
-  const session = begin.result;
-  assert.equal(session.tool_name, begin.tool_name);
-  assert.equal(session.architecture_role, "gpt_external_brain");
-  assert.equal(session.orchestration_mode, "chatgpt_owned_external_brain");
-  assert.equal(session.orchestration_owner, "chatgpt");
-  assert.equal(session.capability_provider, "writer_workbench");
-  assert.equal(session.runtime_host, "writer_workbench_runtime");
-  assert.equal(session.final_prose_generator, "chatgpt");
-  assert.equal(session.external_brain_session_id, session.agent_run_id);
-  assert.equal(session.neural_trace_run_id, session.agent_run_id);
+  const session = begin;
+  assert.equal(session.ok, true);
+  assert.equal(session.architecture_route, "chatgpt_owned_external_brain");
+  assert.equal(session.orchestration_owner, "ChatGPT");
+  assert.equal(session.prose_generator, "ChatGPT");
+  assert.match(session.external_brain_session_id, /^agent_run_/u);
+  assert.match(session.writing_context_bundle_id, /^gptctx_/u);
 
   const traces = [];
   for (const capability of preCapabilities) {
