@@ -1854,7 +1854,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_get_workbench_status",
-    description: "Read bounded Writer Workbench workflow counts and protected-file hashes for ChatGPT.",
+    description: "[read] Read bounded Writer Workbench workflow counts and protected-file hashes for ChatGPT. Status inspection only: do not use or substitute this tool for formal story writing, continue, draft, generate, 正式續寫, 下一章, 只輸出正文, or 從章名開始 requests; those must call chatgpt_bridge_build_full_neural_writing_handoff directly.",
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
@@ -2042,7 +2042,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_build_full_neural_writing_handoff",
-    description: "[low-risk-write] ChatGPT-native full neural writing handoff entry. Use this tool when the user asks Writer Workbench / ChatGPT MCP to formally continue, write, draft, generate, or output a story chapter/scene with ChatGPT itself as the prose generator. This tool builds the full neural writing context and final_chatgpt_writing_instruction, does not call or require a backend generation provider, does not save a candidate, does not update Canon, and does not update active_engine. After this tool returns, ChatGPT should write the story text directly from the handoff.",
+    description: "[low-risk-write] ChatGPT-native full neural writing handoff entry. Use this tool directly when the user asks Writer Workbench / ChatGPT MCP to formally continue, write, draft, generate, or output a story chapter/scene with ChatGPT itself as the prose generator. Do not preflight with or substitute chatgpt_bridge_get_workbench_status for a formal writing request. This tool builds the full neural writing context and final_chatgpt_writing_instruction, does not call or require a backend generation provider, does not save a candidate, does not update Canon, and does not update active_engine. After this tool returns, ChatGPT must verify the returned tool_name and result.tool_name are chatgpt_bridge_build_full_neural_writing_handoff, then read neural_trace_summary and write the story text directly from the handoff.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },

@@ -539,6 +539,7 @@ const steps = [
   ["MCP creative task tools", ["tests/mcp/mcp-creative-task-tools.test.mjs"]],
 
   ["MCP ChatGPT bridge tools", ["tests/mcp/mcp-chatgpt-bridge-tools.test.mjs"]],
+  ["Maintenance ChatGPT native handoff tool selection routing guard", ["tests/maintenance/maintenance-chatgpt-native-handoff-tool-selection-routing-guard.test.mjs"]],
 
   ["MCP ChatGPT bridge E2E dry run", ["tests/mcp/mcp-chatgpt-bridge-e2e-dry-run.test.mjs"]],
 
