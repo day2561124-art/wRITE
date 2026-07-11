@@ -170,6 +170,9 @@ import {
   listSettingChangeProposals,
 } from "./setting-change-proposal-service.mjs";
 import {
+  inspectSealedChainClosureMetadata,
+} from "./inspect-sealed-chain-closure-metadata-service.mjs";
+import {
   entityTypes,
   getStructuredEntity,
   getStructuredEntityRegistry,
@@ -1543,6 +1546,33 @@ async function handleRequest(request, response) {
       name: "armed-academy-workbench",
       time: new Date().toISOString(),
     });
+    return;
+  }
+
+  if (
+    request.method === "POST"
+    && url.pathname === "/api/system/inspect-sealed-chain-closure-metadata"
+  ) {
+    try {
+      const contentType = request.headers["content-type"]
+        ?.split(";", 1)[0]
+        ?.trim()
+        ?.toLowerCase();
+      if (contentType !== "application/json") {
+        throw new TypeError("application_json_required");
+      }
+      const metadata = inspectSealedChainClosureMetadata(await parseBody(request));
+      sendJson(response, 200, { ok: true, metadata });
+    } catch (error) {
+      const isRuntimeValidationError = error instanceof TypeError
+        || error instanceof SyntaxError
+        || error?.message === "Request body is too large."
+        || error?.message === "JSON body must be an object.";
+      sendJson(response, isRuntimeValidationError ? 400 : 500, {
+        ok: false,
+        error: isRuntimeValidationError ? "stable_runtime_error" : "internal_error",
+      });
+    }
     return;
   }
 

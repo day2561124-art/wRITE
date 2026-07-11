@@ -511,6 +511,7 @@ const steps = [
   ["Phase 43I production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation execution smoke", ["tests/phase43/phase43i-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-execution-smoke.test.mjs"]],
   ["Phase 43J production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation final acceptance closure", ["tests/phase43/phase43j-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-final-acceptance-closure.test.mjs"]],
   ["Maintenance MCP tool inventory baseline reconciliation", ["tests/maintenance/mcp-tool-inventory-baseline-reconciliation.test.mjs"]],
+  ["Maintenance self-use metadata inspection entry integration", ["tests/maintenance/self-use-metadata-inspection-entry-integration.test.mjs"]],
 
 
 
