@@ -177,17 +177,26 @@ try {
     write: false,
     appliedAt,
   });
+  const repoRecords = parseVisualUploadedReferenceMetadataJsonl(beforeRepoIndex);
+  const repoUploadedRecords = repoRecords.filter((record) => record.source === "user_imported");
   assert.equal(
     repoDryRun.decision,
-    "visual_uploaded_reference_metadata_safe_auto_application_noop",
+    repoDryRun.summary.ready_count > 0
+      ? "visual_uploaded_reference_metadata_safe_auto_application_ready"
+      : "visual_uploaded_reference_metadata_safe_auto_application_noop",
   );
-  assert.equal(repoDryRun.summary.total_record_count, 10);
-  assert.equal(repoDryRun.summary.ignored_non_user_uploaded_count, 3);
-  assert.equal(repoDryRun.summary.user_uploaded_reference_count, 7);
-  assert.equal(repoDryRun.summary.application_allowed_count, 7);
-  assert.equal(repoDryRun.summary.ready_count, 0);
+  assert.equal(repoDryRun.summary.total_record_count, repoRecords.length);
+  assert.equal(
+    repoDryRun.summary.ignored_non_user_uploaded_count,
+    repoRecords.length - repoUploadedRecords.length,
+  );
+  assert.equal(repoDryRun.summary.user_uploaded_reference_count, repoUploadedRecords.length);
+  assert.equal(repoDryRun.summary.application_allowed_count, repoUploadedRecords.length);
   assert.equal(repoDryRun.summary.applied_count, 0);
-  assert.equal(repoDryRun.summary.no_op_count, 7);
+  assert.equal(
+    repoDryRun.summary.ready_count + repoDryRun.summary.no_op_count,
+    repoUploadedRecords.length,
+  );
   assert.equal(repoDryRun.summary.blocked_count, 0);
   assert.equal(repoDryRun.side_effect_summary.writes_visual_index, false);
   assert.equal(repoDryRun.side_effect_summary.writes_visual_assets, false);

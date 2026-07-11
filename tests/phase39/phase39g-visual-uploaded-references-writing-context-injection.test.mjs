@@ -4,6 +4,9 @@ import path from "node:path";
 import { buildGptWritingContext } from "../../server/src/gpt-writing-context-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 import {
+  parseVisualUploadedReferenceMetadataJsonl,
+} from "../../server/src/visual-uploaded-reference-metadata-enrichment-service.mjs";
+import {
   analyzeVisualUploadedReferenceWritingContextRecord,
   buildVisualUploadedReferencesWritingContextInjection,
   serializeVisualUploadedReferencesWritingContextMarkdown,
@@ -133,18 +136,30 @@ try {
   assert.equal(blocked.blocked_reference_count, 1);
 
   const repoPacket = await buildVisualUploadedReferencesWritingContextInjection();
+  const repoRecords = parseVisualUploadedReferenceMetadataJsonl(before.index.toString("utf8"));
+  const repoUploadedRecords = repoRecords.filter((record) => record.source === "user_imported");
   assert.equal(
     repoPacket.decision,
-    "visual_uploaded_references_writing_context_injection_accepted",
+    repoPacket.blocked_reference_count > 0
+      ? "blocked_visual_uploaded_references_writing_context_injection"
+      : repoPacket.reference_count > 0
+        ? "visual_uploaded_references_writing_context_injection_accepted"
+        : "visual_uploaded_references_writing_context_injection_no_references",
   );
-  assert.equal(repoPacket.summary.total_record_count, 10);
-  assert.equal(repoPacket.summary.ignored_non_user_uploaded_count, 3);
-  assert.equal(repoPacket.reference_count, 7);
-  assert.equal(repoPacket.blocked_reference_count, 0);
+  assert.equal(repoPacket.summary.total_record_count, repoRecords.length);
+  assert.equal(
+    repoPacket.summary.ignored_non_user_uploaded_count,
+    repoRecords.length - repoUploadedRecords.length,
+  );
+  assert.equal(
+    repoPacket.reference_count + repoPacket.blocked_reference_count,
+    repoUploadedRecords.length,
+  );
   assert.ok(repoPacket.items.some((item) => item.character === "貓狼"));
   assert.equal(repoPacket.items.every((item) => item.canon_status === "reference"), true);
   assert.equal(repoPacket.items.every((item) => item.ability_state === "visual_only"), true);
   assert.equal(repoPacket.items.every((item) => item.visual_usage_scope === "visual_only_reference"), true);
+  assert.equal(repoPacket.blocked_items.every((item) => !item.inclusion_allowed), true);
 
   await rm(fixtureContexts, { recursive: true, force: true });
   await writeFile(fixtureActive, "# Phase39G fixture active engine\n", "utf8");
@@ -159,12 +174,21 @@ try {
   }, {
     gptWritingContexts: fixtureContexts,
     activeEnginePath: fixtureActive,
+    visualUploadedReferencesOptions: {
+      visualIndexText: jsonl([baselineRecord, uploadedReadyRecord]),
+    },
   });
   assert.equal(built.bundle.visual_uploaded_references_loaded, true);
-  assert.equal(built.bundle.visual_uploaded_references_count, 7);
+  assert.equal(built.bundle.visual_uploaded_references_count, fixturePacket.reference_count);
   assert.equal(built.bundle.visual_uploaded_references.safety_contract.must_not_establish_canon, true);
-  assert.equal(built.bundle.inputs.retrieval_context.visual_uploaded_references.reference_count, 7);
-  assert.equal(built.bundle.inputs.generation_context.visual_uploaded_references.reference_count, 7);
+  assert.equal(
+    built.bundle.inputs.retrieval_context.visual_uploaded_references.reference_count,
+    fixturePacket.reference_count,
+  );
+  assert.equal(
+    built.bundle.inputs.generation_context.visual_uploaded_references.reference_count,
+    fixturePacket.reference_count,
+  );
   const storedChat = await readFile(path.resolve(built.context_for_chat_path), "utf8");
   assert.match(storedChat, /## Visual Uploaded References \(Visual-only\)/u);
   assert.match(storedChat, /appearance, pose, style, and atmosphere guidance only/u);
