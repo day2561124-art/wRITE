@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "phase": "44C",
+  "evidence_kind": "real_chatgpt_live_acceptance_closure",
+  "immutable_evidence_record": true,
+  "acceptance_subject": "real_current_chatgpt",
+  "architecture_route": "chatgpt_owned_external_brain",
+  "acceptance_result": "PASS",
+  "evidence_sources": {
+    "automated_regression_evidence": {
+      "role": "contract_regression_only",
+      "acceptance_actor": false,
+      "may_substitute_for_live_acceptance": false
+    },
+    "production_http_mcp_regression_evidence": {
+      "role": "production_transport_regression_only",
+      "acceptance_actor": false,
+      "may_substitute_for_live_acceptance": false
+    },
+    "real_current_chatgpt_live_acceptance_evidence": {
+      "role": "authoritative_live_acceptance",
+      "acceptance_actor": true,
+      "may_be_recreated_by_deterministic_test": false
+    }
+  },
+  "public_discovery": {
+    "public_tool_count": 24,
+    "required_gpt_owned_tool_count": 8,
+    "visible_gpt_owned_tool_count": 8,
+    "required_gpt_owned_tools": [
+      "chatgpt_bridge_begin_external_brain_writing_session",
+      "chatgpt_bridge_use_scene_planner",
+      "chatgpt_bridge_use_character_simulator",
+      "chatgpt_bridge_use_neural_critic",
+      "chatgpt_bridge_use_style_drift_detector",
+      "chatgpt_bridge_use_over_governance_detector",
+      "chatgpt_bridge_use_writing_card_director",
+      "chatgpt_bridge_use_final_polisher"
+    ]
+  },
+  "live_session": {
+    "external_brain_session_id": "agent_run_20260711-222938-fdcf8650",
+    "writing_context_bundle_id": "gptctx_20260711-222938-dc20b298",
+    "agent_run_status": "success"
+  },
+  "semantic_consumption": {
+    "pre_generation_capability_count": 6,
+    "semantic_outputs_consumed": true,
+    "capabilities": [
+      {
+        "capability_name": "scene_planner",
+        "semantic_output_consumed": true,
+        "semantic_evidence": [
+          "Open on concrete sensory action and immediate pressure.",
+          "Escalate through a character choice with a visible consequence.",
+          "Close the movement on a readable turn that advances the chapter.",
+          "continuity_anchor_present=true"
+        ]
+      },
+      {
+        "capability_name": "character_simulator",
+        "semantic_output_consumed": true,
+        "semantic_evidence": [
+          "Let each character act from current knowledge, position, and relationship pressure.",
+          "Carry tension through gesture, silence, hesitation, and subtext instead of queue-style dialogue.",
+          "Preserve distinct character agency; do not flatten the ensemble into an operator voice."
+        ]
+      },
+      {
+        "capability_name": "neural_critic",
+        "semantic_output_consumed": true,
+        "semantic_evidence": [
+          "Avoid engineering, provider, workflow, and handoff language in story prose.",
+          "Preserve causal continuity and do not invent unsupported canon facts.",
+          "Prefer dramatized action over abstract explanation or theme-first summary."
+        ]
+      },
+      {
+        "capability_name": "style_drift_detector",
+        "semantic_output_consumed": true,
+        "semantic_evidence": [
+          "Administrative or checklist-like narration.",
+          "Over-short punchlines that break long-form cadence.",
+          "Abstract exposition replacing concrete action, sensory detail, or natural dialogue."
+        ]
+      },
+      {
+        "capability_name": "over_governance_detector",
+        "semantic_output_consumed": true,
+        "semantic_evidence": [
+          "Use governance context as invisible boundaries, never as visible story vocabulary.",
+          "Do not turn dramatic conflict into policy, tool, or process debate.",
+          "Keep character agency and scene momentum alive inside the canon constraints."
+        ]
+      },
+      {
+        "capability_name": "writing_card_director",
+        "semantic_output_consumed": true,
+        "semantic_evidence": {
+          "required_core_characters": [
+            "九逃"
+          ],
+          "chapter_turn": "Set up a longline payoff or reveal a seeded clue.",
+          "scene_function": "推進",
+          "character_pressure": "九逃面臨戰鬥/規則限制的直接壓力",
+          "show_dont_tell_anchor": "場地細節",
+          "sensory_anchors": [
+            "燈光：走廊的冷白燈偏黃，影子拉長",
+            "氣味：止血藥布的藥味與汗水混合在衣袖上",
+            "身體：指尖往內扣，握拳時手背發疼"
+          ],
+          "subtext_target": "對話表面是任務/資訊；底下是關係負擔、未說出的恐懼或選擇成本。",
+          "director_notes": [
+            "Write direct story prose with vivid scene motion and living character reactions.",
+            "Maintain high-density chapter progression and a concrete chapter-level turn."
+          ]
+        }
+      }
+    ]
+  },
+  "live_traces": [
+    {
+      "trace_id": "neural_trace_20260711-222945-a642404f",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "scene_planner",
+      "status": "success",
+      "output_hash": "721c7f5fd8ae43ea614e31b210c31efc613cbf10bbf877f8223ba766628eff4d",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-222951-82a0085d",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "character_simulator",
+      "status": "success",
+      "output_hash": "aad9688a8fc56857fe6ea02d401ae7c2e90ff462a9757fa748e07458f702abc8",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-222958-afdddb33",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "neural_critic",
+      "status": "success",
+      "output_hash": "7ee38ad777ce4a765912e62177ebd21b8c365b50b1f3902d2650a90cf427f69c",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-223005-df9eca1c",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "style_drift_detector",
+      "status": "success",
+      "output_hash": "1775ac6ea69aa718d2d02617455a74bba18b414e22cda411b01bc2cbc0b1472e",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-223010-e38e1966",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "over_governance_detector",
+      "status": "success",
+      "output_hash": "a8824e8e2e2b2101de34b59e4578bbebc5a6732bed78bb4e5d1ffb9e0a2e95c7",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-223021-92c77d31",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "writing_card_director",
+      "status": "success",
+      "output_hash": "5365931548b38596e3637339ba58c9f498af0d36d4e5109d4d57229260a0fe0c",
+      "generation_boundary": "pre_generation"
+    },
+    {
+      "trace_id": "neural_trace_20260711-223138-90b03e31",
+      "run_id": "agent_run_20260711-222938-fdcf8650",
+      "module_name": "final_polisher",
+      "status": "success",
+      "output_hash": "a188eeee2ad448a97df07eb781f3d0c9a7d13bd589a5f20016a73f95b56241ff",
+      "generation_boundary": "post_generation"
+    }
+  ],
+  "raw_story_integrity": {
+    "title": "折痕的方向",
+    "required_core_characters": [
+      "九逃"
+    ],
+    "raw_story_sha256": "92bf2b460eb6607c77071c6e9501fe41f2103c0487e08e9161aeea9651871111",
+    "raw_story_unicode_code_point_count": 785,
+    "raw_story_utf8_byte_count": 2147,
+    "exact_text_stored": false,
+    "chatgpt_independently_computed_hash": true,
+    "writer_workbench_returned_hash": true,
+    "hashes_exactly_matched": true
+  },
+  "final_polisher": {
+    "generation_boundary": "post_generation",
+    "agent_run_status": "success",
+    "returned_fields": [
+      "polished_text",
+      "revision_report",
+      "raw_story_sha256"
+    ],
+    "polished_text_matches_raw_text": true,
+    "text_change_required_for_success": false
+  },
+  "route_guards": {
+    "full_neural_orchestrator_used": false,
+    "aggregate_full_neural_handoff_used": false,
+    "backend_provider_generation_used": false,
+    "node_prose_generation_used": false,
+    "deterministic_adapter_used_as_live_actor": false,
+    "workbench_status_used_as_writing_route": false
+  },
+  "mutation_guards": {
+    "candidate_created": false,
+    "canon_updated": false,
+    "active_engine_updated": false,
+    "adopted": false,
+    "settled": false
+  }
+}

@@ -659,6 +659,8 @@ const steps = [
   ["Phase 44C external brain individual semantic handoff", ["tests/phase44/phase44c-external-brain-individual-semantic-handoff.test.mjs"]],
   ["Phase 44C production HTTP MCP individual semantic handoff regression", ["tests/phase44/phase44c-http-mcp-individual-semantic-handoff-regression.test.mjs"]],
 
+  ["Phase 44C real ChatGPT live acceptance closure evidence", ["tests/phase44/phase44c-real-chatgpt-live-acceptance-closure.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];
