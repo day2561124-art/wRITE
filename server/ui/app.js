@@ -172,14 +172,14 @@ const operatorStatusLabels = {
 
 const workflowStepMeta = {
   load_data: { label: "讀取資料", view: "overview" },
-  generate_candidate: { label: "生成正文候選", view: "compose" },
+  generate_candidate: { label: "開始正文寫作", view: "compose" },
   save_candidate: { label: "保存候選", view: "compose" },
   proofread: { label: "驗稿 / 校對", view: "review" },
   queue_adoption: { label: "加入待我確認", view: "approval" },
   settlement: { label: "章節結算", view: "settlement" },
   canon_candidate: { label: "建立正史更新候選", view: "settlement" },
   manual_approval: { label: "等待人工確認", view: "approval" },
-  writing_context: { label: "起稿", view: "compose" },
+  writing_context: { label: "準備正文寫作", view: "compose" },
   chat_output_candidate: { label: "候選稿", view: "compose" },
   proof_report: { label: "驗稿", view: "review" },
   adoption_request: { label: "採用確認", view: "approval" },
@@ -211,18 +211,24 @@ function workflowReason(step) {
 
 function primaryNextStep(workbench = state.workbench) {
   if (workbench?.next_step) {
+    const primaryWritingLabels = {
+      generate_candidate: "開始正文寫作",
+      writing_context: "準備 ChatGPT 正文寫作",
+      chat_output_candidate: "開始正文寫作",
+    };
+    const label = primaryWritingLabels[workbench.next_step.key] ?? workbench.next_step.label;
     return {
       key: workbench.next_step.key,
       text: workbench.next_step.reason
-        ? `${workbench.next_step.label}：${workbench.next_step.reason}`
-        : `下一步：${workbench.next_step.label}`,
+        ? `${label}：${workbench.next_step.reason}`
+        : `下一步：${label}`,
       view: String(workbench.next_step.route ?? "#overview").replace(/^#/u, ""),
       step: workflowStep(workbench.next_step.key, workbench),
     };
   }
   const checks = [
-    ["writing_context", "下一步：到起稿頁建立本輪任務提示", "compose"],
-    ["chat_output_candidate", "下一步：把任務提示貼給 ChatGPT，取得正文候選後回到紀錄頁保存", "compose"],
+    ["writing_context", "下一步：準備本次 ChatGPT 正文寫作", "compose"],
+    ["chat_output_candidate", "下一步：開始正文寫作；只有明確需要保存時才進入候選流程", "compose"],
     ["proof_report", "下一步：到驗稿頁建立驗稿 context", "review"],
     ["adoption_request", "下一步：到確認佇列處理採用請求", "approval"],
     ["settlement_report", "下一步：到結算匯入頁建立章節結算 context", "settlement"],
@@ -237,7 +243,7 @@ function primaryNextStep(workbench = state.workbench) {
   }
   return {
     key: "writing_context",
-    text: "目前沒有阻塞項，可開始新一輪正文候選。",
+    text: "目前沒有阻塞項，可開始新一輪正文寫作。",
     view: "compose",
     step: workflowStep("writing_context", workbench),
   };
@@ -1249,6 +1255,103 @@ function renderFeedbackLearning(feedback) {
   $("#feedback-learning-raw").textContent = JSON.stringify(feedback, null, 2);
 }
 
+function renderWritingWorkspace() {
+  const workbench = state.workbench ?? {};
+  const health = workbench.health ?? {};
+  const sources = state.data?.sources ?? [];
+  const visuals = state.data?.visuals ?? {};
+  const visualDiagnostics = visuals.diagnostics ?? {};
+  const sourceByKey = (key) => sources.find((item) => (
+    item.key === key || item.id === key || item.source_key === key
+  ));
+  const sourceReady = (key) => {
+    const source = sourceByKey(key);
+    if (!source) return null;
+    return !source.warning && !(source.errors ?? []).length;
+  };
+  const statusText = (value, readyLabel = "已載入") => {
+    if (value === true || ["loaded", "complete", "ready"].includes(value)) return readyLabel;
+    if (value === false || ["missing", "failed", "not_connected"].includes(value)) return "不可用";
+    return value ? String(value) : "尚未建立";
+  };
+  const contextItems = [
+    ["正史資料庫", statusText(health.canon, "正常")],
+    ["寫作規則", statusText(health.writing_rules)],
+    ["寫作卡", sourceReady("active_writing_card") === true ? "已載入" : sourceReady("active_writing_card") === false ? "不可用" : "尚未建立"],
+    ["檢索記憶", statusText(health.retrieval_memory)],
+    ["圖像參考", Number.isFinite(visualDiagnostics.indexRecords)
+      ? `${visualDiagnostics.indexRecords} / ${visualDiagnostics.pngFiles ?? 0}`
+      : Number.isFinite(visuals.count) ? `${visuals.count} 筆` : "尚未載入"],
+    ["章節資料", workbench.chapter?.chapter_id
+      ?? (workbench.chapter?.title && workbench.chapter.title !== "尚未建立本輪章節"
+        ? workbench.chapter.title
+        : "尚未建立")],
+  ];
+  const contextGrid = $("#writing-context-grid");
+  if (contextGrid) {
+    contextGrid.innerHTML = contextItems.map(([label, value]) => `
+      <article class="context-summary-item">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </article>
+    `).join("");
+  }
+  const readyCount = contextItems.filter(([, value]) => !["不可用", "尚未建立", "尚未載入"].includes(value)).length;
+  if ($("#writing-context-summary")) {
+    $("#writing-context-summary").textContent = `${readyCount} / ${contextItems.length} 可用`;
+  }
+  if ($("#writing-context-details")) {
+    const outputs = health.outputs_detail ?? {};
+    $("#writing-context-details").innerHTML = `
+      <dl class="technical-facts">
+        <div><dt>generation context</dt><dd>${escapeHtml(statusText(outputs.generation_context?.status))}</dd></div>
+        <div><dt>retrieval context</dt><dd>${escapeHtml(statusText(outputs.retrieval_context?.status))}</dd></div>
+        <div><dt>task prompt</dt><dd>${escapeHtml(statusText(outputs.task_prompt?.status))}</dd></div>
+        <div><dt>writing context bundle</dt><dd>${escapeHtml(workbench.lineage?.workflow_run_id ?? "尚未建立")}</dd></div>
+      </dl>
+    `;
+  }
+
+  const bridge = state.data?.bridge ?? {};
+  const externalSession = workbench.external_brain_session ?? workbench.latest_external_brain_session ?? null;
+  const bridgeReady = bridge.available === true || health.chatgpt_bridge === "ready";
+  const brainStatus = $("#external-brain-status");
+  if (brainStatus) {
+    brainStatus.textContent = externalSession?.status
+      ? externalSession.status
+      : bridgeReady ? "Bridge 已準備" : "尚未開始";
+    brainStatus.className = `status-badge status-${externalSession?.status === "completed" ? "completed" : bridgeReady ? "ready" : "not_started"}`;
+  }
+  if ($("#external-brain-summary")) {
+    $("#external-brain-summary").textContent = externalSession
+      ? `已取得真實 external-brain session 狀態：${externalSession.status ?? "unknown"}。`
+      : bridgeReady
+        ? "ChatGPT Bridge 已準備；請在 ChatGPT connector 中啟動正式 external-brain writing session。"
+        : "尚無可讀取的 external-brain session。此瀏覽器只準備本地寫作資料，不會冒充已啟動 ChatGPT。";
+  }
+  const capabilities = Array.isArray(externalSession?.capabilities) ? externalSession.capabilities : [];
+  if ($("#external-brain-progress")) {
+    $("#external-brain-progress").innerHTML = capabilities.length
+      ? capabilities.map((item) => `
+        <span><strong>${escapeHtml(item.label ?? item.name)}</strong>${escapeHtml(item.status ?? "尚未執行")}</span>
+      `).join("")
+      : '<p class="muted">沒有 live session trace，因此不顯示推測的能力完成進度。</p>';
+  }
+
+  const recent = $("#recent-writing-summary");
+  if (recent) {
+    recent.innerHTML = externalSession
+      ? `
+        <div class="recent-writing-facts">
+          <div><span>章節</span><strong>${escapeHtml(externalSession.chapter ?? workbench.chapter?.title ?? "未提供")}</strong></div>
+          <div><span>狀態</span><strong>${escapeHtml(externalSession.status ?? "unknown")}</strong></div>
+          <div><span>架構路徑</span><strong>ChatGPT-owned external brain</strong></div>
+        </div>
+      `
+      : '<div class="empty-state">尚無最近一次 ChatGPT 正文寫作紀錄。Acceptance evidence 不會被當作使用者歷史。</div>';
+  }
+}
+
 function renderOperatorOverview() {
   const next = primaryNextStep();
   $("#today-next-step-text").textContent = next.text;
@@ -1336,12 +1439,13 @@ function renderOperatorOverview() {
     const lineage = wb.lineage ?? {};
     const fullNeural = wb.chapter?.full_neural ?? {};
     const fullNeuralUsed = fullNeural.used === true;
+    const compatibilityDiagnostics = $("#workbench-compatibility-diagnostics", workbenchPanel);
     let neuralStatus = $("#workbench-neural-status", workbenchPanel);
     if (!neuralStatus) {
       neuralStatus = document.createElement("div");
       neuralStatus.id = "workbench-neural-status";
       neuralStatus.className = "status-card";
-      workbenchPanel.appendChild(neuralStatus);
+      compatibilityDiagnostics?.appendChild(neuralStatus);
     }
     neuralStatus.innerHTML = `
       <strong>Full Neural Orchestrator</strong>
@@ -1386,7 +1490,7 @@ function renderOperatorOverview() {
     }
     const controls = [
       ["workbench-refresh", true, ""],
-      ["workbench-generate", true, "ChatGPT Bridge 尚未接入；此按鈕會帶你到可複製 prompt 的正文寫作頁。"],
+      ["workbench-generate", true, "此按鈕會帶你到正文寫作頁準備本次任務與上下文。"],
       ["workbench-save", canSaveCandidate, actionState.get("save_chat_output_candidate")?.disabled_reason || "尚未建立本輪寫作 context，或本輪已有候選。"],
       ["workbench-send-proof", hasCandidate && !hasProofReport, hasCandidate ? "本候選已建立驗稿資料。" : "尚未保存候選，無法送去驗稿。"],
       ["workbench-add-approval", hasCandidate && hasProofReport && !wb.chapter?.in_approval_queue, hasProofReport ? "此候選已在待確認流程，或沒有可送出的項目。" : "尚未完成驗稿，無法加入待確認。"],
@@ -1412,12 +1516,7 @@ function bindOverviewWorkbenchActions() {
   const generateButton = $("#workbench-generate");
   generateButton?.addEventListener("click", async () => {
     switchView("compose");
-    try {
-      await openComposeResult("data/outputs/task_prompt.md");
-      toast("已切到正文寫作頁。請複製本章任務給 ChatGPT 生成正文候選，再貼回保存區。");
-    } catch (error) {
-      toast(error.message, true);
-    }
+    toast("已前往正文寫作。先確認本次任務，再準備 ChatGPT 寫作資料。");
   });
 
   const saveButton = $("#workbench-save");
@@ -3107,6 +3206,7 @@ function renderActivityTable() {
 
 function renderAll() {
   renderTopbarStatus();
+  renderWritingWorkspace();
   renderSources();
   renderOutputs();
   renderCounts();
@@ -3196,23 +3296,24 @@ async function ensureWriteConfirmed(dryRun, label) {
 
 async function handlePipeline(event) {
   event.preventDefault();
-  const restoreButton = markButtonRunning($("#pipeline-submit-button"), "建立中…");
-  $("#compose-empty-state").textContent = "正在建立本輪任務提示，請稍候。";
-  setActionProgress("正在執行 pipeline：建立 generation context、retrieval context 與可複製任務提示…");
-  toast("正在建立本輪任務提示…");
+  const restoreButton = markButtonRunning($("#pipeline-submit-button"), "準備中…");
+  $("#compose-empty-state").textContent = "正在準備本輪寫作上下文，請稍候。";
+  setActionProgress("正在準備本地寫作資料：generation context、retrieval context 與 task prompt…");
+  toast("正在準備 ChatGPT 正文寫作資料…");
   try {
     await runAction("pipeline", {
       query: $("#pipeline-query").value,
       task: $("#pipeline-task").value,
       mode: $("#pipeline-mode").value,
+      chapterMode: $("#chapter-mode").value,
       top: Number.parseInt($("#pipeline-top").value, 10),
     });
     await Promise.all([refreshState(), openComposeResult("data/outputs/task_prompt.md")]);
-    $("#compose-empty-state").textContent = "本輪任務提示已建立。請複製給 ChatGPT 生成正文候選。";
-    toast("流水線已完成");
+    $("#compose-empty-state").textContent = "本輪本地寫作資料已準備。請在 ChatGPT connector 中開始正式 external-brain writing session。";
+    toast("ChatGPT 正文寫作資料已準備");
   } catch (error) {
-    setActionProgress(`pipeline 失敗：${error.message}`);
-    $("#compose-empty-state").textContent = "建立本輪任務提示失敗，請查看操作輸出或 Console。";
+    setActionProgress(`寫作資料準備失敗：${error.message}`);
+    $("#compose-empty-state").textContent = "寫作資料準備失敗，請查看執行詳細資料或 Console。";
     toast(error.message, true);
   } finally {
     restoreButton();
@@ -3900,6 +4001,15 @@ function bindEvents() {
     if (!button) return;
     $("#pipeline-mode").value = button.dataset.mode;
     $$("[data-mode]", $("#mode-control")).forEach((item) => {
+      item.classList.toggle("is-active", item === button);
+    });
+  });
+
+  $("#chapter-mode-control")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-chapter-mode]");
+    if (!button) return;
+    $("#chapter-mode").value = button.dataset.chapterMode;
+    $$("[data-chapter-mode]", $("#chapter-mode-control")).forEach((item) => {
       item.classList.toggle("is-active", item === button);
     });
   });

@@ -153,35 +153,22 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">WRITING</p>
-                <h2>正文寫作操作台</h2>
+                <h2>正文寫作</h2>
               </div>
               <div class="form-actions">
                 <button id="workbench-refresh" class="button secondary" type="button" disabled>讀取最新資料</button>
-                <button id="workbench-generate" class="button primary" type="button" disabled>請 ChatGPT 寫正文候選</button>
+                <button id="workbench-generate" class="button primary" type="button" disabled>前往正文寫作</button>
               </div>
             </div>
-
-            <div class="workbench-tabs">
-              <div class="result-tabs" role="tablist" aria-label="寫作分頁">
-                <button class="is-active" data-wtab="task" type="button">本章任務</button>
-                <button data-wtab="materials" type="button">寫作材料</button>
-                <button data-wtab="retrieval" type="button">檢索參考</button>
-                <button data-wtab="candidates" type="button">正文候選</button>
-              </div>
+            <p class="workspace-lead">從任務開始，確認寫作資料後，再由 ChatGPT 外部大腦主導正文生成。保存候選是選用的後續流程。</p>
+            <div class="compact-status-row">
+              <span>目前章節</span>
+              <strong id="workbench-chapter-title">尚未建立本輪章節</strong>
             </div>
-
-            <div class="workbench-body">
-              <div class="workbench-meta">
-                <h3 id="workbench-chapter-title">第二十章｜亮處的影子</h3>
-                <div class="meta-row">字數：<span id="workbench-wordcount">--</span> · 自動保存：<span id="workbench-autosave">尚未啟用</span></div>
-              </div>
-              <textarea id="workbench-draft-text" rows="12" maxlength="1000000" placeholder="尚未載入正文候選。請先讀取最新資料，或請 ChatGPT 產生正文候選。" disabled></textarea>
-              <div class="form-actions">
-                <button id="workbench-save" class="button" type="button" disabled>保存正文候選</button>
-                <button id="workbench-send-proof" class="button secondary" type="button" disabled>送去驗稿</button>
-                <button id="workbench-add-approval" class="button secondary" type="button" disabled>加入待我確認</button>
-              </div>
-            </div>
+            <details class="technical-details overview-diagnostics">
+              <summary>相容流程與執行診斷</summary>
+              <div id="workbench-compatibility-diagnostics" class="diagnostic-stack"></div>
+            </details>
           </section>
 
           <section class="panel workflow-overview-panel">
@@ -327,80 +314,121 @@
           </div>
         </section>
 
-        <section class="view" data-view-panel="compose">
-          <section class="panel operator-guide">
-            <div>
-              <p class="eyebrow">THREE STEPS</p>
-              <h2>起稿流程</h2>
-            </div>
-            <ol>
-              <li>填寫本輪章節任務與承接位置。</li>
-              <li>建立 generation context 與可複製的任務提示。</li>
-              <li>把 ChatGPT 生成的正文候選保存回工作台。</li>
-            </ol>
-            <p id="compose-empty-state" class="operator-empty">尚未建立本輪任務提示。請先填寫章節任務或選擇目前承接位置。</p>
-          </section>
-          <div class="workspace-grid">
-            <form id="pipeline-form" class="form-surface">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">PIPELINE</p>
-                  <h2>任務提示</h2>
-                </div>
-                <div id="mode-control" class="segmented-control" aria-label="任務模式">
-                  <button class="is-active" data-mode="next-chapter" type="button">起稿</button>
-                  <button data-mode="proofread" type="button">驗稿</button>
-                  <button data-mode="settle" type="button">結算</button>
-                  <button data-mode="debug" type="button">除錯</button>
-                </div>
-              </div>
-              <input id="pipeline-mode" type="hidden" value="next-chapter">
+        <section class="view writing-workspace" data-view-panel="compose">
+          <header class="writing-workspace-heading">
+            <p class="eyebrow">GPT-OWNED WRITING</p>
+            <h2>正文寫作</h2>
+            <p>你只需要決定這次要寫什麼；工作台負責準備資料，正文由 ChatGPT 外部大腦主導生成。</p>
+          </header>
 
-              <label class="field">
-                <span>檢索關鍵字</span>
-                <input id="pipeline-query" name="query" type="text" maxlength="10000" value="朝日奈千夜 九逃 醫療後座" required>
-              </label>
-
-              <label class="field">
-                <span>本次任務</span>
-                <textarea id="pipeline-task" name="task" rows="8" maxlength="100000" required>下一章正文候選：承接第十九章正式選拔第一場結束後的醫療後座，保護未成立邊界並準備正文候選。</textarea>
-              </label>
-
-              <label class="field compact-field">
-                <span>檢索筆數</span>
-                <input id="pipeline-top" name="top" type="number" min="1" max="100" value="12">
-              </label>
-
-              <div class="form-actions">
-                <button id="pipeline-submit-button" class="button primary" type="submit">建立本輪任務提示</button>
-                <button id="search-only-button" class="button secondary" type="button">只做檢索</button>
-              </div>
-            </form>
-
-            <section class="result-surface">
-              <div class="panel-heading">
-                <div class="result-tabs" role="tablist" aria-label="產物預覽">
-                  <button class="is-active" data-result-file="data/outputs/task_prompt.md" type="button">本章任務</button>
-                  <button data-result-file="data/outputs/retrieval_context.md" type="button">檢索參考</button>
-                  <button data-result-file="data/outputs/generation_context.md" type="button">寫作材料</button>
-                </div>
-                <button id="copy-result-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
-              </div>
-              <div class="form-actions compact-actions">
-                <button id="copy-prompt-button" class="button secondary" type="button">複製給 ChatGPT</button>
-              </div>
-              <details class="technical-details">
-                <summary>查看完整 prompt</summary>
-                <pre id="compose-result" class="document-viewer">尚未載入產物。</pre>
-              </details>
-            </section>
-          </div>
-
-          <form id="workflow-task-form" class="panel form-panel workflow-task-panel">
+          <form id="pipeline-form" class="panel writing-primary-card">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">DRAFT WORKFLOW</p>
-                <h2>建立正文任務</h2>
+                <p class="eyebrow">CURRENT TASK</p>
+                <h2>本次寫作</h2>
+              </div>
+              <span class="read-only-note">正文不會自動保存為候選</span>
+            </div>
+            <input id="pipeline-mode" type="hidden" value="next-chapter">
+            <div id="chapter-mode-control" class="segmented-control chapter-mode-control" aria-label="章節模式">
+              <button class="is-active" data-chapter-mode="next_chapter" type="button">下一章</button>
+              <button data-chapter-mode="specific_scene" type="button">指定場景</button>
+              <button data-chapter-mode="rewrite_candidate" type="button">改寫</button>
+            </div>
+            <input id="chapter-mode" type="hidden" value="next_chapter">
+            <label class="field writing-task-field">
+              <span>本次任務</span>
+              <textarea id="pipeline-task" name="task" rows="7" maxlength="100000" required>下一章正文續寫：承接第十九章正式選拔第一場結束後的醫療後座，保護未成立邊界並推進下一個變局。</textarea>
+            </label>
+            <div class="form-actions writing-primary-actions">
+              <button id="pipeline-submit-button" class="button primary" type="submit">準備 ChatGPT 正文寫作</button>
+            </div>
+            <p id="compose-empty-state" class="operator-empty">尚未準備本輪寫作資料。這個按鈕會建立本地寫作上下文，不會假裝已從瀏覽器啟動 ChatGPT session。</p>
+
+            <details class="technical-details execution-details">
+              <summary>執行詳細資料</summary>
+              <p class="muted">以下是本地 context / retrieval 相容工具；正式正文仍由 ChatGPT 外部大腦生成。</p>
+              <div id="mode-control" class="segmented-control" aria-label="相容任務模式">
+                <button class="is-active" data-mode="next-chapter" type="button">起稿</button>
+                <button data-mode="proofread" type="button">驗稿</button>
+                <button data-mode="settle" type="button">結算</button>
+                <button data-mode="debug" type="button">除錯</button>
+              </div>
+              <div class="form-row diagnostics-form-row">
+                <label class="field">
+                  <span>檢索關鍵字</span>
+                  <input id="pipeline-query" name="query" type="text" maxlength="10000" value="朝日奈千夜 九逃 醫療後座" required>
+                </label>
+                <label class="field compact-field">
+                  <span>檢索筆數</span>
+                  <input id="pipeline-top" name="top" type="number" min="1" max="100" value="12">
+                </label>
+              </div>
+              <div class="form-actions compact-actions">
+                <button id="search-only-button" class="button secondary" type="button">只做檢索</button>
+              </div>
+              <div class="result-surface embedded-result-surface">
+                <div class="panel-heading">
+                  <div class="result-tabs" role="tablist" aria-label="產物預覽">
+                    <button class="is-active" data-result-file="data/outputs/task_prompt.md" type="button">本章任務</button>
+                    <button data-result-file="data/outputs/retrieval_context.md" type="button">檢索參考</button>
+                    <button data-result-file="data/outputs/generation_context.md" type="button">寫作材料</button>
+                  </div>
+                  <button id="copy-result-button" class="icon-button" type="button" title="複製內容" aria-label="複製內容">⧉</button>
+                </div>
+                <div class="form-actions compact-actions">
+                  <button id="copy-prompt-button" class="button secondary" type="button">複製本地任務資料</button>
+                </div>
+                <pre id="compose-result" class="document-viewer">尚未載入產物。</pre>
+              </div>
+            </details>
+          </form>
+
+          <section class="panel writing-context-card">
+            <div class="section-heading">
+              <div><p class="eyebrow">CONTEXT</p><h2>寫作上下文</h2></div>
+              <span id="writing-context-summary" class="status-summary">載入中</span>
+            </div>
+            <div id="writing-context-grid" class="writing-context-grid"></div>
+            <details class="technical-details">
+              <summary>查看詳細資料</summary>
+              <div id="writing-context-details" class="diagnostic-stack"></div>
+            </details>
+          </section>
+
+          <section class="panel external-brain-card">
+            <div class="section-heading">
+              <div><p class="eyebrow">ARCHITECTURE PRIMARY</p><h2>ChatGPT 外部大腦</h2></div>
+              <span id="external-brain-status" class="status-badge status-not_started">尚未開始</span>
+            </div>
+            <p id="external-brain-summary">正在讀取 ChatGPT Bridge readiness。</p>
+            <div id="external-brain-progress" class="external-brain-progress"></div>
+            <details class="technical-details">
+              <summary>能力與連線說明</summary>
+              <p>正式路徑由 ChatGPT 逐一呼叫場景規劃、角色模擬、神經批評、風格漂移、過度治理與寫作卡導演，再由 ChatGPT 生成正文。</p>
+              <p id="external-brain-diagnostic" class="muted">此瀏覽器沒有 live session trace 時，不會以點擊狀態或時間戳推測能力完成。</p>
+            </details>
+          </section>
+
+          <section class="panel recent-writing-card">
+            <div class="section-heading">
+              <div><p class="eyebrow">LATEST RUN</p><h2>最近一次寫作</h2></div>
+            </div>
+            <div id="recent-writing-summary" class="recent-writing-summary">
+              <div class="empty-state">尚無最近一次 ChatGPT 正文寫作紀錄</div>
+            </div>
+          </section>
+
+          <details class="panel optional-workflow candidate-workflow">
+            <summary>
+              <span><strong>候選流程</strong><small>只有在你明確要保存已完成的 ChatGPT 正文時才使用。</small></span>
+            </summary>
+            <div class="optional-workflow-body">
+          <form id="workflow-task-form" class="form-panel workflow-task-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">CANDIDATE PREPARATION</p>
+                <h2>候選流程資料</h2>
               </div>
               <span id="workflow-context-status" class="workflow-status">尚未建立 context bundle</span>
             </div>
@@ -415,8 +443,8 @@
               </label>
             </div>
             <label class="field">
-              <span>正文任務</span>
-              <textarea id="workflow-task-text" rows="5" maxlength="100000">建立下一章正文候選，不升格正史。</textarea>
+              <span>候選備註</span>
+              <textarea id="workflow-task-text" rows="4" maxlength="100000">將已完成的 ChatGPT 正文保存為候選，不升格正史。</textarea>
             </label>
             <div class="form-actions">
               <button id="workflow-rebuild-context-button" class="button secondary" type="button">重建上下文</button>
@@ -425,11 +453,11 @@
             <div id="workflow-context-facts" class="workflow-facts"></div>
           </form>
 
-          <form id="draft-form" class="panel form-panel">
+          <form id="draft-form" class="form-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">CANDIDATE</p>
-                <h2>保存正文候選</h2>
+                <h2>保存為正文候選</h2>
               </div>
               <span class="candidate-status candidate-status-candidate">非正史</span>
             </div>
@@ -461,23 +489,25 @@
               </label>
             </details>
             <label class="field">
-              <span>正文</span>
-              <textarea id="draft-text" rows="14" maxlength="1000000" required></textarea>
+              <span>已完成的 ChatGPT 正文</span>
+              <textarea id="draft-text" rows="14" maxlength="1000000" required placeholder="只有在你明確要進入候選流程時，才將已完成正文貼到這裡。"></textarea>
             </label>
             <div class="form-actions">
-              <button class="button primary" type="submit">保存正文候選</button>
+              <button class="button primary" type="submit">保存為正文候選</button>
             </div>
           </form>
 
-          <section class="panel workflow-list-panel">
+          <section class="workflow-list-panel">
             <div class="panel-heading">
-              <h2>Candidate Drafts</h2>
+              <h2>已保存候選</h2>
               <button id="refresh-workflow-button" class="icon-button" type="button" title="重新整理" aria-label="重新整理">↻</button>
             </div>
             <div id="workflow-draft-list" class="workflow-draft-list">
               <div class="empty-state">尚無 candidate_draft</div>
             </div>
           </section>
+            </div>
+          </details>
         </section>
 
         <section class="view" data-view-panel="writer-workbench">

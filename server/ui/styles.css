@@ -1538,6 +1538,210 @@ textarea:disabled {
   margin-top: 18px;
 }
 
+/* GPT-owned writing workspace */
+.writing-workspace {
+  max-width: 1180px;
+}
+
+.writing-workspace-heading {
+  margin-bottom: 16px;
+}
+
+.writing-workspace-heading h2,
+.writing-workspace-heading p {
+  margin-bottom: 6px;
+}
+
+.writing-workspace-heading > p:last-child,
+.workspace-lead {
+  max-width: 760px;
+  color: var(--muted);
+}
+
+.writing-workspace > .panel,
+.writing-workspace > details.panel {
+  margin-top: 16px;
+}
+
+.writing-primary-card {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.chapter-mode-control {
+  margin-bottom: 14px;
+}
+
+.writing-task-field textarea {
+  min-height: 150px;
+}
+
+.writing-primary-actions .button.primary {
+  min-width: 240px;
+}
+
+.execution-details {
+  margin-top: 16px;
+}
+
+.diagnostics-form-row {
+  margin-top: 12px;
+}
+
+.embedded-result-surface {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.embedded-result-surface .document-viewer {
+  max-height: 360px;
+}
+
+.writing-context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.context-summary-item,
+.recent-writing-facts > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.context-summary-item span,
+.recent-writing-facts span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.context-summary-item strong,
+.recent-writing-facts strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.technical-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.technical-facts > div {
+  min-width: 0;
+  padding: 9px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+}
+
+.technical-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.technical-facts dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.external-brain-card {
+  border-left: 3px solid var(--accent);
+}
+
+.external-brain-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.external-brain-progress > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.recent-writing-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.optional-workflow {
+  padding: 0;
+  overflow: hidden;
+}
+
+.optional-workflow > summary {
+  padding: 16px 18px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.optional-workflow > summary span {
+  display: inline-grid;
+  gap: 3px;
+  margin-left: 6px;
+}
+
+.optional-workflow > summary small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.optional-workflow[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.optional-workflow-body {
+  padding: 0 18px 18px;
+}
+
+.optional-workflow-body .form-panel,
+.optional-workflow-body .workflow-list-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.compact-status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.compact-status-row span {
+  color: var(--muted);
+}
+
+.overview-diagnostics {
+  margin-top: 12px;
+}
+
+.diagnostic-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .segmented-control,
 .result-tabs {
   display: inline-flex;
@@ -2972,6 +3176,12 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 
+  .writing-context-grid,
+  .external-brain-progress,
+  .recent-writing-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .count-strip {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -2984,6 +3194,18 @@ dialog::backdrop {
 @media (max-width: 760px) {
   body {
     padding-bottom: 64px;
+  }
+
+  .writing-context-grid,
+  .external-brain-progress,
+  .recent-writing-facts,
+  .technical-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .writing-primary-actions .button.primary {
+    width: 100%;
+    min-width: 0;
   }
 
   .app-shell {
