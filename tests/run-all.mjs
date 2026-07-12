@@ -661,6 +661,8 @@ const steps = [
 
   ["Phase 44C real ChatGPT live acceptance closure evidence", ["tests/phase44/phase44c-real-chatgpt-live-acceptance-closure.test.mjs"]],
 
+  ["Phase 45A final-polisher editorial subtraction and output-hash integrity", ["tests/phase45/phase45a-final-polisher-editorial-subtraction-output-hash-integrity.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];

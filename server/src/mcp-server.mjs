@@ -2122,7 +2122,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_final_polisher",
-    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. Call only after ChatGPT has generated raw story prose; raw_story_text is required and its raw_story_sha256 is returned with a dedicated final_polisher neural trace. Writer Workbench returns a polish result to ChatGPT, while ChatGPT remains final prose generator and emitter. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
+    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. Call only after ChatGPT has generated raw story prose; raw_story_text is required and its raw_story_sha256 is returned with a dedicated final_polisher neural trace. Writer Workbench returns an evidence-bound subtractive whole-draft editorial contract, never rewritten or final prose; ChatGPT remains the final prose generator and emitter. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },

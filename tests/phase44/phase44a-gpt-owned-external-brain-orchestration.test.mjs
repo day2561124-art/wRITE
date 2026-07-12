@@ -156,7 +156,11 @@ try {
   assert.equal(polished.generation_boundary, "post_generation");
   assert.equal(polished.raw_story_sha256, sha256(rawStory));
   assert.equal(polished.capability_output.raw_story_sha256, sha256(rawStory));
-  assert.equal(polished.capability_output.polished_text, rawStory);
+  assert.equal(polished.capability_output.result_type, "final_polisher_report");
+  assert.equal(polished.capability_output.editorial_review_required_for_success, true);
+  assert.equal(polished.capability_output.text_change_required, false);
+  assert.equal(polished.capability_output.prose_ownership.final_prose_generator, "ChatGPT");
+  assert.equal("polished_text" in polished.capability_output, false);
   assert.equal(polished.trace.module_name, "final_polisher");
   assert.equal(polished.trace.status, "success");
   assert.equal(polished.trace.run_id, session.external_brain_session_id);

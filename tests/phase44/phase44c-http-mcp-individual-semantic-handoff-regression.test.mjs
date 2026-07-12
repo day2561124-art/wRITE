@@ -134,8 +134,11 @@ try {
   assertCommon(finalResult.payload, finalResult.bytes, "final_polisher", begin, "post_generation");
   assert.equal(finalResult.payload.raw_story_sha256, sha256(rawStory));
   assert.equal(finalResult.payload.capability_output.raw_story_sha256, sha256(rawStory));
-  assert.equal(typeof finalResult.payload.capability_output.polished_text, "string");
-  assert(Array.isArray(finalResult.payload.capability_output.revision_report));
+  assert.equal(finalResult.payload.capability_output.result_type, "final_polisher_report");
+  assert.equal(finalResult.payload.capability_output.editorial_review_required_for_success, true);
+  assert.equal(finalResult.payload.capability_output.text_change_required, false);
+  assert.equal(finalResult.payload.capability_output.prose_ownership.final_prose_generator, "ChatGPT");
+  assert.equal("polished_text" in finalResult.payload.capability_output, false);
   sizes.final_polisher = finalResult.bytes;
   traceIds.push(finalResult.payload.trace.trace_id);
   assert.equal(new Set(traceIds).size, 7);

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "phase": "45A",
+  "evidence_kind": "regression_acceptance_contract",
+  "acceptance_subject": "final_polisher_editorial_subtraction_and_agent_run_output_hash_integrity",
+  "architecture_route": "chatgpt_owned_external_brain",
+  "final_prose_generator": "ChatGPT",
+  "writer_workbench_role": "post_generation_editorial_capability_provider",
+  "editorial_contract": {
+    "result_type": "final_polisher_report",
+    "editorial_mode": "subtractive_whole_draft_review",
+    "editorial_review_required_for_success": true,
+    "text_change_required_for_success": false,
+    "unchanged_release_requires_completed_review": true,
+    "required_finding_codes": [
+      "pattern_saturation",
+      "symmetry_overcompleted",
+      "callback_saturation",
+      "echo_only_callback",
+      "author_hand_visible",
+      "strong_beat_dilution"
+    ],
+    "writer_workbench_generates_final_prose": false
+  },
+  "output_hash_contract": {
+    "strings_hash_original_content": true,
+    "buffers_hash_original_bytes": true,
+    "plain_objects_and_arrays_use_canonical_json": true,
+    "object_keys_sorted_recursively": true,
+    "circular_values_fail_clearly": true,
+    "object_string_coercion_forbidden": true
+  },
+  "mutation_guards": {
+    "candidate_created": false,
+    "canon_updated": false,
+    "active_engine_updated": false,
+    "adopted": false,
+    "settled": false
+  },
+  "historical_evidence_policy": {
+    "phase44c_evidence_modified": false,
+    "phase44c_remains_immutable_historical_acceptance": true
+  },
+  "regression_test": "tests/phase45/phase45a-final-polisher-editorial-subtraction-output-hash-integrity.test.mjs"
+}
