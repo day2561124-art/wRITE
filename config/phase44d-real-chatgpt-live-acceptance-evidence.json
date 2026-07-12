@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "phase": "44D",
+  "evidence_kind": "real_chatgpt_live_acceptance_reconnect_pending",
+  "immutable_evidence_record": true,
+  "acceptance_subject": "real_current_chatgpt",
+  "architecture_route": "chatgpt_owned_external_brain",
+  "acceptance_result": "RECONNECT_PENDING",
+  "formal_status": {
+    "implementation_regression_acceptance": "PASS",
+    "real_current_chatgpt_session_binding_isolation_retry_sha_integrity_live_acceptance": "PASS",
+    "explicit_real_chatgpt_reconnect_lifecycle_acceptance": "NOT DIRECTLY PROVABLE FROM AVAILABLE CONNECTOR CONTROLS",
+    "full_real_current_chatgpt_reconnect_acceptance": "NOT YET PASS",
+    "main_merge": "NOT YET",
+    "phase44e": "NOT STARTED"
+  },
+  "evidence_sources": {
+    "production_http_mcp_regression_evidence": {
+      "role": "production_transport_reconnect_regression_only",
+      "result": "PASS",
+      "verified_sequence": [
+        "client_a_disconnects",
+        "client_b_reconnects",
+        "client_b_lists_24_public_tools",
+        "original_alpha_session_and_bundle_continue_successfully"
+      ],
+      "acceptance_actor": false,
+      "may_substitute_for_explicit_real_chatgpt_reconnect_acceptance": false
+    },
+    "real_current_chatgpt_live_acceptance_evidence": {
+      "role": "authoritative_live_acceptance_for_binding_isolation_retry_and_sha_integrity",
+      "acceptance_actor": true,
+      "explicit_reconnect_lifecycle_observed": false
+    }
+  },
+  "public_discovery": {
+    "public_tool_count": 24,
+    "required_gpt_owned_tool_count": 8,
+    "visible_gpt_owned_tool_count": 8,
+    "required_gpt_owned_tools": [
+      "chatgpt_bridge_begin_external_brain_writing_session",
+      "chatgpt_bridge_use_scene_planner",
+      "chatgpt_bridge_use_character_simulator",
+      "chatgpt_bridge_use_neural_critic",
+      "chatgpt_bridge_use_style_drift_detector",
+      "chatgpt_bridge_use_over_governance_detector",
+      "chatgpt_bridge_use_writing_card_director",
+      "chatgpt_bridge_use_final_polisher"
+    ]
+  },
+  "fresh_live_sessions": {
+    "alpha": {
+      "external_brain_session_id": "agent_run_20260712-122355-0b8b2309",
+      "writing_context_bundle_id": "gptctx_20260712-122354-e17d94a3",
+      "marker": "PHASE44D_SESSION_ALPHA"
+    },
+    "beta": {
+      "external_brain_session_id": "agent_run_20260712-122400-4ca6d1dc",
+      "writing_context_bundle_id": "gptctx_20260712-122400-18c1c7a2",
+      "marker": "PHASE44D_SESSION_BETA"
+    }
+  },
+  "binding_gate_evidence": {
+    "same_session_same_bundle": [
+      {
+        "case": "alpha_session_alpha_bundle",
+        "result": "PASS"
+      },
+      {
+        "case": "beta_session_beta_bundle",
+        "result": "PASS"
+      }
+    ],
+    "cross_session_cross_bundle": [
+      {
+        "case": "alpha_session_beta_bundle",
+        "result": "BLOCK",
+        "reason": "writing_context_bundle_id is not bound to the external brain session."
+      },
+      {
+        "case": "beta_session_alpha_bundle",
+        "result": "BLOCK",
+        "reason": "writing_context_bundle_id is not bound to the external brain session."
+      }
+    ],
+    "unknown_identifiers": [
+      {
+        "case": "unknown_session",
+        "result": "BLOCK",
+        "reason": "run_id is invalid."
+      },
+      {
+        "case": "unknown_bundle",
+        "result": "BLOCK",
+        "failure_trace_honesty": "PASS"
+      }
+    ]
+  },
+  "semantic_isolation": {
+    "result": "PASS",
+    "trace_ownership_visible": true,
+    "live_traces": [
+      {
+        "trace_id": "neural_trace_20260712-122405-61939c00",
+        "run_id": "agent_run_20260712-122355-0b8b2309",
+        "module_name": "scene_planner",
+        "input_digest": "076e56e5031501b6dd48b338e828485ba8838be1a9b335be9c91864f6104ebdb",
+        "semantic_marker_present": "PHASE44D_SESSION_ALPHA",
+        "foreign_marker_absent": "PHASE44D_SESSION_BETA"
+      },
+      {
+        "trace_id": "neural_trace_20260712-122409-84deefc1",
+        "run_id": "agent_run_20260712-122400-4ca6d1dc",
+        "module_name": "scene_planner",
+        "input_digest": "319d4cf3858701c961b09ed44299251f2ebe62cfac516bb0d321d9a108239ed8",
+        "semantic_marker_present": "PHASE44D_SESSION_BETA",
+        "foreign_marker_absent": "PHASE44D_SESSION_ALPHA"
+      },
+      {
+        "trace_id": "neural_trace_20260712-122413-b27cdfbf",
+        "run_id": "agent_run_20260712-122355-0b8b2309",
+        "module_name": "writing_card_director",
+        "direction_marker_present": "PHASE44D_SESSION_ALPHA"
+      },
+      {
+        "trace_id": "neural_trace_20260712-122417-cd276e7b",
+        "run_id": "agent_run_20260712-122400-4ca6d1dc",
+        "module_name": "writing_card_director",
+        "direction_marker_present": "PHASE44D_SESSION_BETA"
+      }
+    ]
+  },
+  "retry_semantics": {
+    "result": "PASS",
+    "contract": "new_honest_execution_with_distinct_trace_id",
+    "same_session_bundle_and_run_preserved": true,
+    "first_success_trace_preserved": true,
+    "output_hash_difference_required": false,
+    "alpha_character_simulator_attempts": [
+      {
+        "attempt": 1,
+        "trace_id": "neural_trace_20260712-122438-44d0f4f1",
+        "output_hash": "c3045babfdaebce6e0d71b39750a96a1d5b35370f4713e6a8bd29afcc8be00c2",
+        "status": "success"
+      },
+      {
+        "attempt": 2,
+        "trace_id": "neural_trace_20260712-122442-6079a23c",
+        "output_hash": "d963aec9348bd3c98e4051ad058c3caaa465757eaba7ae4ad77c1fce2bb3d059",
+        "status": "success"
+      }
+    ]
+  },
+  "raw_story_integrity": {
+    "result": "PASS",
+    "alpha": {
+      "raw_story_text": "PHASE44D_RAW_ALPHA\n雨點敲在封閉月台的玻璃頂棚上。Alpha站在黃線內側，沒有回頭，只把掌心那枚仍帶餘溫的金屬片握得更緊。遠處的號誌由紅轉白，卻沒有列車進站。",
+      "independently_computed_sha256": "bab7b0dba68725b1b70d53b9819f88d2397505d603bc4eaa630a38b7a10c9d9f",
+      "final_polisher_attempts": [
+        {
+          "attempt": 1,
+          "trace_id": "neural_trace_20260712-122530-4c863f92",
+          "returned_raw_story_sha256": "bab7b0dba68725b1b70d53b9819f88d2397505d603bc4eaa630a38b7a10c9d9f"
+        },
+        {
+          "attempt": 2,
+          "trace_id": "neural_trace_20260712-122538-4303453b",
+          "returned_raw_story_sha256": "bab7b0dba68725b1b70d53b9819f88d2397505d603bc4eaa630a38b7a10c9d9f"
+        }
+      ]
+    },
+    "beta": {
+      "raw_story_text": "PHASE44D_RAW_BETA\n風從空橋盡頭灌進來。Beta把寫著座標的紙條折成四次，塞進外套內袋，隨後關掉唯一亮著的終端。城市下方的警報聲晚了三秒才響起。",
+      "independently_computed_sha256": "6c3b8b7f4a0f97c080f96050b74629eb57831a3ffc931b38e8baf450dce565fe",
+      "final_polisher_attempts": [
+        {
+          "attempt": 1,
+          "trace_id": "neural_trace_20260712-122559-7fc48ec0",
+          "returned_raw_story_sha256": "6c3b8b7f4a0f97c080f96050b74629eb57831a3ffc931b38e8baf450dce565fe"
+        }
+      ]
+    },
+    "alpha_beta_hashes_distinct": true
+  },
+  "failure_trace_honesty": {
+    "result": "PASS",
+    "no_success_trace_on_block": true,
+    "no_fake_output_hash_on_block": true,
+    "no_semantic_success_payload_on_block": true,
+    "premature_final_polisher_blocks": [
+      {
+        "session": "alpha",
+        "reason": "final_polisher is post-generation and requires all pre-generation capabilities first: neural_critic, style_drift_detector, over_governance_detector."
+      },
+      {
+        "session": "beta",
+        "reason": "final_polisher is post-generation and requires all pre-generation capabilities first: character_simulator."
+      }
+    ]
+  },
+  "mutation_guards": {
+    "scope": "all_live_responses",
+    "candidate_created": false,
+    "canon_updated": false,
+    "active_engine_updated": false,
+    "adopted": false,
+    "settled": false
+  },
+  "reconnect_gate": {
+    "available_real_chatgpt_connector_controls": {
+      "explicitly_close_current_mcp_client": false,
+      "create_known_distinct_mcp_client": false,
+      "inspect_transport_client_identity": false
+    },
+    "production_failure": false,
+    "regression_and_live_evidence_conflated": false,
+    "explicit_real_chatgpt_reconnect_lifecycle_acceptance": "NOT DIRECTLY PROVABLE FROM AVAILABLE CONNECTOR CONTROLS",
+    "full_real_current_chatgpt_reconnect_acceptance": "NOT YET PASS"
+  },
+  "repository_state": {
+    "implementation_commit": "d8c01c2d5521a6f896e67aa3f3135848293ea112",
+    "implementation_tag": "phase44d-external-brain-session-retry-reconnect-isolation-trace-integrity-guard",
+    "implementation_tag_moved": false,
+    "fully_closed_tag_created": false,
+    "main_merge": "NOT YET",
+    "phase44e": "NOT STARTED"
+  }
+}
