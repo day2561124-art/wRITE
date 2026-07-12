@@ -119,6 +119,13 @@ export async function createAgentRun(input = {}) {
     mode: input.mode ? requireString(input.mode, "mode", 50) : "local",
     requires_neural_modules: requiresNeuralModules,
     required_neural_modules: requiredNeuralModules,
+    ...(input.external_brain_context_bundle_id ? {
+      external_brain_context_bundle_id: requireString(
+        input.external_brain_context_bundle_id,
+        "external_brain_context_bundle_id",
+        100,
+      ),
+    } : {}),
     status: "running",
     input_hash: input.input_hash
       ? requireString(input.input_hash, "input_hash", 64)

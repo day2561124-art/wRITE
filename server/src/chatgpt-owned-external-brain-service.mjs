@@ -49,6 +49,8 @@ const safety = Object.freeze({
   settled: false,
 });
 
+export const externalBrainMutationGuards = safety;
+
 const compactBootstrapCapabilities = Object.freeze([
   "scene_planner",
   "character_simulator",
@@ -194,6 +196,7 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
     requires_neural_modules: true,
     required_neural_modules: [...externalBrainPreGenerationCapabilities, "run_final_polisher"]
       .map((name) => name.slice(4)),
+    external_brain_context_bundle_id: context.bundle.bundle_id,
     input: JSON.stringify({
       task_prompt: input.task_prompt,
       writing_context_bundle_id: context.bundle.bundle_id,
@@ -223,6 +226,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   const run = await getAgentRun(runId);
   if (run.mode !== externalBrainOwnership.orchestration_mode) {
     throw new Error("agent_run_id is not a ChatGPT-owned external brain writing session.");
+  }
+  if (run.external_brain_context_bundle_id !== contextBundleId) {
+    throw new Error("writing_context_bundle_id is not bound to the external brain session.");
   }
   const context = await getGptWritingContextBundle(contextBundleId, options);
   const isFinalPolisher = capabilityName === "run_final_polisher";

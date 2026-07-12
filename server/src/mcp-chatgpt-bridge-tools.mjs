@@ -53,6 +53,7 @@ import {
 import { buildChatgptNativeNeuralWritingHandoff } from "./chatgpt-native-neural-writing-handoff-service.mjs";
 import {
   beginChatgptOwnedExternalBrainWritingSession,
+  externalBrainMutationGuards,
   useChatgptOwnedExternalBrainCapability,
 } from "./chatgpt-owned-external-brain-service.mjs";
 
@@ -11801,7 +11802,8 @@ function externalBrainCapabilityTool(name, capabilityName) {
         full_neural_orchestrator_used: false,
         blocked: true,
         blocked_reason: error.message,
-        mutation_guards: { ...chatgptBridgeSafety },
+        mutation_guards: { ...externalBrainMutationGuards },
+        ...externalBrainMutationGuards,
       };
     }
   };

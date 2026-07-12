@@ -661,6 +661,10 @@ const steps = [
 
   ["Phase 44C real ChatGPT live acceptance closure evidence", ["tests/phase44/phase44c-real-chatgpt-live-acceptance-closure.test.mjs"]],
 
+  ["Phase 44D external brain session binding isolation trace integrity", ["tests/phase44/phase44d-external-brain-session-binding-isolation-trace-integrity.test.mjs"]],
+
+  ["Phase 44D production HTTP MCP reconnect retry continuity regression", ["tests/phase44/phase44d-http-mcp-reconnect-retry-continuity-regression.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];
