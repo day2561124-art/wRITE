@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertImmediateRegistrationAdjacency } from "../helpers/registration-adjacency-assertion.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), "..", "..");
 const CURRENT_PHASE = "Phase43F";
@@ -279,11 +281,12 @@ const phase43ERegistration =
 const phase43FRegistration =
   '  ["Phase 43F production candidate store promotion gate sealed chain metadata-only read-only status inspection capability invocation authorization smoke", ["tests/phase43/phase43f-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-invocation-authorization-smoke.test.mjs"]],';
 assert.equal(countOccurrences(runAllText, currentTestPath), 1);
-assert.equal(
-  runAllText.includes(`${phase43ERegistration}\n${phase43FRegistration}`),
-  true,
-  "Phase43F registration must be immediately after Phase43E"
-);
+assertImmediateRegistrationAdjacency({
+  sourceText: runAllText,
+  previousRegistration: phase43ERegistration,
+  currentRegistration: phase43FRegistration,
+  message: "Phase43F registration must be immediately after Phase43E",
+});
 
 const currentSource = readRepoFile(currentTestPath);
 for (const pattern of [

@@ -7,6 +7,18 @@ const evidencePath = path.join(root, "config", "phase44c-real-chatgpt-live-accep
 const rawEvidence = await readFile(evidencePath, "utf8");
 const evidence = JSON.parse(rawEvidence);
 
+function normalizeLineEndings(text) {
+  return text.replace(/\r\n?/gu, "\n");
+}
+
+function assertCanonicalEvidenceSerialization(text, parsedEvidence) {
+  assert.equal(
+    normalizeLineEndings(text),
+    `${JSON.stringify(parsedEvidence, null, 2)}\n`,
+    "evidence serialization must remain deterministic",
+  );
+}
+
 const expectedTools = [
   "chatgpt_bridge_begin_external_brain_writing_session",
   "chatgpt_bridge_use_scene_planner",
@@ -46,7 +58,18 @@ const expectedOutputHashes = [
 ];
 const runId = "agent_run_20260711-222938-fdcf8650";
 
-assert.equal(rawEvidence, `${JSON.stringify(evidence, null, 2)}\n`, "evidence serialization must remain deterministic");
+const canonicalEvidence = `${JSON.stringify(evidence, null, 2)}\n`;
+assert.doesNotThrow(() => assertCanonicalEvidenceSerialization(canonicalEvidence, evidence));
+assert.doesNotThrow(() => assertCanonicalEvidenceSerialization(canonicalEvidence.replace(/\n/gu, "\r\n"), evidence));
+assert.throws(
+  () => assertCanonicalEvidenceSerialization(canonicalEvidence.replace('"schema_version": 1', '"schema_version": 2'), evidence),
+  { name: "AssertionError" },
+);
+assert.throws(
+  () => assertCanonicalEvidenceSerialization(canonicalEvidence.replace('  "schema_version"', '   "schema_version"'), evidence),
+  { name: "AssertionError" },
+);
+assertCanonicalEvidenceSerialization(rawEvidence, evidence);
 assert.equal(evidence.schema_version, 1);
 assert.equal(evidence.phase, "44C");
 assert.equal(evidence.evidence_kind, "real_chatgpt_live_acceptance_closure");

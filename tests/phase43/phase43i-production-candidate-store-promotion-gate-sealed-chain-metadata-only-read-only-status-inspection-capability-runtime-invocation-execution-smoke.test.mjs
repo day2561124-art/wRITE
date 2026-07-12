@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { assertImmediateRegistrationAdjacency } from "../helpers/registration-adjacency-assertion.mjs";
 import { inspectSealedChainClosureMetadata } from "../../server/src/inspect-sealed-chain-closure-metadata-service.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -322,7 +324,12 @@ const phase43IRegistration =
   '  ["Phase 43I production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation execution smoke", ["tests/phase43/phase43i-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-execution-smoke.test.mjs"]],';
 assert.equal(countOccurrences(runAllText, currentTestPath), 1);
 assert.equal(countOccurrences(runAllText, phase43IRegistration), 1);
-assert.equal(runAllText.includes(`${phase43HRegistration}\n${phase43IRegistration}`), true);
+assertImmediateRegistrationAdjacency({
+  sourceText: runAllText,
+  previousRegistration: phase43HRegistration,
+  currentRegistration: phase43IRegistration,
+  message: "Phase43I registration must be immediately after Phase43H",
+});
 
 const nextPhaseGuidance = Object.freeze({
   status: "runtime_invocation_execution_completed",

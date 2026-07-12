@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertImmediateRegistrationAdjacency } from "../helpers/registration-adjacency-assertion.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -738,11 +740,12 @@ const phase43BRegistration =
 
 assert.equal(countOccurrences(runAllText, phase43APath), 1);
 assert.equal(countOccurrences(runAllText, currentTestPath), 1);
-assert.equal(
-  runAllText.includes(`${phase43ARegistration}\n${phase43BRegistration}`),
-  true,
-  "Phase43B registration must be immediately after Phase43A"
-);
+assertImmediateRegistrationAdjacency({
+  sourceText: runAllText,
+  previousRegistration: phase43ARegistration,
+  currentRegistration: phase43BRegistration,
+  message: "Phase43B registration must be immediately after Phase43A",
+});
 
 assertRejected(
   previewPhase43BStatusInspectionCapabilityContract({ userRequest: "Continue ordinary work." }),

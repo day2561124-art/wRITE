@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertImmediateRegistrationAdjacency } from "../helpers/registration-adjacency-assertion.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -634,11 +636,48 @@ const phase42VRegistration =
   '  ["Phase 42V production candidate store promotion gate final closure operator handoff seal", ["tests/phase42/phase42v-production-candidate-store-promotion-gate-final-closure-operator-handoff-seal.test.mjs"]],';
 const phase43ARegistration =
   '  ["Phase 43A production candidate store promotion gate sealed chain explicit scope acceptance smoke", ["tests/phase43/phase43a-production-candidate-store-promotion-gate-sealed-chain-explicit-scope-acceptance-smoke.test.mjs"]],';
-assert.equal(
-  runAllText.includes(`${phase42VRegistration}\n${phase43ARegistration}`),
-  true,
-  "Phase43A registration must be immediately after Phase42V"
+const canonicalRegistrationPair = `${phase42VRegistration}\n${phase43ARegistration}`;
+const assertSyntheticAdjacency = (sourceText) => assertImmediateRegistrationAdjacency({
+  sourceText,
+  previousRegistration: phase42VRegistration,
+  currentRegistration: phase43ARegistration,
+  message: "synthetic registration adjacency must remain exact",
+});
+assert.doesNotThrow(() => assertSyntheticAdjacency(canonicalRegistrationPair));
+assert.doesNotThrow(() => assertSyntheticAdjacency(canonicalRegistrationPair.replace(/\n/gu, "\r\n")));
+assert.doesNotThrow(() => assertSyntheticAdjacency(canonicalRegistrationPair.replace(/\n/gu, "\r")));
+assert.throws(
+  () => assertSyntheticAdjacency(
+    `${phase42VRegistration}\n  ["Intervening regression", ["tests/intervening.test.mjs"]],\n${phase43ARegistration}`,
+  ),
+  { name: "AssertionError" },
 );
+assert.throws(
+  () => assertSyntheticAdjacency(`${phase43ARegistration}\n${phase42VRegistration}`),
+  { name: "AssertionError" },
+);
+assert.throws(
+  () => assertSyntheticAdjacency(canonicalRegistrationPair.replace(phase42VRegistration, "")),
+  { name: "AssertionError" },
+);
+assert.throws(
+  () => assertSyntheticAdjacency(canonicalRegistrationPair.replace(phase43ARegistration, "")),
+  { name: "AssertionError" },
+);
+assert.throws(
+  () => assertSyntheticAdjacency(canonicalRegistrationPair.replace("phase43a-production", "phase43b-production")),
+  { name: "AssertionError" },
+);
+assert.throws(
+  () => assertSyntheticAdjacency(canonicalRegistrationPair.replace("Phase 43A", "Phase 43Z")),
+  { name: "AssertionError" },
+);
+assertImmediateRegistrationAdjacency({
+  sourceText: runAllText,
+  previousRegistration: phase42VRegistration,
+  currentRegistration: phase43ARegistration,
+  message: "Phase43A registration must be immediately after Phase42V",
+});
 
 assertRejected(
   previewPhase43AExplicitScopeAcceptance({
