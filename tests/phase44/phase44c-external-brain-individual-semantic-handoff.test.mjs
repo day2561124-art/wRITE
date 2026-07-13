@@ -76,6 +76,7 @@ const polished = await chatgpt_bridge_use_final_polisher({
   external_brain_session_id: session.external_brain_session_id,
   writing_context_bundle_id: session.writing_context_bundle_id,
   raw_story_text: rawStory,
+  raw_story_sha256: sha256(rawStory),
 }, { adapter: async () => finalSemanticOutput });
 assert.equal(polished.ok, true);
 assert.equal(polished.architecture_route, "chatgpt_owned_external_brain");

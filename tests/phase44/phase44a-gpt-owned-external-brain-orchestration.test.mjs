@@ -149,6 +149,7 @@ try {
       external_brain_session_id: session.external_brain_session_id,
       writing_context_bundle_id: session.writing_context_bundle_id,
       raw_story_text: rawStory,
+      raw_story_sha256: sha256(rawStory),
     },
   }));
   assert.equal(polished.tool_name, "chatgpt_bridge_use_final_polisher");

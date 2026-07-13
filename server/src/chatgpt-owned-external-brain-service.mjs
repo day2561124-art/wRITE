@@ -128,6 +128,10 @@ function requiredText(value, label) {
   return value;
 }
 
+function validSha256(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
 function sessionId(input = {}) {
   return input.external_brain_session_id ?? input.agent_run_id ?? input.run_id;
 }
@@ -166,9 +170,7 @@ export function buildFinalPolisherEditorialContract(rawStoryText) {
     editorial_strategy: {
       primary: "editorial_subtraction",
       principle: "When the draft is already strong, prefer deletion, de-synchronization, compression, or silence over beautification.",
-      preferred_operations: ["deletion", "de_synchronization", "compression", "silence"],
       prohibited_defaults: ["prose_beautification", "adjective_augmentation", "sensory_detail_injection", "metaphor_generation"],
-      total_priority: "Natural human-written Traditional Chinese; evidence-bound editing; living irregularity, canon, and causality; no beautification, forced theme completion, or proof-of-work revision.",
     },
     findings: [
       {
@@ -485,9 +487,55 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   }
   const context = await getGptWritingContextBundle(contextBundleId, options);
   const isFinalPolisher = capabilityName === "run_final_polisher";
+  const generationBoundary = isFinalPolisher ? "post_generation" : "pre_generation";
   const rawStoryText = isFinalPolisher
     ? requiredText(input.raw_story_text, "raw_story_text")
     : null;
+  const declaredRawStorySha256 = isFinalPolisher ? input.raw_story_sha256 : null;
+  const receivedRawStorySha256 = isFinalPolisher ? sha256(rawStoryText) : null;
+  if (isFinalPolisher) {
+    const declaredFormatValid = validSha256(declaredRawStorySha256);
+    const exactMatch = declaredFormatValid && declaredRawStorySha256 === receivedRawStorySha256;
+    if (!exactMatch) {
+      const integrityStatus = declaredFormatValid ? "mismatch" : "invalid_declared_hash";
+      return {
+        ok: false,
+        tool_name: "chatgpt_bridge_use_final_polisher",
+        architecture_route: externalBrainOwnership.orchestration_mode,
+        capability_name: capabilityName,
+        generation_boundary: generationBoundary,
+        orchestration_owner: "ChatGPT",
+        prose_generator: "ChatGPT",
+        full_neural_orchestrator_used: false,
+        external_brain_session_id: runId,
+        writing_context_bundle_id: contextBundleId,
+        raw_story_integrity: {
+          guard_used: true,
+          status: integrityStatus,
+          declared_raw_story_sha256: declaredFormatValid ? declaredRawStorySha256 : declaredRawStorySha256 ?? null,
+          received_raw_story_sha256: receivedRawStorySha256,
+          exact_match: false,
+          blocked_stage: "raw_story_handoff_integrity",
+          final_polisher_executed: false,
+        },
+        capability_output: null,
+        blocked: true,
+        blocked_reason: declaredFormatValid
+          ? "raw_story_handoff_integrity mismatch: declared raw_story_sha256 does not match the exact received raw_story_text; final_polisher was not executed."
+          : "raw_story_sha256 is required and must be exactly 64 lowercase hexadecimal characters; final_polisher was not executed.",
+        trace: {
+          trace_id: null,
+          run_id: runId,
+          module_name: "final_polisher",
+          status: "not_executed",
+          output_hash: null,
+        },
+        agent_run_status: run.status,
+        mutation_guards: { ...safety },
+        ...safety,
+      };
+    }
+  }
   if (isFinalPolisher) {
     const usage = await summarizeNeuralUsageForRun(runId);
     const completed = new Set(usage.neural_modules_used ?? []);
@@ -498,7 +546,6 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       throw new Error(`final_polisher is post-generation and requires all pre-generation capabilities first: ${missing.join(", ")}.`);
     }
   }
-  const generationBoundary = isFinalPolisher ? "post_generation" : "pre_generation";
   let techniqueSelection = null;
   if (capabilityName === "run_writing_card_director") {
     try {
@@ -527,7 +574,8 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     module_name: capabilityName,
     generation_boundary: generationBoundary,
     raw_story_text: rawStoryText,
-    raw_story_sha256: sha256(rawStoryText),
+    raw_story_sha256: receivedRawStorySha256,
+    declared_raw_story_sha256: declaredRawStorySha256,
     writing_context_bundle_id: contextBundleId,
     capability_input: input.capability_input ?? {},
   } : {
@@ -560,7 +608,18 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     full_neural_orchestrator_used: false,
     external_brain_session_id: runId,
     writing_context_bundle_id: contextBundleId,
-    ...(isFinalPolisher ? { raw_story_sha256: sha256(rawStoryText) } : {}),
+    ...(isFinalPolisher ? {
+      raw_story_sha256: receivedRawStorySha256,
+      raw_story_integrity: {
+        guard_used: true,
+        status: "matched",
+        declared_raw_story_sha256: declaredRawStorySha256,
+        received_raw_story_sha256: receivedRawStorySha256,
+        exact_match: true,
+        blocked_stage: null,
+        final_polisher_executed: true,
+      },
+    } : {}),
     capability_output: execution.output,
     trace: {
       trace_id: execution.trace?.trace_id ?? null,

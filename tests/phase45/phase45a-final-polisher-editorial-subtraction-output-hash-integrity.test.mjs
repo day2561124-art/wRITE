@@ -113,6 +113,7 @@ try {
     external_brain_session_id: session.external_brain_session_id,
     writing_context_bundle_id: session.writing_context_bundle_id,
     raw_story_text: specimen,
+    raw_story_sha256: sha256(specimen),
   });
   assert.equal(premature.ok, false);
   assert.match(premature.blocked_reason, /requires all pre-generation capabilities first/iu);
@@ -133,6 +134,7 @@ try {
     external_brain_session_id: session.external_brain_session_id,
     writing_context_bundle_id: session.writing_context_bundle_id,
     raw_story_text: specimen,
+    raw_story_sha256: sha256(specimen),
   });
   assert.equal(polished.ok, true);
   assert.equal(polished.generation_boundary, "post_generation");

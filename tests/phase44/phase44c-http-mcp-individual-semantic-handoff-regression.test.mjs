@@ -129,6 +129,7 @@ try {
       external_brain_session_id: begin.external_brain_session_id,
       writing_context_bundle_id: begin.writing_context_bundle_id,
       raw_story_text: rawStory,
+      raw_story_sha256: sha256(rawStory),
     },
   }));
   assertCommon(finalResult.payload, finalResult.bytes, "final_polisher", begin, "post_generation");

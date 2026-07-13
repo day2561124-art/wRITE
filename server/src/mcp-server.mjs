@@ -2122,14 +2122,15 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_final_polisher",
-    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. Call only after ChatGPT has generated raw story prose; raw_story_text is required and its raw_story_sha256 is returned with a dedicated final_polisher neural trace. Writer Workbench returns an evidence-bound subtractive whole-draft editorial contract, never rewritten or final prose; ChatGPT remains the final prose generator and emitter. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
+    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. The caller must submit exact raw_story_text plus its predeclared lowercase raw_story_sha256; runtime hashes the exact received string and hard-blocks before final_polisher execution on invalid format or mismatch. A match returns an evidence-bound subtractive editorial contract and dedicated trace; ChatGPT remains the final prose generator. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },
       writing_context_bundle_id: { type: "string" },
       raw_story_text: { type: "string", maxLength: 250000 },
+      raw_story_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
       capability_input: { type: "object" },
-    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text"]),
+    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_final_polisher(args)),
   },
   {

@@ -665,6 +665,8 @@ const steps = [
 
   ["Phase 46A existing-neural human-prose cognition upgrade", ["tests/phase46/phase46a-existing-neural-human-prose-cognition-upgrade.test.mjs"]],
 
+  ["Phase 46C immutable raw-story handoff integrity guard", ["tests/phase46/phase46c-chatgpt-owned-immutable-raw-story-handoff-integrity-guard.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];
