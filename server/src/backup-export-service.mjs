@@ -1,8 +1,13 @@
-import { mkdir, readdir, stat, readFile, writeFile, copyFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readdir, stat, readFile, writeFile, copyFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { pipeline } from "node:stream/promises";
 import { projectPaths, assertPathInside, projectRoot, normalizeProjectPath, resolveProjectPath } from "./project-paths.mjs";
 import { createApprovalItem } from "./approval-queue-service.mjs";
+
+export const DEFAULT_BACKUP_IO_CONCURRENCY = 4;
 
 function json(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -22,6 +27,7 @@ async function walkDirectory(root, options = {}) {
   const entries = [];
   async function walk(dir) {
     const items = await readdir(dir, { withFileTypes: true });
+    items.sort((left, right) => left.name.localeCompare(right.name));
     for (const it of items) {
       const full = path.join(dir, it.name);
       if (it.isDirectory()) await walk(full);
@@ -32,18 +38,126 @@ async function walkDirectory(root, options = {}) {
   return entries;
 }
 
-export async function createProjectBackup({ includeVisualAssets = false, createdBy = "system", note = null } = {}) {
-  await mkdir(projectPaths.projectBackups, { recursive: true });
+async function mapWithBoundedConcurrency(items, concurrency, operation) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  let active = 0;
+  let maxActive = 0;
+  let firstError = null;
+
+  async function worker() {
+    while (firstError === null) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        results[index] = await operation(items[index], index);
+      } catch (error) {
+        if (firstError === null) firstError = error;
+      } finally {
+        active -= 1;
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(items.length, 1)) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  if (firstError !== null) throw firstError;
+  return { results, maxActive };
+}
+
+async function copyAndHashFile(sourcePath, destinationPath) {
+  const hash = crypto.createHash("sha256");
+  let sizeBytes = 0;
+  await pipeline(
+    createReadStream(sourcePath),
+    async function* hashExactBytes(chunks) {
+      for await (const chunk of chunks) {
+        hash.update(chunk);
+        sizeBytes += chunk.length;
+        yield chunk;
+      }
+    },
+    createWriteStream(destinationPath, { flags: "wx" }),
+  );
+  return {
+    size_bytes: sizeBytes,
+    sha256: hash.digest("hex"),
+  };
+}
+
+function validateConcurrency(value) {
+  if (!Number.isInteger(value) || value < 1 || value > 16) {
+    throw new Error("ioConcurrency must be an integer between 1 and 16.");
+  }
+  return value;
+}
+
+function isPathInside(basePath, targetPath) {
+  const relative = path.relative(basePath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export async function createProjectBackup({
+  includeVisualAssets = false,
+  createdBy = "system",
+  note = null,
+  sourceScopes = null,
+  destinationRoot = projectPaths.projectBackups,
+  ioConcurrency = DEFAULT_BACKUP_IO_CONCURRENCY,
+  onEvent = null,
+} = {}) {
+  const startedAt = performance.now();
+  const concurrency = validateConcurrency(ioConcurrency);
+  const resolvedDestinationRoot = resolveProjectPath(destinationRoot, "backup destination root");
+  await mkdir(resolvedDestinationRoot, { recursive: true });
   const backupId = makeId("project_backup");
-  const dir = path.join(projectPaths.projectBackups, backupId);
-  await mkdir(dir, { recursive: true });
+  const dir = path.join(resolvedDestinationRoot, backupId);
+  const stagingDir = path.join(resolvedDestinationRoot, `.${backupId}.staging`);
   // Define scopes to include and copy files into backup/files/
-  const scopes = [
+  const defaultScopes = [
     { root: projectPaths.outputs, category: "outputs" },
     { root: projectPaths.canonDb, category: "canon_db" },
     { root: projectPaths.writingWorkflow, category: "writing_workflow" },
   ];
-  if (includeVisualAssets === true) scopes.push({ root: projectPaths.visualDb, category: "visual_db" });
+  if (includeVisualAssets === true) defaultScopes.push({ root: projectPaths.visualDb, category: "visual_db" });
+  const scopes = (sourceScopes ?? defaultScopes).map((scope, index) => {
+    if (!scope || typeof scope.category !== "string" || !scope.category.trim()) {
+      throw new Error(`Backup source scope ${index} requires a category.`);
+    }
+    const root = resolveProjectPath(scope.root, `backup source scope ${scope.category}`);
+    if (isPathInside(root, resolvedDestinationRoot)) {
+      throw new Error(`Backup destination cannot be inside source scope ${scope.category}.`);
+    }
+    return { root, category: scope.category };
+  });
+
+  const diagnostics = {
+    io_concurrency_bound: concurrency,
+    max_concurrent_file_operations: 0,
+    source_traversal_passes: 0,
+    files_discovered: 0,
+    files_exported: 0,
+    source_content_streams: 0,
+    destination_hash_reads: 0,
+    stage_ms: {
+      traversal: 0,
+      directory_creation: 0,
+      copy_and_hash: 0,
+      manifest_write: 0,
+      finalization: 0,
+      total: 0,
+    },
+  };
+
+  async function emit(event) {
+    if (typeof onEvent === "function") await onEvent(event);
+  }
 
   const manifest = {
     backup_id: backupId,
@@ -54,11 +168,9 @@ export async function createProjectBackup({ includeVisualAssets = false, created
     files: [],
   };
 
-  const filesRoot = path.join(dir, "files");
-  await mkdir(filesRoot, { recursive: true });
+  const filesRoot = path.join(stagingDir, "files");
 
-  function shouldExclude(filePath) {
-    const rel = normalizeProjectPath(filePath);
+  function shouldExclude(rel) {
     if (rel.startsWith("node_modules/")) return true;
     if (rel.startsWith(".git/")) return true;
     if (rel.startsWith("data/backups/")) return true;
@@ -69,49 +181,125 @@ export async function createProjectBackup({ includeVisualAssets = false, created
     return false;
   }
 
-  for (const scope of scopes) {
-    try {
+  try {
+    await mkdir(filesRoot, { recursive: true });
+    const filePlans = [];
+    const traversalStartedAt = performance.now();
+    for (const scope of scopes) {
+      await emit({ type: "scope-traversal-start", category: scope.category, root: scope.root });
       const files = await walkDirectory(scope.root);
+      diagnostics.source_traversal_passes += 1;
       for (const f of files) {
         const rel = normalizeProjectPath(f);
-        if (shouldExclude(f)) continue;
-        // backup relative path under files/
+        if (shouldExclude(rel)) continue;
         const backupRelative = path.posix.join("files", rel);
-        const dest = path.join(dir, backupRelative);
-        await mkdir(path.dirname(dest), { recursive: true });
-        await copyFile(f, dest);
-        const s = await stat(dest);
-        const sha = await computeSha256(dest);
-        manifest.files.push({
-          relative_path: rel,
-          backup_relative_path: backupRelative,
-          size_bytes: s.size,
-          sha256: sha,
+        filePlans.push({
+          sourcePath: f,
+          destinationPath: path.join(stagingDir, backupRelative),
+          relativePath: rel,
+          backupRelativePath: backupRelative,
           category: scope.category,
         });
-        // record active_engine hash if this is the active engine
-        if (rel === normalizeProjectPath(projectPaths.activeEngine)) {
-          manifest.active_engine_hash = sha;
-        }
       }
-    } catch (error) {
-      // ignore missing scopes
+      await emit({ type: "scope-traversal-complete", category: scope.category, files: files.length });
     }
-  }
+    diagnostics.stage_ms.traversal = performance.now() - traversalStartedAt;
+    diagnostics.files_discovered = filePlans.length;
 
-  // write backup.json, manifest.json, README.md
-  const backupJson = { backup_id: backupId, created_at: manifest.created_at, created_by: createdBy, note: manifest.note };
-  await writeFile(path.join(dir, "backup.json"), json(backupJson), "utf8");
-  await writeFile(path.join(dir, "manifest.json"), json(manifest), "utf8");
-  const readme = `Backup: ${backupId}\nCreated: ${manifest.created_at}\nFiles: ${manifest.files.length}\n`;
-  await writeFile(path.join(dir, "README.md"), readme, "utf8");
-  return { backup_id: backupId, path: dir };
+    const directoryStartedAt = performance.now();
+    const destinationDirectories = [...new Set(filePlans.map((plan) => path.dirname(plan.destinationPath)))].sort();
+    const directoryResult = await mapWithBoundedConcurrency(
+      destinationDirectories,
+      concurrency,
+      (directoryPath) => mkdir(directoryPath, { recursive: true }),
+    );
+    diagnostics.max_concurrent_file_operations = Math.max(
+      diagnostics.max_concurrent_file_operations,
+      directoryResult.maxActive,
+    );
+    diagnostics.stage_ms.directory_creation = performance.now() - directoryStartedAt;
+
+    const copyStartedAt = performance.now();
+    const copyResult = await mapWithBoundedConcurrency(filePlans, concurrency, async (plan, index) => {
+      await emit({
+        type: "file-copy-start",
+        index,
+        source_path: plan.sourcePath,
+        relative_path: plan.relativePath,
+      });
+      let integrity;
+      try {
+        integrity = await copyAndHashFile(plan.sourcePath, plan.destinationPath);
+      } catch (error) {
+        throw new Error(`Failed to export ${plan.relativePath}: ${error.message}`, { cause: error });
+      }
+      diagnostics.source_content_streams += 1;
+      await emit({
+        type: "file-copy-complete",
+        index,
+        relative_path: plan.relativePath,
+        size_bytes: integrity.size_bytes,
+        sha256: integrity.sha256,
+      });
+      return {
+        relative_path: plan.relativePath,
+        backup_relative_path: plan.backupRelativePath,
+        size_bytes: integrity.size_bytes,
+        sha256: integrity.sha256,
+        category: plan.category,
+      };
+    });
+    diagnostics.max_concurrent_file_operations = Math.max(
+      diagnostics.max_concurrent_file_operations,
+      copyResult.maxActive,
+    );
+    diagnostics.stage_ms.copy_and_hash = performance.now() - copyStartedAt;
+    manifest.files = copyResult.results;
+    diagnostics.files_exported = manifest.files.length;
+    const activeEngineRelativePath = normalizeProjectPath(projectPaths.activeEngine);
+    manifest.active_engine_hash = manifest.files.find(
+      (file) => file.relative_path === activeEngineRelativePath,
+    )?.sha256 ?? null;
+
+    const manifestStartedAt = performance.now();
+    const backupJson = { backup_id: backupId, created_at: manifest.created_at, created_by: createdBy, note: manifest.note };
+    await writeFile(path.join(stagingDir, "backup.json"), json(backupJson), "utf8");
+    await writeFile(path.join(stagingDir, "manifest.json"), json(manifest), "utf8");
+    const readme = `Backup: ${backupId}\nCreated: ${manifest.created_at}\nFiles: ${manifest.files.length}\n`;
+    await writeFile(path.join(stagingDir, "README.md"), readme, "utf8");
+    diagnostics.stage_ms.manifest_write = performance.now() - manifestStartedAt;
+
+    const finalizationStartedAt = performance.now();
+    await rename(stagingDir, dir);
+    diagnostics.stage_ms.finalization = performance.now() - finalizationStartedAt;
+    diagnostics.stage_ms.total = performance.now() - startedAt;
+    return { backup_id: backupId, path: dir, diagnostics };
+  } catch (error) {
+    try {
+      await rm(stagingDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      error.cleanup_error = cleanupError.message;
+    }
+    throw error;
+  }
 }
 
 export async function listProjectBackups() {
   try {
     const entries = await readdir(projectPaths.projectBackups, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((d) => d.name).sort().reverse();
+    const completed = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("project_backup_")) continue;
+      const directory = path.join(projectPaths.projectBackups, entry.name);
+      try {
+        await stat(path.join(directory, "backup.json"));
+        await stat(path.join(directory, "manifest.json"));
+        completed.push(entry.name);
+      } catch {
+        // Incomplete historical or interrupted artifacts are not completed backups.
+      }
+    }
+    return completed.sort().reverse();
   } catch (error) {
     return [];
   }

@@ -52,6 +52,8 @@ const steps = [
 
   ["Cleanup proposal service", ["tests/cleanup/cleanup-proposal-service.test.mjs"]],
 
+  ["Phase47A backup export scaling portable regression", ["tests/phase47/phase47a-backup-export-scaling-regression.test.mjs"]],
+
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
 
   ["Phase 20 contracts", ["tests/phase20/phase20-contract.test.mjs"]],
