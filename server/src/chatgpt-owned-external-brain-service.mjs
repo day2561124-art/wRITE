@@ -60,6 +60,65 @@ const compactBootstrapCapabilities = Object.freeze([
   "writing_card_director",
 ]);
 
+const writingTechniqueFamilyMethods = Object.freeze({
+  constraint_driven_conflict: Object.freeze([
+    "incorrect hypothesis",
+    "observation → test → cost → revision",
+    "physical position reasoning",
+    "character choice changes actual state",
+    "growth shown through changed action",
+  ]),
+  restriction_and_pressure: Object.freeze([
+    "restrictions entangled with character pressure",
+    "information asymmetry",
+    "unresolved pressure affecting later ordinary action",
+  ]),
+  relational_comedy: Object.freeze([
+    "relationships can exist without progressing every scene",
+    "natural useless banter",
+    "abrupt but earned tonal gear changes",
+  ]),
+  ensemble_motion: Object.freeze([
+    "ensemble heat",
+    "characters move independently",
+    "groups separate and naturally collide",
+  ]),
+  subtle_relationships: Object.freeze([
+    "distance change",
+    "hesitation",
+    "address form",
+    "small boundary shifts",
+  ]),
+});
+
+const availableWritingTechniqueFamilies = Object.freeze(Object.keys(writingTechniqueFamilyMethods));
+
+function resolveWritingTechniqueSelection(capabilityInput = {}) {
+  const requested = capabilityInput.selected_technique_families;
+  if (requested === undefined) {
+    return { selected_technique_families: [], active_technique_cognition: {} };
+  }
+  if (!Array.isArray(requested)) {
+    throw new Error("selected_technique_families must be an array of technique family names.");
+  }
+  const selected = [...new Set(requested)];
+  const unknown = selected.filter((family) => (
+    typeof family !== "string" || !Object.hasOwn(writingTechniqueFamilyMethods, family)
+  ));
+  if (unknown.length) {
+    throw new Error(`Unknown technique family: ${unknown.map((family) => JSON.stringify(family)).join(", ")}.`);
+  }
+  if (selected.length > 2) {
+    throw new Error(`selected_technique_families accepts at most two unique families; received ${selected.length}.`);
+  }
+  return {
+    selected_technique_families: selected,
+    active_technique_cognition: Object.fromEntries(
+      selected.map((family) => [family, [...writingTechniqueFamilyMethods[family]]]),
+    ),
+  };
+}
+
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
 }
@@ -95,6 +154,7 @@ export function buildFinalPolisherEditorialContract(rawStoryText) {
     report_status: "editorial_review_contract_ready",
     raw_story_sha256: sha256(story),
     editorial_review_required_for_success: true,
+    findings_review_mode: "requires_chatgpt_semantic_review",
     text_change_required: false,
     release_recommendation: "release_as_is",
     release_condition: "Release unchanged only after ChatGPT completes the whole-draft review and finds no material evidence-backed issue.",
@@ -108,61 +168,96 @@ export function buildFinalPolisherEditorialContract(rawStoryText) {
       principle: "When the draft is already strong, prefer deletion, de-synchronization, compression, or silence over beautification.",
       preferred_operations: ["deletion", "de_synchronization", "compression", "silence"],
       prohibited_defaults: ["prose_beautification", "adjective_augmentation", "sensory_detail_injection", "metaphor_generation"],
+      total_priority: "Natural human-written Traditional Chinese; evidence-bound editing; living irregularity, canon, and causality; no beautification, forced theme completion, or proof-of-work revision.",
     },
     findings: [
       {
         code: "pattern_saturation",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "medium",
-        evidence: evidenceBinding("Bind repeated narrative patterns to exact occurrences and identify the point after which their dramatic return diminishes."),
-        diagnosis: "Determine whether repeated synchronization, dialogue reversals, punchline rhythms, or nearby sentence shapes have already completed their narrative function and become over-saturated.",
-        revision_action: "If material, retain the strongest occurrences and delete, compress, vary, or de-synchronize later lower-yield repetitions.",
+        evidence: evidenceBinding("Bind exact repeated occurrences and mark where their dramatic return diminishes."),
+        diagnosis: "Check whether synchronization, reversals, punchline rhythms, or nearby sentence shapes have become over-saturated.",
+        revision_action: "Retain the strongest occurrence; delete, compress, vary, or de-synchronize lower-yield repetition.",
         preserve: ["causal_continuity", "character_agency", "strongest_pattern_payoff"],
       },
       {
         code: "symmetry_overcompleted",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "medium",
-        evidence: evidenceBinding("Quote or locate each parallel or mirrored beat and mark where the symmetry first becomes legible before judging later proof as excess."),
-        diagnosis: "Determine whether a mirror or parallel structure remains emotionally productive, or whether accumulated proof makes the author's design visible after the symmetry is already complete.",
-        revision_action: "Preserve the strongest emotionally productive mirror; delete, weaken, or de-synchronize weaker mirrors without damaging the core theme.",
+        evidence: evidenceBinding("Bind exact mirrored beats and mark where the symmetry first becomes legible."),
+        diagnosis: "Check whether later proof adds emotion or merely exposes design after the symmetry is complete.",
+        revision_action: "Preserve the strongest mirror; delete, weaken, or de-synchronize weaker mirrors without damaging the core theme.",
         preserve: ["core_theme", "relationship_turn", "highest_value_mirror"],
       },
       {
         code: "callback_saturation",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "medium",
-        evidence: evidenceBinding("Bind callbacks to their earlier source and state what new relationship, information, emotion, comedy, or structural meaning each recurrence adds."),
-        diagnosis: "Distinguish semantic, relationship, comic, and structural callbacks, then determine whether one class is too dense for the surrounding scene.",
-        revision_action: "Remove the weakest callbacks first and preserve callbacks that materially change relationship, information, emotion, or scene meaning.",
+        evidence: evidenceBinding("Bind each callback to its source and state what new meaning the recurrence adds."),
+        diagnosis: "Classify semantic, relationship, comic, and structural callbacks; check local density.",
+        revision_action: "Remove weakest callbacks first; preserve those that change relationship, information, emotion, or scene meaning.",
         preserve: ["meaningful_payoff", "relationship_change", "chapter_turn"],
       },
       {
         code: "echo_only_callback",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "low",
-        evidence: evidenceBinding("Quote the source and recurrence and explain why the recurrence adds no new meaning before recommending deletion."),
-        diagnosis: "Determine whether a repeated line, action, or image merely echoes its source instead of transforming its meaning.",
-        revision_action: "Prefer deleting or compressing echo-only recurrence while leaving meaning-bearing callbacks intact.",
+        evidence: evidenceBinding("Quote source and recurrence; show that the recurrence adds no meaning."),
+        diagnosis: "Check whether a repeated line, action, or image echoes rather than transforms its source.",
+        revision_action: "Delete or compress echo-only recurrence while keeping meaning-bearing callbacks intact.",
         preserve: ["semantic_callback", "relationship_callback", "comic_callback", "structural_callback"],
       },
       {
         code: "author_hand_visible",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "high",
-        evidence: evidenceBinding("Quote narration that appears to prove compliance with a setting, ability, governance, symmetry, or callback rule rather than simply dramatizing the event."),
-        diagnosis: "Determine whether rule-proof narration exposes writing-card or governance machinery, including explicit proof that a character did not use an ability shortcut.",
-        revision_action: "Delete the proof sentence or let ordinary physical consequence, character load, and natural action make the boundary invisible.",
+        evidence: evidenceBinding("Quote narration that proves a setting, ability, governance, symmetry, or callback rule."),
+        diagnosis: "Check whether rule-proof narration exposes writing-card or governance machinery, including ability-shortcut proof.",
+        revision_action: "Delete proof or let physical consequence, character load, and natural action carry the boundary.",
         preserve: ["canon_boundary", "ordinary_physical_result", "character_agency"],
       },
       {
         code: "strong_beat_dilution",
-        finding_status: "requires_chatgpt_semantic_review",
         severity: "high",
-        evidence: evidenceBinding("Identify the exact high-value short line, pause, or silence and the nearby callbacks, jokes, or patterned beats competing with its emotional air."),
-        diagnosis: "Determine whether surrounding cleverness or structural completion dilutes a strong emotional beat that should be allowed to breathe.",
-        revision_action: "Protect the beat by reducing nearby low-value callbacks; add no explanatory narration and, when sufficient, only delete.",
+        evidence: evidenceBinding("Bind the exact strong line, pause, or silence and nearby beats competing with it."),
+        diagnosis: "Check whether nearby cleverness or structural completion dilutes the emotional beat.",
+        revision_action: "Reduce nearby low-value callbacks; add no explanatory narration and, when sufficient, only delete.",
         preserve: ["strong_emotional_beat", "silence", "character_unexplained_emotion"],
+      },
+      {
+        code: "narrative_camera_template",
+        severity: "high",
+        evidence: evidenceBinding("Bind at least two exact passages or precise local sequences showing a material generative-camera sequence/cluster; a single word, gesture, or banned-word match is never sufficient."),
+        diagnosis: "Check reused cinematic grammar lacking a legitimate entry source: character attention, deliberate narrator distance, legitimate transition, or causal need.",
+        revision_action: "Reorder information, delete source-less establishing narration, admit environment through character action or attention, or preserve and clarify a legitimate narrator-led transition; never use synonym-only replacement.",
+        preserve: ["focal_consciousness", "character_attention", "legitimate_narrator_distance", "legitimate_transition", "causal_continuity", "useful_environment"],
+      },
+      {
+        code: "human_diction_friction",
+        severity: "medium",
+        evidence: evidenceBinding("Quote the exact passage where collocation, translationese, excessive formality, written-register drift, or Taiwan Traditional Chinese rhythm catches in normal reading."),
+        diagnosis: "Distinguish genuine Taiwan Traditional Chinese diction friction from intentional character voice or local rhythm.",
+        revision_action: "Make the minimum revision to smooth the exact passage; preserve character voice and original rhythm, and do not beautify.",
+        preserve: ["character_voice", "original_rhythm", "traditional_chinese_usage"],
+      },
+      {
+        code: "referent_and_spatial_ambiguity",
+        severity: "medium",
+        evidence: evidenceBinding("Quote the exact passage and identify the referent, actor, hand, position, or action relation that forces rereading."),
+        diagnosis: "Check whether the reader can establish who acts or stays still, the relevant hand, and immediate action or position relations.",
+        revision_action: "Use only the minimum information needed to remove ambiguity; do not add unnecessary spatial explanation.",
+        preserve: ["scene_pace", "physical_continuity", "minimal_information"],
+      },
+      {
+        code: "functional_overcompression",
+        severity: "medium",
+        evidence: evidenceBinding("Bind the exact chain where nearly every line advances a relationship, detail pays off, or supporting actor triggers a protagonist turn; distinguish density from over-optimization."),
+        diagnosis: "Check whether optimizing dialogue, objects, supporting actors, callbacks, and details makes design more visible than ordinary life.",
+        revision_action: "Never add filler, banter, sensory detail, or random objects to prove naturalness. Reduce the functional chain: remove immediate interpretation or needless payoff, let a minor beat end without callback, return a supporting actor to an ordinary concern, or stop making each reaction complete the previous line's dramatic job.",
+        preserve: ["ordinary_behavior", "low_function_connection", "supporting_actor_independence", "causal_continuity"],
+      },
+      {
+        code: "self_awareness_overcompleted",
+        severity: "high",
+        evidence: evidenceBinding("Bind exact explicit uncertainty, unresolved emotion, demonstrated confusion, or incomplete self-knowledge where articulation materially exceeds established awareness or conflicts with established voice or prior behavior."),
+        diagnosis: "Precise articulation alone is not a defect, and healthy, mature, expressive characters are valid. Flag only awareness-threshold conflict, backstage understanding copied into ideal dialogue, or an ensemble repeatedly delivering the psychologically best line on cue.",
+        revision_action: "Use minimal intervention and never invent or solve a true hidden motive. Unknown remains valid; weaken only the unsupported excess while preserving established voice and behavior.",
+        preserve: ["unknown_motive", "character_irregularity", "behavioral_evidence", "relationship_continuity"],
       },
     ],
     protected_beats: [{
@@ -171,24 +266,23 @@ export function buildFinalPolisherEditorialContract(rawStoryText) {
       protection: ["do_not_explain", "reduce_nearby_low_value_callbacks", "prefer_silence"],
     }],
     revision_priorities: [
-      "Protect canon, causal continuity, character agency, the chapter turn, and strong emotional beats.",
-      "Resolve high-severity evidence-backed author-hand visibility or strong-beat dilution first.",
-      "Prefer deleting, de-synchronizing, or compressing lower-yield symmetry, pattern, and callback evidence.",
-      "Do not mechanically apply every finding; revise only where exact draft evidence establishes material harm.",
+      "Protect canon, causality, agency, chapter turn, and strong beats.",
+      "Address high-severity exact evidence first; otherwise prefer subtractive editing.",
+      "Preserve living irregularity; never apply findings mechanically or complete a theme.",
     ],
     final_revision_instruction: [
       "ChatGPT remains the final prose generator.",
-      "Complete a whole-draft editorial review of the supplied raw story and revise only when evidence-backed findings justify change.",
+      "Review the whole draft; revise only for material exact evidence.",
       "Preserve canon, causal continuity, character agency, the chapter turn, and strong emotional beats.",
-      "Prefer subtractive editing: deletion, de-synchronization, compression, or silence over beautification.",
-      "Do not mechanically apply every finding, add generic polish, or explain the revision.",
+      "Use natural human-written Traditional Chinese; remove AI narrative grammar only when sequence or cluster evidence exists, preserve unknowns, and prefer subtraction over beautification or theme completion.",
+      "Do not mechanically apply every finding or add generic polish.",
       "When story-only output was requested, output only the final revised story prose.",
       "If no material editorial issue exists after review, release the original text unchanged.",
     ].join(" "),
   };
 }
 
-function deterministicAdapter(capabilityName, rawStoryText = null) {
+function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognition = {}) {
   return async (capabilityInput) => {
     const moduleName = capabilityName.slice(4);
     const taskPrompt = compactText(capabilityInput.task_prompt);
@@ -213,39 +307,83 @@ function deterministicAdapter(capabilityName, rawStoryText = null) {
         result_type: "scene_plan",
         objective: taskPrompt,
         scene_beats: [
-          "Open on concrete sensory action and immediate pressure.",
+          "Enter through what a character is doing, being prevented from doing, misjudging, enduring, or caring about; do not default to a panoramic or cinematic establishing shot.",
           "Escalate through a character choice with a visible consequence.",
           "Close the movement on a readable turn that advances the chapter.",
         ],
+        focal_attention: {
+          focal_consciousness: "Identify the consciousness or deliberate narrator distance governing this local information flow.",
+          attention_priority: "Prefer current attention, action, bodily load, and pressure when selecting local information.",
+          perception_boundary: "Respect the chosen viewpoint without forcing strict limited POV across deliberate narrator distance, scene or time transitions, and multi-POV transitions.",
+          ignored_information: "Let unattended facts remain absent when they have no character, narrative, transition, or causal reason to enter.",
+          body_first_signals: "Let bodily load, reflex, pain, imbalance, breath, or interrupted motion register before a polished psychological explanation when the moment calls for it.",
+          environment_entry_reason: "Question habitual cinematic establishing, not narrator-led transition: environment may enter through attention, action, pressure, deliberate narrative distance, transition, or causal need.",
+        },
+        precision_guard: "Reject precision added only to look concrete and lacking narrative, character, or causal source. Preserve precision required for combat causality, physical position, actionable distance, timing pressure, navigation, or canon.",
         continuity_anchor_present: Boolean(writingContext.content?.chapter_anchor),
       },
       run_character_simulator: {
         result_type: "character_simulation",
         dramatic_situation: taskPrompt,
+        character_cognition: {
+          self_story: "The reason the character believes about themself; it may organize behavior without being true.",
+          misrecognized_motive: "A motive may be misnamed or misunderstood, but do not invent a corrected motive merely to complete the analysis.",
+          avoided_question: "The character may not know the answer or even recognize that they are avoiding the question.",
+          false_certainty: "A confident account can be wrong and can still drive a consequential choice.",
+          behavioral_leak: "Speech and bodily action may temporarily disagree; behavior can leak pressure the character cannot accurately state.",
+          awareness_threshold: "Set plausible awareness and articulation from established character voice, prior behavior, current knowledge, and current scene pressure; backstage cognition cannot bypass it.",
+        },
         behavior_constraints: [
           "Let each character act from current knowledge, position, and relationship pressure.",
           "Carry tension through gesture, silence, hesitation, and subtext instead of queue-style dialogue.",
           "Preserve distinct character agency; do not flatten the ensemble into an operator voice.",
+          "Latent or actual motive may remain unknown; never force a guessed true motive or convert backstage cognition into precise self-analysis.",
+          "Do not make characters consistently describe their psychology, boundaries, or growth correctly; show later growth first through a different choice or action rather than a self-summary.",
         ],
+        character_grounded_irregularity: {
+          principle: "A character may depart from the most efficient, mature, or elegant dramatic response only in a way grounded in that person and moment.",
+          sources: ["established_disposition", "current_attention", "current_knowledge", "mistaken_belief", "relationship_pressure", "bodily_load", "immediate_circumstance"],
+          guard: "Human irregularity is not randomness and is not a menu of anti-AI behaviors; never insert irregularity merely to prove that a character feels human.",
+        },
         voice_registry_loaded: writingContext.character_voice_registry_loaded === true,
       },
       run_neural_critic: {
         result_type: "neural_critique",
         critique_focus: taskPrompt,
         risks: [
+          { code: "character_reaction_too_correct", question: "Does every character produce the reaction best suited to the scene instead of a personally limited, mistimed, or frictional response?" },
+          { code: "self_awareness_overcompleted", question: "Does a character understand and accurately explain their real psychology too quickly?" },
+          { code: "scene_function_overoptimization", question: "Is every beat unusually effective, relationship-advancing, and free of ordinary friction?" },
+          { code: "supporting_actor_functionality", question: "Does a supporting character or bystander exist only to trigger another character's core dialogue or turn rather than retaining an ordinary concern?" },
+          { code: "narrative_information_without_attention_source", question: "Is information placed only because the author wants it known, without a legitimate source in character attention, deliberate narrator distance, scene or time transition, multi-POV transition, or causal need? Check source-less placement; do not require every fact to be character-noticed." },
+        ],
+        standing_constraints: [
           "Avoid engineering, provider, workflow, and handoff language in story prose.",
           "Preserve causal continuity and do not invent unsupported canon facts.",
-          "Prefer dramatized action over abstract explanation or theme-first summary.",
+          "Do not require, manufacture, reverse-engineer, or optimize the scene around a theme, allegory, moral lesson, or thematic closure. Do not search for a chapter theme; natural meaning may emerge from characters and events.",
         ],
       },
       run_style_drift_detector: {
         result_type: "style_drift_report",
         target: taskPrompt,
         drift_risk: "monitor",
-        drift_signals: [
-          "Administrative or checklist-like narration.",
-          "Over-short punchlines that break long-form cadence.",
-          "Abstract exposition replacing concrete action, sensory detail, or natural dialogue.",
+        detection_method: "Inspect reused narrative grammar, local sequence shape, cluster density, and repeated narrative jobs. This is not a banned-word list: no single word or isolated gesture establishes drift, and the detector judges sequence reuse rather than lexical avoidance.",
+        narrative_camera_template_sequences: [
+          "environment establishing shot → distant ambient sound → spatial filtering metaphor → character microreaction → short dialogue reveal",
+          "light → hair → shadow → wind → clothing edge",
+          "environment sentence → character raises eyes, pauses, or turns slightly → narrator confirms the preceding sensory sentence",
+        ],
+        cluster_cognition: [
+          "Low-intensity microreaction repeatedly used as a camera bridge.",
+          "Sensory statement immediately proved by a reaction beat.",
+          "Repeated spatial-filter metaphor used to manufacture literary texture.",
+          "Repeated environment → gesture → dialogue paragraph cadence.",
+          "Ask ChatGPT directly: Are you once again using a generative camera trained to manufacture a novel-like texture to film the scene?（你是不是又在用受過小說質感訓練的生成式攝影機拍場景？）",
+        ],
+        rhythm_guidance: [
+          "Sentence rhythm must follow the character's current attention and pressure.",
+          "Do not force every paragraph into an environment → gesture → dialogue cadence.",
+          "Vary scene entry and paragraph breathing according to the actual event and consciousness.",
         ],
       },
       run_over_governance_detector: {
@@ -256,16 +394,34 @@ function deterministicAdapter(capabilityName, rawStoryText = null) {
           "Use governance context as invisible boundaries, never as visible story vocabulary.",
           "Do not turn dramatic conflict into policy, tool, or process debate.",
           "Keep character agency and scene momentum alive inside the canon constraints.",
+          "Do not copy cognition field names, structures, or proof sentences into prose to demonstrate unknown motive, absence of an ability shortcut, focal consciousness, or a supporting character's independent purpose; cognition stays in the external brain and prose shows only the natural result.",
         ],
       },
       run_writing_card_director: {
         result_type: "writing_card_director_context",
         direction: taskPrompt,
         director_notes: [
-          "Write direct story prose with vivid scene motion and living character reactions.",
-          "Maintain high-density chapter progression and a concrete chapter-level turn.",
+          "Write the people first; let the scene emerge through what interrupts, matters to, or is noticed by them.",
+          "Prefer natural Traditional Chinese narrative flow over cinematic polish.",
+          "Do not seek a theme, symbolic closure, or a quotable chapter statement unless the story naturally produces one.",
+          "Characters do not need to understand themselves correctly, and supporting characters and bystanders retain independent ordinary concerns.",
+          "Do not require every dialogue exchange to progress a relationship or every object, gesture, callback, and environmental detail to pay off.",
+          "Keep the story moving when events demand movement, but do not optimize every beat for narrative efficiency.",
           "When story-only output is requested, begin with the chapter title or prose rather than a handoff summary.",
         ],
+        technique_learning_principle: {
+          rule: "Techniques are opt-in cognitive methods, never default simultaneous directives or prose-style imitation; ChatGPT owns selection.",
+        },
+        available_technique_families: [...availableWritingTechniqueFamilies],
+        selected_technique_families: [...(runtimeCognition.technique_selection?.selected_technique_families ?? [])],
+        active_technique_cognition: runtimeCognition.technique_selection?.active_technique_cognition ?? {},
+        technique_selection_policy: {
+          default_selection: "none",
+          trigger: "Select a family only for a matching craft problem or opportunity in the current scene.",
+          normal_limit: "No more than one or two technique families; never combine the full pool by default.",
+          non_demonstration: "Never alter a scene merely to demonstrate a learned technique.",
+          override_priority: "Character truth, canon, causal continuity, and natural Traditional Chinese override technique usage.",
+        },
         writing_card_context: writingContext.content?.writing_card_director_context ?? null,
       },
     };
@@ -343,6 +499,30 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }
   }
   const generationBoundary = isFinalPolisher ? "post_generation" : "pre_generation";
+  let techniqueSelection = null;
+  if (capabilityName === "run_writing_card_director") {
+    try {
+      techniqueSelection = resolveWritingTechniqueSelection(input.capability_input ?? {});
+    } catch (error) {
+      return {
+        ok: false,
+        tool_name: "chatgpt_bridge_use_writing_card_director",
+        architecture_route: externalBrainOwnership.orchestration_mode,
+        capability_name: capabilityName,
+        generation_boundary: generationBoundary,
+        orchestration_owner: "ChatGPT",
+        prose_generator: "ChatGPT",
+        full_neural_orchestrator_used: false,
+        external_brain_session_id: runId,
+        writing_context_bundle_id: contextBundleId,
+        capability_output: null,
+        blocked: true,
+        blocked_reason: error instanceof Error ? error.message : String(error),
+        mutation_guards: { ...safety },
+        ...safety,
+      };
+    }
+  }
   const capabilityInput = isFinalPolisher ? {
     module_name: capabilityName,
     generation_boundary: generationBoundary,
@@ -362,7 +542,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     run_id: runId,
     task_type: "draft_generation",
     source: "chatgpt_owned_external_brain_mcp",
-    adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText),
+    adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
+      technique_selection: techniqueSelection,
+    }),
   });
   const finalizedRun = isFinalPolisher
     ? await finalizeAgentRun(runId, { output: execution.output })
