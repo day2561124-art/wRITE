@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "phase": "46D",
+  "evidence_kind": "real_chatgpt_immutable_raw_story_handoff_live_acceptance_closure",
+  "immutable_evidence_record": true,
+  "acceptance_subject": "real_current_chatgpt",
+  "architecture_route": "chatgpt_owned_external_brain",
+  "orchestration_owner": "ChatGPT",
+  "prose_generator": "ChatGPT",
+  "full_neural_orchestrator_used": false,
+  "acceptance_result": "PASS",
+  "historical_evidence_chain": {
+    "phase46b_status": "BLOCKED",
+    "phase46b_reason": "exact_long_form_raw_story_sha256_handoff_integrity_not_established",
+    "phase46c_remediation": "caller_predeclared_immutable_raw_story_sha256_integrity_guard",
+    "first_phase46d_attempt_status": "BLOCKED",
+    "first_phase46d_attempt_reason": "stale_chatgpt_conversation_callable_catalog_snapshot",
+    "phase46e_primary_root_cause": "Category D",
+    "phase46d_rerun_status": "PASS"
+  },
+  "live_session": {
+    "external_brain_session_id": "agent_run_20260713-194314-755c7022",
+    "writing_context_bundle_id": "gptctx_20260713-194314-7fdd1302",
+    "agent_run_status": "success"
+  },
+  "individual_pre_generation_capabilities": {
+    "required_count": 6,
+    "successful_count": 6,
+    "aggregate_macro_used": false,
+    "capabilities": [
+      {
+        "capability_name": "scene_planner",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194323-e2d5e00d"
+      },
+      {
+        "capability_name": "character_simulator",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194334-3d68780e"
+      },
+      {
+        "capability_name": "neural_critic",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194345-b25007a3"
+      },
+      {
+        "capability_name": "style_drift_detector",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194356-eeda3507"
+      },
+      {
+        "capability_name": "over_governance_detector",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194407-74f72206"
+      },
+      {
+        "capability_name": "writing_card_director",
+        "status": "success",
+        "individual_live_call": true,
+        "semantic_output_reviewed": true,
+        "trace_id": "neural_trace_20260713-194417-eda24405"
+      }
+    ]
+  },
+  "cognition_integration": {
+    "required": true,
+    "performed_by": "current_chatgpt",
+    "self_reorganization_required": true,
+    "semantic_deduplication_required": true,
+    "authority_arbitration_required": true,
+    "conflict_arbitration_required": true,
+    "compression_required": true,
+    "scene_constraint_reconstruction_required": true,
+    "authority_decision": "canon_db_and_active_engine_p0_outranked_low_confidence_writing_card_suggestions",
+    "unsupported_inventions_rejected": [
+      "new_foreshadowing",
+      "crisis_line",
+      "secret_answer",
+      "other_first_day_match_result"
+    ]
+  },
+  "raw_story": {
+    "title": "第二十章　兩隻手都不方便",
+    "character_length": 5498,
+    "utf8_byte_length": 14902,
+    "current_chatgpt_generated_raw_prose": true,
+    "neural_module_generated_prose": false,
+    "writer_workbench_generated_prose": false,
+    "backend_provider_used": false,
+    "local_provider_used": false,
+    "deterministic_prose_adapter_used": false,
+    "mock_or_synthetic_prose_used": false,
+    "exact_story_text_stored": false
+  },
+  "raw_story_integrity": {
+    "declared_raw_story_sha256": "5dee250d985e786aea10a9e4144002c7dd25250322aa95bfad230665650f9774",
+    "received_raw_story_sha256": "5dee250d985e786aea10a9e4144002c7dd25250322aa95bfad230665650f9774",
+    "status": "matched",
+    "exact_match": true,
+    "guard_used": true,
+    "blocked_stage": null,
+    "first_primary_long_form_handoff": true,
+    "primary_mismatch": false,
+    "primary_retry_count": 0
+  },
+  "final_polisher": {
+    "executed": true,
+    "trace_status": "success",
+    "trace_id": "neural_trace_20260713-194936-b2ba5c2b",
+    "trace_output_hash": "5cad410b35b70bcd37cc725fdf0affec0016976cca3df5647ace7797e318b5ff",
+    "agent_run_status": "success"
+  },
+  "editorial_semantic_review": {
+    "completed": true,
+    "release_recommendation": "release_as_is",
+    "release_recommendation_mechanically_accepted": false,
+    "editorial_decision": "minimal_subtractive_revision_required",
+    "material_evidence_categories": [
+      "callback_saturation",
+      "echo_only_callback",
+      "local_pattern_saturation"
+    ],
+    "material_text_evidence": "猜了妳就會問我為什麼那樣猜。",
+    "revision_scope": "delete_second_echo_only_callback_sequence_only",
+    "operations_used": [
+      "deletion",
+      "compression"
+    ],
+    "beautification_used": false,
+    "sensory_detail_injection_used": false,
+    "metaphor_generation_used": false,
+    "psychological_explanation_used": false,
+    "whole_draft_rewrite_used": false,
+    "primary_immutable_raw_story_evidence_overwritten": false
+  },
+  "independent_mismatch_guard_probe": {
+    "performed_after_primary_success": true,
+    "separate_from_primary_acceptance": true,
+    "probe_text": "Phase46D independent mismatch guard probe",
+    "declared_raw_story_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "received_raw_story_sha256": "d99750844947d639faa593e3f1ca738ec9e152a92d2a2fae46291a4ded7b978a",
+    "status": "mismatch",
+    "exact_match": false,
+    "blocked_stage": "raw_story_handoff_integrity",
+    "final_polisher_executed": false,
+    "trace_status": "not_executed"
+  },
+  "mutation_guards": {
+    "candidate_created": false,
+    "canon_updated": false,
+    "active_engine_updated": false,
+    "adopted": false,
+    "settled": false
+  },
+  "final_workbench_status": {
+    "created": [],
+    "approval_items": 0,
+    "adopted_writings": 0,
+    "settlement_contexts": 0,
+    "settlement_reports": 0,
+    "active_engine_modified": false,
+    "compressed_rules_modified": false
+  },
+  "protected_hashes": {
+    "active_engine_sha256": "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+    "compressed_rules_sha256": "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db"
+  },
+  "final_status": "PASS"
+}

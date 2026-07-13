@@ -667,6 +667,8 @@ const steps = [
 
   ["Phase 46C immutable raw-story handoff integrity guard", ["tests/phase46/phase46c-chatgpt-owned-immutable-raw-story-handoff-integrity-guard.test.mjs"]],
 
+  ["Phase 46F immutable raw-story handoff live acceptance closure", ["tests/phase46/phase46f-immutable-raw-story-handoff-live-acceptance-closure.test.mjs"]],
+
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
 ];
