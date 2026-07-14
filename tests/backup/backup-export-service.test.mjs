@@ -1,5 +1,8 @@
-﻿import { readFile, stat, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   createProjectBackup,
   listProjectBackups,
@@ -9,9 +12,7 @@ import {
   requestRestoreFromBackup,
   createExportBundle,
 } from "../../server/src/backup-export-service.mjs";
-import { projectPaths } from "../../server/src/project-paths.mjs";
-import { listApprovalItems } from "../../server/src/approval-queue-service.mjs";
-import { createHash } from "node:crypto";
+import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -21,90 +22,144 @@ function hash(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function exists(p) {
+async function exists(filePath) {
   try {
-    await stat(p);
+    await stat(filePath);
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
 
-async function main() {
+export async function runBackupExportServiceTest() {
+  const fixtureRoot = path.join(
+    projectRoot,
+    "tests",
+    ".tmp",
+    `backup-export-service-${process.pid}-${Date.now()}`,
+  );
+  const outputsRoot = path.join(fixtureRoot, "source", "data", "outputs");
+  const canonRoot = path.join(fixtureRoot, "source", "data", "canon_db");
+  const workflowRoot = path.join(fixtureRoot, "source", "data", "writing_workflow");
+  const activeEnginePath = path.join(canonRoot, "active_engine.md");
+  const backupRoot = path.join(fixtureRoot, "state", "project_backups");
+  const previewRoot = path.join(fixtureRoot, "state", "restore_previews");
+  const exportRoot = path.join(fixtureRoot, "state", "exports");
+  const approvalRoot = path.join(fixtureRoot, "state", "approval_queue");
+  const isolatedApprovalItems = [];
   const productionHash = hash(await readFile(projectPaths.activeEngine));
-  // create backup
-  const bk = await createProjectBackup({ includeVisualAssets: false, createdBy: "test" });
-  const dir = bk.path;
-  let exp = null;
-  let preview = null;
+
+  await rm(fixtureRoot, { recursive: true, force: true });
   try {
+    await Promise.all([
+      mkdir(outputsRoot, { recursive: true }),
+      mkdir(canonRoot, { recursive: true }),
+      mkdir(workflowRoot, { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(path.join(outputsRoot, "current_prompt.md"), "# Fixture prompt\n", "utf8"),
+      writeFile(activeEnginePath, "# Isolated active engine fixture\n", "utf8"),
+      writeFile(path.join(workflowRoot, "workflow.json"), "{\"fixture\":true}\n", "utf8"),
+    ]);
+
+    const sourceScopes = [
+      { root: outputsRoot, category: "outputs" },
+      { root: canonRoot, category: "canon_db" },
+      { root: workflowRoot, category: "writing_workflow" },
+    ];
+    const bk = await createProjectBackup({
+      includeVisualAssets: false,
+      createdBy: "test",
+      sourceScopes,
+      destinationRoot: backupRoot,
+      activeEnginePath,
+    });
+    const dir = bk.path;
+
     assert(await exists(path.join(dir, "backup.json")), "backup.json missing");
     assert(await exists(path.join(dir, "manifest.json")), "manifest.json missing");
     assert(await exists(path.join(dir, "README.md")), "README.md missing");
-    const manifest = await getProjectBackupDetail(bk.backup_id);
-    // active_engine should be present in backup files
-    const activeRel = manifest.files.find((f) => f.relative_path.endsWith("data/canon_db/active_engine.md") || f.relative_path === "data/canon_db/active_engine.md");
-    assert(activeRel, "active_engine not present in manifest");
+    assert((await listProjectBackups({ destinationRoot: backupRoot })).includes(bk.backup_id), "backup not listed");
+
+    const manifest = await getProjectBackupDetail(bk.backup_id, { destinationRoot: backupRoot });
+    const activeRel = manifest.files.find(
+      (file) => file.relative_path === path.relative(projectRoot, activeEnginePath).replaceAll(path.sep, "/"),
+    );
+    assert(activeRel, "isolated active_engine fixture not present in manifest");
     const activeBackupPath = path.join(dir, activeRel.backup_relative_path);
-    assert(await exists(activeBackupPath), "active_engine copy missing in backup files");
-    // manifest active_engine hash matches backup copy (verify single file only to keep test fast)
     const backupSha = hash(await readFile(activeBackupPath));
     assert(backupSha === activeRel.sha256, "manifest active_engine hash mismatch");
+    assert(manifest.active_engine_hash === activeRel.sha256, "manifest active_engine_hash missing");
+    const verified = await verifyProjectBackup(bk.backup_id, { destinationRoot: backupRoot });
+    assert(verified.results.every((result) => result.ok), "isolated backup verification failed");
 
-    // modify backup copy and expect local check to detect mismatch
-    await writeFile(activeBackupPath, "xxx altered content\n", "utf8");
-    const changedSha = hash(await readFile(activeBackupPath));
-    assert(changedSha !== activeRel.sha256, "modified backup copy not detected by local hash check");
+    await writeFile(activeBackupPath, "xxx altered isolated backup content\n", "utf8");
+    const changed = await verifyProjectBackup(bk.backup_id, { destinationRoot: backupRoot });
+    assert(changed.results.some((result) => result.relative_path === activeRel.relative_path && !result.ok), "integrity mismatch not detected");
 
-    // createExportBundle for active_engine
-    const beforeSha = productionHash;
-    exp = await createExportBundle({ export_type: "active_engine", createdBy: "test" });
+    const exp = await createExportBundle({
+      export_type: "active_engine",
+      createdBy: "test",
+      destinationRoot: exportRoot,
+      activeEnginePath,
+    });
     assert(await exists(path.join(exp.path, "content.md")), "export content.md missing");
-    const afterSha = hash(await readFile(projectPaths.activeEngine));
-    assert(beforeSha === afterSha, "createExportBundle modified active_engine");
+    assert(hash(await readFile(path.join(exp.path, "content.md"))) === hash(await readFile(activeEnginePath)), "export used the wrong active_engine");
 
-    // preview restore should produce preview files and not modify active_engine
-    preview = await previewRestoreFromBackup(bk.backup_id);
-    const previewDir = path.join(projectPaths.restorePreviews, preview.preview_id);
+    const preview = await previewRestoreFromBackup(bk.backup_id, {
+      destinationRoot: backupRoot,
+      previewRoot,
+    });
+    const previewDir = path.join(previewRoot, preview.preview_id);
     assert(await exists(path.join(previewDir, "preview.json")), "preview.json missing");
     assert(await exists(path.join(previewDir, "diff_summary.md")), "diff_summary.md missing");
-    assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "previewRestoreFromBackup modified active_engine");
 
-    // request restore should create approval item only
-    const approval = await requestRestoreFromBackup(bk.backup_id, { requestedBy: "test", reason: "testing" });
+    const approvalItemCreator = async (input) => {
+      const item = {
+        approval_item_id: `isolated_approval_${process.pid}_${Date.now()}`,
+        action_type: input.actionType,
+        target_type: input.targetType,
+        target_id: input.targetId,
+        created_by: input.createdBy,
+      };
+      const itemDir = path.join(approvalRoot, "items", item.approval_item_id);
+      await mkdir(itemDir, { recursive: true });
+      await writeFile(path.join(itemDir, "item.json"), `${JSON.stringify(item, null, 2)}\n`, "utf8");
+      isolatedApprovalItems.push(item);
+      return item;
+    };
+    const approval = await requestRestoreFromBackup(
+      bk.backup_id,
+      { requestedBy: "test", reason: "testing isolated restore request" },
+      { destinationRoot: backupRoot, approvalItemCreator },
+    );
     assert(approval.action_type === "restore_from_backup", "approval action_type incorrect");
-    const items = await listApprovalItems();
-    assert(items.some((it) => it.approval_item_id === approval.approval_item_id), "approval item not recorded");
-    assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "requestRestoreFromBackup modified active_engine");
+    assert(isolatedApprovalItems.some((item) => item.approval_item_id === approval.approval_item_id), "isolated approval item not recorded");
+    assert(await exists(path.join(approvalRoot, "items", approval.approval_item_id, "item.json")), "isolated approval item file missing");
 
-    // ensure visual assets not included by default
-    const hasVisual = manifest.files.some((f) => f.relative_path.startsWith("data/visual_db/assets/"));
+    const hasVisual = manifest.files.some((file) => file.relative_path.includes("data/visual_db/assets/"));
     assert(!hasVisual, "visual assets should be excluded by default");
+    assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "test modified production active_engine");
 
-    // path traversal rejection via resolveProjectPath
     const { resolveProjectPath } = await import("../../server/src/project-paths.mjs");
     let threw = false;
     try {
       resolveProjectPath("../");
-    } catch (e) {
+    } catch {
       threw = true;
     }
     assert(threw, "resolveProjectPath did not reject traversal");
 
     console.log("Backup export service test passed.");
-
-    } finally {
-    // cleanup
-    await rm(dir, { recursive: true, force: true });
-    // remove export
-    try { if (exp) await rm(path.join(projectPaths.backupExports, exp.export_id), { recursive: true, force: true }); } catch {}
-    // remove preview
-    try { if (preview) await rm(path.join(projectPaths.restorePreviews, preview.preview_id), { recursive: true, force: true }); } catch {}
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 }
 
-main().catch((error) => {
-  console.error(`Backup export service test failed: ${error.message}`);
-  process.exitCode = 1;
-});
-
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
+  runBackupExportServiceTest().catch((error) => {
+    console.error(`Backup export service test failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

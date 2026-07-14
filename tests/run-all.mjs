@@ -61,6 +61,7 @@ const steps = [
   ["Phase47L MCP parent ephemeral raw-story seal live acceptance closure", ["tests/phase47/phase47l-mcp-parent-ephemeral-raw-story-seal-live-acceptance-closure.test.mjs"]],
 
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
+  ["Backup export production residue regression", ["tests/backup/backup-export-production-residue-regression.test.mjs"]],
 
   ["Phase 20 contracts", ["tests/phase20/phase20-contract.test.mjs"]],
 

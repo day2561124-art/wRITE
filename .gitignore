@@ -22,3 +22,4 @@ outputs/current_prompt.md
 outputs/retrieval_debug_report.json
 
 node_modules/
+tests/.tmp/

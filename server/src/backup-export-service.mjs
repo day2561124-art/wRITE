@@ -103,18 +103,28 @@ function isPathInside(basePath, targetPath) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function resolveBackupDirectory(backupId, destinationRoot = projectPaths.projectBackups) {
+  if (!/^project_backup_\d{14}_[0-9a-f]{8}$/u.test(String(backupId))) {
+    throw new Error("Invalid project backup ID.");
+  }
+  const root = resolveProjectPath(destinationRoot, "backup destination root");
+  return assertPathInside(path.join(root, backupId), root, "project backup directory");
+}
+
 export async function createProjectBackup({
   includeVisualAssets = false,
   createdBy = "system",
   note = null,
   sourceScopes = null,
   destinationRoot = projectPaths.projectBackups,
+  activeEnginePath = projectPaths.activeEngine,
   ioConcurrency = DEFAULT_BACKUP_IO_CONCURRENCY,
   onEvent = null,
 } = {}) {
   const startedAt = performance.now();
   const concurrency = validateConcurrency(ioConcurrency);
   const resolvedDestinationRoot = resolveProjectPath(destinationRoot, "backup destination root");
+  const resolvedActiveEnginePath = resolveProjectPath(activeEnginePath, "active engine");
   await mkdir(resolvedDestinationRoot, { recursive: true });
   const backupId = makeId("project_backup");
   const dir = path.join(resolvedDestinationRoot, backupId);
@@ -256,7 +266,7 @@ export async function createProjectBackup({
     diagnostics.stage_ms.copy_and_hash = performance.now() - copyStartedAt;
     manifest.files = copyResult.results;
     diagnostics.files_exported = manifest.files.length;
-    const activeEngineRelativePath = normalizeProjectPath(projectPaths.activeEngine);
+    const activeEngineRelativePath = normalizeProjectPath(resolvedActiveEnginePath);
     manifest.active_engine_hash = manifest.files.find(
       (file) => file.relative_path === activeEngineRelativePath,
     )?.sha256 ?? null;
@@ -284,13 +294,14 @@ export async function createProjectBackup({
   }
 }
 
-export async function listProjectBackups() {
+export async function listProjectBackups({ destinationRoot = projectPaths.projectBackups } = {}) {
+  const resolvedDestinationRoot = resolveProjectPath(destinationRoot, "backup destination root");
   try {
-    const entries = await readdir(projectPaths.projectBackups, { withFileTypes: true });
+    const entries = await readdir(resolvedDestinationRoot, { withFileTypes: true });
     const completed = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !entry.name.startsWith("project_backup_")) continue;
-      const directory = path.join(projectPaths.projectBackups, entry.name);
+      const directory = path.join(resolvedDestinationRoot, entry.name);
       try {
         await stat(path.join(directory, "backup.json"));
         await stat(path.join(directory, "manifest.json"));
@@ -305,17 +316,23 @@ export async function listProjectBackups() {
   }
 }
 
-export async function getProjectBackupDetail(backupId) {
-  const dir = path.join(projectPaths.projectBackups, backupId);
+export async function getProjectBackupDetail(
+  backupId,
+  { destinationRoot = projectPaths.projectBackups } = {},
+) {
+  const dir = resolveBackupDirectory(backupId, destinationRoot);
   const manifestPath = path.join(dir, "manifest.json");
   const raw = await readFile(manifestPath, "utf8");
   return JSON.parse(raw);
 }
 
-export async function verifyProjectBackup(backupId) {
-  const manifest = await getProjectBackupDetail(backupId);
+export async function verifyProjectBackup(
+  backupId,
+  { destinationRoot = projectPaths.projectBackups } = {},
+) {
+  const manifest = await getProjectBackupDetail(backupId, { destinationRoot });
   const results = [];
-  const dir = path.join(projectPaths.projectBackups, backupId);
+  const dir = resolveBackupDirectory(backupId, destinationRoot);
   for (const file of manifest.files) {
     const backupPath = path.join(dir, file.backup_relative_path);
     try {
@@ -329,10 +346,17 @@ export async function verifyProjectBackup(backupId) {
   return { backup_id: backupId, verified_at: new Date().toISOString(), results };
 }
 
-export async function previewRestoreFromBackup(backupId) {
-  const manifest = await getProjectBackupDetail(backupId);
+export async function previewRestoreFromBackup(
+  backupId,
+  {
+    destinationRoot = projectPaths.projectBackups,
+    previewRoot = projectPaths.restorePreviews,
+  } = {},
+) {
+  const manifest = await getProjectBackupDetail(backupId, { destinationRoot });
   const diffs = [];
-  const dir = path.join(projectPaths.projectBackups, backupId);
+  const dir = resolveBackupDirectory(backupId, destinationRoot);
+  const resolvedPreviewRoot = resolveProjectPath(previewRoot, "restore preview root");
   for (const file of manifest.files) {
     const backupPath = path.join(dir, file.backup_relative_path);
     const currentPath = path.resolve(projectRoot, file.relative_path);
@@ -350,7 +374,7 @@ export async function previewRestoreFromBackup(backupId) {
     }
   }
   const previewId = makeId("preview");
-  const previewDir = path.join(projectPaths.restorePreviews, previewId);
+  const previewDir = path.join(resolvedPreviewRoot, previewId);
   await mkdir(previewDir, { recursive: true });
   const preview = { preview_id: previewId, backup_id: backupId, created_at: new Date().toISOString(), diffs, count: diffs.length };
   await writeFile(path.join(previewDir, "preview.json"), json(preview), "utf8");
@@ -362,11 +386,21 @@ export async function previewRestoreFromBackup(backupId) {
   return preview;
 }
 
-export async function requestRestoreFromBackup(backupId, { requestedBy = "system", reason = "restore request" } = {}) {
-  const manifest = await getProjectBackupDetail(backupId);
+export async function requestRestoreFromBackup(
+  backupId,
+  { requestedBy = "system", reason = "restore request" } = {},
+  {
+    destinationRoot = projectPaths.projectBackups,
+    approvalItemCreator = createApprovalItem,
+  } = {},
+) {
+  if (typeof approvalItemCreator !== "function") {
+    throw new Error("approvalItemCreator must be a function.");
+  }
+  const manifest = await getProjectBackupDetail(backupId, { destinationRoot });
   const title = `Restore Project Backup ${backupId}`;
   const summary = `Requesting manual approval to restore project backup ${backupId}. Files: ${manifest.files.length}`;
-  const item = await createApprovalItem({
+  const item = await approvalItemCreator({
     actionType: "restore_from_backup",
     targetType: "project_backup",
     targetId: backupId,
@@ -393,15 +427,22 @@ export default {
   createExportBundle,
 };
 
-export async function createExportBundle({ export_type = "active_engine", createdBy = "system", note = null } = {}) {
+export async function createExportBundle({
+  export_type = "active_engine",
+  createdBy = "system",
+  note = null,
+  destinationRoot = projectPaths.backupExports,
+  activeEnginePath = projectPaths.activeEngine,
+} = {}) {
   if (!["active_engine", "review_package"].includes(export_type)) {
     throw new Error("Unsupported export_type");
   }
-  await mkdir(projectPaths.backupExports, { recursive: true });
+  const resolvedDestinationRoot = resolveProjectPath(destinationRoot, "backup export destination root");
+  const activePath = resolveProjectPath(activeEnginePath, "active engine");
+  await mkdir(resolvedDestinationRoot, { recursive: true });
   const exportId = makeId("export");
-  const dir = path.join(projectPaths.backupExports, exportId);
+  const dir = path.join(resolvedDestinationRoot, exportId);
   await mkdir(dir, { recursive: true });
-  const activePath = resolveProjectPath(projectPaths.activeEngine, "active engine");
   if (export_type === "active_engine") {
     const content = await readFile(activePath, "utf8");
     await writeFile(path.join(dir, "content.md"), content, "utf8");
@@ -469,7 +510,7 @@ export async function createExportBundle({ export_type = "active_engine", create
     created_at: new Date().toISOString(),
     created_by: createdBy,
     note: note || null,
-    source_active_engine_path: normalizeProjectPath(projectPaths.activeEngine),
+    source_active_engine_path: normalizeProjectPath(activePath),
     package_root: export_type === "review_package" ? "." : null,
   };
   await writeFile(path.join(dir, "metadata.json"), json(meta), "utf8");
