@@ -11,6 +11,24 @@ import {
   run_final_polisher,
 } from "./neural-module-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
+import {
+  loadVerifiedPriorAuthorshipCognition,
+  priorAuthorshipCognitionModules,
+} from "./external-brain-cognition-output-service.mjs";
+import {
+  getRuntimeProcessInstanceId,
+} from "./raw-story-handoff-seal-service.mjs";
+import {
+  buildRawStoryMismatchForensics,
+  validateRawStoryIntegrityManifest,
+} from "./raw-story-handoff-integrity-service.mjs";
+import {
+  acquireRawStoryHandoff,
+  assertRawStoryHandoffSessionScope,
+  completeRawStoryHandoffConsumption,
+  releaseRawStoryHandoffAcquisition,
+  sealRawStoryHandoff,
+} from "./raw-story-handoff-seal-service.mjs";
 
 export const externalBrainOwnership = Object.freeze({
   architecture_role: "gpt_external_brain",
@@ -143,6 +161,37 @@ function bundleId(input = {}) {
 function compactText(value, maxChars = 240) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxChars);
+}
+
+function blockedDirectorResponse({ runId, contextBundleId, run, continuity, reason }) {
+  return {
+    ok: false,
+    tool_name: "chatgpt_bridge_use_writing_card_director",
+    architecture_route: externalBrainOwnership.orchestration_mode,
+    capability_name: "run_writing_card_director",
+    generation_boundary: "pre_generation",
+    orchestration_owner: "ChatGPT",
+    prose_generator: "ChatGPT",
+    full_neural_orchestrator_used: false,
+    external_brain_session_id: runId,
+    writing_context_bundle_id: contextBundleId,
+    capability_output: null,
+    blocked: true,
+    blocked_stage: "prior_cognition_continuity_integrity",
+    blocked_reason: reason,
+    missing_prior_cognition_modules: continuity?.missing_modules ?? [],
+    invalid_prior_cognition_sources: continuity?.integrity_failures ?? [],
+    trace: {
+      trace_id: null,
+      run_id: runId,
+      module_name: "writing_card_director",
+      status: "not_executed",
+      output_hash: null,
+    },
+    agent_run_status: run.status,
+    mutation_guards: { ...safety },
+    ...safety,
+  };
 }
 
 export function buildFinalPolisherEditorialContract(rawStoryText) {
@@ -401,7 +450,52 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       },
       run_writing_card_director: {
         result_type: "writing_card_director_context",
+        integration_mode: "same_author_cognition_synthesis",
         direction: taskPrompt,
+        source_cognition_manifest: (
+          capabilityInput.authorship_cognition_sources?.source_manifest ?? []
+        ).map((source) => ({
+          ...source,
+          consumption_status: "verified_and_consumed",
+        })),
+        cognition_frame: "The prior cognition outputs are different cognitive passes of the same author, not independent authorities and not simultaneous prose directives.",
+        integration_principles: {
+          semantic_deduplication: "Merge repeated meaning without increasing prose weight merely because multiple modules mention the same cognition.",
+          authority_arbitration: "Use source authority and confidence to protect established truth; low-confidence suggestions never override Canon.",
+          conflict_arbitration: "Resolve conflicts through author judgment before drafting; do not put both sides into prose or split the difference by default.",
+          attention_compression: "Form a compact author understanding containing only concerns material to this scene; do not active-monitor every available cognition while writing.",
+          scene_constraint_reconstruction: "Understand the people, place, action, knowledge, misunderstanding, pressure, prohibited invention, and present movement as one scene rather than a module checklist.",
+        },
+        authority_precedence: {
+          higher_authority: [
+            "Canon hard facts and Canon DB",
+            "active_engine P0 hard constraints",
+            "established causal continuity",
+            "established character knowledge and state",
+          ],
+          lower_authority: [
+            "low-confidence Writing Card suggestions",
+            "technique cognition",
+            "optional scene opportunities",
+            "speculative interpretations",
+          ],
+          rule: "Higher-authority truth outranks lower-authority suggestions. Never compromise Canon merely to preserve a suggestion.",
+        },
+        uncertainty_and_invention: {
+          unknown_preservation: "Unknown is a valid author conclusion; a source asking that something remain unknown must not be completed by speculation.",
+          unsupported_invention_rejection: "Reject or suppress unsupported secret answers, foreshadowing, crisis lines, motives, facts, or payoffs instead of finding a prose compromise.",
+        },
+        prose_attention_transition: {
+          module_boundary_dissolution: "Module boundaries should dissolve before prose generation: stop tracking what each module said and return to one author understanding of the scene.",
+          author_state: "I am the author. I understand this scene. Now write freely.",
+          private_reasoning_policy: "Do not expose private chain-of-thought, a reasoning transcript, or an integration report to the user.",
+        },
+        final_prose_ownership: {
+          owner: "ChatGPT",
+          writer_workbench_role: "integrated_authorship_cognition_handoff",
+          writer_workbench_generates_story_prose: false,
+          story_only_output: "Emit only the story prose when story-only output is requested.",
+        },
         director_notes: [
           "Write the people first; let the scene emerge through what interrupts, matters to, or is noticed by them.",
           "Prefer natural Traditional Chinese narrative flow over cinematic polish.",
@@ -476,6 +570,147 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
   };
 }
 
+async function missingPreGenerationCapabilities(runId) {
+  const usage = await summarizeNeuralUsageForRun(runId);
+  const completed = new Set(usage.neural_modules_used ?? []);
+  return externalBrainPreGenerationCapabilities
+    .map((name) => name.slice(4))
+    .filter((name) => !completed.has(name));
+}
+
+async function validateSealAuthority(runId, contextBundleId, options = {}) {
+  const run = await getAgentRun(runId);
+  if (run.mode !== externalBrainOwnership.orchestration_mode) {
+    throw new Error("agent_run_id is not a ChatGPT-owned external brain writing session.");
+  }
+  await getGptWritingContextBundle(contextBundleId, options);
+  const missing = await missingPreGenerationCapabilities(runId);
+  if (missing.length) {
+    return { ok: false, run, missing, blocked_stage: "pre_generation_capability_gate" };
+  }
+  const priorCognition = await loadVerifiedPriorAuthorshipCognition({
+    run_id: runId,
+    writing_context_bundle_id: contextBundleId,
+  });
+  if (!priorCognition.ok) {
+    const failures = [...priorCognition.integrity_failures.map((failure) => `${failure.module_name}:${failure.code}`), ...priorCognition.missing_modules.map((moduleName) => `${moduleName}:missing`)] ;
+    throw new Error(`writing_card_director requires verified exact outputs from all six pre-generation capabilities and prior cognition continuity. ${failures.join(", ")}`);
+  }
+  return { ok: true, run, priorCognition };
+}
+
+export async function sealChatgptOwnedRawStoryHandoff(input = {}, options = {}) {
+  const runId = requiredText(sessionId(input), "external_brain_session_id");
+  const contextBundleId = requiredText(bundleId(input), "writing_context_bundle_id");
+  const readiness = await validateSealAuthority(runId, contextBundleId, options);
+  if (!readiness.ok) {
+    return {
+      ok: false,
+      tool_name: "chatgpt_bridge_seal_raw_story_handoff",
+      architecture_route: externalBrainOwnership.orchestration_mode,
+      handoff_route: "single_ingress_immutable_seal",
+      external_brain_session_id: runId,
+      writing_context_bundle_id: contextBundleId,
+      raw_story_handoff_id: null,
+      blocked: true,
+      blocked_stage: readiness.blocked_stage,
+      missing_pre_generation_capabilities: readiness.missing,
+      mutation_guards: { ...safety },
+      ...safety,
+    };
+  }
+  const scope = assertRawStoryHandoffSessionScope({
+    run_id: runId,
+    writing_context_bundle_id: contextBundleId,
+  });
+  const missing = readiness.missing ?? [];
+  if (missing.length) {
+    return {
+      ok: false,
+      tool_name: "chatgpt_bridge_seal_raw_story_handoff",
+      architecture_route: externalBrainOwnership.orchestration_mode,
+      handoff_route: "single_ingress_immutable_seal",
+      external_brain_session_id: runId,
+      writing_context_bundle_id: contextBundleId,
+      raw_story_handoff_id: null,
+      blocked: true,
+      blocked_stage: "pre_generation_capability_gate",
+      missing_pre_generation_capabilities: missing,
+      mutation_guards: { ...safety },
+      ...safety,
+    };
+  }
+  const sealed = await sealRawStoryHandoff({
+    run_id: runId,
+    writing_context_bundle_id: contextBundleId,
+    raw_story_text: input.raw_story_text,
+  }, options);
+  return {
+    ok: true,
+    tool_name: "chatgpt_bridge_seal_raw_story_handoff",
+    architecture_route: externalBrainOwnership.orchestration_mode,
+    handoff_route: "single_ingress_immutable_seal",
+    external_brain_session_id: runId,
+    writing_context_bundle_id: contextBundleId,
+    raw_story_handoff_id: sealed.raw_story_handoff_id,
+    raw_story_sha256: sealed.raw_story_sha256,
+    raw_story_integrity_manifest: sealed.raw_story_integrity_manifest,
+    lifecycle_status: sealed.lifecycle_status,
+    storage_scope: sealed.storage_scope,
+    broker_storage_scope: sealed.broker_storage_scope,
+    broker_persistence: sealed.broker_persistence,
+    persists_across_process_restart: false,
+    runtime_process_instance_id: scope.runtime_process_instance_id,
+    seal_child_runtime_process_instance_id: scope.runtime_process_instance_id,
+    broker_runtime_process_instance_id: sealed.broker_runtime_process_instance_id,
+    seal_ingress_raw_story_sha256: sealed.seal_ingress_raw_story_sha256,
+    parent_broker_received_raw_story_sha256: sealed.parent_broker_received_raw_story_sha256,
+    internal_payload_continuity_exact_match: sealed.internal_payload_continuity_exact_match,
+    orchestration_owner: "ChatGPT",
+    prose_generator: "ChatGPT",
+    mutation_guards: { ...safety },
+    ...safety,
+  };
+}
+
+function blockedFinalPolisherResponse({
+  run,
+  runId,
+  contextBundleId,
+  handoffRoute,
+  reason,
+  rawStoryIntegrity = null,
+}) {
+  return {
+    ok: false,
+    tool_name: "chatgpt_bridge_use_final_polisher",
+    architecture_route: externalBrainOwnership.orchestration_mode,
+    handoff_route: handoffRoute,
+    capability_name: "run_final_polisher",
+    generation_boundary: "post_generation",
+    orchestration_owner: "ChatGPT",
+    prose_generator: "ChatGPT",
+    full_neural_orchestrator_used: false,
+    external_brain_session_id: runId,
+    writing_context_bundle_id: contextBundleId,
+    ...(rawStoryIntegrity ? { raw_story_integrity: rawStoryIntegrity } : {}),
+    capability_output: null,
+    blocked: true,
+    blocked_reason: reason,
+    runtime_process_instance_id: getRuntimeProcessInstanceId(),
+    trace: {
+      trace_id: null,
+      run_id: runId,
+      module_name: "final_polisher",
+      status: "not_executed",
+      output_hash: null,
+    },
+    agent_run_status: run.status,
+    mutation_guards: { ...safety },
+    ...safety,
+  };
+}
+
 export async function useChatgptOwnedExternalBrainCapability(capabilityName, input = {}, options = {}) {
   const wrapper = wrappers[capabilityName];
   if (!wrapper) throw new Error(`Unknown external brain capability: ${capabilityName}`);
@@ -488,20 +723,123 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   const context = await getGptWritingContextBundle(contextBundleId, options);
   const isFinalPolisher = capabilityName === "run_final_polisher";
   const generationBoundary = isFinalPolisher ? "post_generation" : "pre_generation";
-  const rawStoryText = isFinalPolisher
-    ? requiredText(input.raw_story_text, "raw_story_text")
-    : null;
-  const declaredRawStorySha256 = isFinalPolisher ? input.raw_story_sha256 : null;
-  const receivedRawStorySha256 = isFinalPolisher ? sha256(rawStoryText) : null;
+  let rawStoryText = null;
+  let declaredRawStorySha256 = null;
+  let receivedRawStorySha256 = null;
+  let sealedAcquisition = null;
+  let handoffRoute = null;
   if (isFinalPolisher) {
+    const sealedRouteRequested = input.raw_story_handoff_id !== undefined;
+    const directRouteRequested = input.raw_story_text !== undefined
+      || input.raw_story_sha256 !== undefined
+      || input.raw_story_integrity_manifest !== undefined;
+    if (sealedRouteRequested === directRouteRequested) {
+      return blockedFinalPolisherResponse({
+        run,
+        runId,
+        contextBundleId,
+        handoffRoute: sealedRouteRequested ? "invalid_mixed_handoff_routes" : "missing_handoff_route",
+        reason: sealedRouteRequested
+          ? "raw_story_handoff_id is mutually exclusive with raw_story_text, raw_story_sha256, and raw_story_integrity_manifest; final_polisher was not executed."
+          : "Choose exactly one final-polisher handoff route: direct raw_story_text plus raw_story_sha256, or raw_story_handoff_id; final_polisher was not executed.",
+      });
+    }
+    if (sealedRouteRequested) {
+      handoffRoute = "single_ingress_immutable_seal";
+      try {
+        sealedAcquisition = await acquireRawStoryHandoff({
+          raw_story_handoff_id: input.raw_story_handoff_id,
+          run_id: runId,
+          writing_context_bundle_id: contextBundleId,
+        }, options);
+      } catch (error) {
+        return blockedFinalPolisherResponse({
+          run,
+          runId,
+          contextBundleId,
+          handoffRoute,
+          reason: `${error instanceof Error ? error.message : String(error)} final_polisher was not executed.`,
+          rawStoryIntegrity: {
+            guard_used: true,
+            integrity_route: handoffRoute,
+            status: "blocked",
+            raw_story_handoff_id: input.raw_story_handoff_id ?? null,
+            exact_match: false,
+            blocked_stage: "raw_story_handoff_seal_resolution",
+            final_polisher_executed: false,
+          },
+        });
+      }
+      rawStoryText = sealedAcquisition.raw_story_text;
+      receivedRawStorySha256 = sha256(rawStoryText);
+      const tripleHashExactMatch = sealedAcquisition.seal_ingress_raw_story_sha256
+        === sealedAcquisition.parent_broker_received_raw_story_sha256
+        && sealedAcquisition.parent_broker_received_raw_story_sha256 === sealedAcquisition.raw_story_sha256
+        && sealedAcquisition.raw_story_sha256 === receivedRawStorySha256;
+      if (!tripleHashExactMatch) {
+        await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
+        return blockedFinalPolisherResponse({
+          run,
+          runId,
+          contextBundleId,
+          handoffRoute,
+          reason: "The process-local sealed payload no longer matches its immutable exact SHA-256; final_polisher was not executed.",
+          rawStoryIntegrity: {
+            guard_used: true,
+            integrity_route: handoffRoute,
+            status: "mismatch",
+            raw_story_handoff_id: sealedAcquisition.raw_story_handoff_id,
+            seal_received_raw_story_sha256: sealedAcquisition.raw_story_sha256,
+            seal_ingress_raw_story_sha256: sealedAcquisition.seal_ingress_raw_story_sha256,
+            parent_broker_received_raw_story_sha256: sealedAcquisition.parent_broker_received_raw_story_sha256,
+            final_polisher_resolved_raw_story_sha256: receivedRawStorySha256,
+            triple_hash_exact_match: false,
+            exact_match: false,
+            blocked_stage: "raw_story_handoff_integrity",
+            final_polisher_executed: false,
+          },
+        });
+      }
+    } else {
+      handoffRoute = "direct_exact_sha256";
+      try {
+        rawStoryText = requiredText(input.raw_story_text, "raw_story_text");
+      } catch (error) {
+        return blockedFinalPolisherResponse({
+          run,
+          runId,
+          contextBundleId,
+          handoffRoute,
+          reason: `${error instanceof Error ? error.message : String(error)}; final_polisher was not executed.`,
+        });
+      }
+      declaredRawStorySha256 = input.raw_story_sha256;
+      receivedRawStorySha256 = sha256(rawStoryText);
+    }
+  }
+  if (isFinalPolisher && handoffRoute === "direct_exact_sha256") {
     const declaredFormatValid = validSha256(declaredRawStorySha256);
     const exactMatch = declaredFormatValid && declaredRawStorySha256 === receivedRawStorySha256;
+    const declaredIntegrityManifest = input.raw_story_integrity_manifest;
+    if (declaredIntegrityManifest !== undefined && declaredFormatValid) {
+      validateRawStoryIntegrityManifest(declaredIntegrityManifest, {
+        declared_raw_story_sha256: declaredRawStorySha256,
+      });
+    }
     if (!exactMatch) {
       const integrityStatus = declaredFormatValid ? "mismatch" : "invalid_declared_hash";
+      const forensics = declaredFormatValid
+        ? buildRawStoryMismatchForensics({
+          declared_manifest: declaredIntegrityManifest,
+          declared_raw_story_sha256: declaredRawStorySha256,
+          received_raw_story_text: rawStoryText,
+        })
+        : null;
       return {
         ok: false,
         tool_name: "chatgpt_bridge_use_final_polisher",
         architecture_route: externalBrainOwnership.orchestration_mode,
+        handoff_route: handoffRoute,
         capability_name: capabilityName,
         generation_boundary: generationBoundary,
         orchestration_owner: "ChatGPT",
@@ -517,6 +855,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
           exact_match: false,
           blocked_stage: "raw_story_handoff_integrity",
           final_polisher_executed: false,
+          ...(forensics ? { forensics } : {}),
         },
         capability_output: null,
         blocked: true,
@@ -537,37 +876,46 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }
   }
   if (isFinalPolisher) {
-    const usage = await summarizeNeuralUsageForRun(runId);
-    const completed = new Set(usage.neural_modules_used ?? []);
-    const missing = externalBrainPreGenerationCapabilities
-      .map((name) => name.slice(4))
-      .filter((name) => !completed.has(name));
+    const missing = await missingPreGenerationCapabilities(runId);
     if (missing.length) {
+      if (sealedAcquisition) {
+        await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
+      }
       throw new Error(`final_polisher is post-generation and requires all pre-generation capabilities first: ${missing.join(", ")}.`);
     }
   }
   let techniqueSelection = null;
+  let priorCognition = null;
   if (capabilityName === "run_writing_card_director") {
+    priorCognition = await loadVerifiedPriorAuthorshipCognition({
+      run_id: runId,
+      writing_context_bundle_id: contextBundleId,
+    });
+    if (!priorCognition.ok) {
+      const missingText = priorCognition.missing_modules.length
+        ? ` Missing prior cognition modules: ${priorCognition.missing_modules.join(", ")}.`
+        : "";
+      const integrityText = priorCognition.integrity_failures.length
+        ? ` Invalid prior cognition sources: ${priorCognition.integrity_failures.map((failure) => `${failure.module_name} (${failure.code})`).join(", ")}.`
+        : "";
+      return blockedDirectorResponse({
+        runId,
+        contextBundleId,
+        run,
+        continuity: priorCognition,
+        reason: `writing_card_director requires verified exact outputs from all five prior cognition modules.${missingText}${integrityText}`,
+      });
+    }
     try {
       techniqueSelection = resolveWritingTechniqueSelection(input.capability_input ?? {});
     } catch (error) {
-      return {
-        ok: false,
-        tool_name: "chatgpt_bridge_use_writing_card_director",
-        architecture_route: externalBrainOwnership.orchestration_mode,
-        capability_name: capabilityName,
-        generation_boundary: generationBoundary,
-        orchestration_owner: "ChatGPT",
-        prose_generator: "ChatGPT",
-        full_neural_orchestrator_used: false,
-        external_brain_session_id: runId,
-        writing_context_bundle_id: contextBundleId,
-        capability_output: null,
-        blocked: true,
-        blocked_reason: error instanceof Error ? error.message : String(error),
-        mutation_guards: { ...safety },
-        ...safety,
-      };
+      return blockedDirectorResponse({
+        runId,
+        contextBundleId,
+        run,
+        continuity: priorCognition,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   const capabilityInput = isFinalPolisher ? {
@@ -575,7 +923,12 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     generation_boundary: generationBoundary,
     raw_story_text: rawStoryText,
     raw_story_sha256: receivedRawStorySha256,
-    declared_raw_story_sha256: declaredRawStorySha256,
+    ...(handoffRoute === "direct_exact_sha256" ? {
+      declared_raw_story_sha256: declaredRawStorySha256,
+    } : {
+      raw_story_handoff_id: sealedAcquisition.raw_story_handoff_id,
+      sealed_raw_story_sha256: sealedAcquisition.raw_story_sha256,
+    }),
     writing_context_bundle_id: contextBundleId,
     capability_input: input.capability_input ?? {},
   } : {
@@ -585,20 +938,57 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     writing_context_bundle_id: contextBundleId,
     writing_context: context.bundle,
     capability_input: input.capability_input ?? {},
+    ...(capabilityName === "run_writing_card_director" ? {
+      authorship_cognition_sources: {
+        integration_mode: "same_author_cognition_synthesis",
+        canonical_ordering: [...priorAuthorshipCognitionModules],
+        source_manifest: priorCognition.selected_sources.map((source) => ({
+          module_name: source.module_name,
+          trace_id: source.trace_id,
+          output_hash: source.output_hash,
+          result_type: source.result_type,
+        })),
+        prior_cognition_outputs: priorCognition.selected_sources.map((source) => ({
+          module_name: source.module_name,
+          trace_id: source.trace_id,
+          output_hash: source.output_hash,
+          result_type: source.result_type,
+          capability_output: source.capability_output,
+        })),
+      },
+    } : {}),
   };
-  const execution = await wrapper(capabilityInput, {
-    run_id: runId,
-    task_type: "draft_generation",
-    source: "chatgpt_owned_external_brain_mcp",
-    adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
-      technique_selection: techniqueSelection,
-    }),
-  });
-  const finalizedRun = isFinalPolisher
+  let execution;
+  try {
+    execution = await wrapper(capabilityInput, {
+      run_id: runId,
+      task_type: "draft_generation",
+      source: "chatgpt_owned_external_brain_mcp",
+      external_brain_cognition_output: priorAuthorshipCognitionModules.includes(capabilityName.slice(4)),
+      writing_context_bundle_id: contextBundleId,
+      adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
+        technique_selection: techniqueSelection,
+      }),
+    });
+  } catch (error) {
+    if (sealedAcquisition) {
+      await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
+    }
+    throw error;
+  }
+  const executionSucceeded = execution.trace?.status === "success";
+  if (sealedAcquisition) {
+    if (executionSucceeded) {
+      await completeRawStoryHandoffConsumption(sealedAcquisition, options);
+    } else {
+      await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
+    }
+  }
+  const finalizedRun = isFinalPolisher && executionSucceeded
     ? await finalizeAgentRun(runId, { output: execution.output })
     : null;
   return {
-    ok: execution.trace?.status === "success",
+    ok: executionSucceeded,
     tool_name: `chatgpt_bridge_use_${capabilityName.slice(4)}`,
     architecture_route: externalBrainOwnership.orchestration_mode,
     capability_name: capabilityName,
@@ -609,8 +999,26 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     external_brain_session_id: runId,
     writing_context_bundle_id: contextBundleId,
     ...(isFinalPolisher ? {
+      handoff_route: handoffRoute,
       raw_story_sha256: receivedRawStorySha256,
-      raw_story_integrity: {
+      raw_story_integrity: handoffRoute === "single_ingress_immutable_seal" ? {
+        guard_used: true,
+        integrity_route: handoffRoute,
+        status: "matched",
+        raw_story_handoff_id: sealedAcquisition.raw_story_handoff_id,
+        seal_received_raw_story_sha256: sealedAcquisition.raw_story_sha256,
+        seal_ingress_raw_story_sha256: sealedAcquisition.seal_ingress_raw_story_sha256,
+        parent_broker_received_raw_story_sha256: sealedAcquisition.parent_broker_received_raw_story_sha256,
+        final_polisher_resolved_raw_story_sha256: receivedRawStorySha256,
+        triple_hash_exact_match: sealedAcquisition.seal_ingress_raw_story_sha256
+          === sealedAcquisition.parent_broker_received_raw_story_sha256
+          && sealedAcquisition.parent_broker_received_raw_story_sha256 === receivedRawStorySha256,
+        exact_match: true,
+        blocked_stage: null,
+        final_polisher_executed: true,
+        payload_reference_active: false,
+        payload_release_semantics: "process_local_reference_released_not_secure_memory_erase",
+      } : {
         guard_used: true,
         status: "matched",
         declared_raw_story_sha256: declaredRawStorySha256,
@@ -621,6 +1029,13 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       },
     } : {}),
     capability_output: execution.output,
+    runtime_process_instance_id: getRuntimeProcessInstanceId(),
+    ...(sealedAcquisition ? {
+      final_polisher_child_runtime_process_instance_id: getRuntimeProcessInstanceId(),
+      broker_runtime_process_instance_id: sealedAcquisition.broker_runtime_process_instance_id,
+      broker_storage_scope: sealedAcquisition.broker_storage_scope,
+      broker_persistence: sealedAcquisition.broker_persistence,
+    } : {}),
     trace: {
       trace_id: execution.trace?.trace_id ?? null,
       run_id: execution.trace?.run_id ?? runId,

@@ -53,6 +53,12 @@ const steps = [
   ["Cleanup proposal service", ["tests/cleanup/cleanup-proposal-service.test.mjs"]],
 
   ["Phase47A backup export scaling portable regression", ["tests/phase47/phase47a-backup-export-scaling-regression.test.mjs"]],
+  ["Phase47B writing-card-director integrated authorship cognition synthesis", ["tests/phase47/phase47b-writing-card-director-integrated-authorship-cognition-synthesis.test.mjs"]],
+  ["Phase47D exact raw-story handoff mismatch forensics", ["tests/phase47/phase47d-exact-raw-story-handoff-mismatch-forensics.test.mjs"]],
+  ["Phase47F single-ingress immutable raw-story seal handoff", ["tests/phase47/phase47f-single-ingress-immutable-raw-story-seal-handoff.test.mjs"]],
+  ["Phase47H raw-story seal session authority reconciliation", ["tests/phase47/phase47h-raw-story-seal-session-authority-reconciliation.test.mjs"]],
+  ["Phase47J MCP parent ephemeral raw-story seal broker", ["tests/phase47/phase47j-mcp-parent-ephemeral-raw-story-seal-broker.test.mjs"]],
+  ["Phase47L MCP parent ephemeral raw-story seal live acceptance closure", ["tests/phase47/phase47l-mcp-parent-ephemeral-raw-story-seal-live-acceptance-closure.test.mjs"]],
 
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
 

@@ -183,6 +183,7 @@ const expectedTools = [
   "chatgpt_bridge_get_entity_conflicts",
   "chatgpt_bridge_get_entity_registry_provenance",
   "chatgpt_bridge_build_writing_context",
+  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_proofing_context",
   "chatgpt_bridge_save_proof_report",
@@ -1207,6 +1208,18 @@ const requiredConstraintFixtures = [
     }],
     ["chatgpt_bridge_get_canon_entity_detail", "entity_id", {}],
     ["chatgpt_bridge_get_foreshadowing_settlement_surface", "id", {}],
+    ["chatgpt_bridge_seal_raw_story_handoff", "external_brain_session_id", {
+      writing_context_bundle_id: "gptctx_20260714-000000-00000000",
+      raw_story_text: "fixture",
+    }],
+    ["chatgpt_bridge_seal_raw_story_handoff", "writing_context_bundle_id", {
+      external_brain_session_id: "agent_run_20260714-000000-00000000",
+      raw_story_text: "fixture",
+    }],
+    ["chatgpt_bridge_seal_raw_story_handoff", "raw_story_text", {
+      external_brain_session_id: "agent_run_20260714-000000-00000000",
+      writing_context_bundle_id: "gptctx_20260714-000000-00000000",
+    }],
   ].map(([name, field, argumentsValue]) => ({
     label: `${name} missing ${field}`,
     name,
@@ -1888,6 +1901,9 @@ function expectedStringMaxLength(field) {
   }
   if (field === "proofReportText") {
     return expectedInputLimits.proofReportMaxLength;
+  }
+  if (field === "raw_story_text") {
+    return 250000;
   }
   if (field === "text") {
     return expectedInputLimits.textMaxLength;

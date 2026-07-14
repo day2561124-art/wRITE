@@ -77,6 +77,7 @@ import {
   chatgpt_bridge_use_style_drift_detector,
   chatgpt_bridge_use_over_governance_detector,
   chatgpt_bridge_use_writing_card_director,
+  chatgpt_bridge_seal_raw_story_handoff,
   chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_get_entity_registry_summary,
   chatgpt_bridge_search_canon_entities,
@@ -636,24 +637,24 @@ function truncateText(value, limit = 160) {
   return `${text.slice(0, limit)}... [truncated ${text.length - limit} chars]`;
 }
 
-function summarizeInputValue(value) {
+function summarizeInputValue(value, key = "") {
   if (typeof value === "string") {
     return {
       type: "string",
       length: value.length,
       sha256: hashText(value),
-      preview: truncateText(value),
+      ...(key === "raw_story_text" ? { sensitive_payload_preview_omitted: true } : { preview: truncateText(value) }),
     };
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => summarizeInputValue(item));
+    return value.map((item) => summarizeInputValue(item, key));
   }
 
   if (isObject(value)) {
     const summary = {};
     for (const [key, nestedValue] of Object.entries(value)) {
-      summary[key] = summarizeInputValue(nestedValue);
+      summary[key] = summarizeInputValue(nestedValue, key);
     }
     return summary;
   }
@@ -664,7 +665,7 @@ function summarizeInputValue(value) {
 function summarizeToolArguments(args) {
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
-    summary[key] = summarizeInputValue(value);
+    summary[key] = summarizeInputValue(value, key);
   }
   return summary;
 }
@@ -2121,16 +2122,81 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_use_writing_card_director(args)),
   },
   {
-    name: "chatgpt_bridge_use_final_polisher",
-    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability. The caller must submit exact raw_story_text plus its predeclared lowercase raw_story_sha256; runtime hashes the exact received string and hard-blocks before final_polisher execution on invalid format or mismatch. A match returns an evidence-bound subtractive editorial contract and dedicated trace; ChatGPT remains the final prose generator. Never mutates candidate/Canon/active_engine/adoption/settlement state.",
+    name: "chatgpt_bridge_seal_raw_story_handoff",
+    description: "[low-risk-write] Single-ingress immutable raw-story seal. After all six pre-generation capabilities succeed, accept the exact ChatGPT-authored raw_story_text once, hash it, and store it only in the long-lived MCP HTTP parent process ephemeral-memory broker behind an opaque run/bundle-scoped raw_story_handoff_id. Per-connection children use internal Node IPC; the response never returns prose, nothing is persisted, and the ID does not survive parent restart.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },
       writing_context_bundle_id: { type: "string" },
       raw_story_text: { type: "string", maxLength: 250000 },
+    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_seal_raw_story_handoff(args)),
+  },
+  {
+    name: "chatgpt_bridge_use_final_polisher",
+    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability with exactly one mutually exclusive handoff route. Preferred sealed route: submit only raw_story_handoff_id; the requesting child atomically acquires the same-run/same-bundle exact string from the MCP HTTP parent ephemeral broker over internal Node IPC, verifies the full ingress-parent-final SHA chain, executes once, then consumes the lease and releases the payload reference. Compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged; no fallback, retry, normalization, prose resubmission, or authorship transfer occurs.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      external_brain_session_id: { type: "string" },
+      writing_context_bundle_id: { type: "string" },
+      raw_story_handoff_id: { type: "string", pattern: "^raw_story_handoff_[0-9]{8}-[0-9]{6}-[a-f0-9]{12}$" },
+      raw_story_text: { type: "string", maxLength: 250000 },
       raw_story_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+      raw_story_integrity_manifest: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          manifest_version: { type: "string", const: "phase47d-raw-story-integrity-manifest-v1" },
+          hash_algorithm: { type: "string", const: "sha256" },
+          text_encoding: { type: "string", const: "utf8" },
+          exact_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          js_code_unit_length: { type: "integer", minimum: 0, maximum: 500000 },
+          unicode_code_point_length: { type: "integer", minimum: 0, maximum: 250000 },
+          utf8_byte_length: { type: "integer", minimum: 0, maximum: 1000000 },
+          line_count: { type: "integer", minimum: 0, maximum: 250001 },
+          newline_profile: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              lf_count: { type: "integer", minimum: 0, maximum: 250000 },
+              crlf_count: { type: "integer", minimum: 0, maximum: 250000 },
+              cr_count: { type: "integer", minimum: 0, maximum: 250000 },
+            },
+            required: ["lf_count", "crlf_count", "cr_count"],
+          },
+          nfc_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          nfd_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          boundary_window_code_points: { type: "integer", const: 256 },
+          prefix_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          suffix_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          chunk_size_bytes: { type: "integer", const: 1024 },
+          chunk_sha256: {
+            type: "array",
+            maxItems: 1024,
+            items: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
+          },
+        },
+        required: [
+          "manifest_version",
+          "hash_algorithm",
+          "text_encoding",
+          "exact_sha256",
+          "js_code_unit_length",
+          "unicode_code_point_length",
+          "utf8_byte_length",
+          "line_count",
+          "newline_profile",
+          "nfc_sha256",
+          "nfd_sha256",
+          "boundary_window_code_points",
+          "prefix_sha256",
+          "suffix_sha256",
+          "chunk_size_bytes",
+          "chunk_sha256",
+        ],
+      },
       capability_input: { type: "object" },
-    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"]),
+    }, ["external_brain_session_id", "writing_context_bundle_id"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_final_polisher(args)),
   },
   {
@@ -2787,6 +2853,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_use_style_drift_detector",
   "chatgpt_bridge_use_over_governance_detector",
   "chatgpt_bridge_use_writing_card_director",
+  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
@@ -2883,6 +2950,9 @@ const permissionSources = {
   ],
   chatgpt_bridge_begin_external_brain_writing_session: [
     "user_input", "registered_project_sources", "gpt_writing_context_records",
+  ],
+  chatgpt_bridge_seal_raw_story_handoff: [
+    "user_input", "gpt_writing_context_records", "agent_run_records", "neural_trace_records",
   ],
   ...Object.fromEntries([
     "scene_planner", "character_simulator", "neural_critic", "style_drift_detector",

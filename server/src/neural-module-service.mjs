@@ -4,6 +4,11 @@ import {
   hashNeuralValue,
   recordNeuralWrapperTrace,
 } from "./neural-trace-service.mjs";
+import {
+  persistExternalBrainCognitionOutput,
+  priorAuthorshipCognitionModules,
+  serializeCognitionCapabilityOutput,
+} from "./external-brain-cognition-output-service.mjs";
 
 const moduleSpecs = {
   scene_planner: {
@@ -49,8 +54,7 @@ function inputText(value) {
 }
 
 function outputText(value) {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value ?? null);
+  return serializeCognitionCapabilityOutput(value ?? null);
 }
 
 async function runModule(moduleName, input, options = {}) {
@@ -116,6 +120,21 @@ async function runModule(moduleName, input, options = {}) {
       result_type: spec.result_type,
     },
   });
+  if (
+    status === "success"
+    && options.external_brain_cognition_output === true
+    && priorAuthorshipCognitionModules.includes(moduleName)
+  ) {
+    await persistExternalBrainCognitionOutput({
+      run_id: runId,
+      writing_context_bundle_id: options.writing_context_bundle_id,
+      capability_name: `run_${moduleName}`,
+      module_name: moduleName,
+      result_type: spec.result_type,
+      trace,
+      capability_output: output,
+    });
+  }
   return { output, trace };
 }
 

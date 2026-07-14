@@ -25,11 +25,12 @@ const externalBrainToolNames = [
   "chatgpt_bridge_use_style_drift_detector",
   "chatgpt_bridge_use_over_governance_detector",
   "chatgpt_bridge_use_writing_card_director",
+  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
 ];
-const expectedDirectDigest = "c2158ab55f337bef810861aaeeb1ee445ac285f517a68e64731052a191748531";
+const expectedDirectDigest = "c614302e630e54e7dafd9419d33ec8ccf7a3c0d28ebebc425b509540629d7226";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "d9ba57f22adeb7493701bd705ba30aba22ff7166e3a8d9429b451f2bb64618eb";
+const expectedPublicDigest = "40841beb0d057623a63ec665c8ad24fb26e318cb6ad66c3e794077a4973a1cac";
 const expectedPublicNames = [
   "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
@@ -136,7 +137,7 @@ const directNames = extractDirectMcpToolNames(currentSource);
 assert(historicalNames);
 assert(directNames);
 assert.equal(historicalNames.length, 70);
-assert.equal(directNames.length, 79);
+assert.equal(directNames.length, 80);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
 assert.deepEqual(
@@ -189,7 +190,7 @@ const [fullTools, publicTools] = await Promise.all([
 ]);
 const fullNames = fullTools.map((tool) => tool.name);
 const publicNames = publicTools.map((tool) => tool.name);
-assert.equal(fullNames.length, 79);
+assert.equal(fullNames.length, 80);
 assert.deepEqual(duplicates(fullNames), []);
 assert.equal(digest(fullNames), expectedRuntimeDigest);
 assert.deepEqual(publicNames, expectedPublicNames);
@@ -210,8 +211,8 @@ assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_canon, f
 assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_active_engine, false);
 
 const preview = await runVisualLibraryFinalE2eAcceptancePreview();
-assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 79);
-assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 79);
+assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 80);
+assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 80);
 assert.equal(preview.bridge_readiness_acceptance.passed, true);
 assert.equal(preview.final_acceptance_decision, "visual_library_final_e2e_preview_acceptance_passed");
 

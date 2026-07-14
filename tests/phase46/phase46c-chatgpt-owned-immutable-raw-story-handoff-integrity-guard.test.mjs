@@ -124,7 +124,8 @@ function assertBlocked(response, status, declaredHash, receivedHash) {
   assert.equal(response.ok, false);
   assert.equal(response.blocked, true);
   assert.equal(response.capability_output, null);
-  assert.deepEqual(response.raw_story_integrity, {
+  const { forensics, ...primaryIntegrityVerdict } = response.raw_story_integrity;
+  assert.deepEqual(primaryIntegrityVerdict, {
     guard_used: true,
     status,
     declared_raw_story_sha256: declaredHash,
@@ -133,6 +134,14 @@ function assertBlocked(response, status, declaredHash, receivedHash) {
     blocked_stage: "raw_story_handoff_integrity",
     final_polisher_executed: false,
   });
+  if (status === "mismatch") {
+    assert.equal(forensics.diagnostics_available, true);
+    assert.equal(forensics.declared_manifest_present, false);
+    assert.equal(forensics.comparisons, null);
+    assert.equal(forensics.classifications.insufficient_forensic_evidence, true);
+  } else {
+    assert.equal(forensics, undefined);
+  }
   assert.equal(response.trace.trace_id, null);
   assert.equal(response.trace.module_name, "final_polisher");
   assert.equal(response.trace.status, "not_executed");
@@ -159,7 +168,8 @@ try {
   )?.[0];
   assert(finalPolisherTool, "production final-polisher MCP tool definition must be inspectable");
   assert.match(finalPolisherTool, /raw_story_sha256: \{ type: "string", minLength: 64, maxLength: 64, pattern: "\^\[a-f0-9\]\{64\}\$" \}/u);
-  assert.match(finalPolisherTool, /\["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"\]/u);
+  assert.match(finalPolisherTool, /raw_story_handoff_id/u);
+  assert.match(finalPolisherTool, /\["external_brain_session_id", "writing_context_bundle_id"\]/u);
 
   // Case A — exact ASCII match through the production external-brain capability path.
   const asciiSession = await readySession("exact ASCII match");

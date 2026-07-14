@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
+import { createEphemeralRawStoryHandoffBroker } from './raw-story-handoff-ephemeral-broker.mjs';
 import fs from 'fs';
 
 function safeTransportSend(transport, payload, label = 'transport.send') {
@@ -113,6 +114,12 @@ const configPath = process.argv.includes('--config')
 
 const config = readConfig(configPath);
 const sessions = new Map();
+// The long-lived HTTP parent owns only the ephemeral sealed payload broker.
+// Each MCP connection still receives its own isolated mcp-server child.
+const rawStoryHandoffBroker = createEphemeralRawStoryHandoffBroker({
+  ownership: 'mcp_http_parent',
+  storage_scope: 'mcp_http_parent_process_ephemeral_memory',
+});
 
 function closeBridgeSession(entry) {
   if (!entry || entry.closed) {
@@ -212,7 +219,7 @@ function bindBridge(entry) {
 }
 
 function createBridgeSession() {
-  const session = createStdioSession();
+  const session = createStdioSession({ rawStoryHandoffBroker });
   let entry;
 
   const transport = new StreamableHTTPServerTransport({

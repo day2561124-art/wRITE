@@ -93,7 +93,7 @@ try {
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
 
   const listed = await client.listTools();
-  assert.equal(listed.tools.length, 24);
+  assert.equal(listed.tools.length, 25);
 
   const beginCall = await client.callTool({
     name: "chatgpt_bridge_begin_external_brain_writing_session",
@@ -132,7 +132,7 @@ try {
   }
 
   console.log(
-    `Phase 44C production HTTP MCP compact bootstrap handoff regression passed: size=${serializedBytes} bytes, tool_count=24, capabilities=6/6`,
+    `Phase 44C production HTTP MCP compact bootstrap handoff regression passed: size=${serializedBytes} bytes, tool_count=25, capabilities=6/6`,
   );
 } finally {
   if (client) await client.close().catch(() => {});

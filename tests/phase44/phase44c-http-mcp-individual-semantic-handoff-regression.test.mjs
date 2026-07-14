@@ -103,7 +103,7 @@ try {
   client = new Client({ name: "phase44c-http-individual-semantic-handoff", version: "1.0.0" }, { capabilities: {} });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
   const listed = await client.listTools();
-  assert.equal(listed.tools.length, 24);
+  assert.equal(listed.tools.length, 25);
   const begin = parse(await client.callTool({
     name: "chatgpt_bridge_begin_external_brain_writing_session",
     arguments: { task_prompt: "Phase44C production HTTP semantic handoff：雨夜門前的抉擇。", chapter_mode: "specific_scene" },
