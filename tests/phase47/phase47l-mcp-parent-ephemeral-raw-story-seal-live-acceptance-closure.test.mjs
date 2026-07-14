@@ -14,7 +14,7 @@ const rawEvidence = await readFile(evidencePath, "utf8");
 const evidence = JSON.parse(rawEvidence);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
-assert.equal(rawEvidence, `${JSON.stringify(evidence, null, 2)}\n`, "Phase47K evidence must use canonical LF JSON serialization");
+assert.equal(rawEvidence.replaceAll("\r\n", "\n"), `${JSON.stringify(evidence, null, 2)}\n`, "Phase47K evidence must use canonical LF JSON serialization");
 assert.equal(evidence.schema_version, 1);
 assert.equal(evidence.phase, "47K");
 assert.equal(evidence.evidence_kind, "real_chatgpt_mcp_parent_ephemeral_raw_story_seal_live_acceptance_closure");

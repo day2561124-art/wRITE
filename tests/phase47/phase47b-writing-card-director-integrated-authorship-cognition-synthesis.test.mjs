@@ -201,7 +201,7 @@ try {
   assert.equal(externalBrainOwnership.final_prose_generator, "chatgpt");
 
   const neuralModuleSource = await readFile(path.join(projectRoot, "server", "src", "neural-module-service.mjs"), "utf8");
-  const moduleSpecsBlock = neuralModuleSource.match(/const moduleSpecs = \{([\s\S]*?)\n\};\n\nfunction inputText/u)?.[1];
+  const moduleSpecsBlock = neuralModuleSource.match(/const moduleSpecs = \{([\s\S]*?)\r?\n\};\r?\n\r?\nfunction inputText/u)?.[1];
   assert(moduleSpecsBlock, "neural module specs must remain inspectable");
   const moduleNames = [...moduleSpecsBlock.matchAll(/^  ([a-z_]+): \{/gmu)].map((match) => match[1]);
   assert.deepEqual(moduleNames, expectedNeuralModules);
