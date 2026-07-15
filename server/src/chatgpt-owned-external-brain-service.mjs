@@ -242,9 +242,10 @@ export function buildFinalPolisherEditorialContract(
   const entityGroundingRelevant = characterHardFacts.length > 0
     || ambiguousMentions.length > 0
     || originalOrUnresolvedMentions.length > 0;
-  const originalEntityFreedom = entityGroundingRelevant
-    ? characterCanonGrounding?.original_entity_freedom ?? null
-    : null;
+  
+  // ORIGINAL ENTITY FREEDOM INVARIANT: always provided, not conditional
+  const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom ?? null;
+  
   const evidenceBinding = (requirement) => [{
     source: "raw_story_text",
     binding: "exact_passage_or_precise_location_required",

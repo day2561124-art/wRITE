@@ -69,6 +69,20 @@ const nonCharacterEntitySuffixes = Object.freeze([
 const personActionPattern = /^(?:[，,、：:\s]{0,2})(?:把|將|看向|看了|看著|看|望向|望|回答|答道|答|問道|問|說道|說|道|走進|走出|走向|走|跑|拿起|拿|推開|推|坐下|坐|站起|站|皺|笑|哭|點頭|搖頭|轉身|轉|伸手|伸|抬頭|抬|低頭|低|閉眼|閉|睜眼|睜|進來|進門|離開|靠近|靠|喝|吃|放下|放|收起|收|翻開|翻|蹲下|蹲|起身|起|開口|開|關上|關|拍了|拍|碰|摸|聽見|聽|喊道|喊|叫住|喃喃|沉默|停下|停|退開|退|往|朝|找|接過|遞出|遞|抱著|抱|盯著|盯)/u;
 const personAddressPattern = /^(?:哥|哥哥|弟|弟弟|姐|姐姐|姊|姊姊|妹|妹妹|老師|教官|同學|學長|學姊|學弟|學妹|先生|小姐)/u;
 
+// Person-context evidence patterns for natural prose recall
+const possessivePersonContextPattern = /^的(?:手|聲音|眼睛|眼|目光|臉|頭|身體|胸口|心臟|腳|腿|話|喘息|呼吸|步伐|背影|身影|側臉|表情|嘴角|眉頭|姿態|動作|氣息|氣味|嗓音|聲線|目彩|視線|唇角|眼神|頭髮|耳朵|尾巴|翅膀)/u;
+const personStateReactionPattern = /^(?:一愣|愣了|怔住了|沒有回答|沒回答|停了一下|停了下|還蹲|還站|還坐|仍站|似乎|只是|只有|依舊|仍舊|始終|一直|緩緩|慢慢|輕輕|默默|靜靜|悄悄|漸漸|逐漸|突然|驟然|猛然|忽然|突兀|意外|驚訝|震驚|恍然|恍惚|茫然|呆呆|傻傻|癡癡|呆滯|空洞|迷蒙|朦朧|黯淡|明亮|清亮|晶亮|濕潤|泛紅|蒼白|粉紅|滾燙|冰冷|顫抖|哆嗦|發抖|顫動|抖動|蜷縮|蜷著|靜躺|瑟縮|蜷起|捧著|懷抱|擁抱|緊抱|輕抱)/u;
+const dialogueSpeakerContextPattern = /^(?:問|說|道|答|喊|叫|問道|說道|答道|喊道|叫住|低聲|輕聲|大聲|輕輕地|緩緩地|急促地|迫不及待地|遲疑地|堅定地|溫柔地|冷淡地|嘲諷地|嘲笑地|讚美地|譏諷地|懇求地|央求地|抗議地|哀求地|哭訴地|嚎啕地|啜泣地|抽噎地)\s*[：:]/u;
+
+// Evidence scoring constants
+const evidenceScores = Object.freeze({
+  strong: 10,        // Definitive person evidence
+  supporting: 5,     // Contextual support
+  collision: -10,    // Non-character entity collision
+  weak: 2,           // Weak supporting evidence
+  ambiguous: 0,      // Insufficient confidence
+});
+
 function cleanCell(value) {
   return String(value ?? "")
     .replace(/<br\s*\/?>/giu, "；")
@@ -316,7 +330,68 @@ function isDirectedCharacterList(before, after) {
   return directive && listOrAction;
 }
 
-function classifyOccurrence(source, canonicalName, index) {
+// Detect if action pattern is actually a person action vs part of entity name/suffix compound
+function isPersonActionNotCompound(after) {
+  // Check if the pattern after NAME is actually a person action (not compound word)
+  // Examples:
+  //   夜星把門推開 → TRUE (把 is definitive person action marker)
+  //   夜星站在門口 → TRUE (站在 is person action phrase)
+  //   血站在桌邊 → TRUE
+  //   夜星站今天停駛 → FALSE (站 + entity compound "station that closes today")
+  //   血站今天關門 → FALSE (站 + entity compound)
+  //   武裝學院的休息間 → FALSE (not a person action, should have collision detected)
+  //   夜星道路今天封閉 → FALSE (道 part of "道路" entity compound)
+  
+  // Must start with actual person action verb
+  if (!personActionPattern.test(after)) return false;
+  
+  // Extract the matched verb from personActionPattern using precise regex
+  const match = /^(?:[，,、：:\s]{0,2})((?:把|將|看向|看了|看著|看|望向|望|回答|答道|答|問道|問|說道|說|道|走進|走出|走向|走|跑|拿起|拿|推開|推|坐下|坐|站起|站|皺|笑|哭|點頭|搖頭|轉身|轉|伸手|伸|抬頭|抬|低頭|低|閉眼|閉|睜眼|睜|進來|進門|離開|靠近|靠|喝|吃|放下|放|收起|收|翻開|翻|蹲下|蹲|起身|起|開口|開|關上|關|拍了|拍|碰|摸|聽見|聽|喊道|喊|叫住|喃喃|沉默|停下|停|退開|退|往|朝|找|接過|遞出|遞|抱著|抱|盯著|盯))/u.exec(after);
+  
+  if (!match) return false;
+  
+  const verb = match[1];
+  const afterVerb = after.slice(match[0].length);
+  
+  // Definitive person action markers (multi-character or unambiguous verbs)
+  const definitiveVerbs = ['把', '將', '看向', '望向', '回答', '答道', '問道', '說道', '走進', '走出', '走向', '推開', '拿起', '坐下', '站起', '點頭', '搖頭', '轉身', '伸手', '抬頭', '低頭', '閉眼', '睜眼', '進來', '進門', '離開', '靠近', '放下', '收起', '翻開', '蹲下', '起身', '開口', '關上', '拍了', '喊道', '叫住', '抱著', '盯著'];
+  
+  if (definitiveVerbs.includes(verb)) return true;
+  
+  // Single-character ambiguous verbs need context examination
+  const ambiguousVerbs = ['看', '道', '站', '開', '關', '走', '坐', '皺', '笑', '哭', '轉', '伸', '抬', '低', '閉', '睜', '靠', '喝', '吃', '放', '收', '翻', '蹲', '起', '拍', '碰', '摸', '聽', '喊', '叫', '朝', '找', '遞', '抱', '盯'];
+  
+  if (ambiguousVerbs.includes(verb)) {
+    // No context after - likely not a person action
+    if (!afterVerb || afterVerb[0] === '。' || afterVerb[0] === '，') return false;
+    
+    // Check for person action continuations (stance/location markers)
+    if (/^(?:在|著|起|中|過)/.test(afterVerb)) return true;
+    
+    // Check for possessive person context
+    if (/^的(?:手|聲|眼|身|頭)/.test(afterVerb)) return true;
+    
+    // Check for known non-character entity suffixes - indicates compound noun
+    if (/^(?:路|道|局|站|港|塔|橋|河|湖|山|街|村|鎮|市|區|省|縣|州|國|黨|軍|隊|院|校|會|社|店|家|場|室|館|園|廣|台)(?:[^的在於向往從到與和及而但就才又也]|$)/.test(afterVerb)) {
+      return false;
+    }
+    
+    // Check for date/time/modifier context - indicates entity context, not person action
+    if (/^(?:今|明|近|最|第|一|新|舊|老|小|大|每|週|月|年|日|小時|現在|剛|才|已|了|著|過)/.test(afterVerb)) {
+      return false;
+    }
+    
+    // Ambiguous case - conservatively return true (treating as person action when in doubt)
+    // Only explicit collision or impossible context returns false
+    return true;
+  }
+  
+  // Other verbs - assume person action
+  return true;
+}
+
+// Evaluate evidence for a single occurrence with scoring
+function evaluateOccurrenceEvidence(source, canonicalName, index) {
   const { before, after, passage } = contextWindow(source, index, canonicalName);
   const characterLength = [...canonicalName].length;
   const precedingCharacter = before.slice(-1);
@@ -324,71 +399,185 @@ function classifyOccurrence(source, canonicalName, index) {
     || !precedingCharacter
     || !/\p{Script=Han}/u.test(precedingCharacter);
 
+  const scores = [];
+
+  // STRONG EVIDENCE
   if (oneCharacterBoundary && isVocative(before, after)) {
-    return {
-      status: canonCharacterMentionStatuses.confirmed,
-      confidence: "high",
+    scores.push({
+      score: evidenceScores.strong,
       reason: "vocative_character_context",
-      index,
-      passage,
-    };
+    });
   }
+  
   if (oneCharacterBoundary && personAddressPattern.test(after)) {
-    return {
-      status: canonCharacterMentionStatuses.confirmed,
-      confidence: "high",
+    scores.push({
+      score: evidenceScores.strong,
       reason: "person_address_or_relationship_context",
-      index,
-      passage,
-    };
+    });
   }
-  if (oneCharacterBoundary && personActionPattern.test(after)) {
-    return {
-      status: canonCharacterMentionStatuses.confirmed,
-      confidence: "high",
-      reason: "actor_or_person_action_context",
-      index,
-      passage,
-    };
-  }
+
   if (characterLength > 1 && isDirectedCharacterList(before, after)) {
+    scores.push({
+      score: evidenceScores.strong,
+      reason: "explicit_character_list_or_writing_directive",
+    });
+  }
+
+  if (characterLength >= 4 && !nonCharacterEntitySuffixes.some(suffix => canonicalName.endsWith(suffix))) {
+    scores.push({
+      score: evidenceScores.strong,
+      reason: "exact_long_canonical_name",
+    });
+  }
+
+  // SUPPORTING EVIDENCE - possessive human-bearing context
+  if (oneCharacterBoundary && possessivePersonContextPattern.test(after)) {
+    scores.push({
+      score: evidenceScores.supporting,
+      reason: "possessive_person_context",
+    });
+  }
+
+  // SUPPORTING EVIDENCE - person state/reaction context
+  if (oneCharacterBoundary && personStateReactionPattern.test(after)) {
+    scores.push({
+      score: evidenceScores.supporting,
+      reason: "person_state_reaction_context",
+    });
+  }
+
+  // SUPPORTING EVIDENCE - dialogue speaker context
+  if (oneCharacterBoundary && dialogueSpeakerContextPattern.test(after)) {
+    scores.push({
+      score: evidenceScores.supporting,
+      reason: "dialogue_speaker_context",
+    });
+  }
+
+  // SUPPORTING EVIDENCE - checked person action (with collision guard)
+  if (oneCharacterBoundary && personActionPattern.test(after) && isPersonActionNotCompound(after)) {
+    scores.push({
+      score: evidenceScores.supporting,
+      reason: "actor_or_person_action_context",
+    });
+  }
+
+  // WEAK EVIDENCE - repeated canonical name in person-like position
+  if (characterLength >= 2) {
+    // Count this occurrence position in sentence/clause subject area
+    const sentenceStart = Math.max(0, before.lastIndexOf("。"), before.lastIndexOf("！"), before.lastIndexOf("？"), before.lastIndexOf("\n"));
+    const clauseStart = Math.max(0, before.lastIndexOf("，"), before.lastIndexOf("；"));
+    if (index - sentenceStart < 20 || (clauseStart > sentenceStart && index - clauseStart < 20)) {
+      scores.push({
+        score: evidenceScores.weak,
+        reason: "subject_position_in_clause",
+      });
+    }
+  }
+
+  // COLLISION EVIDENCE
+  const collisionSuffix = hasNonCharacterCompoundSuffix(after);
+  if (collisionSuffix && !isPersonActionNotCompound(after)) {
+    scores.push({
+      score: evidenceScores.collision,
+      reason: "non_character_compound_suffix",
+      collision_suffix: collisionSuffix,
+    });
+  }
+
+  return {
+    index,
+    passage,
+    scores,
+  };
+}
+
+function classifyOccurrence(source, canonicalName, index) {
+  const evidence = evaluateOccurrenceEvidence(source, canonicalName, index);
+  const { before, after } = contextWindow(source, index, canonicalName);
+  const characterLength = [...canonicalName].length;
+  const precedingCharacter = before.slice(-1);
+  const oneCharacterBoundary = characterLength > 1
+    || !precedingCharacter
+    || !/\p{Script=Han}/u.test(precedingCharacter);
+
+  // Calculate total score
+  const totalScore = evidence.scores.reduce((sum, item) => sum + item.score, 0);
+  
+  // Determine status based on evidence
+  if (totalScore >= evidenceScores.strong) {
     return {
       status: canonCharacterMentionStatuses.confirmed,
       confidence: "high",
-      reason: "explicit_character_list_or_writing_directive",
-      index,
-      passage,
+      reason: evidence.scores.find(s => s.score === evidenceScores.strong)?.reason || "strong_evidence",
+      evidence_scores: evidence.scores,
+      total_score: totalScore,
+      index: evidence.index,
+      passage: evidence.passage,
     };
   }
 
-  const collisionSuffix = hasNonCharacterCompoundSuffix(after);
-  if (collisionSuffix) {
+  // Multiple supporting evidences can collectively confirm
+  if (evidence.scores.filter(s => s.score === evidenceScores.supporting).length >= 2) {
+    return {
+      status: canonCharacterMentionStatuses.confirmed,
+      confidence: "medium",
+      reason: "multiple_supporting_evidence",
+      evidence_scores: evidence.scores,
+      total_score: totalScore,
+      index: evidence.index,
+      passage: evidence.passage,
+    };
+  }
+
+  // Total supporting + weak evidence with no collision
+  if (totalScore >= evidenceScores.supporting && !evidence.scores.some(s => s.score === evidenceScores.collision)) {
+    return {
+      status: canonCharacterMentionStatuses.confirmed,
+      confidence: "medium",
+      reason: "accumulated_supporting_evidence",
+      evidence_scores: evidence.scores,
+      total_score: totalScore,
+      index: evidence.index,
+      passage: evidence.passage,
+    };
+  }
+
+  // Collision detected - ambiguous
+  if (evidence.scores.some(s => s.score === evidenceScores.collision)) {
     return {
       status: canonCharacterMentionStatuses.ambiguous,
       confidence: "insufficient",
       reason: "non_character_compound_suffix",
-      collision_suffix: collisionSuffix,
-      index,
-      passage,
+      collision_suffix: evidence.scores.find(s => s.collision_suffix)?.collision_suffix,
+      evidence_scores: evidence.scores,
+      total_score: totalScore,
+      index: evidence.index,
+      passage: evidence.passage,
     };
   }
-  if (characterLength >= 4) {
+
+  // Insufficient evidence
+  if (characterLength === 1) {
     return {
-      status: canonCharacterMentionStatuses.confirmed,
-      confidence: "high",
-      reason: "exact_long_canonical_name",
-      index,
-      passage,
+      status: canonCharacterMentionStatuses.ambiguous,
+      confidence: "insufficient",
+      reason: "single_character_name_without_person_evidence",
+      evidence_scores: evidence.scores,
+      total_score: totalScore,
+      index: evidence.index,
+      passage: evidence.passage,
     };
   }
+
   return {
     status: canonCharacterMentionStatuses.ambiguous,
     confidence: "insufficient",
-    reason: characterLength === 1
-      ? "single_character_name_without_person_evidence"
-      : "canonical_name_without_sufficient_identity_context",
-    index,
-    passage,
+    reason: "canonical_name_without_sufficient_identity_context",
+    evidence_scores: evidence.scores,
+    total_score: totalScore,
+    index: evidence.index,
+    passage: evidence.passage,
   };
 }
 

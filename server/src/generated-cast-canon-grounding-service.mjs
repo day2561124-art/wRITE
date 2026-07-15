@@ -70,25 +70,59 @@ export function expandGeneratedCastCanonGrounding(input = {}) {
   const preGenerationNames = new Set(
     preGenerationCharacters.map((character) => character.canonical_name),
   );
-  const generatedCharacters = resolution.confirmed_characters
-    .filter((character) => !preGenerationNames.has(character.canonical_name))
-    .map((character) => ({
-      ...character,
-      grounding_classification: "generated_existing_canon_character",
-      match_sources: ["verified_raw_story_text"],
-    }));
+
+  // SERVICE INTEGRITY INVARIANT: integrity gate must be passed to produce formal expansion
+  const integrityGatePassed = input.integrityValidated === true;
+
+  // GENERATED CHARACTER HANDLING: only build merged characters if integrity gate passed
+  let generatedCharacters = [];
+  let mergedCharacters = preGenerationCharacters.map((character) => ({
+    ...character,
+    grounding_classification: "pre_generation_existing_canon_character",
+  }));
+
+  if (integrityGatePassed) {
+    generatedCharacters = resolution.confirmed_characters
+      .filter((character) => !preGenerationNames.has(character.canonical_name))
+      .map((character) => ({
+        ...character,
+        grounding_classification: "generated_existing_canon_character",
+        match_sources: ["verified_raw_story_text"],
+      }));
+    mergedCharacters = [
+      ...mergedCharacters,
+      ...generatedCharacters,
+    ];
+  }
+
   const generatedNames = new Set(
     generatedCharacters.map((character) => character.canonical_name),
   );
-  const mergedCharacters = [
-    ...preGenerationCharacters.map((character) => ({
-      ...character,
-      grounding_classification: "pre_generation_existing_canon_character",
-    })),
-    ...generatedCharacters,
-  ];
   const canonNames = new Set(records.map((record) => record.canonical_name));
   const possibleOriginalEntities = collectPossibleOriginalEntities(rawStoryText, canonNames);
+
+  // AMBIGUOUS CANON CANDIDATES: collect for semantic identity resolution (not binding hard facts)
+  const ambiguousExistingCanonCandidates = resolution.ambiguous_mentions
+    .map((mention) => {
+      const record = records.find((r) => r.canonical_name === mention.canonical_name);
+      if (!record) return null;
+      return {
+        canonical_name: mention.canonical_name,
+        source_authority: record.source_authority,
+        gender: record.gender,
+        pronouns: record.pronouns,
+        identity_facts: record.identity_facts,
+        affiliation_facts: record.affiliation_facts,
+        appearance_facts: record.appearance_facts,
+        relationship_or_position_facts: record.relationship_or_position_facts,
+        explicit_body_traits: record.explicit_body_traits,
+        mention_evidence: mention,
+        identity_not_confirmed: true,
+        identity_resolution_required: true,
+        do_not_apply_as_grounded_hard_facts_warning: "Candidate Canon facts are identity-resolution evidence only. They do not become binding until ChatGPT semantically confirms that the exact passage refers to the existing Canon entity.",
+      };
+    })
+    .filter((item) => item !== null);
 
   return {
     schema_version: "phase48b-generated-cast-canon-grounding-v1",
@@ -107,20 +141,23 @@ export function expandGeneratedCastCanonGrounding(input = {}) {
       character.canonical_name
     )),
     ambiguous_mentions: resolution.ambiguous_mentions,
+    ambiguous_existing_canon_candidates: ambiguousExistingCanonCandidates,
     original_or_unresolved_mentions: possibleOriginalEntities,
     characters: mergedCharacters,
     body_trait_policy: preGeneration.body_trait_policy ?? null,
     authority_contract: preGeneration.authority_contract ?? null,
+    // ORIGINAL ENTITY FREEDOM INVARIANT: always provided, not conditional on entity grounding
     original_entity_freedom: { ...originalEntityFreedomContract },
     expansion_metadata: {
       mode: "expansion_not_restriction",
       integrity_gate_required: true,
-      integrity_gate_passed: input.integrityValidated === true,
+      integrity_gate_passed: integrityGatePassed,
       raw_story_sha256: input.rawStorySha256 ?? null,
       generated_existing_character_names: [...generatedNames],
       ambiguous_mentions_remain_unresolved: true,
       canon_absence_blocks_final_polisher: false,
       original_entities_persisted: false,
+      formal_expansion_applied: integrityGatePassed,
     },
   };
 }

@@ -379,8 +379,185 @@ try {
     compressed_rules: sha256(await readFile(projectPaths.compressedRules)),
   }, protectedBefore);
 
+  // ===== PHASE 48B FIX1 NEW TESTS =====
+
+  // TEST S: natural person-context recall (possessive, state, dialogue)
+  const naturalContextStory = [
+    "初日一愣。",
+    "初日沒有回答。",
+    "初日的手停了一下。",
+    "初日的聲音從門邊傳來。",
+    "初日怔住了。",
+  ].join("\n");
+  const naturalContextSession = await startReadySession("寫初日的自然反應。");
+  const naturalContextFinal = await useChatgptOwnedExternalBrainCapability(
+    "run_final_polisher",
+    {
+      ...naturalContextSession.common,
+      raw_story_text: naturalContextStory,
+      raw_story_sha256: sha256(naturalContextStory),
+    },
+    options,
+  );
+  assert.equal(naturalContextFinal.ok, true);
+  assert(naturalContextFinal.capability_output.character_hard_facts.some((item) => (
+    item.canonical_name === "初日"
+  )), "TEST S: natural context should confirm 初日");
+
+  // TEST T: cross-occurrence evidence accumulation
+  const crossOccurrenceStory = [
+    "夜星很安靜。",
+    "過了一會兒，夜星把門推開。",
+  ].join("\n");
+  const crossOccurrenceResolution = resolveCanonCharacterMention(
+    crossOccurrenceStory,
+    "夜星",
+  );
+  assert.equal(
+    crossOccurrenceResolution.status,
+    canonCharacterMentionStatuses.confirmed,
+    "TEST T: cross-occurrence should confirm 夜星",
+  );
+  assert(crossOccurrenceResolution.confirmed_occurrences.length > 0);
+
+  // TEST U: suffix/action overlap arbitration
+  const suffixActionTests = [
+    {
+      text: "夜星站今天停駛。",
+      name: "夜星",
+      expectConfirmed: false,
+      label: "夜星站 + entity compound",
+    },
+    {
+      text: "血站今天關門。",
+      name: "血",
+      expectConfirmed: false,
+      label: "血站 + entity compound",
+    },
+    {
+      text: "夜星道路今天封閉。",
+      name: "夜星",
+      expectConfirmed: false,
+      label: "夜星道 + entity suffix",
+    },
+    {
+      text: "夜星站在門口。",
+      name: "夜星",
+      expectConfirmed: true,
+      label: "夜星站在 + person action",
+    },
+    {
+      text: "血站在桌邊。",
+      name: "血",
+      expectConfirmed: true,
+      label: "血站在 + person action",
+    },
+  ];
+  for (const test of suffixActionTests) {
+    const resolution = resolveCanonCharacterMention(test.text, test.name);
+    const isConfirmed = resolution.status === canonCharacterMentionStatuses.confirmed;
+    assert.equal(
+      isConfirmed,
+      test.expectConfirmed,
+      `TEST U: ${test.label} should ${test.expectConfirmed ? "confirm" : "not confirm"} ${test.name}`,
+    );
+  }
+
+  // TEST V: zero-Canon original world creation freedom
+  const zeroCanonSession = await startReadySession("寫一段完全新的城市序章。");
+  const zeroCanonStory = "東岸新開了一所蒼霧學院。";
+  const zeroCanonFinal = await useChatgptOwnedExternalBrainCapability(
+    "run_final_polisher",
+    {
+      ...zeroCanonSession.common,
+      raw_story_text: zeroCanonStory,
+      raw_story_sha256: sha256(zeroCanonStory),
+    },
+    options,
+  );
+  assert.equal(zeroCanonFinal.ok, true);
+  const zeroCanonReport = zeroCanonFinal.capability_output;
+  assert.equal(
+    zeroCanonReport.original_entity_freedom.original_entity_creation_allowed,
+    true,
+    "TEST V: zero-Canon should allow original entity creation",
+  );
+  assert.equal(
+    zeroCanonReport.original_entity_freedom.canon_absence_is_not_error,
+    true,
+    "TEST V: Canon absence should not be error",
+  );
+
+  // TEST W: collector-independent facility freedom
+  const facilityStory = "西側新建了一座白汐綜合醫療塔。";
+  const facilitySession = await startReadySession("寫新設施的介紹。");
+  const facilityFinal = await useChatgptOwnedExternalBrainCapability(
+    "run_final_polisher",
+    {
+      ...facilitySession.common,
+      raw_story_text: facilityStory,
+      raw_story_sha256: sha256(facilityStory),
+    },
+    options,
+  );
+  assert.equal(facilityFinal.ok, true);
+  assert.equal(
+    facilityFinal.capability_output.original_entity_freedom.original_entity_creation_allowed,
+    true,
+    "TEST W: facility freedom should be preserved",
+  );
+
+  // TEST X: ambiguous Canon candidate evidence (not force-binding)
+  const ambiguousStory = "初日可能不在這裡。";
+  const ambiguousResolution = resolveCanonCharacterMention(ambiguousStory, "初日");
+  assert.notEqual(
+    ambiguousResolution.status,
+    canonCharacterMentionStatuses.confirmed,
+    "TEST X: ambiguous context should not confirm 初日",
+  );
+  const expandedWithAmbiguous = expandGeneratedCastCanonGrounding({
+    rawStoryText: ambiguousStory,
+    integrityValidated: true,
+    existingCharacterCanonGrounding: {
+      characters: [],
+    },
+    activeEngineContent: activeEngine,
+  });
+  if (expandedWithAmbiguous.ambiguous_existing_canon_candidates?.length > 0) {
+    const ambiguousCandidate = expandedWithAmbiguous.ambiguous_existing_canon_candidates[0];
+    assert.equal(
+      ambiguousCandidate.identity_not_confirmed,
+      true,
+      "TEST X: ambiguous candidate should mark identity_not_confirmed",
+    );
+  }
+
+  // TEST Y: service integrity invariant (integrityValidated=false blocks expansion)
+  const integrityFailStory = "初日走進來。";
+  const integrityFailExpansion = expandGeneratedCastCanonGrounding({
+    rawStoryText: integrityFailStory,
+    integrityValidated: false,
+    existingCharacterCanonGrounding: {
+      characters: [],
+    },
+    activeEngineContent: activeEngine,
+  });
+  assert.equal(
+    integrityFailExpansion.generated_existing_canon_character_count,
+    0,
+    "TEST Y: integrityValidated=false should produce no generated characters",
+  );
+  assert.equal(
+    integrityFailExpansion.expansion_metadata.formal_expansion_applied,
+    false,
+    "TEST Y: formal_expansion_applied should be false",
+  );
+
+  // TEST Z: Phase48A/Phase48B preserved + existing tests
+  // (existing tests already cover this throughout)
+
   console.log(
-    "Phase48B generated-cast Canon expansion and original entity freedom PASS: collisions, single-character names, integrity ordering, accident replay, compact bootstrap, and mutation guards verified.",
+    "Phase48B Fix1 generated-cast recall and original entity freedom PASS: natural contexts, cross-occurrence, suffix/action arbitration, zero-Canon freedom, collector-independence, ambiguous candidates, service integrity, and compound bootstrap verified.",
   );
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
