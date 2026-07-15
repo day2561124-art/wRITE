@@ -146,6 +146,14 @@ function normalizeInput(input = {}) {
 }
 
 function rootsFor(options = {}) {
+  if (options.fixtureRoot) {
+    const fixtureRoot = assertPathInside(
+      options.fixtureRoot,
+      path.join(projectRoot, "tests", ".tmp"),
+      "GPT writing context fixture root",
+    );
+    return { gptWritingContexts: path.join(fixtureRoot, "data", "outputs", "gpt_writing_contexts") };
+  }
   const gptWritingContexts = options.gptWritingContexts
     ? assertPathInside(
       options.gptWritingContexts,
@@ -700,12 +708,13 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       const filteredRequiredTraceModules = requiredTraceModules.filter((m) => preGenerationModules.has(m));
       if (filteredRequiredTraceModules.length > 0) {
         // create an agent run to record traces
+        const agentRunOptions = options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {};
         const agentRun = await createAgentRun({
           requires_neural_modules: true,
           required_neural_modules: requiredTraceModules,
           task_type: "draft_generation",
           created_by: "gpt_writing_context_service",
-        });
+        }, agentRunOptions);
         const runId = agentRun.run_id;
         // adapter resolution: options.neuralAdapter or options.neuralAdapters[module]
         const adapters = options.neuralAdapters ?? null;
@@ -728,7 +737,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
               generation_context: generationContext,
               retrieval_context: retrievalContext,
               character_voice_registry: characterVoiceRegistry,
-            }, { run_id: runId, task_type: "draft_generation", adapter });
+            }, { run_id: runId, task_type: "draft_generation", adapter, ...agentRunOptions });
           } catch (err) {
             // record but do not block bundle creation
             bundle.warnings.push(`neural_wrapper_failed:${moduleName}:${err.message}`);
@@ -736,14 +745,14 @@ export async function buildGptWritingContext(rawInput, options = {}) {
         }
         // finalize run (verifies modules and writes warnings)
         try {
-          await finalizeAgentRun(runId, {});
+          await finalizeAgentRun(runId, agentRunOptions);
         } catch (err) {
           // non-fatal
           bundle.warnings.push(`finalize_agent_run_failed:${err.message}`);
         }
         // summarize usage and attach into bundle
         try {
-          const summary = await summarizeNeuralUsageForRun(runId);
+          const summary = await summarizeNeuralUsageForRun(runId, agentRunOptions);
           bundle.neural_modules_used = summary.neural_modules_used ?? [];
           bundle.neural_traces = (summary.traces ?? []).map((t) => ({
             trace_id: t.trace_id,
@@ -770,7 +779,13 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   await commitFileTransaction("build-gpt-writing-context", [
     { filePath: paths.bundle, content: `${JSON.stringify(bundle, null, 2)}\n` },
     { filePath: paths.chat, content: markdown },
-  ], { bundle_id: bundleId, phase: "phase_8b_gpt_writing_context" });
+  ], {
+    bundle_id: bundleId,
+    phase: "phase_8b_gpt_writing_context",
+    ...(options.fixtureRoot ? {
+      test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions"),
+    } : {}),
+  });
   return {
     bundle,
     context_bundle_path: normalizeProjectPath(paths.bundle),

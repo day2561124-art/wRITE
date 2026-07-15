@@ -19,6 +19,7 @@ import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
+  projectRoot,
 } from "./project-paths.mjs";
 import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
 
@@ -113,6 +114,14 @@ function normalizeInput(input = {}) {
 }
 
 function rootsFor(options = {}) {
+  if (options.fixtureRoot) {
+    const fixtureRoot = assertPathInside(
+      options.fixtureRoot,
+      path.join(projectRoot, "tests", ".tmp"),
+      "writing candidate fixture root",
+    );
+    return { writingCandidates: path.join(fixtureRoot, "data", "outputs", "writing_candidates") };
+  }
   const writingCandidates = options.writingCandidates
     ? assertPathInside(
       options.writingCandidates,
@@ -434,7 +443,13 @@ export async function saveChatOutputAsWritingCandidate(rawInput, options = {}) {
   await commitFileTransaction("save-chat-output-writing-candidate", [
     { filePath: paths.content, content: `${candidateText}\n` },
     { filePath: paths.metadata, content: `${JSON.stringify(metadata, null, 2)}\n` },
-  ], { candidate_id: candidateId, phase: "phase_22v_orchestrator_candidate_save_bridge" });
+  ], {
+    candidate_id: candidateId,
+    phase: "phase_22v_orchestrator_candidate_save_bridge",
+    ...(options.fixtureRoot ? {
+      test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions"),
+    } : {}),
+  });
   return {
     ...publicResult(metadata),
     candidate_created: true,

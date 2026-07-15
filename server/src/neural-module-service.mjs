@@ -61,7 +61,8 @@ async function runModule(moduleName, input, options = {}) {
   const spec = moduleSpecs[moduleName];
   if (!spec) throw new Error(`Unknown neural module: ${moduleName}`);
   const runId = options.run_id;
-  const run = await getAgentRun(runId);
+  const agentRunOptions = options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {};
+  const run = await getAgentRun(runId, agentRunOptions);
   const taskType = options.task_type ?? run.task_type;
   if (taskType !== run.task_type) throw new Error("task_type must match the agent run.");
   const source = options.source ?? "local_ui";
@@ -125,7 +126,7 @@ async function runModule(moduleName, input, options = {}) {
       chars: output === null ? 0 : outputText(output).length,
       result_type: spec.result_type,
     },
-  });
+  }, agentRunOptions);
   if (
     status === "success"
     && options.external_brain_cognition_output === true

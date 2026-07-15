@@ -55,6 +55,7 @@ const steps = [
   ["External brain session lineage lifecycle", ["tests/cleanup/external-brain-session-lineage-service.test.mjs"]],
 
   ["External brain session retirement and reconciliation", ["tests/cleanup/external-brain-session-retirement-reconciliation.test.mjs"]],
+  ["External brain retirement approval governance Phase 3C", ["tests/approval/external-brain-retirement-governance-phase3c.test.mjs"]],
 
   ["Phase47A backup export scaling portable regression", ["tests/phase47/phase47a-backup-export-scaling-regression.test.mjs"]],
   ["Phase47B writing-card-director integrated authorship cognition synthesis", ["tests/phase47/phase47b-writing-card-director-integrated-authorship-cognition-synthesis.test.mjs"]],
@@ -74,6 +75,7 @@ const steps = [
   ["Phase 22 writing card director", ["tests/phase22/phase22a-writing-card-director-service.test.mjs", "tests/phase22/phase22a-writing-card-director-context.test.mjs"]],
 
   ["Phase 22 neural trace materialization", ["tests/phase22/phase22g-writing-context-trace.test.mjs", "tests/phase22/phase22h-neural-trace-option-exposure.test.mjs"]],
+  ["Phase 22G production residue regression", ["tests/phase22/phase22g-production-residue-regression.test.mjs"]],
 
   ["Phase 22 guard report explainability", ["tests/phase22/phase22o-guard-report-explainability.test.mjs", "tests/phase22/phase22p-guard-report-display-polish.test.mjs"]],
 

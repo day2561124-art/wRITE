@@ -16,11 +16,20 @@ import {
   assertCleanupProposalId,
 } from "./cleanup-proposal-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
-import { getAgentRun } from "./agent-run-service.mjs";
+import { agentRunPaths, assertAgentRunId, getAgentRun } from "./agent-run-service.mjs";
+import { defaultCleanupRetentionPolicy } from "./cleanup-retention-policy.mjs";
+import {
+  auditActiveExternalBrainSessions,
+  reconciliationRecommendations,
+  retireExternalBrainSession,
+} from "./external-brain-session-reconciliation-service.mjs";
+import { externalBrainSessionRoots } from "./external-brain-session-lineage-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 import {
   assertPathInside,
+  normalizeProjectPath,
   projectPaths,
+  projectRoot,
 } from "./project-paths.mjs";
 import {
   adoptCandidateDraft,
@@ -56,6 +65,7 @@ const allowedActions = new Set([
   "restore_from_backup",
   "compressed_rule_update",
   "setting_change_proposal",
+  "retire_external_brain_session",
 ]);
 
 function json(value) {
@@ -81,6 +91,20 @@ function optionalText(value, maxLength = 5_000) {
 }
 
 function rootsFor(options = {}) {
+  if (options.fixtureRoot) {
+    const fixtureRoot = assertPathInside(
+      options.fixtureRoot,
+      path.join(projectRoot, "tests", ".tmp"),
+      "approval queue fixture root",
+    );
+    const approvalQueue = path.join(fixtureRoot, "data", "approval_queue");
+    return {
+      approvalQueue,
+      approvalItems: path.join(approvalQueue, "items"),
+      approvalLogs: path.join(approvalQueue, "logs"),
+      approvalLog: path.join(approvalQueue, "logs", "approval_log.jsonl"),
+    };
+  }
   const approvalQueue = options.approvalQueue
     ? assertPathInside(options.approvalQueue, projectPaths.approvalQueue, "approval queue test root")
     : projectPaths.approvalQueue;
@@ -90,6 +114,12 @@ function rootsFor(options = {}) {
     approvalLogs: path.join(approvalQueue, "logs"),
     approvalLog: path.join(approvalQueue, "logs", "approval_log.jsonl"),
   };
+}
+
+function fixtureTransactionMetadata(options = {}) {
+  return options.fixtureRoot
+    ? { test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions") }
+    : {};
 }
 
 function targetOptions(options = {}) {
@@ -107,6 +137,7 @@ function targetOptions(options = {}) {
     ...(options.engineArchive ? { engineArchive: options.engineArchive } : {}),
     ...(options.activationLog ? { activationLog: options.activationLog } : {}),
     ...(options.rollbackIndex ? { rollbackIndex: options.rollbackIndex } : {}),
+    ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
   };
 }
 
@@ -125,6 +156,7 @@ function cleanupTargetOptions(options = {}) {
     ...(options.settlementContexts ? { settlementContexts: options.settlementContexts } : {}),
     ...(options.settlementReports ? { settlementReports: options.settlementReports } : {}),
     ...(options.approvalItems ? { approvalItems: options.approvalItems } : {}),
+    ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
   };
 }
 
@@ -241,6 +273,7 @@ export async function appendApprovalLog(event, item, details = {}, options = {})
     approval_item_id: item.approval_item_id,
     event,
     phase: "phase_5a_approval_queue",
+    ...fixtureTransactionMetadata(options),
   });
   return record;
 }
@@ -315,10 +348,11 @@ export async function createApprovalItem(input = {}, options = {}) {
     proof_severity: input.proofSeverity ?? input.proof_severity ?? null,
     reason: optionalText(input.reason, 5_000),
     requires_user_confirmation: actionType === "adopt_writing_candidate"
+      || actionType === "retire_external_brain_session"
       || input.requiresUserConfirmation === true
       || input.requires_user_confirmation === true,
     can_execute_without_user_confirmation:
-      actionType === "adopt_writing_candidate"
+      ["adopt_writing_candidate", "retire_external_brain_session"].includes(actionType)
         ? false
         : input.canExecuteWithoutUserConfirmation === true
           || input.can_execute_without_user_confirmation === true,
@@ -347,6 +381,25 @@ export async function createApprovalItem(input = {}, options = {}) {
       character_voice_guard_display: characterVoiceGate.display,
       character_voice_findings: characterVoiceGate.display.findings,
     } : input.details ?? {},
+    ...(actionType === "retire_external_brain_session" ? {
+      session_id: targetId,
+      current_classification: input.currentClassification ?? input.current_classification ?? null,
+      last_activity_at: input.lastActivityAt ?? input.last_activity_at ?? null,
+      activity_age_days: input.activityAgeDays ?? input.activity_age_days ?? null,
+      writing_context_bundle_ids: input.writingContextBundleIds ?? input.writing_context_bundle_ids ?? [],
+      neural_trace_count: input.neuralTraceCount ?? input.neural_trace_count ?? 0,
+      estimated_logical_bytes: input.estimatedLogicalBytes ?? input.estimated_logical_bytes ?? 0,
+      estimated_file_count: input.estimatedFileCount ?? input.estimated_file_count ?? 0,
+      ownership_proof_complete: input.ownershipProofComplete === true
+        || input.ownership_proof_complete === true,
+      retirement_recommendation: input.retirementRecommendation
+        ?? input.retirement_recommendation
+        ?? null,
+      retention_after_retirement_days: input.retentionAfterRetirementDays
+        ?? input.retention_after_retirement_days
+        ?? defaultCleanupRetentionPolicy.abandoned_session_days,
+      cleanup_not_executed: true,
+    } : {}),
   };
   const status = baseStatus(
     input.status === "blocked" || item.blocked_reason ? "blocked" : "pending",
@@ -374,6 +427,7 @@ export async function createApprovalItem(input = {}, options = {}) {
   ], {
     approval_item_id: approvalItemId,
     phase: "phase_5a_approval_queue",
+    ...fixtureTransactionMetadata(options),
   });
   return getApprovalItem(approvalItemId, options);
 }
@@ -454,6 +508,7 @@ export async function refreshApprovalItem(approvalItemId, options = {}) {
     ], {
       approval_item_id: approvalItemId,
       phase: "phase_5a_approval_queue",
+      ...fixtureTransactionMetadata(options),
     });
   }
   return getApprovalItem(approvalItemId, options);
@@ -546,10 +601,77 @@ export async function scanApprovalQueue(options = {}) {
       details: { issue_summary: proof.issue_summary },
     }, options));
   }
+
+  scanned.push(...(await scanExternalBrainRetirementApprovals(options)).items);
   return {
     scanned_count: scanned.length,
     items: await listApprovalItems(options),
   };
+}
+
+export async function scanExternalBrainRetirementApprovals(options = {}) {
+  await ensureApprovalQueueDirectories(options);
+  const liveness = await auditActiveExternalBrainSessions({}, options);
+  const items = [];
+  for (const session of liveness.sessions) {
+    if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) continue;
+    items.push(await createExternalBrainSessionRetirementApprovalItem(session, options));
+  }
+  return {
+    live_retire_recommended_count: items.length,
+    items,
+  };
+}
+
+export async function createExternalBrainSessionRetirementApprovalItem(session, options = {}) {
+  assertAgentRunId(session?.session_id);
+  if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) {
+    throw errorWithStatus("Session does not have a live RETIRE_RECOMMENDED recommendation.", 409);
+  }
+  const sessionRoots = externalBrainSessionRoots(options);
+  const reason = "Session exceeded the stale activity threshold, has complete cognition lineage, and has no live governance or acceptance-evidence pin.";
+  return createApprovalItem({
+    actionType: "retire_external_brain_session",
+    targetType: "external_brain_session",
+    targetId: session.session_id,
+    title: "退役已停止的 GPT 外置大腦 Session",
+    summary: "此 Session 已超過 stale activity threshold，完整 cognition lineage 可辨識，且目前沒有治理或 acceptance evidence pin。核准後只標記 ABANDONED，不刪除資料；30 天後才可能進入獨立 cleanup proposal。",
+    riskLevel: "medium",
+    requiresSecondConfirmation: false,
+    requiresUserConfirmation: true,
+    canExecuteWithoutUserConfirmation: false,
+    reason,
+    currentClassification: session.current_classification ?? session.classification ?? "STALE_ACTIVE_SESSION",
+    lastActivityAt: session.latest_activity_at ?? session.last_activity_at,
+    activityAgeDays: session.activity_age_days,
+    writingContextBundleIds: session.writing_context_bundle_ids,
+    neuralTraceCount: session.neural_trace_count,
+    estimatedLogicalBytes: session.estimated_logical_bytes,
+    estimatedFileCount: session.estimated_file_count,
+    ownershipProofComplete: session.ownership_proof_complete,
+    retirementRecommendation: session.recommendation,
+    retentionAfterRetirementDays: defaultCleanupRetentionPolicy.abandoned_session_days,
+    impact: {
+      will_modify: [normalizeProjectPath(agentRunPaths(session.session_id, options).run)],
+      will_create: [normalizeProjectPath(path.join(
+        sessionRoots.auditRoot,
+        "retirements",
+        `${session.session_id}.json`,
+      ))],
+      will_delete: [],
+      active_engine_modified: false,
+      canon_modified: false,
+      cleanup_executed: false,
+      rollback_available: false,
+    },
+    details: {
+      recommendation_reason: reason,
+      control_plane_approval_reference: true,
+      substantive_governance_pin: false,
+    },
+    createdBy: "external_brain_session_liveness_scan",
+    sourcePhase: "external_brain_session_lifecycle_phase_3c",
+  }, options);
 }
 
 export async function createRollbackApprovalItem(snapshotId, options = {}) {
@@ -617,6 +739,7 @@ async function updateDecision(approvalItemId, decision, reason, options = {}) {
   ], {
     approval_item_id: approvalItemId,
     phase: "phase_5a_approval_queue",
+    ...fixtureTransactionMetadata(options),
   });
   return getApprovalItem(approvalItemId, options);
 }
@@ -748,6 +871,15 @@ export async function confirmApprovalItem(
         confirm: true,
         approvedBy,
       }, cleanupTargetOptions(options));
+    } else if (item.action_type === "retire_external_brain_session") {
+      if (item.target_type !== "external_brain_session") {
+        throw errorWithStatus("Retirement approval target_type is invalid.", 409);
+      }
+      assertAgentRunId(item.target_id);
+      result = await retireExternalBrainSession(item.target_id, {
+        retired_by: optionalText(approvedBy, 200) || "local_user",
+        retirement_reason: item.reason || item.details?.recommendation_reason,
+      }, targetOptions(options));
     } else if (item.action_type === "compressed_rule_update") {
       // Approval confirmed for compressed rule update — do not auto-apply here.
       // Execution is handled by a dedicated service to ensure safety and explicit application.
@@ -784,6 +916,13 @@ export async function confirmApprovalItem(
         adopted_chapter_id: result.adopted_chapter_id,
         candidate_id: result.candidate_id,
         proof_report_id: result.proof_report_id,
+      } : result?.run?.session_lifecycle_status === "ABANDONED" ? {
+        session_id: result.run.run_id,
+        session_lifecycle_status: result.run.session_lifecycle_status,
+        retired_at: result.run.retired_at,
+        retired_by: result.run.retired_by,
+        retirement_reason: result.run.retirement_reason,
+        production_cleanup_executed: false,
       } : null,
     };
     const logs = ["approval_confirmed", "approval_resolved"].map((event) => ({
@@ -807,6 +946,7 @@ export async function confirmApprovalItem(
     ], {
       approval_item_id: approvalItemId,
       phase: "phase_5a_approval_queue",
+      ...fixtureTransactionMetadata(options),
     });
     return {
       approval_item: await getApprovalItem(approvalItemId, options),

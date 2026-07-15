@@ -10,7 +10,7 @@ import {
 } from "./agent-run-service.mjs";
 import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
 import { atomicWriteFile } from "./file-transactions.mjs";
-import { projectPaths } from "./project-paths.mjs";
+import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs";
 
 export const neuralTraceIdPattern = /^neural_trace_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const writingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -29,9 +29,25 @@ function requireString(value, label, maxLength = 100_000) {
   return value.trim();
 }
 
-function tracePath(traceId) {
+function traceRoot(options = {}) {
+  if (!options.fixtureRoot) return projectPaths.neuralTraces;
+  const fixtureRoot = assertPathInside(
+    options.fixtureRoot,
+    path.join(projectRoot, "tests", ".tmp"),
+    "neural trace fixture root",
+  );
+  return path.join(fixtureRoot, "data", "agent_runs", "neural_traces");
+}
+
+function fixtureTransactionMetadata(options = {}) {
+  return options.fixtureRoot
+    ? { test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions") }
+    : {};
+}
+
+function tracePath(traceId, options = {}) {
   assertNeuralTraceId(traceId);
-  return path.join(projectPaths.neuralTraces, `${traceId}.json`);
+  return path.join(traceRoot(options), `${traceId}.json`);
 }
 
 function normalizeTrace(input, allowSuccess) {
@@ -93,19 +109,20 @@ function normalizeTrace(input, allowSuccess) {
   };
 }
 
-async function persistTrace(input, proof) {
-  await ensureAgentRunDirectories();
-  const run = await getAgentRun(input.run_id);
+async function persistTrace(input, proof, options = {}) {
+  await ensureAgentRunDirectories(options);
+  const run = await getAgentRun(input.run_id, options);
   const trace = normalizeTrace(input, proof === wrapperProof);
   if (run.task_type !== trace.task_type) {
     throw new Error("trace task_type must match the agent run task_type.");
   }
-  await atomicWriteFile(tracePath(trace.trace_id), `${JSON.stringify(trace, null, 2)}\n`, {
+  await atomicWriteFile(tracePath(trace.trace_id, options), `${JSON.stringify(trace, null, 2)}\n`, {
     name: "neural-trace",
     run_id: trace.run_id,
     trace_id: trace.trace_id,
+    ...fixtureTransactionMetadata(options),
   });
-  await attachNeuralModulesUsed(trace.run_id, trace);
+  await attachNeuralModulesUsed(trace.run_id, trace, options);
   return trace;
 }
 
@@ -122,21 +139,21 @@ export function assertNeuralTraceId(traceId) {
   return traceId;
 }
 
-export async function createNeuralTrace(input = {}) {
-  return persistTrace(input, null);
+export async function createNeuralTrace(input = {}, options = {}) {
+  return persistTrace(input, null, options);
 }
 
-export async function appendNeuralTrace(input = {}) {
-  return createNeuralTrace(input);
+export async function appendNeuralTrace(input = {}, options = {}) {
+  return createNeuralTrace(input, options);
 }
 
-export async function recordNeuralWrapperTrace(input = {}) {
-  return persistTrace(input, wrapperProof);
+export async function recordNeuralWrapperTrace(input = {}, options = {}) {
+  return persistTrace(input, wrapperProof, options);
 }
 
-export async function getNeuralTrace(traceId) {
+export async function getNeuralTrace(traceId, options = {}) {
   try {
-    return JSON.parse(await readFile(tracePath(traceId), "utf8"));
+    return JSON.parse(await readFile(tracePath(traceId, options), "utf8"));
   } catch (error) {
     if (error.code === "ENOENT") {
       const notFound = new Error(`Neural trace not found: ${traceId}`);
@@ -148,24 +165,24 @@ export async function getNeuralTrace(traceId) {
 }
 
 export async function listNeuralTraces(options = {}) {
-  await ensureAgentRunDirectories();
+  await ensureAgentRunDirectories(options);
   const runId = options.run_id ? assertAgentRunId(options.run_id) : "";
-  const names = await readdir(projectPaths.neuralTraces, { withFileTypes: true });
+  const names = await readdir(traceRoot(options), { withFileTypes: true });
   const traces = [];
   for (const entry of names) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     const traceId = entry.name.slice(0, -5);
     if (!neuralTraceIdPattern.test(traceId)) continue;
-    const trace = await getNeuralTrace(traceId);
+    const trace = await getNeuralTrace(traceId, options);
     if (!runId || trace.run_id === runId) traces.push(trace);
   }
   return traces.sort((a, b) => String(b.called_at).localeCompare(String(a.called_at)));
 }
 
-export async function summarizeNeuralUsageForRun(runId) {
+export async function summarizeNeuralUsageForRun(runId, options = {}) {
   assertAgentRunId(runId);
-  const run = await getAgentRun(runId);
-  const traces = await listNeuralTraces({ run_id: runId });
+  const run = await getAgentRun(runId, options);
+  const traces = await listNeuralTraces({ ...options, run_id: runId });
   // Normalize module names from traces: accept either "run_*" or canonical keys.
   const successfulModules = [...new Set(
     traces.filter((trace) => trace.status === "success").map((trace) => normalizeNeuralModuleKey(trace.module_name)),
@@ -188,6 +205,6 @@ export async function summarizeNeuralUsageForRun(runId) {
   };
 }
 
-export async function verifyRequiredNeuralModules(runId) {
-  return verifyAgentRunModules(runId);
+export async function verifyRequiredNeuralModules(runId, options = {}) {
+  return verifyAgentRunModules(runId, options);
 }

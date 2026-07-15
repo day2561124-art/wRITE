@@ -318,7 +318,10 @@ async function loadStructuredDirectoryRecords(state, category, root, options = {
 
 async function loadGovernanceRecords(state, roots) {
   const candidatePin = (_values, status) => !closedStatuses.has(status);
-  const approvalPin = (_values, status) => !closedStatuses.has(status);
+  const approvalPin = (values, status) => (
+    !values.some((value) => value?.action_type === "retire_external_brain_session")
+    && !closedStatuses.has(status)
+  );
   await loadStructuredDirectoryRecords(state, "candidate", roots.writingCandidates, { pin: candidatePin });
   await loadStructuredDirectoryRecords(state, "candidate", roots.candidateDrafts, { pin: candidatePin });
   await loadStructuredDirectoryRecords(state, "proof", roots.outputProofReports);
