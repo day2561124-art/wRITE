@@ -20,7 +20,7 @@ import {
   chatgptBridgeToolMetadata,
   chatgptBridgeTools,
 } from "../../server/src/mcp-chatgpt-bridge-tools.mjs";
-import { listNeuralTraces } from "../../server/src/neural-trace-service.mjs";
+import { getNeuralTrace, listNeuralTraces } from "../../server/src/neural-trace-service.mjs";
 import { buildRawStoryIntegrityManifest } from "../../server/src/raw-story-handoff-integrity-service.mjs";
 import {
   getRawStoryHandoffReceipt,
@@ -321,6 +321,10 @@ try {
   assert.equal(finalAdapterInput.raw_story_sha256, sha256(exactStory));
   assert.equal(finalAdapterInput.raw_story_handoff_id, sealed.raw_story_handoff_id);
   assert.deepEqual(polished.capability_output, finalOutput);
+  const persistedFinalTrace = await getNeuralTrace(polished.trace.trace_id);
+  assert.equal(persistedFinalTrace.run_id, session.external_brain_session_id);
+  assert.equal(persistedFinalTrace.writing_context_bundle_id, session.writing_context_bundle_id);
+  assert.equal(persistedFinalTrace.raw_story_handoff_id, sealed.raw_story_handoff_id);
   assert.equal(objectHasKey(polished, "raw_story_text"), false);
   assertGuardsFalse(polished);
 

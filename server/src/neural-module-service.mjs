@@ -100,6 +100,12 @@ async function runModule(moduleName, input, options = {}) {
   const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
   const trace = await recordNeuralWrapperTrace({
     run_id: runId,
+    ...(options.writing_context_bundle_id ? {
+      writing_context_bundle_id: options.writing_context_bundle_id,
+    } : {}),
+    ...(input && typeof input === "object" && input.raw_story_handoff_id ? {
+      raw_story_handoff_id: input.raw_story_handoff_id,
+    } : {}),
     task_type: taskType,
     module_name: moduleName,
     model_name: modelName,

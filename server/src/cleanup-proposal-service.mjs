@@ -4,15 +4,23 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
 } from "node:fs/promises";
 import path from "node:path";
+import { defaultCleanupRetentionPolicy } from "./cleanup-retention-policy.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import {
+  externalBrainSessionRoots,
+  scanExternalBrainSessions,
+  validateExternalBrainSessionCleanupPaths,
+} from "./external-brain-session-lineage-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
   projectPaths,
+  projectRoot,
 } from "./project-paths.mjs";
 
 export const cleanupProposalIdPattern =
@@ -20,14 +28,7 @@ export const cleanupProposalIdPattern =
 export const cleanupTrashIdPattern =
   /^cleanup_trash_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 
-export const defaultCleanupRetentionPolicy = Object.freeze({
-  keep_latest_archives: 10,
-  keep_latest_snapshots: 10,
-  rejected_candidate_days: 90,
-  failed_candidate_days: 90,
-  blocked_candidate_days: 90,
-  trash_retention_days: 30,
-});
+export { defaultCleanupRetentionPolicy };
 
 const proposalStatuses = new Set([
   "draft",
@@ -47,6 +48,12 @@ const protectedExactPaths = new Set([
 
 function json(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function fixtureTransactionMetadata(options = {}) {
+  return options.fixtureRoot
+    ? { test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions") }
+    : {};
 }
 
 function stamp(date = new Date()) {
@@ -71,6 +78,23 @@ function optionalText(value, maxLength = 5_000) {
 }
 
 function cleanupRoots(options = {}) {
+  if (options.fixtureRoot) {
+    const fixtureRoot = assertPathInside(
+      options.fixtureRoot,
+      path.join(projectRoot, "tests", ".tmp"),
+      "cleanup fixture root",
+    );
+    const cleanupRoot = path.join(fixtureRoot, "data", "cleanup");
+    return {
+      cleanupRoot,
+      cleanupProposals: path.join(cleanupRoot, "proposals"),
+      cleanupLogs: path.join(cleanupRoot, "logs"),
+      cleanupLog: path.join(cleanupRoot, "logs", "cleanup_log.jsonl"),
+      cleanupTrash: path.join(cleanupRoot, "trash"),
+      cleanupStaging: path.join(cleanupRoot, "staging"),
+      cleanupTombstones: path.join(cleanupRoot, "tombstones"),
+    };
+  }
   const cleanupRoot = options.cleanupRoot
     ? assertPathInside(options.cleanupRoot, projectPaths.cleanupRoot, "cleanup test root")
     : projectPaths.cleanupRoot;
@@ -86,6 +110,25 @@ function cleanupRoots(options = {}) {
 }
 
 function sourceRoots(options = {}) {
+  if (options.fixtureRoot) {
+    const roots = externalBrainSessionRoots({ fixtureRoot: options.fixtureRoot });
+    const canonRoot = path.join(roots.fixtureRoot, "data", "canon_db");
+    const workflowRoot = path.join(roots.fixtureRoot, "data", "writing_workflow");
+    return {
+      engineArchive: path.join(canonRoot, "archive"),
+      rejectedEngineCandidates: path.join(canonRoot, "rejected_engine_candidates"),
+      pendingEngineCandidates: roots.pendingEngineCandidates,
+      engineSnapshots: path.join(canonRoot, "engine_snapshots"),
+      rollbackIndex: roots.rollbackIndex,
+      candidateDrafts: roots.candidateDrafts,
+      proofReports: roots.workflowProofReports,
+      adoptedChapters: roots.adoptedChapters,
+      contextBundles: path.join(workflowRoot, "context_bundles"),
+      settlementContexts: roots.settlementContexts,
+      settlementReports: roots.settlementReports,
+      approvalItems: roots.approvalItems,
+    };
+  }
   const canonRoot = (value, fallback, label) => (
     value ? assertPathInside(value, projectPaths.canonDb, label) : fallback
   );
@@ -502,7 +545,7 @@ export async function appendCleanupLog(event, details = {}, options = {}) {
   };
   await commitFileTransaction("append-cleanup-log", [
     { type: "append", filePath: roots.cleanupLog, content: `${JSON.stringify(record)}\n` },
-  ], { phase: "phase_5b_cleanup", event });
+  ], { phase: "phase_5b_cleanup", event, ...fixtureTransactionMetadata(options) });
   return record;
 }
 
@@ -579,6 +622,33 @@ export async function scanCleanupCandidates(input = {}, options = {}) {
       }
     }
   }
+  const isolatedLegacySourceKeys = [
+    "engineArchive",
+    "rejectedEngineCandidates",
+    "pendingEngineCandidates",
+    "engineSnapshots",
+    "rollbackIndex",
+    "candidateDrafts",
+    "proofReports",
+    "adoptedChapters",
+    "contextBundles",
+    "settlementContexts",
+    "settlementReports",
+    "approvalItems",
+  ];
+  const hasLegacyIsolatedSources = isolatedLegacySourceKeys.some((key) => options[key]);
+  const includeExternalBrainSessions = input.includeExternalBrainSessions
+    ?? input.include_external_brain_sessions
+    ?? (options.fixtureRoot ? true : !hasLegacyIsolatedSources);
+  if (includeExternalBrainSessions) {
+    const externalOptions = {
+      ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
+      ...(options.now instanceof Date ? { now: options.now } : {}),
+      ...(options.externalBrainSessionOptions ?? {}),
+    };
+    const externalScan = await scanExternalBrainSessions({ retentionPolicy: policy }, externalOptions);
+    items.push(...externalScan.sessions);
+  }
   const groups = {
     eligible_items: items.filter((item) => item.status === "eligible_for_cleanup"),
     must_keep_items: items.filter((item) => item.status === "must_keep"),
@@ -636,7 +706,7 @@ export async function createCleanupProposal(input = {}, options = {}) {
     { filePath: paths.status, content: json(status) },
     { filePath: paths.scanReport, content: json(scan) },
     { type: "append", filePath: roots.cleanupLog, content: `${JSON.stringify(log)}\n` },
-  ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup" });
+  ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup", ...fixtureTransactionMetadata(options) });
   return getCleanupProposal(cleanupProposalId, options);
 }
 
@@ -668,7 +738,10 @@ export async function getCleanupProposal(cleanupProposalId, options = {}) {
   return { ...proposal, status, scan_report: scanReport };
 }
 
-function allowedRootForItem(itemType, roots) {
+function allowedRootForItem(itemType, roots, options = {}) {
+  if (itemType === "external_brain_session") {
+    return externalBrainSessionRoots(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}).agentRuns;
+  }
   const rootsByType = {
     archive: roots.engineArchive,
     rejected_candidate: roots.rejectedEngineCandidates,
@@ -704,7 +777,7 @@ async function verifyEligibleItems(proposal, options = {}) {
     }
     const sourcePath = assertPathInside(
       item.source_path,
-      allowedRootForItem(item.item_type, roots),
+      allowedRootForItem(item.item_type, roots, options),
       "cleanup source",
     );
     if (protectedSourcePath(sourcePath)) {
@@ -716,6 +789,17 @@ async function verifyEligibleItems(proposal, options = {}) {
     const currentItem = currentEligible.get(item.source_path);
     if (!currentItem) {
       throw errorWithStatus(`Cleanup source is no longer eligible: ${item.source_path}`, 409);
+    }
+    if (item.item_type === "external_brain_session") {
+      const currentPaths = JSON.stringify([...(currentItem.cleanup_paths ?? [])].sort());
+      const proposalPaths = JSON.stringify([...(item.cleanup_paths ?? [])].sort());
+      if (currentItem.hash !== item.hash || currentPaths !== proposalPaths) {
+        throw errorWithStatus(`External brain session lineage changed after scan: ${item.session_id}`, 409);
+      }
+      await validateExternalBrainSessionCleanupPaths(item.cleanup_paths, options.fixtureRoot
+        ? { fixtureRoot: options.fixtureRoot }
+        : {});
+      continue;
     }
     if (currentItem.hash !== item.hash || await directoryHash(sourcePath) !== item.hash) {
       throw errorWithStatus(`Cleanup source changed after scan: ${item.source_path}`, 409);
@@ -757,7 +841,7 @@ async function updateProposalDecision(cleanupProposalId, decision, reason, optio
         error_message: null,
       })}\n`,
     },
-  ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup" });
+  ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup", ...fixtureTransactionMetadata(options) });
   return getCleanupProposal(cleanupProposalId, options);
 }
 
@@ -802,7 +886,7 @@ export async function approveCleanupProposal(
           error_message: null,
         })}\n`,
       },
-    ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup" });
+    ], { cleanup_proposal_id: cleanupProposalId, phase: "phase_5b_cleanup", ...fixtureTransactionMetadata(options) });
     return getCleanupProposal(cleanupProposalId, options);
   } catch (error) {
     await appendCleanupLog("cleanup_failed", {
@@ -840,6 +924,8 @@ export async function executeCleanupProposal(
 ) {
   assertCleanupProposalId(cleanupProposalId);
   const proposal = await getCleanupProposal(cleanupProposalId, options);
+  const stagedSessionMoves = [];
+  let transactionCommitted = false;
   try {
     if (confirm !== true) throw errorWithStatus("Cleanup execution requires confirmation.", 409);
     if (proposal.status.status !== "approved" || proposal.status.can_execute !== true) {
@@ -856,10 +942,98 @@ export async function executeCleanupProposal(
       const cleanupTrashId = createId("cleanup_trash");
       const sourcePath = assertPathInside(
         item.source_path,
-        allowedRootForItem(item.item_type, sourceRoots(options)),
+        allowedRootForItem(item.item_type, sourceRoots(options), options),
         "cleanup source",
       );
       const trashDirectory = path.join(roots.cleanupTrash, cleanupTrashId);
+      const movedAt = now.toISOString();
+      const permanentDeleteAt = new Date(
+        now.getTime() + proposal.retention_policy.trash_retention_days * 86_400_000,
+      ).toISOString();
+      if (item.item_type === "external_brain_session") {
+        const validated = await validateExternalBrainSessionCleanupPaths(
+          item.cleanup_paths,
+          options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {},
+        );
+        for (const cleanupPath of validated) {
+          const destination = path.join(
+            trashDirectory,
+            "content",
+            ...cleanupPath.project_path.split("/"),
+          );
+          await mkdir(path.dirname(destination), { recursive: true });
+          await rename(cleanupPath.path, destination);
+          stagedSessionMoves.push({
+            original: cleanupPath.path,
+            destination,
+            trashDirectory,
+          });
+        }
+        const deletedFileCount = validated.reduce((sum, entry) => sum + entry.files, 0);
+        const deletedLogicalBytes = validated.reduce((sum, entry) => sum + entry.bytes, 0);
+        const metadata = {
+          cleanup_trash_id: cleanupTrashId,
+          original_path: item.source_path,
+          source_proposal_id: cleanupProposalId,
+          item_type: item.item_type,
+          item_id: item.item_id,
+          session_id: item.session_id,
+          hash: item.hash,
+          moved_at: movedAt,
+          restore_available: true,
+          permanent_delete_allowed_after: permanentDeleteAt,
+        };
+        const trashPath = normalizeProjectPath(trashDirectory);
+        const tombstone = {
+          cleanup_trash_id: cleanupTrashId,
+          source_proposal_id: cleanupProposalId,
+          session_id: item.session_id,
+          classification_at_cleanup: item.classification,
+          lineage_ids: {
+            agent_run_ids: item.agent_run_ids,
+            writing_context_bundle_ids: item.writing_context_bundle_ids,
+            neural_trace_ids: item.neural_trace_ids,
+            raw_story_handoff_ids: item.raw_story_handoff_ids,
+          },
+          deleted_paths: validated.map((entry) => entry.project_path),
+          deleted_file_count: deletedFileCount,
+          deleted_logical_bytes: deletedLogicalBytes,
+          reference_scan_summary: {
+            explicit_reference_count: item.explicit_reference_count,
+            inferred_reference_count: item.inferred_reference_count,
+            referenced_by: item.referenced_by,
+          },
+          executed_at: movedAt,
+          approved_by: optionalText(approvedBy, 200) || "local_user",
+          trash_path: trashPath,
+          restore_available: true,
+          permanent_delete_allowed_after: permanentDeleteAt,
+        };
+        operations.push(
+          { filePath: path.join(trashDirectory, "trash_metadata.json"), content: json(metadata) },
+          {
+            filePath: path.join(roots.cleanupTombstones, `${cleanupTrashId}.json`),
+            content: json(tombstone),
+          },
+        );
+        logRecords.push({
+          event: "external_brain_session_moved_to_trash",
+          cleanup_proposal_id: cleanupProposalId,
+          cleanup_trash_id: cleanupTrashId,
+          created_at: movedAt,
+          actor: optionalText(approvedBy, 200) || "local_user",
+          result: "success",
+          error_message: null,
+        });
+        moved.push({
+          ...metadata,
+          trash_path: trashPath,
+          deleted_paths: tombstone.deleted_paths,
+          deleted_file_count: deletedFileCount,
+          deleted_logical_bytes: deletedLogicalBytes,
+        });
+        continue;
+      }
       const files = await directoryFiles(sourcePath);
       for (const file of files) {
         operations.push({
@@ -867,10 +1041,6 @@ export async function executeCleanupProposal(
           content: await readFile(file.path),
         });
       }
-      const movedAt = now.toISOString();
-      const permanentDeleteAt = new Date(
-        now.getTime() + proposal.retention_policy.trash_retention_days * 86_400_000,
-      ).toISOString();
       const metadata = {
         cleanup_trash_id: cleanupTrashId,
         original_path: item.source_path,
@@ -944,12 +1114,15 @@ export async function executeCleanupProposal(
         cleanup_proposal_id: cleanupProposalId,
         phase: "phase_5b_cleanup",
         test_fail_after_commits: options.testFailAfterCommits,
+        ...fixtureTransactionMetadata(options),
       },
     );
+    transactionCommitted = true;
     for (const item of proposal.eligible_items) {
+      if (item.item_type === "external_brain_session") continue;
       await rm(assertPathInside(
         item.source_path,
-        allowedRootForItem(item.item_type, sourceRoots(options)),
+        allowedRootForItem(item.item_type, sourceRoots(options), options),
         "cleanup source",
       ), {
         recursive: true,
@@ -962,6 +1135,25 @@ export async function executeCleanupProposal(
       transaction_id: transaction.transaction_id,
     };
   } catch (error) {
+    if (!transactionCommitted) {
+      for (const move of [...stagedSessionMoves].reverse()) {
+        try {
+          if (await exists(move.destination) && !await exists(move.original)) {
+            await mkdir(path.dirname(move.original), { recursive: true });
+            await rename(move.destination, move.original);
+          }
+        } catch {
+          // Preserve the original execution failure; live data restoration is best effort.
+        }
+      }
+      for (const trashDirectory of new Set(stagedSessionMoves.map((move) => move.trashDirectory))) {
+        try {
+          await rm(trashDirectory, { recursive: true, force: true });
+        } catch {
+          // Preserve the original execution failure.
+        }
+      }
+    }
     await appendCleanupLog("cleanup_failed", {
       cleanupProposalId,
       approvedBy,

@@ -5,6 +5,7 @@ import { commitFileTransaction } from "./file-transactions.mjs";
 import { projectPaths } from "./project-paths.mjs";
 
 export const agentRunIdPattern = /^agent_run_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+const gptWritingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 export const agentTaskTypes = new Set([
   "draft_generation",
   "proofing",
@@ -147,12 +148,25 @@ export async function createAgentRun(input = {}) {
   const requiredNeuralModules = uniqueModules(input.required_neural_modules);
   const runId = `agent_run_${isoStamp()}-${randomBytes(4).toString("hex")}`;
   const createdAt = new Date().toISOString();
+  const mode = input.mode ? requireString(input.mode, "mode", 50) : "local";
+  const writingContextBundleId = input.writing_context_bundle_id === undefined
+    ? null
+    : requireString(input.writing_context_bundle_id, "writing_context_bundle_id", 100);
+  if (writingContextBundleId && !gptWritingContextBundleIdPattern.test(writingContextBundleId)) {
+    throw new Error("writing_context_bundle_id is invalid.");
+  }
   const run = {
     run_id: runId,
     task_type: taskType,
     created_at: createdAt,
     created_by: input.created_by ? requireString(input.created_by, "created_by", 100) : "local_ui",
-    mode: input.mode ? requireString(input.mode, "mode", 50) : "local",
+    mode,
+    ...(mode === "chatgpt_owned_external_brain" ? {
+      external_brain_session_id: runId,
+    } : {}),
+    ...(writingContextBundleId ? {
+      writing_context_bundle_id: writingContextBundleId,
+    } : {}),
     requires_neural_modules: requiresNeuralModules,
     required_neural_modules: requiredNeuralModules,
     status: "running",

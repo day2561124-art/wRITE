@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { projectPaths } from "../../server/src/project-paths.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const serverPath = path.join(rootDir, "server", "src", "mcp-server.mjs");
@@ -36,6 +37,44 @@ async function treeDigest(relativePath) {
   await visit(root);
   return sha256(records.join("\n"));
 }
+
+async function names(directory) {
+  try {
+    return new Set(await readdir(directory));
+  } catch (error) {
+    if (error.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
+async function removeNewEntries(directory, before) {
+  for (const name of await names(directory)) {
+    if (!before.has(name)) await rm(path.join(directory, name), { recursive: true, force: true });
+  }
+}
+
+async function readOptional(filePath) {
+  try {
+    return await readFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+const cleanupRoots = [
+  projectPaths.agentRuns,
+  projectPaths.neuralTraces,
+  projectPaths.neuralModuleOutputs,
+  projectPaths.gptWritingContexts,
+  path.join(projectPaths.outputLogs, "transactions"),
+  path.join(projectPaths.outputLogs, "mcp_audit_intents"),
+];
+const cleanupBaselines = new Map(await Promise.all(
+  cleanupRoots.map(async (root) => [root, await names(root)]),
+));
+const mcpAuditPath = path.join(projectPaths.outputLogs, "mcp_tool_audit.jsonl");
+const mcpAuditBefore = await readOptional(mcpAuditPath);
 
 const productionStateBefore = {
   canon_db: await treeDigest("data/canon_db"),
@@ -168,6 +207,21 @@ try {
   assert.equal(polished.agent_run_status, "success");
   traces.push(polished.trace.trace_id);
   assert.equal(new Set(traces).size, 7);
+  const persistedRun = JSON.parse(await readFile(path.join(
+    projectPaths.agentRuns,
+    session.external_brain_session_id,
+    "run.json",
+  ), "utf8"));
+  assert.equal(persistedRun.external_brain_session_id, session.external_brain_session_id);
+  assert.equal(persistedRun.writing_context_bundle_id, session.writing_context_bundle_id);
+  for (const traceId of traces) {
+    const persistedTrace = JSON.parse(await readFile(
+      path.join(projectPaths.neuralTraces, `${traceId}.json`),
+      "utf8",
+    ));
+    assert.equal(persistedTrace.run_id, session.external_brain_session_id);
+    assert.equal(persistedTrace.writing_context_bundle_id, session.writing_context_bundle_id);
+  }
 
   for (const result of [session, polished]) {
     assert.equal(result.candidate_created, false);
@@ -184,4 +238,7 @@ try {
 } finally {
   child.stdin.end();
   await new Promise((resolve) => child.once("close", resolve));
+  for (const root of cleanupRoots) await removeNewEntries(root, cleanupBaselines.get(root));
+  if (mcpAuditBefore === null) await rm(mcpAuditPath, { force: true });
+  else await writeFile(mcpAuditPath, mcpAuditBefore);
 }

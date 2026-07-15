@@ -11,8 +11,10 @@ import {
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  assertPathInside,
   normalizeProjectPath,
   projectPaths,
+  projectRoot,
   resolveProjectPath,
 } from "./project-paths.mjs";
 
@@ -21,6 +23,19 @@ const lockPath = path.join(lockDir, "project-write.lock");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 const lockTimeoutMs = 15_000;
 const staleLockMs = 10 * 60 * 1000;
+const transientRenameErrors = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+async function renameWithRetry(source, destination) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      if (!transientRenameErrors.has(error.code) || attempt >= 7) throw error;
+      await delay(10 * (attempt + 1));
+    }
+  }
+}
 
 async function readOptionalBuffer(filePath) {
   try {
@@ -85,12 +100,21 @@ async function atomicWriteUnlogged(filePath, content, transactionId, suffix) {
     `.${path.basename(filePath)}.${transactionId}.${suffix}.tmp`,
   );
   await writeFile(tempPath, content, { flag: "wx" });
-  await rename(tempPath, filePath);
+  await renameWithRetry(tempPath, filePath);
 }
 
-async function writeManifest(manifest) {
-  await mkdir(transactionDir, { recursive: true });
-  const manifestPath = path.join(transactionDir, `${manifest.transaction_id}.json`);
+function transactionDirectoryFor(metadata = {}) {
+  if (!metadata.test_transaction_dir) return transactionDir;
+  return assertPathInside(
+    metadata.test_transaction_dir,
+    path.join(projectRoot, "tests", ".tmp"),
+    "test transaction directory",
+  );
+}
+
+async function writeManifest(manifest, targetDirectory = transactionDir) {
+  await mkdir(targetDirectory, { recursive: true });
+  const manifestPath = path.join(targetDirectory, `${manifest.transaction_id}.json`);
   await atomicWriteUnlogged(
     manifestPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
@@ -109,6 +133,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
   }
 
   const transactionId = metadata.transaction_id || createTransactionId();
+  const manifestDirectory = transactionDirectoryFor(metadata);
   const normalizedOperations = operations.map((operation) => ({
     ...operation,
     type: operation.type ?? "write",
@@ -148,7 +173,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       if (item.type === "delete") {
         await rm(item.filePath, { force: true });
       } else {
-        await rename(item.tempPath, item.filePath);
+        await renameWithRetry(item.tempPath, item.filePath);
       }
       committed.push(item);
       if (
@@ -179,7 +204,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       ),
       rollback_available: true,
     };
-    await writeManifest(manifest);
+    await writeManifest(manifest, manifestDirectory);
     return manifest;
   } catch (error) {
     const rollbackErrors = [];
@@ -217,7 +242,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
         error: error.message,
         rollback_errors: rollbackErrors,
         rollback_available: rollbackErrors.length === 0,
-      });
+      }, manifestDirectory);
     } catch {
       // Preserve the original transaction failure.
     }

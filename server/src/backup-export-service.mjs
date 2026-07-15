@@ -4,10 +4,24 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { projectPaths, assertPathInside, projectRoot, normalizeProjectPath, resolveProjectPath } from "./project-paths.mjs";
 import { createApprovalItem } from "./approval-queue-service.mjs";
 
 export const DEFAULT_BACKUP_IO_CONCURRENCY = 4;
+const transientRenameErrors = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+async function renameWithRetry(source, destination) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      if (!transientRenameErrors.has(error.code) || attempt >= 7) throw error;
+      await delay(10 * (attempt + 1));
+    }
+  }
+}
 
 function json(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -280,7 +294,7 @@ export async function createProjectBackup({
     diagnostics.stage_ms.manifest_write = performance.now() - manifestStartedAt;
 
     const finalizationStartedAt = performance.now();
-    await rename(stagingDir, dir);
+    await renameWithRetry(stagingDir, dir);
     diagnostics.stage_ms.finalization = performance.now() - finalizationStartedAt;
     diagnostics.stage_ms.total = performance.now() - startedAt;
     return { backup_id: backupId, path: dir, diagnostics };

@@ -546,6 +546,7 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
     task_type: "draft_generation",
     mode: externalBrainOwnership.orchestration_mode,
     created_by: "chatgpt",
+    writing_context_bundle_id: context.bundle.bundle_id,
     requires_neural_modules: true,
     required_neural_modules: [...externalBrainPreGenerationCapabilities, "run_final_polisher"]
       .map((name) => name.slice(4)),

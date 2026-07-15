@@ -52,6 +52,8 @@ const steps = [
 
   ["Cleanup proposal service", ["tests/cleanup/cleanup-proposal-service.test.mjs"]],
 
+  ["External brain session lineage lifecycle", ["tests/cleanup/external-brain-session-lineage-service.test.mjs"]],
+
   ["Phase47A backup export scaling portable regression", ["tests/phase47/phase47a-backup-export-scaling-regression.test.mjs"]],
   ["Phase47B writing-card-director integrated authorship cognition synthesis", ["tests/phase47/phase47b-writing-card-director-integrated-authorship-cognition-synthesis.test.mjs"]],
   ["Phase47D exact raw-story handoff mismatch forensics", ["tests/phase47/phase47d-exact-raw-story-handoff-mismatch-forensics.test.mjs"]],

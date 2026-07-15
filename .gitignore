@@ -13,6 +13,7 @@ data/canon_db/activation_logs/
 data/canon_db/rollback/
 data/writing_workflow/
 data/approval_queue/
+data/cleanup/session_lifecycle_audits/
 
 # Generated visual/runtime artifacts
 data/visual_db/assets/

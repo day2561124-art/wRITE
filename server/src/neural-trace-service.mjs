@@ -13,6 +13,8 @@ import { atomicWriteFile } from "./file-transactions.mjs";
 import { projectPaths } from "./project-paths.mjs";
 
 export const neuralTraceIdPattern = /^neural_trace_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+const writingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
+const rawStoryHandoffIdPattern = /^raw_story_handoff_\d{8}-\d{6}-[a-f0-9]{12}$/u;
 const traceStatuses = new Set(["success", "failed", "skipped"]);
 const wrapperProof = Symbol("neural-wrapper-execution");
 
@@ -49,6 +51,14 @@ function normalizeTrace(input, allowSuccess) {
   const traceId = input.trace_id ?? `neural_trace_${isoStamp()}-${randomBytes(4).toString("hex")}`;
   assertNeuralTraceId(traceId);
   assertAgentRunId(input.run_id);
+  if (input.writing_context_bundle_id !== undefined
+    && !writingContextBundleIdPattern.test(String(input.writing_context_bundle_id))) {
+    throw new Error("writing_context_bundle_id is invalid for neural trace lineage.");
+  }
+  if (input.raw_story_handoff_id !== undefined
+    && !rawStoryHandoffIdPattern.test(String(input.raw_story_handoff_id))) {
+    throw new Error("raw_story_handoff_id is invalid for neural trace lineage.");
+  }
   // Normalize module name: accept either "run_*" wrapper names or canonical module keys
   let moduleNameRaw = String(input.module_name ?? "").trim();
   if (!moduleNameRaw) throw new Error("module_name is required.");
@@ -56,6 +66,12 @@ function normalizeTrace(input, allowSuccess) {
   if (moduleNameRaw.startsWith("run_")) moduleNameRaw = moduleNameRaw.slice(4);
   return {
     run_id: input.run_id,
+    ...(input.writing_context_bundle_id ? {
+      writing_context_bundle_id: input.writing_context_bundle_id,
+    } : {}),
+    ...(input.raw_story_handoff_id ? {
+      raw_story_handoff_id: input.raw_story_handoff_id,
+    } : {}),
     trace_id: traceId,
     task_type: requireString(input.task_type, "task_type", 100),
     module_name: requireString(moduleNameRaw, "module_name", 100),
