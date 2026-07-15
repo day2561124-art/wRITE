@@ -16,6 +16,7 @@
     "test:bridge:e2e": "node tests/mcp/mcp-chatgpt-bridge-e2e-dry-run.test.mjs",
     "test:phase22b": "node tests/phase22/phase22b-wrong-cast.test.mjs",
     "audit:sessions": "node scripts/external-brain-session-lifecycle-audit.mjs",
+    "audit:sessions:phase3b": "node scripts/external-brain-session-phase3b-audit.mjs",
     "test:bridge:approval-readiness": "node tests/mcp/mcp-approval-queue-bridge-readiness.test.mjs",
     "mcp:http": "node server/src/mcp-http-server.mjs --config config/mcp-http.example.json"
   },

@@ -135,6 +135,8 @@ try {
   const beforeSeal = Object.fromEntries(await Promise.all(
     persistenceRoots.map(async (root) => [root, await snapshotTree(root)]),
   ));
+  const sessionRunPath = path.join(projectPaths.agentRuns, session.external_brain_session_id, "run.json");
+  const runBeforeSeal = JSON.parse(await readFile(sessionRunPath, "utf8"));
 
   const story = "第47H章\n她把紙張折好，留在原處。";
   const sealed = await chatgpt_bridge_seal_raw_story_handoff({
@@ -151,8 +153,23 @@ try {
   assert.equal(JSON.stringify(sealed).includes(story), false);
   assertGuardsFalse(sealed);
   for (const root of persistenceRoots) {
-    assert.deepEqual(await snapshotTree(root), beforeSeal[root], `seal wrote persistent data under ${root}`);
+    const after = await snapshotTree(root);
+    const before = { ...beforeSeal[root] };
+    if (root === path.join(projectPaths.agentRuns, session.external_brain_session_id)) {
+      delete after["run.json"];
+      delete before["run.json"];
+    }
+    assert.deepEqual(after, before, `seal wrote unexpected persistent data under ${root}`);
   }
+  const runAfterSeal = JSON.parse(await readFile(sessionRunPath, "utf8"));
+  const activityFields = new Set(["last_activity_at", "last_activity_source", "updated_at"]);
+  const withoutActivity = (run) => Object.fromEntries(
+    Object.entries(run).filter(([key]) => !activityFields.has(key)),
+  );
+  assert.deepEqual(withoutActivity(runAfterSeal), withoutActivity(runBeforeSeal));
+  assert.equal(runAfterSeal.session_lifecycle_status, "ACTIVE");
+  assert.equal(runAfterSeal.last_activity_source, `raw_story_handoff_sealed:${sealed.raw_story_handoff_id}`);
+  assert(Date.parse(runAfterSeal.last_activity_at) >= Date.parse(runBeforeSeal.last_activity_at));
 
   const blockedRun = await chatgpt_bridge_seal_raw_story_handoff({
     external_brain_session_id: "agent_run_20991231-000000-00000000",

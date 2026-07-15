@@ -7,5 +7,7 @@ export const defaultCleanupRetentionPolicy = Object.freeze({
   completed_unadopted_session_days: 45,
   failed_or_blocked_session_days: 30,
   test_session_days: 14,
+  stale_active_session_days: 2,
+  abandoned_session_days: 30,
   trash_retention_days: 30,
 });

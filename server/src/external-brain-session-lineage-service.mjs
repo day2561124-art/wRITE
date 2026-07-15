@@ -18,11 +18,13 @@ import {
 
 export const externalBrainSessionClassifications = Object.freeze({
   ACTIVE_SESSION: "ACTIVE_SESSION",
+  STALE_ACTIVE_SESSION: "STALE_ACTIVE_SESSION",
   GOVERNANCE_PINNED_SESSION: "GOVERNANCE_PINNED_SESSION",
   ACCEPTANCE_EVIDENCE_PINNED_SESSION: "ACCEPTANCE_EVIDENCE_PINNED_SESSION",
   COMPLETED_UNADOPTED_SESSION: "COMPLETED_UNADOPTED_SESSION",
   FAILED_OR_BLOCKED_SESSION: "FAILED_OR_BLOCKED_SESSION",
   TEST_SESSION: "TEST_SESSION",
+  ABANDONED_SESSION: "ABANDONED_SESSION",
   INCOMPLETE_SESSION: "INCOMPLETE_SESSION",
   UNKNOWN_SESSION: "UNKNOWN_SESSION",
 });
@@ -103,6 +105,7 @@ function fixtureDataPaths(fixtureRoot) {
     rollbackIndex: path.join(data, "canon_db", "rollback", "rollback_index.json"),
     evidenceRoot: path.join(fixtureRoot, "config"),
     auditRoot: path.join(data, "cleanup", "session_lifecycle_audits"),
+    transactions: path.join(data, "outputs", "logs", "transactions"),
   };
 }
 
@@ -137,6 +140,7 @@ export function externalBrainSessionRoots(options = {}) {
     rollbackIndex: projectPaths.rollbackIndex,
     evidenceRoot: path.join(projectRoot, "config"),
     auditRoot: path.join(projectPaths.cleanupRoot, "session_lifecycle_audits"),
+    transactions: path.join(projectPaths.outputLogs, "transactions"),
   };
 }
 
@@ -366,6 +370,88 @@ async function loadAcceptanceEvidence(state, roots) {
   }
 }
 
+async function mapConcurrent(items, limit, worker) {
+  const output = new Array(items.length);
+  let nextIndex = 0;
+  async function consume() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      output[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, consume));
+  return output;
+}
+
+export async function collectDeterministicTransactionLineage(options = {}) {
+  const roots = externalBrainSessionRoots(options);
+  const files = (await directoryEntries(roots.transactions))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
+  const parsed = await mapConcurrent(files, 32, async (entry) => {
+    const sourcePath = path.join(roots.transactions, entry.name);
+    let sourceContent;
+    let manifest;
+    try {
+      sourceContent = await readFile(sourcePath);
+      manifest = JSON.parse(sourceContent.toString("utf8"));
+    } catch {
+      return null;
+    }
+    if (!manifest || typeof manifest.metadata !== "object" || !manifest.metadata) return null;
+    const metadata = manifest.metadata;
+    const runId = metadata.run_id
+      ?? metadata.agent_run_id
+      ?? metadata.external_brain_session_id;
+    const bundleId = metadata.writing_context_bundle_id ?? metadata.bundle_id;
+    const validRunId = runIdPattern.test(String(runId ?? "")) ? String(runId) : null;
+    const validBundleId = bundleIdPattern.test(String(bundleId ?? "")) ? String(bundleId) : null;
+    if (!validRunId) return null;
+    return {
+      transaction_id: manifest.transaction_id ?? entry.name.replace(/\.json$/u, ""),
+      source_path: normalizeProjectPath(sourcePath),
+      source_sha256: createHash("sha256").update(sourceContent).digest("hex"),
+      completed_at: manifest.completed_at ?? manifest.started_at ?? null,
+      run_id: validRunId,
+      writing_context_bundle_id: validBundleId,
+    };
+  });
+  const activityByRun = new Map();
+  const deterministicPairs = [];
+  for (const record of parsed.filter(Boolean)) {
+    const current = activityByRun.get(record.run_id);
+    if (!current || Date.parse(record.completed_at ?? "") > Date.parse(current.completed_at ?? "")) {
+      activityByRun.set(record.run_id, record);
+    }
+    if (record.writing_context_bundle_id) deterministicPairs.push(record);
+  }
+  return {
+    deterministic_pairs: deterministicPairs,
+    latest_activity_by_run: Object.fromEntries(activityByRun),
+  };
+}
+
+function loadDeterministicTransactionEdges(state, transactionLineage) {
+  for (const record of transactionLineage.deterministic_pairs) {
+    addEdge(
+      state,
+      record.run_id,
+      record.writing_context_bundle_id,
+      sessionLineageEdgeKinds.EXPLICIT_METADATA,
+      path.resolve(projectRoot, record.source_path),
+    );
+    state.records.push({
+      category: "transaction_lineage",
+      source_path: record.source_path,
+      status: "committed",
+      ids: [record.run_id, record.writing_context_bundle_id],
+      hashes: [record.source_sha256],
+      pin: false,
+      acceptance: false,
+    });
+  }
+}
+
 function connectedIds(state, rootId) {
   const visited = new Set([rootId]);
   const queue = [rootId];
@@ -440,11 +526,20 @@ export async function validateExternalBrainSessionCleanupPaths(cleanupPaths, opt
   return validated;
 }
 
-function classificationFor({ run, governance, evidence, explicitBundles, inferredBundles }) {
+function classificationFor({ run, governance, evidence, explicitBundles, inferredBundles, activityAgeDays, policy }) {
   if (!run || run.unreadable === true) return externalBrainSessionClassifications.UNKNOWN_SESSION;
   if (governance.length) return externalBrainSessionClassifications.GOVERNANCE_PINNED_SESSION;
   if (evidence.length) return externalBrainSessionClassifications.ACCEPTANCE_EVIDENCE_PINNED_SESSION;
-  if (run.status === "running") return externalBrainSessionClassifications.ACTIVE_SESSION;
+  const lifecycleStatus = String(run.session_lifecycle_status ?? "").toUpperCase();
+  if (lifecycleStatus === "ABANDONED") return externalBrainSessionClassifications.ABANDONED_SESSION;
+  if (["FAILED", "BLOCKED"].includes(lifecycleStatus)) {
+    return externalBrainSessionClassifications.FAILED_OR_BLOCKED_SESSION;
+  }
+  if (run.status === "running" || lifecycleStatus === "ACTIVE") {
+    return activityAgeDays !== null && activityAgeDays >= policy.stale_active_session_days
+      ? externalBrainSessionClassifications.STALE_ACTIVE_SESSION
+      : externalBrainSessionClassifications.ACTIVE_SESSION;
+  }
   if (run.task_type === "test" || /test/iu.test(String(run.created_by ?? ""))) {
     return externalBrainSessionClassifications.TEST_SESSION;
   }
@@ -454,7 +549,7 @@ function classificationFor({ run, governance, evidence, explicitBundles, inferre
   if (!["success", "warning"].includes(run.status)) {
     return externalBrainSessionClassifications.UNKNOWN_SESSION;
   }
-  if (!explicitBundles.length || inferredBundles.length) {
+  if (explicitBundles.length !== 1 || inferredBundles.length) {
     return externalBrainSessionClassifications.INCOMPLETE_SESSION;
   }
   return externalBrainSessionClassifications.COMPLETED_UNADOPTED_SESSION;
@@ -471,6 +566,9 @@ function retentionFor(classification, age, policy, ownershipProofComplete) {
   if (classification === C.INCOMPLETE_SESSION) {
     return { status: "needs_review", reason: "Incomplete or inferred-only lineage requires manual review." };
   }
+  if (classification === C.STALE_ACTIVE_SESSION) {
+    return { status: "needs_review", reason: "Stale active sessions require explicit retirement before cleanup." };
+  }
   if (classification === C.FAILED_OR_BLOCKED_SESSION) {
     if (age === null || age < policy.failed_or_blocked_session_days) {
       return { status: "must_keep", reason: `Failed or blocked session is within ${policy.failed_or_blocked_session_days}-day retention.` };
@@ -479,7 +577,9 @@ function retentionFor(classification, age, policy, ownershipProofComplete) {
   }
   const threshold = classification === C.TEST_SESSION
     ? policy.test_session_days
-    : policy.completed_unadopted_session_days;
+    : classification === C.ABANDONED_SESSION
+      ? policy.abandoned_session_days
+      : policy.completed_unadopted_session_days;
   if (age === null || age < threshold) {
     return { status: "must_keep", reason: `Session is within ${threshold}-day retention.` };
   }
@@ -517,12 +617,41 @@ async function buildSession(state, runRecord, roots, policy, now) {
   const records = state.records.filter((record) => record.ids.some((id) => connected.has(id)));
   const governance = records.filter((record) => record.pin && record.category !== "acceptance_evidence");
   const evidence = records.filter((record) => record.acceptance);
+  const activityTimestamps = [
+    runRecord.last_activity_at,
+    runRecord.updated_at,
+    runRecord.created_at,
+    ...traces.map((trace) => trace.called_at),
+    ...state.outputs
+      .filter((entry) => entry.run_id === runId)
+      .flatMap((entry) => [entry.output.called_at, entry.output.recorded_at]),
+  ].map((value) => Date.parse(value ?? "")).filter(Number.isFinite);
+  const lastActivityAt = activityTimestamps.length
+    ? new Date(Math.max(...activityTimestamps)).toISOString()
+    : null;
+  const traceTimestamps = traces
+    .map((trace) => Date.parse(trace.called_at ?? ""))
+    .filter(Number.isFinite);
+  const latestTraceCalledAt = traceTimestamps.length
+    ? new Date(Math.max(...traceTimestamps)).toISOString()
+    : null;
+  const outputTimestamps = state.outputs
+    .filter((entry) => entry.run_id === runId)
+    .flatMap((entry) => [entry.output.called_at, entry.output.recorded_at])
+    .map((value) => Date.parse(value ?? ""))
+    .filter(Number.isFinite);
+  const latestNeuralOutputTimestamp = outputTimestamps.length
+    ? new Date(Math.max(...outputTimestamps)).toISOString()
+    : null;
+  const activityAge = ageDays(lastActivityAt, now);
   const classification = classificationFor({
     run: runRecord,
     governance,
     evidence,
     explicitBundles,
     inferredBundles,
+    activityAgeDays: activityAge,
+    policy,
   });
   const runDirectory = path.join(roots.agentRuns, runId);
   const cleanupPaths = [runDirectory];
@@ -559,10 +688,14 @@ async function buildSession(state, runRecord, roots, policy, now) {
   } catch {
     ownershipProofComplete = false;
   }
-  const completedAt = ["success", "warning", "failed"].includes(runRecord.status)
-    ? runRecord.updated_at ?? runRecord.created_at ?? null
-    : null;
-  const age = ageDays(completedAt ?? runRecord.updated_at ?? runRecord.created_at, now);
+  const completedAt = runRecord.session_completed_at
+    ?? (["success", "warning", "failed"].includes(runRecord.status)
+      ? runRecord.updated_at ?? runRecord.created_at ?? null
+      : null);
+  const retentionAnchor = classification === externalBrainSessionClassifications.ABANDONED_SESSION
+    ? runRecord.retired_at ?? lastActivityAt
+    : completedAt ?? lastActivityAt;
+  const age = ageDays(retentionAnchor, now);
   const retention = retentionFor(classification, age, policy, ownershipProofComplete);
   const sessionEdges = state.edges.filter((edge) => connected.has(edge.from) && connected.has(edge.to));
   const edgeSummary = Object.fromEntries(Object.values(sessionLineageEdgeKinds).map((kind) => [
@@ -603,9 +736,20 @@ async function buildSession(state, runRecord, roots, policy, now) {
       externalBrainSessionClassifications.UNKNOWN_SESSION,
       externalBrainSessionClassifications.GOVERNANCE_PINNED_SESSION,
       externalBrainSessionClassifications.ACCEPTANCE_EVIDENCE_PINNED_SESSION,
-    ].includes(classification) ? "high" : classification === externalBrainSessionClassifications.COMPLETED_UNADOPTED_SESSION || classification === externalBrainSessionClassifications.TEST_SESSION ? "low" : "medium",
+    ].includes(classification) ? "high" : [
+      externalBrainSessionClassifications.COMPLETED_UNADOPTED_SESSION,
+      externalBrainSessionClassifications.TEST_SESSION,
+      externalBrainSessionClassifications.ABANDONED_SESSION,
+    ].includes(classification) ? "low" : "medium",
     created_at: runRecord.created_at ?? null,
     updated_at: runRecord.updated_at ?? null,
+    last_activity_at: lastActivityAt,
+    latest_trace_called_at: latestTraceCalledAt,
+    latest_neural_output_timestamp: latestNeuralOutputTimestamp,
+    activity_age_days: activityAge,
+    session_lifecycle_status: runRecord.session_lifecycle_status
+      ?? (runRecord.status === "running" ? "ACTIVE" : null),
+    retired_at: runRecord.retired_at ?? null,
     completed_at: completedAt,
     age_days: age,
     agent_run_ids: [runId],
@@ -696,6 +840,12 @@ export async function enumerateExternalBrainCognitiveSessions(input = {}, option
   }
   await loadGovernanceRecords(state, roots);
   await loadAcceptanceEvidence(state, roots);
+  if (input.include_transaction_lineage === true) {
+    loadDeterministicTransactionEdges(
+      state,
+      await collectDeterministicTransactionLineage(roots.fixtureRoot ? { fixtureRoot: roots.fixtureRoot } : {}),
+    );
+  }
 
   const bundleEntries = (await directoryEntries(roots.gptWritingContexts))
     .filter((entry) => entry.isDirectory() && bundleIdPattern.test(entry.name));
@@ -747,6 +897,7 @@ export async function writeExternalBrainSessionLifecycleAudit(input = {}, option
       externalBrainSessionClassifications.GOVERNANCE_PINNED_SESSION,
       externalBrainSessionClassifications.ACCEPTANCE_EVIDENCE_PINNED_SESSION,
       externalBrainSessionClassifications.ACTIVE_SESSION,
+      externalBrainSessionClassifications.STALE_ACTIVE_SESSION,
     ].includes(session.classification))
     .sort((left, right) => right.estimated_logical_bytes - left.estimated_logical_bytes);
   const compact = (session) => ({
@@ -755,6 +906,9 @@ export async function writeExternalBrainSessionLifecycleAudit(input = {}, option
     status: session.status,
     created_at: session.created_at,
     completed_at: session.completed_at,
+    last_activity_at: session.last_activity_at,
+    activity_age_days: session.activity_age_days,
+    session_lifecycle_status: session.session_lifecycle_status,
     age_days: session.age_days,
     writing_context_bundle_ids: session.writing_context_bundle_ids,
     neural_trace_count: session.neural_trace_ids.length,

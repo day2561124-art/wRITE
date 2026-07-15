@@ -211,6 +211,8 @@ try {
   const diskBeforeSeal = Object.fromEntries(await Promise.all(
     persistenceRoots.map(async (root) => [root, await snapshotTree(root)]),
   ));
+  const sessionRunPath = path.join(projectPaths.agentRuns, session.external_brain_session_id, "run.json");
+  const runBeforeSeal = JSON.parse(await readFile(sessionRunPath, "utf8"));
   const topLevelBeforeSeal = Object.fromEntries(await Promise.all(
     cleanupRoots.map(async (root) => [root, [...await names(root)].sort()]),
   ));
@@ -239,10 +241,36 @@ try {
   assertGuardsFalse(sealed);
   assert.equal(getRawStoryHandoffStorageStatus().active_payload_count, storageBefore.active_payload_count + 1);
   for (const root of persistenceRoots) {
-    assert.deepEqual(await snapshotTree(root), diskBeforeSeal[root], `seal wrote persistent data under ${root}`);
+    const after = await snapshotTree(root);
+    const before = { ...diskBeforeSeal[root] };
+    if (root === path.join(projectPaths.agentRuns, session.external_brain_session_id)) {
+      delete after["run.json"];
+      delete before["run.json"];
+    }
+    assert.deepEqual(after, before, `seal wrote unexpected persistent data under ${root}`);
   }
+  const runAfterSeal = JSON.parse(await readFile(sessionRunPath, "utf8"));
+  const activityFields = new Set(["last_activity_at", "last_activity_source", "updated_at"]);
+  const withoutActivity = (run) => Object.fromEntries(
+    Object.entries(run).filter(([key]) => !activityFields.has(key)),
+  );
+  assert.deepEqual(withoutActivity(runAfterSeal), withoutActivity(runBeforeSeal));
+  assert.equal(runAfterSeal.session_lifecycle_status, "ACTIVE");
+  assert.equal(runAfterSeal.last_activity_source, `raw_story_handoff_sealed:${sealed.raw_story_handoff_id}`);
+  assert(Date.parse(runAfterSeal.last_activity_at) >= Date.parse(runBeforeSeal.last_activity_at));
   for (const root of cleanupRoots) {
-    assert.deepEqual([...await names(root)].sort(), topLevelBeforeSeal[root], `seal created a disk entry under ${root}`);
+    const afterNames = [...await names(root)].sort();
+    if (root === path.join(projectPaths.outputLogs, "transactions")) {
+      const beforeNames = new Set(topLevelBeforeSeal[root]);
+      const additions = afterNames.filter((name) => !beforeNames.has(name));
+      assert.equal(additions.length, 1, "seal activity update must create exactly one safe-write transaction manifest");
+      const manifest = JSON.parse(await readFile(path.join(root, additions[0]), "utf8"));
+      assert.equal(manifest.metadata.run_id, session.external_brain_session_id);
+      assert.equal(manifest.metadata.action, "external-brain-session-activity");
+      assert.equal(JSON.stringify(manifest).includes(exactStory), false);
+      continue;
+    }
+    assert.deepEqual(afterNames, topLevelBeforeSeal[root], `seal created a disk entry under ${root}`);
   }
   assert.deepEqual(Object.fromEntries(await Promise.all(
     Object.keys(traceFilesBeforeSeal).map(async (traceId) => [

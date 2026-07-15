@@ -159,7 +159,8 @@ try {
   await rm(executionFixtureRoot, { recursive: true, force: true });
 
   const active = await makeSession(fixtureRoot, {
-    stamp: "20260501-010000", suffix: "00000001", status: "running", traceModules: [],
+    stamp: "20260714-010000", suffix: "00000001", status: "running",
+    createdAt: "2026-07-14T01:00:00.000Z", traceModules: [],
   });
   const governance = await makeSession(fixtureRoot, {
     stamp: "20260501-020000", suffix: "00000002", traceModules: ["scene_planner"],

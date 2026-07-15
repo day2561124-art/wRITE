@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
-import { projectPaths } from "./project-paths.mjs";
+import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs";
 
 export const agentRunIdPattern = /^agent_run_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const gptWritingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -23,6 +23,13 @@ export const neuralModuleNames = new Set([
   "final_polisher",
 ]);
 const runStatuses = new Set(["running", "success", "warning", "failed"]);
+export const externalBrainSessionLifecycleStatuses = new Set([
+  "ACTIVE",
+  "COMPLETED",
+  "ABANDONED",
+  "FAILED",
+  "BLOCKED",
+]);
 
 function isoStamp(date = new Date()) {
   const compact = date.toISOString().replace(/\D/gu, "").slice(0, 14);
@@ -93,9 +100,35 @@ function uniqueModules(value) {
   return [...new Set(modules)];
 }
 
-function runPaths(runId) {
+function agentRunRoots(options = {}) {
+  if (!options.fixtureRoot) {
+    return {
+      agentRuns: projectPaths.agentRuns,
+      neuralTraces: projectPaths.neuralTraces,
+      neuralOutputs: projectPaths.neuralModuleOutputs,
+    };
+  }
+  const fixtureRoot = assertPathInside(
+    options.fixtureRoot,
+    path.join(projectRoot, "tests", ".tmp"),
+    "agent run fixture root",
+  );
+  return {
+    agentRuns: path.join(fixtureRoot, "data", "agent_runs"),
+    neuralTraces: path.join(fixtureRoot, "data", "agent_runs", "neural_traces"),
+    neuralOutputs: path.join(fixtureRoot, "data", "agent_runs", "neural_outputs"),
+  };
+}
+
+function fixtureTransactionMetadata(options = {}) {
+  return options.fixtureRoot
+    ? { test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions") }
+    : {};
+}
+
+export function agentRunPaths(runId, options = {}) {
   assertAgentRunId(runId);
-  const directory = path.join(projectPaths.agentRuns, runId);
+  const directory = path.join(agentRunRoots(options).agentRuns, runId);
   return {
     directory,
     run: path.join(directory, "run.json"),
@@ -109,8 +142,8 @@ async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
-async function writeRunFiles(runId, files, metadata = {}) {
-  const paths = runPaths(runId);
+async function writeRunFiles(runId, files, metadata = {}, options = {}) {
+  const paths = agentRunPaths(runId, options);
   const operations = Object.entries(files).map(([key, value]) => ({
     type: "write",
     filePath: paths[key],
@@ -119,6 +152,7 @@ async function writeRunFiles(runId, files, metadata = {}) {
   return commitFileTransaction("agent-run-update", operations, {
     run_id: runId,
     ...metadata,
+    ...fixtureTransactionMetadata(options),
   });
 }
 
@@ -129,17 +163,18 @@ export function assertAgentRunId(runId) {
   return runId;
 }
 
-export async function ensureAgentRunDirectories() {
+export async function ensureAgentRunDirectories(options = {}) {
+  const roots = agentRunRoots(options);
   await Promise.all([
-    mkdir(projectPaths.agentRuns, { recursive: true }),
-    mkdir(projectPaths.neuralTraces, { recursive: true }),
-    mkdir(projectPaths.neuralModuleOutputs, { recursive: true }),
+    mkdir(roots.agentRuns, { recursive: true }),
+    mkdir(roots.neuralTraces, { recursive: true }),
+    mkdir(roots.neuralOutputs, { recursive: true }),
   ]);
 }
 
-export async function createAgentRun(input = {}) {
+export async function createAgentRun(input = {}, options = {}) {
   requireObject(input, "agent run input");
-  await ensureAgentRunDirectories();
+  await ensureAgentRunDirectories(options);
   const taskType = input.task_type ?? "test";
   if (!agentTaskTypes.has(taskType)) {
     throw new Error(`task_type must be one of: ${[...agentTaskTypes].join(", ")}.`);
@@ -163,6 +198,8 @@ export async function createAgentRun(input = {}) {
     mode,
     ...(mode === "chatgpt_owned_external_brain" ? {
       external_brain_session_id: runId,
+      session_lifecycle_status: "ACTIVE",
+      last_activity_at: createdAt,
     } : {}),
     ...(writingContextBundleId ? {
       writing_context_bundle_id: writingContextBundleId,
@@ -183,12 +220,12 @@ export async function createAgentRun(input = {}) {
     modules: { neural_modules_used: [] },
     warnings: { warnings: [] },
     blockedReason: { blocked: false, blocked_reason: null },
-  }, { action: "create" });
+  }, { action: "create" }, options);
   return run;
 }
 
-export async function getAgentRun(runId) {
-  const paths = runPaths(runId);
+export async function getAgentRun(runId, options = {}) {
+  const paths = agentRunPaths(runId, options);
   try {
     return await readJson(paths.run);
   } catch (error) {
@@ -201,14 +238,14 @@ export async function getAgentRun(runId) {
   }
 }
 
-export async function listAgentRuns() {
-  await ensureAgentRunDirectories();
-  const names = await readdir(projectPaths.agentRuns, { withFileTypes: true });
+export async function listAgentRuns(options = {}) {
+  await ensureAgentRunDirectories(options);
+  const names = await readdir(agentRunRoots(options).agentRuns, { withFileTypes: true });
   const runs = [];
   for (const entry of names) {
     if (!entry.isDirectory() || !agentRunIdPattern.test(entry.name)) continue;
     try {
-      runs.push(await getAgentRun(entry.name));
+      runs.push(await getAgentRun(entry.name, options));
     } catch (error) {
       if (error.statusCode !== 404) throw error;
     }
@@ -216,12 +253,12 @@ export async function listAgentRuns() {
   return runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 }
 
-export async function updateAgentRunStatus(runId, status, updates = {}) {
+export async function updateAgentRunStatus(runId, status, updates = {}, options = {}) {
   if (!runStatuses.has(status)) {
     throw new Error(`status must be one of: ${[...runStatuses].join(", ")}.`);
   }
   requireObject(updates, "agent run updates");
-  const run = await getAgentRun(runId);
+  const run = await getAgentRun(runId, options);
   const next = {
     ...run,
     status,
@@ -237,14 +274,14 @@ export async function updateAgentRunStatus(runId, status, updates = {}) {
       blocked: next.blocked,
       blocked_reason: next.blocked_reason,
     },
-  }, { action: "status", status });
+  }, { action: "status", status }, options);
   return next;
 }
 
-export async function attachNeuralModulesUsed(runId, usage) {
+export async function attachNeuralModulesUsed(runId, usage, options = {}) {
   requireObject(usage, "neural module usage");
-  const paths = runPaths(runId);
-  await getAgentRun(runId);
+  const paths = agentRunPaths(runId, options);
+  const run = await getAgentRun(runId, options);
   const current = await readJson(paths.modules);
   const entries = Array.isArray(current.neural_modules_used) ? current.neural_modules_used : [];
   const { normalizeNeuralModuleKey } = await import("./neural-module-utils.mjs");
@@ -258,13 +295,24 @@ export async function attachNeuralModulesUsed(runId, usage) {
   };
   const filtered = entries.filter((entry) => entry.trace_id !== nextEntry.trace_id);
   const payload = { neural_modules_used: [...filtered, nextEntry] };
-  await writeRunFiles(runId, { modules: payload }, { action: "attach-neural-module" });
+  const activityAt = usage.called_at ?? new Date().toISOString();
+  const files = { modules: payload };
+  if (run.mode === "chatgpt_owned_external_brain") {
+    files.run = {
+      ...run,
+      session_lifecycle_status: run.session_lifecycle_status ?? "ACTIVE",
+      last_activity_at: activityAt,
+      last_activity_source: `neural_trace:${nextEntry.trace_id}`,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  await writeRunFiles(runId, files, { action: "attach-neural-module" }, options);
   return payload;
 }
 
-export async function verifyRequiredNeuralModules(runId) {
-  const run = await getAgentRun(runId);
-  const paths = runPaths(runId);
+export async function verifyRequiredNeuralModules(runId, options = {}) {
+  const run = await getAgentRun(runId, options);
+  const paths = agentRunPaths(runId, options);
   const usage = await readJson(paths.modules);
   const entries = Array.isArray(usage.neural_modules_used) ? usage.neural_modules_used : [];
   const { normalizeNeuralModuleKey } = await import("./neural-module-utils.mjs");
@@ -288,7 +336,7 @@ export async function verifyRequiredNeuralModules(runId) {
   await writeRunFiles(runId, {
     run: nextRun,
     warnings: { warnings },
-  }, { action: "verify-neural-modules", missing_count: missing.length });
+  }, { action: "verify-neural-modules", missing_count: missing.length }, options);
   return {
     ok: missing.length === 0,
     required: run.required_neural_modules,
@@ -301,7 +349,7 @@ export async function verifyRequiredNeuralModules(runId) {
 
 export async function finalizeAgentRun(runId, options = {}) {
   requireObject(options, "finalize options");
-  const verification = await verifyRequiredNeuralModules(runId);
+  const verification = await verifyRequiredNeuralModules(runId, options);
   const run = verification.run;
   const outputHash = options.output_hash
     ? requireString(options.output_hash, "output_hash", 64)
@@ -310,5 +358,72 @@ export async function finalizeAgentRun(runId, options = {}) {
   return updateAgentRunStatus(runId, status, {
     warning: !verification.ok,
     output_hash: outputHash,
-  });
+  }, options);
+}
+
+function validIsoTimestamp(value, label) {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${label} must be an ISO timestamp.`);
+  }
+  return new Date(value).toISOString();
+}
+
+export async function recordExternalBrainSessionActivity(runId, input = {}, options = {}) {
+  requireObject(input, "external brain session activity");
+  const run = await getAgentRun(runId, options);
+  if (run.mode !== "chatgpt_owned_external_brain" || run.external_brain_session_id !== run.run_id) {
+    throw new Error("run_id is not a ChatGPT-owned external brain session.");
+  }
+  const activityAt = input.activity_at
+    ? validIsoTimestamp(input.activity_at, "activity_at")
+    : new Date().toISOString();
+  const currentActivity = Date.parse(run.last_activity_at ?? run.created_at ?? "");
+  const nextActivity = Date.parse(activityAt) >= currentActivity
+    ? activityAt
+    : run.last_activity_at;
+  const next = {
+    ...run,
+    session_lifecycle_status: run.session_lifecycle_status ?? "ACTIVE",
+    last_activity_at: nextActivity,
+    last_activity_source: requireString(input.activity_source ?? "external_brain_capability", "activity_source", 200),
+    updated_at: new Date().toISOString(),
+  };
+  await writeRunFiles(runId, { run: next }, {
+    action: "external-brain-session-activity",
+    activity_source: next.last_activity_source,
+  }, options);
+  return next;
+}
+
+export async function transitionExternalBrainSessionLifecycle(runId, lifecycleStatus, input = {}, options = {}) {
+  const normalized = requireString(lifecycleStatus, "session_lifecycle_status", 20).toUpperCase();
+  if (!externalBrainSessionLifecycleStatuses.has(normalized)) {
+    throw new Error(`session_lifecycle_status must be one of: ${[...externalBrainSessionLifecycleStatuses].join(", ")}.`);
+  }
+  requireObject(input, "external brain lifecycle transition");
+  const run = await getAgentRun(runId, options);
+  if (run.mode !== "chatgpt_owned_external_brain" || run.external_brain_session_id !== run.run_id) {
+    throw new Error("run_id is not a ChatGPT-owned external brain session.");
+  }
+  const transitionedAt = input.transitioned_at
+    ? validIsoTimestamp(input.transitioned_at, "transitioned_at")
+    : new Date().toISOString();
+  const next = {
+    ...run,
+    session_lifecycle_status: normalized,
+    last_activity_at: transitionedAt,
+    last_activity_source: requireString(input.activity_source ?? `lifecycle:${normalized.toLowerCase()}`, "activity_source", 200),
+    updated_at: new Date().toISOString(),
+    ...(normalized === "COMPLETED" ? { session_completed_at: transitionedAt } : {}),
+    ...(normalized === "ABANDONED" ? {
+      retired_at: transitionedAt,
+      retired_by: requireString(input.retired_by, "retired_by", 200),
+      retirement_reason: requireString(input.retirement_reason, "retirement_reason", 2_000),
+    } : {}),
+  };
+  await writeRunFiles(runId, { run: next }, {
+    action: "external-brain-session-lifecycle",
+    session_lifecycle_status: normalized,
+  }, options);
+  return next;
 }

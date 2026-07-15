@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { createAgentRun, finalizeAgentRun, getAgentRun } from "./agent-run-service.mjs";
+import {
+  createAgentRun,
+  finalizeAgentRun,
+  getAgentRun,
+  recordExternalBrainSessionActivity,
+  transitionExternalBrainSessionLifecycle,
+} from "./agent-run-service.mjs";
 import { buildGptWritingContext, getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import {
   run_scene_planner,
@@ -555,7 +561,7 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
       writing_context_bundle_id: context.bundle.bundle_id,
       orchestration_owner: "chatgpt",
     }),
-  });
+  }, options);
   return {
     ok: true,
     tool_name: "chatgpt_bridge_begin_external_brain_writing_session",
@@ -645,6 +651,10 @@ export async function sealChatgptOwnedRawStoryHandoff(input = {}, options = {}) 
     run_id: runId,
     writing_context_bundle_id: contextBundleId,
     raw_story_text: input.raw_story_text,
+  }, options);
+  await recordExternalBrainSessionActivity(runId, {
+    activity_at: new Date().toISOString(),
+    activity_source: `raw_story_handoff_sealed:${sealed.raw_story_handoff_id}`,
   }, options);
   return {
     ok: true,
@@ -978,6 +988,12 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     throw error;
   }
   const executionSucceeded = execution.trace?.status === "success";
+  if (execution.trace?.trace_id) {
+    await recordExternalBrainSessionActivity(runId, {
+      activity_at: execution.trace.called_at ?? new Date().toISOString(),
+      activity_source: `neural_trace:${execution.trace.trace_id}`,
+    }, options);
+  }
   if (sealedAcquisition) {
     if (executionSucceeded) {
       await completeRawStoryHandoffConsumption(sealedAcquisition, options);
@@ -986,7 +1002,13 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }
   }
   const finalizedRun = isFinalPolisher && executionSucceeded
-    ? await finalizeAgentRun(runId, { output: execution.output })
+    ? await finalizeAgentRun(runId, { ...options, output: execution.output })
+    : null;
+  const lifecycleRun = finalizedRun
+    ? await transitionExternalBrainSessionLifecycle(runId, "COMPLETED", {
+      transitioned_at: execution.trace.called_at ?? new Date().toISOString(),
+      activity_source: `final_polisher:${execution.trace.trace_id}`,
+    }, options)
     : null;
   return {
     ok: executionSucceeded,
@@ -1045,6 +1067,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       output_hash: execution.trace?.output_hash ?? null,
     },
     agent_run_status: finalizedRun?.status ?? run.status,
+    session_lifecycle_status: lifecycleRun?.session_lifecycle_status
+      ?? run.session_lifecycle_status
+      ?? "ACTIVE",
     mutation_guards: { ...safety },
     ...safety,
   };
