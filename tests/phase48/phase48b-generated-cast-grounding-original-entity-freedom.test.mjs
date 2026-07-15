@@ -389,7 +389,7 @@ try {
     "初日的聲音從門邊傳來。",
     "初日怔住了。",
   ].join("\n");
-  const naturalContextSession = await startReadySession("寫初日的自然反應。");
+  const naturalContextSession = await startReadySession("寫一段休息間裡突發的自然反應。");
   const naturalContextFinal = await useChatgptOwnedExternalBrainCapability(
     "run_final_polisher",
     {
@@ -400,9 +400,30 @@ try {
     options,
   );
   assert.equal(naturalContextFinal.ok, true);
-  assert(naturalContextFinal.capability_output.character_hard_facts.some((item) => (
+  const naturalContextReport = naturalContextFinal.capability_output;
+  assert.equal(
+    naturalContextReport.pre_generation_character_count,
+    0,
+    "TEST S: 初日 must not be pre-grounded by the task prompt",
+  );
+  assert.equal(
+    naturalContextReport.generated_existing_canon_character_count,
+    1,
+    "TEST S: natural prose person context must generate one supplemental Canon character",
+  );
+  assert(
+    naturalContextReport.generated_existing_canon_characters.includes("初日"),
+    "TEST S: generated-cast recall must add 初日",
+  );
+  const naturalInitialFact = naturalContextReport.character_hard_facts.find((item) => (
     item.canonical_name === "初日"
-  )), "TEST S: natural context should confirm 初日");
+  ));
+  assert(naturalInitialFact, "TEST S: Final Polisher must receive 初日 hard facts");
+  assert.equal(
+    naturalInitialFact.grounding_classification,
+    "generated_existing_canon_character",
+    "TEST S: 初日 must be classified as generated existing Canon cast",
+  );
 
   // TEST T: cross-occurrence evidence accumulation
   const crossOccurrenceStory = [
@@ -507,30 +528,64 @@ try {
     "TEST W: facility freedom should be preserved",
   );
 
-  // TEST X: ambiguous Canon candidate evidence (not force-binding)
+  // TEST X: ambiguous Canon candidate evidence reaches Final Polisher without force-binding.
   const ambiguousStory = "初日可能不在這裡。";
   const ambiguousResolution = resolveCanonCharacterMention(ambiguousStory, "初日");
   assert.notEqual(
     ambiguousResolution.status,
     canonCharacterMentionStatuses.confirmed,
-    "TEST X: ambiguous context should not confirm 初日",
+    "TEST X: ambiguous context should not deterministically confirm 初日",
   );
-  const expandedWithAmbiguous = expandGeneratedCastCanonGrounding({
-    rawStoryText: ambiguousStory,
-    integrityValidated: true,
-    existingCharacterCanonGrounding: {
-      characters: [],
+
+  const ambiguousSession = await startReadySession(
+    "寫一段人物是否在場仍不明的休息間短場景。",
+  );
+  const ambiguousFinal = await useChatgptOwnedExternalBrainCapability(
+    "run_final_polisher",
+    {
+      ...ambiguousSession.common,
+      raw_story_text: ambiguousStory,
+      raw_story_sha256: sha256(ambiguousStory),
     },
-    activeEngineContent: activeEngine,
-  });
-  if (expandedWithAmbiguous.ambiguous_existing_canon_candidates?.length > 0) {
-    const ambiguousCandidate = expandedWithAmbiguous.ambiguous_existing_canon_candidates[0];
-    assert.equal(
-      ambiguousCandidate.identity_not_confirmed,
-      true,
-      "TEST X: ambiguous candidate should mark identity_not_confirmed",
-    );
-  }
+    options,
+  );
+
+  assert.equal(ambiguousFinal.ok, true);
+  const ambiguousReport = ambiguousFinal.capability_output;
+  assert.equal(
+    (ambiguousReport.character_hard_facts ?? []).some((item) => (
+      item.canonical_name === "初日"
+    )),
+    false,
+    "TEST X: ambiguous 初日 must not enter binding character_hard_facts",
+  );
+
+  const ambiguousCandidates = ambiguousReport.ambiguous_existing_canon_candidates ?? [];
+  const ambiguousCandidate = ambiguousCandidates.find((item) => (
+    item.canonical_name === "初日"
+  ));
+  assert(ambiguousCandidate, "TEST X: Final Polisher must receive 初日 candidate evidence");
+  assert.equal(ambiguousCandidate.identity_not_confirmed, true);
+  assert.equal(ambiguousCandidate.identity_resolution_required, true);
+  assert.equal(ambiguousCandidate.gender, "male");
+  assert.equal(ambiguousCandidate.pronouns.third_person, "他");
+  assert.equal(
+    ambiguousReport
+      .ambiguous_canon_candidate_resolution
+      .candidate_facts_are_binding_before_identity_confirmation,
+    false,
+    "TEST X: candidate Canon facts must remain non-binding before identity confirmation",
+  );
+  assert.match(
+    ambiguousReport.ambiguous_canon_candidate_resolution.binding_rule,
+    /identity-resolution evidence only/iu,
+  );
+  assert(
+    ambiguousReport.findings.some((finding) => (
+      finding.code === "ambiguous_existing_canon_candidate_resolution"
+    )),
+    "TEST X: semantic candidate identity-resolution contract must reach Final Polisher",
+  );
 
   // TEST Y: service integrity invariant (integrityValidated=false blocks expansion)
   const integrityFailStory = "初日走進來。";

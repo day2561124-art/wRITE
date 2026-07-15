@@ -239,9 +239,12 @@ export function buildFinalPolisherEditorialContract(
   const ambiguousMentions = characterCanonGrounding?.ambiguous_mentions ?? [];
   const originalOrUnresolvedMentions = characterCanonGrounding
     ?.original_or_unresolved_mentions ?? [];
+  const ambiguousExistingCanonCandidates = characterCanonGrounding
+    ?.ambiguous_existing_canon_candidates ?? [];
   const entityGroundingRelevant = characterHardFacts.length > 0
     || ambiguousMentions.length > 0
-    || originalOrUnresolvedMentions.length > 0;
+    || originalOrUnresolvedMentions.length > 0
+    || ambiguousExistingCanonCandidates.length > 0;
   
   // ORIGINAL ENTITY FREEDOM INVARIANT: always provided, not conditional
   const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom ?? null;
@@ -254,6 +257,11 @@ export function buildFinalPolisherEditorialContract(
   const characterEvidenceBinding = (requirement) => [{
     source: "raw_story_text+expanded_character_canon_grounding",
     binding: "exact_passage_character_grounded_fact_and_provenance_required",
+    requirement,
+  }];
+  const ambiguousCandidateEvidenceBinding = (requirement) => [{
+    source: "raw_story_text+ambiguous_existing_canon_candidates",
+    binding: "exact_passage_candidate_fact_and_semantic_identity_decision_required",
     requirement,
   }];
   return {
@@ -277,6 +285,15 @@ export function buildFinalPolisherEditorialContract(
       ambiguous_canon_mentions: ambiguousMentions,
       original_or_unresolved_mentions: originalOrUnresolvedMentions,
       generated_cast_expansion: characterCanonGrounding.expansion_metadata,
+    } : {}),
+    ...(ambiguousExistingCanonCandidates.length ? {
+      ambiguous_existing_canon_candidates: ambiguousExistingCanonCandidates,
+      ambiguous_canon_candidate_resolution: {
+        semantic_resolution_required: true,
+        candidate_facts_are_binding_before_identity_confirmation: false,
+        binding_rule: "Candidate Canon facts are identity-resolution evidence only. They do not become binding hard facts until ChatGPT semantically confirms that the exact passage refers to the existing Canon entity.",
+        original_entity_protection: "An unresolved or original entity must never inherit candidate Canon facts merely because its name is similar.",
+      },
     } : {}),
     ...(originalEntityFreedom ? {
       original_entity_freedom: originalEntityFreedom,
@@ -424,6 +441,13 @@ export function buildFinalPolisherEditorialContract(
         diagnosis: "Check whether a school, organization, location, facility, or other non-character phrase was force-bound to a similarly named Canon character.",
         revision_action: "Correct the grounding or referent interpretation first; revise prose only when the prose itself remains materially ambiguous.",
       }] : []),
+      ...(ambiguousExistingCanonCandidates.length ? [{
+        code: "ambiguous_existing_canon_candidate_resolution",
+        severity: "high",
+        evidence: ambiguousCandidateEvidenceBinding("Bind the exact passage, candidate existing Canon entity, candidate Canon facts, and ChatGPT's semantic identity decision."),
+        diagnosis: "Resolve whether the exact ambiguous passage actually refers to the candidate existing Canon entity before applying candidate gender, pronouns, identity, appearance, relationship, or body-trait facts.",
+        revision_action: "Do not force-bind. First resolve identity semantically; apply candidate Canon facts only after identity is confirmed, otherwise preserve the occurrence as unresolved or original.",
+      }] : []),
       ...(generatedCharacterCount ? [{
         code: "generated_existing_character_canon_conflict",
         severity: "high",
@@ -442,6 +466,9 @@ export function buildFinalPolisherEditorialContract(
       ...(characterHardFacts.length ? [
         "Resolve evidence-bound Canon character identity, pronoun, appearance, and unsupported body-trait conflicts before release.",
       ] : []),
+      ...(ambiguousExistingCanonCandidates.length ? [
+        "Resolve ambiguous existing-Canon candidates semantically before applying candidate facts; candidate evidence is non-binding until identity is confirmed.",
+      ] : []),
       "Address high-severity exact evidence first; otherwise prefer subtractive editing.",
       "Preserve living irregularity; never apply findings mechanically or complete a theme.",
     ],
@@ -451,6 +478,9 @@ export function buildFinalPolisherEditorialContract(
       "Preserve canon, causal continuity, character agency, the chapter turn, and strong emotional beats.",
       ...(characterHardFacts.length ? [
         "Use character-bound Canon grounding for identity, pronouns, appearance, and body traits; remove unsupported traits and repair any local action causality that depended on them.",
+      ] : []),
+      ...(ambiguousExistingCanonCandidates.length ? [
+        "Use ambiguous Canon candidate facts only to resolve semantic identity. They remain non-binding until the exact passage is confirmed to refer to that existing Canon entity; never transfer candidate facts to an unresolved or original entity.",
       ] : []),
       ...(originalEntityFreedom ? [
         "Protect established facts without restricting new creation: unmatched original entities are allowed, never auto-persisted, and never deleted merely for Canon absence.",
