@@ -64,6 +64,7 @@ const steps = [
   ["Phase47H raw-story seal session authority reconciliation", ["tests/phase47/phase47h-raw-story-seal-session-authority-reconciliation.test.mjs"]],
   ["Phase47J MCP parent ephemeral raw-story seal broker", ["tests/phase47/phase47j-mcp-parent-ephemeral-raw-story-seal-broker.test.mjs"]],
   ["Phase47L MCP parent ephemeral raw-story seal live acceptance closure", ["tests/phase47/phase47l-mcp-parent-ephemeral-raw-story-seal-live-acceptance-closure.test.mjs"]],
+  ["Phase48A primary external brain character Canon grounding", ["tests/phase48/phase48a-character-canon-grounding-primary-route.test.mjs"]],
 
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
   ["Backup export production residue regression", ["tests/backup/backup-export-production-residue-regression.test.mjs"]],

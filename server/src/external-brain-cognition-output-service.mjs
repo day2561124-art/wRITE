@@ -7,7 +7,11 @@ import {
   getNeuralTrace,
   hashNeuralValue,
 } from "./neural-trace-service.mjs";
-import { projectPaths } from "./project-paths.mjs";
+import {
+  assertPathInside,
+  projectPaths,
+  projectRoot,
+} from "./project-paths.mjs";
 
 const writingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 
@@ -41,16 +45,29 @@ function assertPriorModule(moduleName) {
   return moduleName;
 }
 
-function cognitionOutputDirectory(runId, bundleId, moduleName) {
+function cognitionOutputRoot(options = {}) {
+  if (!options.fixtureRoot) return projectPaths.neuralModuleOutputs;
+  const fixtureRoot = assertPathInside(
+    options.fixtureRoot,
+    path.join(projectRoot, "tests", ".tmp"),
+    "External brain cognition fixture root",
+  );
+  return path.join(fixtureRoot, "data", "agent_runs", "neural_outputs");
+}
+
+function cognitionOutputDirectory(runId, bundleId, moduleName, options = {}) {
   assertAgentRunId(runId);
   assertWritingContextBundleId(bundleId);
   assertPriorModule(moduleName);
-  return path.join(projectPaths.neuralModuleOutputs, runId, bundleId, moduleName);
+  return path.join(cognitionOutputRoot(options), runId, bundleId, moduleName);
 }
 
-function cognitionOutputPath(runId, bundleId, moduleName, traceId) {
+function cognitionOutputPath(runId, bundleId, moduleName, traceId, options = {}) {
   assertNeuralTraceId(traceId);
-  return path.join(cognitionOutputDirectory(runId, bundleId, moduleName), `${traceId}.json`);
+  return path.join(
+    cognitionOutputDirectory(runId, bundleId, moduleName, options),
+    `${traceId}.json`,
+  );
 }
 
 export function serializeCognitionCapabilityOutput(capabilityOutput) {
@@ -75,8 +92,8 @@ function integrityFailure(moduleName, code, message, record = null) {
   };
 }
 
-async function readSelectedRecord(runId, bundleId, moduleName) {
-  const directory = cognitionOutputDirectory(runId, bundleId, moduleName);
+async function readSelectedRecord(runId, bundleId, moduleName, options = {}) {
+  const directory = cognitionOutputDirectory(runId, bundleId, moduleName, options);
   let names;
   try {
     names = await readdir(directory);
@@ -107,7 +124,7 @@ async function readSelectedRecord(runId, bundleId, moduleName) {
   return { record: records[0] };
 }
 
-async function verifySelectedRecord(record, expected) {
+async function verifySelectedRecord(record, expected, options = {}) {
   const { runId, bundleId, moduleName } = expected;
   const expectedCapabilityName = `run_${moduleName}`;
   const expectedResultType = resultTypes[moduleName];
@@ -129,7 +146,7 @@ async function verifySelectedRecord(record, expected) {
   let trace;
   try {
     assertNeuralTraceId(record.trace_id);
-    trace = await getNeuralTrace(record.trace_id);
+    trace = await getNeuralTrace(record.trace_id, options);
   } catch (error) {
     return integrityFailure(
       moduleName,
@@ -163,7 +180,7 @@ async function verifySelectedRecord(record, expected) {
   return null;
 }
 
-export async function persistExternalBrainCognitionOutput(input = {}) {
+export async function persistExternalBrainCognitionOutput(input = {}, options = {}) {
   const runId = assertAgentRunId(input.run_id);
   const bundleId = assertWritingContextBundleId(input.writing_context_bundle_id);
   const moduleName = assertPriorModule(input.module_name);
@@ -203,7 +220,7 @@ export async function persistExternalBrainCognitionOutput(input = {}) {
     capability_output: input.capability_output,
   };
   await atomicWriteFile(
-    cognitionOutputPath(runId, bundleId, moduleName, trace.trace_id),
+    cognitionOutputPath(runId, bundleId, moduleName, trace.trace_id, options),
     `${JSON.stringify(record, null, 2)}\n`,
     {
       name: "external-brain-cognition-output",
@@ -216,7 +233,7 @@ export async function persistExternalBrainCognitionOutput(input = {}) {
   return record;
 }
 
-export async function loadVerifiedPriorAuthorshipCognition(input = {}) {
+export async function loadVerifiedPriorAuthorshipCognition(input = {}, options = {}) {
   const runId = assertAgentRunId(input.run_id);
   const bundleId = assertWritingContextBundleId(input.writing_context_bundle_id);
   const selectedSources = [];
@@ -224,7 +241,7 @@ export async function loadVerifiedPriorAuthorshipCognition(input = {}) {
   const integrityFailures = [];
 
   for (const moduleName of priorAuthorshipCognitionModules) {
-    const selected = await readSelectedRecord(runId, bundleId, moduleName);
+    const selected = await readSelectedRecord(runId, bundleId, moduleName, options);
     if (selected.missing) {
       missingModules.push(moduleName);
       continue;
@@ -233,7 +250,11 @@ export async function loadVerifiedPriorAuthorshipCognition(input = {}) {
       integrityFailures.push(selected.failure);
       continue;
     }
-    const failure = await verifySelectedRecord(selected.record, { runId, bundleId, moduleName });
+    const failure = await verifySelectedRecord(
+      selected.record,
+      { runId, bundleId, moduleName },
+      options,
+    );
     if (failure) {
       integrityFailures.push(failure);
       continue;

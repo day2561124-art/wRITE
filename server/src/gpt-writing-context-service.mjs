@@ -5,6 +5,10 @@ import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { buildWritingCardDirectorContext } from "./writing-card-director-service.mjs";
 import { buildChapterAnchorFromBundle } from "./chapter-anchor-guard.mjs";
+import {
+  buildCharacterCanonGrounding,
+  serializeCharacterCanonGroundingFixedGuard,
+} from "./character-canon-grounding-service.mjs";
 import { createAgentRun, finalizeAgentRun } from "./agent-run-service.mjs";
 import {
   run_scene_planner,
@@ -496,6 +500,22 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     ),
   ]);
   const byLabel = Object.fromEntries(sourceList.map((source) => [source.label, source]));
+  const groundingActiveEngine = byLabel.active_engine.included
+    ? byLabel.active_engine
+    : await sourceSnapshot(
+      "character_canon_grounding_active_engine",
+      activeEnginePath,
+      true,
+      "active",
+    );
+  const characterCanonGrounding = buildCharacterCanonGrounding({
+    activeEngineContent: groundingActiveEngine.content,
+    sourceFile: groundingActiveEngine.path,
+    taskPrompt: input.taskPrompt,
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
+    currentLongline: byLabel.active_longline.content,
+  });
   const characterVoiceRegistry = characterVoiceRegistryMetadata(
     byLabel.character_voice_registry,
   );
@@ -605,6 +625,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     character_voice_registry_bytes: characterVoiceRegistry.bytes,
     character_voice_registry_source_type: characterVoiceRegistry.source_type,
     character_voice_registry_authority: characterVoiceRegistry.authority,
+    character_canon_grounding_loaded: characterCanonGrounding.loaded,
+    character_canon_grounding_count: characterCanonGrounding.matched_character_count,
+    character_canon_grounding_source_authority: characterCanonGrounding.source_authority,
+    character_canon_grounding_source_file: characterCanonGrounding.source_file,
     visual_uploaded_references_loaded: visualUploadedReferences.loaded === true,
     visual_uploaded_references_path: visualUploadedReferences.visual_index_path ?? byLabel.visual_index.path,
     visual_uploaded_references_hash_sha256: visualUploadedReferences.visual_index_hash_sha256 ?? byLabel.visual_index.hash,
@@ -634,6 +658,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
         allocated.content.longline_excerpt_or_reference,
       character_voice_registry_content:
         allocated.content.character_voice_registry_content,
+      character_canon_grounding: characterCanonGrounding,
       visual_uploaded_reference_context:
         allocated.content.visual_uploaded_reference_context,
       retrieval_context: retrievalContext,
@@ -647,6 +672,9 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     truncated_sections: allocated.truncated_sections,
     warnings,
   };
+  bundle.fixed_guard_section = serializeCharacterCanonGroundingFixedGuard(
+    characterCanonGrounding,
+  );
   // Attach deterministic writing card director context (local only)
   if (input.includeWritingCardDirector) {
     try {
@@ -684,7 +712,9 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       "- 如無法被 current context 支援，停止生成並回報：缺少設定依據。",
       "",
     ].join("\n");
-    bundle.fixed_guard_section = guardLines;
+    bundle.fixed_guard_section = [bundle.fixed_guard_section, guardLines]
+      .filter(Boolean)
+      .join("\n\n");
   } catch (err) {
     bundle.warnings.push(`chapter_anchor_generation_failed: ${err.message}`);
   }
@@ -737,6 +767,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
               generation_context: generationContext,
               retrieval_context: retrievalContext,
               character_voice_registry: characterVoiceRegistry,
+              character_canon_grounding: characterCanonGrounding,
             }, { run_id: runId, task_type: "draft_generation", adapter, ...agentRunOptions });
           } catch (err) {
             // record but do not block bundle creation

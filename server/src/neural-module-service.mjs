@@ -140,7 +140,7 @@ async function runModule(moduleName, input, options = {}) {
       result_type: spec.result_type,
       trace,
       capability_output: output,
-    });
+    }, agentRunOptions);
   }
   return { output, trace };
 }
