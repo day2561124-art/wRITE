@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   createAgentRun,
   finalizeAgentRun,
@@ -24,6 +25,8 @@ import {
 import {
   getRuntimeProcessInstanceId,
 } from "./raw-story-handoff-seal-service.mjs";
+import { expandGeneratedCastCanonGrounding } from "./generated-cast-canon-grounding-service.mjs";
+import { resolveProjectPath } from "./project-paths.mjs";
 import {
   buildRawStoryMismatchForensics,
   validateRawStoryIntegrityManifest,
@@ -187,6 +190,7 @@ function compactCharacterHardFacts(packet = {}) {
     appearance_facts: character.appearance_facts ?? [],
     relationship_or_position_facts: character.relationship_or_position_facts ?? [],
     explicit_body_traits: character.explicit_body_traits ?? [],
+    grounding_classification: character.grounding_classification ?? null,
     unsupported_body_trait_policy: character.unsupported_body_trait_policy
       ?? packet.body_trait_policy?.rule
       ?? null,
@@ -230,20 +234,30 @@ export function buildFinalPolisherEditorialContract(
 ) {
   const story = requiredText(rawStoryText, "raw_story_text");
   const characterHardFacts = compactCharacterHardFacts(characterCanonGrounding);
+  const generatedCharacterCount = characterCanonGrounding
+    ?.generated_existing_canon_character_count ?? 0;
+  const ambiguousMentions = characterCanonGrounding?.ambiguous_mentions ?? [];
+  const originalOrUnresolvedMentions = characterCanonGrounding
+    ?.original_or_unresolved_mentions ?? [];
+  const entityGroundingRelevant = characterHardFacts.length > 0
+    || ambiguousMentions.length > 0
+    || originalOrUnresolvedMentions.length > 0;
+  const originalEntityFreedom = entityGroundingRelevant
+    ? characterCanonGrounding?.original_entity_freedom ?? null
+    : null;
   const evidenceBinding = (requirement) => [{
     source: "raw_story_text",
     binding: "exact_passage_or_precise_location_required",
     requirement,
   }];
   const characterEvidenceBinding = (requirement) => [{
-    source: "raw_story_text+character_canon_grounding",
+    source: "raw_story_text+expanded_character_canon_grounding",
     binding: "exact_passage_character_grounded_fact_and_provenance_required",
     requirement,
   }];
   return {
     result_type: "final_polisher_report",
     editorial_mode: "subtractive_whole_draft_review",
-    report_status: "editorial_review_contract_ready",
     raw_story_sha256: sha256(story),
     editorial_review_required_for_success: true,
     findings_review_mode: "requires_chatgpt_semantic_review",
@@ -251,6 +265,24 @@ export function buildFinalPolisherEditorialContract(
       character_canon_grounding_loaded: characterCanonGrounding?.loaded === true,
       character_canon_grounding_count: characterHardFacts.length,
       character_hard_facts: characterHardFacts,
+    } : {}),
+    ...(characterCanonGrounding?.expansion_metadata && entityGroundingRelevant ? {
+      expanded_character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
+      pre_generation_character_count:
+        characterCanonGrounding.pre_generation_character_count ?? 0,
+      generated_existing_canon_character_count: generatedCharacterCount,
+      generated_existing_canon_characters:
+        characterCanonGrounding.generated_existing_canon_characters ?? [],
+      ambiguous_canon_mentions: ambiguousMentions,
+      original_or_unresolved_mentions: originalOrUnresolvedMentions,
+      generated_cast_expansion: characterCanonGrounding.expansion_metadata,
+    } : {}),
+    ...(originalEntityFreedom ? {
+      original_entity_freedom: originalEntityFreedom,
+      editorial_entity_rules: [
+        "Canon absence alone is not an editorial defect and never requires deletion or approval.",
+        "Do not silently reinterpret an original entity as a similarly named Canon entity.",
+      ],
     } : {}),
     text_change_required: false,
     release_recommendation: "release_as_is",
@@ -384,6 +416,20 @@ export function buildFinalPolisherEditorialContract(
           revision_action: "Minimally restore the grounded appearance without decorative addition or beautification.",
         },
       ] : []),
+      ...(ambiguousMentions.length ? [{
+        code: "existing_canon_entity_name_collision",
+        severity: "high",
+        evidence: characterEvidenceBinding("Bind exact passage, candidate Canon entity, collision context, and why identity confidence is insufficient."),
+        diagnosis: "Check whether a school, organization, location, facility, or other non-character phrase was force-bound to a similarly named Canon character.",
+        revision_action: "Correct the grounding or referent interpretation first; revise prose only when the prose itself remains materially ambiguous.",
+      }] : []),
+      ...(generatedCharacterCount ? [{
+        code: "generated_existing_character_canon_conflict",
+        severity: "high",
+        evidence: characterEvidenceBinding("Bind newly grounded existing Canon character, exact passage, grounded hard fact, and conflict."),
+        diagnosis: "Review a confidently identified existing Canon character who entered after pre-generation grounding against the supplemental hard facts.",
+        revision_action: "Minimally restore the newly grounded established fact while preserving the character's lawful entrance, agency, and local causality.",
+      }] : []),
     ],
     protected_beats: [{
       code: "strong_emotional_beat",
@@ -405,6 +451,9 @@ export function buildFinalPolisherEditorialContract(
       ...(characterHardFacts.length ? [
         "Use character-bound Canon grounding for identity, pronouns, appearance, and body traits; remove unsupported traits and repair any local action causality that depended on them.",
       ] : []),
+      ...(originalEntityFreedom ? [
+        "Protect established facts without restricting new creation: unmatched original entities are allowed, never auto-persisted, and never deleted merely for Canon absence.",
+      ] : []),
       "Use natural human-written Traditional Chinese; remove AI narrative grammar only when sequence or cluster evidence exists, preserve unknowns, and prefer subtraction over beautification or theme completion.",
       "Do not mechanically apply every finding or add generic polish.",
       "When story-only output was requested, output only the final revised story prose.",
@@ -418,9 +467,13 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
     const moduleName = capabilityName.slice(4);
     const taskPrompt = compactText(capabilityInput.task_prompt);
     const writingContext = capabilityInput.writing_context ?? {};
-    const characterCanonGrounding = capabilityInput.character_canon_grounding
+    const preGenerationCharacterCanonGrounding = capabilityInput
+      .pre_generation_character_canon_grounding
       ?? writingContext.content?.character_canon_grounding
       ?? {};
+    const characterCanonGrounding = capabilityInput.expanded_character_canon_grounding
+      ?? capabilityInput.character_canon_grounding
+      ?? preGenerationCharacterCanonGrounding;
     const characterHardFacts = compactCharacterHardFacts(characterCanonGrounding);
     const base = {
       capability_name: capabilityName,
@@ -428,7 +481,6 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       orchestration_mode: externalBrainOwnership.orchestration_mode,
       orchestration_owner: externalBrainOwnership.orchestration_owner,
       runtime_host: externalBrainOwnership.runtime_host,
-      input_digest: sha256(JSON.stringify(capabilityInput)),
     };
     if (capabilityName === "run_final_polisher") {
       return {
@@ -478,6 +530,8 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           "When Canon gender is explicit, keep Traditional Chinese third- and second-person pronouns consistent with the grounded character.",
           "Do not invent unsupported animal ears, tails, horns, wings, scales, or permanent body traits as emotional or visual shorthand.",
           "Character Voice Registry guidance cannot override Canon identity, appearance, relationship position, or explicit body traits.",
+          "Grounded hard facts apply only to confidently matched existing Canon characters; possible original characters remain creatively open.",
+          "Never borrow the nearest Canon character's gender, appearance, body traits, relationships, or identity for an unmatched or similarly named original character.",
         ],
         character_grounded_irregularity: {
           principle: "A character may depart from the most efficient, mature, or elegant dramatic response only in a way grounded in that person and moment.",
@@ -488,6 +542,7 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,
+        original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
       },
       run_neural_critic: {
         result_type: "neural_critique",
@@ -501,6 +556,9 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           { code: "character_gender_or_pronoun_conflict", question: "For a specifically grounded character with explicit gender, does an exact passage semantically bind that character to a conflicting third- or second-person Traditional Chinese pronoun? Do not treat every pronoun in the draft as referring to the same character." },
           { code: "unsupported_body_trait_invention", question: "Does an exact character-bound passage invent animal ears, tails, horns, wings, scales, or another permanent body trait unsupported by that character's Canon grounding and current higher-authority context?" },
           { code: "appearance_fact_conflict", question: "Does an exact character-bound passage directly replace or contradict an explicit grounded Canon appearance fact?" },
+          { code: "canon_entity_name_collision", question: "Has a name occurrence been force-bound to a Canon character although its phrase indicates a school, organization, location, facility, or other non-character entity?" },
+          { code: "original_entity_freedom_violation", question: "Has cognition treated a Canon-unmatched original character or world entity as prohibited merely because no Canon record exists?" },
+          { code: "generated_existing_character_ungrounded", question: "Does the verified raw story introduce a confidently identifiable existing Canon character absent from pre-generation grounding and therefore needing supplemental hard facts before final review?" },
         ],
         standing_constraints: [
           "Avoid engineering, provider, workflow, and handoff language in story prose.",
@@ -510,6 +568,7 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,
+        original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
       },
       run_style_drift_detector: {
         result_type: "style_drift_report",
@@ -585,6 +644,14 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           unknown_preservation: "Unknown is a valid author conclusion; a source asking that something remain unknown must not be completed by speculation.",
           unsupported_invention_rejection: "Reject or suppress unsupported secret answers, foreshadowing, crisis lines, motives, facts, or payoffs instead of finding a prose compromise.",
         },
+        established_fact_protection: "Existing Canon hard facts remain authoritative for confidently matched existing entities.",
+        original_entity_freedom: {
+          contract: characterCanonGrounding.original_entity_freedom ?? null,
+          rule: "GPT may create new characters and world entities whenever the scene or long-form development naturally calls for them.",
+          canon_absence_rule: "No Canon match is not, by itself, an error or prohibition.",
+          ambiguity_rule: "Ambiguous names remain unresolved instead of being force-bound to a Canon entity.",
+          persistence_boundary: "Original prose entities are not automatically written into Canon, active_engine, candidate, adoption, activation, or settlement workflows.",
+        },
         prose_attention_transition: {
           module_boundary_dissolution: "Module boundaries should dissolve before prose generation: stop tracking what each module said and return to one author understanding of the scene.",
           author_state: "I am the author. I understand this scene. Now write freely.",
@@ -630,6 +697,27 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       ...semanticOutputs[capabilityName],
     };
   };
+}
+
+async function buildVerifiedGeneratedCastGrounding({
+  context,
+  rawStoryText,
+  rawStorySha256,
+}) {
+  const preGenerationGrounding = context.bundle.content?.character_canon_grounding ?? {};
+  const sourceFile = preGenerationGrounding.source_file
+    ?? context.bundle.sources?.active_engine?.path
+    ?? "data/canon_db/active_engine.md";
+  const activeEnginePath = resolveProjectPath(sourceFile, "generated cast active_engine source");
+  const activeEngineContent = await readFile(activeEnginePath, "utf8");
+  return expandGeneratedCastCanonGrounding({
+    rawStoryText,
+    rawStorySha256,
+    integrityValidated: true,
+    existingCharacterCanonGrounding: preGenerationGrounding,
+    activeEngineContent,
+    sourceFile,
+  });
 }
 
 export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, options = {}) {
@@ -994,6 +1082,21 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   }
   let techniqueSelection = null;
   let priorCognition = null;
+  let expandedCharacterCanonGrounding = null;
+  if (isFinalPolisher) {
+    try {
+      expandedCharacterCanonGrounding = await buildVerifiedGeneratedCastGrounding({
+        context,
+        rawStoryText,
+        rawStorySha256: receivedRawStorySha256,
+      });
+    } catch (error) {
+      if (sealedAcquisition) {
+        await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
+      }
+      throw error;
+    }
+  }
   if (capabilityName === "run_writing_card_director") {
     priorCognition = await loadVerifiedPriorAuthorshipCognition({
       run_id: runId,
@@ -1038,8 +1141,13 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       sealed_raw_story_sha256: sealedAcquisition.raw_story_sha256,
     }),
     writing_context_bundle_id: contextBundleId,
-    character_canon_grounding:
+    pre_generation_character_canon_grounding:
       context.bundle.content?.character_canon_grounding ?? null,
+    expanded_character_canon_grounding: expandedCharacterCanonGrounding,
+    character_canon_grounding:
+      expandedCharacterCanonGrounding
+      ?? context.bundle.content?.character_canon_grounding
+      ?? null,
     capability_input: input.capability_input ?? {},
   } : {
     module_name: capabilityName,

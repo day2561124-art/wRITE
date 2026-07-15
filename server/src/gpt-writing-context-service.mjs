@@ -706,10 +706,13 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       JSON.stringify(anchor.chapter_anchor, null, 2),
       "```",
       "",
-      "## 【P0｜創作自由越界阻擋】",
+      "## 【P0｜已成立事實保護與原創自由】",
       "",
-      "- GPT 必須將所有創作建立在 active_engine、generation_context、retrieval_context、writing_card 與本輪章節錨點之上。",
-      "- 如無法被 current context 支援，停止生成並回報：缺少設定依據。",
+      "- 已成立的 Canon、因果與章節錨點必須保持；這些來源保護既有事實，不是允許存在的角色或世界 entity 白名單。",
+      "- GPT 可依長篇發展自由創造新角色、國家、地區、城市、行政機關、學校、組織、企業、派系與設施。",
+      "- Canon 查無資料本身不是錯誤、越界或停止生成理由，也不要求刪除新 entity。",
+      "- 只有高可信度對應既有 Canon entity 時才套用其 hard facts；名稱碰撞或身分不明時保持 unresolved。",
+      "- 原創 entity 不會因出現在正文而自動寫入 Canon、candidate、adoption、activation 或 settlement workflow。",
       "",
     ].join("\n");
     bundle.fixed_guard_section = [bundle.fixed_guard_section, guardLines]

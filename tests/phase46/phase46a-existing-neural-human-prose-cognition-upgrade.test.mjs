@@ -166,6 +166,9 @@ try {
     "character_gender_or_pronoun_conflict",
     "unsupported_body_trait_invention",
     "appearance_fact_conflict",
+    "canon_entity_name_collision",
+    "original_entity_freedom_violation",
+    "generated_existing_character_ungrounded",
   ]);
   assert.match(asText(critic), /every character.*reaction best suited|supporting character or bystander/iu);
   const attentionSourceRisk = critic.risks.find((risk) => risk.code === "narrative_information_without_attention_source");
