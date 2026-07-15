@@ -197,6 +197,46 @@ function compactCharacterHardFacts(packet = {}) {
   }));
 }
 
+function compactFactText(values, maxChars) {
+  return compactText(
+    Array.isArray(values) ? values.join("；") : "",
+    maxChars,
+  );
+}
+
+function compactAmbiguousCanonCandidates(packet = {}) {
+  const candidates = Array.isArray(packet?.ambiguous_existing_canon_candidates)
+    ? packet.ambiguous_existing_canon_candidates
+    : [];
+
+  return candidates.map((candidate) => ({
+    canonical_name: candidate.canonical_name,
+    source_authority: candidate.source_authority ?? packet.source_authority ?? null,
+    gender: candidate.gender ?? null,
+    pronouns: candidate.pronouns ?? {
+      third_person: null,
+      second_person: null,
+      resolved: false,
+    },
+    identity: compactFactText(candidate.identity_facts, 320),
+    affiliation: compactFactText(candidate.affiliation_facts, 240),
+    appearance: compactFactText(candidate.appearance_facts, 320),
+    position: compactFactText(candidate.relationship_or_position_facts, 320),
+    explicit_body_traits: candidate.explicit_body_traits ?? [],
+    mention: {
+      passage: compactText(candidate.mention_evidence?.passage, 160),
+      reason: candidate.mention_evidence?.reason ?? null,
+      collision_suffix: candidate.mention_evidence?.collision_suffix ?? null,
+    },
+    identity_not_confirmed: candidate.identity_not_confirmed === true,
+    identity_resolution_required: candidate.identity_resolution_required === true,
+  }));
+}
+
+const finalPolisherOriginalEntityFreedomInvariant = (
+  "allow_new|absence_not_error_no_block_no_delete|confident_only|unresolved|no_persist"
+);
+
 function blockedDirectorResponse({ runId, contextBundleId, run, continuity, reason }) {
   return {
     ok: false,
@@ -239,15 +279,20 @@ export function buildFinalPolisherEditorialContract(
   const ambiguousMentions = characterCanonGrounding?.ambiguous_mentions ?? [];
   const originalOrUnresolvedMentions = characterCanonGrounding
     ?.original_or_unresolved_mentions ?? [];
-  const ambiguousExistingCanonCandidates = characterCanonGrounding
-    ?.ambiguous_existing_canon_candidates ?? [];
+  const ambiguousExistingCanonCandidates = compactAmbiguousCanonCandidates(
+    characterCanonGrounding,
+  );
   const entityGroundingRelevant = characterHardFacts.length > 0
     || ambiguousMentions.length > 0
     || originalOrUnresolvedMentions.length > 0
     || ambiguousExistingCanonCandidates.length > 0;
   
-  // ORIGINAL ENTITY FREEDOM INVARIANT: always provided, not conditional
-  const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom ?? null;
+  // ORIGINAL ENTITY FREEDOM INVARIANT: always present when the grounding contract exists.
+  // Final Polisher receives a compact invariant token; the full category contract remains
+  // in Character Canon Grounding and Writing Card Director cognition.
+  const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom
+    ? finalPolisherOriginalEntityFreedomInvariant
+    : null;
   
   const evidenceBinding = (requirement) => [{
     source: "raw_story_text",
@@ -297,14 +342,10 @@ export function buildFinalPolisherEditorialContract(
     } : {}),
     ...(originalEntityFreedom ? {
       original_entity_freedom: originalEntityFreedom,
-      editorial_entity_rules: [
-        "Canon absence alone is not an editorial defect and never requires deletion or approval.",
-        "Do not silently reinterpret an original entity as a similarly named Canon entity.",
-      ],
     } : {}),
     text_change_required: false,
     release_recommendation: "release_as_is",
-    release_condition: "Release unchanged only after ChatGPT completes the whole-draft review and finds no material evidence-backed issue.",
+    release_condition: "Release unchanged only after whole-draft semantic review finds no material issue.",
     prose_ownership: {
       final_prose_generator: "ChatGPT",
       writer_workbench_role: "post_generation_editorial_capability_provider",
@@ -481,9 +522,6 @@ export function buildFinalPolisherEditorialContract(
       ] : []),
       ...(ambiguousExistingCanonCandidates.length ? [
         "Use ambiguous Canon candidate facts only to resolve semantic identity. They remain non-binding until the exact passage is confirmed to refer to that existing Canon entity; never transfer candidate facts to an unresolved or original entity.",
-      ] : []),
-      ...(originalEntityFreedom ? [
-        "Protect established facts without restricting new creation: unmatched original entities are allowed, never auto-persisted, and never deleted merely for Canon absence.",
       ] : []),
       "Use natural human-written Traditional Chinese; remove AI narrative grammar only when sequence or cluster evidence exists, preserve unknowns, and prefer subtraction over beautification or theme completion.",
       "Do not mechanically apply every finding or add generic polish.",

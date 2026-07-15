@@ -232,6 +232,25 @@ try {
   const generatedSession = await startReadySession("寫初夢和晴禮找少掉的布丁。");
   const director = generatedSession.outputs.get("run_writing_card_director");
   assert.equal(director.original_entity_freedom.contract.original_entity_creation_allowed, true);
+  for (const category of [
+    "character",
+    "country",
+    "region",
+    "city",
+    "administrative_area",
+    "administrative_agency",
+    "official_institution",
+    "school",
+    "organization",
+    "company",
+    "faction",
+    "facility",
+  ]) {
+    assert(
+      director.original_entity_freedom.contract.entity_categories.includes(category),
+      `Writing Card Director must preserve original entity scope: ${category}`,
+    );
+  }
   assert.match(director.established_fact_protection, /confidently matched existing entities/iu);
   const criticCodes = new Set(
     generatedSession.outputs.get("run_neural_critic").risks.map((risk) => risk.code),
@@ -308,22 +327,15 @@ try {
   assert.equal(originalFinal.ok, true);
   assertGuards(originalFinal);
   const originalReport = originalFinal.capability_output;
-  assert.equal(originalReport.original_entity_freedom.original_entity_creation_allowed, true);
-  assert.equal(originalReport.original_entity_freedom.canon_absence_is_not_error, true);
-  assert.equal(originalReport.original_entity_freedom.canon_absence_does_not_block_generation, true);
-  assert.equal(originalReport.original_entity_freedom.canon_absence_does_not_require_deletion, true);
-  for (const category of [
-    "character",
-    "country",
-    "region",
-    "city",
-    "administrative_agency",
-    "school",
-    "organization",
-    "company",
-    "faction",
-    "facility",
-  ]) assert(originalReport.original_entity_freedom.entity_categories.includes(category));
+  assert.equal(typeof originalReport.original_entity_freedom, "string");
+  assert.match(originalReport.original_entity_freedom, /allow_new/iu);
+  assert.match(
+    originalReport.original_entity_freedom,
+    /absence_not_error_no_block_no_delete/iu,
+  );
+  assert.match(originalReport.original_entity_freedom, /confident_only/iu);
+  assert.match(originalReport.original_entity_freedom, /unresolved/iu);
+  assert.match(originalReport.original_entity_freedom, /no_persist/iu);
   assert(originalReport.original_or_unresolved_mentions.some((item) => (
     item.entity_name === "常盤澪" && item.entity_category === "character"
   )));
@@ -498,15 +510,11 @@ try {
   );
   assert.equal(zeroCanonFinal.ok, true);
   const zeroCanonReport = zeroCanonFinal.capability_output;
-  assert.equal(
-    zeroCanonReport.original_entity_freedom.original_entity_creation_allowed,
-    true,
-    "TEST V: zero-Canon should allow original entity creation",
-  );
-  assert.equal(
-    zeroCanonReport.original_entity_freedom.canon_absence_is_not_error,
-    true,
-    "TEST V: Canon absence should not be error",
+  assert.equal(typeof zeroCanonReport.original_entity_freedom, "string");
+  assert.match(
+    zeroCanonReport.original_entity_freedom,
+    /allow_new.*absence_not_error_no_block_no_delete.*confident_only.*unresolved.*no_persist/iu,
+    "TEST V: zero-Canon Final Polisher must retain the compact freedom invariant",
   );
 
   // TEST W: collector-independent facility freedom
@@ -522,9 +530,9 @@ try {
     options,
   );
   assert.equal(facilityFinal.ok, true);
-  assert.equal(
-    facilityFinal.capability_output.original_entity_freedom.original_entity_creation_allowed,
-    true,
+  assert.match(
+    facilityFinal.capability_output.original_entity_freedom,
+    /allow_new.*no_persist/iu,
     "TEST W: facility freedom should be preserved",
   );
 
@@ -569,6 +577,10 @@ try {
   assert.equal(ambiguousCandidate.identity_resolution_required, true);
   assert.equal(ambiguousCandidate.gender, "male");
   assert.equal(ambiguousCandidate.pronouns.third_person, "他");
+  assert.equal("identity_facts" in ambiguousCandidate, false);
+  assert.equal("appearance_facts" in ambiguousCandidate, false);
+  assert.equal(typeof ambiguousCandidate.identity, "string");
+  assert.equal(typeof ambiguousCandidate.appearance, "string");
   assert.equal(
     ambiguousReport
       .ambiguous_canon_candidate_resolution
