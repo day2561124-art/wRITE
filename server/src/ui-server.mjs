@@ -284,6 +284,7 @@ function parseArgs(argv) {
     host: defaultHost,
     port: Number.parseInt(process.env.UI_PORT ?? "", 10) || defaultPort,
     open: false,
+    entityRegistryRoot: null,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -295,6 +296,15 @@ function parseArgs(argv) {
     }
     if (arg === "--port") {
       options.port = Number.parseInt(argv[index + 1] ?? "", 10);
+      index += 1;
+      continue;
+    }
+    if (arg === "--entity-registry-root") {
+      options.entityRegistryRoot = assertPathInside(
+        argv[index + 1] ?? "",
+        projectPaths.entityRegistry,
+        "entity registry root",
+      );
       index += 1;
       continue;
     }
@@ -319,7 +329,7 @@ function parseArgs(argv) {
 function usage() {
   return [
     "Usage:",
-    "  node server/src/ui-server.mjs [--host 127.0.0.1] [--port 4173] [--open]",
+    "  node server/src/ui-server.mjs [--host 127.0.0.1] [--port 4173] [--open] [--entity-registry-root data/entity_registry/.test-root]",
   ].join("\n");
 }
 
@@ -1536,9 +1546,12 @@ async function latestForeshadowingSettlementOperatorReviewChainIndexPayload() {
   };
 }
 
-async function handleRequest(request, response) {
+async function handleRequest(request, response, runtimeOptions = {}) {
   const rawPathname = (request.url ?? "/").split(/[?#]/u)[0];
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const entityRegistryOptions = runtimeOptions.entityRegistryRoot
+    ? { registryRoot: runtimeOptions.entityRegistryRoot }
+    : {};
 
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, 200, {
@@ -1885,7 +1898,7 @@ async function handleRequest(request, response) {
   if (request.method === "GET" && url.pathname === "/api/entity-registry") {
     try {
       const { registry, buildReport, conflictReport, provenance } =
-        await getStructuredEntityRegistry();
+        await getStructuredEntityRegistry(entityRegistryOptions);
       sendJson(response, 200, {
         ok: true,
         registry: {
@@ -1914,7 +1927,7 @@ async function handleRequest(request, response) {
           .map((key) => [key, url.searchParams.get(key)])
           .filter(([, value]) => value !== null && value !== ""),
       );
-      sendJson(response, 200, { ok: true, ...await searchStructuredEntities(input) });
+      sendJson(response, 200, { ok: true, ...await searchStructuredEntities(input, entityRegistryOptions) });
     } catch (error) {
       sendError(response, error.statusCode ?? 400, error);
     }
@@ -1923,7 +1936,7 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && url.pathname === "/api/entity-registry/conflicts") {
     try {
-      const { conflictReport, provenance } = await getStructuredEntityRegistry();
+      const { conflictReport, provenance } = await getStructuredEntityRegistry(entityRegistryOptions);
       sendJson(response, 200, { ok: true, conflict_report: conflictReport, provenance });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);
@@ -1933,7 +1946,7 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && url.pathname === "/api/entity-registry/provenance") {
     try {
-      const { provenance, buildReport } = await getStructuredEntityRegistry();
+      const { provenance, buildReport } = await getStructuredEntityRegistry(entityRegistryOptions);
       sendJson(response, 200, { ok: true, provenance, build_report: buildReport });
     } catch (error) {
       sendError(response, error.statusCode ?? 500, error);
@@ -1946,7 +1959,7 @@ async function handleRequest(request, response) {
       assertSameOrigin(request, "Cross-origin registry rebuilds are not allowed.");
       const input = await parseBody(request);
       rejectUnknownFields(input, []);
-      const built = await rebuildStructuredEntityRegistryPreview();
+      const built = await rebuildStructuredEntityRegistryPreview(entityRegistryOptions);
       sendJson(response, 201, {
         ok: true,
         build_report: built.buildReport,
@@ -1978,6 +1991,7 @@ async function handleRequest(request, response) {
       ]);
       const target = await getStructuredEntity(
         requireString(input.target_entity_id, "target_entity_id", 200),
+        entityRegistryOptions,
       );
       const entityType = requireString(input.entity_type, "entity_type", 50);
       const entityTypeMap = new Map([
@@ -2035,7 +2049,7 @@ async function handleRequest(request, response) {
   if (request.method === "GET" && entityRegistryDetailMatch) {
     try {
       const entityId = decodeApiId(entityRegistryDetailMatch[1], "entity_id");
-      sendJson(response, 200, { ok: true, ...await getStructuredEntity(entityId) });
+      sendJson(response, 200, { ok: true, ...await getStructuredEntity(entityId, entityRegistryOptions) });
     } catch (error) {
       sendError(response, error.statusCode ?? 400, error);
     }
@@ -3134,7 +3148,9 @@ async function main() {
   await ensureCleanupDirectories();
 
   const server = http.createServer((request, response) => {
-    handleRequest(request, response).catch((error) => {
+    handleRequest(request, response, {
+      entityRegistryRoot: options.entityRegistryRoot,
+    }).catch((error) => {
       if (error.code === "ENOENT") {
         sendError(response, 404, new Error("Not found."));
         return;

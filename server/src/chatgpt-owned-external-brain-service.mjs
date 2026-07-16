@@ -464,7 +464,7 @@ export function buildFinalPolisherEditorialContract(
     } : {}),
     text_change_required: false,
     release_recommendation: "release_as_is",
-    release_condition: "Release unchanged only after whole-draft semantic review finds no material issue.",
+    release_condition: "Release unchanged only after ChatGPT completes the whole-draft review and finds no material issue.",
     prose_ownership: {
       final_prose_generator: "ChatGPT",
       writer_workbench_role: "post_generation_editorial_capability_provider",

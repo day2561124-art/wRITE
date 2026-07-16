@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +15,14 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(projectRoot, "server", "src", "ui-server.mjs");
+const productionRegistryPaths = Object.freeze([
+  projectPaths.entityRegistryConflictReport,
+  projectPaths.entityRegistryIndex,
+  projectPaths.entityRegistryData,
+  projectPaths.entityRegistryBuildReport,
+  projectPaths.entityRegistryProvenance,
+  projectPaths.entityRegistrySchema,
+]);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -22,6 +30,13 @@ function assert(condition, message) {
 
 async function hashFile(filePath) {
   return createHash("sha256").update(await readFile(filePath)).digest("hex");
+}
+
+async function hashFiles(filePaths) {
+  return Object.fromEntries(await Promise.all(filePaths.map(async (filePath) => [
+    filePath,
+    await hashFile(filePath),
+  ])));
 }
 
 async function hashDirectory(directory) {
@@ -96,10 +111,15 @@ function syntheticEntity(overrides) {
 }
 
 async function main() {
+  const registryTestRoot = path.join(
+    projectPaths.entityRegistry,
+    `.phase21-test-${process.pid}-${randomUUID()}`,
+  );
   const beforeHashes = {
     activeEngine: await hashFile(projectPaths.activeEngine),
     canonDb: await hashDirectory(projectPaths.canonDb),
     compressedRules: await hashFile(projectPaths.compressedRules),
+    entityRegistry: await hashFiles(productionRegistryPaths),
   };
   const approvalLogBefore = await optionalBuffer(projectPaths.approvalLog);
   let proposalPath = "";
@@ -187,6 +207,8 @@ async function main() {
       "127.0.0.1",
       "--port",
       String(port),
+      "--entity-registry-root",
+      registryTestRoot,
     ], {
       cwd: projectRoot,
       stdio: ["ignore", "ignore", "pipe"],
@@ -299,13 +321,24 @@ async function main() {
       activeEngine: await hashFile(projectPaths.activeEngine),
       canonDb: await hashDirectory(projectPaths.canonDb),
       compressedRules: await hashFile(projectPaths.compressedRules),
+      entityRegistry: await hashFiles(productionRegistryPaths),
     };
     assert(afterHashes.activeEngine === beforeHashes.activeEngine, "active_engine was modified");
     assert(afterHashes.canonDb === beforeHashes.canonDb, "Canon DB was modified");
     assert(afterHashes.compressedRules === beforeHashes.compressedRules, "compressed_rules was modified");
+    assert(
+      JSON.stringify(afterHashes.entityRegistry) === JSON.stringify(beforeHashes.entityRegistry),
+      "production Entity Registry was modified",
+    );
     console.log("Phase 21 entity registry contract tests passed.");
   } finally {
     if (child) terminateProcessTree(child);
+    await rm(registryTestRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
     if (proposalPath) await rm(proposalPath, { force: true });
     if (approvalPath) await rm(approvalPath, { recursive: true, force: true });
     if (approvalLogBefore.exists) {

@@ -130,17 +130,29 @@ async function withTimeout(
   label,
   timeoutMs = 20_000,
 ) {
-  return await Promise.race([
-    promise,
-    delay(timeoutMs).then(() => {
-      throw new Error(
-        label +
-          " timed out after " +
-          timeoutMs +
-          "ms",
-      );
-    }),
-  ]);
+  let timeoutHandle;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(
+            new Error(
+              label +
+                " timed out after " +
+                timeoutMs +
+                "ms",
+            ),
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 async function stopChild(child) {
@@ -155,12 +167,27 @@ async function stopChild(child) {
 
   child.kill("SIGTERM");
 
-  await Promise.race([
-    exited,
-    delay(5_000),
-  ]);
+  let timeoutHandle;
+  let exitedGracefully;
+
+  try {
+    exitedGracefully = await Promise.race([
+      exited.then(() => true),
+      new Promise((resolve) => {
+        timeoutHandle = setTimeout(
+          () => resolve(false),
+          5_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 
   if (
+    !exitedGracefully &&
     child.exitCode === null &&
     child.signalCode === null
   ) {
