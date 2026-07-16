@@ -66,6 +66,7 @@ const steps = [
   ["Phase47L MCP parent ephemeral raw-story seal live acceptance closure", ["tests/phase47/phase47l-mcp-parent-ephemeral-raw-story-seal-live-acceptance-closure.test.mjs"]],
   ["Phase48A primary external brain character Canon grounding", ["tests/phase48/phase48a-character-canon-grounding-primary-route.test.mjs"]],
   ["Phase48B generated cast grounding and original entity freedom", ["tests/phase48/phase48b-generated-cast-grounding-original-entity-freedom.test.mjs"]],
+  ["Phase48C existing Canon world entity grounding", ["tests/phase48/phase48c-existing-canon-world-entity-grounding.test.mjs"]],
 
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
   ["Backup export production residue regression", ["tests/backup/backup-export-production-residue-regression.test.mjs"]],

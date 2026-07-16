@@ -9,6 +9,10 @@ import {
   buildCharacterCanonGrounding,
   serializeCharacterCanonGroundingFixedGuard,
 } from "./character-canon-grounding-service.mjs";
+import {
+  buildWorldEntityCanonGrounding,
+  serializeWorldEntityCanonGroundingFixedGuard,
+} from "./world-entity-canon-grounding-service.mjs";
 import { createAgentRun, finalizeAgentRun } from "./agent-run-service.mjs";
 import {
   run_scene_planner,
@@ -516,6 +520,14 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     retrievalContext: input.retrievalContext,
     currentLongline: byLabel.active_longline.content,
   });
+  const worldEntityCanonGrounding = buildWorldEntityCanonGrounding({
+    activeEngineContent: groundingActiveEngine.content,
+    sourceFile: groundingActiveEngine.path,
+    taskPrompt: input.taskPrompt,
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
+    currentLongline: byLabel.active_longline.content,
+  });
   const characterVoiceRegistry = characterVoiceRegistryMetadata(
     byLabel.character_voice_registry,
   );
@@ -629,6 +641,13 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     character_canon_grounding_count: characterCanonGrounding.matched_character_count,
     character_canon_grounding_source_authority: characterCanonGrounding.source_authority,
     character_canon_grounding_source_file: characterCanonGrounding.source_file,
+    world_entity_canon_grounding_loaded: worldEntityCanonGrounding.loaded,
+    world_entity_canon_grounding_count:
+      worldEntityCanonGrounding.matched_world_entity_count,
+    world_entity_canon_grounding_source_authority:
+      worldEntityCanonGrounding.source_authority,
+    world_entity_canon_grounding_source_file:
+      worldEntityCanonGrounding.source_file,
     visual_uploaded_references_loaded: visualUploadedReferences.loaded === true,
     visual_uploaded_references_path: visualUploadedReferences.visual_index_path ?? byLabel.visual_index.path,
     visual_uploaded_references_hash_sha256: visualUploadedReferences.visual_index_hash_sha256 ?? byLabel.visual_index.hash,
@@ -659,6 +678,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       character_voice_registry_content:
         allocated.content.character_voice_registry_content,
       character_canon_grounding: characterCanonGrounding,
+      world_entity_canon_grounding: worldEntityCanonGrounding,
       visual_uploaded_reference_context:
         allocated.content.visual_uploaded_reference_context,
       retrieval_context: retrievalContext,
@@ -672,9 +692,14 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     truncated_sections: allocated.truncated_sections,
     warnings,
   };
-  bundle.fixed_guard_section = serializeCharacterCanonGroundingFixedGuard(
-    characterCanonGrounding,
-  );
+  bundle.fixed_guard_section = [
+    serializeCharacterCanonGroundingFixedGuard(
+      characterCanonGrounding,
+    ),
+    serializeWorldEntityCanonGroundingFixedGuard(
+      worldEntityCanonGrounding,
+    ),
+  ].filter(Boolean).join("\n\n");
   // Attach deterministic writing card director context (local only)
   if (input.includeWritingCardDirector) {
     try {
@@ -771,6 +796,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
               retrieval_context: retrievalContext,
               character_voice_registry: characterVoiceRegistry,
               character_canon_grounding: characterCanonGrounding,
+              world_entity_canon_grounding: worldEntityCanonGrounding,
             }, { run_id: runId, task_type: "draft_generation", adapter, ...agentRunOptions });
           } catch (err) {
             // record but do not block bundle creation

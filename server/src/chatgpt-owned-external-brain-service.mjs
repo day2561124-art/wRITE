@@ -26,6 +26,9 @@ import {
   getRuntimeProcessInstanceId,
 } from "./raw-story-handoff-seal-service.mjs";
 import { expandGeneratedCastCanonGrounding } from "./generated-cast-canon-grounding-service.mjs";
+import {
+  expandGeneratedWorldEntityCanonGrounding,
+} from "./generated-world-entity-canon-grounding-service.mjs";
 import { resolveProjectPath } from "./project-paths.mjs";
 import {
   buildRawStoryMismatchForensics,
@@ -233,6 +236,57 @@ function compactAmbiguousCanonCandidates(packet = {}) {
   }));
 }
 
+function compactWorldEntityHardFacts(packet = {}) {
+  const entities = Array.isArray(packet?.entities)
+    ? packet.entities
+    : [];
+
+  return entities.map((entity) => ({
+    canonical_name: entity.canonical_name,
+    entity_type: entity.entity_type ?? "world_entity",
+    source_authority:
+      entity.source_authority
+      ?? packet.source_authority
+      ?? null,
+    source_file:
+      entity.source_file
+      ?? packet.source_file
+      ?? null,
+    facts: compactFactText(entity.canon_facts, 720),
+    grounding_classification:
+      entity.grounding_classification ?? null,
+  }));
+}
+
+function compactAmbiguousWorldEntityCandidates(packet = {}) {
+  const candidates = Array.isArray(
+    packet?.ambiguous_existing_canon_world_entity_candidates,
+  )
+    ? packet.ambiguous_existing_canon_world_entity_candidates
+    : [];
+
+  return candidates.map((candidate) => ({
+    canonical_name: candidate.canonical_name,
+    entity_type: candidate.entity_type ?? "world_entity",
+    source_authority:
+      candidate.source_authority
+      ?? packet.source_authority
+      ?? null,
+    facts: compactFactText(candidate.canon_facts, 520),
+    mention: {
+      passage: compactText(
+        candidate.mention_evidence?.passage,
+        160,
+      ),
+      reason: candidate.mention_evidence?.reason ?? null,
+    },
+    identity_not_confirmed:
+      candidate.identity_not_confirmed === true,
+    identity_resolution_required:
+      candidate.identity_resolution_required === true,
+  }));
+}
+
 const finalPolisherOriginalEntityFreedomInvariant = (
   "allow_new|absence_not_error_no_block_no_delete|confident_only|unresolved|no_persist"
 );
@@ -271,6 +325,7 @@ function blockedDirectorResponse({ runId, contextBundleId, run, continuity, reas
 export function buildFinalPolisherEditorialContract(
   rawStoryText,
   characterCanonGrounding = {},
+  worldEntityCanonGrounding = {},
 ) {
   const story = requiredText(rawStoryText, "raw_story_text");
   const characterHardFacts = compactCharacterHardFacts(characterCanonGrounding);
@@ -293,6 +348,26 @@ export function buildFinalPolisherEditorialContract(
   const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom
     ? finalPolisherOriginalEntityFreedomInvariant
     : null;
+
+  const worldEntityHardFacts =
+    compactWorldEntityHardFacts(worldEntityCanonGrounding);
+  const generatedWorldEntityCount =
+    worldEntityCanonGrounding
+      ?.generated_existing_canon_world_entity_count ?? 0;
+  const ambiguousWorldEntityMentions =
+    worldEntityCanonGrounding?.ambiguous_mentions ?? [];
+  const originalOrUnresolvedWorldEntities =
+    worldEntityCanonGrounding
+      ?.original_or_unresolved_world_entities ?? [];
+  const ambiguousWorldEntityCandidates =
+    compactAmbiguousWorldEntityCandidates(
+      worldEntityCanonGrounding,
+    );
+  const worldEntityGroundingRelevant =
+    worldEntityHardFacts.length > 0
+    || ambiguousWorldEntityMentions.length > 0
+    || originalOrUnresolvedWorldEntities.length > 0
+    || ambiguousWorldEntityCandidates.length > 0;
   
   const evidenceBinding = (requirement) => [{
     source: "raw_story_text",
@@ -309,6 +384,11 @@ export function buildFinalPolisherEditorialContract(
     binding: "exact_passage_candidate_fact_and_semantic_identity_decision_required",
     requirement,
   }];
+  const worldEntityEvidenceBinding = (requirement) => [{
+    source: "raw_story_text+expanded_world_entity_canon_grounding",
+    binding: "exact_passage_world_entity_fact_and_provenance_required",
+    requirement,
+  }];
   return {
     result_type: "final_polisher_report",
     editorial_mode: "subtractive_whole_draft_review",
@@ -320,6 +400,13 @@ export function buildFinalPolisherEditorialContract(
       character_canon_grounding_count: characterHardFacts.length,
       character_hard_facts: characterHardFacts,
     } : {}),
+    ...(worldEntityHardFacts.length ? {
+      world_entity_canon_grounding_loaded:
+        worldEntityCanonGrounding?.loaded === true,
+      world_entity_canon_grounding_count:
+        worldEntityHardFacts.length,
+      world_entity_hard_facts: worldEntityHardFacts,
+    } : {}),
     ...(characterCanonGrounding?.expansion_metadata && entityGroundingRelevant ? {
       expanded_character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
       pre_generation_character_count:
@@ -330,6 +417,38 @@ export function buildFinalPolisherEditorialContract(
       ambiguous_canon_mentions: ambiguousMentions,
       original_or_unresolved_mentions: originalOrUnresolvedMentions,
       generated_cast_expansion: characterCanonGrounding.expansion_metadata,
+    } : {}),
+    ...(worldEntityCanonGrounding?.expansion_metadata
+      && worldEntityGroundingRelevant ? {
+      expanded_world_entity_canon_grounding_loaded:
+        worldEntityCanonGrounding.loaded === true,
+      pre_generation_world_entity_count:
+        worldEntityCanonGrounding
+          .pre_generation_world_entity_count ?? 0,
+      generated_existing_canon_world_entity_count:
+        generatedWorldEntityCount,
+      generated_existing_canon_world_entities:
+        worldEntityCanonGrounding
+          .generated_existing_canon_world_entities ?? [],
+      ambiguous_canon_world_entity_mentions:
+        ambiguousWorldEntityMentions,
+      original_or_unresolved_world_entities:
+        originalOrUnresolvedWorldEntities,
+      generated_world_entity_expansion:
+        worldEntityCanonGrounding.expansion_metadata,
+    } : {}),
+    ...(ambiguousWorldEntityCandidates.length ? {
+      ambiguous_existing_canon_world_entity_candidates:
+        ambiguousWorldEntityCandidates,
+      ambiguous_canon_world_entity_candidate_resolution: {
+        semantic_resolution_required: true,
+        candidate_facts_are_binding_before_identity_confirmation:
+          false,
+        binding_rule:
+          "Candidate world-entity facts are non-binding identity-resolution evidence until ChatGPT confirms the exact existing Canon entity.",
+        original_entity_protection:
+          "A new or unresolved world entity must never inherit candidate Canon facts merely because its name is similar.",
+      },
     } : {}),
     ...(ambiguousExistingCanonCandidates.length ? {
       ambiguous_existing_canon_candidates: ambiguousExistingCanonCandidates,
@@ -475,6 +594,41 @@ export function buildFinalPolisherEditorialContract(
           revision_action: "Minimally restore the grounded appearance without decorative addition or beautification.",
         },
       ] : []),
+      ...(worldEntityHardFacts.length ? [{
+        code: "canon_world_entity_fact_conflict",
+        severity: "high",
+        evidence: worldEntityEvidenceBinding(
+          "Bind the exact world entity, passage, grounded type or role fact, and material conflict.",
+        ),
+        diagnosis:
+          "Check whether a confidently grounded existing Canon school, organization, agency, city, faction, company, or facility has been assigned a conflicting type, role, function, affiliation, location, or authority.",
+        revision_action:
+          "Minimally restore the grounded existing world-entity fact without deleting lawful new entities or expanding unknown Canon.",
+      }] : []),
+      ...(ambiguousWorldEntityCandidates.length ? [{
+        code:
+          "ambiguous_existing_world_entity_candidate_resolution",
+        severity: "high",
+        evidence: worldEntityEvidenceBinding(
+          "Bind the passage, candidate existing Canon world entity, candidate facts, and semantic identity decision.",
+        ),
+        diagnosis:
+          "Resolve exact world-entity identity before applying candidate type, role, function, affiliation, location, or authority facts.",
+        revision_action:
+          "Do not force-bind; apply candidate facts only after identity confirmation, otherwise preserve the entity as unresolved or original.",
+      }] : []),
+      ...(generatedWorldEntityCount ? [{
+        code:
+          "generated_existing_world_entity_canon_conflict",
+        severity: "high",
+        evidence: worldEntityEvidenceBinding(
+          "Bind the generated existing Canon world entity, exact passage, supplemental fact, and conflict.",
+        ),
+        diagnosis:
+          "Review an existing Canon world entity introduced after pre-generation grounding against its supplemental hard facts.",
+        revision_action:
+          "Minimally restore the grounded fact while preserving the entity's lawful entrance and local causality.",
+      }] : []),
       ...(ambiguousMentions.length ? [{
         code: "existing_canon_entity_name_collision",
         severity: "high",
@@ -510,6 +664,12 @@ export function buildFinalPolisherEditorialContract(
       ...(ambiguousExistingCanonCandidates.length ? [
         "Resolve ambiguous existing-Canon candidates semantically before applying candidate facts; candidate evidence is non-binding until identity is confirmed.",
       ] : []),
+      ...(worldEntityHardFacts.length ? [
+        "Resolve evidence-bound existing Canon world-entity type, role, function, affiliation, location, and authority conflicts before release.",
+      ] : []),
+      ...(ambiguousWorldEntityCandidates.length ? [
+        "Resolve ambiguous existing world-entity candidates semantically before applying candidate facts.",
+      ] : []),
       "Address high-severity exact evidence first; otherwise prefer subtractive editing.",
       "Preserve living irregularity; never apply findings mechanically or complete a theme.",
     ],
@@ -522,6 +682,12 @@ export function buildFinalPolisherEditorialContract(
       ] : []),
       ...(ambiguousExistingCanonCandidates.length ? [
         "Use ambiguous Canon candidate facts only to resolve semantic identity. They remain non-binding until the exact passage is confirmed to refer to that existing Canon entity; never transfer candidate facts to an unresolved or original entity.",
+      ] : []),
+      ...(worldEntityHardFacts.length ? [
+        "Use world-entity hard facts only for confidently matched existing Canon entities; protect their established type and role without restricting lawful new world creation.",
+      ] : []),
+      ...(ambiguousWorldEntityCandidates.length ? [
+        "Keep ambiguous world-entity candidate facts non-binding until semantic identity is confirmed; never transfer them to a new or unresolved entity.",
       ] : []),
       "Use natural human-written Traditional Chinese; remove AI narrative grammar only when sequence or cluster evidence exists, preserve unknowns, and prefer subtraction over beautification or theme completion.",
       "Do not mechanically apply every finding or add generic polish.",
@@ -544,6 +710,21 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       ?? capabilityInput.character_canon_grounding
       ?? preGenerationCharacterCanonGrounding;
     const characterHardFacts = compactCharacterHardFacts(characterCanonGrounding);
+    const preGenerationWorldEntityCanonGrounding = capabilityInput
+      .pre_generation_world_entity_canon_grounding
+      ?? writingContext.content?.world_entity_canon_grounding
+      ?? {};
+    const worldEntityCanonGrounding = capabilityInput
+      .expanded_world_entity_canon_grounding
+      ?? capabilityInput.world_entity_canon_grounding
+      ?? preGenerationWorldEntityCanonGrounding;
+    const worldEntityHardFacts =
+      compactWorldEntityHardFacts(worldEntityCanonGrounding);
+    const worldEntityCognitionRelevant =
+      worldEntityHardFacts.length > 0
+      || (worldEntityCanonGrounding
+        ?.mention_resolution
+        ?.ambiguous_mention_count ?? 0) > 0;
     const base = {
       capability_name: capabilityName,
       module_name: moduleName,
@@ -555,7 +736,11 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       return {
         ...base,
         generation_boundary: "post_generation",
-        ...buildFinalPolisherEditorialContract(rawStoryText, characterCanonGrounding),
+        ...buildFinalPolisherEditorialContract(
+          rawStoryText,
+          characterCanonGrounding,
+          worldEntityCanonGrounding,
+        ),
       };
     }
     const semanticOutputs = {
@@ -600,7 +785,10 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           "Do not invent unsupported animal ears, tails, horns, wings, scales, or permanent body traits as emotional or visual shorthand.",
           "Character Voice Registry guidance cannot override Canon identity, appearance, relationship position, or explicit body traits.",
           "Grounded hard facts apply only to confidently matched existing Canon characters; possible original characters remain creatively open.",
-          "Never borrow the nearest Canon character's gender, appearance, body traits, relationships, or identity for an unmatched or similarly named original character.",
+           "Never borrow the nearest Canon character's gender, appearance, body traits, relationships, or identity for an unmatched or similarly named original character.",
+          ...(worldEntityCognitionRelevant ? [
+            "Confidently grounded existing Canon world entities retain their established type, role, function, affiliation, location, and authority; Canon absence never blocks lawful new world entities.",
+          ] : []),
         ],
         character_grounded_irregularity: {
           principle: "A character may depart from the most efficient, mature, or elegant dramatic response only in a way grounded in that person and moment.",
@@ -612,6 +800,13 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,
         original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
+        ...(worldEntityCognitionRelevant ? {
+          world_entity_canon_grounding_loaded:
+            worldEntityCanonGrounding.loaded === true,
+          world_entity_canon_grounding_count:
+            worldEntityHardFacts.length,
+          world_entity_hard_facts: worldEntityHardFacts,
+        } : {}),
       },
       run_neural_critic: {
         result_type: "neural_critique",
@@ -628,6 +823,11 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           { code: "canon_entity_name_collision", question: "Has a name occurrence been force-bound to a Canon character although its phrase indicates a school, organization, location, facility, or other non-character entity?" },
           { code: "original_entity_freedom_violation", question: "Has cognition treated a Canon-unmatched original character or world entity as prohibited merely because no Canon record exists?" },
           { code: "generated_existing_character_ungrounded", question: "Does the verified raw story introduce a confidently identifiable existing Canon character absent from pre-generation grounding and therefore needing supplemental hard facts before final review?" },
+          ...(worldEntityCognitionRelevant ? [
+            { code: "canon_world_entity_fact_conflict", question: "Has a confidently grounded existing Canon school, organization, agency, city, faction, company, or facility been assigned a conflicting type, role, function, affiliation, location, or authority?" },
+            { code: "generated_existing_world_entity_ungrounded", question: "Does the verified raw story introduce a confidently identifiable existing Canon world entity absent from pre-generation grounding and needing supplemental facts before final review?" },
+            { code: "original_world_entity_freedom_violation", question: "Has cognition treated a Canon-unmatched original city, school, organization, agency, company, faction, or facility as prohibited merely because no Canon record exists?" },
+          ] : []),
         ],
         standing_constraints: [
           "Avoid engineering, provider, workflow, and handoff language in story prose.",
@@ -638,6 +838,13 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,
         original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
+        ...(worldEntityCognitionRelevant ? {
+          world_entity_canon_grounding_loaded:
+            worldEntityCanonGrounding.loaded === true,
+          world_entity_canon_grounding_count:
+            worldEntityHardFacts.length,
+          world_entity_hard_facts: worldEntityHardFacts,
+        } : {}),
       },
       run_style_drift_detector: {
         result_type: "style_drift_report",
@@ -695,6 +902,9 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           higher_authority: [
             "Canon hard facts and Canon DB",
             "Character Canon Grounding derived directly from the full active_engine source",
+            ...(worldEntityCognitionRelevant ? [
+              "World Entity Canon Grounding derived directly from the full active_engine source",
+            ] : []),
             "active_engine P0 hard constraints",
             "established causal continuity",
             "established character knowledge and state",
@@ -758,6 +968,13 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,
+        ...(worldEntityCognitionRelevant ? {
+          world_entity_canon_grounding_loaded:
+            worldEntityCanonGrounding.loaded === true,
+          world_entity_canon_grounding_count:
+            worldEntityHardFacts.length,
+          world_entity_hard_facts: worldEntityHardFacts,
+        } : {}),
       },
     };
     return {
@@ -784,6 +1001,32 @@ async function buildVerifiedGeneratedCastGrounding({
     rawStorySha256,
     integrityValidated: true,
     existingCharacterCanonGrounding: preGenerationGrounding,
+    activeEngineContent,
+    sourceFile,
+  });
+}
+
+async function buildVerifiedGeneratedWorldEntityGrounding({
+  context,
+  rawStoryText,
+  rawStorySha256,
+}) {
+  const preGenerationGrounding =
+    context.bundle.content?.world_entity_canon_grounding ?? {};
+  const sourceFile = preGenerationGrounding.source_file
+    ?? context.bundle.sources?.active_engine?.path
+    ?? "data/canon_db/active_engine.md";
+  const activeEnginePath = resolveProjectPath(
+    sourceFile,
+    "generated world entity active_engine source",
+  );
+  const activeEngineContent = await readFile(activeEnginePath, "utf8");
+
+  return expandGeneratedWorldEntityCanonGrounding({
+    rawStoryText,
+    rawStorySha256,
+    integrityValidated: true,
+    existingWorldEntityCanonGrounding: preGenerationGrounding,
     activeEngineContent,
     sourceFile,
   });
@@ -1152,6 +1395,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   let techniqueSelection = null;
   let priorCognition = null;
   let expandedCharacterCanonGrounding = null;
+  let expandedWorldEntityCanonGrounding = null;
   if (isFinalPolisher) {
     try {
       expandedCharacterCanonGrounding = await buildVerifiedGeneratedCastGrounding({
@@ -1159,6 +1403,12 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
         rawStoryText,
         rawStorySha256: receivedRawStorySha256,
       });
+      expandedWorldEntityCanonGrounding =
+        await buildVerifiedGeneratedWorldEntityGrounding({
+          context,
+          rawStoryText,
+          rawStorySha256: receivedRawStorySha256,
+        });
     } catch (error) {
       if (sealedAcquisition) {
         await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
@@ -1216,6 +1466,15 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     character_canon_grounding:
       expandedCharacterCanonGrounding
       ?? context.bundle.content?.character_canon_grounding
+      ?? null,
+    pre_generation_world_entity_canon_grounding:
+      context.bundle.content?.world_entity_canon_grounding
+      ?? null,
+    expanded_world_entity_canon_grounding:
+      expandedWorldEntityCanonGrounding,
+    world_entity_canon_grounding:
+      expandedWorldEntityCanonGrounding
+      ?? context.bundle.content?.world_entity_canon_grounding
       ?? null,
     capability_input: input.capability_input ?? {},
   } : {
