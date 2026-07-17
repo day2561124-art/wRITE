@@ -879,7 +879,10 @@ export async function confirmApprovalItem(
       result = await retireExternalBrainSession(item.target_id, {
         retired_by: optionalText(approvedBy, 200) || "local_user",
         retirement_reason: item.reason || item.details?.recommendation_reason,
-      }, targetOptions(options));
+      }, {
+        ...targetOptions(options),
+        ...(options.now instanceof Date ? { now: options.now } : {}),
+      });
     } else if (item.action_type === "compressed_rule_update") {
       // Approval confirmed for compressed rule update — do not auto-apply here.
       // Execution is handled by a dedicated service to ensure safety and explicit application.
