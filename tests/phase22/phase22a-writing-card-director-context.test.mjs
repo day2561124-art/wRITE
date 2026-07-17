@@ -1,15 +1,39 @@
 import assert from "node:assert/strict";
-import { buildWritingCardDirectorContext } from "../../server/src/writing-card-director-service.mjs";
 
-async function main() {
-  const ctx = buildWritingCardDirectorContext({ taskPrompt: "tone: battle" , writingCardText: "戰鬥 場景 選拔"});
-  assert.equal(typeof ctx.heuristics, "object");
-  assert.ok(Array.isArray(ctx.archetype_engines) && ctx.archetype_engines.length === 0);
-  assert.equal(ctx.basis.writing_card_version, "v3.0");
-  console.log("Writing card director context test passed.");
+import {
+  buildWritingCardDirectorContext,
+} from "../../server/src/writing-card-director-service.mjs";
+
+const context = buildWritingCardDirectorContext({
+  taskPrompt: "tone: battle",
+  writingCardText: "battle scene",
+});
+
+for (const removedField of [
+  "fusion_mode",
+  "twelve_core_judgments",
+  "archetype_engines",
+  "scene_engine_rules",
+  "heuristics",
+  "input_summary",
+  "chapter_anchor_summary",
+  "chapter_turn",
+  "scene_function",
+  "character_pressure_map",
+  "sensory_anchors",
+  "subtext_targets",
+  "anti_patterns",
+  "ending_event_hook",
+  "revision_priority",
+]) {
+  assert.equal(
+    Object.hasOwn(context, removedField),
+    false,
+    `legacy technique field must be absent: ${removedField}`,
+  );
 }
 
-main().catch((err) => {
-  console.error(`Writing card director context test failed: ${err.message}`);
-  process.exitCode = 1;
-});
+assert.equal(context.context_kind, "writing_card_director_context");
+assert.equal(context.basis.writing_card_version, "v4.1-minimal");
+
+console.log("Writing card director context minimal surface test passed.");

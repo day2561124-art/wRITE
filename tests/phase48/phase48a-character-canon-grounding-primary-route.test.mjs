@@ -57,14 +57,6 @@ function joinedFacts(character, key) {
   return (character[key] ?? []).join("；");
 }
 
-function riskCodes(output) {
-  return new Set((output.risks ?? []).map((risk) => risk.code));
-}
-
-function findingCodes(output) {
-  return new Set((output.findings ?? []).map((finding) => finding.code));
-}
-
 const activeEngine = await readFile(projectPaths.activeEngine, "utf8");
 const protectedBefore = {
   active_engine: sha256(activeEngine),
@@ -222,27 +214,51 @@ try {
   assert.equal(simulated.get("初夢").pronouns.third_person, "他");
   assert.equal(simulated.get("晴禮").pronouns.second_person, "妳");
   assert.match(joinedFacts(simulated.get("初夢"), "appearance_facts"), /白髮.*紫色.*桃色.*挑染.*紫眼/u);
-  assert(simulator.behavior_constraints.some((rule) => /Canon identity facts are hard constraints/iu.test(rule)));
-  assert(simulator.behavior_constraints.some((rule) => /Voice Registry guidance cannot override Canon/iu.test(rule)));
+  assert.equal(
+    Object.hasOwn(simulator, "behavior_constraints"),
+    false,
+  );
 
   const critic = outputs.get("run_neural_critic");
-  for (const code of [
-    "character_gender_or_pronoun_conflict",
-    "unsupported_body_trait_invention",
-    "appearance_fact_conflict",
-  ]) assert(riskCodes(critic).has(code));
-  assert.equal(critic.character_canon_grounding_count, 3);
+  assert.equal(critic.evidence_only, true);
+  assert.deepEqual(critic.hard_risk_scope, [
+    "canon",
+    "causality",
+    "identity",
+    "character_state",
+    "timeline",
+    "explicit_user_requirement",
+  ]);
+  assert.equal(Object.hasOwn(critic, "risks"), false);
+  assert.equal(
+    critic.character_canon_grounding_count,
+    3,
+  );
 
   const director = outputs.get("run_writing_card_director");
-  assert(director.authority_precedence.higher_authority.some((item) => (
-    /Character Canon Grounding.*active_engine/iu.test(item)
-  )));
-  assert(director.authority_precedence.lower_authority.some((item) => (
-    /Character Voice Registry/iu.test(item)
-  )));
-  assert.equal(director.character_canon_grounding_count, 3);
+  assert.deepEqual(director.hard_authority, [
+    "Canon",
+    "causal continuity",
+    "character identity and state",
+    "timeline",
+    "explicit user requirements",
+  ]);
+  assert.match(
+    director.arbitration_rule,
+    /do not convert diagnostics into prose requirements/iu,
+  );
+  assert.equal(
+    Object.hasOwn(director, "authority_precedence"),
+    false,
+  );
+  assert.equal(
+    director.character_canon_grounding_count,
+    3,
+  );
   assert.deepEqual(
-    director.character_hard_facts.map((fact) => fact.canonical_name),
+    director.character_hard_facts.map(
+      (fact) => fact.canonical_name,
+    ),
     ["初日", "初夢", "晴禮"],
   );
 
@@ -258,28 +274,27 @@ try {
   );
   assert.equal(polished.ok, true);
   assert.equal(polished.prose_generator, "ChatGPT");
-  assert.equal(polished.capability_output.findings_review_mode, "requires_chatgpt_semantic_review");
-  assert.equal(polished.capability_output.character_canon_grounding_count, 3);
-  for (const code of [
-    "canon_character_identity_conflict",
-    "character_pronoun_consistency_conflict",
-    "unsupported_body_trait_invention",
-    "appearance_fact_conflict",
-  ]) {
-    const finding = polished.capability_output.findings.find((item) => item.code === code);
-    assert(findingCodes(polished.capability_output).has(code));
-    assert(finding.evidence.some((evidence) => (
-      evidence.source.includes("character_canon_grounding")
-    )));
-    assert.match(finding.evidence[0].binding, /exact_passage|precise_location/iu);
-    assert(finding.revision_action.length > 40);
-  }
-  assert.match(
-    polished.capability_output.findings.find((finding) => (
-      finding.code === "unsupported_body_trait_invention"
-    )).revision_action,
-    /rebuild any local action causality/iu,
+  assert.equal(
+    polished.capability_output.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
   );
+  assert.equal(
+    polished.capability_output
+      .character_canon_grounding_count,
+    3,
+  );
+  assert.equal(
+    Object.hasOwn(
+      polished.capability_output,
+      "findings",
+    ),
+    false,
+  );
+  assert.equal(
+    polished.capability_output.release_recommendation,
+    "release_as_is",
+  );
+
   assert.equal("polished_text" in polished.capability_output, false);
 
   assert.deepEqual(Object.fromEntries(await Promise.all(

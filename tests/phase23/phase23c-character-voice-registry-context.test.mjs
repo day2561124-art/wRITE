@@ -53,13 +53,12 @@ try {
     built.bundle.inputs.retrieval_context.character_voice_registry.authority,
     "below_canon_db",
   );
-  assert(
-    built.bundle.content.writing_card_director_context.input_summary
-      .generation_context_keys.includes("character_voice_registry"),
-  );
-  assert(
-    built.bundle.content.writing_card_director_context.input_summary
-      .retrieval_context_keys.includes("character_voice_registry"),
+  assert.equal(
+    Object.hasOwn(
+      built.bundle.content.writing_card_director_context,
+      "input_summary",
+    ),
+    false,
   );
 
   const missing = await buildGptWritingContext({

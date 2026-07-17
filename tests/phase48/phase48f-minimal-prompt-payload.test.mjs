@@ -137,12 +137,8 @@ const explicitDirector = buildMinimalWritingCardPromptContext({
 assert.deepEqual(explicitDirector, {
   context_kind: "writing_card_director_context",
   chapter_anchor_summary: {
-    required_core_characters: ["千夜"],
+    required_core_characters: ["\u5343\u591c"],
   },
-  chapter_turn: "撤離路線被切斷",
-  scene_function: "守住門口直到撤離完成",
-  sensory_anchors: ["雨聲"],
-  ending_event_hook: "門外傳來第二次敲擊",
 });
 
 console.log(

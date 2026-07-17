@@ -148,47 +148,48 @@ try {
 
   const report = polished.capability_output;
   assert.equal(report.result_type, "final_polisher_report");
-  assert.equal(report.editorial_mode, "subtractive_whole_draft_review");
+  assert.equal(
+    report.editorial_mode,
+    "evidence_triggered_minimal_review",
+  );
   assert.equal(report.raw_story_sha256, sha256(specimen));
-  assert.equal(report.editorial_review_required_for_success, true);
+  assert.equal(
+    Object.hasOwn(
+      report,
+      "editorial_review_required_for_success",
+    ),
+    false,
+  );
+  assert.equal(
+    report.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(Object.hasOwn(report, "findings"), false);
   assert.equal(report.text_change_required, false);
   assert.equal(report.release_recommendation, "release_as_is");
-  assert.match(report.release_condition, /only after ChatGPT completes the whole-draft review/iu);
-  assert.equal(report.prose_ownership.final_prose_generator, "ChatGPT");
-  assert.equal(report.prose_ownership.writer_workbench_generated_final_prose, false);
+  assert.equal(
+    report.prose_ownership.final_prose_generator,
+    "ChatGPT",
+  );
+  assert.equal(
+    report.prose_ownership
+      .writer_workbench_generated_final_prose,
+    false,
+  );
   assert.equal("polished_text" in report, false);
   assert.equal("revision_report" in report, false);
-  assert.equal(report.editorial_strategy.primary, "editorial_subtraction");
-  assert.match(report.editorial_strategy.principle, /prefer deletion, de-synchronization, compression, or silence over beautification/iu);
-  assert(report.editorial_strategy.prohibited_defaults.includes("metaphor_generation"));
-
-  const findings = new Map(report.findings.map((finding) => [finding.code, finding]));
-  for (const code of [
-    "pattern_saturation",
-    "symmetry_overcompleted",
-    "callback_saturation",
-    "echo_only_callback",
-    "author_hand_visible",
-    "strong_beat_dilution",
-  ]) {
-    const finding = findings.get(code);
-    assert(finding, `Missing editorial domain: ${code}`);
-    assert(["low", "medium", "high"].includes(finding.severity));
-    assert(Array.isArray(finding.evidence) && finding.evidence.length > 0);
-    assert.match(finding.evidence[0].binding, /exact_passage|precise_location/iu);
-    assert(finding.diagnosis.length > 40);
-    assert(finding.revision_action.length > 40);
-    assert(Array.isArray(finding.preserve) && finding.preserve.length > 0);
-  }
-  assert.match(findings.get("symmetry_overcompleted").revision_action, /delete, weaken, or de-synchronize/iu);
-  assert.match(findings.get("author_hand_visible").diagnosis, /rule-proof narration/iu);
-  assert.match(findings.get("strong_beat_dilution").revision_action, /add no explanatory narration/iu);
-  assert.match(report.protected_beats[0].selection_rule, /沒有。/u);
-  assert.match(report.final_revision_instruction, /ChatGPT remains the final prose generator/iu);
-  assert.match(report.final_revision_instruction, /Preserve canon, causal continuity, character agency, the chapter turn, and strong emotional beats/iu);
-  assert.match(report.final_revision_instruction, /Do not mechanically apply every finding/iu);
-  assert.match(report.final_revision_instruction, /output only the final revised story prose/iu);
-  assert.match(report.final_revision_instruction, /release the original text unchanged/iu);
+  assert.equal(
+    Object.hasOwn(report, "editorial_strategy"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(report, "protected_beats"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(report, "final_revision_instruction"),
+    false,
+  );
 
   const outputA = { chapter: 45, report: { status: "ready", codes: ["pattern_saturation"] } };
   const outputB = { chapter: 45, report: { status: "ready", codes: ["author_hand_visible"] } };

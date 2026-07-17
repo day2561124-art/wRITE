@@ -199,32 +199,8 @@ export function buildMinimalWritingCardPromptContext(value) {
       ?? "writing_card_director_context",
     chapter_anchor_summary:
       source.chapter_anchor_summary,
-    twelve_core_judgments:
-      source.twelve_core_judgments,
-    selected_archetype:
-      source.selected_archetype
-      ?? source.heuristics?.selected_archetype,
-    archetype_engines:
-      source.archetype_engines,
-    chapter_turn:
-      source.chapter_turn,
-    scene_function:
-      source.scene_function,
-    character_pressure_map:
-      source.character_pressure_map,
-    sensory_anchors:
-      source.sensory_anchors,
-    subtext_targets:
-      source.subtext_targets,
-    anti_patterns:
-      source.anti_patterns,
-    ending_event_hook:
-      source.ending_event_hook,
-    revision_priority:
-      source.revision_priority,
   });
 }
-
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
 }
@@ -404,26 +380,45 @@ export function buildFinalPolisherEditorialContract(
   worldEntityCanonGrounding = {},
 ) {
   const story = requiredText(rawStoryText, "raw_story_text");
-  const characterHardFacts = compactCharacterHardFacts(characterCanonGrounding);
-  const generatedCharacterCount = characterCanonGrounding
-    ?.generated_existing_canon_character_count ?? 0;
-  const ambiguousMentions = characterCanonGrounding?.ambiguous_mentions ?? [];
-  const originalOrUnresolvedMentions = characterCanonGrounding
-    ?.original_or_unresolved_mentions ?? [];
-  const ambiguousExistingCanonCandidates = compactAmbiguousCanonCandidates(
-    characterCanonGrounding,
-  );
-  const entityGroundingRelevant = characterHardFacts.length > 0
+  const characterHardFacts =
+    compactCharacterHardFacts(characterCanonGrounding);
+  const generatedCharacterCount =
+    characterCanonGrounding
+      ?.generated_existing_canon_character_count ?? 0;
+  const ambiguousMentions =
+    characterCanonGrounding?.ambiguous_mentions ?? [];
+  const originalOrUnresolvedMentions =
+    characterCanonGrounding
+      ?.original_or_unresolved_mentions ?? [];
+  const ambiguousExistingCanonCandidates =
+    compactAmbiguousCanonCandidates(characterCanonGrounding);
+  const entityGroundingRelevant =
+    characterHardFacts.length > 0
     || ambiguousMentions.length > 0
     || originalOrUnresolvedMentions.length > 0
     || ambiguousExistingCanonCandidates.length > 0;
-  
-  // ORIGINAL ENTITY FREEDOM INVARIANT: always present when the grounding contract exists.
-  // Final Polisher receives a compact invariant token; the full category contract remains
-  // in Character Canon Grounding and Writing Card Director cognition.
-  const originalEntityFreedom = characterCanonGrounding?.original_entity_freedom
-    ? finalPolisherOriginalEntityFreedomInvariant
-    : null;
+
+  const originalEntityFreedom =
+    (
+      (
+        Array.isArray(
+          characterCanonGrounding
+            ?.original_or_unresolved_mentions,
+        )
+        && characterCanonGrounding
+          .original_or_unresolved_mentions.length > 0
+      )
+      || (
+        Array.isArray(
+          worldEntityCanonGrounding
+            ?.original_or_unresolved_world_entities,
+        )
+        && worldEntityCanonGrounding
+          .original_or_unresolved_world_entities.length > 0
+      )
+    )
+      ? finalPolisherOriginalEntityFreedomInvariant
+      : null;
 
   const worldEntityHardFacts =
     compactWorldEntityHardFacts(worldEntityCanonGrounding);
@@ -444,55 +439,59 @@ export function buildFinalPolisherEditorialContract(
     || ambiguousWorldEntityMentions.length > 0
     || originalOrUnresolvedWorldEntities.length > 0
     || ambiguousWorldEntityCandidates.length > 0;
-  
-  const evidenceBinding = (requirement) => [{
-    source: "raw_story_text",
-    binding: "exact_passage_or_precise_location_required",
-    requirement,
-  }];
-  const characterEvidenceBinding = (requirement) => [{
-    source: "raw_story_text+expanded_character_canon_grounding",
-    binding: "exact_passage_character_grounded_fact_and_provenance_required",
-    requirement,
-  }];
-  const ambiguousCandidateEvidenceBinding = (requirement) => [{
-    source: "raw_story_text+ambiguous_existing_canon_candidates",
-    binding: "exact_passage_candidate_fact_and_semantic_identity_decision_required",
-    requirement,
-  }];
-  const worldEntityEvidenceBinding = (requirement) => [{
-    source: "raw_story_text+expanded_world_entity_canon_grounding",
-    binding: "exact_passage_world_entity_fact_and_provenance_required",
-    requirement,
-  }];
-  return {
+
+  return compactPromptPayloadValue({
     result_type: "final_polisher_report",
-    editorial_mode: "subtractive_whole_draft_review",
+    editorial_mode: "evidence_triggered_minimal_review",
     raw_story_sha256: sha256(story),
-    editorial_review_required_for_success: true,
-    findings_review_mode: "requires_chatgpt_semantic_review",
+    findings_review_mode:
+      "hard_conflicts_and_exact_evidence_only",
+    findings: [],
+    text_change_required: false,
+    release_recommendation: "release_as_is",
+    review_boundary:
+      "Revise only a material hard conflict supported by exact evidence; otherwise return the original text unchanged.",
+    hard_checks: [
+      "canon",
+      "causal_continuity",
+      "character_identity_and_state",
+      "timeline",
+      "explicit_user_requirement",
+    ],
     ...(characterHardFacts.length ? {
-      character_canon_grounding_loaded: characterCanonGrounding?.loaded === true,
-      character_canon_grounding_count: characterHardFacts.length,
-      character_hard_facts: characterHardFacts,
+      character_canon_grounding_loaded:
+        characterCanonGrounding?.loaded === true,
+      character_canon_grounding_count:
+        characterHardFacts.length,
+      character_hard_facts:
+        characterHardFacts,
     } : {}),
     ...(worldEntityHardFacts.length ? {
       world_entity_canon_grounding_loaded:
         worldEntityCanonGrounding?.loaded === true,
       world_entity_canon_grounding_count:
         worldEntityHardFacts.length,
-      world_entity_hard_facts: worldEntityHardFacts,
+      world_entity_hard_facts:
+        worldEntityHardFacts,
     } : {}),
-    ...(characterCanonGrounding?.expansion_metadata && entityGroundingRelevant ? {
-      expanded_character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
+    ...(characterCanonGrounding?.expansion_metadata
+      && entityGroundingRelevant ? {
+      expanded_character_canon_grounding_loaded:
+        characterCanonGrounding.loaded === true,
       pre_generation_character_count:
-        characterCanonGrounding.pre_generation_character_count ?? 0,
-      generated_existing_canon_character_count: generatedCharacterCount,
+        characterCanonGrounding
+          .pre_generation_character_count ?? 0,
+      generated_existing_canon_character_count:
+        generatedCharacterCount,
       generated_existing_canon_characters:
-        characterCanonGrounding.generated_existing_canon_characters ?? [],
-      ambiguous_canon_mentions: ambiguousMentions,
-      original_or_unresolved_mentions: originalOrUnresolvedMentions,
-      generated_cast_expansion: characterCanonGrounding.expansion_metadata,
+        characterCanonGrounding
+          .generated_existing_canon_characters ?? [],
+      ambiguous_canon_mentions:
+        ambiguousMentions,
+      original_or_unresolved_mentions:
+        originalOrUnresolvedMentions,
+      generated_cast_expansion:
+        characterCanonGrounding.expansion_metadata,
     } : {}),
     ...(worldEntityCanonGrounding?.expansion_metadata
       && worldEntityGroundingRelevant ? {
@@ -513,266 +512,26 @@ export function buildFinalPolisherEditorialContract(
       generated_world_entity_expansion:
         worldEntityCanonGrounding.expansion_metadata,
     } : {}),
+    ...(ambiguousExistingCanonCandidates.length ? {
+      ambiguous_existing_canon_candidates:
+        ambiguousExistingCanonCandidates,
+    } : {}),
     ...(ambiguousWorldEntityCandidates.length ? {
       ambiguous_existing_canon_world_entity_candidates:
         ambiguousWorldEntityCandidates,
-      ambiguous_canon_world_entity_candidate_resolution: {
-        semantic_resolution_required: true,
-        candidate_facts_are_binding_before_identity_confirmation:
-          false,
-        binding_rule:
-          "Candidate world-entity facts are non-binding identity-resolution evidence until ChatGPT confirms the exact existing Canon entity.",
-        original_entity_protection:
-          "A new or unresolved world entity must never inherit candidate Canon facts merely because its name is similar.",
-      },
-    } : {}),
-    ...(ambiguousExistingCanonCandidates.length ? {
-      ambiguous_existing_canon_candidates: ambiguousExistingCanonCandidates,
-      ambiguous_canon_candidate_resolution: {
-        semantic_resolution_required: true,
-        candidate_facts_are_binding_before_identity_confirmation: false,
-        binding_rule: "Candidate Canon facts are identity-resolution evidence only. They do not become binding hard facts until ChatGPT semantically confirms that the exact passage refers to the existing Canon entity.",
-        original_entity_protection: "An unresolved or original entity must never inherit candidate Canon facts merely because its name is similar.",
-      },
     } : {}),
     ...(originalEntityFreedom ? {
-      original_entity_freedom: originalEntityFreedom,
+      original_entity_freedom:
+        originalEntityFreedom,
     } : {}),
-    text_change_required: false,
-    release_recommendation: "release_as_is",
-    release_condition: "Release unchanged only after ChatGPT completes the whole-draft review and finds no material issue.",
     prose_ownership: {
       final_prose_generator: "ChatGPT",
-      writer_workbench_role: "post_generation_editorial_capability_provider",
+      writer_workbench_role:
+        "post_generation_editorial_capability_provider",
       writer_workbench_generated_final_prose: false,
     },
-    editorial_strategy: {
-      primary: "editorial_subtraction",
-      principle: "When the draft is already strong, prefer deletion, de-synchronization, compression, or silence over beautification.",
-      prohibited_defaults: ["prose_beautification", "adjective_augmentation", "sensory_detail_injection", "metaphor_generation"],
-    },
-    findings: [
-      {
-        code: "pattern_saturation",
-        severity: "medium",
-        evidence: evidenceBinding("Bind exact repeated occurrences and mark where their dramatic return diminishes."),
-        diagnosis: "Check whether synchronization, reversals, punchline rhythms, or nearby sentence shapes have become over-saturated.",
-        revision_action: "Retain the strongest occurrence; delete, compress, vary, or de-synchronize lower-yield repetition.",
-        preserve: ["causal_continuity", "character_agency", "strongest_pattern_payoff"],
-      },
-      {
-        code: "symmetry_overcompleted",
-        severity: "medium",
-        evidence: evidenceBinding("Bind exact mirrored beats and mark where the symmetry first becomes legible."),
-        diagnosis: "Check whether later proof adds emotion or merely exposes design after the symmetry is complete.",
-        revision_action: "Preserve the strongest mirror; delete, weaken, or de-synchronize weaker mirrors without damaging the core theme.",
-        preserve: ["core_theme", "relationship_turn", "highest_value_mirror"],
-      },
-      {
-        code: "callback_saturation",
-        severity: "medium",
-        evidence: evidenceBinding("Bind each callback to its source and state what new meaning the recurrence adds."),
-        diagnosis: "Classify semantic, relationship, comic, and structural callbacks; check local density.",
-        revision_action: "Remove weakest callbacks first; preserve those that change relationship, information, emotion, or scene meaning.",
-        preserve: ["meaningful_payoff", "relationship_change", "chapter_turn"],
-      },
-      {
-        code: "echo_only_callback",
-        severity: "low",
-        evidence: evidenceBinding("Quote source and recurrence; show that the recurrence adds no meaning."),
-        diagnosis: "Check whether a repeated line, action, or image echoes rather than transforms its source.",
-        revision_action: "Delete or compress echo-only recurrence while keeping meaning-bearing callbacks intact.",
-        preserve: ["semantic_callback", "relationship_callback", "comic_callback", "structural_callback"],
-      },
-      {
-        code: "author_hand_visible",
-        severity: "high",
-        evidence: evidenceBinding("Quote narration that proves a setting, ability, governance, symmetry, or callback rule."),
-        diagnosis: "Check whether rule-proof narration exposes writing-card or governance machinery, including ability-shortcut proof.",
-        revision_action: "Delete proof or let physical consequence, character load, and natural action carry the boundary.",
-        preserve: ["canon_boundary", "ordinary_physical_result", "character_agency"],
-      },
-      {
-        code: "strong_beat_dilution",
-        severity: "high",
-        evidence: evidenceBinding("Bind the exact strong line, pause, or silence and nearby beats competing with it."),
-        diagnosis: "Check whether nearby cleverness or structural completion dilutes the emotional beat.",
-        revision_action: "Reduce nearby low-value callbacks; add no explanatory narration and, when sufficient, only delete.",
-        preserve: ["strong_emotional_beat", "silence", "character_unexplained_emotion"],
-      },
-      {
-        code: "narrative_camera_template",
-        severity: "high",
-        evidence: evidenceBinding("Bind at least two exact passages or precise local sequences showing a material generative-camera sequence/cluster; a single word, gesture, or banned-word match is never sufficient."),
-        diagnosis: "Check reused cinematic grammar lacking a legitimate entry source: character attention, deliberate narrator distance, legitimate transition, or causal need.",
-        revision_action: "Reorder information, delete source-less establishing narration, admit environment through character action or attention, or preserve and clarify a legitimate narrator-led transition; never use synonym-only replacement.",
-        preserve: ["focal_consciousness", "character_attention", "legitimate_narrator_distance", "legitimate_transition", "causal_continuity", "useful_environment"],
-      },
-      {
-        code: "human_diction_friction",
-        severity: "medium",
-        evidence: evidenceBinding("Quote the exact passage where collocation, translationese, excessive formality, written-register drift, or Taiwan Traditional Chinese rhythm catches in normal reading."),
-        diagnosis: "Distinguish genuine Taiwan Traditional Chinese diction friction from intentional character voice or local rhythm.",
-        revision_action: "Make the minimum revision to smooth the exact passage; preserve character voice and original rhythm, and do not beautify.",
-        preserve: ["character_voice", "original_rhythm", "traditional_chinese_usage"],
-      },
-      {
-        code: "referent_and_spatial_ambiguity",
-        severity: "medium",
-        evidence: evidenceBinding("Quote the exact passage and identify the referent, actor, hand, position, or action relation that forces rereading."),
-        diagnosis: "Check whether the reader can establish who acts or stays still, the relevant hand, and immediate action or position relations.",
-        revision_action: "Use only the minimum information needed to remove ambiguity; do not add unnecessary spatial explanation.",
-        preserve: ["scene_pace", "physical_continuity", "minimal_information"],
-      },
-      {
-        code: "functional_overcompression",
-        severity: "medium",
-        evidence: evidenceBinding("Bind the exact chain where nearly every line advances a relationship, detail pays off, or supporting actor triggers a protagonist turn; distinguish density from over-optimization."),
-        diagnosis: "Check whether optimizing dialogue, objects, supporting actors, callbacks, and details makes design more visible than ordinary life.",
-        revision_action: "Never add filler, banter, sensory detail, or random objects to prove naturalness. Reduce the functional chain: remove immediate interpretation or needless payoff, let a minor beat end without callback, return a supporting actor to an ordinary concern, or stop making each reaction complete the previous line's dramatic job.",
-        preserve: ["ordinary_behavior", "low_function_connection", "supporting_actor_independence", "causal_continuity"],
-      },
-      {
-        code: "self_awareness_overcompleted",
-        severity: "high",
-        evidence: evidenceBinding("Bind exact explicit uncertainty, unresolved emotion, demonstrated confusion, or incomplete self-knowledge where articulation materially exceeds established awareness or conflicts with established voice or prior behavior."),
-        diagnosis: "Precise articulation alone is not a defect, and healthy, mature, expressive characters are valid. Flag only awareness-threshold conflict, backstage understanding copied into ideal dialogue, or an ensemble repeatedly delivering the psychologically best line on cue.",
-        revision_action: "Use minimal intervention and never invent or solve a true hidden motive. Unknown remains valid; weaken only the unsupported excess while preserving established voice and behavior.",
-        preserve: ["unknown_motive", "character_irregularity", "behavioral_evidence", "relationship_continuity"],
-      },
-      ...(characterHardFacts.length ? [
-        {
-          code: "canon_character_identity_conflict",
-          severity: "high",
-          evidence: characterEvidenceBinding("Bind character, exact passage, and conflicting grounded identity fact."),
-          diagnosis: "Check explicit gender, formal identity, and core relationship position against the same grounded character.",
-          revision_action: "Minimally restore the grounded identity or relationship while preserving causality and agency.",
-        },
-        {
-          code: "character_pronoun_consistency_conflict",
-          severity: "high",
-          evidence: characterEvidenceBinding("Bind character, grounded pronouns, and exact conflicting passage."),
-          diagnosis: "Review semantic referents only when Canon gender is explicit; unrelated draft pronouns are not evidence.",
-          revision_action: "Correct only the bound pronoun and dependent referent wording; preserve unrelated or quoted usage.",
-        },
-        {
-          code: "unsupported_body_trait_invention",
-          severity: "high",
-          evidence: characterEvidenceBinding("Bind character, exact invented trait, and lack of high-authority support."),
-          diagnosis: "Check unsupported animal ears, tails, horns, wings, scales, or other permanent body traits; unlisted does not prove absence.",
-          revision_action: "Remove the unsupported trait and rebuild any local action causality that depended on it.",
-        },
-        {
-          code: "appearance_fact_conflict",
-          severity: "high",
-          evidence: characterEvidenceBinding("Bind character, exact passage, and conflicting grounded appearance fact."),
-          diagnosis: "Check direct replacement of explicit Canon appearance by shorthand or conflicting permanent appearance.",
-          revision_action: "Minimally restore the grounded appearance without decorative addition or beautification.",
-        },
-      ] : []),
-      ...(worldEntityHardFacts.length ? [{
-        code: "canon_world_entity_fact_conflict",
-        severity: "high",
-        evidence: worldEntityEvidenceBinding(
-          "Bind the exact world entity, passage, grounded type or role fact, and material conflict.",
-        ),
-        diagnosis:
-          "Check whether a confidently grounded existing Canon school, organization, agency, city, faction, company, or facility has been assigned a conflicting type, role, function, affiliation, location, or authority.",
-        revision_action:
-          "Minimally restore the grounded existing world-entity fact without deleting lawful new entities or expanding unknown Canon.",
-      }] : []),
-      ...(ambiguousWorldEntityCandidates.length ? [{
-        code:
-          "ambiguous_existing_world_entity_candidate_resolution",
-        severity: "high",
-        evidence: worldEntityEvidenceBinding(
-          "Bind the passage, candidate existing Canon world entity, candidate facts, and semantic identity decision.",
-        ),
-        diagnosis:
-          "Resolve exact world-entity identity before applying candidate type, role, function, affiliation, location, or authority facts.",
-        revision_action:
-          "Do not force-bind; apply candidate facts only after identity confirmation, otherwise preserve the entity as unresolved or original.",
-      }] : []),
-      ...(generatedWorldEntityCount ? [{
-        code:
-          "generated_existing_world_entity_canon_conflict",
-        severity: "high",
-        evidence: worldEntityEvidenceBinding(
-          "Bind the generated existing Canon world entity, exact passage, supplemental fact, and conflict.",
-        ),
-        diagnosis:
-          "Review an existing Canon world entity introduced after pre-generation grounding against its supplemental hard facts.",
-        revision_action:
-          "Minimally restore the grounded fact while preserving the entity's lawful entrance and local causality.",
-      }] : []),
-      ...(ambiguousMentions.length ? [{
-        code: "existing_canon_entity_name_collision",
-        severity: "high",
-        evidence: characterEvidenceBinding("Bind exact passage, candidate Canon entity, collision context, and why identity confidence is insufficient."),
-        diagnosis: "Check whether a school, organization, location, facility, or other non-character phrase was force-bound to a similarly named Canon character.",
-        revision_action: "Correct the grounding or referent interpretation first; revise prose only when the prose itself remains materially ambiguous.",
-      }] : []),
-      ...(ambiguousExistingCanonCandidates.length ? [{
-        code: "ambiguous_existing_canon_candidate_resolution",
-        severity: "high",
-        evidence: ambiguousCandidateEvidenceBinding("Bind the exact passage, candidate existing Canon entity, candidate Canon facts, and ChatGPT's semantic identity decision."),
-        diagnosis: "Resolve whether the exact ambiguous passage actually refers to the candidate existing Canon entity before applying candidate gender, pronouns, identity, appearance, relationship, or body-trait facts.",
-        revision_action: "Do not force-bind. First resolve identity semantically; apply candidate Canon facts only after identity is confirmed, otherwise preserve the occurrence as unresolved or original.",
-      }] : []),
-      ...(generatedCharacterCount ? [{
-        code: "generated_existing_character_canon_conflict",
-        severity: "high",
-        evidence: characterEvidenceBinding("Bind newly grounded existing Canon character, exact passage, grounded hard fact, and conflict."),
-        diagnosis: "Review a confidently identified existing Canon character who entered after pre-generation grounding against the supplemental hard facts.",
-        revision_action: "Minimally restore the newly grounded established fact while preserving the character's lawful entrance, agency, and local causality.",
-      }] : []),
-    ],
-    protected_beats: [{
-      code: "strong_emotional_beat",
-      selection_rule: "ChatGPT must bind protection to exact short lines, pauses, or silences in the supplied draft, including beats such as ‘沒有。’ when context gives them emotional weight.",
-      protection: ["do_not_explain", "reduce_nearby_low_value_callbacks", "prefer_silence"],
-    }],
-    revision_priorities: [
-      "Protect canon, causality, agency, chapter turn, and strong beats.",
-      ...(characterHardFacts.length ? [
-        "Resolve evidence-bound Canon character identity, pronoun, appearance, and unsupported body-trait conflicts before release.",
-      ] : []),
-      ...(ambiguousExistingCanonCandidates.length ? [
-        "Resolve ambiguous existing-Canon candidates semantically before applying candidate facts; candidate evidence is non-binding until identity is confirmed.",
-      ] : []),
-      ...(worldEntityHardFacts.length ? [
-        "Resolve evidence-bound existing Canon world-entity type, role, function, affiliation, location, and authority conflicts before release.",
-      ] : []),
-      ...(ambiguousWorldEntityCandidates.length ? [
-        "Resolve ambiguous existing world-entity candidates semantically before applying candidate facts.",
-      ] : []),
-      "Address high-severity exact evidence first; otherwise prefer subtractive editing.",
-      "Preserve living irregularity; never apply findings mechanically or complete a theme.",
-    ],
-    final_revision_instruction: [
-      "ChatGPT remains the final prose generator.",
-      "Review the whole draft; revise only for material exact evidence.",
-      "Preserve canon, causal continuity, character agency, the chapter turn, and strong emotional beats.",
-      ...(characterHardFacts.length ? [
-        "Use character-bound Canon grounding for identity, pronouns, appearance, and body traits; remove unsupported traits and repair any local action causality that depended on them.",
-      ] : []),
-      ...(ambiguousExistingCanonCandidates.length ? [
-        "Use ambiguous Canon candidate facts only to resolve semantic identity. They remain non-binding until the exact passage is confirmed to refer to that existing Canon entity; never transfer candidate facts to an unresolved or original entity.",
-      ] : []),
-      ...(worldEntityHardFacts.length ? [
-        "Use world-entity hard facts only for confidently matched existing Canon entities; protect their established type and role without restricting lawful new world creation.",
-      ] : []),
-      ...(ambiguousWorldEntityCandidates.length ? [
-        "Keep ambiguous world-entity candidate facts non-binding until semantic identity is confirmed; never transfer them to a new or unresolved entity.",
-      ] : []),
-      "Use natural human-written Traditional Chinese; remove AI narrative grammar only when sequence or cluster evidence exists, preserve unknowns, and prefer subtraction over beautification or theme completion.",
-      "Do not mechanically apply every finding or add generic polish.",
-      "When story-only output was requested, output only the final revised story prose.",
-      "If no material editorial issue exists after review, release the original text unchanged.",
-    ].join(" "),
-  };
+  });
 }
-
 function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognition = {}) {
   return async (capabilityInput) => {
     const moduleName = capabilityName.slice(4);
@@ -819,239 +578,143 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         ),
       };
     }
+    const selectedTechniqueFamilies =
+      runtimeCognition.technique_selection?.selected_technique_families ?? [];
+    const activeTechniqueCognition =
+      runtimeCognition.technique_selection?.active_technique_cognition ?? {};
+
     const semanticOutputs = {
       run_scene_planner: {
         result_type: "scene_plan",
         objective: taskPrompt,
-        scene_beats: [
-          "Enter through what a character is doing, being prevented from doing, misjudging, enduring, or caring about; do not default to a panoramic or cinematic establishing shot.",
-          "Escalate through a character choice with a visible consequence.",
-          "Close the movement on a readable turn that advances the chapter.",
-        ],
-        focal_attention: {
-          focal_consciousness: "Identify the consciousness or deliberate narrator distance governing this local information flow.",
-          attention_priority: "Prefer current attention, action, bodily load, and pressure when selecting local information.",
-          perception_boundary: "Respect the chosen viewpoint without forcing strict limited POV across deliberate narrator distance, scene or time transitions, and multi-POV transitions.",
-          ignored_information: "Let unattended facts remain absent when they have no character, narrative, transition, or causal reason to enter.",
-          body_first_signals: "Let bodily load, reflex, pain, imbalance, breath, or interrupted motion register before a polished psychological explanation when the moment calls for it.",
-          environment_entry_reason: "Question habitual cinematic establishing, not narrator-led transition: environment may enter through attention, action, pressure, deliberate narrative distance, transition, or causal need.",
-        },
-        precision_guard: "Reject precision added only to look concrete and lacking narrative, character, or causal source. Preserve precision required for combat causality, physical position, actionable distance, timing pressure, navigation, or canon.",
-        continuity_anchor_present: Boolean(writingContext.content?.chapter_anchor),
+        continuity_anchor_present:
+          Boolean(writingContext.content?.chapter_anchor),
       },
       run_character_simulator: {
         result_type: "character_simulation",
         dramatic_situation: taskPrompt,
-        character_cognition: {
-          self_story: "The reason the character believes about themself; it may organize behavior without being true.",
-          misrecognized_motive: "A motive may be misnamed or misunderstood, but do not invent a corrected motive merely to complete the analysis.",
-          avoided_question: "The character may not know the answer or even recognize that they are avoiding the question.",
-          false_certainty: "A confident account can be wrong and can still drive a consequential choice.",
-          behavioral_leak: "Speech and bodily action may temporarily disagree; behavior can leak pressure the character cannot accurately state.",
-          awareness_threshold: "Set plausible awareness and articulation from established character voice, prior behavior, current knowledge, and current scene pressure; backstage cognition cannot bypass it.",
-        },
-        behavior_constraints: [
-          "Let each character act from current knowledge, position, and relationship pressure.",
-          "Carry tension through gesture, silence, hesitation, and subtext instead of queue-style dialogue.",
-          "Preserve distinct character agency; do not flatten the ensemble into an operator voice.",
-          "Latent or actual motive may remain unknown; never force a guessed true motive or convert backstage cognition into precise self-analysis.",
-          "Do not make characters consistently describe their psychology, boundaries, or growth correctly; show later growth first through a different choice or action rather than a self-summary.",
-          "Canon identity facts are hard constraints, not psychological suggestions; never reinterpret a known male character as female or vice versa for scene convenience.",
-          "When Canon gender is explicit, keep Traditional Chinese third- and second-person pronouns consistent with the grounded character.",
-          "Do not invent unsupported animal ears, tails, horns, wings, scales, or permanent body traits as emotional or visual shorthand.",
-          "Character Voice Registry guidance cannot override Canon identity, appearance, relationship position, or explicit body traits.",
-          "Grounded hard facts apply only to confidently matched existing Canon characters; possible original characters remain creatively open.",
-           "Never borrow the nearest Canon character's gender, appearance, body traits, relationships, or identity for an unmatched or similarly named original character.",
-          ...(worldEntityCognitionRelevant ? [
-            "Confidently grounded existing Canon world entities retain their established type, role, function, affiliation, location, and authority; Canon absence never blocks lawful new world entities.",
-          ] : []),
-        ],
-        character_grounded_irregularity: {
-          principle: "A character may depart from the most efficient, mature, or elegant dramatic response only in a way grounded in that person and moment.",
-          sources: ["established_disposition", "current_attention", "current_knowledge", "mistaken_belief", "relationship_pressure", "bodily_load", "immediate_circumstance"],
-          guard: "Human irregularity is not randomness and is not a menu of anti-AI behaviors; never insert irregularity merely to prove that a character feels human.",
-        },
-        voice_registry_loaded: writingContext.character_voice_registry_loaded === true,
-        character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
-        character_canon_grounding_count: characterHardFacts.length,
-        character_hard_facts: characterHardFacts,
-        original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
+        character_canon_grounding_loaded:
+          characterCanonGrounding.loaded === true,
+        character_canon_grounding_count:
+          characterHardFacts.length,
+        character_hard_facts:
+          characterHardFacts,
+        original_entity_freedom:
+          characterCanonGrounding.original_entity_freedom ?? null,
         ...(worldEntityCognitionRelevant ? {
           world_entity_canon_grounding_loaded:
             worldEntityCanonGrounding.loaded === true,
           world_entity_canon_grounding_count:
             worldEntityHardFacts.length,
-          world_entity_hard_facts: worldEntityHardFacts,
+          world_entity_hard_facts:
+            worldEntityHardFacts,
         } : {}),
       },
       run_neural_critic: {
         result_type: "neural_critique",
         critique_focus: taskPrompt,
-        risks: [
-          { code: "character_reaction_too_correct", question: "Does every character produce the reaction best suited to the scene instead of a personally limited, mistimed, or frictional response?" },
-          { code: "self_awareness_overcompleted", question: "Does a character understand and accurately explain their real psychology too quickly?" },
-          { code: "scene_function_overoptimization", question: "Is every beat unusually effective, relationship-advancing, and free of ordinary friction?" },
-          { code: "supporting_actor_functionality", question: "Does a supporting character or bystander exist only to trigger another character's core dialogue or turn rather than retaining an ordinary concern?" },
-          { code: "narrative_information_without_attention_source", question: "Is information placed only because the author wants it known, without a legitimate source in character attention, deliberate narrator distance, scene or time transition, multi-POV transition, or causal need? Check source-less placement; do not require every fact to be character-noticed." },
-          { code: "character_gender_or_pronoun_conflict", question: "For a specifically grounded character with explicit gender, does an exact passage semantically bind that character to a conflicting third- or second-person Traditional Chinese pronoun? Do not treat every pronoun in the draft as referring to the same character." },
-          { code: "unsupported_body_trait_invention", question: "Does an exact character-bound passage invent animal ears, tails, horns, wings, scales, or another permanent body trait unsupported by that character's Canon grounding and current higher-authority context?" },
-          { code: "appearance_fact_conflict", question: "Does an exact character-bound passage directly replace or contradict an explicit grounded Canon appearance fact?" },
-          { code: "canon_entity_name_collision", question: "Has a name occurrence been force-bound to a Canon character although its phrase indicates a school, organization, location, facility, or other non-character entity?" },
-          { code: "original_entity_freedom_violation", question: "Has cognition treated a Canon-unmatched original character or world entity as prohibited merely because no Canon record exists?" },
-          { code: "generated_existing_character_ungrounded", question: "Does the verified raw story introduce a confidently identifiable existing Canon character absent from pre-generation grounding and therefore needing supplemental hard facts before final review?" },
-          ...(worldEntityCognitionRelevant ? [
-            { code: "canon_world_entity_fact_conflict", question: "Has a confidently grounded existing Canon school, organization, agency, city, faction, company, or facility been assigned a conflicting type, role, function, affiliation, location, or authority?" },
-            { code: "generated_existing_world_entity_ungrounded", question: "Does the verified raw story introduce a confidently identifiable existing Canon world entity absent from pre-generation grounding and needing supplemental facts before final review?" },
-            { code: "original_world_entity_freedom_violation", question: "Has cognition treated a Canon-unmatched original city, school, organization, agency, company, faction, or facility as prohibited merely because no Canon record exists?" },
-          ] : []),
+        evidence_only: true,
+        hard_risk_scope: [
+          "canon",
+          "causality",
+          "identity",
+          "character_state",
+          "timeline",
+          "explicit_user_requirement",
         ],
-        standing_constraints: [
-          "Avoid engineering, provider, workflow, and handoff language in story prose.",
-          "Preserve causal continuity and do not invent unsupported canon facts.",
-          "Do not require, manufacture, reverse-engineer, or optimize the scene around a theme, allegory, moral lesson, or thematic closure. Do not search for a chapter theme; natural meaning may emerge from characters and events.",
-        ],
-        character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
-        character_canon_grounding_count: characterHardFacts.length,
-        character_hard_facts: characterHardFacts,
-        original_entity_freedom: characterCanonGrounding.original_entity_freedom ?? null,
+        character_canon_grounding_loaded:
+          characterCanonGrounding.loaded === true,
+        character_canon_grounding_count:
+          characterHardFacts.length,
+        character_hard_facts:
+          characterHardFacts,
+        original_entity_freedom:
+          characterCanonGrounding.original_entity_freedom ?? null,
         ...(worldEntityCognitionRelevant ? {
           world_entity_canon_grounding_loaded:
             worldEntityCanonGrounding.loaded === true,
           world_entity_canon_grounding_count:
             worldEntityHardFacts.length,
-          world_entity_hard_facts: worldEntityHardFacts,
+          world_entity_hard_facts:
+            worldEntityHardFacts,
         } : {}),
       },
       run_style_drift_detector: {
         result_type: "style_drift_report",
         target: taskPrompt,
-        drift_risk: "monitor",
-        detection_method: "Inspect reused narrative grammar, local sequence shape, cluster density, and repeated narrative jobs. This is not a banned-word list: no single word or isolated gesture establishes drift, and the detector judges sequence reuse rather than lexical avoidance.",
-        narrative_camera_template_sequences: [
-          "environment establishing shot → distant ambient sound → spatial filtering metaphor → character microreaction → short dialogue reveal",
-          "light → hair → shadow → wind → clothing edge",
-          "environment sentence → character raises eyes, pauses, or turns slightly → narrator confirms the preceding sensory sentence",
-        ],
-        cluster_cognition: [
-          "Low-intensity microreaction repeatedly used as a camera bridge.",
-          "Sensory statement immediately proved by a reaction beat.",
-          "Repeated spatial-filter metaphor used to manufacture literary texture.",
-          "Repeated environment → gesture → dialogue paragraph cadence.",
-          "Ask ChatGPT directly: Are you once again using a generative camera trained to manufacture a novel-like texture to film the scene?（你是不是又在用受過小說質感訓練的生成式攝影機拍場景？）",
-        ],
-        rhythm_guidance: [
-          "Sentence rhythm must follow the character's current attention and pressure.",
-          "Do not force every paragraph into an environment → gesture → dialogue cadence.",
-          "Vary scene entry and paragraph breathing according to the actual event and consciousness.",
-        ],
+        evidence_only: true,
+        pre_generation_status:
+          "inactive_without_draft_evidence",
+        findings: [],
       },
       run_over_governance_detector: {
         result_type: "over_governance_report",
         target: taskPrompt,
-        governance_risk: "guardrails_must_remain_invisible",
-        release_constraints: [
-          "Use governance context as invisible boundaries, never as visible story vocabulary.",
-          "Do not turn dramatic conflict into policy, tool, or process debate.",
-          "Keep character agency and scene momentum alive inside the canon constraints.",
-          "Do not copy cognition field names, structures, or proof sentences into prose to demonstrate unknown motive, absence of an ability shortcut, focal consciousness, or a supporting character's independent purpose; cognition stays in the external brain and prose shows only the natural result.",
-        ],
+        hard_boundary:
+          "Keep workflow and governance language out of story prose.",
       },
       run_writing_card_director: {
         result_type: "writing_card_director_context",
-        integration_mode: "same_author_cognition_synthesis",
-        direction: taskPrompt,
+        integration_mode:
+          "same_author_cognition_synthesis",
+        direction:
+          taskPrompt,
         source_cognition_manifest: (
           capabilityInput.authorship_cognition_sources?.source_manifest ?? []
         ).map((source) => ({
           ...source,
           consumption_status: "verified_and_consumed",
         })),
-        cognition_frame: "The prior cognition outputs are different cognitive passes of the same author, not independent authorities and not simultaneous prose directives.",
-        integration_principles: {
-          semantic_deduplication: "Merge repeated meaning without increasing prose weight merely because multiple modules mention the same cognition.",
-          authority_arbitration: "Use source authority and confidence to protect established truth; low-confidence suggestions never override Canon.",
-          conflict_arbitration: "Resolve conflicts through author judgment before drafting; do not put both sides into prose or split the difference by default.",
-          attention_compression: "Form a compact author understanding containing only concerns material to this scene; do not active-monitor every available cognition while writing.",
-          scene_constraint_reconstruction: "Understand the people, place, action, knowledge, misunderstanding, pressure, prohibited invention, and present movement as one scene rather than a module checklist.",
-        },
-        authority_precedence: {
-          higher_authority: [
-            "Canon hard facts and Canon DB",
-            "Character Canon Grounding derived directly from the full active_engine source",
-            ...(worldEntityCognitionRelevant ? [
-              "World Entity Canon Grounding derived directly from the full active_engine source",
-            ] : []),
-            "active_engine P0 hard constraints",
-            "established causal continuity",
-            "established character knowledge and state",
-          ],
-          lower_authority: [
-            "Character Voice Registry supporting guidance",
-            "visual-only references",
-            "low-confidence Writing Card suggestions",
-            "technique cognition",
-            "optional scene opportunities",
-            "speculative interpretations",
-          ],
-          rule: "Higher-authority truth outranks lower-authority suggestions. Never compromise Canon merely to preserve a suggestion.",
-        },
-        uncertainty_and_invention: {
-          unknown_preservation: "Unknown is a valid author conclusion; a source asking that something remain unknown must not be completed by speculation.",
-          unsupported_invention_rejection: "Reject or suppress unsupported secret answers, foreshadowing, crisis lines, motives, facts, or payoffs instead of finding a prose compromise.",
-        },
-        established_fact_protection: "Existing Canon hard facts remain authoritative for confidently matched existing entities.",
+        hard_authority: [
+          "Canon",
+          "causal continuity",
+          "character identity and state",
+          "timeline",
+          "explicit user requirements",
+        ],
+        arbitration_rule:
+          "Use only material hard constraints; do not convert diagnostics into prose requirements.",
         original_entity_freedom: {
-          contract: characterCanonGrounding.original_entity_freedom ?? null,
-          rule: "GPT may create new characters and world entities whenever the scene or long-form development naturally calls for them.",
-          canon_absence_rule: "No Canon match is not, by itself, an error or prohibition.",
-          ambiguity_rule: "Ambiguous names remain unresolved instead of being force-bound to a Canon entity.",
-          persistence_boundary: "Original prose entities are not automatically written into Canon, active_engine, candidate, adoption, activation, or settlement workflows.",
-        },
-        prose_attention_transition: {
-          module_boundary_dissolution: "Module boundaries should dissolve before prose generation: stop tracking what each module said and return to one author understanding of the scene.",
-          author_state: "I am the author. I understand this scene. Now write freely.",
-          private_reasoning_policy: "Do not expose private chain-of-thought, a reasoning transcript, or an integration report to the user.",
+          contract:
+            characterCanonGrounding.original_entity_freedom ?? null,
+          rule:
+            "Canon absence does not prohibit lawful new characters or world entities.",
+          ambiguity_rule:
+            "Unresolved names remain unresolved instead of being force-bound.",
+          persistence_boundary:
+            "New prose entities are not automatically persisted.",
         },
         final_prose_ownership: {
           owner: "ChatGPT",
-          writer_workbench_role: "integrated_authorship_cognition_handoff",
+          writer_workbench_role:
+            "integrated_authorship_cognition_handoff",
           writer_workbench_generates_story_prose: false,
-          story_only_output: "Emit only the story prose when story-only output is requested.",
+          story_only_output:
+            "Emit only story prose when requested.",
         },
-        director_notes: [
-          "Write the people first; let the scene emerge through what interrupts, matters to, or is noticed by them.",
-          "Prefer natural Traditional Chinese narrative flow over cinematic polish.",
-          "Do not seek a theme, symbolic closure, or a quotable chapter statement unless the story naturally produces one.",
-          "Characters do not need to understand themselves correctly, and supporting characters and bystanders retain independent ordinary concerns.",
-          "Do not require every dialogue exchange to progress a relationship or every object, gesture, callback, and environmental detail to pay off.",
-          "Keep the story moving when events demand movement, but do not optimize every beat for narrative efficiency.",
-          "When story-only output is requested, begin with the chapter title or prose rather than a handoff summary.",
-        ],
-        technique_learning_principle: {
-          rule: "Techniques are opt-in cognitive methods, never default simultaneous directives or prose-style imitation; ChatGPT owns selection.",
-        },
-        available_technique_families: [...availableWritingTechniqueFamilies],
-        selected_technique_families: [...(runtimeCognition.technique_selection?.selected_technique_families ?? [])],
-        active_technique_cognition: runtimeCognition.technique_selection?.active_technique_cognition ?? {},
-        technique_selection_policy: {
-          default_selection: "none",
-          trigger: "Select a family only for a matching craft problem or opportunity in the current scene.",
-          normal_limit: "No more than one or two technique families; never combine the full pool by default.",
-          non_demonstration: "Never alter a scene merely to demonstrate a learned technique.",
-          override_priority: "Character truth, canon, causal continuity, and natural Traditional Chinese override technique usage.",
-        },
-        writing_card_context: buildMinimalWritingCardPromptContext(
-          writingContext.content?.writing_card_director_context,
-        ),
-        character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
-        character_canon_grounding_count: characterHardFacts.length,
-        character_hard_facts: characterHardFacts,
+        ...(selectedTechniqueFamilies.length ? {
+          selected_technique_families:
+            [...selectedTechniqueFamilies],
+          active_technique_cognition:
+            activeTechniqueCognition,
+        } : {}),
+        writing_card_context:
+          buildMinimalWritingCardPromptContext(
+            writingContext.content?.writing_card_director_context,
+          ),
+        character_canon_grounding_loaded:
+          characterCanonGrounding.loaded === true,
+        character_canon_grounding_count:
+          characterHardFacts.length,
+        character_hard_facts:
+          characterHardFacts,
         ...(worldEntityCognitionRelevant ? {
           world_entity_canon_grounding_loaded:
             worldEntityCanonGrounding.loaded === true,
           world_entity_canon_grounding_count:
             worldEntityHardFacts.length,
-          world_entity_hard_facts: worldEntityHardFacts,
+          world_entity_hard_facts:
+            worldEntityHardFacts,
         } : {}),
       },
     };

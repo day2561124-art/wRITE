@@ -251,18 +251,45 @@ try {
       `Writing Card Director must preserve original entity scope: ${category}`,
     );
   }
-  assert.match(director.established_fact_protection, /confidently matched existing entities/iu);
-  const criticCodes = new Set(
-    generatedSession.outputs.get("run_neural_critic").risks.map((risk) => risk.code),
+  assert.deepEqual(director.hard_authority, [
+    "Canon",
+    "causal continuity",
+    "character identity and state",
+    "timeline",
+    "explicit user requirements",
+  ]);
+  assert.match(
+    director.arbitration_rule,
+    /do not convert diagnostics into prose requirements/iu,
   );
-  for (const code of [
-    "canon_entity_name_collision",
-    "original_entity_freedom_violation",
-    "generated_existing_character_ungrounded",
-  ]) assert(criticCodes.has(code));
-  const simulator = generatedSession.outputs.get("run_character_simulator");
-  assert(simulator.behavior_constraints.some((rule) => /possible original characters remain creatively open/iu.test(rule)));
-  assert(simulator.behavior_constraints.some((rule) => /nearest Canon character's gender/iu.test(rule)));
+  assert.equal(
+    Object.hasOwn(director, "established_fact_protection"),
+    false,
+  );
+
+  const critic = generatedSession.outputs.get("run_neural_critic");
+  assert.equal(critic.evidence_only, true);
+  assert.deepEqual(critic.hard_risk_scope, [
+    "canon",
+    "causality",
+    "identity",
+    "character_state",
+    "timeline",
+    "explicit_user_requirement",
+  ]);
+  assert.equal(Object.hasOwn(critic, "risks"), false);
+
+  const simulator = generatedSession.outputs.get(
+    "run_character_simulator",
+  );
+  assert.equal(
+    simulator.character_canon_grounding_loaded,
+    true,
+  );
+  assert.equal(
+    Object.hasOwn(simulator, "behavior_constraints"),
+    false,
+  );
 
   const generatedFinal = await useChatgptOwnedExternalBrainCapability(
     "run_final_polisher",
@@ -285,9 +312,18 @@ try {
       .get("初日").gender,
     "male",
   );
-  assert(generatedReport.findings.some((finding) => (
-    finding.code === "generated_existing_character_canon_conflict"
-  )));
+  assert.equal(
+    generatedReport.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(
+    Object.hasOwn(generatedReport, "findings"),
+    false,
+  );
+  assert.equal(
+    generatedReport.release_recommendation,
+    "release_as_is",
+  );
   assert.equal("polished_text" in generatedReport, false);
 
   // TEST H/I/J/O/Q: failed integrity produces no formal expansion; original entities remain free.
@@ -342,9 +378,14 @@ try {
   assert(originalReport.ambiguous_canon_mentions.some((item) => (
     item.canonical_name === "夜星" && item.reason === "non_character_compound_suffix"
   )));
-  assert(originalReport.findings.some((finding) => (
-    finding.code === "existing_canon_entity_name_collision"
-  )));
+  assert.equal(
+    originalReport.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(
+    Object.hasOwn(originalReport, "findings"),
+    false,
+  );
   const forbiddenOriginalErrors = /unknown_character_error|unapproved_character|canon_character_required|delete_original_character/iu;
   assert.doesNotMatch(JSON.stringify(originalReport), forbiddenOriginalErrors);
   assert.equal(originalReport.generated_cast_expansion.original_entities_persisted, false);
@@ -374,13 +415,18 @@ try {
     ["初夢", "晴禮", "初日"],
   );
   assert.equal(replayReport.generated_existing_canon_character_count, 1);
-  const replayCodes = new Set(replayReport.findings.map((finding) => finding.code));
-  for (const code of [
-    "character_pronoun_consistency_conflict",
-    "unsupported_body_trait_invention",
-    "generated_existing_character_canon_conflict",
-  ]) assert(replayCodes.has(code));
-  assert.equal(replayReport.findings_review_mode, "requires_chatgpt_semantic_review");
+  assert.equal(
+    replayReport.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(
+    Object.hasOwn(replayReport, "findings"),
+    false,
+  );
+  assert.equal(
+    replayReport.release_recommendation,
+    "release_as_is",
+  );
 
   // TEST P/Q/R: no production mutation or original-entity persistence.
   assert.deepEqual(Object.fromEntries(await Promise.all(
@@ -579,24 +625,31 @@ try {
   assert.equal(ambiguousCandidate.pronouns.third_person, "他");
   assert.equal("identity_facts" in ambiguousCandidate, false);
   assert.equal("appearance_facts" in ambiguousCandidate, false);
-  assert.equal(typeof ambiguousCandidate.identity, "string");
-  assert.equal(typeof ambiguousCandidate.appearance, "string");
+  for (const optionalField of [
+    "identity",
+    "appearance",
+  ]) {
+    if (Object.hasOwn(ambiguousCandidate, optionalField)) {
+      assert.equal(
+        typeof ambiguousCandidate[optionalField],
+        "string",
+      );
+    }
+  }
   assert.equal(
-    ambiguousReport
-      .ambiguous_canon_candidate_resolution
-      .candidate_facts_are_binding_before_identity_confirmation,
+    Object.hasOwn(
+      ambiguousReport,
+      "ambiguous_canon_candidate_resolution",
+    ),
     false,
-    "TEST X: candidate Canon facts must remain non-binding before identity confirmation",
   );
-  assert.match(
-    ambiguousReport.ambiguous_canon_candidate_resolution.binding_rule,
-    /identity-resolution evidence only/iu,
+  assert.equal(
+    ambiguousReport.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
   );
-  assert(
-    ambiguousReport.findings.some((finding) => (
-      finding.code === "ambiguous_existing_canon_candidate_resolution"
-    )),
-    "TEST X: semantic candidate identity-resolution contract must reach Final Polisher",
+  assert.equal(
+    Object.hasOwn(ambiguousReport, "findings"),
+    false,
   );
 
   // TEST Y: service integrity invariant (integrityValidated=false blocks expansion)

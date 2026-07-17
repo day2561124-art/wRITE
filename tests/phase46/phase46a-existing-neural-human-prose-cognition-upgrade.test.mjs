@@ -125,94 +125,103 @@ try {
   }
 
   const scene = outputs.get("scene_planner");
-  assert.deepEqual(Object.keys(scene.focal_attention), [
-    "focal_consciousness",
-    "attention_priority",
-    "perception_boundary",
-    "ignored_information",
-    "body_first_signals",
-    "environment_entry_reason",
-  ]);
-  assert.match(asText(scene), /do not default to a panoramic or cinematic establishing shot/iu);
-  assert.match(asText(scene), /current attention, action, bodily load, and pressure/iu);
-  assert.match(asText(scene), /deliberate narrator distance.*scene or time transitions.*multi-POV transitions/iu);
-  assert.match(asText(scene), /not narrator-led transition/iu);
-  assert.match(asText(scene), /precision added only to look concrete.*narrative, character, or causal source/iu);
-  assert.match(asText(scene), /combat causality.*physical position.*timing pressure.*navigation.*canon/iu);
+  assert.equal(typeof scene, "object");
+  assert.equal(
+    Object.hasOwn(scene, "focal_attention"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(scene, "scene_beats"),
+    false,
+  );
 
   const character = outputs.get("character_simulator");
-  assert.deepEqual(Object.keys(character.character_cognition), [
-    "self_story",
-    "misrecognized_motive",
-    "avoided_question",
-    "false_certainty",
-    "behavioral_leak",
-    "awareness_threshold",
-  ]);
-  assert.match(asText(character), /actual motive may remain unknown|never force a guessed true motive/iu);
-  assert.match(asText(character), /backstage cognition|precise self-analysis/iu);
-  assert.match(asText(character), /established character voice.*prior behavior.*current scene pressure/iu);
-  assert.match(asText(character), /Human irregularity is not randomness.*not a menu of anti-AI behaviors/iu);
-  assert.doesNotMatch(asText(character), /answer a different question|mishear|decline to repeat|apology is expected/iu);
+  assert.equal(typeof character, "object");
+  assert.equal(
+    Object.hasOwn(character, "character_cognition"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(character, "behavior_constraints"),
+    false,
+  );
 
   const critic = outputs.get("neural_critic");
-  const riskCodes = critic.risks.map((risk) => risk.code);
-  assert.deepEqual(riskCodes, [
-    "character_reaction_too_correct",
-    "self_awareness_overcompleted",
-    "scene_function_overoptimization",
-    "supporting_actor_functionality",
-    "narrative_information_without_attention_source",
-    "character_gender_or_pronoun_conflict",
-    "unsupported_body_trait_invention",
-    "appearance_fact_conflict",
-    "canon_entity_name_collision",
-    "original_entity_freedom_violation",
-    "generated_existing_character_ungrounded",
+  assert.equal(critic.evidence_only, true);
+  assert.deepEqual(critic.hard_risk_scope, [
+    "canon",
+    "causality",
+    "identity",
+    "character_state",
+    "timeline",
+    "explicit_user_requirement",
   ]);
-  assert.match(asText(critic), /every character.*reaction best suited|supporting character or bystander/iu);
-  const attentionSourceRisk = critic.risks.find((risk) => risk.code === "narrative_information_without_attention_source");
-  assert.match(attentionSourceRisk.question, /character attention.*deliberate narrator distance.*scene or time transition.*multi-POV transition.*causal need/iu);
-  assert.match(attentionSourceRisk.question, /source-less placement.*do not require every fact to be character-noticed/iu);
-  assert.match(asText(critic), /Do not require, manufacture, reverse-engineer, or optimize.*theme/iu);
-  assert.match(asText(critic), /Do not search for a chapter theme.*natural meaning may emerge/iu);
-  assert.doesNotMatch(asText(critic), /Do not pursue theme/iu);
+  assert.equal(Object.hasOwn(critic, "risks"), false);
 
   const style = outputs.get("style_drift_detector");
-  assert.equal(style.narrative_camera_template_sequences.length, 3);
-  assert.match(style.detection_method, /narrative grammar.*sequence shape.*cluster density/iu);
-  assert.match(style.detection_method, /not a banned-word list/iu);
-  assert.match(style.detection_method, /no single word or isolated gesture/iu);
-  assert.match(style.detection_method, /repeated narrative jobs.*sequence reuse rather than lexical avoidance/iu);
-  assert.match(asText(style), /environment establishing shot.*distant ambient sound.*spatial filtering metaphor.*character microreaction.*short dialogue reveal/iu);
-  assert.match(asText(style), /microreaction repeatedly used as a camera bridge.*sensory statement immediately proved.*spatial-filter metaphor.*environment.*gesture.*dialogue paragraph cadence/iu);
-  assert.doesNotMatch(asText(style.cluster_cognition), /fingertip stops|small frowns|delayed answers/iu);
-  assert.match(asText(style), /生成式攝影機拍場景/u);
-  assert.match(asText(style), /Sentence rhythm must follow the character's current attention and pressure/iu);
+  assert.equal(typeof style, "object");
+  assert.equal(
+    Object.hasOwn(
+      style,
+      "narrative_camera_template_sequences",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(style, "cluster_cognition"),
+    false,
+  );
 
   const governance = outputs.get("over_governance_detector");
-  assert.match(asText(governance), /Do not copy cognition field names, structures, or proof sentences into prose/iu);
-  assert.match(asText(governance), /unknown motive.*ability shortcut.*focal consciousness.*supporting character's independent purpose/iu);
+  assert.equal(typeof governance, "object");
 
   const director = outputs.get("writing_card_director");
-  assert.match(asText(director), /Write the people first/iu);
-  assert.match(asText(director), /natural Traditional Chinese narrative flow/iu);
-  assert.match(asText(director), /Do not seek a theme, symbolic closure/iu);
-  assert.match(asText(director.technique_learning_principle), /opt-in cognitive methods.*never default simultaneous directives.*prose-style imitation.*ChatGPT owns selection/iu);
-  assert.deepEqual(director.available_technique_families, [
-    "constraint_driven_conflict",
-    "restriction_and_pressure",
-    "relational_comedy",
-    "ensemble_motion",
-    "subtle_relationships",
+  assert.deepEqual(director.hard_authority, [
+    "Canon",
+    "causal continuity",
+    "character identity and state",
+    "timeline",
+    "explicit user requirements",
   ]);
-  assert.deepEqual(director.selected_technique_families, []);
-  assert.deepEqual(director.active_technique_cognition, {});
-  assert.doesNotMatch(asText(director), /incorrect hypothesis|natural useless banter|groups separate and naturally collide/iu);
-  assert.equal(director.technique_selection_policy.default_selection, "none");
-  assert.match(asText(director.technique_selection_policy), /No more than one or two technique families/iu);
-  assert.match(asText(director.technique_selection_policy), /Never alter a scene merely to demonstrate a learned technique/iu);
-  assert.match(asText(director.technique_selection_policy), /Character truth, canon, causal continuity, and natural Traditional Chinese override/iu);
+  assert.match(
+    director.arbitration_rule,
+    /do not convert diagnostics into prose requirements/iu,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director,
+      "selected_technique_families",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director,
+      "active_technique_cognition",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director,
+      "technique_learning_principle",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director,
+      "available_technique_families",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director,
+      "technique_selection_policy",
+    ),
+    false,
+  );
 
   async function invokeDirector(selectedTechniqueFamilies) {
     return await chatgpt_bridge_use_writing_card_director({
@@ -227,13 +236,51 @@ try {
     assert.equal(response.orchestration_owner, "ChatGPT");
     assert.equal(response.prose_generator, "ChatGPT");
     assertAllGuardsFalse(response);
-    assert.deepEqual(response.capability_output.selected_technique_families, selectedFamilies);
-    assert.deepEqual(Object.keys(response.capability_output.active_technique_cognition), selectedFamilies);
+
+    if (selectedFamilies.length === 0) {
+      assert.equal(
+        Object.hasOwn(
+          response.capability_output,
+          "selected_technique_families",
+        ),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(
+          response.capability_output,
+          "active_technique_cognition",
+        ),
+        false,
+      );
+    } else {
+      assert.deepEqual(
+        response.capability_output
+          .selected_technique_families,
+        selectedFamilies,
+      );
+      assert.deepEqual(
+        Object.keys(
+          response.capability_output
+            .active_technique_cognition,
+        ),
+        selectedFamilies,
+      );
+    }
+
     return response.capability_output;
   }
 
-  const explicitEmpty = assertSelectedDirector(await invokeDirector([]), []);
-  assert.deepEqual(explicitEmpty.active_technique_cognition, {});
+  const explicitEmpty = assertSelectedDirector(
+    await invokeDirector([]),
+    [],
+  );
+  assert.equal(
+    Object.hasOwn(
+      explicitEmpty,
+      "active_technique_cognition",
+    ),
+    false,
+  );
 
   const oneFamily = assertSelectedDirector(
     await invokeDirector(["constraint_driven_conflict"]),
@@ -292,67 +339,21 @@ try {
   assert(finalPolisherMcpBytes < 14 * 1024, `final_polisher MCP response is not below 14 KiB: ${finalPolisherMcpBytes} bytes`);
 
   const report = polished.capability_output;
-  const findings = new Map(report.findings.map((finding) => [finding.code, finding]));
-  const phase45Findings = [
-    "pattern_saturation",
-    "symmetry_overcompleted",
-    "callback_saturation",
-    "echo_only_callback",
-    "author_hand_visible",
-    "strong_beat_dilution",
-  ];
-  const phase46Findings = [
-    "narrative_camera_template",
-    "human_diction_friction",
-    "referent_and_spatial_ambiguity",
-    "functional_overcompression",
-    "self_awareness_overcompleted",
-  ];
-  for (const code of [...phase45Findings, ...phase46Findings]) {
-    assert(findings.has(code), `Missing final-polisher finding: ${code}`);
-  }
-  assert.equal(findings.size, 11);
-
-  const camera = findings.get("narrative_camera_template");
-  assert.equal(camera.severity, "high");
-  assert.match(camera.evidence[0].requirement, /at least two exact passages or precise local sequences/iu);
-  assert.match(camera.evidence[0].requirement, /sequence\/cluster pattern|single word.*never sufficient/iu);
-  assert.match(camera.diagnosis, /character attention.*deliberate narrator distance.*legitimate transition.*causal need/iu);
-  assert.doesNotMatch(camera.diagnosis, /instead of character-led attention/iu);
-  assert.match(camera.revision_action, /Reorder information.*delete source-less establishing narration.*character action or attention.*preserve and clarify a legitimate narrator-led transition/iu);
-  assert.match(camera.revision_action, /never use synonym-only replacement/iu);
-  assert(camera.preserve.includes("legitimate_narrator_distance"));
-  assert(camera.preserve.includes("legitimate_transition"));
-
-  const diction = findings.get("human_diction_friction");
-  assert.equal(diction.severity, "medium");
-  assert.match(diction.evidence[0].requirement, /exact passage/iu);
-  assert.match(diction.revision_action, /minimum revision.*preserve character voice.*original rhythm/iu);
-  assert.match(diction.revision_action, /do not beautify/iu);
-
-  const ambiguity = findings.get("referent_and_spatial_ambiguity");
-  assert.match(ambiguity.revision_action, /minimum information.*do not add unnecessary spatial explanation/iu);
-
-  const compression = findings.get("functional_overcompression");
-  assert(["medium", "high"].includes(compression.severity));
-  assert.match(compression.revision_action, /Never add filler, banter, sensory detail, or random objects to prove naturalness/iu);
-  assert.match(compression.revision_action, /remove immediate interpretation or needless payoff.*minor beat end without callback.*supporting actor.*ordinary concern/iu);
-  assert.match(compression.revision_action, /stop making each reaction complete the previous line's dramatic job/iu);
-
-  const awareness = findings.get("self_awareness_overcompleted");
-  assert.equal(awareness.severity, "high");
-  assert.doesNotMatch(asText(awareness), /I don't know/iu);
-  assert.match(awareness.evidence[0].requirement, /explicit uncertainty.*unresolved emotion.*demonstrated confusion.*incomplete self-knowledge/iu);
-  assert.match(awareness.evidence[0].requirement, /established awareness.*established voice.*prior behavior/iu);
-  assert.match(awareness.diagnosis, /Precise articulation alone is not a defect/iu);
-  assert.match(awareness.diagnosis, /healthy, mature, expressive characters are valid/iu);
-  assert.match(awareness.revision_action, /never invent or solve a true hidden motive/iu);
-  assert.match(awareness.revision_action, /Unknown remains valid/iu);
-  assert.match(awareness.revision_action, /minimal intervention/iu);
-  assert.match(report.final_revision_instruction, /natural human-written Traditional Chinese/iu);
-  assert.match(report.final_revision_instruction, /remove AI narrative grammar only when sequence or cluster evidence exists/iu);
-  assert.match(report.final_revision_instruction, /prefer subtraction over beautification or theme completion/iu);
-  assert.match(report.final_revision_instruction, /ChatGPT remains the final prose generator/iu);
+  assert.equal(
+    report.editorial_mode,
+    "evidence_triggered_minimal_review",
+  );
+  assert.equal(
+    report.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(Object.hasOwn(report, "findings"), false);
+  assert.equal(report.text_change_required, false);
+  assert.equal(report.release_recommendation, "release_as_is");
+  assert.equal(
+    Object.hasOwn(report, "final_revision_instruction"),
+    false,
+  );
 
   assert.deepEqual(await currentProtectedHashes(), hashesBefore);
   console.log(`Phase46A existing-neural human-prose cognition upgrade PASS: final_polisher_mcp_bytes=${finalPolisherMcpBytes}`);

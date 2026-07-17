@@ -1,21 +1,18 @@
 import { createHash } from "node:crypto";
 
-const defaultChangedDimensions = [
-  "human_diction",
-  "voice",
-  "subtext",
-  "ending_hook",
-];
-
 const canonicalPreservedConstraints = [
   "canon_facts",
-  "character_state",
+  "causal_continuity",
+  "character_identity_and_state",
   "battle_result",
   "timeline",
+  "explicit_user_requirements",
 ];
 
 function sha256(value) {
-  return createHash("sha256").update(String(value ?? "")).digest("hex");
+  return createHash("sha256")
+    .update(String(value ?? ""))
+    .digest("hex");
 }
 
 function textOrEmpty(value) {
@@ -23,7 +20,11 @@ function textOrEmpty(value) {
 }
 
 function objectOrNull(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  return value
+    && typeof value === "object"
+    && !Array.isArray(value)
+      ? value
+      : null;
 }
 
 function unique(values) {
@@ -44,151 +45,84 @@ function baseRevisionReport({
   changedDimensions = [],
   riskFlags = [],
   structuralGate = pass(),
-  canonPreservationPass = pass(),
-  characterVoicePass = pass(),
-  humanDictionPass = pass(),
-  proseTexturePass = pass(),
-  overPolishingGuard = pass(),
 }) {
   return {
     revision_scope: revisionScope,
     changed_dimensions: unique(changedDimensions),
     preserved_constraints: canonicalPreservedConstraints,
     risk_flags: unique(riskFlags),
-    raw_draft_hash: rawDraftText ? sha256(rawDraftText) : "",
-    polished_text_hash: polishedText ? sha256(polishedText) : "",
+    raw_draft_hash:
+      rawDraftText ? sha256(rawDraftText) : "",
+    polished_text_hash:
+      polishedText ? sha256(polishedText) : "",
     structural_gate: structuralGate,
-    canon_preservation_pass: canonPreservationPass,
-    character_voice_pass: characterVoicePass,
-    human_diction_pass: humanDictionPass,
-    prose_texture_pass: proseTexturePass,
-    over_polishing_guard: overPolishingGuard,
+    canon_preservation_pass: pass(),
+    character_voice_pass: pass("not_evaluated"),
+    human_diction_pass: pass("not_evaluated"),
+    prose_texture_pass: pass("not_evaluated"),
+    over_polishing_guard: pass("not_evaluated"),
   };
-}
-
-function detectHumanDictionIssues(text) {
-  const issues = [];
-  const checks = [
-    ["abstract_noun_stack", /(情緒|命運|沉默|壓力|記憶|真相|靈魂|存在|世界).{0,8}(重量|輪廓|裂縫|深處|深淵|蔓延|交織|承載|映照)/u],
-    ["translationese_phrase", /(一種|某種).{0,12}(難以言喻|無法被命名|不可名狀)|被.{1,12}所/u],
-    ["unnatural_collocation", /(情緒|沉默|意義|命運).{0,8}(蔓延|宣告|承載|映照|凝聚)/u],
-    ["over_formal_dialogue", /「[^」]*(我認為|重新評估|進行|有必要|基於目前狀況)[^」]*」/u],
-    ["generic_emotion_wording", /(很不安|很難過|很生氣|感到不安|感受到一種|難以言喻的情緒)/u],
-  ];
-  for (const [flag, pattern] of checks) {
-    if (pattern.test(text)) issues.push(flag);
-  }
-  return unique(issues);
-}
-
-function detectCanonRisks(text) {
-  const risks = [];
-  const checks = [
-    ["canon_fact_locked_by_polish", /(正式設定為|正史確定|從此被確認為|已被正史承認)/u],
-    ["battle_result_changed_by_polish", /(原本輸了|改成勝利|戰鬥結果被改寫|裁定被改變)/u],
-    ["injury_erased_by_polish", /(傷口完全消失|毫髮無傷|傷勢像沒發生過)/u],
-    ["ability_changed_by_polish", /(能力變成|武裝變成|異能武裝改為|新增能力為)/u],
-    ["foreshadowing_over_defined", /(伏筆已經代表|真相就是|這個暗示明確表示)/u],
-  ];
-  for (const [flag, pattern] of checks) {
-    if (pattern.test(text)) risks.push(flag);
-  }
-  return unique(risks);
-}
-
-function detectOverPolishingRisks(rawText, polishedText) {
-  const risks = [];
-  const text = polishedText || rawText;
-  if (/(真正的風暴才剛開始|一切才剛開始|命運的齒輪開始轉動|新的危機即將到來)/u.test(text)) {
-    risks.push("pretty_but_empty_ending");
-  }
-  if (/(他其實是因為|她真正想說的是|這代表他內心|這象徵著)/u.test(text)) {
-    risks.push("subtext_over_explained");
-  }
-  if (rawText && polishedText) {
-    const rawLength = rawText.length;
-    const polishedLength = polishedText.length;
-    if (rawLength > 0 && Math.abs(polishedLength - rawLength) / rawLength > 0.45) {
-      risks.push("revision_changed_too_much_for_line_edit");
-    }
-  }
-  return unique(risks);
 }
 
 function normalizeForcedReasons(signals) {
   const normalized = objectOrNull(signals) ?? {};
-  const reasons = normalized.block_reasons ?? normalized.blockReasons ?? [];
-  if (!Array.isArray(reasons)) return [];
-  return reasons.map((reason) => String(reason ?? "").trim()).filter(Boolean);
+  const reasons =
+    normalized.block_reasons
+    ?? normalized.blockReasons
+    ?? [];
+
+  if (!Array.isArray(reasons)) {
+    return [];
+  }
+
+  return reasons
+    .map((reason) => String(reason ?? "").trim())
+    .filter(Boolean);
 }
 
 function evaluateStructuralGate(rawDraftText, input) {
-  const director = objectOrNull(
-    input.writing_card_director_context ?? input.writingCardDirectorContext,
-  );
   const structuralSignals = objectOrNull(
-    input.structural_signals ?? input.structuralSignals,
+    input.structural_signals
+    ?? input.structuralSignals,
   );
-  const reasons = normalizeForcedReasons(structuralSignals);
+  const reasons =
+    normalizeForcedReasons(structuralSignals);
 
-  const optionalStructuralReasons = new Set([
+  const techniqueOnlyReasons = new Set([
     "missing_chapter_turn",
     "missing_scene_function",
     "missing_ending_event_hook",
+    "ending_hook_is_pretty_sentence_only",
+    "battle_payment_insufficient",
   ]);
 
-  for (let index = reasons.length - 1; index >= 0; index -= 1) {
-    if (optionalStructuralReasons.has(reasons[index])) {
-      reasons.splice(index, 1);
-    }
-  }
-
-  const requiredStructuralSignals = objectOrNull(
-    input.required_structural_signals ?? input.requiredStructuralSignals,
+  const hardReasons = reasons.filter(
+    (reason) => !techniqueOnlyReasons.has(reason),
   );
 
-  if (director && requiredStructuralSignals) {
-    if (
-      requiredStructuralSignals.chapter_turn === true
-      && !textOrEmpty(director.chapter_turn)
-    ) {
-      reasons.push("missing_chapter_turn");
-    }
-
-    if (
-      requiredStructuralSignals.scene_function === true
-      && !textOrEmpty(director.scene_function)
-    ) {
-      reasons.push("missing_scene_function");
-    }
-
-    if (
-      requiredStructuralSignals.ending_event_hook === true
-      && !textOrEmpty(director.ending_event_hook)
-    ) {
-      reasons.push("missing_ending_event_hook");
-    }
-  }
-
   const hasExplicitCanonDeclaration =
-    /(?:這一章|本章|本文|此章|正史|canon)[^。！？\n]{0,40}(?:正式)?(?:設定|定義|宣告)[^。！？\n]{0,40}(?:新增|獲得|覺醒|擁有|改為|成為)[^。！？\n]{0,40}(?:能力|異能武裝|身分|血統|關係|世界規則)/iu.test(
+    /(?:this chapter|this text|canon)[^.!?\n]{0,40}(?:sets?|defines?|declares?)[^.!?\n]{0,40}(?:new|gains?|awakens?|becomes?)[^.!?\n]{0,40}(?:ability|identity|bloodline|relationship|world rule)/iu.test(
       rawDraftText,
     )
-    || /(?:正式設定為|正史設定為|canon\s*[:：])[^。！？\n]{0,80}/iu.test(
+    || /(?:\u9019\u4e00\u7ae0|\u672c\u7ae0|\u672c\u6587|\u6b64\u7ae0|\u6b63\u53f2|canon)[^\u3002\uff01\uff1f\n]{0,40}(?:\u6b63\u5f0f)?(?:\u8a2d\u5b9a|\u5b9a\u7fa9|\u5ba3\u544a)[^\u3002\uff01\uff1f\n]{0,40}(?:\u65b0\u589e|\u7372\u5f97|\u89ba\u9192|\u64c1\u6709|\u6539\u70ba|\u6210\u70ba)[^\u3002\uff01\uff1f\n]{0,40}(?:\u80fd\u529b|\u7570\u80fd\u6b66\u88dd|\u8eab\u5206|\u8840\u7d71|\u95dc\u4fc2|\u4e16\u754c\u898f\u5247)/iu.test(
+      rawDraftText,
+    )
+    || /(?:\u6b63\u5f0f\u8a2d\u5b9a\u70ba|\u6b63\u53f2\u8a2d\u5b9a\u70ba|canon\s*[:\uff1a])[^\u3002\uff01\uff1f\n]{0,80}/iu.test(
       rawDraftText,
     );
 
   if (hasExplicitCanonDeclaration) {
-    reasons.push("unauthorized_new_canon_claim");
+    hardReasons.push("unauthorized_new_canon_claim");
   }
 
-  const uniqueReasons = unique(reasons);
+  const uniqueReasons = unique(hardReasons);
 
   if (uniqueReasons.length > 0) {
     return pass("blocked", {
       blocked: true,
       reasons: uniqueReasons,
-      suggested_return_stage: "writing_card_director",
+      suggested_return_stage:
+        "writing_card_director",
     });
   }
 
@@ -199,52 +133,39 @@ function evaluateStructuralGate(rawDraftText, input) {
   });
 }
 
-function normalizeChinesePunctuation(text) {
+function applyMinimalFormatting(text) {
   return String(text ?? "")
-    .replace(/。{2,}/gu, "。")
-    .replace(/！{2,}/gu, "！")
-    .replace(/？{2,}/gu, "？")
-    .replace(/，{2,}/gu, "，")
-    .replace(/、{2,}/gu, "、")
-    .replace(/；{2,}/gu, "；")
-    .replace(/：{2,}/gu, "：")
-    .replace(/。([」』])/gu, "。$1")
-    .replace(/([。！？])。([」』])/gu, "$1$2");
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .replace(/\u3002{2,}/gu, "\u3002")
+    .replace(/\uff01{2,}/gu, "\uff01")
+    .replace(/\uff1f{2,}/gu, "\uff1f")
+    .replace(/\uff0c{2,}/gu, "\uff0c")
+    .replace(/\u3001{2,}/gu, "\u3001")
+    .replace(/\uff1b{2,}/gu, "\uff1b")
+    .replace(/\uff1a{2,}/gu, "\uff1a")
+    .replace(/\u3002([\u300d\u300f])/gu, "\u3002$1")
+    .replace(/([\u3002\uff01\uff1f])\u3002([\u300d\u300f])/gu, "$1$2")
+    .trim();
 }
 
-function applyHumanDictionPolish(text) {
-  return normalizeChinesePunctuation(
-    String(text ?? "")
-      .replace(/[ \t]+\n/gu, "\n")
-      .replace(/\n{3,}/gu, "\n\n")
-      .trim(),
-  );
-}
-
-function evaluateCharacterVoice(text) {
-  const risks = [];
-  const formalDialogueMatches = text.match(/「[^」]*(我認為|重新評估|進行|有必要|基於目前狀況)[^」]*」/gu) ?? [];
-  if (formalDialogueMatches.length > 0) risks.push("dialogue_voice_too_formal");
-  const explainMachineMatches = text.match(/「[^」]*(也就是說|換句話說|這代表|因此我們可以得知)[^」]*」/gu) ?? [];
-  if (explainMachineMatches.length > 1) risks.push("character_voice_exposition_machine");
-  return pass(risks.length ? "warning" : "passed", {
-    voice_preserved: risks.length === 0,
-    risk_flags: risks,
-  });
-}
-
-function evaluateProseTexture() {
-  return pass("passed", {
-    checked_dimensions: [],
-    risk_flags: [],
-  });
-}
-
-export function runFinalPolisherEditorialBrain(rawInput = {}, options = {}) {
-  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
+export function runFinalPolisherEditorialBrain(
+  rawInput = {},
+  options = {},
+) {
+  if (
+    !rawInput
+    || typeof rawInput !== "object"
+    || Array.isArray(rawInput)
+  ) {
     throw new Error("input must be an object.");
   }
-  const rawDraftText = textOrEmpty(rawInput.raw_draft_text ?? rawInput.rawDraftText);
+
+  const rawDraftText = textOrEmpty(
+    rawInput.raw_draft_text
+    ?? rawInput.rawDraftText,
+  );
+
   if (!rawDraftText) {
     const revisionReport = baseRevisionReport({
       revisionScope: "skipped",
@@ -256,6 +177,7 @@ export function runFinalPolisherEditorialBrain(rawInput = {}, options = {}) {
         reasons: ["raw_draft_missing"],
       }),
     });
+
     return {
       status: "skipped",
       polished_text: "",
@@ -267,7 +189,9 @@ export function runFinalPolisherEditorialBrain(rawInput = {}, options = {}) {
     };
   }
 
-  const structuralGate = evaluateStructuralGate(rawDraftText, rawInput);
+  const structuralGate =
+    evaluateStructuralGate(rawDraftText, rawInput);
+
   if (structuralGate.blocked === true) {
     const revisionReport = baseRevisionReport({
       revisionScope: "structural_block",
@@ -275,83 +199,52 @@ export function runFinalPolisherEditorialBrain(rawInput = {}, options = {}) {
       polishedText: "",
       riskFlags: structuralGate.reasons,
       structuralGate,
-      canonPreservationPass: pass("skipped", { reason: "structural_gate_blocked" }),
-      characterVoicePass: pass("skipped", { reason: "structural_gate_blocked" }),
-      humanDictionPass: pass("skipped", { reason: "structural_gate_blocked" }),
-      proseTexturePass: pass("skipped", { reason: "structural_gate_blocked" }),
-      overPolishingGuard: pass("skipped", { reason: "structural_gate_blocked" }),
     });
+
     return {
       status: "needs_structural_revision",
       polished_text: "",
       revision_report: revisionReport,
       needs_structural_revision: true,
-      suggested_return_stage: "writing_card_director",
+      suggested_return_stage:
+        "writing_card_director",
       writing_pipeline_complete: false,
-      warnings: ["structural_gate_blocked"],
+      warnings: structuralGate.reasons,
     };
   }
 
-  const beforeHumanDictionIssues = detectHumanDictionIssues(rawDraftText);
-  const polishedText = typeof options.editorialAdapter === "function"
-    ? textOrEmpty(options.editorialAdapter(rawDraftText, rawInput)) || rawDraftText
-    : applyHumanDictionPolish(rawDraftText);
-  const afterHumanDictionIssues = detectHumanDictionIssues(polishedText);
-  const canonRisks = unique([
-    ...detectCanonRisks(rawDraftText),
-    ...detectCanonRisks(polishedText),
-  ]);
-  const characterVoicePass = evaluateCharacterVoice(polishedText);
-  const proseTexturePass = evaluateProseTexture(polishedText);
-  const overPolishingRisks = detectOverPolishingRisks(rawDraftText, polishedText);
-  const riskFlags = unique([
-    ...canonRisks,
-    ...afterHumanDictionIssues,
-    ...(characterVoicePass.risk_flags ?? []),
-    ...(proseTexturePass.risk_flags ?? []),
-    ...overPolishingRisks,
-  ]);
-  const changedDimensions = polishedText === rawDraftText
-    ? []
-    : defaultChangedDimensions;
-  const humanDictionPass = pass(
-    beforeHumanDictionIssues.length > afterHumanDictionIssues.length ? "revised" : "passed",
-    {
-      detected_issues_before: beforeHumanDictionIssues,
-      detected_issues_after: afterHumanDictionIssues,
-      revision_policy: "replace_with_contextual_human_phrasing",
-    },
-  );
-  const canonPreservationPass = pass(canonRisks.length ? "warning" : "passed", {
-    canon_preserved: canonRisks.length === 0,
-    risk_flags: canonRisks,
-  });
-  const overPolishingGuard = pass(overPolishingRisks.length ? "warning" : "passed", {
-    risk_flags: overPolishingRisks,
-    preserve_event_function: true,
-    preserve_subtext: !overPolishingRisks.includes("subtext_over_explained"),
-  });
+  const polishedText =
+    typeof options.editorialAdapter === "function"
+      ? textOrEmpty(
+        options.editorialAdapter(
+          rawDraftText,
+          rawInput,
+        ),
+      ) || rawDraftText
+      : applyMinimalFormatting(rawDraftText);
+
+  const changedDimensions =
+    polishedText === rawDraftText
+      ? []
+      : ["formatting"];
+
   const revisionReport = baseRevisionReport({
-    revisionScope: changedDimensions.length ? "line_edit" : "line_edit",
+    revisionScope: "line_edit",
     rawDraftText,
     polishedText,
     changedDimensions,
-    riskFlags,
+    riskFlags: [],
     structuralGate,
-    canonPreservationPass,
-    characterVoicePass,
-    humanDictionPass,
-    proseTexturePass,
-    overPolishingGuard,
   });
+
   return {
     status: "completed",
     polished_text: polishedText,
     revision_report: revisionReport,
     needs_structural_revision: false,
     suggested_return_stage: null,
-    writing_pipeline_complete: riskFlags.length === 0,
-    warnings: riskFlags,
+    writing_pipeline_complete: true,
+    warnings: [],
   };
 }
 

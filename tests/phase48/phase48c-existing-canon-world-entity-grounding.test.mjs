@@ -255,17 +255,16 @@ try {
   );
 
   const critic = session.outputs.get("run_neural_critic");
-  const criticCodes = new Set(
-    critic.risks.map((risk) => risk.code),
-  );
-
-  for (const code of [
-    "canon_world_entity_fact_conflict",
-    "generated_existing_world_entity_ungrounded",
-    "original_world_entity_freedom_violation",
-  ]) {
-    assert(criticCodes.has(code));
-  }
+  assert.equal(critic.evidence_only, true);
+  assert.deepEqual(critic.hard_risk_scope, [
+    "canon",
+    "causality",
+    "identity",
+    "character_state",
+    "timeline",
+    "explicit_user_requirement",
+  ]);
+  assert.equal(Object.hasOwn(critic, "risks"), false);
 
   const director = session.outputs.get("run_writing_card_director");
   assert.equal(
@@ -329,16 +328,17 @@ try {
     )),
   );
 
-  assert(
-    report.findings.some((finding) => (
-      finding.code === "canon_world_entity_fact_conflict"
-    )),
+  assert.equal(
+    report.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
   );
-  assert(
-    report.findings.some((finding) => (
-      finding.code
-      === "generated_existing_world_entity_canon_conflict"
-    )),
+  assert.equal(
+    Object.hasOwn(report, "findings"),
+    false,
+  );
+  assert.equal(
+    report.release_recommendation,
+    "release_as_is",
   );
 
   assert.equal("polished_text" in report, false);

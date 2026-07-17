@@ -197,7 +197,29 @@ try {
   assert.equal(polished.raw_story_sha256, sha256(rawStory));
   assert.equal(polished.capability_output.raw_story_sha256, sha256(rawStory));
   assert.equal(polished.capability_output.result_type, "final_polisher_report");
-  assert.equal(polished.capability_output.editorial_review_required_for_success, true);
+  assert.equal(
+    Object.hasOwn(
+      polished.capability_output,
+      "editorial_review_required_for_success",
+    ),
+    false,
+  );
+  assert.equal(
+    polished.capability_output.editorial_mode,
+    "evidence_triggered_minimal_review",
+  );
+  assert.equal(
+    polished.capability_output.findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(
+    Object.hasOwn(polished.capability_output, "findings"),
+    false,
+  );
+  assert.equal(
+    polished.capability_output.release_recommendation,
+    "release_as_is",
+  );
   assert.equal(polished.capability_output.text_change_required, false);
   assert.equal(polished.capability_output.prose_ownership.final_prose_generator, "ChatGPT");
   assert.equal("polished_text" in polished.capability_output, false);

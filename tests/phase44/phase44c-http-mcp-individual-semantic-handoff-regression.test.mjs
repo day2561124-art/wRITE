@@ -136,9 +136,44 @@ try {
   assert.equal(finalResult.payload.raw_story_sha256, sha256(rawStory));
   assert.equal(finalResult.payload.capability_output.raw_story_sha256, sha256(rawStory));
   assert.equal(finalResult.payload.capability_output.result_type, "final_polisher_report");
-  assert.equal(finalResult.payload.capability_output.editorial_review_required_for_success, true);
-  assert.equal(finalResult.payload.capability_output.text_change_required, false);
-  assert.equal(finalResult.payload.capability_output.prose_ownership.final_prose_generator, "ChatGPT");
+  assert.equal(
+    Object.hasOwn(
+      finalResult.payload.capability_output,
+      "editorial_review_required_for_success",
+    ),
+    false,
+  );
+  assert.equal(
+    finalResult.payload.capability_output.editorial_mode,
+    "evidence_triggered_minimal_review",
+  );
+  assert.equal(
+    finalResult.payload.capability_output
+      .findings_review_mode,
+    "hard_conflicts_and_exact_evidence_only",
+  );
+  assert.equal(
+    Object.hasOwn(
+      finalResult.payload.capability_output,
+      "findings",
+    ),
+    false,
+  );
+  assert.equal(
+    finalResult.payload.capability_output
+      .release_recommendation,
+    "release_as_is",
+  );
+  assert.equal(
+    finalResult.payload.capability_output
+      .text_change_required,
+    false,
+  );
+  assert.equal(
+    finalResult.payload.capability_output
+      .prose_ownership.final_prose_generator,
+    "ChatGPT",
+  );
   assert.equal("polished_text" in finalResult.payload.capability_output, false);
   sizes.final_polisher = finalResult.bytes;
   traceIds.push(finalResult.payload.trace.trace_id);

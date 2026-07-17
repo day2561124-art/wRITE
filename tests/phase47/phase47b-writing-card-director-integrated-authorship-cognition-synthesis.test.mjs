@@ -305,27 +305,31 @@ try {
   assert(director.capability_output.source_cognition_manifest.every((source) => source.consumption_status === "verified_and_consumed"));
   const directorText = JSON.stringify(director.capability_output);
   for (const phrase of [
-    "semantic_deduplication",
-    "authority_arbitration",
-    "conflict_arbitration",
-    "attention_compression",
-    "scene_constraint_reconstruction",
-    "Canon hard facts and Canon DB",
-    "active_engine P0 hard constraints",
-    "established causal continuity",
-    "low-confidence Writing Card suggestions",
-    "Unknown is a valid author conclusion",
-    "Reject or suppress unsupported",
-    "without increasing prose weight",
-    "Module boundaries should dissolve before prose generation",
-    "Write the people first",
-    "natural Traditional Chinese",
-    "Do not seek a theme",
-    "opt-in cognitive methods",
+    "same_author_cognition_synthesis",
+    "Canon",
+    "causal continuity",
+    "character identity and state",
+    "timeline",
+    "explicit user requirements",
+    "do not convert diagnostics into prose requirements",
+    "Canon absence does not prohibit",
     "ChatGPT",
   ]) assert.match(directorText, new RegExp(phrase, "iu"));
-  assert.match(directorText, /Do not expose private chain-of-thought/iu);
-  assert.doesNotMatch(directorText, /show (?:your|the) (?:private )?chain-of-thought|output (?:your )?reasoning transcript/iu);
+
+  for (const removedPrompt of [
+    "scene_constraint_reconstruction",
+    "Write the people first",
+    "Do not seek a theme",
+    "available_technique_families",
+    "director_notes",
+    "sensory_anchors",
+    "subtext_targets",
+    "ending_event_hook",
+  ]) assert.doesNotMatch(directorText, new RegExp(removedPrompt, "iu"));
+  assert.doesNotMatch(
+    directorText,
+    /private chain-of-thought|reasoning transcript|integration report/iu,
+  );
   for (const field of ["story_body", "polished_text", "chatgpt_final_output", "final_candidate_text"]) {
     assert.equal(Object.hasOwn(director.capability_output, field), false);
   }
