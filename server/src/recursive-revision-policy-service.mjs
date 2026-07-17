@@ -106,7 +106,7 @@ function classifyRevisionType(input) {
     ])
     || includesAny(riskFlags, ["pretty_but_empty_ending"])
   ) {
-    return "ending_hook_rewrite";
+    return "ending_cleanup";
   }
 
   if (
@@ -134,7 +134,7 @@ function returnStageFor(revisionType, suggestedReturnStage) {
     foreshadowing_payoff_repair: "foreshadowing_payoff_repair",
     conflict_reframe: "dramatic_conflict_manager",
     structural_scene_rewrite: "scene_planner",
-    ending_hook_rewrite: "raw_generation",
+    ending_cleanup: "raw_generation",
     dialogue_rewrite: "raw_generation",
     style_polish_only: "final_polisher",
     none: "final_polisher",
@@ -183,7 +183,7 @@ function targetsFor(revisionType, critique, repairPlanner, readerResponseRevisio
     );
   }
 
-  if (revisionType === "ending_hook_rewrite") {
+  if (revisionType === "ending_cleanup") {
     base.push(
       "replace pretty ending with event hook",
       "make the last beat change the situation",

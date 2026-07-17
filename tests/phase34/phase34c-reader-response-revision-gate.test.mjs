@@ -108,7 +108,7 @@ assert.equal(weakGate.phase, "34C");
 assert.equal(weakGate.version, readerResponseRevisionGateVersion);
 assert.equal(weakGate.status, "revision_required");
 assert.equal(weakGate.revision_required, true);
-assert(["dialogue_rewrite", "structural_scene_rewrite", "ending_hook_rewrite", "conflict_reframe"].includes(weakGate.revision_type));
+assert(["dialogue_rewrite", "structural_scene_rewrite", "ending_cleanup", "conflict_reframe"].includes(weakGate.revision_type));
 assert.equal(typeof weakGate.return_stage, "string");
 assert(weakGate.rewrite_targets.length > 0);
 assert(weakGate.stop_conditions.includes("reader_response_revision_gate_status_no_revision_needed"));

@@ -36,28 +36,9 @@ export function buildWritingCardDirectorContext(input = {}) {
   const counts = Object.fromEntries(Object.entries(keywords).map(([k, v]) => [k, countMatches(v)]));
   const maxKey = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "daily";
 
-  const twelve_core_judgments = [
-    "canon_judgment",
-    "chapter_promise_judgment",
-    "scene_function_judgment",
-    "ensemble_lens_judgment",
-    "character_desire_judgment",
-    "conflict_pressure_judgment",
-    "creative_boldness_judgment",
-    "world_rule_pressure_judgment",
-    "dialogue_subtext_judgment",
-    "reader_immersion_judgment",
-    "battle_selection_judgment",
-    "revision_judgment",
-  ];
+  const twelve_core_judgments = [];
 
-  const archetype_engines = [
-    "Araki SBR Character Engine",
-    "Arakawa Grounded Ensemble Engine",
-    "Togashi Rule-Game Engine",
-    "Oda Longline-Payoff Engine",
-    "Isayama Reversal Engine",
-  ];
+  const archetype_engines = [];
 
   const scene_engine_rules = {
     battle: {
@@ -80,13 +61,7 @@ export function buildWritingCardDirectorContext(input = {}) {
     combined_text_sample: combinedText.slice(0, 400),
     counts,
     predominant_tone: maxKey,
-    selected_archetype: (() => {
-      if (maxKey === "battle") return "Togashi Rule-Game Engine";
-      if (maxKey === "romance") return "Araki SBR Character Engine";
-      if (maxKey === "longline") return "Oda Longline-Payoff Engine";
-      if (maxKey === "world") return "Arakawa Grounded Ensemble Engine";
-      return "Arakawa Grounded Ensemble Engine";
-    })(),
+    selected_archetype: null,
   };
 
   // Simple chapter anchor summary extraction
@@ -129,77 +104,14 @@ export function buildWritingCardDirectorContext(input = {}) {
       guard_severity,
     },
     // Narrative craft rubric (Phase 22Q additions)
-    chapter_turn: (function decideChapterTurn(){
-      if (locked_result) return locked_result;
-      if ((counts.longline ?? 0) > 0) return "Set up a longline payoff or reveal a seeded clue.";
-      if ((counts.battle ?? 0) > 0) return "Introduce a new combat constraint or escalation.";
-      if ((counts.romance ?? 0) > 0) return "Reveal a personal stake that forces a choice.";
-      return "Introduce a new restriction, choice, or incoming pressure that forces action.";
-    })(),
-    scene_function: (function decideSceneFunction(){
-      if ((counts.battle ?? 0) > 0) return "推進";
-      if ((counts.longline ?? 0) > 0) return "轉折";
-      if ((counts.world ?? 0) > 0) return "壓力累積";
-      return "角色選擇";
-    })(),
-    character_pressure_map: (function buildPressureMap(){
-      const map = {};
-      const mains = required_core_characters.length ? required_core_characters : ["主要角色"];
-      for (const name of mains) {
-        const pressure = counts.battle > 0 ? "面臨戰鬥/規則限制的直接壓力" : "面臨選擇或關係張力";
-        const anchors = [
-          "動作",
-          "身體反應",
-          "視線",
-          "沉默",
-          "物件",
-          "傷勢殘留",
-          "終端提示",
-          "場地細節",
-        ];
-        map[name] = {
-          pressure,
-          show_dont_tell_anchor: anchors[Math.floor(Math.random() * anchors.length)],
-          forbidden_shortcut: "禁止用分析或總結句代替具體感官/行動呈現",
-        };
-      }
-      return map;
-    })(),
-    sensory_anchors: (function buildSensory(){
-      const anchors = [];
-      // prefer concrete, non-medical sensory details
-      anchors.push("燈光：走廊的冷白燈偏黃，影子拉長");
-      anchors.push("氣味：止血藥布的藥味與汗水混合在衣袖上");
-      anchors.push("身體：指尖往內扣，握拳時手背發疼");
-      return anchors;
-    })(),
-    subtext_targets: (function buildSubtext(){
-      const subs = [];
-      if (required_core_characters.includes("朝日奈千夜")) {
-        subs.push("朝日奈千夜：對話表面在討論策略，潛台詞在掩飾對某人失望與保護欲。");
-      }
-      subs.push("對話表面：任務/資訊；底下：關係負擔、未說出的恐懼或選擇成本。");
-      return subs;
-    })(),
-    anti_patterns: [
-      "禁止抽象總結取代事件",
-      "禁止漂亮章尾沒有具體事件托住",
-      "禁止醫療紀錄式傷勢堆列",
-      "禁止角色用分析報告口吻講話",
-      "禁止只把事情寫清楚但沒有角色壓力",
-      "禁止把賽後沉澱寫成沒有新推進的尾聲",
-    ],
-    ending_event_hook: (function buildEndingHook(){
-      if (locked_result) return `章尾以裁定宣告或中止作為終端提示：${locked_result}`;
-      return "章尾用具體事件或通知收束（例如：場務廣播、候場名單更新、角色突發動作）。";
-    })(),
-    revision_priority: [
-      "先補章節變局",
-      "再補角色壓力",
-      "再補潛台詞",
-      "再補感官錨點",
-      "最後修句子",
-    ],
+    chapter_turn: null,
+    scene_function: null,
+    character_pressure_map: {},
+    sensory_anchors: [],
+    subtext_targets: [],
+    anti_patterns: [],
+    ending_event_hook: null,
+    revision_priority: [],
   };
 }
 

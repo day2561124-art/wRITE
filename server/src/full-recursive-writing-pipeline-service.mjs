@@ -410,7 +410,9 @@ function buildRevisionPlan(critique, recursiveRevisionPolicy = null) {
     fix_structural_reasons: critique.structural_reasons,
     strengthen_scene_function: critique.missing_scene_function,
     add_concrete_action_or_cost: critique.missing_concrete_action_or_cost,
-    strengthen_ending_event_hook: critique.weak_ending_hook || critique.pretty_but_empty_ending,
+    strengthen_ending_event_hook: false,
+    remove_pretty_or_forced_ending:
+      critique.weak_ending_hook || critique.pretty_but_empty_ending,
     keep_dialogue_natural: true,
     avoid_administrative_prose: true,
     recursive_revision_policy: recursiveRevisionPolicy,

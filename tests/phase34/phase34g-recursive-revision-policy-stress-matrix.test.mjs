@@ -213,7 +213,7 @@ const stressCases = [
       summary: { hook_strength_score: 35 },
     },
     expectedTrigger: "ending_hook_weak",
-    expectedRevisionType: "ending_hook_rewrite",
+    expectedRevisionType: "ending_cleanup",
     expectedReturnStage: "raw_generation",
     expectedTargetIncludes: "replace soft closing with a concrete unanswered pressure",
   },

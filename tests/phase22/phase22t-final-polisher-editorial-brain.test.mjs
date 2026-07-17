@@ -67,8 +67,11 @@ async function main() {
     assert.equal(blocked.needs_structural_revision, true);
     assert.equal(blocked.suggested_return_stage, "writing_card_director");
     assert.equal(blocked.polished_text, "");
-    assert(blocked.revision_report.risk_flags.includes("missing_chapter_turn"));
-    assert(blocked.revision_report.risk_flags.includes("missing_ending_event_hook"));
+    assert(!blocked.revision_report.risk_flags.includes("missing_chapter_turn"));
+    assert(!blocked.revision_report.risk_flags.includes("missing_scene_function"));
+    assert(!blocked.revision_report.risk_flags.includes("missing_ending_event_hook"));
+    assert(blocked.revision_report.risk_flags.includes("ending_hook_is_pretty_sentence_only"));
+    assert(blocked.revision_report.risk_flags.includes("battle_payment_insufficient"));
 
     const rawDraft = [
       "# Candidate",

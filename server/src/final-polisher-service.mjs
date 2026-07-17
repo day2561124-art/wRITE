@@ -6,11 +6,9 @@ export function runFinalPolisher(input = {}) {
     status: "skipped",
     scope: "candidate_text_only",
     polish_goals: [
-      "reduce_abstract_summary",
-      "increase_sensory_weight",
-      "strengthen_subtext",
-      "vary_sentence_rhythm",
-      "replace_pretty_ending_with_event_hook",
+      "preserve_canon_and_causality",
+      "remove_clear_repetition",
+      "smooth_material_diction_friction",
     ],
     blocked_changes: [
       "canon_fact_change",

@@ -163,7 +163,7 @@ assertPolicy({
     risk_flags: ["pretty_but_empty_ending"],
     weak_ending_hook: true,
   },
-}, "ending_hook_rewrite", "raw_generation");
+}, "ending_cleanup", "raw_generation");
 
 assertPolicy({
   critique: {

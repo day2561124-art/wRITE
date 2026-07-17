@@ -130,10 +130,45 @@ function evaluateStructuralGate(rawDraftText, input) {
     input.structural_signals ?? input.structuralSignals,
   );
   const reasons = normalizeForcedReasons(structuralSignals);
-  if (director) {
-    if (!textOrEmpty(director.chapter_turn)) reasons.push("missing_chapter_turn");
-    if (!textOrEmpty(director.scene_function)) reasons.push("missing_scene_function");
-    if (!textOrEmpty(director.ending_event_hook)) reasons.push("missing_ending_event_hook");
+
+  const optionalStructuralReasons = new Set([
+    "missing_chapter_turn",
+    "missing_scene_function",
+    "missing_ending_event_hook",
+  ]);
+
+  for (let index = reasons.length - 1; index >= 0; index -= 1) {
+    if (optionalStructuralReasons.has(reasons[index])) {
+      reasons.splice(index, 1);
+    }
+  }
+
+  const requiredStructuralSignals = objectOrNull(
+    input.required_structural_signals
+      ?? input.requiredStructuralSignals,
+  );
+
+  if (director && requiredStructuralSignals) {
+    if (
+      requiredStructuralSignals.chapter_turn === true
+      && !textOrEmpty(director.chapter_turn)
+    ) {
+      reasons.push("missing_chapter_turn");
+    }
+
+    if (
+      requiredStructuralSignals.scene_function === true
+      && !textOrEmpty(director.scene_function)
+    ) {
+      reasons.push("missing_scene_function");
+    }
+
+    if (
+      requiredStructuralSignals.ending_event_hook === true
+      && !textOrEmpty(director.ending_event_hook)
+    ) {
+      reasons.push("missing_ending_event_hook");
+    }
   }
   const ending = rawDraftText.slice(Math.max(0, rawDraftText.length - 600));
   if (/(真正的風暴才剛開始|新的危機即將到來|一切才剛開始)[。！!？?\s]*$/u.test(ending)) {
@@ -208,19 +243,9 @@ function evaluateCharacterVoice(text) {
 
 function evaluateProseTexture(text) {
   const risks = [];
-  const concreteAnchors = text.match(/(燈|門|桌|終端|螢幕|地板|走廊|風|雨|血|手|眼|咖啡|水痕|影子)/gu) ?? [];
-  if (text.length > 120 && concreteAnchors.length === 0) risks.push("scene_lacks_concrete_objects");
   if (/(很不安|很難過|很生氣|非常痛苦)/u.test(text)) risks.push("emotion_over_named");
   return pass(risks.length ? "warning" : "passed", {
-    checked_dimensions: [
-      "concrete_detail",
-      "sentence_rhythm",
-      "paragraph_breath",
-      "scene_object_presence",
-      "body_anchor",
-      "subtext",
-      "ending_hook_strength",
-    ],
+    checked_dimensions: ["sentence_rhythm", "paragraph_breath"],
     risk_flags: risks,
   });
 }

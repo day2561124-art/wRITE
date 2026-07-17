@@ -12,7 +12,7 @@ async function main() {
   assert.equal(ctx.context_kind, "writing_card_director_context");
   assert.equal(ctx.basis.writing_card_version, "v3.0");
   assert.equal(ctx.fusion_mode, "mature_creator_fused_into_writing_card");
-  assert(Array.isArray(ctx.twelve_core_judgments) && ctx.twelve_core_judgments.length === 12);
+  assert(Array.isArray(ctx.twelve_core_judgments) && ctx.twelve_core_judgments.length === 0);
   console.log("Writing card director service test passed.");
 }
 

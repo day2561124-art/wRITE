@@ -150,7 +150,7 @@ function buildTriggers(readerResponse, metrics, softAcceptable) {
     triggers.push(trigger(
       "ending_hook_weak",
       metrics.hookStrengthScore < 45 ? 88 : 76,
-      "ending_hook_rewrite",
+      "ending_cleanup",
       "raw_generation",
       "Ending hook is not strong enough to carry continuation desire.",
       [

@@ -158,7 +158,8 @@ try {
       revisionPayloads.push(payload);
       assert.equal(payload.foreshadowing_causal_graph.used, true);
       assert.equal(payload.foreshadowing_causal_graph.provider_guidance.must_not_do.includes("Do not mark debts as paid automatically."), true);
-      assert.equal(payload.revision_plan.strengthen_ending_event_hook, true);
+      assert.equal(payload.revision_plan.strengthen_ending_event_hook, false);
+      assert.equal(payload.revision_plan.remove_pretty_or_forced_ending, true);
       return { text: finalText, provider_trace_id: "phase27a-revision" };
     },
     finalPolisherAdapter,
