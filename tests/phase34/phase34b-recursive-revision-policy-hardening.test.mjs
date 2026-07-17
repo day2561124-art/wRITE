@@ -244,9 +244,12 @@ try {
     capturedRevisionPayload.revision_plan.revision_type,
     capturedPolicy.revision_type,
   );
-  assert.deepEqual(
+    assert.deepEqual(
     capturedRevisionPayload.revision_plan.rewrite_targets,
-    capturedPolicy.rewrite_targets,
+    [
+      "missing_scene_function",
+      "battle_payment_insufficient",
+    ],
   );
   assert(revised.recursive_revision.rounds_attempted >= 1);
   assert(revised.recursive_revision.rounds.length >= 1);
@@ -256,7 +259,13 @@ try {
     "recursive_revision_policy_v1",
   );
   assert.equal(revised.recursive_revision.rounds[0].revision_plan.revision_type, revised.recursive_revision.rounds[0].recursive_revision_policy.revision_type);
-  assert.deepEqual(revised.recursive_revision.rounds[0].revision_plan.rewrite_targets, revised.recursive_revision.rounds[0].recursive_revision_policy.rewrite_targets);
+  assert.deepEqual(
+    revised.recursive_revision.rounds[0].revision_plan.rewrite_targets,
+    [
+      "missing_scene_function",
+      "battle_payment_insufficient",
+    ],
+  );
   assert.equal(revised.candidate_created, false);
   assert.equal(revised.active_engine_update_allowed, false);
   assert.equal(revised.canon_update_allowed, false);

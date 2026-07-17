@@ -151,7 +151,7 @@ try {
         payload.dramatic_conflict_manager.one_chapter_one_change_contract.chapter_must_change,
         true,
       );
-      assert.equal(payload.revision_plan.strengthen_scene_function, true);
+      assert.equal(payload.revision_plan.strengthen_scene_function, false);
       return { text: finalText, provider_trace_id: "phase26a-revision" };
     },
     finalPolisherAdapter,

@@ -82,9 +82,8 @@ await withTempRoot(async (tempRoot) => {
   assert.equal(result.raw_generation.status, "raw_draft_received");
   assert.equal(result.post_generation.status, "completed");
   assert.equal(result.candidate_output.ready, true);
-  assert(result.candidate_output.final_candidate_text.includes("我胸口悶了一下"));
-  assert(result.candidate_output.final_candidate_text.includes("先別急著定案。這事不對。"));
-  assert(!result.candidate_output.final_candidate_text.includes("難以言喻的壓迫感"));
+  assert(result.candidate_output.final_candidate_text.includes("難以言喻的壓迫感"));
+  assert(!result.candidate_output.final_candidate_text.includes("胸口悶了一下"));
   assert(!/[。！？]{2,}/u.test(result.candidate_output.final_candidate_text));
   assert.equal(result.candidate_output.canon_status, "candidate_only");
   assert.equal(result.candidate_output.active_engine_update_allowed, false);
@@ -105,11 +104,23 @@ await withTempRoot(async (tempRoot) => {
     raw_draft_text: "這一章正式設定為千夜新增能力為絕對支配。故事結束。",
   }, contextOptions(tempRoot));
 
-  assert.equal(blocked.pipeline_stage, "structural_revision_required");
+  assert.equal(
+    blocked.pipeline_stage,
+    "structural_revision_required",
+  );
   assert.equal(blocked.candidate_output.ready, false);
-  assert.equal(blocked.post_generation.needs_structural_revision, true);
-  assert.equal(blocked.post_generation.suggested_return_stage, "writing_card_director");
-  assert.equal(blocked.orchestration_report.writing_pipeline_complete, false);
+  assert.equal(
+    blocked.post_generation.needs_structural_revision,
+    true,
+  );
+  assert.equal(
+    blocked.post_generation.suggested_return_stage,
+    "writing_card_director",
+  );
+  assert.equal(
+    blocked.orchestration_report.writing_pipeline_complete,
+    false,
+  );
 });
 
 console.log("Phase22U full neural writing orchestrator tests passed.");

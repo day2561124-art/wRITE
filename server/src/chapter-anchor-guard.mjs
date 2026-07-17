@@ -76,6 +76,34 @@ export function buildChapterAnchorFromBundle(bundle = {}) {
   };
 }
 
+function escapeEntityMentionRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsEntityMention(candidateText, name) {
+  const source = String(candidateText ?? "");
+  const token = String(name ?? "").trim();
+
+  if (!token) return false;
+
+  const codePoints = [...token];
+
+  if (codePoints.length > 1) {
+    return source.includes(token);
+  }
+
+  const escaped = escapeEntityMentionRegExp(token);
+  const leftBoundary =
+    "(?:^|[\\s，。！？；：、…「」『』（）()【】《》〈〉—–-])";
+  const rightEvidence =
+    "(?=$|[\\s，。！？；：、…「」『』（）()【】《》〈〉—–-]|說|問|答|道|喊|叫|看|望|盯|走|來|去|笑|哭|點|搖|抬|伸|握|放|站|坐|轉|停|退|靠|沉默|皺眉|垂眼|沒有|不|也|卻|便|才|已|正|仍)";
+
+  return new RegExp(
+    `${leftBoundary}${escaped}${rightEvidence}`,
+    "u",
+  ).test(source);
+}
+
 export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") {
   const report = [];
   const anchor = bundle.content?.chapter_anchor ?? {};
@@ -86,14 +114,14 @@ export function evaluateCandidateAgainstAnchor(bundle = {}, candidateText = "") 
 
   // P0_WRONG_CORE_CAST: main POV lacks required core characters
   // Enforce only when anchor confidence is high (i.e., at least two core names were deterministically found).
-  const hasRequired = required.every((name) => candidateText.includes(name));
+  const hasRequired = required.every((name) => containsEntityMention(candidateText, name));
   if (!hasRequired && required.length > 0 && anchorConfidence === "high") {
     report.push({ code: "P0_WRONG_CORE_CAST", message: "Missing required core characters in candidate." });
   }
 
   // P0_FORBIDDEN_CHARACTER: any forbidden appears
   for (const name of forbidden) {
-    if (candidateText.includes(name)) {
+    if (containsEntityMention(candidateText, name)) {
       report.push({ code: "P0_FORBIDDEN_CHARACTER", message: `Forbidden character present: ${name}` });
     }
   }

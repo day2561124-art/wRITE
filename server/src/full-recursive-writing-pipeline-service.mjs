@@ -400,28 +400,206 @@ function buildCritique(polisher) {
   };
 }
 
-function buildRevisionPlan(critique, recursiveRevisionPolicy = null) {
+export function buildRevisionPlan(
+  critique = {},
+  recursiveRevisionPolicy = null,
+) {
+  const structuralReasons = Array.isArray(
+    critique.structural_reasons,
+  )
+    ? [
+        ...new Set(
+          critique.structural_reasons
+            .filter(
+              (item) =>
+                typeof item === "string"
+                && item.trim(),
+            )
+            .map((item) => item.trim()),
+        ),
+      ]
+    : [];
+
+  const hasExplicitCorrection =
+    structuralReasons.length > 0;
+
+  const policy = object(recursiveRevisionPolicy);
+
+  const safetyConstraintPattern =
+    /canon|continuity|timeline|character[_ -]?state|battle[_ -]?result|candidate|active[_ -]?engine|compressed[_ -]?rules|approval|adoption|settlement|foreshadow|causal|payoff|debt/iu;
+
+  const filterSafetyConstraints = (value) => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        value
+          .filter(
+            (item) =>
+              typeof item === "string"
+              && safetyConstraintPattern.test(item),
+          )
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
+  };
+
+  const preserveConstraints = filterSafetyConstraints(
+    policy.preserve_constraints,
+  );
+
+  const stopConditions = filterSafetyConstraints(
+    policy.stop_conditions,
+  );
+
+  const revisionType = hasExplicitCorrection
+    ? (
+        typeof policy.revision_type === "string"
+        && policy.revision_type.trim()
+          ? policy.revision_type.trim()
+          : "targeted_correction"
+      )
+    : null;
+
+  const returnStage = hasExplicitCorrection
+    ? (
+        typeof policy.return_stage === "string"
+        && policy.return_stage.trim()
+          ? policy.return_stage.trim()
+          : critique.suggested_return_stage ?? null
+      )
+    : null;
+
+  const escalationReason =
+    hasExplicitCorrection
+    && typeof policy.escalation_reason === "string"
+    && policy.escalation_reason.trim()
+      ? policy.escalation_reason.trim()
+      : null;
+
+  const policyVersion =
+    typeof policy.version === "string"
+    && policy.version.trim()
+      ? policy.version.trim()
+      : (
+          typeof policy.policy_version === "string"
+          && policy.policy_version.trim()
+            ? policy.policy_version.trim()
+            : null
+        );
+
+  const policyPhase =
+    typeof policy.phase === "string"
+    && policy.phase.trim()
+      ? policy.phase.trim()
+      : null;
+
+  const policyStatus =
+    typeof policy.status === "string"
+    && policy.status.trim()
+      ? policy.status.trim()
+      : null;
+
+  const safetyMetadataKeys = [
+    "used",
+    "read_only",
+    "contract_only",
+    "preview_only",
+    "candidate_only",
+    "no_generation",
+    "no_auto_persist",
+    "no_candidate_save",
+    "no_approval",
+    "no_adoption",
+    "no_canon_update",
+    "no_active_engine_update",
+    "no_compressed_rules_update",
+  ];
+
+  const safetyMetadata = {};
+
+  for (const key of safetyMetadataKeys) {
+    if (typeof policy[key] === "boolean") {
+      safetyMetadata[key] = policy[key];
+    }
+  }
+
+  const policySafetyBoundary = object(
+    policy.safety_boundary,
+  );
+
+  const policyNoMutationSnapshot = object(
+    policy.no_mutation_snapshot,
+  );
+
+  const minimalPolicy = hasExplicitCorrection
+    ? {
+        ...(policyVersion
+          ? {
+              version: policyVersion,
+              policy_version: policyVersion,
+            }
+          : {}),
+        ...(policyPhase
+          ? { phase: policyPhase }
+          : {}),
+        ...(policyStatus
+          ? { status: policyStatus }
+          : {}),
+        ...safetyMetadata,
+        ...(Object.keys(policySafetyBoundary).length > 0
+          ? {
+              safety_boundary: policySafetyBoundary,
+            }
+          : {}),
+        ...(Object.keys(policyNoMutationSnapshot).length > 0
+          ? {
+              no_mutation_snapshot:
+                policyNoMutationSnapshot,
+            }
+          : {}),
+        revision_required: true,
+        revision_type: revisionType,
+        ...(returnStage
+          ? { return_stage: returnStage }
+          : {}),
+        rewrite_targets: structuralReasons,
+        preserve_constraints: preserveConstraints,
+        stop_conditions: stopConditions,
+        ...(escalationReason
+          ? { escalation_reason: escalationReason }
+          : {}),
+      }
+    : null;
+
   return {
     preserve_canon_facts: true,
     preserve_character_state: true,
     preserve_timeline: true,
     preserve_battle_result: true,
     preserve_candidate_only_scope: true,
-    fix_structural_reasons: critique.structural_reasons,
-    strengthen_scene_function: critique.missing_scene_function,
-    add_concrete_action_or_cost: critique.missing_concrete_action_or_cost,
+
+    fix_structural_reasons: structuralReasons,
+
+    strengthen_scene_function: false,
+    add_concrete_action_or_cost: false,
     strengthen_ending_event_hook: false,
-    remove_pretty_or_forced_ending:
-      critique.weak_ending_hook || critique.pretty_but_empty_ending,
-    keep_dialogue_natural: true,
-    avoid_administrative_prose: true,
-    recursive_revision_policy: recursiveRevisionPolicy,
-    revision_type: recursiveRevisionPolicy?.revision_type ?? null,
-    return_stage: recursiveRevisionPolicy?.return_stage ?? critique.suggested_return_stage ?? null,
-    rewrite_targets: recursiveRevisionPolicy?.rewrite_targets ?? [],
-    preserve_constraints: recursiveRevisionPolicy?.preserve_constraints ?? [],
-    stop_conditions: recursiveRevisionPolicy?.stop_conditions ?? [],
-    escalation_reason: recursiveRevisionPolicy?.escalation_reason ?? null,
+    remove_pretty_or_forced_ending: false,
+    keep_dialogue_natural: false,
+    avoid_administrative_prose: false,
+
+    recursive_revision_policy: minimalPolicy,
+    revision_type: revisionType,
+    return_stage: returnStage,
+    rewrite_targets: hasExplicitCorrection
+      ? structuralReasons
+      : [],
+    preserve_constraints: preserveConstraints,
+    stop_conditions: stopConditions,
+    escalation_reason: escalationReason,
   };
 }
 

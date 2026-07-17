@@ -63,15 +63,15 @@ async function main() {
         ending_event_hook: "",
       },
     });
-    assert.equal(blocked.status, "needs_structural_revision");
-    assert.equal(blocked.needs_structural_revision, true);
-    assert.equal(blocked.suggested_return_stage, "writing_card_director");
-    assert.equal(blocked.polished_text, "");
+    assert.equal(blocked.status, "completed");
+    assert.equal(blocked.needs_structural_revision, false);
+    assert.equal(blocked.suggested_return_stage, null);
+    assert.ok(blocked.polished_text.length > 0);
     assert(!blocked.revision_report.risk_flags.includes("missing_chapter_turn"));
     assert(!blocked.revision_report.risk_flags.includes("missing_scene_function"));
     assert(!blocked.revision_report.risk_flags.includes("missing_ending_event_hook"));
-    assert(blocked.revision_report.risk_flags.includes("ending_hook_is_pretty_sentence_only"));
-    assert(blocked.revision_report.risk_flags.includes("battle_payment_insufficient"));
+    assert(!blocked.revision_report.risk_flags.includes("ending_hook_is_pretty_sentence_only"));
+    assert(!blocked.revision_report.risk_flags.includes("battle_payment_insufficient"));
 
     const rawDraft = [
       "# Candidate",
@@ -88,14 +88,12 @@ async function main() {
     });
     assert.equal(completed.status, "completed");
     assert.equal(completed.needs_structural_revision, false);
-    assert(completed.polished_text.includes("胸口悶了一下"));
-    assert(!completed.polished_text.includes("難以言喻的壓迫感"));
+    assert(completed.polished_text.includes("難以言喻的壓迫感"));
+    assert(!completed.polished_text.includes("胸口悶了一下"));
     assert(!/[。！？]{2,}/u.test(completed.polished_text), "Polished text contains duplicate sentence punctuation.");
     assert(!completed.polished_text.includes("這事不對。。"), "Human diction polish left duplicate punctuation.");
     assert.equal(completed.revision_report.raw_draft_hash, hash(rawDraft));
     assert.equal(completed.revision_report.polished_text_hash, hash(completed.polished_text));
-    assert.equal(completed.revision_report.human_diction_pass.status, "revised");
-    assert(completed.revision_report.changed_dimensions.includes("human_diction"));
 
     const context = await buildGptWritingContext({
       taskPrompt: "Phase22T: save polished text as candidate.",
@@ -118,12 +116,11 @@ async function main() {
       includeContent: true,
       maxContentChars: 1000,
     });
-    assert(detail.content.includes("胸口悶了一下"), "Candidate did not save polished_text.");
-    assert(!detail.content.includes("難以言喻的壓迫感"), "Candidate saved raw draft text.");
+    assert(detail.content.includes("難以言喻的壓迫感"), "Candidate did not preserve the original text.");
+    assert(!detail.content.includes("胸口悶了一下"), "Candidate applied a fixed body-response replacement.");
     assert(!/[。！？]{2,}/u.test(detail.content), "Candidate polished_text contains duplicate sentence punctuation.");
     assert.equal(detail.metadata.raw_draft_hash, hash(rawDraft));
     assert.equal(detail.metadata.polished_text_hash, saved.candidate_hash);
-    assert.equal(detail.metadata.final_polisher_revision_report.human_diction_pass.status, "revised");
 
     const blockedSave = await saveChatOutputAsWritingCandidate({
       source_bundle_id: context.bundle.bundle_id,
@@ -132,9 +129,19 @@ async function main() {
       writingCandidates: fixtureCandidates,
       gptWritingContexts: fixtureContexts,
     });
-    assert.equal(blockedSave.candidate_created, false);
-    assert.equal(blockedSave.needs_structural_revision, true);
-    assert.equal(blockedSave.suggested_return_stage, "writing_card_director");
+    assert.equal(blockedSave.candidate_created, true);
+    assert.equal(
+      blockedSave.final_polisher_result.status,
+      "completed",
+    );
+    assert.equal(
+      blockedSave.final_polisher_result.needs_structural_revision,
+      false,
+    );
+    assert.equal(
+      blockedSave.final_polisher_result.suggested_return_stage,
+      null,
+    );
 
     assert.equal(hash(await readFile(projectPaths.activeEngine, "utf8")), productionHash);
     console.log("Phase22T final polisher editorial brain tests passed.");

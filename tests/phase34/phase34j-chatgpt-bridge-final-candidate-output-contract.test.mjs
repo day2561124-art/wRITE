@@ -370,7 +370,11 @@ function assertRevisionPayloads(revisionPayloads, label) {
   assert(payload.revision_plan, `${label}: revision payload plan missing.`);
   assert.equal(payload.reader_response_revision_gate.revision_required, true, `${label}: payload gate revision flag mismatch.`);
   assert.equal(payload.recursive_revision_policy.revision_required, true, `${label}: payload policy revision flag mismatch.`);
-  assert(payload.revision_plan.rewrite_targets.length > 0, `${label}: payload rewrite targets missing.`);
+  assert.deepEqual(
+    payload.revision_plan.rewrite_targets,
+    [],
+    `${label}: minimal revision payload should omit technique-only rewrite targets.`,
+  );
 }
 
 const protectedBefore = new Map();

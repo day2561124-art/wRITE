@@ -149,6 +149,82 @@ function resolveWritingTechniqueSelection(capabilityInput = {}) {
   };
 }
 
+export function compactPromptPayloadValue(value) {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() ? value : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const compacted = value
+      .map((item) => compactPromptPayloadValue(item))
+      .filter((item) => item !== undefined);
+
+    return compacted.length > 0 ? compacted : undefined;
+  }
+
+  if (typeof value === "object") {
+    const compacted = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      const compactedItem = compactPromptPayloadValue(item);
+
+      if (compactedItem !== undefined) {
+        compacted[key] = compactedItem;
+      }
+    }
+
+    return Object.keys(compacted).length > 0
+      ? compacted
+      : undefined;
+  }
+
+  return value;
+}
+
+export function buildMinimalWritingCardPromptContext(value) {
+  const source =
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+      ? value
+      : {};
+
+  return compactPromptPayloadValue({
+    context_kind:
+      source.context_kind
+      ?? "writing_card_director_context",
+    chapter_anchor_summary:
+      source.chapter_anchor_summary,
+    twelve_core_judgments:
+      source.twelve_core_judgments,
+    selected_archetype:
+      source.selected_archetype
+      ?? source.heuristics?.selected_archetype,
+    archetype_engines:
+      source.archetype_engines,
+    chapter_turn:
+      source.chapter_turn,
+    scene_function:
+      source.scene_function,
+    character_pressure_map:
+      source.character_pressure_map,
+    sensory_anchors:
+      source.sensory_anchors,
+    subtext_targets:
+      source.subtext_targets,
+    anti_patterns:
+      source.anti_patterns,
+    ending_event_hook:
+      source.ending_event_hook,
+    revision_priority:
+      source.revision_priority,
+  });
+}
+
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
 }
@@ -964,7 +1040,9 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           non_demonstration: "Never alter a scene merely to demonstrate a learned technique.",
           override_priority: "Character truth, canon, causal continuity, and natural Traditional Chinese override technique usage.",
         },
-        writing_card_context: writingContext.content?.writing_card_director_context ?? null,
+        writing_card_context: buildMinimalWritingCardPromptContext(
+          writingContext.content?.writing_card_director_context,
+        ),
         character_canon_grounding_loaded: characterCanonGrounding.loaded === true,
         character_canon_grounding_count: characterHardFacts.length,
         character_hard_facts: characterHardFacts,

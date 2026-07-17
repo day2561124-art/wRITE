@@ -107,9 +107,8 @@ async function main() {
       maxContentChars: 2000,
     });
 
-    assert(detail.content.includes("我胸口悶了一下"));
-    assert(detail.content.includes("先別急著定案。這事不對。"));
-    assert(!detail.content.includes("難以言喻的壓迫感"));
+    assert(detail.content.includes("難以言喻的壓迫感"));
+    assert(!detail.content.includes("胸口悶了一下"));
     assert(!/[。！？]{2,}/u.test(detail.content));
 
     assert.equal(detail.metadata.full_neural_orchestrator_version, "phase22u-lite-v1");

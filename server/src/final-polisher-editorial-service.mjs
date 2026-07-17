@@ -144,8 +144,7 @@ function evaluateStructuralGate(rawDraftText, input) {
   }
 
   const requiredStructuralSignals = objectOrNull(
-    input.required_structural_signals
-      ?? input.requiredStructuralSignals,
+    input.required_structural_signals ?? input.requiredStructuralSignals,
   );
 
   if (director && requiredStructuralSignals) {
@@ -170,25 +169,21 @@ function evaluateStructuralGate(rawDraftText, input) {
       reasons.push("missing_ending_event_hook");
     }
   }
-  const ending = rawDraftText.slice(Math.max(0, rawDraftText.length - 600));
-  if (/(真正的風暴才剛開始|新的危機即將到來|一切才剛開始)[。！!？?\s]*$/u.test(ending)) {
-    reasons.push("ending_hook_is_pretty_sentence_only");
-  }
-  if (/傷口完全消失|毫髮無傷|傷勢像沒發生過/u.test(rawDraftText)) {
-    reasons.push("character_injury_disappeared");
-  }
-  if (/突然就原諒|立刻釋懷|毫無過程地接受/u.test(rawDraftText)) {
-    reasons.push("emotional_jump_without_process");
-  }
-  if (/正式設定為|正史確定|新增能力為/u.test(rawDraftText)) {
+
+  const hasExplicitCanonDeclaration =
+    /(?:這一章|本章|本文|此章|正史|canon)[^。！？\n]{0,40}(?:正式)?(?:設定|定義|宣告)[^。！？\n]{0,40}(?:新增|獲得|覺醒|擁有|改為|成為)[^。！？\n]{0,40}(?:能力|異能武裝|身分|血統|關係|世界規則)/iu.test(
+      rawDraftText,
+    )
+    || /(?:正式設定為|正史設定為|canon\s*[:：])[^。！？\n]{0,80}/iu.test(
+      rawDraftText,
+    );
+
+  if (hasExplicitCanonDeclaration) {
     reasons.push("unauthorized_new_canon_claim");
   }
-  const hasBattleCue = /(戰鬥|攻擊|防守|武裝|靈力|招式|裁定)/u.test(rawDraftText)
-    || /battle|combat|attack/iu.test(rawDraftText);
-  const hasCostCue = /(痛|血|喘|酸|麻|負荷|代價|震|傷|疲|汗|呼吸)/u.test(rawDraftText);
-  if (hasBattleCue && !hasCostCue) reasons.push("battle_payment_insufficient");
 
   const uniqueReasons = unique(reasons);
+
   if (uniqueReasons.length > 0) {
     return pass("blocked", {
       blocked: true,
@@ -196,6 +191,7 @@ function evaluateStructuralGate(rawDraftText, input) {
       suggested_return_stage: "writing_card_director",
     });
   }
+
   return pass("passed", {
     blocked: false,
     reasons: [],
@@ -217,16 +213,12 @@ function normalizeChinesePunctuation(text) {
 }
 
 function applyHumanDictionPolish(text) {
-  return normalizeChinesePunctuation(text
-    .replaceAll("我感受到一種難以言喻的壓迫感在胸口蔓延", "我胸口悶了一下")
-    .replaceAll("感受到一種難以言喻的壓迫感在胸口蔓延", "胸口悶了一下")
-    .replaceAll("她感到一種無法被命名的情緒在胸口擴散", "她胸口悶了一下，話卡在裡面。")
-    .replaceAll("他感到一種無法被命名的情緒在胸口擴散", "他胸口悶了一下，話卡在裡面。")
-    .replaceAll("我認為我們現在應該重新評估這件事的意義", "先別急著定案。這事不對。")
-    .replaceAll("空氣變得沉重", "冷氣聲忽然變得很清楚")
-    .replace(/[ \t]+\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .trim());
+  return normalizeChinesePunctuation(
+    String(text ?? "")
+      .replace(/[ \t]+\n/gu, "\n")
+      .replace(/\n{3,}/gu, "\n\n")
+      .trim(),
+  );
 }
 
 function evaluateCharacterVoice(text) {
@@ -241,12 +233,10 @@ function evaluateCharacterVoice(text) {
   });
 }
 
-function evaluateProseTexture(text) {
-  const risks = [];
-  if (/(很不安|很難過|很生氣|非常痛苦)/u.test(text)) risks.push("emotion_over_named");
-  return pass(risks.length ? "warning" : "passed", {
-    checked_dimensions: ["sentence_rhythm", "paragraph_breath"],
-    risk_flags: risks,
+function evaluateProseTexture() {
+  return pass("passed", {
+    checked_dimensions: [],
+    risk_flags: [],
   });
 }
 
