@@ -1,4 +1,5 @@
 import "./mcp-stdio-guard.mjs";
+import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -92,8 +93,7 @@ import {
   chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_save_candidate,
   chatgpt_bridge_save_proof_report,
-  chatgpt_bridge_visual_library_ui_import_flow_preview,
-  chatgpt_bridge_save_settlement_report,
+  chatgpt_bridge_visual_library_ui_import_flow_preview
 } from "./mcp-chatgpt-bridge-tools.mjs";
 import {
   approval_queue_bridge_readiness_report,
@@ -2350,7 +2350,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_save_settlement_report",
-    description: "Save a settlement report without creating a pending engine candidate.",
+    description: (String("Save a settlement report without creating a pending engine candidate.") + " Direct pasted-chapter settlement uses the existing fields without changing this tool schema. When the user pastes a complete chapter and explicitly says chapter settlement, first call with adopted_chapter_id=adopted_chapter_00000000-000000-00000000, settlement_context_id=settlement_ctx_00000000-000000-00000000, and prefix settlement_report_text with [[DIRECT_PASTED_CHAPTER_SETTLEMENT_PREPARE]] followed by a newline and the exact chapter. Generate the report from the returned context, then call this same tool with the returned IDs and prefix settlement_report_text with [[DIRECT_PASTED_CHAPTER_SETTLEMENT_FINALIZE]] followed by a newline and the complete report. This creates or reuses the adopted chapter, saves the settlement report, and creates a pending engine candidate; it never activates active_engine.md."),
     risk: "low-risk-write",
     inputSchema: baseSchema({
       adoptedChapterId: { type: "string" },
