@@ -68,6 +68,7 @@ const steps = [
   ["Phase48B generated cast grounding and original entity freedom", ["tests/phase48/phase48b-generated-cast-grounding-original-entity-freedom.test.mjs"]],
   ["Phase48C existing Canon world entity grounding", ["tests/phase48/phase48c-existing-canon-world-entity-grounding.test.mjs"]],
   ["Phase48G minimal neural cognition contracts", ["tests/phase48/phase48g-minimal-neural-cognition-contracts.test.mjs"]],
+  ["Phase48I GPT-owned story-material compatible formal route wiring", ["tests/phase48/phase48i-gpt-owned-story-material-route-wiring.test.mjs"]],
 
   ["Backup export service", ["tests/backup/backup-export-service.test.mjs"]],
   ["Backup export production residue regression", ["tests/backup/backup-export-production-residue-regression.test.mjs"]],

@@ -61,6 +61,13 @@ export const externalBrainPreGenerationCapabilities = Object.freeze([
   "run_writing_card_director",
 ]);
 
+export function shouldEnableStoryMaterialCognition(capabilityName, options = {}) {
+  if (!externalBrainPreGenerationCapabilities.includes(capabilityName)) return false;
+  if (options.story_material_cognition_output === true) return true;
+  if (options.story_material_cognition_output === false) return false;
+  return options.adapter === undefined;
+}
+
 const wrappers = {
   run_scene_planner,
   run_character_simulator,
@@ -1252,6 +1259,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       task_type: "draft_generation",
       source: "chatgpt_owned_external_brain_mcp",
       external_brain_cognition_output: priorAuthorshipCognitionModules.includes(capabilityName.slice(4)),
+      story_material_cognition_output: shouldEnableStoryMaterialCognition(capabilityName, options),
       writing_context_bundle_id: contextBundleId,
       adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
         technique_selection: techniqueSelection,
