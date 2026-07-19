@@ -696,6 +696,7 @@ const steps = [
   ["Phase 49A direct chapter settlement summary contract", ["tests/phase49/phase49a-direct-chapter-settlement-summary-contract.test.mjs"]],
 
   ["Phase 50A external brain context isolation and generation surface", ["tests/phase50/phase50a-context-isolation-generation-surface.test.mjs"]],
+  ["Phase 50B character simulator substantive single-turn cognition", ["tests/phase50/phase50b-character-simulator-single-turn-cognition.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

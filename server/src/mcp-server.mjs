@@ -2088,7 +2088,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_character_simulator",
-    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_character_simulator in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Derive one target character's substantive single-next-turn cognition from current dialogue, scene pressure, character-state evidence, and Canon constraints; keep known separate from guessed, keep refuses_to_admit out of speakable dialogue, return the compact result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
     risk: "low-risk-write",
     inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_character_simulator(args)),

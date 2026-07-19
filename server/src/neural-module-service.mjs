@@ -21,7 +21,7 @@ const moduleSpecs = {
   },
   character_simulator: {
     model_name: "local-character-simulator",
-    model_version: "v1.0.0",
+    model_version: "v1.1.0-phase50b-single-turn",
     result_type: "character_simulation",
   },
   neural_critic: {

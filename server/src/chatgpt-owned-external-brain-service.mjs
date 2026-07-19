@@ -640,8 +640,10 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       }),
       run_character_simulator: {
         ...buildDeterministicCharacterSimulation({
+          taskPrompt,
           writingContext,
           capabilityInput: requestedCapabilityInput,
+          characterHardFacts,
         }),
         ...groundingSurface,
       },

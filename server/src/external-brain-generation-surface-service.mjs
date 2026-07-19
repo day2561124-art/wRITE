@@ -1,3 +1,7 @@
+import {
+  buildCharacterTurnSimulation,
+} from "./character-turn-simulation-service.mjs";
+
 const generationSurfaceVersion = "phase50a-external-brain-generation-surface-v1";
 
 function isObject(value) {
@@ -17,12 +21,23 @@ function compactScalar(value, maxChars = 320) {
   return null;
 }
 
-function compactArray(value, { maxItems = 8, maxChars = 320 } = {}) {
+function compactArray(value, {
+  maxItems = 8,
+  maxChars = 320,
+  maxKeys = 10,
+  nestedMaxItems = 6,
+} = {}) {
   if (!Array.isArray(value)) return [];
   return value
     .slice(0, maxItems)
     .map((item) => {
-      if (isObject(item)) return compactObject(item, { maxKeys: 10, maxItems: 6, maxChars });
+      if (isObject(item)) {
+        return compactObject(item, {
+          maxKeys,
+          maxItems: nestedMaxItems,
+          maxChars,
+        });
+      }
       return compactScalar(item, maxChars);
     })
     .filter((item) => item !== null && item !== undefined && item !== "");
@@ -33,7 +48,12 @@ function compactObject(value, { maxKeys = 12, maxItems = 8, maxChars = 320 } = {
   const output = {};
   for (const [key, item] of Object.entries(value).slice(0, maxKeys)) {
     if (Array.isArray(item)) {
-      const array = compactArray(item, { maxItems, maxChars });
+      const array = compactArray(item, {
+        maxItems,
+        maxChars,
+        maxKeys,
+        nestedMaxItems: maxItems,
+      });
       if (array.length) output[key] = array;
       continue;
     }
@@ -93,6 +113,12 @@ function compactWorldEntityHardFacts(value) {
 }
 
 function compactGenerationField(key, value) {
+  if (key === "generation_card" && isObject(value)) {
+    return compactObject(value, { maxKeys: 16, maxItems: 10, maxChars: 480 });
+  }
+  if (key === "simulation_basis" && isObject(value)) {
+    return compactObject(value, { maxKeys: 14, maxItems: 10, maxChars: 320 });
+  }
   if (key === "character_hard_facts") return compactCharacterHardFacts(value);
   if (key === "world_entity_hard_facts") return compactWorldEntityHardFacts(value);
   if (key === "original_entity_freedom" && isObject(value)) {
@@ -117,7 +143,9 @@ const generationVisibleKeys = Object.freeze({
   ]),
   character_simulator: Object.freeze([
     "result_type",
+    "simulation_version",
     "simulation_status",
+    "turn_scope",
     "character",
     "characters",
     "known",
@@ -128,6 +156,10 @@ const generationVisibleKeys = Object.freeze({
     "speech_ceiling",
     "next_turn_reaction",
     "uncertainty",
+    "knowledge_boundary",
+    "admission_boundary",
+    "resolution_boundary",
+    "simulation_basis",
     "character_canon_grounding_loaded",
     "character_canon_grounding_count",
     "character_hard_facts",
@@ -277,39 +309,6 @@ function focusCharacters(writingContext = {}, capabilityInput = {}) {
   return characters.slice(0, 6);
 }
 
-function listFromMapOrArray(value, character) {
-  if (Array.isArray(value)) return compactArray(value, { maxItems: 8, maxChars: 240 });
-  if (isObject(value) && character && Array.isArray(value[character])) {
-    return compactArray(value[character], { maxItems: 8, maxChars: 240 });
-  }
-  return [];
-}
-
-function scalarFromMapOrValue(value, character, maxChars = 320) {
-  if (typeof value === "string") return compactString(value, maxChars);
-  if (isObject(value) && character) return compactString(value[character], maxChars);
-  return null;
-}
-
-function nextTurnReaction(capabilityInput, character) {
-  const source = isObject(capabilityInput.next_turn_reaction)
-    ? capabilityInput.next_turn_reaction
-    : isObject(capabilityInput.next_turn_reactions) && character
-      ? capabilityInput.next_turn_reactions[character]
-      : {};
-  const output = compactObject({
-    trigger: firstNonEmpty(
-      source?.trigger,
-      capabilityInput.last_utterance,
-      capabilityInput.previous_line,
-    ),
-    impulse: source?.impulse,
-    likely_action: source?.likely_action,
-    speakable_fragment: source?.speakable_fragment,
-  }, { maxKeys: 4, maxItems: 4, maxChars: 240 }) ?? {};
-  return output;
-}
-
 export function buildDeterministicScenePlan({
   taskPrompt = "",
   writingContext = {},
@@ -348,55 +347,17 @@ export function buildDeterministicScenePlan({
 }
 
 export function buildDeterministicCharacterSimulation({
+  taskPrompt = "",
   writingContext = {},
   capabilityInput = {},
+  characterHardFacts = [],
 } = {}) {
-  const characters = focusCharacters(writingContext, capabilityInput);
-  const character = characters[0] ?? null;
-  const known = listFromMapOrArray(capabilityInput.known, character);
-  const guessed = listFromMapOrArray(capabilityInput.guessed, character);
-  const felt = listFromMapOrArray(capabilityInput.felt, character);
-  const refusesToAdmit = listFromMapOrArray(
-    capabilityInput.refuses_to_admit,
-    character,
-  );
-  const reaction = nextTurnReaction(capabilityInput, character);
-  const immediateGoal = scalarFromMapOrValue(
-    capabilityInput.immediate_goal,
-    character,
-  );
-  const speechCeiling = scalarFromMapOrValue(
-    capabilityInput.speech_ceiling,
-    character,
-  );
-  const uncertainty = listFromMapOrArray(
-    capabilityInput.uncertainty ?? capabilityInput.uncertainties,
-    character,
-  );
-  const hasTurnResult = Boolean(
-    character
-    && (reaction.likely_action || reaction.speakable_fragment),
-  );
-  if (!character) uncertainty.push("active character was not supplied for this turn");
-  if (character && !hasTurnResult) {
-    uncertainty.push("next-turn action or speakable fragment was not supplied");
-  }
-  return {
-    result_type: "character_simulation",
-    simulation_status: hasTurnResult
-      ? "character_specific_next_turn_ready"
-      : "insufficient_character_specific_input",
-    character,
-    ...(characters.length > 1 ? { characters } : {}),
-    known,
-    guessed,
-    felt,
-    refuses_to_admit: refusesToAdmit,
-    immediate_goal: immediateGoal,
-    speech_ceiling: speechCeiling,
-    next_turn_reaction: reaction,
-    uncertainty: [...new Set(uncertainty)].slice(0, 8),
-  };
+  return buildCharacterTurnSimulation({
+    taskPrompt,
+    writingContext,
+    capabilityInput,
+    characterHardFacts,
+  });
 }
 
 export function buildDeterministicNeuralCritique({
@@ -490,6 +451,7 @@ export function buildDeterministicWritingCard({
     immediate_pressure: scene.immediate_pressure ?? null,
     character_turn_states: character.character ? [{
       character: character.character,
+      turn_scope: character.turn_scope ?? "single_next_turn_only",
       known: character.known ?? [],
       guessed: character.guessed ?? [],
       felt: character.felt ?? [],
@@ -497,6 +459,9 @@ export function buildDeterministicWritingCard({
       immediate_goal: character.immediate_goal ?? null,
       speech_ceiling: character.speech_ceiling ?? null,
       next_turn_reaction: character.next_turn_reaction ?? {},
+      knowledge_boundary: character.knowledge_boundary ?? null,
+      admission_boundary: character.admission_boundary ?? null,
+      resolution_boundary: character.resolution_boundary ?? null,
       uncertainty: character.uncertainty ?? [],
     }] : [],
     hard_continuity_constraints: sourceArray(
@@ -512,8 +477,8 @@ export function buildDeterministicWritingCard({
     result_type: "writing_card_director_context",
     integration_mode: "same_author_cognition_synthesis",
     generation_card: compactObject(generationCard, {
-      maxKeys: 10,
-      maxItems: 8,
+      maxKeys: 16,
+      maxItems: 10,
       maxChars: 480,
     }),
     ...(selectedTechniqueFamilies.length ? {
