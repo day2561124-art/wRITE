@@ -694,6 +694,8 @@ const steps = [
   ["Phase 42A direct pasted chapter settlement compatibility route", ["tests/phase42/phase42a-direct-pasted-chapter-settlement.test.mjs"]],
 
   ["Phase 49A direct chapter settlement summary contract", ["tests/phase49/phase49a-direct-chapter-settlement-summary-contract.test.mjs"]],
+
+  ["Phase 50A external brain context isolation and generation surface", ["tests/phase50/phase50a-context-isolation-generation-surface.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

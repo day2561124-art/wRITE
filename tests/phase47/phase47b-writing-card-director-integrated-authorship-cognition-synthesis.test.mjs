@@ -301,31 +301,32 @@ try {
   assert.equal(director.ok, true);
   assert.equal(director.capability_output.result_type, "writing_card_director_context");
   assert.equal(director.capability_output.integration_mode, "same_author_cognition_synthesis");
-  assert.deepEqual(director.capability_output.source_cognition_manifest.map((source) => source.module_name), priorAuthorshipCognitionModules);
-  assert(director.capability_output.source_cognition_manifest.every((source) => source.consumption_status === "verified_and_consumed"));
+  assert.equal(director.capability_output.generation_surface_only, true);
+  assert.equal(director.capability_output.control_plane_excluded, true);
+  assert(director.capability_output.generation_card);
+  assert.deepEqual(
+    director.capability_output.source_modules_consumed,
+    priorAuthorshipCognitionModules,
+  );
   const directorText = JSON.stringify(director.capability_output);
-  for (const phrase of [
-    "same_author_cognition_synthesis",
-    "Canon",
-    "causal continuity",
-    "character identity and state",
-    "timeline",
-    "explicit user requirements",
-    "do not convert diagnostics into prose requirements",
-    "Canon absence does not prohibit",
-    "ChatGPT",
-  ]) assert.match(directorText, new RegExp(phrase, "iu"));
-
-  for (const removedPrompt of [
-    "scene_constraint_reconstruction",
-    "Write the people first",
-    "Do not seek a theme",
-    "available_technique_families",
-    "director_notes",
-    "sensory_anchors",
-    "subtext_targets",
-    "ending_event_hook",
-  ]) assert.doesNotMatch(directorText, new RegExp(removedPrompt, "iu"));
+  assert.match(directorText, /same_author_cognition_synthesis/iu);
+  for (const forbiddenControlPlaneField of [
+    "source_cognition_manifest",
+    "grounded_material",
+    "story_material_cognition",
+    "source_authority",
+    "source_file",
+    "output_hash",
+    "trace_id",
+    "manifest",
+    "final_prose_ownership",
+  ]) {
+    assert.equal(
+      Object.hasOwn(director.capability_output, forbiddenControlPlaneField),
+      false,
+      `${forbiddenControlPlaneField} must remain outside the generation surface`,
+    );
+  }
   assert.doesNotMatch(
     directorText,
     /private chain-of-thought|reasoning transcript|integration report/iu,
@@ -333,8 +334,6 @@ try {
   for (const field of ["story_body", "polished_text", "chatgpt_final_output", "final_candidate_text"]) {
     assert.equal(Object.hasOwn(director.capability_output, field), false);
   }
-  assert.equal(director.capability_output.final_prose_ownership.owner, "ChatGPT");
-  assert.equal(director.capability_output.final_prose_ownership.writer_workbench_generates_story_prose, false);
   for (const moduleName of priorAuthorshipCognitionModules) {
     assert.doesNotMatch(directorText, new RegExp(`PHASE47B_EXACT_${moduleName.toUpperCase()}`, "u"));
   }

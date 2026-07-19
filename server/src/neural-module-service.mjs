@@ -9,6 +9,9 @@ import {
   priorAuthorshipCognitionModules,
   serializeCognitionCapabilityOutput,
 } from "./external-brain-cognition-output-service.mjs";
+import {
+  buildExternalBrainGenerationSurface,
+} from "./external-brain-generation-surface-service.mjs";
 
 const moduleSpecs = {
   scene_planner: {
@@ -283,7 +286,10 @@ async function runModule(moduleName, input, options = {}) {
   const modelVersion = options.model_version ?? spec.model_version;
   let status = "skipped";
   let output = null;
+  let persistedOutput = null;
   let outputHash = null;
+  let generationSurfaceHash = null;
+  let generationSurfaceCompacted = false;
   let errorMessage = null;
   let warnings = [];
 
@@ -298,14 +304,26 @@ async function runModule(moduleName, input, options = {}) {
         model_name: modelName,
         model_version: modelVersion,
       });
-      output = attachStoryMaterialCognition(
+      persistedOutput = attachStoryMaterialCognition(
         moduleName,
         input,
         output,
         options,
       );
-      const serializedOutput = outputText(output);
-      outputHash = hashNeuralValue(serializedOutput);
+      const serializedPersistedOutput = outputText(persistedOutput);
+      outputHash = hashNeuralValue(serializedPersistedOutput);
+      if (options.generation_surface_output === true) {
+        output = buildExternalBrainGenerationSurface(
+          moduleName,
+          persistedOutput,
+        );
+        generationSurfaceCompacted =
+          serializeCognitionCapabilityOutput(output)
+          !== serializedPersistedOutput;
+      } else {
+        output = persistedOutput;
+      }
+      generationSurfaceHash = hashNeuralValue(outputText(output));
       status = "success";
     } catch (error) {
       status = "failed";
@@ -338,7 +356,10 @@ async function runModule(moduleName, input, options = {}) {
       source,
     },
     output_summary: {
-      chars: output === null ? 0 : outputText(output).length,
+      chars: persistedOutput === null ? 0 : outputText(persistedOutput).length,
+      generation_surface_chars: output === null ? 0 : outputText(output).length,
+      generation_surface_hash: generationSurfaceHash,
+      generation_surface_compacted: generationSurfaceCompacted,
       result_type: spec.result_type,
     },
   }, agentRunOptions);
@@ -354,10 +375,18 @@ async function runModule(moduleName, input, options = {}) {
       module_name: moduleName,
       result_type: spec.result_type,
       trace,
-      capability_output: output,
+      capability_output: persistedOutput,
     }, agentRunOptions);
   }
-  return { output, trace };
+  return {
+    output,
+    trace,
+    control_plane: {
+      persisted_output_hash: outputHash,
+      generation_surface_hash: generationSurfaceHash,
+      generation_surface_compacted: generationSurfaceCompacted,
+    },
+  };
 }
 
 export function run_scene_planner(input, options) {

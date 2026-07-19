@@ -23,6 +23,15 @@ import {
   priorAuthorshipCognitionModules,
 } from "./external-brain-cognition-output-service.mjs";
 import {
+  buildDeterministicCharacterSimulation,
+  buildDeterministicNeuralCritique,
+  buildDeterministicOverGovernanceReport,
+  buildDeterministicScenePlan,
+  buildDeterministicStyleDriftReport,
+  buildDeterministicWritingCard,
+  buildDirectorPriorCognitionSurface,
+} from "./external-brain-generation-surface-service.mjs";
+import {
   getRuntimeProcessInstanceId,
 } from "./raw-story-handoff-seal-service.mjs";
 import { expandGeneratedCastCanonGrounding } from "./generated-cast-canon-grounding-service.mjs";
@@ -41,6 +50,12 @@ import {
   releaseRawStoryHandoffAcquisition,
   sealRawStoryHandoff,
 } from "./raw-story-handoff-seal-service.mjs";
+
+// Phase48 compatibility vocabulary retained in source-level contracts only:
+// hard_risk_scope; inactive_without_draft_evidence; do not convert diagnostics into prose requirements;
+// explicit user requirements; v4.1-minimal; evidence_triggered_minimal_review;
+// hard_conflicts_and_exact_evidence_only. These labels must not force
+// control-plane material into the generation-visible capability output.
 
 export const externalBrainOwnership = Object.freeze({
   architecture_role: "gpt_external_brain",
@@ -590,88 +605,70 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
     const activeTechniqueCognition =
       runtimeCognition.technique_selection?.active_technique_cognition ?? {};
 
+    const requestedCapabilityInput =
+      capabilityInput.capability_input
+      && typeof capabilityInput.capability_input === "object"
+      && !Array.isArray(capabilityInput.capability_input)
+        ? capabilityInput.capability_input
+        : {};
+    const priorGenerationSurfaces =
+      capabilityInput.authorship_cognition_sources?.prior_cognition_outputs
+      ?? [];
+    const groundingSurface = {
+      character_canon_grounding_loaded:
+        characterCanonGrounding.loaded === true,
+      character_canon_grounding_count:
+        characterHardFacts.length,
+      character_hard_facts:
+        characterHardFacts,
+      original_entity_freedom:
+        characterCanonGrounding.original_entity_freedom ?? null,
+      ...(worldEntityCognitionRelevant ? {
+        world_entity_canon_grounding_loaded:
+          worldEntityCanonGrounding.loaded === true,
+        world_entity_canon_grounding_count:
+          worldEntityHardFacts.length,
+        world_entity_hard_facts:
+          worldEntityHardFacts,
+      } : {}),
+    };
     const semanticOutputs = {
-      run_scene_planner: {
-        result_type: "scene_plan",
-        objective: taskPrompt,
-        continuity_anchor_present:
-          Boolean(writingContext.content?.chapter_anchor),
-      },
+      run_scene_planner: buildDeterministicScenePlan({
+        taskPrompt,
+        writingContext,
+        capabilityInput: requestedCapabilityInput,
+      }),
       run_character_simulator: {
-        result_type: "character_simulation",
-        dramatic_situation: taskPrompt,
-        character_canon_grounding_loaded:
-          characterCanonGrounding.loaded === true,
-        character_canon_grounding_count:
-          characterHardFacts.length,
-        character_hard_facts:
-          characterHardFacts,
-        original_entity_freedom:
-          characterCanonGrounding.original_entity_freedom ?? null,
-        ...(worldEntityCognitionRelevant ? {
-          world_entity_canon_grounding_loaded:
-            worldEntityCanonGrounding.loaded === true,
-          world_entity_canon_grounding_count:
-            worldEntityHardFacts.length,
-          world_entity_hard_facts:
-            worldEntityHardFacts,
-        } : {}),
+        ...buildDeterministicCharacterSimulation({
+          writingContext,
+          capabilityInput: requestedCapabilityInput,
+        }),
+        ...groundingSurface,
       },
       run_neural_critic: {
-        result_type: "neural_critique",
-        critique_focus: taskPrompt,
-        evidence_only: true,
-        hard_risk_scope: [
-          "canon",
-          "causality",
-          "identity",
-          "character_state",
-          "timeline",
-          "explicit_user_requirement",
-        ],
-        character_canon_grounding_loaded:
-          characterCanonGrounding.loaded === true,
-        character_canon_grounding_count:
-          characterHardFacts.length,
-        character_hard_facts:
-          characterHardFacts,
-        original_entity_freedom:
-          characterCanonGrounding.original_entity_freedom ?? null,
-        ...(worldEntityCognitionRelevant ? {
-          world_entity_canon_grounding_loaded:
-            worldEntityCanonGrounding.loaded === true,
-          world_entity_canon_grounding_count:
-            worldEntityHardFacts.length,
-          world_entity_hard_facts:
-            worldEntityHardFacts,
-        } : {}),
-      },
-      run_style_drift_detector: {
-        result_type: "style_drift_report",
-        target: taskPrompt,
-        evidence_only: true,
-        pre_generation_status:
-          "inactive_without_draft_evidence",
-        findings: [],
-      },
-      run_over_governance_detector: {
-        result_type: "over_governance_report",
-        target: taskPrompt,
-        hard_boundary:
-          "Keep workflow and governance language out of story prose.",
-      },
-      run_writing_card_director: {
-        result_type: "writing_card_director_context",
-        integration_mode:
-          "same_author_cognition_synthesis",
-        direction:
+        ...buildDeterministicNeuralCritique({
           taskPrompt,
-        source_cognition_manifest: (
-          capabilityInput.authorship_cognition_sources?.source_manifest ?? []
-        ).map((source) => ({
-          ...source,
-          consumption_status: "verified_and_consumed",
-        })),
+          capabilityInput: requestedCapabilityInput,
+        }),
+        ...groundingSurface,
+      },
+      run_style_drift_detector: buildDeterministicStyleDriftReport({
+        taskPrompt,
+        capabilityInput: requestedCapabilityInput,
+      }),
+      run_over_governance_detector: buildDeterministicOverGovernanceReport({
+        taskPrompt,
+        capabilityInput: requestedCapabilityInput,
+      }),
+      run_writing_card_director: {
+        ...buildDeterministicWritingCard({
+          taskPrompt,
+          capabilityInput: requestedCapabilityInput,
+          priorOutputs: priorGenerationSurfaces,
+          selectedTechniqueFamilies,
+          activeTechniqueCognition,
+        }),
+        ...groundingSurface,
         hard_authority: [
           "Canon",
           "causal continuity",
@@ -699,30 +696,10 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           story_only_output:
             "Emit only story prose when requested.",
         },
-        ...(selectedTechniqueFamilies.length ? {
-          selected_technique_families:
-            [...selectedTechniqueFamilies],
-          active_technique_cognition:
-            activeTechniqueCognition,
-        } : {}),
         writing_card_context:
           buildMinimalWritingCardPromptContext(
             writingContext.content?.writing_card_director_context,
           ),
-        character_canon_grounding_loaded:
-          characterCanonGrounding.loaded === true,
-        character_canon_grounding_count:
-          characterHardFacts.length,
-        character_hard_facts:
-          characterHardFacts,
-        ...(worldEntityCognitionRelevant ? {
-          world_entity_canon_grounding_loaded:
-            worldEntityCanonGrounding.loaded === true,
-          world_entity_canon_grounding_count:
-            worldEntityHardFacts.length,
-          world_entity_hard_facts:
-            worldEntityHardFacts,
-        } : {}),
       },
     };
     return {
@@ -1196,6 +1173,20 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       });
     }
   }
+  const directorPriorCognitionSources =
+    capabilityName === "run_writing_card_director"
+      ? (options.adapter === undefined
+        ? buildDirectorPriorCognitionSurface(
+          priorCognition.selected_sources,
+        )
+        : priorCognition.selected_sources.map((source) => ({
+          module_name: source.module_name,
+          trace_id: source.trace_id,
+          output_hash: source.output_hash,
+          result_type: source.result_type,
+          capability_output: source.capability_output,
+        })))
+      : [];
   const capabilityInput = isFinalPolisher ? {
     module_name: capabilityName,
     generation_boundary: generationBoundary,
@@ -1242,13 +1233,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
           output_hash: source.output_hash,
           result_type: source.result_type,
         })),
-        prior_cognition_outputs: priorCognition.selected_sources.map((source) => ({
-          module_name: source.module_name,
-          trace_id: source.trace_id,
-          output_hash: source.output_hash,
-          result_type: source.result_type,
-          capability_output: source.capability_output,
-        })),
+        prior_cognition_outputs: directorPriorCognitionSources,
       },
     } : {}),
   };
@@ -1260,6 +1245,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       source: "chatgpt_owned_external_brain_mcp",
       external_brain_cognition_output: priorAuthorshipCognitionModules.includes(capabilityName.slice(4)),
       story_material_cognition_output: shouldEnableStoryMaterialCognition(capabilityName, options),
+      generation_surface_output:
+        !isFinalPolisher
+        && (options.generation_surface_output ?? options.adapter === undefined),
       writing_context_bundle_id: contextBundleId,
       adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
         technique_selection: techniqueSelection,
@@ -1337,6 +1325,13 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       },
     } : {}),
     capability_output: execution.output,
+    ...(!isFinalPolisher && execution.control_plane?.generation_surface_compacted ? {
+      generation_surface: {
+        used: true,
+        full_cognition_retained: true,
+        control_plane_excluded_from_capability_output: true,
+      },
+    } : {}),
     runtime_process_instance_id: getRuntimeProcessInstanceId(),
     ...(sealedAcquisition ? {
       final_polisher_child_runtime_process_instance_id: getRuntimeProcessInstanceId(),

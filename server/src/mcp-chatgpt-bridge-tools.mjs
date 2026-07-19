@@ -11714,11 +11714,31 @@ export const chatgpt_bridge_get_workbench_status = tool(
   (_input, options) => getChatgptBridgeWorkbenchStatus(options),
 );
 
-export const chatgpt_bridge_get_current_inputs = tool(
-  "chatgpt_bridge_get_current_inputs",
-  "read_only",
-  getChatgptBridgeCurrentInputs,
-);
+export async function chatgpt_bridge_get_current_inputs(input = {}, options = {}) {
+  try {
+    // Metadata/input inspection is a control-plane read. Keep the legacy
+    // result alias for compatibility, but never attach the Phase36-37
+    // final-output diagnostics chain to this non-generation response.
+    const result = await getChatgptBridgeCurrentInputs(input, options);
+    return {
+      ok: true,
+      tool_name: "chatgpt_bridge_get_current_inputs",
+      permission: "read_only",
+      result,
+      created: [],
+      warnings: result.warnings ?? [],
+      blocked: false,
+      blocked_reason: null,
+      safety: chatgptBridgeSafety,
+    };
+  } catch (error) {
+    return blocked(
+      "chatgpt_bridge_get_current_inputs",
+      "read_only",
+      error,
+    );
+  }
+}
 
 export const chatgpt_bridge_build_writing_context = tool(
   "chatgpt_bridge_build_writing_context",
