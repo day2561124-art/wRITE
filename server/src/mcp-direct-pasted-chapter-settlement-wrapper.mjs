@@ -59,7 +59,19 @@ function withSafety(result, envelopeMode) {
 }
 
 export async function chatgpt_bridge_save_settlement_report(input = {}, options = {}) {
-  const envelope = parseEnvelope(input?.settlement_report_text);
+  const settlementReportText =
+    input?.settlement_report_text
+    ?? input?.settlementReportText;
+  const adoptedChapterId =
+    input?.adopted_chapter_id
+    ?? input?.adoptedChapterId;
+  const settlementContextId =
+    input?.settlement_context_id
+    ?? input?.settlementContextId;
+  const dryRun =
+    input?.dry_run === true
+    || input?.dryRun === true;
+  const envelope = parseEnvelope(settlementReportText);
   if (!envelope) {
     return legacySaveSettlementReport(input, options);
   }
@@ -73,9 +85,7 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
       settlement_summary_text: envelope.payload,
       summary: input.summary,
       source: input.source ?? "chatgpt",
-      dry_run:
-        input.dry_run === true
-        || input.dryRun === true,
+      dry_run: dryRun,
     }, options);
 
     const envelopeResult = withSafety(
@@ -107,7 +117,7 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
       include_proofing_card: true,
       include_longline: true,
       include_foreshadowing_settlement_proposal_bridge: true,
-      dry_run: input.dry_run === true,
+      dry_run: dryRun,
     }, options);
 
     return withSafety({
@@ -126,8 +136,8 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
   }
 
   const result = await finalizePreparedPastedChapter({
-    adopted_chapter_id: input.adopted_chapter_id,
-    settlement_context_id: input.settlement_context_id,
+    adopted_chapter_id: adoptedChapterId,
+    settlement_context_id: settlementContextId,
     settlement_report_text: envelope.payload,
     summary: input.summary,
     reason: input.reason,

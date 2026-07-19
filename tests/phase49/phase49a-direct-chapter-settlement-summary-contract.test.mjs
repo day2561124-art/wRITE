@@ -67,11 +67,11 @@ const activeBefore = await readFile(
 try {
   const response =
     await chatgptBridgeTools.chatgpt_bridge_save_settlement_report({
-      adopted_chapter_id:
+      adoptedChapterId:
         "adopted_chapter_00000000-000000-00000000",
-      settlement_context_id:
+      settlementContextId:
         "settlement_ctx_00000000-000000-00000000",
-      settlement_report_text:
+      settlementReportText:
         `${directSettlementEnvelopeMarkers.summary}\n${summaryText}`,
       source: "chatgpt",
     }, options);
