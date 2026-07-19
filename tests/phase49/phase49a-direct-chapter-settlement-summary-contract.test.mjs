@@ -7,9 +7,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
-  chatgpt_bridge_save_settlement_report,
   directSettlementEnvelopeMarkers,
 } from "../../server/src/mcp-direct-pasted-chapter-settlement-wrapper.mjs";
+import {
+  chatgptBridgeTools,
+} from "../../server/src/mcp-chatgpt-bridge-tools.mjs";
 import {
   getSettlementReportDetail,
   listSettlementReports,
@@ -63,8 +65,8 @@ const activeBefore = await readFile(
 );
 
 try {
-  const result =
-    await chatgpt_bridge_save_settlement_report({
+  const response =
+    await chatgptBridgeTools.chatgpt_bridge_save_settlement_report({
       adopted_chapter_id:
         "adopted_chapter_00000000-000000-00000000",
       settlement_context_id:
@@ -73,6 +75,13 @@ try {
         `${directSettlementEnvelopeMarkers.summary}\n${summaryText}`,
       source: "chatgpt",
     }, options);
+
+  assert.equal(
+    response.ok,
+    true,
+  );
+
+  const result = response.result;
 
   assert.equal(
     result.direct_settlement_envelope_mode,

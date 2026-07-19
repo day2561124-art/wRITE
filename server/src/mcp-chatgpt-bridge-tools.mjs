@@ -11,8 +11,10 @@ import {
   runChatgptBridgeFullRecursiveWritingPipeline,
   saveChatgptBridgeCandidate,
   saveChatgptBridgeProofReport,
-  saveChatgptBridgeSettlementReport,
 } from "./chatgpt-bridge-service.mjs";
+import {
+  chatgpt_bridge_save_settlement_report as saveChatgptBridgeSettlementReport,
+} from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import {
   chatgpt_bridge_get_entity_registry_summary as _get_entity_registry_summary_handler,
   chatgpt_bridge_search_canon_entities as _search_canon_entities_handler,

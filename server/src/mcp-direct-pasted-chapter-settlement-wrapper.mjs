@@ -1,6 +1,6 @@
 import {
-  chatgpt_bridge_save_settlement_report as legacySaveSettlementReport,
-} from "./mcp-chatgpt-bridge-tools.mjs";
+  saveChatgptBridgeSettlementReport as legacySaveSettlementReport,
+} from "./chatgpt-bridge-service.mjs";
 import {
   finalizePreparedPastedChapter,
   settlePastedChapter,
