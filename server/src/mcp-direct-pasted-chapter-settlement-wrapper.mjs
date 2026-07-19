@@ -5,8 +5,12 @@ import {
   finalizePreparedPastedChapter,
   settlePastedChapter,
 } from "./direct-pasted-chapter-settlement-service.mjs";
+import {
+  saveDirectChapterSettlementSummary,
+} from "./direct-chapter-settlement-summary-service.mjs";
 
 export const directSettlementEnvelopeMarkers = Object.freeze({
+  summary: "[[DIRECT_CHAPTER_SETTLEMENT_SUMMARY]]",
   prepare: "[[DIRECT_PASTED_CHAPTER_SETTLEMENT_PREPARE]]",
   finalize: "[[DIRECT_PASTED_CHAPTER_SETTLEMENT_FINALIZE]]",
 });
@@ -64,6 +68,34 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
     throw new Error(`${envelope.mode} direct settlement envelope payload is empty.`);
   }
 
+  if (envelope.mode === "summary") {
+    const result = await saveDirectChapterSettlementSummary({
+      settlement_summary_text: envelope.payload,
+      summary: input.summary,
+      source: input.source ?? "chatgpt",
+      dry_run:
+        input.dry_run === true
+        || input.dryRun === true,
+    }, options);
+
+    const envelopeResult = withSafety(
+      result,
+      "summary",
+    );
+
+    return {
+      ...envelopeResult,
+      safety: {
+        ...envelopeResult.safety,
+        can_confirm_adoption: false,
+        direct_pasted_chapter_settlement_allowed: false,
+        direct_chapter_summary_settlement_allowed: true,
+        full_chapter_persistence_allowed: false,
+        writing_candidate_creation_allowed: false,
+        pending_engine_candidate_creation_allowed: false,
+      },
+    };
+  }
   if (envelope.mode === "prepare") {
     const result = await settlePastedChapter({
       mode: "prepare",

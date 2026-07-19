@@ -692,6 +692,8 @@ const steps = [
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 
   ["Phase 42A direct pasted chapter settlement compatibility route", ["tests/phase42/phase42a-direct-pasted-chapter-settlement.test.mjs"]],
+
+  ["Phase 49A direct chapter settlement summary contract", ["tests/phase49/phase49a-direct-chapter-settlement-summary-contract.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
