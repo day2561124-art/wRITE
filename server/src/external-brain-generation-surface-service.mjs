@@ -1,6 +1,10 @@
 import {
   buildCharacterTurnSimulation,
 } from "./character-turn-simulation-service.mjs";
+import {
+  buildPostDraftNeuralCritique,
+  buildPostDraftStyleDriftReport,
+} from "./post-draft-line-diagnostic-service.mjs";
 
 const generationSurfaceVersion = "phase50a-external-brain-generation-surface-v1";
 
@@ -112,6 +116,26 @@ function compactWorldEntityHardFacts(value) {
   }, { maxKeys: 6, maxItems: 8, maxChars: 720 })).filter(Boolean);
 }
 
+function compactDiagnosticFindings(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 12).map((finding) => compactObject({
+    finding_id: finding?.finding_id,
+    line_start: finding?.line_start,
+    line_end: finding?.line_end,
+    line_reference: finding?.line_reference,
+    column_start: finding?.column_start,
+    column_end: finding?.column_end,
+    issue_type: finding?.issue_type,
+    severity: finding?.severity,
+    quote: finding?.quote,
+    character: finding?.character,
+    reason: finding?.reason,
+    must_fix: finding?.must_fix,
+    minimal_direction: finding?.minimal_direction,
+    confidence: finding?.confidence,
+  }, { maxKeys: 14, maxItems: 6, maxChars: 480 })).filter(Boolean);
+}
+
 function compactGenerationField(key, value) {
   if (key === "generation_card" && isObject(value)) {
     return compactObject(value, { maxKeys: 16, maxItems: 10, maxChars: 480 });
@@ -121,6 +145,7 @@ function compactGenerationField(key, value) {
   }
   if (key === "character_hard_facts") return compactCharacterHardFacts(value);
   if (key === "world_entity_hard_facts") return compactWorldEntityHardFacts(value);
+  if (key === "findings") return compactDiagnosticFindings(value);
   if (key === "original_entity_freedom" && isObject(value)) {
     return compactObject(value, { maxKeys: 18, maxItems: 24, maxChars: 520 });
   }
@@ -170,9 +195,16 @@ const generationVisibleKeys = Object.freeze({
   ]),
   neural_critic: Object.freeze([
     "result_type",
+    "diagnostic_version",
+    "analysis_phase",
+    "analysis_status",
     "draft_evidence_status",
+    "draft_sha256",
+    "draft_line_count",
     "findings",
     "hard_risks",
+    "summary",
+    "release_recommendation",
     "critique_focus",
     "evidence_only",
     "hard_risk_scope",
@@ -186,9 +218,16 @@ const generationVisibleKeys = Object.freeze({
   ]),
   style_drift_detector: Object.freeze([
     "result_type",
+    "diagnostic_version",
+    "analysis_phase",
+    "analysis_status",
     "draft_evidence_status",
     "pre_generation_status",
+    "draft_sha256",
+    "draft_line_count",
     "findings",
+    "summary",
+    "release_recommendation",
     "target",
     "evidence_only",
   ]),
@@ -362,48 +401,28 @@ export function buildDeterministicCharacterSimulation({
 
 export function buildDeterministicNeuralCritique({
   taskPrompt = "",
+  writingContext = {},
   capabilityInput = {},
+  characterHardFacts = [],
 } = {}) {
-  const draft = firstNonEmpty(
-    capabilityInput.draft_text,
-    capabilityInput.raw_draft_text,
-  );
-  return {
-    result_type: "neural_critique",
-    draft_evidence_status: draft ? "draft_available" : "not_available_pre_generation",
-    findings: sourceArray(capabilityInput.findings),
-    hard_risks: sourceArray(capabilityInput.hard_risks),
-    critique_focus: taskPrompt,
-    evidence_only: true,
-    hard_risk_scope: [
-      "canon",
-      "causality",
-      "identity",
-      "character_state",
-      "timeline",
-      "explicit_user_requirement",
-    ],
-  };
+  return buildPostDraftNeuralCritique({
+    taskPrompt,
+    writingContext,
+    capabilityInput,
+    characterHardFacts,
+  });
 }
 
 export function buildDeterministicStyleDriftReport({
   taskPrompt = "",
+  writingContext = {},
   capabilityInput = {},
 } = {}) {
-  const draft = firstNonEmpty(
-    capabilityInput.draft_text,
-    capabilityInput.raw_draft_text,
-  );
-  return {
-    result_type: "style_drift_report",
-    draft_evidence_status: draft ? "draft_available" : "not_available_pre_generation",
-    pre_generation_status: draft
-      ? "draft_evidence_supplied"
-      : "inactive_without_draft_evidence",
-    findings: sourceArray(capabilityInput.findings),
-    target: taskPrompt,
-    evidence_only: true,
-  };
+  return buildPostDraftStyleDriftReport({
+    taskPrompt,
+    writingContext,
+    capabilityInput,
+  });
 }
 
 export function buildDeterministicOverGovernanceReport({

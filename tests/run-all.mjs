@@ -697,6 +697,7 @@ const steps = [
 
   ["Phase 50A external brain context isolation and generation surface", ["tests/phase50/phase50a-context-isolation-generation-surface.test.mjs"]],
   ["Phase 50B character simulator substantive single-turn cognition", ["tests/phase50/phase50b-character-simulator-single-turn-cognition.test.mjs"]],
+  ["Phase 50C post-draft exact-line critic and style diagnostics", ["tests/phase50/phase50c-post-draft-exact-line-diagnostics.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

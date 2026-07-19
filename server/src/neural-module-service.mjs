@@ -26,12 +26,12 @@ const moduleSpecs = {
   },
   neural_critic: {
     model_name: "local-neural-critic",
-    model_version: "v1.0.0",
+    model_version: "v1.1.0-phase50c-exact-line",
     result_type: "neural_critique",
   },
   style_drift_detector: {
     model_name: "local-style-drift-detector",
-    model_version: "v1.0.0",
+    model_version: "v1.1.0-phase50c-exact-line",
     result_type: "style_drift_report",
   },
   over_governance_detector: {
@@ -80,7 +80,7 @@ const storyMaterialProfiles = Object.freeze({
     ]),
   }),
   neural_critic: Object.freeze({
-    role: "detect narrative design overriding lived character events",
+    role: "run exact-line hard-risk review only after draft evidence exists",
     keywords: /(?:theme|title|symbol|image|callback|emotion|reconcile|ending|summary|主題|章名|象徵|意象|回呼|情緒|和解|結尾|總結)/iu,
     cognition_tasks: Object.freeze([
       "check theme-first construction",
@@ -89,10 +89,14 @@ const storyMaterialProfiles = Object.freeze({
       "check characters speaking for the author",
       "check premature reconciliation or conflict resolution",
       "check beautiful but nonfunctional passages",
+      "remain inactive before draft evidence exists",
+      "cite exact draft lines for material hard conflicts",
+      "mark must-fix only when exact evidence supports it",
+      "offer minimum local revision direction instead of rewriting",
     ]),
   }),
   style_drift_detector: Object.freeze({
-    role: "detect drift from lived-story prose into explanation or proposition",
+    role: "run exact-line style-drift review only after draft evidence exists",
     keywords: /(?:draft|prose|narration|ending|summary|parallel|symmetry|style|草稿|正文|旁白|結尾|總結|排比|對稱|風格)/iu,
     cognition_tasks: Object.freeze([
       "check narrator summary and explanatory overreach",
@@ -100,6 +104,10 @@ const storyMaterialProfiles = Object.freeze({
       "check essay-like or fable-like diction",
       "check overly tidy symmetry, parallelism, and designed closure",
       "run again after draft evidence is available",
+      "remain inactive before draft evidence exists",
+      "cite exact lines for explanation, proposition, or workflow leakage",
+      "distinguish hard workflow leakage from advisory style drift",
+      "offer minimum local revision direction instead of replacement prose",
     ]),
   }),
   over_governance_detector: Object.freeze({

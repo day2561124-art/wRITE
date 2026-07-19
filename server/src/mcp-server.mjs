@@ -2068,7 +2068,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_begin_external_brain_writing_session",
-    description: "[low-risk-write] Architecture-primary formal writing entry. Build persistent Writer Workbench context and begin one ChatGPT-owned external brain session. ChatGPT individually orchestrates six pre-generation cognitive capabilities, generates raw prose itself, optionally sends raw_story_text to the post-generation final polisher, and emits final prose. Writer Workbench hosts capability implementations only; no candidate, Canon, active_engine, adoption, or settlement mutation occurs.",
+    description: "[low-risk-write] Architecture-primary formal writing entry. Build persistent Writer Workbench context and begin one ChatGPT-owned external brain session. ChatGPT individually orchestrates six pre-generation cognitive capabilities; neural_critic and style_drift_detector remain pre-generation-compatible but become active exact-line diagnostics only when draft_text is supplied after drafting. ChatGPT generates prose itself and may then use diagnostics and the final polisher. Writer Workbench hosts capability implementations only; no candidate, Canon, active_engine, adoption, or settlement mutation occurs.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
@@ -2095,14 +2095,14 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_neural_critic",
-    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_neural_critic in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    description: "[low-risk-write] ChatGPT-owned draft diagnostic capability. Without draft_text it returns an inactive pre-generation compatibility result. With capability_input.draft_text it performs post-generation exact-line hard-risk review and returns line numbers, quote, issue type, character, reason, must-fix status, and minimal revision direction. It never generates final prose or mutates candidate/Canon/active_engine/adoption/settlement state.",
     risk: "low-risk-write",
     inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_neural_critic(args)),
   },
   {
     name: "chatgpt_bridge_use_style_drift_detector",
-    description: "[low-risk-write] ChatGPT-owned pre-generation external brain capability. Individually execute only run_style_drift_detector in Writer Workbench runtime for the supplied session, return its result and neural trace to ChatGPT, and never generate final prose or mutate candidate/Canon/active_engine/adoption/settlement state.",
+    description: "[low-risk-write] ChatGPT-owned draft diagnostic capability. Without draft_text it returns an inactive pre-generation compatibility result. With capability_input.draft_text it performs post-generation exact-line style-drift review and returns line numbers, quote, issue type, character, reason, must-fix status, and minimal revision direction. It never generates final prose or mutates candidate/Canon/active_engine/adoption/settlement state.",
     risk: "low-risk-write",
     inputSchema: baseSchema({ external_brain_session_id: { type: "string" }, writing_context_bundle_id: { type: "string" }, capability_input: { type: "object" } }, ["external_brain_session_id", "writing_context_bundle_id"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_style_drift_detector(args)),

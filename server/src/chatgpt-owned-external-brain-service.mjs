@@ -76,6 +76,31 @@ export const externalBrainPreGenerationCapabilities = Object.freeze([
   "run_writing_card_director",
 ]);
 
+const postDraftDiagnosticCapabilities = Object.freeze([
+  "run_neural_critic",
+  "run_style_drift_detector",
+]);
+
+function requestedDraftText(input = {}) {
+  const capabilityInput = input.capability_input;
+  if (!capabilityInput || typeof capabilityInput !== "object" || Array.isArray(capabilityInput)) {
+    return null;
+  }
+  const value = capabilityInput.draft_text ?? capabilityInput.raw_draft_text;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+export function externalBrainGenerationBoundary(capabilityName, input = {}) {
+  if (capabilityName === "run_final_polisher") return "post_generation";
+  if (
+    postDraftDiagnosticCapabilities.includes(capabilityName)
+    && requestedDraftText(input)
+  ) {
+    return "post_generation_diagnostic";
+  }
+  return "pre_generation";
+}
+
 export function shouldEnableStoryMaterialCognition(capabilityName, options = {}) {
   if (!externalBrainPreGenerationCapabilities.includes(capabilityName)) return false;
   if (options.story_material_cognition_output === true) return true;
@@ -650,12 +675,15 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       run_neural_critic: {
         ...buildDeterministicNeuralCritique({
           taskPrompt,
+          writingContext,
           capabilityInput: requestedCapabilityInput,
+          characterHardFacts,
         }),
         ...groundingSurface,
       },
       run_style_drift_detector: buildDeterministicStyleDriftReport({
         taskPrompt,
+        writingContext,
         capabilityInput: requestedCapabilityInput,
       }),
       run_over_governance_detector: buildDeterministicOverGovernanceReport({
@@ -706,7 +734,8 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
     };
     return {
       ...base,
-      generation_boundary: "pre_generation",
+      generation_boundary:
+        capabilityInput.generation_boundary ?? "pre_generation",
       ...semanticOutputs[capabilityName],
     };
   };
@@ -796,6 +825,12 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
     orchestration_owner: "ChatGPT",
     prose_generator: "ChatGPT",
     next_capabilities: [...compactBootstrapCapabilities],
+    post_draft_diagnostics: [
+      "neural_critic",
+      "style_drift_detector",
+    ],
+    diagnostic_activation:
+      "Supply capability_input.draft_text after ChatGPT drafts prose; pre-generation calls remain inactive compatibility checks.",
     mutation_guards: { ...safety },
     ...safety,
   };
@@ -957,7 +992,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   }
   const context = await getGptWritingContextBundle(contextBundleId, options);
   const isFinalPolisher = capabilityName === "run_final_polisher";
-  const generationBoundary = isFinalPolisher ? "post_generation" : "pre_generation";
+  const generationBoundary = externalBrainGenerationBoundary(capabilityName, input);
   let rawStoryText = null;
   let declaredRawStorySha256 = null;
   let receivedRawStorySha256 = null;

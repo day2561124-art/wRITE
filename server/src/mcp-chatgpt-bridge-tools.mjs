@@ -55,6 +55,7 @@ import {
 import { buildChatgptNativeNeuralWritingHandoff } from "./chatgpt-native-neural-writing-handoff-service.mjs";
 import {
   beginChatgptOwnedExternalBrainWritingSession,
+  externalBrainGenerationBoundary,
   sealChatgptOwnedRawStoryHandoff,
   useChatgptOwnedExternalBrainCapability,
 } from "./chatgpt-owned-external-brain-service.mjs";
@@ -11853,7 +11854,7 @@ function externalBrainCapabilityTool(name, capabilityName) {
         tool_name: name,
         architecture_route: "chatgpt_owned_external_brain",
         capability_name: capabilityName,
-        generation_boundary: capabilityName === "run_final_polisher" ? "post_generation" : "pre_generation",
+        generation_boundary: externalBrainGenerationBoundary(capabilityName, input),
         orchestration_owner: "ChatGPT",
         prose_generator: "ChatGPT",
         full_neural_orchestrator_used: false,
