@@ -699,11 +699,15 @@ const steps = [
   ["Phase 50B character simulator substantive single-turn cognition", ["tests/phase50/phase50b-character-simulator-single-turn-cognition.test.mjs"]],
   ["Phase 50C post-draft exact-line critic and style diagnostics", ["tests/phase50/phase50c-post-draft-exact-line-diagnostics.test.mjs"]],
   ["Phase 50D final-polisher minimal-intervention regression hardening", ["tests/phase50/phase50d-final-polisher-minimal-intervention-regression.test.mjs"]],
+  ["Phase 50E external-brain writing-chain final acceptance seal", ["tests/phase50/phase50e-external-brain-writing-chain-final-acceptance-seal.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
 
-  if (label === "UI server contract tests") {
+  if (
+    label === "UI server contract tests"
+    || label === "Full workflow smoke test"
+  ) {
     return 900_000;
   }
 

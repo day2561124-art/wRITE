@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "phase": "50E",
+  "acceptance_kind": "external_brain_writing_chain_final_acceptance_seal",
+  "base_commit": "37c6a13bdf73f0648192f7ccafcf82f2eb4ae399",
+  "acceptance_version": "phase50e-external-brain-writing-chain-acceptance-v1",
+  "architecture_route": "chatgpt_owned_external_brain",
+  "orchestration_owner": "ChatGPT",
+  "prose_generator": "ChatGPT",
+  "required_pre_generation_capabilities": [
+    "scene_planner",
+    "character_simulator",
+    "neural_critic",
+    "style_drift_detector",
+    "over_governance_detector",
+    "writing_card_director"
+  ],
+  "required_post_draft_diagnostics": [
+    "neural_critic",
+    "style_drift_detector"
+  ],
+  "required_handoff_route": "single_ingress_immutable_seal",
+  "fixture": {
+    "id": "rainy_entryway_silence_boundary",
+    "problem_draft_sha256": "bd49aa83f20acf8ec755e20bccf3d1b061081cdbfe0301754e11b451d36c8786",
+    "release_story_sha256": "5bee7462590aabdbbb3d814ab6750b03b42363ab1739f7326500afc3ede8171a",
+    "revision_owner": "ChatGPT",
+    "final_polisher_may_generate_replacement_prose": false
+  },
+  "mutation_guards": {
+    "candidate_created": false,
+    "canon_updated": false,
+    "active_engine_updated": false,
+    "adopted": false,
+    "settled": false
+  },
+  "protected_hashes": {
+    "active_engine": "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+    "compressed_rules": "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db"
+  },
+  "required_acceptance_checks": [
+    "compact_bootstrap",
+    "six_pre_generation_capabilities",
+    "pre_generation_diagnostics_inactive_without_draft",
+    "problem_draft_exact_line_findings",
+    "chatgpt_owned_revision",
+    "release_diagnostics_no_must_fix",
+    "single_ingress_immutable_seal",
+    "triple_sha_exact_match",
+    "final_polisher_exact_identity",
+    "session_completed",
+    "mutation_guards_closed",
+    "protected_files_unchanged",
+    "candidate_adoption_settlement_state_unchanged",
+    "raw_story_not_persisted"
+  ],
+  "expected_deterministic_digest": "e8d054ed9010945c31de88be4cc2dbbb5a37af91e520780d0ce0c3e1e3da05a1"
+}
