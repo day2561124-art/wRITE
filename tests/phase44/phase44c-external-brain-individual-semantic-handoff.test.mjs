@@ -69,8 +69,8 @@ for (const [capability, invoke, semanticOutput] of capabilities) {
 
 const finalSemanticOutput = {
   raw_story_sha256: sha256(rawStory),
-  polished_text: `${rawStory}\n\n門，從裡面開了。`,
-  revision_report: [{ dimension: "ending_event", action: "added_concrete_turn" }],
+  polished_text: rawStory,
+  revision_report: [{ dimension: "identity", action: "release_exact_raw_story" }],
 };
 const polished = await chatgpt_bridge_use_final_polisher({
   external_brain_session_id: session.external_brain_session_id,
@@ -84,6 +84,11 @@ assert.equal(polished.generation_boundary, "post_generation");
 assert.equal(polished.raw_story_sha256, sha256(rawStory));
 assert.deepEqual(polished.capability_output, finalSemanticOutput);
 assert.equal(typeof polished.capability_output.polished_text, "string");
+assert.equal(polished.capability_output.polished_text, rawStory);
+assert.equal(
+  polished.final_polisher_minimal_intervention_guard.text_identity_preserved,
+  true,
+);
 assert(Array.isArray(polished.capability_output.revision_report));
 assert.equal(polished.trace.module_name, "final_polisher");
 assert.equal(polished.trace.status, "success");

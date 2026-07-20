@@ -46,7 +46,7 @@ const moduleSpecs = {
   },
   final_polisher: {
     model_name: "local-final-polisher",
-    model_version: "v1.0.0",
+    model_version: "v1.1.0-phase50d-minimal-intervention",
     result_type: "final_polisher_report",
   },
 };

@@ -40,6 +40,9 @@ import {
 } from "./generated-world-entity-canon-grounding-service.mjs";
 import { resolveProjectPath } from "./project-paths.mjs";
 import {
+  enforceFinalPolisherMinimalIntervention,
+} from "./final-polisher-minimal-intervention-guard-service.mjs";
+import {
   buildRawStoryMismatchForensics,
   validateRawStoryIntegrityManifest,
 } from "./raw-story-handoff-integrity-service.mjs";
@@ -496,8 +499,20 @@ export function buildFinalPolisherEditorialContract(
     findings: [],
     text_change_required: false,
     release_recommendation: "release_as_is",
+    release_story_sha256: sha256(story),
+    text_identity_preserved: true,
+    minimal_intervention_contract: {
+      no_hard_conflict_requires_exact_identity: true,
+      writer_workbench_may_emit_changed_prose: false,
+      dialogue_addition_forbidden: true,
+      psychology_addition_forbidden: true,
+      causal_explanation_addition_forbidden: true,
+      silence_explanation_forbidden: true,
+      hard_conflict_action:
+        "report_exact_evidence_and_minimal_direction_without_replacement_prose",
+    },
     review_boundary:
-      "Revise only a material hard conflict supported by exact evidence; otherwise return the original text unchanged.",
+      "Revise only a material hard conflict supported by exact evidence; otherwise return the original text unchanged. Writer Workbench must not emit replacement prose.",
     hard_checks: [
       "canon",
       "causal_continuity",
@@ -1298,6 +1313,16 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     throw error;
   }
   const executionSucceeded = execution.trace?.status === "success";
+  const finalPolisherGuard = isFinalPolisher && executionSucceeded
+    ? enforceFinalPolisherMinimalIntervention({
+      raw_story_text: rawStoryText,
+      capability_output: execution.output,
+    })
+    : null;
+  const acceptedExecution = executionSucceeded
+    && (!isFinalPolisher || finalPolisherGuard?.accepted === true);
+  const safeCapabilityOutput = finalPolisherGuard?.capability_output
+    ?? execution.output;
   if (execution.trace?.trace_id) {
     await recordExternalBrainSessionActivity(runId, {
       activity_at: execution.trace.called_at ?? new Date().toISOString(),
@@ -1305,14 +1330,14 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }, options);
   }
   if (sealedAcquisition) {
-    if (executionSucceeded) {
+    if (acceptedExecution) {
       await completeRawStoryHandoffConsumption(sealedAcquisition, options);
     } else {
       await releaseRawStoryHandoffAcquisition(sealedAcquisition, options);
     }
   }
-  const finalizedRun = isFinalPolisher && executionSucceeded
-    ? await finalizeAgentRun(runId, { ...options, output: execution.output })
+  const finalizedRun = isFinalPolisher && acceptedExecution
+    ? await finalizeAgentRun(runId, { ...options, output: safeCapabilityOutput })
     : null;
   const lifecycleRun = finalizedRun
     ? await transitionExternalBrainSessionLifecycle(runId, "COMPLETED", {
@@ -1321,7 +1346,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }, options)
     : null;
   return {
-    ok: executionSucceeded,
+    ok: acceptedExecution,
     tool_name: `chatgpt_bridge_use_${capabilityName.slice(4)}`,
     architecture_route: externalBrainOwnership.orchestration_mode,
     capability_name: capabilityName,
@@ -1334,6 +1359,14 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     ...(isFinalPolisher ? {
       handoff_route: handoffRoute,
       raw_story_sha256: receivedRawStorySha256,
+      final_polisher_minimal_intervention_guard:
+        finalPolisherGuard?.public_guard ?? null,
+      ...(!acceptedExecution ? {
+        blocked: true,
+        blocked_stage: "final_polisher_minimal_intervention_guard",
+        blocked_reason:
+          "final_polisher attempted to return changed prose. Writer Workbench may report exact evidence and minimal direction, but it may not replace ChatGPT-authored prose.",
+      } : {}),
       raw_story_integrity: handoffRoute === "single_ingress_immutable_seal" ? {
         guard_used: true,
         integrity_route: handoffRoute,
@@ -1349,8 +1382,10 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
         exact_match: true,
         blocked_stage: null,
         final_polisher_executed: true,
-        payload_reference_active: false,
-        payload_release_semantics: "process_local_reference_released_not_secure_memory_erase",
+        payload_reference_active: acceptedExecution ? false : true,
+        payload_release_semantics: acceptedExecution
+          ? "process_local_reference_released_not_secure_memory_erase"
+          : "lease_released_payload_retained_for_retry",
       } : {
         guard_used: true,
         status: "matched",
@@ -1361,7 +1396,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
         final_polisher_executed: true,
       },
     } : {}),
-    capability_output: execution.output,
+    capability_output: safeCapabilityOutput,
     ...(!isFinalPolisher && execution.control_plane?.generation_surface_compacted ? {
       generation_surface: {
         used: true,
@@ -1380,7 +1415,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       trace_id: execution.trace?.trace_id ?? null,
       run_id: execution.trace?.run_id ?? runId,
       module_name: execution.trace?.module_name ?? capabilityName.slice(4),
-      status: execution.trace?.status ?? "failed",
+      status: isFinalPolisher && executionSucceeded && !acceptedExecution
+        ? "blocked_by_minimal_intervention_guard"
+        : execution.trace?.status ?? "failed",
       output_hash: execution.trace?.output_hash ?? null,
     },
     agent_run_status: finalizedRun?.status ?? run.status,

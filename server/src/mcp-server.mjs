@@ -2134,7 +2134,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_final_polisher",
-    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability with exactly one mutually exclusive handoff route. Preferred sealed route: submit only raw_story_handoff_id; the requesting child atomically acquires the same-run/same-bundle exact string from the MCP HTTP parent ephemeral broker over internal Node IPC, verifies the full ingress-parent-final SHA chain, executes once, then consumes the lease and releases the payload reference. Compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged; no fallback, retry, normalization, prose resubmission, or authorship transfer occurs.",
+    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability with exactly one mutually exclusive handoff route. Preferred sealed route: submit only raw_story_handoff_id; the requesting child atomically acquires the same-run/same-bundle exact string from the MCP HTTP parent ephemeral broker over internal Node IPC, verifies the full ingress-parent-final SHA chain, executes once, then consumes the lease and releases the payload reference. Compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged. Phase50D enforces exact release identity when no hard conflict exists and blocks any changed prose payload, including added dialogue, psychology, causal explanation, or explanation of silence; the tool may return evidence and minimal direction only. No fallback, retry, normalization, prose resubmission, or authorship transfer occurs.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },

@@ -167,6 +167,28 @@ try {
   assert.equal(Object.hasOwn(report, "findings"), false);
   assert.equal(report.text_change_required, false);
   assert.equal(report.release_recommendation, "release_as_is");
+  assert.equal(report.release_story_sha256, sha256(specimen));
+  assert.equal(report.text_identity_preserved, true);
+  assert.equal(
+    report.minimal_intervention_contract
+      .no_hard_conflict_requires_exact_identity,
+    true,
+  );
+  assert.equal(
+    report.minimal_intervention_contract
+      .writer_workbench_may_emit_changed_prose,
+    false,
+  );
+  assert.equal(
+    polished.final_polisher_minimal_intervention_guard
+      .release_story_sha256,
+    sha256(specimen),
+  );
+  assert.equal(
+    polished.final_polisher_minimal_intervention_guard
+      .text_identity_preserved,
+    true,
+  );
   assert.equal(
     report.prose_ownership.final_prose_generator,
     "ChatGPT",
