@@ -129,6 +129,7 @@ function targetOptions(options = {}) {
     ...(options.proofReports ? { proofReports: options.proofReports } : {}),
     ...(options.adoptedWritings ? { adoptedWritings: options.adoptedWritings } : {}),
     ...(options.approvalQueue ? { approvalQueue: options.approvalQueue } : {}),
+    ...(options.outputs ? { outputs: options.outputs } : {}),
     ...(options.activeEnginePath ? { activeEnginePath: options.activeEnginePath } : {}),
     ...(options.pendingEngineCandidates
       ? { pendingEngineCandidates: options.pendingEngineCandidates }
@@ -200,9 +201,20 @@ function baseStatus(status = "pending", reason = null) {
   };
 }
 
-function activationImpact() {
+function activationImpact(candidate = null) {
+  const willModify = ["data/canon_db/active_engine.md"];
+  if (candidate?.metadata?.current_input_refresh) {
+    willModify.push(
+      "data/outputs/task_prompt.md",
+      "data/outputs/generation_context.md",
+      "data/outputs/retrieval_context.md",
+    );
+  }
+  if (candidate?.metadata?.settlement_report_metadata_path) {
+    willModify.push(candidate.metadata.settlement_report_metadata_path);
+  }
   return {
-    will_modify: ["data/canon_db/active_engine.md"],
+    will_modify: willModify,
     will_create: ["snapshot", "archive", "activation_log"],
     rollback_available: true,
   };
@@ -536,7 +548,7 @@ export async function scanApprovalQueue(options = {}) {
         neuralStatus: neural.status,
         blockedReason: neural.blocked_reason,
         status: "blocked",
-        impact: activationImpact(),
+        impact: activationImpact(candidate),
         links: { candidate_id: summary.candidate_id },
         details: { diff: candidate.diff, candidate_status: candidate.status.status },
       }, options));
@@ -561,7 +573,7 @@ export async function scanApprovalQueue(options = {}) {
           || `${candidate.status.status} / ${candidate.risk_report.risk_level}`
         : null,
       status: candidateBlocked ? "blocked" : "pending",
-      impact: activationImpact(),
+      impact: activationImpact(candidate),
       links: { candidate_id: summary.candidate_id },
       details: {
         candidate_status: candidate.status.status,

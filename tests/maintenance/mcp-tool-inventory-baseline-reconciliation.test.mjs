@@ -30,7 +30,7 @@ const externalBrainToolNames = [
 ];
 const expectedDirectDigest = "c614302e630e54e7dafd9419d33ec8ccf7a3c0d28ebebc425b509540629d7226";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "40841beb0d057623a63ec665c8ad24fb26e318cb6ad66c3e794077a4973a1cac";
+const expectedPublicDigest = "593691cb38f96d6bc621bfa8df3fa24807e1420ceb240bbac579278aeeb75291";
 const expectedPublicNames = [
   "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
@@ -48,6 +48,10 @@ const expectedPublicNames = [
   "chatgpt_bridge_get_foreshadowing_settlement_surface",
   "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "chatgpt_bridge_save_settlement_report",
+  "build_pending_engine_candidate_review",
+  "get_pending_engine_candidate_review",
+  "list_pending_engine_candidate_reviews",
+  "request_pending_engine_candidate_activation",
   addedToolName,
 ];
 

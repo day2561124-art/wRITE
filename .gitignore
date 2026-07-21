@@ -24,3 +24,7 @@ outputs/retrieval_debug_report.json
 
 node_modules/
 tests/.tmp/
+.patch-backups/
+wRITE-*-fix-v*/
+wRITE-*-fix-v*.zip
+wRITE-*-fix-v*.zip.sha256

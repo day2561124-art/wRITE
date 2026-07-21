@@ -557,6 +557,17 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
 
   let diagnostics = neuralDiagnostics(bundle);
 
+  const effectiveInput = {
+    ...input,
+    taskPrompt: bundle?.task_prompt ?? input.taskPrompt,
+    generationContext:
+      bundle?.inputs?.generation_context
+      ?? input.generationContext,
+    retrievalContext:
+      bundle?.inputs?.retrieval_context
+      ?? input.retrievalContext,
+  };
+
   const writingContext = {
     gpt_writing_context_bundle_id: bundle?.bundle_id ?? contextResult?.bundle_id ?? null,
     task_prompt: bundle?.task_prompt ?? input.taskPrompt,
@@ -576,10 +587,10 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
   };
 
   const neuralExecution = await executeChatgptNativeTraceOnlyNeuralModules({
-    task_prompt: input.taskPrompt,
-    generation_context: input.generationContext,
-    retrieval_context: input.retrievalContext,
-    chapter_mode: input.chapterMode,
+    task_prompt: effectiveInput.taskPrompt,
+    generation_context: effectiveInput.generationContext,
+    retrieval_context: effectiveInput.retrievalContext,
+    chapter_mode: effectiveInput.chapterMode,
     bundle,
     writing_context: writingContext,
     required_modules: diagnostics.required_neural_modules,
@@ -633,8 +644,10 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     architecture_primary_route: false,
     compatibility_aggregate_surface: true,
     surface_kind: HANDOFF_SURFACE_KIND,
-    final_chatgpt_writing_instruction: buildFinalChatgptWritingInstruction(input),
-    chatgpt_native_consumer_contract: buildChatgptNativeConsumerContract(input),
+    final_chatgpt_writing_instruction:
+      buildFinalChatgptWritingInstruction(effectiveInput),
+    chatgpt_native_consumer_contract:
+      buildChatgptNativeConsumerContract(effectiveInput),
     writing_context: writingContext,
     neural_modules_diagnostics: diagnostics,
     neural_module_execution_results:
@@ -697,7 +710,7 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
       "Consumer contract must preserve visual-only reference boundaries.",
     ],
     handoff_hash_sha256: sha256(JSON.stringify({
-      task_prompt: input.taskPrompt,
+      task_prompt: effectiveInput.taskPrompt,
       bundle_id: writingContext.gpt_writing_context_bundle_id,
       constraints,
       diagnostics,

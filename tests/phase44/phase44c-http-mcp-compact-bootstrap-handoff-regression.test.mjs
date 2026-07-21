@@ -93,7 +93,7 @@ try {
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
 
   const listed = await client.listTools();
-  assert.equal(listed.tools.length, 25);
+  assert.equal(listed.tools.length, 29);
 
   const beginCall = await client.callTool({
     name: "chatgpt_bridge_begin_external_brain_writing_session",

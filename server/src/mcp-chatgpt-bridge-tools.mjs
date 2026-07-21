@@ -11948,11 +11948,26 @@ export const chatgpt_bridge_save_settlement_report = tool(
   "chatgpt_bridge_save_settlement_report",
   "write_low_risk",
   saveChatgptBridgeSettlementReport,
-  (result) => result.settlement_report_created ? [{
-    label: "settlement_report",
-    target_id: result.settlement_report_id,
-    canon_status: "settlement_report_only",
-  }] : [],
+  (result) => {
+    const artifacts = [];
+    if (result.settlement_report_created || result.settlement_report_reused) {
+      artifacts.push({
+        label: "settlement_report",
+        target_id: result.settlement_report_id,
+        canon_status: result.pending_engine_candidate_created
+          ? "settlement_candidate_pending_review"
+          : "settlement_report_only",
+      });
+    }
+    if (result.pending_engine_candidate_created) {
+      artifacts.push({
+        label: "pending_engine_candidate",
+        target_id: result.pending_engine_candidate_id,
+        canon_status: "pending_review",
+      });
+    }
+    return artifacts;
+  },
 );
 
 export const chatgpt_bridge_visual_library_ui_import_flow_preview = tool(
@@ -12210,9 +12225,13 @@ export const chatgptBridgeToolMetadata = {
   },
   chatgpt_bridge_save_settlement_report: writeMetadata([
     projectPaths.adoptedWritingSettlementReports,
+    projectPaths.pendingEngineCandidates,
     projectPaths.adoptedWritings,
     projectPaths.outputLogs,
-  ]),
+  ], {
+    creates_pending_engine_candidate: true,
+    requires_user_confirmation_for_activation: true,
+  }),
   chatgpt_bridge_visual_library_ui_import_flow_preview: { ...readMetadata },
   chatgpt_bridge_get_entity_registry_summary: { ...readMetadata },
   chatgpt_bridge_search_canon_entities: { ...readMetadata },

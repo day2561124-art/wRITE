@@ -111,6 +111,68 @@ async function readOptionalText(filePath) {
   }
 }
 
+const currentInputFileNames = Object.freeze({
+  task_prompt: "task_prompt.md",
+  generation_context: "generation_context.md",
+  retrieval_context: "retrieval_context.md",
+});
+
+function normalizedCurrentInputRefresh(metadata = {}) {
+  const refresh = metadata.current_input_refresh;
+  if (!refresh || typeof refresh !== "object" || Array.isArray(refresh)) {
+    return null;
+  }
+  const files = {};
+  for (const label of Object.keys(currentInputFileNames)) {
+    const record = refresh.files?.[label];
+    if (!record || typeof record.content !== "string") {
+      throw errorWithStatus(`current_input_refresh.${label} is missing.`, 409);
+    }
+    const expectedHash = String(record.sha256 ?? "").trim();
+    const actualHash = sha256(record.content);
+    if (!expectedHash || expectedHash !== actualHash) {
+      throw errorWithStatus(`current_input_refresh.${label} hash mismatch.`, 409);
+    }
+    files[label] = {
+      content: record.content,
+      sha256: actualHash,
+    };
+  }
+  return {
+    schema_version: refresh.schema_version ?? 1,
+    settlement_report_id: refresh.settlement_report_id ?? null,
+    chapter: refresh.chapter ?? null,
+    heading: refresh.heading ?? null,
+    continuity_head: refresh.continuity_head ?? null,
+    files,
+  };
+}
+
+function currentInputPaths(outputsRoot) {
+  return Object.fromEntries(
+    Object.entries(currentInputFileNames).map(([label, fileName]) => [
+      label,
+      path.join(outputsRoot, fileName),
+    ]),
+  );
+}
+
+async function snapshotCurrentInputs(outputsRoot) {
+  const paths = currentInputPaths(outputsRoot);
+  const records = {};
+  for (const [label, filePath] of Object.entries(paths)) {
+    const content = await readOptionalText(filePath);
+    const present = await exists(filePath);
+    records[label] = {
+      exists: present,
+      path: normalizeProjectPath(filePath),
+      content,
+      sha256: present ? sha256(content) : null,
+    };
+  }
+  return records;
+}
+
 async function exists(filePath) {
   try {
     await stat(filePath);
@@ -182,6 +244,9 @@ function phase3PathsFor(options = {}) {
     rollbackIndex: options.rollbackIndex
       ? assertPathInside(options.rollbackIndex, projectPaths.canonDb, "rollback index")
       : projectPaths.rollbackIndex,
+    outputs: options.outputs
+      ? assertPathInside(options.outputs, projectPaths.outputs, "activation outputs root")
+      : projectPaths.outputs,
   };
 }
 
@@ -192,6 +257,13 @@ function snapshotPaths(snapshotId, roots) {
     directory,
     engine: path.join(directory, "active_engine_before_activation.md"),
     metadata: path.join(directory, "metadata.json"),
+    taskPrompt: path.join(directory, "task_prompt_before_activation.md"),
+    generationContext: path.join(directory, "generation_context_before_activation.md"),
+    retrievalContext: path.join(directory, "retrieval_context_before_activation.md"),
+    settlementReportMetadata: path.join(
+      directory,
+      "settlement_report_metadata_before_activation.json",
+    ),
   };
 }
 
@@ -855,6 +927,45 @@ export async function activatePendingCandidate(
       409,
     );
   }
+  const currentInputRefresh = normalizedCurrentInputRefresh(metadata);
+  const currentInputsBefore = currentInputRefresh
+    ? await snapshotCurrentInputs(roots.outputs)
+    : null;
+  const outputPaths = currentInputPaths(roots.outputs);
+  let settlementReportMetadataPath = null;
+  let settlementReportBefore = null;
+  let settlementReportAfter = null;
+  if (metadata.settlement_report_metadata_path) {
+    settlementReportMetadataPath = assertPathInside(
+      resolveProjectPath(
+        metadata.settlement_report_metadata_path,
+        "settlement report metadata path",
+      ),
+      projectPaths.outputs,
+      "settlement report metadata path",
+    );
+    settlementReportBefore = await readFile(
+      settlementReportMetadataPath,
+      "utf8",
+    );
+    const reportMetadata = JSON.parse(settlementReportBefore);
+    settlementReportAfter = json({
+      ...reportMetadata,
+      canon_status: "formal_canon_activated",
+      settlement_status: "activated",
+      formal_canon_activated: true,
+      formal_canon_activated_at: new Date().toISOString(),
+      activated_pending_engine_candidate_id: candidateId,
+      pending_engine_candidate_created: true,
+      pending_engine_candidate_id: candidateId,
+      active_engine_update_allowed: true,
+      active_engine_modified: true,
+      current_inputs_refreshed: currentInputRefresh !== null,
+      engine_activation_requested: true,
+      approval_item_created: approvalItemId !== null,
+      activation_approval_item_id: approvalItemId,
+    });
+  }
   const neuralEvidence = await verifyCandidateNeuralEvidence(metadata);
   const activatedAt = new Date().toISOString();
   const activationLogId = createActivationLogId();
@@ -882,6 +993,31 @@ export async function activatePendingCandidate(
     previous_active_engine_hash: currentHash,
     active_engine_path: normalizeProjectPath(roots.activeEngine),
     snapshot_path: normalizeProjectPath(snapshot.engine),
+    current_inputs_snapshot: currentInputsBefore
+      ? Object.fromEntries(Object.entries(currentInputsBefore).map(([label, record]) => [
+        label,
+        {
+          exists: record.exists,
+          path: record.path,
+          sha256: record.sha256,
+          snapshot_path: record.exists
+            ? normalizeProjectPath(snapshot[{
+              task_prompt: "taskPrompt",
+              generation_context: "generationContext",
+              retrieval_context: "retrievalContext",
+            }[label]])
+            : null,
+        },
+      ]))
+      : null,
+    current_inputs_refresh_planned: currentInputRefresh !== null,
+    settlement_report_snapshot: settlementReportBefore
+      ? {
+        path: normalizeProjectPath(settlementReportMetadataPath),
+        sha256: sha256(settlementReportBefore),
+        snapshot_path: normalizeProjectPath(snapshot.settlementReportMetadata),
+      }
+      : null,
     rollback_available: true,
     rollback_requires_approval: true,
   };
@@ -924,6 +1060,11 @@ export async function activatePendingCandidate(
     requires_second_confirmation: riskReport.requires_second_confirmation === true,
     rollback_available: true,
     rollback_requires_approval: true,
+    current_inputs_refreshed: currentInputRefresh !== null,
+    current_input_refresh_settlement_report_id:
+      currentInputRefresh?.settlement_report_id ?? null,
+    settlement_report_status_updated:
+      settlementReportAfter !== null,
     neural_evidence: neuralEvidence,
   };
   const nextMetadata = {
@@ -939,6 +1080,9 @@ export async function activatePendingCandidate(
     previous_active_engine_hash: currentHash,
     new_active_engine_hash: activeAfterHash,
     active_engine_modified: true,
+    current_inputs_refreshed: currentInputRefresh !== null,
+    current_inputs_refreshed_at:
+      currentInputRefresh ? activatedAt : null,
     review_status: "activated",
     activation_request_status: "resolved",
     rollback_available: true,
@@ -960,6 +1104,9 @@ export async function activatePendingCandidate(
     previous_active_engine_hash: currentHash,
     new_active_engine_hash: activeAfterHash,
     active_engine_modified: true,
+    current_inputs_refreshed: currentInputRefresh !== null,
+    current_inputs_refreshed_at:
+      currentInputRefresh ? activatedAt : null,
     review_status: "activated",
     activation_request_status: "resolved",
     rollback_available: true,
@@ -978,21 +1125,56 @@ export async function activatePendingCandidate(
       activated_at: activatedAt,
       active_engine_before_hash: currentHash,
       active_engine_after_hash: activeAfterHash,
+      current_inputs_refreshed: currentInputRefresh !== null,
     }],
   };
+  const activationOperations = [
+    { filePath: snapshot.engine, content: activeText },
+    { filePath: snapshot.metadata, content: json(snapshotMetadata) },
+    { filePath: archive.engine, content: activeText },
+    { filePath: archive.metadata, content: json(archiveMetadata) },
+    { filePath: roots.activeEngine, content: candidateText },
+    { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(activationRecord)}\n` },
+    { filePath: paths.metadata, content: json(nextMetadata) },
+    { filePath: paths.status, content: json(nextStatus) },
+    { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
+  ];
+  if (currentInputRefresh) {
+    const snapshotTargets = {
+      task_prompt: snapshot.taskPrompt,
+      generation_context: snapshot.generationContext,
+      retrieval_context: snapshot.retrievalContext,
+    };
+    for (const label of Object.keys(currentInputFileNames)) {
+      const before = currentInputsBefore[label];
+      if (before.exists) {
+        activationOperations.push({
+          filePath: snapshotTargets[label],
+          content: before.content,
+        });
+      }
+      activationOperations.push({
+        filePath: outputPaths[label],
+        content: currentInputRefresh.files[label].content,
+      });
+    }
+  }
+  if (settlementReportBefore && settlementReportAfter) {
+    activationOperations.push(
+      {
+        filePath: snapshot.settlementReportMetadata,
+        content: settlementReportBefore,
+      },
+      {
+        filePath: settlementReportMetadataPath,
+        content: settlementReportAfter,
+      },
+    );
+  }
+
   let transaction;
   try {
-    transaction = await commitFileTransaction("activate-engine-candidate", [
-      { filePath: snapshot.engine, content: activeText },
-      { filePath: snapshot.metadata, content: json(snapshotMetadata) },
-      { filePath: archive.engine, content: activeText },
-      { filePath: archive.metadata, content: json(archiveMetadata) },
-      { filePath: roots.activeEngine, content: candidateText },
-      { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(activationRecord)}\n` },
-      { filePath: paths.metadata, content: json(nextMetadata) },
-      { filePath: paths.status, content: json(nextStatus) },
-      { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
-    ], {
+    transaction = await commitFileTransaction("activate-engine-candidate", activationOperations, {
       candidate_id: candidateId,
       snapshot_id: snapshotId,
       archive_id: archiveId,
@@ -1025,6 +1207,11 @@ export async function activatePendingCandidate(
     previous_active_engine_hash: currentHash,
     new_active_engine_hash: activeAfterHash,
     active_engine_modified: true,
+    current_inputs_refreshed: currentInputRefresh !== null,
+    current_input_refresh_settlement_report_id:
+      currentInputRefresh?.settlement_report_id ?? null,
+    settlement_report_status_updated:
+      settlementReportAfter !== null,
     rollback_available: true,
     rollback_requires_approval: true,
     transaction_id: transaction.transaction_id,
@@ -1086,6 +1273,31 @@ export async function rollbackActiveEngine(
     throw errorWithStatus("Snapshot is not available for rollback.", 409);
   }
   if (!targetText.trim()) throw errorWithStatus("Snapshot engine content is empty.", 409);
+  const restoreCurrentInputs =
+    targetMetadata.current_inputs_snapshot
+    && typeof targetMetadata.current_inputs_snapshot === "object";
+  const currentInputsBeforeRollback = restoreCurrentInputs
+    ? await snapshotCurrentInputs(roots.outputs)
+    : null;
+  const outputPaths = currentInputPaths(roots.outputs);
+  const settlementReportSnapshot =
+    targetMetadata.settlement_report_snapshot
+    && typeof targetMetadata.settlement_report_snapshot === "object"
+      ? targetMetadata.settlement_report_snapshot
+      : null;
+  const settlementReportRestorePath = settlementReportSnapshot?.path
+    ? assertPathInside(
+      resolveProjectPath(
+        settlementReportSnapshot.path,
+        "rollback settlement report metadata path",
+      ),
+      projectPaths.outputs,
+      "rollback settlement report metadata path",
+    )
+    : null;
+  const settlementReportBeforeRollback = settlementReportRestorePath
+    ? await readFile(settlementReportRestorePath, "utf8")
+    : null;
   const rolledBackAt = new Date().toISOString();
   const safetySnapshotId = await uniqueSnapshotId(roots);
   const safety = snapshotPaths(safetySnapshotId, roots);
@@ -1099,6 +1311,30 @@ export async function rollbackActiveEngine(
     source_chapter: targetMetadata.source_chapter ?? "",
     active_engine_hash: activeBeforeHash,
     active_engine_path: normalizeProjectPath(roots.activeEngine),
+    current_inputs_snapshot: currentInputsBeforeRollback
+      ? Object.fromEntries(Object.entries(currentInputsBeforeRollback).map(([label, record]) => [
+        label,
+        {
+          exists: record.exists,
+          path: record.path,
+          sha256: record.sha256,
+          snapshot_path: record.exists
+            ? normalizeProjectPath(safety[{
+              task_prompt: "taskPrompt",
+              generation_context: "generationContext",
+              retrieval_context: "retrievalContext",
+            }[label]])
+            : null,
+        },
+      ]))
+      : null,
+    settlement_report_snapshot: settlementReportBeforeRollback
+      ? {
+        path: normalizeProjectPath(settlementReportRestorePath),
+        sha256: sha256(settlementReportBeforeRollback),
+        snapshot_path: normalizeProjectPath(safety.settlementReportMetadata),
+      }
+      : null,
     rollback_available: true,
   };
   const rollbackRecord = {
@@ -1109,6 +1345,9 @@ export async function rollbackActiveEngine(
     safety_snapshot_id: safetySnapshotId,
     active_engine_before_hash: activeBeforeHash,
     active_engine_after_hash: activeAfterHash,
+    current_inputs_restored: restoreCurrentInputs,
+    settlement_report_status_restored:
+      settlementReportBeforeRollback !== null,
   };
   const rollbackIndex = await readRollbackIndex(roots.rollbackIndex);
   const nextRollbackIndex = {
@@ -1116,15 +1355,62 @@ export async function rollbackActiveEngine(
     updated_at: rolledBackAt,
     rollbacks: [...rollbackIndex.rollbacks, rollbackRecord],
   };
+  const rollbackOperations = [
+    { filePath: safety.engine, content: activeText },
+    { filePath: safety.metadata, content: json(safetyMetadata) },
+    { filePath: roots.activeEngine, content: targetText },
+    { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(rollbackRecord)}\n` },
+    { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
+  ];
+  if (restoreCurrentInputs) {
+    const safetyTargets = {
+      task_prompt: safety.taskPrompt,
+      generation_context: safety.generationContext,
+      retrieval_context: safety.retrievalContext,
+    };
+    const targetSources = {
+      task_prompt: target.taskPrompt,
+      generation_context: target.generationContext,
+      retrieval_context: target.retrievalContext,
+    };
+    for (const label of Object.keys(currentInputFileNames)) {
+      const current = currentInputsBeforeRollback[label];
+      if (current.exists) {
+        rollbackOperations.push({
+          filePath: safetyTargets[label],
+          content: current.content,
+        });
+      }
+      const targetRecord = targetMetadata.current_inputs_snapshot[label];
+      if (targetRecord?.exists === true) {
+        rollbackOperations.push({
+          filePath: outputPaths[label],
+          content: await readFile(targetSources[label], "utf8"),
+        });
+      } else {
+        rollbackOperations.push({
+          type: "delete",
+          filePath: outputPaths[label],
+        });
+      }
+    }
+  }
+  if (settlementReportBeforeRollback && settlementReportRestorePath) {
+    rollbackOperations.push(
+      {
+        filePath: safety.settlementReportMetadata,
+        content: settlementReportBeforeRollback,
+      },
+      {
+        filePath: settlementReportRestorePath,
+        content: await readFile(target.settlementReportMetadata, "utf8"),
+      },
+    );
+  }
+
   let transaction;
   try {
-    transaction = await commitFileTransaction("rollback-active-engine", [
-      { filePath: safety.engine, content: activeText },
-      { filePath: safety.metadata, content: json(safetyMetadata) },
-      { filePath: roots.activeEngine, content: targetText },
-      { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(rollbackRecord)}\n` },
-      { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
-    ], {
+    transaction = await commitFileTransaction("rollback-active-engine", rollbackOperations, {
       target_snapshot_id: snapshotId,
       safety_snapshot_id: safetySnapshotId,
       phase: "phase_3_rollback",
@@ -1145,6 +1431,9 @@ export async function rollbackActiveEngine(
     rollback_at: rolledBackAt,
     active_engine_before_hash: activeBeforeHash,
     active_engine_after_hash: activeAfterHash,
+    current_inputs_restored: restoreCurrentInputs,
+    settlement_report_status_restored:
+      settlementReportBeforeRollback !== null,
     transaction_id: transaction.transaction_id,
   };
 }

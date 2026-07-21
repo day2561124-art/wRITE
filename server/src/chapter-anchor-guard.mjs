@@ -8,22 +8,48 @@ export function buildChapterAnchorFromBundle(bundle = {}) {
 
   // Use a core context (generation + retrieval + longline) for extracting required core characters.
   // Writing card text is informative but should not by itself create strict required-core constraints.
-  const text = [generation, retrieval, longline, writingCard].join("\n").toString();
+  const latestSettledContinuity =
+    content.latest_settled_continuity
+    && typeof content.latest_settled_continuity === "object"
+      ? content.latest_settled_continuity
+      : null;
+  const settledSummary = String(
+    latestSettledContinuity?.summary_text ?? "",
+  );
+  const text = [
+    settledSummary,
+    generation,
+    retrieval,
+    longline,
+    writingCard,
+  ].join("\n").toString();
   const lc = text.toLocaleLowerCase("zh-Hant");
 
-  // Heuristics to extract simple anchor fields.
-  const chapter = /第[一二三四五六七八九十百0-9]+章/.exec(text)?.[0] ?? null;
-  const must_continue_from = /正式結算後|正式結算/.test(lc) ? "previous chapter settlement" : null;
+  // Prefer the structured latest-settlement identity. Text parsing is fallback only.
+  const chapter = latestSettledContinuity?.chapter
+    ?? /第[一二三四五六七八九十百千萬〇零0-9]+章/.exec(text)?.[0]
+    ?? null;
+  const latestSettledContinuityApplied =
+    latestSettledContinuity?.loaded === true;
+  const viewpointSwitchAllowed = latestSettledContinuityApplied
+    && /(?:不必承接[^\n]{0,30}下一秒|可(?:以)?[^\n]{0,30}(?:跳至|跳接|轉場|切換視角|切走|開啟新場景))/u.test(settledSummary);
+  const must_continue_from = latestSettledContinuityApplied
+    ? "latest settled continuity"
+    : /正式結算後|正式結算/.test(lc)
+      ? "previous chapter settlement"
+      : null;
 
   // Try find locked_match and locked_result by simple phrase matching
   const locked_match = (text.match(/\b[\p{L}0-9\-\u4e00-\u9fff]+\s*(?:vs|VS|對|vs\.|v\.)\s*[\p{L}0-9\-\u4e00-\u9fff]+/u) || [null])[0];
-  const locked_result = (lc.match(/九逃勝|九逃 勝|裁定中止|裁定 中止/) || [null])[0] || null;
+  const locked_result = (lc.match(/九逃獲勝|九逃 獲勝|九逃勝|九逃 勝|裁定中止|裁定 中止/) || [null])[0] || null;
 
   // required core - attempt to identify obvious names from core context (generation/retrieval/longline)
   const coreContext = [generation, retrieval, longline].join("\n");
   const required_core_characters = [];
-  if (/朝日奈千夜/.test(coreContext)) required_core_characters.push("朝日奈千夜");
-  if (/九逃/.test(coreContext)) required_core_characters.push("九逃");
+  if (!viewpointSwitchAllowed) {
+    if (/朝日奈千夜/.test(coreContext)) required_core_characters.push("朝日奈千夜");
+    if (/九逃/.test(coreContext)) required_core_characters.push("九逃");
+  }
 
   const allowed_supporting_characters = [];
   const forbidden_characters = ["江止澄", "蒼藤嵐", "周念今", "安岫", "建瑞凰"];
@@ -33,14 +59,21 @@ export function buildChapterAnchorFromBundle(bundle = {}) {
     "改寫九逃勝",
   ];
 
-  const allowed_scope = [
-    "醫療後座",
-    "短期疼痛與訓練限制",
-    "明日複查與換藥",
-    "觀眾反應",
-    "七班初步沉澱",
-    "下一場前壓力",
-  ];
+  const allowed_scope = latestSettledContinuityApplied
+    ? [
+      "依最新結算摘要承接",
+      "保留最新角色狀態與未收事項",
+      "允許合理轉場",
+      "允許切換視角或開啟新場景",
+    ]
+    : [
+      "醫療後座",
+      "短期疼痛與訓練限制",
+      "明日複查與換藥",
+      "觀眾反應",
+      "七班初步沉澱",
+      "下一場前壓力",
+    ];
 
   const chapter_anchor = {
     chapter: chapter ?? "unknown",
@@ -53,6 +86,9 @@ export function buildChapterAnchorFromBundle(bundle = {}) {
     forbidden_characters,
     forbidden_events,
     allowed_scope,
+    latest_settled_continuity_applied:
+      latestSettledContinuityApplied,
+    viewpoint_switch_allowed: viewpointSwitchAllowed,
   };
 
   const anchor_confidence = required_core_characters.length >= 2 ? "high" : "low";

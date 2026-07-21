@@ -5,6 +5,10 @@ import {
   readFile,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+  createDirectSettlementPromotionCandidate,
+  deriveDirectSettlementChapterIdentity,
+} from "./direct-chapter-settlement-promotion-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import {
   assertPathInside,
@@ -76,6 +80,24 @@ function optionalText(value, label, maximumLength) {
   }
 
   return value.trim();
+}
+
+function optionalBoolean(value, fallback = false) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "boolean") {
+    throw new Error("Boolean option must be true or false.");
+  }
+  return value;
+}
+
+function identityMetadata(identity = {}) {
+  return {
+    chapter: identity.chapter ?? null,
+    chapter_number: identity.chapter_number ?? null,
+    heading: identity.heading ?? null,
+    continuity_head: identity.continuity_head ?? null,
+    chapter_identity_complete: identity.complete === true,
+  };
 }
 
 function rootsFor(options = {}) {
@@ -224,6 +246,27 @@ export async function saveDirectChapterSettlementSummary(
     "summary",
     1_000,
   );
+  const explicitChapter = optionalText(
+    rawInput.chapter ?? rawInput.chapter_id ?? rawInput.chapterId,
+    "chapter",
+    100,
+  );
+  const explicitHeading = optionalText(
+    rawInput.heading ?? rawInput.chapter_heading ?? rawInput.chapterHeading,
+    "heading",
+    300,
+  );
+  const createPendingEngineCandidate = optionalBoolean(
+    rawInput.create_pending_engine_candidate
+      ?? rawInput.createPendingEngineCandidate,
+    false,
+  );
+  const identity = deriveDirectSettlementChapterIdentity({
+    summaryText,
+    explicitChapter,
+    explicitHeading,
+    metadata: { summary },
+  });
 
   const reportHash = sha256(summaryText);
   const dryRun =
@@ -244,7 +287,12 @@ export async function saveDirectChapterSettlementSummary(
       writing_candidate_created: false,
       proof_report_created: false,
       adoption_requested: false,
+      pending_engine_candidate_supported: true,
       pending_engine_candidate_created: false,
+      chapter: identity.chapter,
+      chapter_number: identity.chapter_number,
+      heading: identity.heading,
+      continuity_head: identity.continuity_head,
       active_engine_modified: false,
       engine_activation_requested: false,
     };
@@ -256,31 +304,101 @@ export async function saveDirectChapterSettlementSummary(
   );
 
   if (existing) {
+    const enrichedIdentity = deriveDirectSettlementChapterIdentity({
+      summaryText,
+      explicitChapter,
+      explicitHeading,
+      metadata: existing.metadata,
+    });
+    let metadata = {
+      ...existing.metadata,
+      ...identityMetadata(enrichedIdentity),
+      pending_engine_candidate_supported: true,
+    };
+    let promotion = null;
+
+    if (
+      createPendingEngineCandidate
+      && metadata.pending_engine_candidate_created !== true
+    ) {
+      promotion = await createDirectSettlementPromotionCandidate({
+        settlementReportId: metadata.settlement_report_id,
+        settlementSummary: summaryText,
+        metadata,
+        explicitChapter,
+        explicitHeading,
+      }, options);
+      metadata = {
+        ...metadata,
+        canon_status: "settlement_candidate_pending_review",
+        settlement_status: "pending_engine_candidate",
+        pending_engine_candidate_created: true,
+        pending_engine_candidate_id:
+          promotion.pending_engine_candidate_id,
+        pending_engine_candidate_path:
+          promotion.pending_engine_candidate_path,
+        current_input_refresh_prepared:
+          promotion.current_input_refresh_prepared === true,
+        active_engine_update_allowed: false,
+        active_engine_modified: false,
+        engine_activation_requested: false,
+        approval_item_created: false,
+      };
+    }
+
+    if (
+      JSON.stringify(metadata)
+      !== JSON.stringify(existing.metadata)
+    ) {
+      await commitFileTransaction(
+        "enrich-direct-chapter-continuity-handoff",
+        [{
+          filePath: existing.paths.metadata,
+          content: `${JSON.stringify(metadata, null, 2)}\n`,
+        }],
+        {
+          settlement_report_id: metadata.settlement_report_id,
+          pending_engine_candidate_id:
+            metadata.pending_engine_candidate_id ?? null,
+          phase: "phase_52a_direct_settlement_promotion",
+        },
+      );
+    }
+
     return {
       settlement_report_created: false,
       settlement_report_reused: true,
       settlement_report_id:
-        existing.metadata.settlement_report_id,
+        metadata.settlement_report_id,
       settlement_report_hash: reportHash,
       settlement_report_path:
-        existing.metadata.content_path,
+        metadata.content_path,
       settlement_report_meta_path:
-        existing.metadata.metadata_path,
+        metadata.metadata_path,
       report_kind:
-        existing.metadata.report_kind,
+        metadata.report_kind,
       continuity_handoff_saved: true,
+      ...identityMetadata(enrichedIdentity),
       full_chapter_persisted: false,
       adopted_chapter_created: false,
       writing_candidate_created: false,
       proof_report_created: false,
       adoption_requested: false,
-      pending_engine_candidate_created: false,
+      pending_engine_candidate_supported: true,
+      pending_engine_candidate_created:
+        metadata.pending_engine_candidate_created === true,
+      pending_engine_candidate_id:
+        metadata.pending_engine_candidate_id ?? null,
+      pending_engine_candidate_path:
+        metadata.pending_engine_candidate_path ?? null,
+      current_input_refresh_prepared:
+        metadata.current_input_refresh_prepared === true,
       active_engine_modified: false,
       engine_activation_requested: false,
-      next_action:
-        "Use this settlement summary as the latest continuity handoff "
-        + "when deciding whether the next chapter should continue directly, "
-        + "jump in time, switch viewpoint, or open a new scene.",
+      approval_item_created: false,
+      next_action: metadata.pending_engine_candidate_created === true
+        ? "Review the pending engine candidate, request activation, and explicitly confirm it. active_engine remains unchanged until approval."
+        : "The next writing-context build will load this as the latest settled continuity overlay. No formal engine candidate was requested.",
     };
   }
 
@@ -301,6 +419,7 @@ export async function saveDirectChapterSettlementSummary(
     settlement_context_id: null,
     settlement_report_hash: reportHash,
     summary,
+    ...identityMetadata(identity),
     canon_status: "settlement_report_only",
     settlement_status:
       "continuity_handoff_saved",
@@ -312,7 +431,7 @@ export async function saveDirectChapterSettlementSummary(
     writing_candidate_created: false,
     proof_report_created: false,
     adoption_requested: false,
-    pending_engine_candidate_supported: false,
+    pending_engine_candidate_supported: true,
     pending_engine_candidate_created: false,
     pending_engine_candidate_id: null,
     active_engine_update_allowed: false,
@@ -349,6 +468,46 @@ export async function saveDirectChapterSettlementSummary(
     },
   );
 
+  let finalMetadata = metadata;
+  if (createPendingEngineCandidate) {
+    const promotion = await createDirectSettlementPromotionCandidate({
+      settlementReportId: reportId,
+      settlementSummary: summaryText,
+      metadata,
+      explicitChapter,
+      explicitHeading,
+    }, options);
+    finalMetadata = {
+      ...metadata,
+      canon_status: "settlement_candidate_pending_review",
+      settlement_status: "pending_engine_candidate",
+      pending_engine_candidate_created: true,
+      pending_engine_candidate_id:
+        promotion.pending_engine_candidate_id,
+      pending_engine_candidate_path:
+        promotion.pending_engine_candidate_path,
+      current_input_refresh_prepared:
+        promotion.current_input_refresh_prepared === true,
+      active_engine_update_allowed: false,
+      active_engine_modified: false,
+      engine_activation_requested: false,
+      approval_item_created: false,
+    };
+    await commitFileTransaction(
+      "link-direct-chapter-settlement-promotion",
+      [{
+        filePath: paths.metadata,
+        content: `${JSON.stringify(finalMetadata, null, 2)}\n`,
+      }],
+      {
+        settlement_report_id: reportId,
+        pending_engine_candidate_id:
+          promotion.pending_engine_candidate_id,
+        phase: "phase_52a_direct_settlement_promotion",
+      },
+    );
+  }
+
   return {
     settlement_report_created: true,
     settlement_report_reused: false,
@@ -357,19 +516,28 @@ export async function saveDirectChapterSettlementSummary(
     settlement_report_path: metadata.content_path,
     settlement_report_meta_path:
       metadata.metadata_path,
-    report_kind: metadata.report_kind,
+    report_kind: finalMetadata.report_kind,
     continuity_handoff_saved: true,
+    ...identityMetadata(identity),
     full_chapter_persisted: false,
     adopted_chapter_created: false,
     writing_candidate_created: false,
     proof_report_created: false,
     adoption_requested: false,
-    pending_engine_candidate_created: false,
+    pending_engine_candidate_supported: true,
+    pending_engine_candidate_created:
+      finalMetadata.pending_engine_candidate_created === true,
+    pending_engine_candidate_id:
+      finalMetadata.pending_engine_candidate_id ?? null,
+    pending_engine_candidate_path:
+      finalMetadata.pending_engine_candidate_path ?? null,
+    current_input_refresh_prepared:
+      finalMetadata.current_input_refresh_prepared === true,
     active_engine_modified: false,
     engine_activation_requested: false,
-    next_action:
-      "Use this settlement summary as the latest continuity handoff "
-      + "when deciding whether the next chapter should continue directly, "
-      + "jump in time, switch viewpoint, or open a new scene.",
+    approval_item_created: false,
+    next_action: finalMetadata.pending_engine_candidate_created === true
+      ? "Review the pending engine candidate, request activation, and explicitly confirm it. active_engine remains unchanged until approval."
+      : "The next writing-context build will load this as the latest settled continuity overlay. No formal engine candidate was requested.",
   };
 }

@@ -33,6 +33,13 @@ import {
   buildVisualUploadedReferencesWritingContextInjection,
   serializeVisualUploadedReferencesWritingContextMarkdown,
 } from "./visual-uploaded-reference-writing-context-service.mjs";
+import {
+  buildLatestSettledContinuityTaskGuard,
+  getLatestSettledContinuityOverlay,
+  inspectCurrentInputSettlementFreshness,
+  serializeLatestSettledContinuityFixedGuard,
+  withLatestSettledContinuity,
+} from "./latest-settled-continuity-service.mjs";
 
 const bundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const chapterModes = new Set(["next_chapter", "specific_scene", "rewrite_candidate"]);
@@ -225,6 +232,32 @@ async function sourceSnapshot(label, filePath, included, canonStatus) {
 
 function serializeContext(value) {
   return JSON.stringify(value, null, 2);
+}
+
+function taskPromptWithContinuityGuard(taskPrompt, guardText) {
+  if (!guardText) {
+    return {
+      text: taskPrompt,
+      guard_applied: false,
+      original_task_prompt_truncated: false,
+    };
+  }
+
+  const separator = "\n\n";
+  const available = Math.max(
+    0,
+    taskPromptMaxLength
+      - guardText.length
+      - separator.length,
+  );
+  const boundedTaskPrompt = taskPrompt.slice(0, available);
+
+  return {
+    text: `${guardText}${separator}${boundedTaskPrompt}`,
+    guard_applied: true,
+    original_task_prompt_truncated:
+      boundedTaskPrompt.length < taskPrompt.length,
+  };
 }
 
 function characterVoiceRegistryMetadata(source) {
@@ -470,6 +503,23 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       "character voice registry test path",
     )
     : projectPaths.characterVoiceRegistry;
+  const latestSettledContinuity =
+    await getLatestSettledContinuityOverlay(options);
+  const currentInputSettlementFreshness =
+    await inspectCurrentInputSettlementFreshness(
+      latestSettledContinuity,
+      options,
+    );
+  const continuityTaskGuard =
+    buildLatestSettledContinuityTaskGuard(
+      latestSettledContinuity,
+      currentInputSettlementFreshness,
+    );
+  const effectiveTaskPrompt =
+    taskPromptWithContinuityGuard(
+      input.taskPrompt,
+      continuityTaskGuard,
+    );
   const sourceList = await Promise.all([
     sourceSnapshot("active_engine", activeEnginePath, input.includeActiveEngine, "active"),
     sourceSnapshot(
@@ -515,17 +565,29 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   const characterCanonGrounding = buildCharacterCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
-    taskPrompt: input.taskPrompt,
-    generationContext: input.generationContext,
-    retrievalContext: input.retrievalContext,
+    taskPrompt: effectiveTaskPrompt.text,
+    generationContext: withLatestSettledContinuity(
+      input.generationContext,
+      latestSettledContinuity,
+    ),
+    retrievalContext: withLatestSettledContinuity(
+      input.retrievalContext,
+      latestSettledContinuity,
+    ),
     currentLongline: byLabel.active_longline.content,
   });
   const worldEntityCanonGrounding = buildWorldEntityCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
-    taskPrompt: input.taskPrompt,
-    generationContext: input.generationContext,
-    retrievalContext: input.retrievalContext,
+    taskPrompt: effectiveTaskPrompt.text,
+    generationContext: withLatestSettledContinuity(
+      input.generationContext,
+      latestSettledContinuity,
+    ),
+    retrievalContext: withLatestSettledContinuity(
+      input.retrievalContext,
+      latestSettledContinuity,
+    ),
     currentLongline: byLabel.active_longline.content,
   });
   const characterVoiceRegistry = characterVoiceRegistryMetadata(
@@ -538,14 +600,20 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     : disabledVisualUploadedReferencesContext();
   const generationContext = contextWithVisualUploadedReferences(
     contextWithCharacterVoiceRegistry(
-      input.generationContext,
+      withLatestSettledContinuity(
+        input.generationContext,
+        latestSettledContinuity,
+      ),
       characterVoiceRegistry,
     ),
     visualUploadedReferences,
   );
   const retrievalContext = contextWithVisualUploadedReferences(
     contextWithCharacterVoiceRegistry(
-      input.retrievalContext,
+      withLatestSettledContinuity(
+        input.retrievalContext,
+        latestSettledContinuity,
+      ),
       characterVoiceRegistry,
     ),
     visualUploadedReferences,
@@ -595,6 +663,22 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   const warnings = sourceList
     .filter((source) => source.included && source.exists === false)
     .map((source) => `Missing source: ${source.label}`);
+  warnings.push(...(
+    latestSettledContinuity.warnings ?? []
+  ));
+  if (
+    currentInputSettlementFreshness
+      .stale_due_to_newer_settlement === true
+  ) {
+    warnings.push(
+      "Generated current inputs are stale because a newer chapter settlement exists.",
+    );
+  }
+  if (effectiveTaskPrompt.original_task_prompt_truncated) {
+    warnings.push(
+      "Original task prompt was truncated after the latest settled continuity guard was applied.",
+    );
+  }
   if (allocated.truncated_sections.length) {
     warnings.push(`Context truncated: ${allocated.truncated_sections.join(", ")}`);
   }
@@ -605,12 +689,29 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     source.label,
     source,
   ]));
+  publicSources.latest_settled_continuity = {
+    label: "latest_settled_continuity",
+    path: latestSettledContinuity.content_path ?? null,
+    included: latestSettledContinuity.loaded === true,
+    exists: latestSettledContinuity.loaded === true,
+    hash: latestSettledContinuity.settlement_report_hash ?? null,
+    modified_at: latestSettledContinuity.created_at ?? null,
+    canon_status: latestSettledContinuity.canon_status
+      ?? "settlement_report_only",
+    authority: latestSettledContinuity.authority ?? null,
+  };
   const bundle = {
     bundle_id: bundleId,
     bundle_kind: "gpt_writing_context",
     created_at: new Date().toISOString(),
     source: "gpt_writing_context_service",
-    task_prompt: input.taskPrompt,
+    task_prompt: effectiveTaskPrompt.text,
+    original_task_prompt: input.taskPrompt,
+    latest_settled_continuity_task_guard_applied:
+      effectiveTaskPrompt.guard_applied,
+    latest_settled_continuity: latestSettledContinuity,
+    current_input_settlement_freshness:
+      currentInputSettlementFreshness,
     chapter_mode: input.chapterMode,
     output_mode: input.outputMode,
     for_chat_output: true,
@@ -681,6 +782,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       world_entity_canon_grounding: worldEntityCanonGrounding,
       visual_uploaded_reference_context:
         allocated.content.visual_uploaded_reference_context,
+      latest_settled_continuity:
+        latestSettledContinuity.loaded === true
+          ? latestSettledContinuity
+          : null,
       retrieval_context: retrievalContext,
       generation_context: generationContext,
       retrieval_context_for_chat: allocated.content.retrieval_context,
@@ -693,6 +798,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     warnings,
   };
   bundle.fixed_guard_section = [
+    serializeLatestSettledContinuityFixedGuard(
+      latestSettledContinuity,
+      currentInputSettlementFreshness,
+    ),
     serializeCharacterCanonGroundingFixedGuard(
       characterCanonGrounding,
     ),
@@ -704,7 +813,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   if (input.includeWritingCardDirector) {
     try {
       const director = buildWritingCardDirectorContext({
-        taskPrompt: input.taskPrompt,
+        taskPrompt: effectiveTaskPrompt.text,
         generationContext,
         retrievalContext,
         writingCardText: byLabel.active_writing_card.content,
@@ -791,7 +900,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
           // call wrapper; if adapter is null the wrapper will record a skipped trace
           try {
             await wrapper({
-              task_prompt: input.taskPrompt,
+              task_prompt: effectiveTaskPrompt.text,
               generation_context: generationContext,
               retrieval_context: retrievalContext,
               character_voice_registry: characterVoiceRegistry,

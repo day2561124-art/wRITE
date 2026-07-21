@@ -275,7 +275,7 @@ try {
 
   childAClient = await connectClient(port, "phase47j-seal-child-a");
   const tools = await childAClient.listTools();
-  assert.equal(tools.tools.length, 25);
+  assert.equal(tools.tools.length, 29);
   const sealed = parse(await withTimeout(childAClient.callTool({
     name: "chatgpt_bridge_seal_raw_story_handoff",
     arguments: {

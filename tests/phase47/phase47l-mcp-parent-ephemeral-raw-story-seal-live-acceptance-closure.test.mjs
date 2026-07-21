@@ -276,7 +276,7 @@ assert.equal(fullToolNames.length, 80);
 const publicStart = mcpSource.indexOf("const chatgptPublicToolNames = new Set([");
 const publicEnd = mcpSource.indexOf("\n]);", publicStart);
 const publicToolNames = [...mcpSource.slice(publicStart, publicEnd).matchAll(/^  "([^"]+)",$/gmu)].map((match) => match[1]);
-assert.equal(publicToolNames.length, 25);
+assert.equal(publicToolNames.length, 29);
 assert.equal(evidence.mcp_inventory.public_tool_count, 25);
 assert.equal(evidence.mcp_inventory.full_tool_count, 80);
 

@@ -700,6 +700,12 @@ const steps = [
   ["Phase 50C post-draft exact-line critic and style diagnostics", ["tests/phase50/phase50c-post-draft-exact-line-diagnostics.test.mjs"]],
   ["Phase 50D final-polisher minimal-intervention regression hardening", ["tests/phase50/phase50d-final-polisher-minimal-intervention-regression.test.mjs"]],
   ["Phase 50E external-brain writing-chain final acceptance seal", ["tests/phase50/phase50e-external-brain-writing-chain-final-acceptance-seal.test.mjs"]],
+  ["Phase 51A latest settled continuity overlay", ["tests/phase51/phase51a-latest-settled-continuity-overlay.test.mjs"]],
+  ["Phase 52A direct settlement formal promotion", ["tests/phase52/phase52a-direct-settlement-formal-promotion.test.mjs"]],
+  ["Phase 52B existing direct settlement migration", ["tests/phase52/phase52b-existing-direct-settlement-migration.test.mjs"]],
+  ["Phase 53A pending engine review public profile exposure", ["tests/phase53/phase53a-pending-engine-review-public-profile.test.mjs"]],
+  ["Phase 54A direct settlement reviewability repair", ["tests/phase54/phase54a-direct-settlement-reviewability-repair.test.mjs"]],
+  ["Phase 55A direct settlement traceability review", ["tests/phase55/phase55a-direct-settlement-traceability-review.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

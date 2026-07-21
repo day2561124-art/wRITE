@@ -44,6 +44,10 @@ const publicToolNames = [
   "chatgpt_bridge_get_foreshadowing_settlement_surface",
   "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "chatgpt_bridge_save_settlement_report",
+  "build_pending_engine_candidate_review",
+  "get_pending_engine_candidate_review",
+  "list_pending_engine_candidate_reviews",
+  "request_pending_engine_candidate_activation",
   "approval_queue_bridge_readiness_report",
   "preview_visual_reference_consumer_output_guard",
 ];
@@ -55,7 +59,6 @@ const blockedToolNames = [
   "commit_error_report",
   "create_settlement_proposal",
   "build_pending_engine_candidate_from_settlement_report",
-  "request_pending_engine_candidate_activation",
   "query_mcp_audit",
 ];
 

@@ -2350,13 +2350,16 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_save_settlement_report",
-    description: (String("Save a concise chapter continuity settlement summary for the next writing turn. When the user pastes a completed chapter and explicitly requests chapter settlement, ChatGPT must read the chapter in the conversation, extract only continuity-critical events, character states, relationship changes, unresolved threads, and the next-chapter transition decision, then call this tool once with adopted_chapter_id=adopted_chapter_00000000-000000-00000000, settlement_context_id=settlement_ctx_00000000-000000-00000000, and prefix settlement_report_text with [[DIRECT_CHAPTER_SETTLEMENT_SUMMARY]] followed by a newline and the concise summary. Do not include or persist the full chapter text. This summary-only route does not create a writing candidate, proof report, adopted writing, adoption request, pending engine candidate, approval item, or active-engine update. Legacy adopted-writing settlement remains available only for separately confirmed full adoption workflows.")),
+    description: (String("Save a concise chapter continuity settlement summary for the next writing turn. When the user pastes a completed chapter and explicitly requests chapter settlement, ChatGPT must extract only continuity-critical events, character states, relationship changes, unresolved threads, and the next-chapter transition decision, then call this tool once with adopted_chapter_id=adopted_chapter_00000000-000000-00000000, settlement_context_id=settlement_ctx_00000000-000000-00000000, chapter, heading, and settlement_report_text prefixed by [[DIRECT_CHAPTER_SETTLEMENT_SUMMARY]]. Do not include or persist the full chapter text. The summary route stores structured chapter metadata and creates a pending formal-engine promotion candidate with refreshed current inputs prepared for activation. It never activates or modifies active_engine by itself. The user must review and explicitly approve activation. Until activation, the newest valid direct settlement summary remains the higher-priority continuity overlay so older generated inputs cannot roll chapter progress backward.")),
     risk: "low-risk-write",
     inputSchema: baseSchema({
       adoptedChapterId: { type: "string" },
       settlementContextId: { type: "string" },
       settlementReportText: { type: "string" },
       summary: { type: "string" },
+      chapter: { type: "string" },
+      heading: { type: "string" },
+      createPendingEngineCandidate: { type: "boolean", default: true },
       source: {
         type: "string",
         enum: ["chatgpt", "gpt", "manual_paste"],
@@ -2863,6 +2866,10 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_get_foreshadowing_settlement_surface",
   "chatgpt_bridge_get_foreshadowing_settlement_operator_ledger_surface",
   "chatgpt_bridge_save_settlement_report",
+  "build_pending_engine_candidate_review",
+  "get_pending_engine_candidate_review",
+  "list_pending_engine_candidate_reviews",
+  "request_pending_engine_candidate_activation",
   "approval_queue_bridge_readiness_report",
   "preview_visual_reference_consumer_output_guard",
 ]);

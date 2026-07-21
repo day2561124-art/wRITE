@@ -137,6 +137,7 @@ const expectedToolScripts = [
   "compress-error-rules.mjs",
   "create-settlement-proposal.mjs",
   "import-policy-file.mjs",
+  "promote-latest-direct-settlement.mjs",
   "query-mcp-audit.mjs",
   "run-pipeline.mjs",
   "save-draft.mjs",
@@ -1691,6 +1692,7 @@ const expectedDefaultMetadata = new Map([
     maxContextChars: 120000,
   }],
   ["chatgpt_bridge_save_settlement_report", {
+    createPendingEngineCandidate: true,
     source: "chatgpt",
     dryRun: false,
   }],

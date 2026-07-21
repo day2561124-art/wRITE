@@ -84,6 +84,12 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
     const result = await saveDirectChapterSettlementSummary({
       settlement_summary_text: envelope.payload,
       summary: input.summary,
+      chapter: input.chapter ?? input.chapter_id ?? input.chapterId,
+      heading: input.heading ?? input.chapter_heading ?? input.chapterHeading,
+      create_pending_engine_candidate:
+        input.create_pending_engine_candidate
+        ?? input.createPendingEngineCandidate
+        ?? true,
       source: input.source ?? "chatgpt",
       dry_run: dryRun,
     }, options);
@@ -102,7 +108,9 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
         direct_chapter_summary_settlement_allowed: true,
         full_chapter_persistence_allowed: false,
         writing_candidate_creation_allowed: false,
-        pending_engine_candidate_creation_allowed: false,
+        pending_engine_candidate_creation_allowed: true,
+        pending_engine_candidate_requires_activation_approval: true,
+        current_input_refresh_requires_activation: true,
       },
     };
   }
