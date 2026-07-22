@@ -640,6 +640,14 @@ export async function createExternalBrainSessionRetirementApprovalItem(session, 
   if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) {
     throw errorWithStatus("Session does not have a live RETIRE_RECOMMENDED recommendation.", 409);
   }
+  const existingRetirementApproval = (await listApprovalItems(options)).find((item) => {
+    const status = item.status?.status ?? item.status;
+    return item.action_type === "retire_external_brain_session"
+      && item.target_type === "external_brain_session"
+      && item.target_id === session.session_id
+      && !["resolved", "confirmed", "rejected"].includes(status);
+  });
+  if (existingRetirementApproval) return existingRetirementApproval;
   const sessionRoots = externalBrainSessionRoots(options);
   const reason = "Session exceeded the stale activity threshold, has complete cognition lineage, and has no live governance or acceptance-evidence pin.";
   return createApprovalItem({

@@ -550,7 +550,7 @@ async function refreshWriterWorkbenchState() {
   `;
 
   // approval panel
-  approvalPanel.innerHTML = `<div>確認佇列：${workbench.approval_queue?.pending_count ?? 0} 筆待確認</div>`;
+  approvalPanel.innerHTML = `<div>確認佇列：${pendingMainFlowApprovalItems(workbench.approval_queue?.items ?? []).length} 筆待確認</div>`;
 
   // review/diff panel (show minimal info)
   reviewPanel.innerHTML = workbench.blocked?.is_blocked
@@ -1291,7 +1291,7 @@ function renderOperatorOverview() {
   $("#nav-badge-settlement").textContent =
     operatorStatusLabel(workflowStep("settlement")?.status ?? "unknown");
   $("#nav-badge-approval").textContent =
-    `${state.workbench?.approval_queue?.pending_count ?? 0} 待確認`;
+    `${pendingMainFlowApprovalItems(state.approval.items ?? []).length} 待確認`;
   $("#nav-badge-visuals").textContent =
     `${diagnostics.indexRecords ?? visuals.count ?? 0} / ${diagnostics.pngFiles ?? 0}`;
   $("#nav-badge-neural").textContent =
@@ -2267,6 +2267,37 @@ function neuralUsageHtml(usage) {
   `).join("");
 }
 
+const APPROVAL_LATER_ACTION_TYPES = new Set([
+  "restore_from_backup",
+  "rollback_active_engine",
+  "cleanup_proposal",
+]);
+
+const APPROVAL_MAINTENANCE_ACTION_TYPES = new Set([
+  "retire_external_brain_session",
+]);
+
+function isApprovalHistoryItem(item) {
+  return ["resolved", "confirmed", "rejected"].includes(item.status?.status);
+}
+
+function isApprovalMaintenanceItem(item) {
+  return APPROVAL_MAINTENANCE_ACTION_TYPES.has(item.action_type);
+}
+
+function isApprovalLaterItem(item) {
+  return APPROVAL_LATER_ACTION_TYPES.has(item.action_type);
+}
+
+function pendingMainFlowApprovalItems(items = []) {
+  return items.filter(
+    (item) =>
+      !isApprovalHistoryItem(item)
+      && !isApprovalMaintenanceItem(item)
+      && !isApprovalLaterItem(item),
+  );
+}
+
 function approvalStatusClass(status) {
   if (status === "blocked") return "candidate-status-blocked";
   if (status === "rejected") return "candidate-status-rejected";
@@ -2283,18 +2314,32 @@ function approvalTypeLabel(actionType) {
     rollback_active_engine: "回滾",
     approve_cleanup_proposal: "清理",
     execute_cleanup_proposal: "清理",
+    retire_external_brain_session: "Session \u9000\u5f79",
   }[actionType] ?? actionType;
 }
 
 function renderApprovalQueue() {
   const items = state.approval.items ?? [];
-  $("#approval-queue-count").textContent = String(items.length);
-  const laterTypes = new Set(["restore_from_backup", "rollback_active_engine", "cleanup_proposal"]);
-  const isHistory = (item) => ["resolved", "confirmed", "rejected"].includes(item.status?.status);
+
+  const unresolvedItems = items.filter(
+    (item) => !isApprovalHistoryItem(item),
+  );
+  const mainFlowItems = pendingMainFlowApprovalItems(items);
+  const maintenanceItems = unresolvedItems.filter(
+    isApprovalMaintenanceItem,
+  );
+  const laterItems = unresolvedItems.filter(
+    isApprovalLaterItem,
+  );
+  const historyItems = items.filter(isApprovalHistoryItem);
+
+  $("#approval-queue-count").textContent = String(mainFlowItems.length);
+
   const groups = [
-    ["目前主流程必須處理", items.filter((item) => !laterTypes.has(item.action_type) && !isHistory(item))],
-    ["可稍後處理", items.filter((item) => laterTypes.has(item.action_type) && !isHistory(item))],
-    ["歷史與已處理", items.filter(isHistory)],
+    ["\u76ee\u524d\u4e3b\u6d41\u7a0b\u5fc5\u9808\u8655\u7406", mainFlowItems],
+    ["Session \u7dad\u8b77\uff08\u53ef\u7a0d\u5f8c\u8655\u7406\uff09", maintenanceItems],
+    ["\u5176\u4ed6\u53ef\u7a0d\u5f8c\u8655\u7406", laterItems],
+    ["\u6b77\u53f2\u8207\u5df2\u8655\u7406", historyItems],
   ];
   const itemHtml = (item) => `
       <button class="approval-item${item.approval_item_id === state.activeApprovalItemId ? " is-active" : ""}${item.risk_level === "high" ? " is-high-risk" : ""}" type="button" data-approval-item-id="${escapeHtml(item.approval_item_id)}">
@@ -3126,7 +3171,7 @@ function renderTopbarStatus() {
     const sources = state.data?.sources ?? [];
     const rules = state.data?.rules ?? null;
     const memory = state.data?.memory ?? null;
-    const pending = state.workbench?.approval_queue?.pending_count ?? 0;
+    const pending = pendingMainFlowApprovalItems(state.approval.items ?? []).length;
     const bridgeText = bridge?.available ? `ChatGPT Bridge：可用` : bridge?.error ? `ChatGPT Bridge：錯誤` : `ChatGPT Bridge：尚未接入`;
     const canonText = sources.length ? `正史資料庫：${sources.filter(s=>s.errors?.length).length ? '警告' : '正常'}` : '正史資料庫：載入中';
     const rulesText = rules?.hash ? `寫作規則：正常` : `寫作規則：載入中`;
