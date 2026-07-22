@@ -2433,7 +2433,7 @@ function renderApprovalQueue() {
       <p><strong>可以暫時忽略嗎？</strong>${
         item.action_type === "restore_from_backup"
           ? "這是資料還原請求，不是目前寫作必須處理。若你沒有要還原資料，可以暫時忽略。"
-          : laterTypes.has(item.action_type)
+          : APPROVAL_LATER_ACTION_TYPES.has(item.action_type)
             ? "可以。這項目預設不阻塞目前寫作主流程。"
             : "若主流程正在等待此項確認，延後會讓相對應階段維持待確認。"
       }</p>
