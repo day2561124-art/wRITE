@@ -627,8 +627,19 @@ export async function requestPendingEngineCandidateActivation(rawInput, options 
   }
   const item = await createApprovalItem({
     actionType: "activate_engine_candidate",
+    requestKind: "activate_engine_candidate",
     targetType: "pending_engine_candidate",
     targetId: input.candidateId,
+    workflowRunId: candidate.metadata.workflow_run_id
+      ?? candidate.metadata.run_id
+      ?? candidate.metadata.source_lineage?.workflow_run_id
+      ?? null,
+    sourceHash: currentCandidateHash,
+    sourceRevision: currentCandidateHash,
+    sourcePhase: "phase_8h_pending_engine_candidate_review",
+    sourceKind: candidate.metadata.source_kind ?? candidate.metadata.candidate_kind ?? null,
+    environment: candidate.metadata.environment ?? "production",
+    testFixture: candidate.metadata.test_fixture === true,
     sourceChapter: candidate.metadata.source_chapter,
     title: "Pending engine candidate activation request",
     summary: input.reason || "User requested activation review through Phase 8H.",
@@ -682,8 +693,21 @@ export async function requestPendingEngineCandidateActivation(rawInput, options 
       candidate_status: candidate.status.status,
       review_status: candidate.metadata.review_status ?? "pending_review",
       diff_summary: review.diff_summary,
+      candidate_hash: currentCandidateHash,
     },
   }, options);
+  if (!item.approval_item_id) {
+    return {
+      approval_item_created: false,
+      approval_item_id: null,
+      approval_status: item.status?.status ?? "archived",
+      diagnostic: item.diagnostic ?? "approval request was not persisted",
+      pending_engine_candidate_id: input.candidateId,
+      review_id: review.review_id,
+      active_engine_modified: false,
+      activation_performed: false,
+    };
+  }
   const paths = candidatePaths(input.candidateId, roots);
   const nextMetadata = {
     ...candidate.metadata,

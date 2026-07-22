@@ -185,6 +185,10 @@ export async function auditActiveExternalBrainSessions(input = {}, options = {})
       run_status: run.status,
       run_mode: run.mode,
       session_lifecycle_status: run.session_lifecycle_status ?? "ACTIVE",
+      lifecycle_generation: Number.isSafeInteger(run.lifecycle_generation)
+        && run.lifecycle_generation > 0
+        ? run.lifecycle_generation
+        : 1,
       writing_context_bundle_ids: session.writing_context_bundle_ids,
       neural_trace_count: session.neural_trace_ids.length,
       estimated_logical_bytes: session.estimated_logical_bytes,

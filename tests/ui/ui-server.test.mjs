@@ -947,6 +947,9 @@ async function main() {
       body: JSON.stringify({
         sourceChapter: "UI 合約測試章",
         note: "Phase 2 API fixture",
+        sourceKind: "ui_contract_test",
+        environment: "test",
+        testFixture: true,
         rawText: settlementRaw,
       }),
     }));
@@ -971,7 +974,7 @@ async function main() {
       (item) => item.target_id === apiCandidateId
         && item.action_type === "activate_engine_candidate",
     );
-    assert(candidateApproval, "Approval scan omitted pending candidate.");
+    assert(!candidateApproval, "UI contract fixture entered the production approval queue.");
     const approvalCount = approvalScan.payload.scan.items.length;
     const repeatedApprovalScan = await readJson(await fetch(`${baseUrl}/api/approval-queue/scan`, {
       method: "POST",
@@ -982,50 +985,11 @@ async function main() {
       repeatedApprovalScan.payload.scan.items.length === approvalCount,
       "Repeated approval scan created duplicate items.",
     );
-    const approvalDetail = await readJson(await fetch(
-      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}`,
-    ));
-    assert(approvalDetail.response.ok, "Approval item detail API failed.");
-    const unconfirmedApproval = await readJson(await fetch(
-      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/confirm`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      },
-    ));
-    assert(unconfirmedApproval.response.status === 409, "Approval item confirmed without checkbox.");
-    const deferredApproval = await readJson(await fetch(
-      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/defer`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "UI contract defer" }),
-      },
-    ));
+    const approvalItems = await readJson(await fetch(`${baseUrl}/api/approval-queue/items`));
+    assert(approvalItems.response.ok, "Approval item list API failed.");
     assert(
-      deferredApproval.response.ok && deferredApproval.payload.result.status.status === "deferred",
-      "Approval defer API failed.",
-    );
-    const rejectedApproval = await readJson(await fetch(
-      `${baseUrl}/api/approval-queue/items/${candidateApproval.approval_item_id}/reject`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "UI contract reject" }),
-      },
-    ));
-    assert(
-      rejectedApproval.response.ok && rejectedApproval.payload.result.status.status === "rejected",
-      "Approval reject API failed.",
-    );
-    const approvalLogs = await readJson(await fetch(`${baseUrl}/api/approval-queue/logs`));
-    assert(
-      approvalLogs.response.ok
-        && approvalLogs.payload.logs.some((log) => log.event === "approval_deferred")
-        && approvalLogs.payload.logs.some((log) => log.event === "approval_rejected")
-        && approvalLogs.payload.logs.some((log) => log.event === "approval_failed"),
-      "Approval log API omitted decision events.",
+      !(approvalItems.payload.pending_items ?? []).some((item) => item.target_id === apiCandidateId),
+      "UI contract fixture leaked into the actionable pending API.",
     );
 
     const cleanupScan = await readJson(await fetch(`${baseUrl}/api/cleanup/scan`, {
@@ -1618,7 +1582,7 @@ async function main() {
     console.log("- Writing workflow active_engine side effects: none");
     console.log("- Settlement context, report, Phase 2 candidate, diff, and risk checked: yes");
     console.log("- Phase 4B direct active_engine activation: none");
-    console.log("- Approval scan, dedupe, detail, reject, defer, rollback request, and logs checked: yes");
+    console.log("- Approval scan dedupe, UI fixture isolation, actionable filtering, and rollback request checked: yes");
     console.log("- Approval high-risk UI confirmation and path safety checked: yes");
     console.log("- Cleanup scan, proposal, reject, defer, logs, UI, and path safety checked: yes");
     console.log("- Unknown action rejected: yes");

@@ -100,6 +100,7 @@ import {
   deferApprovalItem,
   ensureApprovalQueueDirectories,
   getApprovalItem,
+  listActionableApprovalItems,
   listApprovalItems,
   listApprovalLogs,
   refreshApprovalItem,
@@ -239,6 +240,7 @@ const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".gif": "image/gif",
   ".jpg": "image/jpeg",
@@ -2309,7 +2311,14 @@ async function handleRequest(request, response, runtimeOptions = {}) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/approval-queue/items") {
-    sendJson(response, 200, { ok: true, items: await listApprovalItems() });
+    const pendingItems = await listActionableApprovalItems();
+    const items = await listApprovalItems();
+    sendJson(response, 200, {
+      ok: true,
+      items,
+      pending_items: pendingItems,
+      pending_count: pendingItems.length,
+    });
     return;
   }
 
@@ -2427,6 +2436,9 @@ async function handleRequest(request, response, runtimeOptions = {}) {
         draftText: input.draftText ?? input.draft_text,
         sourceChapter: input.sourceChapter ?? input.source_chapter,
         note: input.note,
+        sourceKind: input.sourceKind ?? input.source_kind,
+        environment: input.environment,
+        testFixture: input.testFixture === true || input.test_fixture === true,
         runId: input.runId ?? input.run_id,
         contextBundleId: input.contextBundleId ?? input.context_bundle_id,
         neuralModulesUsedPath: input.neuralModulesUsedPath ?? input.neural_modules_used_path,

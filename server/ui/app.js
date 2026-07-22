@@ -1,3 +1,8 @@
+import {
+  isActionableApprovalItem,
+  isApprovalHistoryItem,
+} from "./approval-ui-policy.mjs";
+
 const state = {
   data: null,
   activeView: "overview",
@@ -34,6 +39,7 @@ const state = {
   },
   approval: {
     items: [],
+    pendingItems: [],
     detail: null,
     logs: [],
   },
@@ -2277,10 +2283,6 @@ const APPROVAL_MAINTENANCE_ACTION_TYPES = new Set([
   "retire_external_brain_session",
 ]);
 
-function isApprovalHistoryItem(item) {
-  return ["resolved", "confirmed", "rejected"].includes(item.status?.status);
-}
-
 function isApprovalMaintenanceItem(item) {
   return APPROVAL_MAINTENANCE_ACTION_TYPES.has(item.action_type);
 }
@@ -2292,7 +2294,7 @@ function isApprovalLaterItem(item) {
 function pendingMainFlowApprovalItems(items = []) {
   return items.filter(
     (item) =>
-      !isApprovalHistoryItem(item)
+      isActionableApprovalItem(item)
       && !isApprovalMaintenanceItem(item)
       && !isApprovalLaterItem(item),
   );
@@ -2321,17 +2323,18 @@ function approvalTypeLabel(actionType) {
 function renderApprovalQueue() {
   const items = state.approval.items ?? [];
 
-  const unresolvedItems = items.filter(
-    (item) => !isApprovalHistoryItem(item),
-  );
-  const mainFlowItems = pendingMainFlowApprovalItems(items);
+  const actionableItems = state.approval.pendingItems?.length
+    ? state.approval.pendingItems
+    : items.filter(isActionableApprovalItem);
+  const unresolvedItems = actionableItems;
+  const mainFlowItems = pendingMainFlowApprovalItems(actionableItems);
   const maintenanceItems = unresolvedItems.filter(
     isApprovalMaintenanceItem,
   );
   const laterItems = unresolvedItems.filter(
     isApprovalLaterItem,
   );
-  const historyItems = items.filter(isApprovalHistoryItem);
+  const historyItems = items.filter((item) => !isActionableApprovalItem(item));
 
   $("#approval-queue-count").textContent = String(mainFlowItems.length);
 
@@ -2524,6 +2527,7 @@ async function refreshApprovalQueue(showToast = false) {
     api("/api/canon/snapshots"),
   ]);
   state.approval.items = itemsPayload.items ?? [];
+  state.approval.pendingItems = itemsPayload.pending_items ?? [];
   state.approval.logs = logsPayload.logs ?? [];
   state.canon.snapshots = snapshotsPayload.snapshots ?? [];
   if (!state.approval.items.some(

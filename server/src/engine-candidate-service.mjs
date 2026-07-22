@@ -644,6 +644,9 @@ export async function importSettlementResult(input, options = {}) {
   if (!rawText.trim()) throw errorWithStatus("rawText 不可空白。");
   const sourceChapter = String(input?.sourceChapter ?? "").trim().slice(0, 500);
   const note = String(input?.note ?? "").trim().slice(0, 5000);
+  const sourceKind = String(input?.sourceKind ?? input?.source_kind ?? "").trim().slice(0, 100);
+  const environment = String(input?.environment ?? "production").trim().slice(0, 50)
+    || "production";
   const runId = String(input?.runId ?? "").trim();
   const requiresNeuralModules = input?.requiresNeuralModules === true;
   const neuralModulesUsedPath = validateImportReferences(
@@ -665,6 +668,9 @@ export async function importSettlementResult(input, options = {}) {
     note,
     created_at: createdAt,
     created_by: "local_ui_import",
+    source_kind: sourceKind || null,
+    environment,
+    test_fixture: input?.testFixture === true || input?.test_fixture === true,
     run_id: runId,
     raw_hash: sha256(rawText),
     candidate_hash: evaluated.parsed.ok ? sha256(evaluated.parsed.candidateText) : "",

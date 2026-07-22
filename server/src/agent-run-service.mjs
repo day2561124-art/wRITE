@@ -199,6 +199,7 @@ export async function createAgentRun(input = {}, options = {}) {
     ...(mode === "chatgpt_owned_external_brain" ? {
       external_brain_session_id: runId,
       session_lifecycle_status: "ACTIVE",
+      lifecycle_generation: 1,
       last_activity_at: createdAt,
     } : {}),
     ...(writingContextBundleId ? {
@@ -408,9 +409,18 @@ export async function transitionExternalBrainSessionLifecycle(runId, lifecycleSt
   const transitionedAt = input.transitioned_at
     ? validIsoTimestamp(input.transitioned_at, "transitioned_at")
     : new Date().toISOString();
+  const currentLifecycle = String(run.session_lifecycle_status ?? "ACTIVE").toUpperCase();
+  const currentGeneration = Number.isSafeInteger(run.lifecycle_generation)
+    && run.lifecycle_generation > 0
+    ? run.lifecycle_generation
+    : 1;
+  const lifecycleGeneration = normalized === "ACTIVE" && currentLifecycle !== "ACTIVE"
+    ? currentGeneration + 1
+    : currentGeneration;
   const next = {
     ...run,
     session_lifecycle_status: normalized,
+    lifecycle_generation: lifecycleGeneration,
     last_activity_at: transitionedAt,
     last_activity_source: requireString(input.activity_source ?? `lifecycle:${normalized.toLowerCase()}`, "activity_source", 200),
     updated_at: new Date().toISOString(),

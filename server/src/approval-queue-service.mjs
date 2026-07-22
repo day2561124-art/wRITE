@@ -14,9 +14,15 @@ import {
   approveCleanupProposal,
   executeCleanupProposal,
   assertCleanupProposalId,
+  getCleanupProposal,
 } from "./cleanup-proposal-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
-import { agentRunPaths, assertAgentRunId, getAgentRun } from "./agent-run-service.mjs";
+import {
+  agentRunPaths,
+  assertAgentRunId,
+  getAgentRun,
+  hashAgentRunValue,
+} from "./agent-run-service.mjs";
 import { defaultCleanupRetentionPolicy } from "./cleanup-retention-policy.mjs";
 import {
   auditActiveExternalBrainSessions,
@@ -52,7 +58,28 @@ const allowedStatuses = new Set([
   "deferred",
   "blocked",
   "resolved",
+  "approved",
+  "completed",
+  "expired",
+  "invalidated",
+  "orphaned",
+  "archived",
 ]);
+
+const terminalApprovalStatuses = new Set([
+  "confirmed",
+  "rejected",
+  "resolved",
+  "approved",
+  "completed",
+  "expired",
+  "invalidated",
+  "orphaned",
+  "archived",
+]);
+
+const productionFixturePattern = /(?:^|[_\-\s])(ui[_-]?test|e2e|fixture|demo)(?:$|[_\-\s])/iu;
+const productionUiFixturePattern = /ui[_\-\s]*workflow|ui(?:[_\-\s]*(?:contract|合約))?[_\-\s]*(?:test|測試)/iu;
 
 const allowedActions = new Set([
   "activate_engine_candidate",
@@ -185,8 +212,165 @@ async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
-function keyFor(item) {
-  return `${item.target_type}:${item.target_id}:${item.action_type}`;
+function firstText(...values) {
+  return values.find((value) => typeof value === "string" && value.trim())?.trim() ?? "";
+}
+
+function positiveGeneration(value) {
+  const generation = Number(value);
+  return Number.isSafeInteger(generation) && generation > 0 ? generation : 1;
+}
+
+export function approvalIdentity(input = {}) {
+  const actionType = firstText(input.actionType, input.action_type);
+  const targetId = firstText(input.targetId, input.target_id);
+  const requestKind = firstText(
+    input.requestKind,
+    input.request_kind,
+    input.details?.request_kind,
+    actionType,
+  );
+  const workflowRunId = firstText(
+    input.workflowRunId,
+    input.workflow_run_id,
+    input.runId,
+    input.run_id,
+    input.lineage?.workflow_run_id,
+    input.lineage?.run_id,
+    input.details?.workflow_run_id,
+    input.details?.lineage?.workflow_run_id,
+    actionType === "retire_external_brain_session" ? targetId : "",
+  );
+  const sourcePhase = firstText(
+    input.sourcePhase,
+    input.source_phase,
+    input.details?.source_phase,
+  );
+  const sourceRevision = firstText(
+    input.sourceRevision,
+    input.source_revision,
+    input.candidateHash,
+    input.candidate_hash,
+    input.proofReportHash,
+    input.proof_report_hash,
+    input.details?.candidate_engine_hash_sha256,
+    input.details?.candidate_hash,
+    input.details?.source_revision,
+    input.details?.raw_hash,
+    input.details?.active_engine_hash,
+  );
+  const lifecycleGeneration = positiveGeneration(
+    input.lifecycleGeneration
+      ?? input.lifecycle_generation
+      ?? input.lineage?.lifecycle_generation
+      ?? input.details?.lifecycle_generation,
+  );
+  const sourceHash = firstText(input.sourceHash, input.source_hash)
+    || (actionType === "retire_external_brain_session"
+      ? hashAgentRunValue({
+        session_id: targetId,
+        lifecycle_generation: lifecycleGeneration,
+      })
+      : hashAgentRunValue({
+      request_kind: requestKind,
+      target_id: targetId,
+      workflow_run_id: workflowRunId,
+      source_phase: sourcePhase,
+      source_revision: sourceRevision,
+      lifecycle_generation: lifecycleGeneration,
+      }));
+  const components = {
+    request_kind: requestKind,
+    target_id: targetId,
+    workflow_run_id: workflowRunId || null,
+    source_phase: sourcePhase || null,
+    source_revision: sourceRevision || null,
+    source_hash: sourceHash,
+    lifecycle_generation: lifecycleGeneration,
+  };
+  return {
+    ...components,
+    dedupe_key: hashAgentRunValue(components),
+  };
+}
+
+function approvalStatus(item) {
+  return item?.status?.status ?? item?.status ?? null;
+}
+
+function explicitlyAllowsReproposal(item) {
+  return item?.reproposal_allowed === true
+    || item?.status?.reproposal_allowed === true
+    || item?.status?.suppression?.reproposal_allowed === true;
+}
+
+function legacyIdentityMatches(item, identity, actionType, targetId) {
+  if (item.dedupe_key) return false;
+  if (item.action_type !== actionType || item.target_id !== targetId) return false;
+  const legacy = approvalIdentity(item);
+  if (legacy.lifecycle_generation !== identity.lifecycle_generation) return false;
+  const legacyRevision = firstText(
+    item.source_revision,
+    item.candidate_hash,
+    item.proof_report_hash,
+    item.details?.candidate_engine_hash_sha256,
+    item.details?.candidate_hash,
+    item.details?.raw_hash,
+  );
+  if (legacyRevision && identity.source_revision && legacyRevision !== identity.source_revision) {
+    return false;
+  }
+  if (legacy.workflow_run_id && identity.workflow_run_id
+    && legacy.workflow_run_id !== identity.workflow_run_id) {
+    return false;
+  }
+  return Boolean(legacyRevision || actionType === "retire_external_brain_session");
+}
+
+function isTestQueue(options = {}) {
+  if (options.enforceProductionFixtureIsolation === true
+    || options.enforce_production_fixture_isolation === true) return false;
+  return Boolean(options.fixtureRoot)
+    || Boolean(options.approvalQueue && path.resolve(options.approvalQueue) !== projectPaths.approvalQueue);
+}
+
+export function isApprovalTestFixture(input = {}) {
+  if (input.testFixture === true || input.test_fixture === true) return true;
+  if (input.details?.test_fixture === true || input.metadata?.test_fixture === true) return true;
+  const environment = firstText(input.environment, input.details?.environment, input.metadata?.environment);
+  const sourceKind = firstText(
+    input.sourceKind,
+    input.source_kind,
+    input.details?.source_kind,
+    input.metadata?.source_kind,
+  );
+  if (["test", "fixture", "e2e", "demo"].includes(environment.toLowerCase())) return true;
+  if (["test", "test_fixture", "ui_contract_test", "e2e", "demo"].includes(sourceKind.toLowerCase())) {
+    return true;
+  }
+  const structuredSource = [
+    input.sourceChapter,
+    input.source_chapter,
+    input.source,
+    input.createdBy,
+    input.created_by,
+  ].filter(Boolean).join(" ");
+  return productionFixturePattern.test(structuredSource)
+    || productionUiFixturePattern.test(structuredSource);
+}
+
+export function isActionableApprovalItem(item = {}) {
+  const status = approvalStatus(item);
+  const targetExists = item.target_exists ?? item.status?.target_exists;
+  if (status === "pending") {
+    return targetExists !== false && !isApprovalTestFixture(item);
+  }
+  if (status === "blocked") {
+    return targetExists !== false
+      && item.resolution_path?.available === true
+      && !isApprovalTestFixture(item);
+  }
+  return false;
 }
 
 function baseStatus(status = "pending", reason = null) {
@@ -220,13 +404,54 @@ function activationImpact(candidate = null) {
   };
 }
 
-async function neuralCandidateState(metadata) {
+function isDirectSettlementCandidate(metadata = {}) {
+  return metadata.candidate_kind === "direct_chapter_settlement_promotion"
+    || metadata.source === "direct_chapter_settlement_promotion_service"
+    || metadata.lineage_mode === "direct_chapter_settlement_summary"
+    || metadata.source_lineage?.lineage_mode === "direct_chapter_settlement_summary"
+    || metadata.source_lineage?.legacy_adopted_writing_workflow_applicable === false;
+}
+
+async function neuralCandidateState(metadata, options = {}) {
+  if (isDirectSettlementCandidate(metadata)) {
+    return {
+      required: false,
+      ok: true,
+      status: "not_applicable",
+      blocked_reason: null,
+      workflow_run_id: null,
+      trace_source_available: false,
+    };
+  }
   if (metadata.requires_neural_modules !== true) {
-    return { required: false, ok: true, status: "not_required", blocked_reason: null };
+    return {
+      required: false,
+      ok: true,
+      status: "not_required",
+      blocked_reason: null,
+      workflow_run_id: null,
+      trace_source_available: false,
+    };
+  }
+  const workflowRunId = firstText(
+    metadata.workflow_run_id,
+    metadata.run_id,
+    metadata.source_lineage?.workflow_run_id,
+  );
+  if (!workflowRunId) {
+    return {
+      required: true,
+      ok: false,
+      status: "trace_source_unavailable",
+      blocked_reason: "trace source unavailable: workflow_run_id is missing",
+      workflow_run_id: null,
+      trace_source_available: false,
+    };
   }
   try {
-    const run = await getAgentRun(metadata.run_id);
-    const usage = await summarizeNeuralUsageForRun(run.run_id);
+    assertAgentRunId(workflowRunId);
+    const run = await getAgentRun(workflowRunId, options);
+    const usage = await summarizeNeuralUsageForRun(run.run_id, options);
     if (usage.missing_required_neural_modules.length) {
       return {
         required: true,
@@ -234,15 +459,26 @@ async function neuralCandidateState(metadata) {
         status: "missing",
         blocked_reason:
           `neural_trace_missing: ${usage.missing_required_neural_modules.join(", ")}`,
+        workflow_run_id: workflowRunId,
+        trace_source_available: true,
       };
     }
-    return { required: true, ok: true, status: "success", blocked_reason: null };
+    return {
+      required: true,
+      ok: true,
+      status: "success",
+      blocked_reason: null,
+      workflow_run_id: workflowRunId,
+      trace_source_available: true,
+    };
   } catch (error) {
     return {
       required: true,
       ok: false,
-      status: "missing",
-      blocked_reason: `neural_trace_missing: ${error.message}`,
+      status: "trace_source_unavailable",
+      blocked_reason: `trace source unavailable: ${error.message}`,
+      workflow_run_id: workflowRunId,
+      trace_source_available: false,
     };
   }
 }
@@ -300,18 +536,49 @@ export async function listApprovalLogs(options = {}) {
     .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
 }
 
-export async function createApprovalItem(input = {}, options = {}) {
+async function createApprovalItemUnlocked(input = {}, options = {}) {
   const roots = await ensureApprovalQueueDirectories(options);
   const actionType = optionalText(input.actionType ?? input.action_type, 100);
   if (!allowedActions.has(actionType)) throw errorWithStatus("Invalid approval action_type.");
   const targetType = optionalText(input.targetType ?? input.target_type, 100);
   const targetId = optionalText(input.targetId ?? input.target_id, 200);
   if (!targetType || !targetId) throw errorWithStatus("target_type and target_id are required.");
-  const existing = (await listApprovalItems(options)).find(
-    (item) => keyFor(item) === `${targetType}:${targetId}:${actionType}`
-      && !["rejected", "resolved"].includes(item.status.status),
-  );
-  if (existing) return existing;
+  if (!isTestQueue(options) && isApprovalTestFixture(input)) {
+    return {
+      approval_item_id: null,
+      approval_item_created: false,
+      persisted: false,
+      test_fixture: true,
+      action_type: actionType,
+      target_type: targetType,
+      target_id: targetId,
+      status: baseStatus("archived", "test_fixture_excluded_from_production_queue"),
+      diagnostic: "test fixture excluded from production approval queue",
+    };
+  }
+  const identity = approvalIdentity({
+    ...input,
+    action_type: actionType,
+    target_id: targetId,
+  });
+  const matching = (await listApprovalItems(options))
+    .filter((item) => {
+      const existingIdentity = item.dedupe_key
+        ? { dedupe_key: item.dedupe_key }
+        : approvalIdentity(item);
+      return existingIdentity.dedupe_key === identity.dedupe_key
+        || legacyIdentityMatches(item, identity, actionType, targetId);
+    })
+    .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+  const existing = matching.find((item) => !explicitlyAllowsReproposal(item));
+  if (existing) {
+    return {
+      ...existing,
+      approval_item_created: false,
+      deduplicated: true,
+      suppressed: terminalApprovalStatuses.has(approvalStatus(existing)),
+    };
+  }
 
   const characterVoiceGate = actionType === "adopt_writing_candidate"
     ? input.details?.character_voice_adoption_gate
@@ -369,12 +636,26 @@ export async function createApprovalItem(input = {}, options = {}) {
         : input.canExecuteWithoutUserConfirmation === true
           || input.can_execute_without_user_confirmation === true,
     created_by: optionalText(input.createdBy ?? input.created_by, 200),
-    request_kind: optionalText(input.requestKind ?? input.request_kind, 100) || null,
+    request_kind: identity.request_kind,
     source: optionalText(input.source, 100) || null,
-    source_phase: optionalText(input.sourcePhase ?? input.source_phase, 100) || null,
+    source_kind: optionalText(input.sourceKind ?? input.source_kind, 100) || null,
+    environment: optionalText(input.environment, 50) || "production",
+    test_fixture: input.testFixture === true || input.test_fixture === true,
+    source_phase: identity.source_phase,
+    source_revision: identity.source_revision,
+    source_hash: identity.source_hash,
+    workflow_run_id: identity.workflow_run_id,
+    lifecycle_generation: identity.lifecycle_generation,
+    dedupe_key: identity.dedupe_key,
+    dedupe_components: identity,
+    reproposal_allowed: input.reproposalAllowed === true || input.reproposal_allowed === true,
     verified_by: optionalText(input.verifiedBy ?? input.verified_by, 200) || null,
     bridge_capabilities: input.bridgeCapabilities ?? input.bridge_capabilities ?? null,
-    lineage: input.lineage ?? null,
+    lineage: {
+      ...(input.lineage ?? {}),
+      ...(identity.workflow_run_id ? { workflow_run_id: identity.workflow_run_id } : {}),
+      lifecycle_generation: identity.lifecycle_generation,
+    },
     safety_snapshot: input.safetySnapshot ?? input.safety_snapshot ?? null,
     operator_readiness: input.operatorReadiness ?? input.operator_readiness ?? null,
     safety: input.safety ?? null,
@@ -393,6 +674,16 @@ export async function createApprovalItem(input = {}, options = {}) {
       character_voice_guard_display: characterVoiceGate.display,
       character_voice_findings: characterVoiceGate.display.findings,
     } : input.details ?? {},
+    resolution_path: input.resolutionPath ?? input.resolution_path ?? (
+      actionType === "neural_trace_missing" && identity.workflow_run_id
+        ? {
+          available: true,
+          action: "record_required_neural_success_trace_then_refresh",
+        }
+        : input.blockedReason || input.blocked_reason || input.status === "blocked"
+          ? { available: false, action: null }
+          : { available: true, action: "human_decision" }
+    ),
     ...(actionType === "retire_external_brain_session" ? {
       session_id: targetId,
       current_classification: input.currentClassification ?? input.current_classification ?? null,
@@ -417,6 +708,9 @@ export async function createApprovalItem(input = {}, options = {}) {
     input.status === "blocked" || item.blocked_reason ? "blocked" : "pending",
     item.blocked_reason,
   );
+  status.dedupe_key = identity.dedupe_key;
+  status.source_hash = identity.source_hash;
+  status.lifecycle_generation = identity.lifecycle_generation;
   const paths = itemPaths(approvalItemId, roots);
   await commitFileTransaction("create-approval-item", [
     { filePath: paths.item, content: json(item) },
@@ -442,6 +736,20 @@ export async function createApprovalItem(input = {}, options = {}) {
     ...fixtureTransactionMetadata(options),
   });
   return getApprovalItem(approvalItemId, options);
+}
+
+let approvalCreationTail = Promise.resolve();
+
+export async function createApprovalItem(input = {}, options = {}) {
+  const previous = approvalCreationTail;
+  let release;
+  approvalCreationTail = new Promise((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await createApprovalItemUnlocked(input, options);
+  } finally {
+    release();
+  }
 }
 
 export async function listApprovalItems(options = {}) {
@@ -482,12 +790,267 @@ export async function getApprovalItem(approvalItemId, options = {}) {
   return { ...item, status };
 }
 
+export async function validateApprovalItemTarget(item, options = {}) {
+  try {
+    if (item.target_type === "pending_engine_candidate") {
+      const candidate = await getPendingCandidate(item.target_id, targetOptions(options));
+      const status = candidate.status?.status;
+      if (["rejected", "activated"].includes(status)) {
+        return { exists: true, actionable: false, reason: `target_status_${status}` };
+      }
+      return { exists: true, actionable: true, reason: null, target: candidate };
+    }
+    if (item.target_type === "external_brain_session") {
+      const run = await getAgentRun(item.target_id, options);
+      const lifecycle = String(run.session_lifecycle_status ?? "ACTIVE").toUpperCase();
+      if (["COMPLETED", "ABANDONED", "FAILED", "BLOCKED"].includes(lifecycle)) {
+        return { exists: true, actionable: false, reason: `target_lifecycle_${lifecycle.toLowerCase()}` };
+      }
+      return { exists: true, actionable: true, reason: null, target: run };
+    }
+    if (item.target_type === "candidate_draft") {
+      await getCandidateDraft(item.target_id, targetOptions(options));
+      return { exists: true, actionable: true, reason: null };
+    }
+    if (item.target_type === "writing_candidate") {
+      const { getWritingCandidateDetail } = await import("./chat-output-candidate-service.mjs");
+      await getWritingCandidateDetail(item.target_id, options);
+      return { exists: true, actionable: true, reason: null };
+    }
+    if (item.target_type === "cleanup_proposal") {
+      await getCleanupProposal(item.target_id, cleanupTargetOptions(options));
+      return { exists: true, actionable: true, reason: null };
+    }
+    if (item.target_type === "setting_change_proposal") {
+      const { getSettingChangeProposal } = await import("./setting-change-proposal-service.mjs");
+      await getSettingChangeProposal(item.target_id, options);
+      return { exists: true, actionable: true, reason: null };
+    }
+    if (item.target_type === "agent_run" || item.target_type === "workflow_run") {
+      await getAgentRun(item.target_id, options);
+      return { exists: true, actionable: true, reason: null };
+    }
+    if (item.target_type === "engine_snapshot") {
+      const snapshot = (await listSnapshots(targetOptions(options)))
+        .find((record) => record.snapshot_id === item.target_id);
+      return snapshot
+        ? { exists: true, actionable: snapshot.rollback_available === true, reason: snapshot.rollback_available === true ? null : "target_not_actionable" }
+        : { exists: false, actionable: false, reason: "target_not_found" };
+    }
+    return { exists: null, actionable: true, reason: null };
+  } catch (error) {
+    if (error.statusCode === 404 || /not found|不存在/iu.test(error.message)) {
+      return { exists: false, actionable: false, reason: "target_not_found" };
+    }
+    return { exists: null, actionable: false, reason: `target_validation_failed: ${error.message}` };
+  }
+}
+
+async function transitionApprovalItemStatus(
+  approvalItemId,
+  nextStatus,
+  reason,
+  event,
+  options = {},
+  extras = {},
+) {
+  const item = await getApprovalItem(approvalItemId, options);
+  const now = new Date().toISOString();
+  const status = {
+    ...item.status,
+    status: nextStatus,
+    reason: reason || item.status.reason || null,
+    ...extras,
+  };
+  const roots = rootsFor(options);
+  const paths = itemPaths(approvalItemId, roots);
+  await commitFileTransaction(`approval-${nextStatus}`, [
+    { filePath: paths.status, content: json(status) },
+    {
+      type: "append",
+      filePath: roots.approvalLog,
+      content: `${JSON.stringify({
+        event,
+        approval_item_id: approvalItemId,
+        action_type: item.action_type,
+        target_type: item.target_type,
+        target_id: item.target_id,
+        created_at: now,
+        approved_by: null,
+        result: "success",
+        error_message: null,
+        reason: reason || null,
+      })}\n`,
+    },
+  ], {
+    approval_item_id: approvalItemId,
+    phase: "approval_queue_lifecycle_reconciliation",
+    ...fixtureTransactionMetadata(options),
+  });
+  return getApprovalItem(approvalItemId, options);
+}
+
+export async function invalidateApprovalItem(
+  approvalItemId,
+  { reason = "target_not_found", orphaned = false } = {},
+  options = {},
+) {
+  const current = await getApprovalItem(approvalItemId, options);
+  if (["invalidated", "orphaned"].includes(approvalStatus(current))) return current;
+  const now = new Date().toISOString();
+  return transitionApprovalItemStatus(
+    approvalItemId,
+    orphaned ? "orphaned" : "invalidated",
+    reason,
+    orphaned ? "approval_orphaned" : "approval_invalidated",
+    options,
+    {
+      invalidated_at: now,
+      invalidation_reason: reason,
+      target_exists: reason === "target_not_found" ? false : current.status.target_exists,
+      suppression: {
+        dedupe_key: current.dedupe_key ?? approvalIdentity(current).dedupe_key,
+        source_hash: current.source_hash ?? approvalIdentity(current).source_hash,
+        suppress_reproposal: true,
+        reason,
+        recorded_at: now,
+      },
+    },
+  );
+}
+
+export async function archiveApprovalItem(
+  approvalItemId,
+  { reason = "archived_by_cleanup", duplicateOf = null } = {},
+  options = {},
+) {
+  const current = await getApprovalItem(approvalItemId, options);
+  if (approvalStatus(current) === "archived") return current;
+  const now = new Date().toISOString();
+  return transitionApprovalItemStatus(
+    approvalItemId,
+    "archived",
+    reason,
+    "approval_archived",
+    options,
+    {
+      archived_at: now,
+      archive_reason: reason,
+      duplicate_of: duplicateOf,
+      prior_status: current.status.status,
+      suppression: current.status.suppression ?? {
+        dedupe_key: current.dedupe_key ?? approvalIdentity(current).dedupe_key,
+        source_hash: current.source_hash ?? approvalIdentity(current).source_hash,
+        suppress_reproposal: true,
+        reason,
+        recorded_at: now,
+      },
+    },
+  );
+}
+
+export async function backfillApprovalIdentity(approvalItemId, options = {}) {
+  const current = await getApprovalItem(approvalItemId, options);
+  const identity = approvalIdentity(current);
+  const now = new Date().toISOString();
+  const item = {
+    ...current,
+    status: undefined,
+    updated_at: now,
+    request_kind: current.request_kind ?? identity.request_kind,
+    source_phase: current.source_phase ?? identity.source_phase,
+    source_revision: current.source_revision ?? identity.source_revision,
+    source_hash: identity.source_hash,
+    workflow_run_id: current.workflow_run_id ?? identity.workflow_run_id,
+    lifecycle_generation: identity.lifecycle_generation,
+    dedupe_key: identity.dedupe_key,
+    dedupe_components: identity,
+  };
+  const status = {
+    ...current.status,
+    dedupe_key: identity.dedupe_key,
+    source_hash: identity.source_hash,
+    lifecycle_generation: identity.lifecycle_generation,
+    ...(approvalStatus(current) === "rejected" && !current.status.suppression ? {
+      decision: current.status.decision ?? {
+        decision: current.action_type === "retire_external_brain_session" ? "keep" : "rejected",
+        decided_at: current.status.rejected_at ?? now,
+        reason: current.status.reason ?? null,
+        dedupe_key: identity.dedupe_key,
+        source_hash: identity.source_hash,
+        lifecycle_generation: identity.lifecycle_generation,
+      },
+      suppression: {
+        dedupe_key: identity.dedupe_key,
+        source_hash: identity.source_hash,
+        lifecycle_generation: identity.lifecycle_generation,
+        suppress_reproposal: true,
+        reproposal_allowed: current.reproposal_allowed === true,
+        reason: "backfilled_from_explicit_rejected_status",
+        recorded_at: now,
+      },
+    } : {}),
+  };
+  const roots = rootsFor(options);
+  const paths = itemPaths(approvalItemId, roots);
+  await commitFileTransaction("backfill-approval-identity", [
+    { filePath: paths.item, content: json(item) },
+    { filePath: paths.status, content: json(status) },
+  ], {
+    approval_item_id: approvalItemId,
+    phase: "approval_queue_dedupe_migration",
+    ...fixtureTransactionMetadata(options),
+  });
+  return getApprovalItem(approvalItemId, options);
+}
+
+export async function reconcileApprovalQueueTargets(options = {}) {
+  const changes = [];
+  for (const item of await listApprovalItems(options)) {
+    if (terminalApprovalStatuses.has(approvalStatus(item))) continue;
+    if (isApprovalTestFixture(item) && !isTestQueue(options)) {
+      changes.push(await archiveApprovalItem(item.approval_item_id, {
+        reason: "test_fixture_excluded_from_production_queue",
+      }, options));
+      continue;
+    }
+    const target = await validateApprovalItemTarget(item, options);
+    if (target.exists === false) {
+      changes.push(await invalidateApprovalItem(item.approval_item_id, {
+        reason: "target_not_found",
+        orphaned: true,
+      }, options));
+    } else if (target.exists === true && target.actionable === false) {
+      changes.push(await invalidateApprovalItem(item.approval_item_id, {
+        reason: target.reason ?? "target_not_actionable",
+      }, options));
+    }
+  }
+  return changes;
+}
+
+export async function listActionableApprovalItems(options = {}) {
+  if (options.reconcile !== false) await reconcileApprovalQueueTargets(options);
+  return (await listApprovalItems(options)).filter(isActionableApprovalItem);
+}
+
 export async function refreshApprovalItem(approvalItemId, options = {}) {
   const current = await getApprovalItem(approvalItemId, options);
   if (current.action_type === "activate_engine_candidate"
     || current.action_type === "neural_trace_missing") {
-    const candidate = await getPendingCandidate(current.target_id, targetOptions(options));
-    const neural = await neuralCandidateState(candidate.metadata);
+    let candidate;
+    try {
+      candidate = await getPendingCandidate(current.target_id, targetOptions(options));
+    } catch (error) {
+      if (error.statusCode === 404 || /not found|不存在/iu.test(error.message)) {
+        return invalidateApprovalItem(approvalItemId, {
+          reason: "target_not_found",
+          orphaned: true,
+        }, options);
+      }
+      throw error;
+    }
+    const neural = await neuralCandidateState(candidate.metadata, options);
     const blockedReason = candidate.status.status !== "candidate"
       ? candidate.status.blocked_reason || `candidate status: ${candidate.status.status}`
       : neural.ok ? null : neural.blocked_reason;
@@ -528,18 +1091,42 @@ export async function refreshApprovalItem(approvalItemId, options = {}) {
 
 export async function scanApprovalQueue(options = {}) {
   await ensureApprovalQueueDirectories(options);
+  await reconcileApprovalQueueTargets(options);
   const scanned = [];
+  const diagnostics = [];
+  let suppressedCount = 0;
   for (const summary of await listPendingCandidates(targetOptions(options))) {
     const candidate = await getPendingCandidate(summary.candidate_id, targetOptions(options));
     if (["rejected", "activated"].includes(candidate.status.status)) continue;
-    const neural = await neuralCandidateState(candidate.metadata);
+    const neural = await neuralCandidateState(candidate.metadata, options);
     const candidateBlocked = candidate.status.status !== "candidate"
       || candidate.risk_report.risk_level === "critical";
     if (!neural.ok) {
-      scanned.push(await createApprovalItem({
+      if (!neural.trace_source_available || !neural.workflow_run_id) {
+        diagnostics.push({
+          kind: "neural_trace_source_unavailable",
+          severity: "warning",
+          target_type: "pending_engine_candidate",
+          target_id: summary.candidate_id,
+          workflow_run_id: neural.workflow_run_id,
+          neural_status: neural.status,
+          message: neural.blocked_reason,
+          approval_item_created: false,
+        });
+        continue;
+      }
+      const item = await createApprovalItem({
         actionType: "neural_trace_missing",
+        requestKind: "neural_trace_missing",
         targetType: "pending_engine_candidate",
         targetId: summary.candidate_id,
+        workflowRunId: neural.workflow_run_id,
+        sourceHash: candidate.metadata.candidate_hash || candidate.metadata.raw_hash,
+        sourceRevision: candidate.metadata.candidate_hash || candidate.metadata.raw_hash,
+        sourcePhase: candidate.metadata.source_phase ?? "engine_candidate_neural_evidence_scan",
+        sourceKind: candidate.metadata.source_kind ?? null,
+        environment: candidate.metadata.environment ?? "production",
+        testFixture: isApprovalTestFixture(candidate.metadata),
         sourceChapter: candidate.metadata.source_chapter,
         title: "缺少必要 Neural Success Trace",
         summary: "此候選不可強制確認，只能延後或拒絕。",
@@ -548,16 +1135,40 @@ export async function scanApprovalQueue(options = {}) {
         neuralStatus: neural.status,
         blockedReason: neural.blocked_reason,
         status: "blocked",
+        resolutionPath: {
+          available: true,
+          action: "record_required_neural_success_trace_then_refresh",
+        },
         impact: activationImpact(candidate),
         links: { candidate_id: summary.candidate_id },
-        details: { diff: candidate.diff, candidate_status: candidate.status.status },
-      }, options));
+        lineage: { workflow_run_id: neural.workflow_run_id },
+        details: {
+          diff: candidate.diff,
+          candidate_status: candidate.status.status,
+          candidate_hash: candidate.metadata.candidate_hash,
+          raw_hash: candidate.metadata.raw_hash,
+        },
+      }, options);
+      if (item.suppressed) suppressedCount += 1;
+      scanned.push(item);
       continue;
     }
-    scanned.push(await createApprovalItem({
+    const item = await createApprovalItem({
       actionType: "activate_engine_candidate",
+      requestKind: "activate_engine_candidate",
       targetType: "pending_engine_candidate",
       targetId: summary.candidate_id,
+      workflowRunId: firstText(
+        candidate.metadata.workflow_run_id,
+        candidate.metadata.run_id,
+        candidate.metadata.source_lineage?.workflow_run_id,
+      ),
+      sourceHash: candidate.metadata.candidate_hash || candidate.metadata.raw_hash,
+      sourceRevision: candidate.metadata.candidate_hash || candidate.metadata.raw_hash,
+      sourcePhase: candidate.metadata.source_phase ?? "pending_engine_candidate_scan",
+      sourceKind: candidate.metadata.source_kind ?? candidate.metadata.candidate_kind ?? null,
+      environment: candidate.metadata.environment ?? "production",
+      testFixture: isApprovalTestFixture(candidate.metadata),
       sourceChapter: candidate.metadata.source_chapter,
       title: "啟用新版完整創作引擎",
       summary: "Pending candidate 等待 Phase 3 人工確認。",
@@ -573,15 +1184,23 @@ export async function scanApprovalQueue(options = {}) {
           || `${candidate.status.status} / ${candidate.risk_report.risk_level}`
         : null,
       status: candidateBlocked ? "blocked" : "pending",
+      resolutionPath: candidateBlocked
+        ? { available: true, action: "repair_or_reparse_candidate" }
+        : { available: true, action: "human_decision" },
       impact: activationImpact(candidate),
       links: { candidate_id: summary.candidate_id },
+      lineage: candidate.metadata.source_lineage ?? null,
       details: {
         candidate_status: candidate.status.status,
         diff: candidate.diff,
         active_engine_hash_at_import: candidate.metadata.active_engine_hash_at_import,
         candidate_hash: candidate.metadata.candidate_hash,
+        raw_hash: candidate.metadata.raw_hash,
+        neural_status: neural.status,
       },
-    }, options));
+    }, options);
+    if (item.suppressed) suppressedCount += 1;
+    scanned.push(item);
   }
 
   for (const proof of await listProofReports(targetOptions(options))) {
@@ -591,10 +1210,14 @@ export async function scanApprovalQueue(options = {}) {
     if (draft.status.can_adopt !== true || draft.status.status === "accepted_pending_settlement") {
       continue;
     }
-    scanned.push(await createApprovalItem({
+    const item = await createApprovalItem({
       actionType: "adopt_p0_p1_draft",
+      requestKind: "adopt_p0_p1_draft",
       targetType: "candidate_draft",
       targetId: proof.draft_id,
+      sourceHash: proof.proof_hash ?? proof.content_hash ?? proof.proof_id,
+      sourceRevision: proof.proof_hash ?? proof.content_hash ?? proof.proof_id,
+      sourcePhase: "writing_workflow_proof_scan",
       sourceChapter: draft.metadata.source_chapter,
       title: "確認採用含 P0 / P1 的正文",
       summary: "驗稿含重大警告，採用前必須再次人工確認。",
@@ -611,13 +1234,21 @@ export async function scanApprovalQueue(options = {}) {
         draft_id: proof.draft_id,
       },
       details: { issue_summary: proof.issue_summary },
-    }, options));
+    }, options);
+    if (item.suppressed) suppressedCount += 1;
+    scanned.push(item);
   }
 
-  scanned.push(...(await scanExternalBrainRetirementApprovals(options)).items);
+  const retirement = await scanExternalBrainRetirementApprovals(options);
+  scanned.push(...retirement.items);
+  diagnostics.push(...(retirement.diagnostics ?? []));
+  suppressedCount += retirement.suppressed_count ?? 0;
   return {
     scanned_count: scanned.length,
+    suppressed_count: suppressedCount,
+    diagnostics,
     items: await listApprovalItems(options),
+    pending_items: await listActionableApprovalItems({ ...options, reconcile: false }),
   };
 }
 
@@ -625,12 +1256,29 @@ export async function scanExternalBrainRetirementApprovals(options = {}) {
   await ensureApprovalQueueDirectories(options);
   const liveness = await auditActiveExternalBrainSessions({}, options);
   const items = [];
+  const diagnostics = [];
+  let suppressedCount = 0;
   for (const session of liveness.sessions) {
     if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) continue;
-    items.push(await createExternalBrainSessionRetirementApprovalItem(session, options));
+    if (!session.session_id || session.ownership_proof_complete !== true
+      || (!(session.writing_context_bundle_ids ?? []).length && !session.neural_trace_count)) {
+      diagnostics.push({
+        kind: "session_retirement_traceability_unavailable",
+        severity: "maintenance",
+        session_id: session.session_id ?? null,
+        message: "Retirement recommendation lacks workflow/source lineage and was not promoted to approval.",
+        approval_item_created: false,
+      });
+      continue;
+    }
+    const item = await createExternalBrainSessionRetirementApprovalItem(session, options);
+    if (item.suppressed) suppressedCount += 1;
+    items.push(item);
   }
   return {
     live_retire_recommended_count: items.length,
+    suppressed_count: suppressedCount,
+    diagnostics,
     items,
   };
 }
@@ -640,20 +1288,32 @@ export async function createExternalBrainSessionRetirementApprovalItem(session, 
   if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) {
     throw errorWithStatus("Session does not have a live RETIRE_RECOMMENDED recommendation.", 409);
   }
-  const existingRetirementApproval = (await listApprovalItems(options)).find((item) => {
-    const status = item.status?.status ?? item.status;
-    return item.action_type === "retire_external_brain_session"
-      && item.target_type === "external_brain_session"
-      && item.target_id === session.session_id
-      && !["resolved", "confirmed", "rejected"].includes(status);
-  });
-  if (existingRetirementApproval) return existingRetirementApproval;
+  if (session.ownership_proof_complete !== true
+    || (!(session.writing_context_bundle_ids ?? []).length && !session.neural_trace_count)) {
+    throw errorWithStatus(
+      "Session retirement lacks sufficient workflow/source traceability; emit a maintenance diagnostic instead.",
+      409,
+    );
+  }
+  const run = await getAgentRun(session.session_id, options);
+  const lifecycleGeneration = positiveGeneration(
+    session.lifecycle_generation ?? run.lifecycle_generation,
+  );
   const sessionRoots = externalBrainSessionRoots(options);
   const reason = "Session exceeded the stale activity threshold, has complete cognition lineage, and has no live governance or acceptance-evidence pin.";
   return createApprovalItem({
     actionType: "retire_external_brain_session",
+    requestKind: "retire_external_brain_session",
     targetType: "external_brain_session",
     targetId: session.session_id,
+    workflowRunId: session.session_id,
+    sourceHash: hashAgentRunValue({
+      session_id: session.session_id,
+      lifecycle_generation: lifecycleGeneration,
+    }),
+    sourcePhase: "external_brain_session_lifecycle_phase_3c",
+    sourceKind: "external_brain_session_liveness_scan",
+    lifecycleGeneration,
     title: "退役已停止的 GPT 外置大腦 Session",
     summary: "此 Session 已超過 stale activity threshold，完整 cognition lineage 可辨識，且目前沒有治理或 acceptance evidence pin。核准後只標記 ABANDONED，不刪除資料；30 天後才可能進入獨立 cleanup proposal。",
     riskLevel: "medium",
@@ -688,6 +1348,17 @@ export async function createExternalBrainSessionRetirementApprovalItem(session, 
       recommendation_reason: reason,
       control_plane_approval_reference: true,
       substantive_governance_pin: false,
+      workflow_run_id: session.session_id,
+      lifecycle_generation: lifecycleGeneration,
+      source_trace_ids: session.final_polisher_success_trace_ids
+        ?? session.final_polisher_failed_trace_ids
+        ?? [],
+    },
+    lineage: {
+      workflow_run_id: session.session_id,
+      agent_run_id: session.session_id,
+      writing_context_bundle_ids: session.writing_context_bundle_ids,
+      lifecycle_generation: lifecycleGeneration,
     },
     createdBy: "external_brain_session_liveness_scan",
     sourcePhase: "external_brain_session_lifecycle_phase_3c",
@@ -728,12 +1399,38 @@ async function updateDecision(approvalItemId, decision, reason, options = {}) {
     throw errorWithStatus(`Approval item is already ${item.status.status}.`, 409);
   }
   const now = new Date().toISOString();
+  const identity = item.dedupe_key
+    ? {
+      dedupe_key: item.dedupe_key,
+      source_hash: item.source_hash,
+      lifecycle_generation: item.lifecycle_generation,
+    }
+    : approvalIdentity(item);
   const status = {
     ...item.status,
     status: decision,
     reason: optionalText(reason, 5_000) || null,
     rejected_at: decision === "rejected" ? now : item.status.rejected_at,
     deferred_at: decision === "deferred" ? now : item.status.deferred_at,
+    ...(decision === "rejected" ? {
+      decision: {
+        decision: item.action_type === "retire_external_brain_session" ? "keep" : "rejected",
+        decided_at: now,
+        reason: optionalText(reason, 5_000) || null,
+        dedupe_key: identity.dedupe_key,
+        source_hash: identity.source_hash,
+        lifecycle_generation: identity.lifecycle_generation,
+      },
+      suppression: {
+        dedupe_key: identity.dedupe_key,
+        source_hash: identity.source_hash,
+        lifecycle_generation: identity.lifecycle_generation,
+        suppress_reproposal: true,
+        reproposal_allowed: item.reproposal_allowed === true,
+        reason: "explicit_user_rejection",
+        recorded_at: now,
+      },
+    } : {}),
   };
   const roots = rootsFor(options);
   const paths = itemPaths(approvalItemId, roots);

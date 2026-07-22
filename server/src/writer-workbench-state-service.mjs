@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { listApprovalItems } from "./approval-queue-service.mjs";
+import { listActionableApprovalItems } from "./approval-queue-service.mjs";
 import { listAdoptedChapters } from "./writing-workflow-service.mjs";
 import { listGptWritingContextBundles } from "./gpt-writing-context-service.mjs";
 import {
@@ -124,7 +124,7 @@ export async function buildWriterWorkbenchState(options = {}) {
     listProofReports({ limit: 100 }, options),
     listAdoptedChapters(),
     listSettlementReports({ limit: 100 }),
-    listApprovalItems(),
+    listActionableApprovalItems(options),
   ]);
 
   const bundle = bundles.find((item) => !isFixture(item)) ?? null;
@@ -304,7 +304,8 @@ export async function buildWriterWorkbenchState(options = {}) {
   }
 
   const nextStep = steps.find((item) => !["completed"].includes(item.status)) ?? steps.at(-1);
-  const pendingApprovals = approvals.filter((item) => ["pending", "deferred"].includes(approvalStatus(item)));
+  const pendingApprovals = approvals.filter((item) => approvalStatus(item) === "pending"
+    || (approvalStatus(item) === "blocked" && item.resolution_path?.available === true));
   return {
     active_engine: active,
     lineage: {
