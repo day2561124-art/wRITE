@@ -6,6 +6,7 @@ import {
   shouldEnableStoryMaterialCognition,
 } from "../../server/src/chatgpt-owned-external-brain-service.mjs";
 import {
+  buildNeuralModuleContractRegistry,
   buildStoryMaterialCognitionContract,
 } from "../../server/src/neural-module-service.mjs";
 
@@ -85,12 +86,6 @@ assert.match(
   "story-material cognition must remain an independent neural-module opt-in",
 );
 
-assert.match(
-  neuralModuleSource,
-  /moduleName\s*===\s*"final_polisher"/u,
-  "Final Polisher must remain outside pre-generation story-material attachment",
-);
-
 const sampleInput = {
   task_prompt:
     "正式續寫下一章；讓角色經歷事件，不替角色的人生整理意義。",
@@ -112,16 +107,25 @@ for (const capabilityName of expectedPreGenerationCapabilities) {
   );
 
   assert(contract, `${moduleName} must expose story-material cognition`);
-  assert.equal(contract.capability_consumer, "ChatGPT");
   assert.equal(
-    contract.guardrails.final_story_judgment_owner,
-    "ChatGPT",
+    contract.permissions.inherits,
+    "common_neural_module_permissions",
   );
 }
 
+const finalPolisherContract =
+  buildStoryMaterialCognitionContract(
+    "final_polisher",
+    sampleInput,
+  );
+assert.equal(finalPolisherContract.module, "final_polisher");
 assert.equal(
-  buildStoryMaterialCognitionContract("final_polisher", sampleInput),
-  null,
+  finalPolisherContract.activation.without_draft,
+  "skipped",
+);
+assert.equal(
+  Object.keys(buildNeuralModuleContractRegistry().modules).length,
+  7,
 );
 
 console.log(

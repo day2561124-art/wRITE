@@ -3,6 +3,9 @@ import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import {
   executeChatgptNativeTraceOnlyNeuralModules,
 } from "./chatgpt-native-trace-only-neural-execution-service.mjs";
+import {
+  formalWritingAuthorityContract,
+} from "./formal-writing-contracts.mjs";
 
 const HANDOFF_TOOL_NAME = "chatgpt_bridge_build_full_neural_writing_handoff";
 const HANDOFF_SURFACE_KIND = "chatgpt_native_full_neural_writing_handoff";
@@ -26,53 +29,6 @@ function toPlainJson(value, maxChars = 16000) {
   } catch {
     return String(value ?? "");
   }
-}
-
-function compactObject(value, maxChars = 24000) {
-  const raw = toPlainJson(value, maxChars);
-  if (raw.includes("...[truncated:")) return { excerpt: raw };
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { excerpt: raw };
-  }
-}
-
-function getNestedText(value) {
-  if (typeof value === "string") return value.trim();
-  if (!value || typeof value !== "object") return "";
-  for (const key of ["text", "content", "excerpt", "body", "value"]) {
-    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
-  }
-  return "";
-}
-
-function findByKey(root, targetKey, seen = new Set()) {
-  if (!root || typeof root !== "object") return null;
-  if (seen.has(root)) return null;
-  seen.add(root);
-
-  if (Object.prototype.hasOwnProperty.call(root, targetKey)) {
-    return root[targetKey];
-  }
-
-  for (const value of Object.values(root)) {
-    if (value && typeof value === "object") {
-      const found = findByKey(value, targetKey, seen);
-      if (found !== null && found !== undefined) return found;
-    }
-  }
-
-  return null;
-}
-
-function sectionText(bundle, key, maxChars = 6000) {
-  const found = findByKey(bundle, key);
-  const rendered = getNestedText(found) || toPlainJson(found, maxChars);
-  if (!rendered) return "";
-  return rendered.length <= maxChars
-    ? rendered
-    : rendered.slice(0, maxChars) + "\n...[truncated:" + (rendered.length - maxChars) + "]";
 }
 
 function arrayOfStrings(value) {
@@ -544,10 +500,11 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     chapter_mode: input.chapterMode,
     output_mode: "chat_only",
     max_context_chars: input.maxContextChars,
-    include_active_engine: true,
-    include_writing_card: true,
-    include_proofing_card: true,
+    include_active_engine: false,
+    include_writing_card: false,
+    include_proofing_card: false,
     include_longline: true,
+    formal_context_only: true,
   }, options);
 
   const bundle = contextResult?.bundle
@@ -559,7 +516,10 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
 
   const effectiveInput = {
     ...input,
-    taskPrompt: bundle?.task_prompt ?? input.taskPrompt,
+    taskPrompt:
+      bundle?.formal_context?.user_request
+      ?? bundle?.original_task_prompt
+      ?? input.taskPrompt,
     generationContext:
       bundle?.inputs?.generation_context
       ?? input.generationContext,
@@ -569,21 +529,10 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
   };
 
   const writingContext = {
+    ...(bundle?.formal_context ?? {}),
     gpt_writing_context_bundle_id: bundle?.bundle_id ?? contextResult?.bundle_id ?? null,
-    task_prompt: bundle?.task_prompt ?? input.taskPrompt,
     context_builder_output_mode: bundle?.output_mode ?? "chat_only",
-    active_engine_summary: sectionText(bundle, "active_engine_excerpt_or_reference"),
-    writing_card_summary: sectionText(bundle, "writing_card_excerpt_or_reference"),
-    proofing_card_summary: sectionText(bundle, "proofing_card_excerpt_or_reference"),
-    longline_summary: sectionText(bundle, "longline_excerpt_or_reference"),
-    character_voice_guard_context: sectionText(bundle, "character_voice_registry_content"),
-    retrieval_context: sectionText(bundle, "retrieval_context"),
-    generation_context: sectionText(bundle, "generation_context"),
-    aesthetic_memory_context: sectionText(bundle, "aesthetic_memory_context"),
-    character_state_context: sectionText(bundle, "character_state_context"),
-    foreshadowing_context: sectionText(bundle, "foreshadowing_context"),
-    reader_simulator_context: sectionText(bundle, "reader_simulator_context"),
-    compact_bundle_excerpt: compactObject(bundle, 24000),
+    context_composition: bundle?.context_composition ?? null,
   };
 
   const neuralExecution = await executeChatgptNativeTraceOnlyNeuralModules({
@@ -641,6 +590,7 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     capability_provider: "writer_workbench",
     runtime_host: "writer_workbench_runtime",
     final_prose_generator: "chatgpt",
+    ...formalWritingAuthorityContract(),
     architecture_primary_route: false,
     compatibility_aggregate_surface: true,
     surface_kind: HANDOFF_SURFACE_KIND,

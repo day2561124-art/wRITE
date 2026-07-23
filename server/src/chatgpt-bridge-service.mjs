@@ -20,7 +20,7 @@ import {
 } from "./project-paths.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 
-const defaultMaxChars = 120_000;
+const defaultMaxChars = 48_000;
 const maximumMaxChars = 250_000;
 
 export const chatgptBridgeSafety = Object.freeze({
@@ -264,7 +264,7 @@ export async function getChatgptBridgeCurrentInputs(rawInput = {}, options = {})
     bounded_task_prompt: (() => {
       try {
         const snapshot = Object.fromEntries(inputs)["task_prompt"];
-        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 12000);
+        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 4000);
         return { text: bounded, meta };
       } catch {
         return { text: "", meta: {} };
@@ -347,14 +347,15 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
     }, options);
   }
   let taskPromptMetadata = null;
-  const taskPrompt = rawInput.task_prompt
-    ?? rawInput.taskPrompt
+  const explicitTaskPrompt =
+    rawInput.task_prompt ?? rawInput.taskPrompt;
+  const taskPrompt = explicitTaskPrompt
     ?? (() => {
       // If an explicit task_prompt argument was not provided, derive from current inputs and bound it.
       try {
         const snapshot = current?.inputs?.task_prompt;
         if (!snapshot || typeof snapshot.text !== "string") return "";
-        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 12000);
+        const { bounded, meta } = boundTaskPromptFromSnapshot(snapshot, 4000);
         // stash metadata for later bundle persistence
         taskPromptMetadata = meta;
         return bounded;
@@ -365,6 +366,13 @@ export async function buildChatgptBridgeWritingContext(rawInput = {}, options = 
   const result = await buildGptWritingContext({
     ...rawInput,
     taskPrompt,
+    taskPromptSource:
+      (
+        explicitTaskPrompt === undefined
+        || explicitTaskPrompt === null
+      )
+        ? "old_generated_inputs"
+        : "explicit_task_prompt",
     generationContext: rawInput.generation_context
       ?? rawInput.generationContext
       ?? textToContext(current?.inputs.generation_context),

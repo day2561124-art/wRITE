@@ -1,6 +1,16 @@
+import { createHash } from "node:crypto";
+
+function sha256(value) {
+  return createHash("sha256")
+    .update(String(value ?? ""))
+    .digest("hex");
+}
+
 // Minimal Final Polisher service for Phase 22R
 export function runFinalPolisher(input = {}) {
-  const candidateText = String(input.candidateText ?? input.candidate_text ?? "").trim();
+  const candidateText = String(
+    input.candidateText ?? input.candidate_text ?? "",
+  );
   const result = {
     module: "final_polisher",
     status: "skipped",
@@ -26,6 +36,9 @@ export function runFinalPolisher(input = {}) {
       ending_issues: [],
     },
     polished_text: "",
+    input_hash_sha256: candidateText ? sha256(candidateText) : null,
+    output_hash_sha256: null,
+    text_identity_preserved: true,
     polish_suggestions: [],
     needs_structural_revision: false,
     structural_revision_reason: "",
@@ -92,12 +105,12 @@ export function runFinalPolisher(input = {}) {
     }
   }
 
-  // Build a lightweight polished_text: suggest minimal in-place changes (do not alter canon)
-  let polished = candidateText;
-  // Replace obvious medical tokens with body reactions (simple heuristic)
-  polished = polished.replace(/右腕麻感/g, "右腕隱隱麻痛，握筆時指節發涼");
-  polished = polished.replace(/左前臂深割/g, "左前臂一陣劇痛，肌肉在觸碰時收縮");
-  result.polished_text = polished;
+  // Report only. The final polisher must never synthesize replacement prose,
+  // add bodily reactions, or explain causality/silence on the author's behalf.
+  result.polished_text = candidateText;
+  result.output_hash_sha256 = sha256(result.polished_text);
+  result.text_identity_preserved =
+    result.output_hash_sha256 === result.input_hash_sha256;
 
   // Structural revision detection: no new change/turn
   if (!/新|變局|下一場|候場|通知|壓力|限制|選擇/.test(candidateText) ) {

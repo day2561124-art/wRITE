@@ -9,6 +9,7 @@ import {
   runFinalPolisherEditorialBrain,
 } from "../../server/src/final-polisher-editorial-service.mjs";
 import {
+  buildNeuralModuleContractRegistry,
   buildStoryMaterialCognitionContract,
 } from "../../server/src/neural-module-service.mjs";
 import {
@@ -134,166 +135,79 @@ const techniqueOnly = runFinalPolisherEditorialBrain({
 });
 assert.equal(techniqueOnly.status, "completed");
 
-const materialInput = {
-  task_prompt: "續寫受傷後回到學院的下一段生活。",
-  writing_context: {
-    content: {
-      chapter_anchor: {
-        current_event: "正式對戰已結束，兩人都帶傷。",
-        unresolved_consequence: "九逃仍介意千夜在最後停手。",
-      },
-    },
-    inputs: {
-      generation_context: {
-        recent_event: "醫護人員要求兩人暫時避免使用受傷的手。",
-        focus_characters: ["朝日奈千夜", "九逃"],
-        relationship_state: "恢復正常說話，但尚未談完。",
-      },
-      retrieval_context: {
-        pending_scene: "隔天上課前的短暫碰面。",
-        injury_state: "包紮仍在，動作受限。",
-      },
-    },
-  },
-  capability_input: {
-    chapter_title: "換手",
-    rule_guard: "不要為了群像硬切視角。",
-    draft_excerpt: "她們終於明白，彼此的重量應該共同承擔。",
-  },
-};
-
-const sceneMaterial = buildStoryMaterialCognitionContract(
+const registry = buildNeuralModuleContractRegistry();
+const expectedModules = [
   "scene_planner",
-  materialInput,
-);
-assert.equal(
-  sceneMaterial.architecture_role,
-  "chatgpt_external_brain_story_material",
-);
-assert.equal(
-  sceneMaterial.capability_consumer,
-  "ChatGPT",
-);
-assert.equal(sceneMaterial.guardrails.theme_first_forbidden, true);
-assert.equal(
-  sceneMaterial.guardrails.chapter_title_must_not_direct_events,
-  true,
-);
-assert.equal(
-  sceneMaterial.guardrails.rules_are_guardrails_not_plot_generators,
-  true,
-);
-assert(
-  sceneMaterial.grounded_material.some((item) => (
-    item.content.includes("正式對戰")
-    || item.content.includes("醫護人員")
-    || item.content.includes("隔天上課")
-  )),
-);
-assert(
-  sceneMaterial.cognition_tasks.includes(
-    "flag repeated emotional payment",
-  ),
-);
-
-const characterMaterial = buildStoryMaterialCognitionContract(
   "character_simulator",
-  materialInput,
-);
-assert(
-  characterMaterial.grounded_material.some((item) => (
-    item.content.includes("朝日奈千夜")
-    || item.content.includes("尚未談完")
-  )),
-);
-assert(
-  characterMaterial.cognition_tasks.includes(
-    "test whether dialogue is too complete, mature, correct, or thesis-like",
-  ),
-);
-
-const criticMaterial = buildStoryMaterialCognitionContract(
-  "neural_critic",
-  materialInput,
-);
-assert(
-  criticMaterial.cognition_tasks.includes(
-    "check characters speaking for the author",
-  ),
-);
-assert(
-  criticMaterial.cognition_tasks.includes(
-    "check premature reconciliation or conflict resolution",
-  ),
-);
-
-const styleMaterial = buildStoryMaterialCognitionContract(
-  "style_drift_detector",
-  materialInput,
-);
-assert(
-  styleMaterial.cognition_tasks.includes(
-    "check uplifted or meaning-closing endings",
-  ),
-);
-assert(
-  styleMaterial.cognition_tasks.includes(
-    "run again after draft evidence is available",
-  ),
-);
-
-const governanceMaterial = buildStoryMaterialCognitionContract(
   "over_governance_detector",
-  materialInput,
+  "writing_card_director",
+  "neural_critic",
+  "style_drift_detector",
+  "final_polisher",
+];
+assert.deepEqual(
+  Object.keys(registry.modules).sort(),
+  [...expectedModules].sort(),
 );
-assert(
-  governanceMaterial.cognition_tasks.includes(
-    "treat rules as error boundaries rather than story generators",
-  ),
+assert.equal(
+  registry.common_neural_module_permissions.generate_final_prose,
+  false,
+);
+assert.equal(
+  registry.common_neural_module_permissions.decide_story_direction,
+  false,
+);
+assert.equal(
+  registry.common_neural_module_permissions.modify_canon,
+  false,
 );
 
-const directorMaterial = buildStoryMaterialCognitionContract(
-  "writing_card_director",
-  {
-    ...materialInput,
-    authorship_cognition_sources: {
-      prior_cognition_outputs: [
-        {
-          module_name: "scene_planner",
-          result_type: "scene_plan",
-          output_hash: "a".repeat(64),
-          capability_output: {
-            story_material_cognition: sceneMaterial,
-          },
-        },
-        {
-          module_name: "character_simulator",
-          result_type: "character_simulation",
-          output_hash: "b".repeat(64),
-          capability_output: {
-            story_material_cognition: characterMaterial,
-          },
-        },
-      ],
-    },
-  },
-);
-assert.equal(directorMaterial.integrated_prior_cognition.length, 2);
+for (const moduleName of expectedModules) {
+  const contract = buildStoryMaterialCognitionContract(moduleName);
+  assert.deepEqual(
+    Object.keys(contract),
+    [
+      "module",
+      "purpose",
+      "activation",
+      "required_inputs",
+      "optional_inputs",
+      "returns",
+      "permissions",
+    ],
+  );
+  assert.equal(contract.module, moduleName);
+  assert.equal(
+    contract.permissions.inherits,
+    "common_neural_module_permissions",
+  );
+}
+
 assert.equal(
-  directorMaterial.integrated_prior_cognition.every(
-    (item) => item.story_material_present === true,
-  ),
-  true,
-);
-assert(
-  directorMaterial.cognition_tasks.includes(
-    "leave final selection, narration, dialogue, and prose to ChatGPT",
-  ),
+  registry.modules.neural_critic.activation.without_draft,
+  "inactive",
 );
 assert.equal(
-  buildStoryMaterialCognitionContract("final_polisher", materialInput),
-  null,
+  registry.modules.style_drift_detector.activation.without_draft,
+  "inactive",
 );
+assert.equal(
+  registry.modules.final_polisher.activation.without_draft,
+  "skipped",
+);
+
+const serializedRegistry = JSON.stringify(registry);
+for (const removed of [
+  "cognition_tasks",
+  "storyMaterialProfiles",
+  "storyMaterialGuardrails",
+  "output_boundary",
+  "complete emotional arc",
+  "symbol chain",
+  "chapter-title meaning",
+]) {
+  assert.equal(serializedRegistry.includes(removed), false);
+}
 
 const externalBrainSource = await readFile(
   "server/src/chatgpt-owned-external-brain-service.mjs",
@@ -353,10 +267,7 @@ for (const forbidden of [
 }
 
 for (const required of [
-  "hard_risk_scope",
   "inactive_without_draft_evidence",
-  "do not convert diagnostics into prose requirements",
-  "explicit user requirements",
   "v4.1-minimal",
   "evidence_triggered_minimal_review",
   "hard_conflicts_and_exact_evidence_only",

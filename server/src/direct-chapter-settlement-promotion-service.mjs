@@ -335,18 +335,22 @@ export function buildDirectSettlementFormalEngineCandidate({
   return `${promoted}\n\n${block}\n`;
 }
 
-function buildCurrentInputRefresh({
+export function buildCurrentInputRefresh({
   identity,
   settlementReportId,
   settlementSummary,
   createdAt,
+  activeEngineHash = null,
 }) {
   const display = identity.display ?? identity.chapter ?? "最新章節";
-  const common = [
+  const continuityHead =
+    identity.continuity_head ?? `${display}結束後`;
+  const settlementReportReference =
+    `data/outputs/settlement_reports/${settlementReportId}/settlement_report.md`;
+  const taskMetadata = [
     `- effective_canon_head: ${display}`,
-    `- continuity_head: ${identity.continuity_head ?? `${display}結束後`}`,
+    `- continuity_head: ${continuityHead}`,
     `- settlement_report_id: ${settlementReportId}`,
-    `- refreshed_at: ${createdAt ?? new Date().toISOString()}`,
     "- continuity_rollback: forbidden",
   ];
   const taskPrompt = [
@@ -354,22 +358,25 @@ function buildCurrentInputRefresh({
     "",
     "## 正式承接點",
     "",
-    ...common,
+    ...taskMetadata,
     "",
     "## 任務",
     "",
-    `依 active_engine 的硬設定與 ${display} 的正式結算狀態處理下一章。`,
-    "不得把章節進度退回較舊的 generated inputs。可依事件需要合理轉場或切換視角。",
+    `承接 ${display} 的正式結算狀態，創作下一章正文候選。`,
     "",
-    "## 最新章節結算摘要",
+    "## 必要硬性要求",
     "",
-    settlementSummary,
+    "- 不得把章節進度退回較舊的 generated inputs。",
+    "- 保持 active_engine 的硬設定與既有因果。",
+    "- 可依事件需要合理轉場或切換視角。",
     "",
   ].join("\n");
   const generationContext = [
     "# Generation Context｜正式章節結算刷新",
     "",
-    ...common,
+    `- effective_canon_head: ${display}`,
+    `- continuity_head: ${continuityHead}`,
+    `- settlement_report_id: ${settlementReportId}`,
     "",
     "## Continuity Summary",
     "",
@@ -379,15 +386,30 @@ function buildCurrentInputRefresh({
   const retrievalContext = [
     "# Retrieval Context｜最新正式承接",
     "",
-    ...common,
+    `- effective_canon_head: ${display}`,
+    `- continuity_head: ${continuityHead}`,
+    `- settlement_report_id: ${settlementReportId}`,
     "",
     "## Source Authority",
     "",
-    "active_engine hard canon > latest formal chapter settlement > older generated working inputs",
+    "current user instruction > latest formal continuity overlay > active_engine hard canon > older generated working inputs",
     "",
-    "## Retrieved Continuity",
+    "## Active Engine Metadata",
     "",
-    settlementSummary,
+    "- path: data/canon_db/active_engine.md",
+    `- sha256: ${activeEngineHash ?? "recorded_at_activation"}`,
+    "- authority_level: active_hard_canon",
+    "",
+    "## Context References",
+    "",
+    `- generation_context_sha256: ${sha256(generationContext)}`,
+    "- generation_context_reference: data/outputs/generation_context.md",
+    `- continuity_overlay_reference: ${settlementReportReference}`,
+    `- continuity_overlay_created_at: ${createdAt ?? "unknown"}`,
+    "",
+    "## Retrieved Sources",
+    "",
+    "- 本次正式刷新不複製 continuity summary；相關角色、能力、世界規則與事件片段由檢索服務按章節任務另行附加。",
     "",
   ].join("\n");
 
@@ -398,7 +420,7 @@ function buildCurrentInputRefresh({
   };
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     settlement_report_id: settlementReportId,
     chapter: identity.chapter,
     chapter_number: identity.chapter_number,
@@ -804,11 +826,13 @@ export async function createDirectSettlementPromotionCandidate({
     readFile(riskPath, "utf8").then(JSON.parse),
   ]);
   const activeHash = sha256(activeText);
+  const candidateHash = sha256(candidateText.trimEnd());
   const currentInputRefresh = buildCurrentInputRefresh({
     identity,
     settlementReportId,
     settlementSummary,
     createdAt,
+    activeEngineHash: candidateHash,
   });
   const normalizedPromotionRisk = normalizeDeterministicPromotionRisk(candidateRisk);
   const deterministicDiffOnly = normalizedPromotionRisk.repaired;
@@ -822,7 +846,6 @@ export async function createDirectSettlementPromotionCandidate({
     }
     : candidateRisk;
 
-  const candidateHash = sha256(candidateText.trimEnd());
   const lineage = directSettlementLineage(metadata, identity, settlementReportId);
   const activationWriteManifest = directSettlementActivationWriteManifest(
     metadata.metadata_path ?? null,

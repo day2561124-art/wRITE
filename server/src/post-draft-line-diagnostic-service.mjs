@@ -290,6 +290,88 @@ function hardConstraintFindings(lines, capabilityInput, output, seen) {
   exactMatchFindings(lines, structured, output, seen);
 }
 
+const canonCompatibilityIssueTypes = new Set([
+  "character_affiliation_conflict",
+  "location_access_conflict",
+  "unexplained_cross_organization_presence",
+  "timeline_presence_conflict",
+  "character_status_presence_conflict",
+  "misidentified_organization_membership",
+  "ability_or_weapon_ownership_conflict",
+  "exclusive_organization_role_conflict",
+  "exclusive_relationship_conflict",
+  "closed_historical_event_participation_conflict",
+]);
+
+function structuredCanonCompatibilityFindings(
+  lines,
+  capabilityInput,
+  output,
+  seen,
+) {
+  const sceneFindings = Array.isArray(
+    capabilityInput.scene_compatibility?.findings,
+  )
+    ? capabilityInput.scene_compatibility.findings
+    : [];
+  const candidates = [
+    ...sceneFindings,
+    ...(Array.isArray(capabilityInput.structured_hard_conflict_candidates)
+      ? capabilityInput.structured_hard_conflict_candidates
+      : []),
+  ];
+  for (const candidate of candidates) {
+    if (!isObject(candidate) || output.length >= MAX_FINDINGS) break;
+    if (!["requires_justification", "hard_conflict"].includes(candidate.status)) {
+      continue;
+    }
+    const issueType = canonCompatibilityIssueTypes.has(candidate.issue_type)
+      ? candidate.issue_type
+      : candidate.status === "requires_justification"
+        ? "unexplained_cross_organization_presence"
+        : "character_affiliation_conflict";
+    const character = compactText(
+      candidate.character_name ?? candidate.character,
+      80,
+    );
+    const suppliedEvidence = Array.isArray(candidate.exact_line_evidence)
+      ? candidate.exact_line_evidence[0]
+      : null;
+    const suppliedLine = Number.isInteger(suppliedEvidence?.line_start)
+      ? lines[suppliedEvidence.line_start - 1]
+      : null;
+    const matchingLine = suppliedLine
+      ?? lines.find((line) => (
+        character && line.text.includes(character)
+      ));
+    if (!matchingLine) continue;
+    const severity = candidate.issue_type === "timeline_presence_conflict"
+      ? "P0"
+      : "P1";
+    pushFinding(output, seen, {
+      ...lineEvidence(matchingLine, character),
+      issue_type: issueType,
+      severity,
+      character,
+      affiliation: compactText(candidate.affiliation, 120),
+      scene_location: compactText(candidate.scene_location, 160),
+      access_level: compactText(candidate.access_level, 40),
+      reason: compactText(candidate.reason, 420)
+        ?? "The structured Canon compatibility audit found a location, affiliation, timeline, status, or ownership conflict.",
+      must_fix: true,
+      minimal_direction: candidate.status === "requires_justification"
+        ? "Add or establish a valid access or cross-organization basis without changing the selected character or scene."
+        : "Correct only the conflicting Canon identity, access, timeline, status, or ownership assertion.",
+      confidence: candidate.status === "hard_conflict"
+        ? "structured_canon_conflict"
+        : "structured_grounding_missing",
+      canon_evidence: Array.isArray(candidate.canon_evidence)
+        ? candidate.canon_evidence.slice(0, 12)
+        : [],
+    });
+  }
+}
+
 function explicitRequirementFindings(lines, taskPrompt, capabilityInput, output, seen) {
   const phrases = forbiddenPhrasesFromPrompt(taskPrompt, capabilityInput);
   exactMatchFindings(
@@ -319,6 +401,7 @@ function summary(findings) {
 function inactiveResult(resultType, extra = {}) {
   return {
     result_type: resultType,
+    status: "inactive",
     diagnostic_version: postDraftLineDiagnosticVersion,
     analysis_phase: "pre_generation_compatibility",
     analysis_status: "inactive_without_draft_evidence",
@@ -340,7 +423,6 @@ export function buildPostDraftNeuralCritique({
   if (!draft) {
     return inactiveResult("neural_critique", {
       hard_risks: [],
-      critique_focus: compactText(taskPrompt, 480),
       hard_risk_scope: [
         "canon",
         "causality",
@@ -356,6 +438,12 @@ export function buildPostDraftNeuralCritique({
   const findings = [];
   const seen = new Set();
   hardConstraintFindings(lines, capabilityInput, findings, seen);
+  structuredCanonCompatibilityFindings(
+    lines,
+    capabilityInput,
+    findings,
+    seen,
+  );
   explicitRequirementFindings(lines, taskPrompt, capabilityInput, findings, seen);
   boundaryFindings(lines, capabilityInput, findings, seen);
   canonIdentityFindings(
@@ -374,6 +462,14 @@ export function buildPostDraftNeuralCritique({
     draft_sha256: sha256(draft),
     draft_line_count: lines.length,
     findings,
+    draft_entity_audit:
+      capabilityInput.draft_entity_audit ?? null,
+    draft_canon_coverage:
+      capabilityInput.draft_canon_coverage ?? null,
+    scene_compatibility:
+      capabilityInput.scene_compatibility ?? null,
+    post_draft_diagnostic_composition:
+      capabilityInput.post_draft_diagnostic_composition ?? null,
     hard_risks: findings.filter((finding) => finding.must_fix).map((finding) => ({
       finding_id: finding.finding_id,
       line_reference: finding.line_reference,
@@ -383,7 +479,6 @@ export function buildPostDraftNeuralCritique({
     release_recommendation: diagnosticSummary.must_fix_count > 0
       ? "minimal_targeted_revision_required"
       : "release_as_is_from_hard_risk_review",
-    critique_focus: compactText(taskPrompt, 480),
     evidence_only: true,
     hard_risk_scope: [
       "canon",
@@ -510,7 +605,6 @@ export function buildPostDraftStyleDriftReport({
   if (!draft) {
     return inactiveResult("style_drift_report", {
       pre_generation_status: "inactive_without_draft_evidence",
-      target: compactText(taskPrompt, 480),
     });
   }
   const lines = draftLines(draft);
@@ -536,7 +630,6 @@ export function buildPostDraftStyleDriftReport({
       : diagnosticSummary.finding_count > 0
         ? "advisory_minimal_revision_only"
         : "release_as_is_from_style_review",
-    target: compactText(taskPrompt, 480),
     evidence_only: true,
   };
 }

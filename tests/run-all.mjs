@@ -706,6 +706,12 @@ const steps = [
   ["Phase 53A pending engine review public profile exposure", ["tests/phase53/phase53a-pending-engine-review-public-profile.test.mjs"]],
   ["Phase 54A direct settlement reviewability repair", ["tests/phase54/phase54a-direct-settlement-reviewability-repair.test.mjs"]],
   ["Phase 55A direct settlement traceability review", ["tests/phase55/phase55a-direct-settlement-traceability-review.test.mjs"]],
+  ["Phase 56A writing context composition regression", ["tests/phase56/phase56a-writing-context-composition-regression.test.mjs"]],
+  ["Phase 57A formal context and functional contracts", ["tests/phase57/phase57a-formal-context-and-functional-contracts.test.mjs"]],
+  ["Phase 58A formal relevant Canon and ephemeral context", ["tests/phase58/phase58a-formal-relevant-canon-and-ephemeral-context.test.mjs"]],
+  ["Phase 59A dynamic Canon coverage and scene compatibility", ["tests/phase59/phase59a-dynamic-canon-coverage-and-scene-compatibility.test.mjs"]],
+  ["Phase 59B ephemeral draft review MCP", ["tests/phase59/phase59b-ephemeral-draft-review-mcp.test.mjs"]],
+  ["Phase 60A highest creative authority contract", ["tests/phase60/phase60a-highest-creative-authority-contract.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

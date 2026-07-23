@@ -71,19 +71,24 @@ function textFromValue(value, character, maxChars = 360) {
 function contextGeneration(writingContext) {
   return object(
     writingContext?.inputs?.generation_context
-      ?? writingContext?.content?.generation_context,
+      ?? writingContext?.content?.generation_context
+      ?? writingContext?.materials?.generation_context,
   );
 }
 
 function contextRetrieval(writingContext) {
   return object(
     writingContext?.inputs?.retrieval_context
-      ?? writingContext?.content?.retrieval_context,
+      ?? writingContext?.content?.retrieval_context
+      ?? writingContext?.materials?.retrieval_context,
   );
 }
 
 function contextAnchor(writingContext) {
-  return object(writingContext?.content?.chapter_anchor);
+  return object(
+    writingContext?.content?.chapter_anchor
+      ?? writingContext?.materials?.chapter_anchor,
+  );
 }
 
 function characterNamesFromValue(value) {
@@ -193,7 +198,10 @@ function ledgerState(value, character) {
 function resolveCharacterState(writingContext, capabilityInput, character) {
   const generation = contextGeneration(writingContext);
   const retrieval = contextRetrieval(writingContext);
-  const content = object(writingContext?.content);
+  const content = object(
+    writingContext?.content
+      ?? writingContext?.materials,
+  );
   const candidates = [
     { label: "capability_input.character_state", value: capabilityInput.character_state },
     { label: "capability_input.character_turn_state", value: capabilityInput.character_turn_state },

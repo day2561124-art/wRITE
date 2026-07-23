@@ -11,6 +11,7 @@ import {
   run_over_governance_detector,
   run_writing_card_director,
   run_final_polisher,
+  buildStoryMaterialCognitionContract,
 } from "./neural-module-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 
@@ -92,15 +93,12 @@ function normalizeExecutionModules(input = {}) {
 
 function compactWritingContext(writingContext = {}) {
   return {
-    bundle_id: writingContext.gpt_writing_context_bundle_id ?? null,
-    active_engine_summary: text(writingContext.active_engine_summary).slice(0, 4000),
-    writing_card_summary: text(writingContext.writing_card_summary).slice(0, 4000),
-    proofing_card_summary: text(writingContext.proofing_card_summary).slice(0, 3000),
-    longline_summary: text(writingContext.longline_summary).slice(0, 3000),
-    aesthetic_memory_context: text(writingContext.aesthetic_memory_context).slice(0, 3000),
-    character_state_context: text(writingContext.character_state_context).slice(0, 3000),
-    foreshadowing_context: text(writingContext.foreshadowing_context).slice(0, 3000),
-    reader_simulator_context: text(writingContext.reader_simulator_context).slice(0, 3000),
+    context_kind: writingContext.context_kind ?? "formal_writing_context",
+    user_request: writingContext.user_request ?? "",
+    creative_authority: writingContext.creative_authority ?? {},
+    external_research: writingContext.external_research ?? {},
+    active_engine_metadata: writingContext.active_engine_metadata ?? {},
+    materials: writingContext.materials ?? {},
   };
 }
 
@@ -126,8 +124,6 @@ function moduleInput(moduleName, input = {}) {
 
 function defaultModuleAdapter(moduleName) {
   return async (input, meta = {}) => {
-    const prompt = text(input.task_prompt);
-    const context = input.writing_context ?? {};
     const base = {
       module_name: wrapperName(moduleName),
       canonical_module_name: moduleName,
@@ -136,97 +132,11 @@ function defaultModuleAdapter(moduleName) {
       task_type: meta.task_type ?? "draft_generation",
       input_digest: sha256(toPlainJson(input)).slice(0, 16),
     };
-
-    if (moduleName === "scene_planner") {
-      return {
-        ...base,
-        summary: "Scene planner prepared a ChatGPT-native chapter continuation plan.",
-        result_summary: "Anchor the next chapter in concrete location, pressure, character movement, and one visible turn.",
-        beats: [
-          "Start from a chapter title when requested.",
-          "Open with immediate sensory action rather than engineering explanation.",
-          "Move the ensemble pressure forward through a concrete event.",
-          "End the opening movement with a readable story turn.",
-        ],
-        prompt_focus: prompt.slice(0, 240),
-      };
-    }
-
-    if (moduleName === "character_simulator") {
-      return {
-        ...base,
-        summary: "Character simulator prepared ensemble behavior constraints.",
-        result_summary: "Keep characters acting from position, emotion, relationship pressure, and current knowledge.",
-        character_guidance: [
-          "Avoid queue-style dialogue.",
-          "Do not flatten characters into operator voice.",
-          "Let silence, hesitation, and small actions carry tension when suitable.",
-        ],
-        voice_context_present: Boolean(context.character_voice_guard_context),
-      };
-    }
-
-    if (moduleName === "neural_critic") {
-      return {
-        ...base,
-        summary: "Neural critic prepared pre-generation risk notes.",
-        result_summary: "Block engineering prose, provider language, canon drift, and unsupported setting invention.",
-        critique_targets: [
-          "No handoff summary in final chat response.",
-          "No candidate / Canon / active_engine / adoption / settlement wording in story output.",
-          "Preserve causality and sensory continuity.",
-        ],
-      };
-    }
-
-    if (moduleName === "style_drift_detector") {
-      return {
-        ...base,
-        summary: "Style drift detector prepared style continuity notes.",
-        result_summary: "Maintain long-form prose, concrete action, natural dialogue, and non-administrative narration.",
-        drift_risks: [
-          "Administrative checklist prose.",
-          "Over-short meme-like punchlines.",
-          "Abstract theme-first narration.",
-        ],
-      };
-    }
-
-    if (moduleName === "over_governance_detector") {
-      return {
-        ...base,
-        summary: "Over-governance detector prepared anti-overcontrol notes.",
-        result_summary: "Use the governance context as invisible guardrails, not as visible story language.",
-        governance_limits: [
-          "Do not expose policy, tool, provider, or diagnostics vocabulary.",
-          "Do not turn story conflict into form/process debate.",
-          "Do not freeze character agency because of backend constraints.",
-        ],
-      };
-    }
-
-    if (moduleName === "writing_card_director") {
-      return {
-        ...base,
-        summary: "Writing card director prepared prose-facing instructions.",
-        result_summary: "Write direct story prose from the latest context, with vivid scene action and chapter-level momentum.",
-        director_notes: [
-          "Prioritize scene motion and living character reactions.",
-          "Use high-density chapter progression.",
-          "If the user requested story only, start directly from the chapter title.",
-        ],
-      };
-    }
-
     return {
       ...base,
-      summary: "Final polisher editorial brain prepared pre-handoff prose refinement notes.",
-      result_summary: "ChatGPT should perform final prose shaping in the chat response without saving a candidate.",
-      editorial_notes: [
-        "Polish cadence, sensory clarity, and dialogue naturalness in the final response.",
-        "Do not create a final candidate file.",
-        "Do not enter post-generation settlement or adoption.",
-      ],
+      result_summary: buildStoryMaterialCognitionContract(moduleName)?.purpose
+        ?? moduleName,
+      module_contract: buildStoryMaterialCognitionContract(moduleName),
     };
   };
 }
@@ -261,6 +171,9 @@ function summarizeOutput(output) {
 
 export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, options = {}) {
   const modules = normalizeExecutionModules(rawInput);
+  const agentRunOptions = options.fixtureRoot
+    ? { fixtureRoot: options.fixtureRoot }
+    : {};
   if (modules.length === 0) {
     return {
       status: "skipped",
@@ -297,7 +210,7 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
       modules,
       bundle_id: rawInput.bundle?.bundle_id ?? null,
     }),
-  });
+  }, agentRunOptions);
 
   const runId = agentRun.run_id;
   const results = [];
@@ -314,6 +227,7 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
         task_type: "draft_generation",
         source: "chatgpt_native_trace_only_handoff",
         adapter,
+        ...agentRunOptions,
       });
 
       const trace = execution.trace ?? {};
@@ -359,9 +273,13 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
         trace_id: item.trace_id,
       })),
     }),
+    ...agentRunOptions,
   });
 
-  const usage = await summarizeNeuralUsageForRun(runId);
+  const usage = await summarizeNeuralUsageForRun(
+    runId,
+    agentRunOptions,
+  );
   const compactTraces = (usage.traces ?? []).map((trace) => ({
     trace_id: trace.trace_id,
     module_name: wrapperName(trace.module_name),

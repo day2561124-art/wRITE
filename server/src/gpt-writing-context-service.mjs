@@ -40,13 +40,43 @@ import {
   serializeLatestSettledContinuityFixedGuard,
   withLatestSettledContinuity,
 } from "./latest-settled-continuity-service.mjs";
+import {
+  composeWritingContextSources,
+  countActiveEngineRetrievalChars,
+  truncateContextTextAtBlockBoundaries,
+  truncateStructuredContextAtBoundaries,
+} from "./context-composition-service.mjs";
+import {
+  formalWritingAuthorityContract,
+} from "./formal-writing-contracts.mjs";
+import {
+  buildFormalRelevantCanon,
+  countRelevantCanonActiveEngineChars,
+} from "./formal-relevant-canon-service.mjs";
+import {
+  hydratePlannedEntityManifest,
+} from "./canon-entity-hydration-service.mjs";
+import {
+  buildNeuralModuleContractRegistry,
+} from "./neural-module-service.mjs";
 
 const bundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const chapterModes = new Set(["next_chapter", "specific_scene", "rewrite_candidate"]);
 const outputModes = new Set(["chat_only", "candidate_save_later"]);
-const defaultMaxContextChars = 120_000;
+const taskPromptSources = new Set([
+  "explicit_task_prompt",
+  "old_generated_inputs",
+]);
+const defaultMaxContextChars = 48_000;
 const maximumContextChars = 250_000;
 const taskPromptMaxLength = 12_000;
+const sectionBudgets = Object.freeze({
+  task_prompt: 4_000,
+  generation_context: 12_000,
+  retrieval_context: 12_000,
+  writing_card: 4_000,
+  active_engine_retrieval: 12_000,
+});
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -96,8 +126,26 @@ function normalizeInput(input = {}) {
   }
   const chapterMode = String(input.chapter_mode ?? input.chapterMode ?? "next_chapter").trim();
   const outputMode = String(input.output_mode ?? input.outputMode ?? "chat_only").trim();
+  const taskPromptSource = String(
+    input.task_prompt_source
+      ?? input.taskPromptSource
+      ?? "explicit_task_prompt",
+  ).trim();
   if (!chapterModes.has(chapterMode)) throw new Error(`Unknown chapter_mode: ${chapterMode}`);
   if (!outputModes.has(outputMode)) throw new Error(`Unknown output_mode: ${outputMode}`);
+  if (!taskPromptSources.has(taskPromptSource)) {
+    throw new Error(`Unknown task_prompt_source: ${taskPromptSource}`);
+  }
+  const ephemeral = optionalBoolean(
+    input.ephemeral ?? input.dry_run ?? input.dryRun,
+    false,
+    "ephemeral",
+  );
+  const persistContext = optionalBoolean(
+    input.persist_context ?? input.persistContext,
+    true,
+    "persist_context",
+  );
   return {
     taskPrompt: requiredText(
       input.task_prompt ?? input.taskPrompt,
@@ -112,11 +160,16 @@ function normalizeInput(input = {}) {
       input.retrieval_context ?? input.retrievalContext,
       "retrieval_context",
     ),
+    plannedEntityManifest: optionalObject(
+      input.planned_entity_manifest ?? input.plannedEntityManifest,
+      "planned_entity_manifest",
+    ),
+    taskPromptSource,
     chapterMode,
     outputMode,
     includeActiveEngine: optionalBoolean(
       input.include_active_engine ?? input.includeActiveEngine,
-      true,
+      false,
       "include_active_engine",
     ),
     includeWritingCard: optionalBoolean(
@@ -131,7 +184,7 @@ function normalizeInput(input = {}) {
     ),
     includeProofingCard: optionalBoolean(
       input.include_proofing_card ?? input.includeProofingCard,
-      true,
+      false,
       "include_proofing_card",
     ),
     includeLongline: optionalBoolean(
@@ -157,6 +210,13 @@ function normalizeInput(input = {}) {
       optionalBoolean(input.run_neural_traces, false, "run_neural_traces")
       || optionalBoolean(input.runNeuralTraces, false, "runNeuralTraces")
     ),
+    formalContextOnly: optionalBoolean(
+      input.formal_context_only ?? input.formalContextOnly,
+      false,
+      "formal_context_only",
+    ),
+    ephemeral,
+    persistContext: ephemeral ? false : persistContext,
   };
 }
 
@@ -189,17 +249,25 @@ function bundlePaths(bundleId, roots) {
   };
 }
 
-async function sourceSnapshot(label, filePath, included, canonStatus) {
+async function sourceSnapshot(
+  label,
+  filePath,
+  included,
+  canonStatus,
+  { metadataWhenExcluded = false, authorityLevel = canonStatus } = {},
+) {
   const sourcePath = normalizeProjectPath(filePath);
-  if (!included) {
+  if (!included && !metadataWhenExcluded) {
     return {
       label,
       path: sourcePath,
       included: false,
+      text_included: false,
       exists: null,
       hash: null,
       modified_at: null,
       canon_status: canonStatus,
+      authority_level: authorityLevel,
       content: "",
     };
   }
@@ -208,23 +276,27 @@ async function sourceSnapshot(label, filePath, included, canonStatus) {
     return {
       label,
       path: sourcePath,
-      included: true,
+      included,
+      text_included: included,
       exists: true,
       hash: sha256(content),
       modified_at: fileStat.mtime.toISOString(),
       canon_status: canonStatus,
-      content,
+      authority_level: authorityLevel,
+      content: included ? content : "",
     };
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     return {
       label,
       path: sourcePath,
-      included: true,
+      included,
+      text_included: included,
       exists: false,
       hash: null,
       modified_at: null,
       canon_status: canonStatus,
+      authority_level: authorityLevel,
       content: "",
     };
   }
@@ -258,6 +330,16 @@ function taskPromptWithContinuityGuard(taskPrompt, guardText) {
     original_task_prompt_truncated:
       boundedTaskPrompt.length < taskPrompt.length,
   };
+}
+
+function withoutRedundantCreativeAuthorityLanguage(value) {
+  return String(value ?? "")
+    .replace(
+      /[；;，,]?\s*只整理\s*Canon、entity、continuity\s*與權限契約[，,；;]?\s*不決定故事事件[。.]?/gu,
+      "",
+    )
+    .replace(/[；;，,]?\s*不決定故事事件[。.]?/gu, "")
+    .trim();
 }
 
 function characterVoiceRegistryMetadata(source) {
@@ -323,31 +405,204 @@ function allocateContent(sections, maxChars) {
       content[section.key] = "";
       continue;
     }
-    if (remaining <= 0) {
-      content[section.key] = `[omitted: context budget exhausted; source=${section.reference}]`;
-      truncation.push(section.key);
-      continue;
+    const sectionLimit = Math.max(
+      0,
+      Math.min(
+        remaining,
+        Number.isInteger(section.maxChars)
+          ? section.maxChars
+          : remaining,
+      ),
+    );
+    const bounded = truncateContextTextAtBlockBoundaries(
+      text,
+      sectionLimit,
+      section.key,
+    );
+    content[section.key] = bounded.text;
+    remaining -= bounded.actual_chars;
+    if (bounded.truncated) {
+      truncation.push({
+        source: section.key,
+        reference: section.reference,
+        truncated: true,
+        original_chars: bounded.original_chars,
+        actual_chars: bounded.actual_chars,
+        budget_chars: bounded.budget_chars,
+      });
     }
-    if (text.length <= remaining) {
-      content[section.key] = text;
-      remaining -= text.length;
-      continue;
-    }
-    const suffix = `\n\n[truncated; source=${section.reference}]`;
-    const allowed = Math.max(0, remaining - suffix.length);
-    content[section.key] = `${text.slice(0, allowed)}${suffix}`;
-    truncation.push(section.key);
-    remaining = 0;
   }
   return {
     content,
     context_chars_used: maxChars - remaining,
     context_chars_limit: maxChars,
-    truncated_sections: truncation,
+    truncated_sections: truncation.map((entry) => entry.source),
+    truncated_sources: truncation,
+  };
+}
+
+function serializedChars(value) {
+  return JSON.stringify(value, null, 2).length;
+}
+
+function containsFullText(value, fullText, seen = new Set()) {
+  const target = String(fullText ?? "").trim();
+  if (!target) return false;
+  if (typeof value === "string") return value.includes(target);
+  if (!value || typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  return Object.values(value).some((item) => (
+    containsFullText(item, target, seen)
+  ));
+}
+
+function buildBoundedFormalContext(bundle, maxChars) {
+  const activeEngine = bundle.sources.active_engine ?? {};
+  const authority = formalWritingAuthorityContract();
+  const fixed = {
+    context_kind: "formal_writing_context",
+    source_priority: [
+      "current_user_request",
+      "latest_continuity_overlay",
+      "current_active_engine_relevant_canon",
+      "corroborated_stale_registry",
+      "chatgpt_narrative_decisions",
+      "external_reference_material",
+      "old_generated_inputs",
+    ],
+    user_request: bundle.original_task_prompt ?? bundle.task_prompt,
+    ...authority,
+    active_engine_metadata: {
+      path: activeEngine.path ?? null,
+      sha256: activeEngine.hash ?? null,
+      exists: activeEngine.exists === true,
+      authority_level: activeEngine.authority_level ?? "active_hard_canon",
+      full_text_included: false,
+    },
+    neural_module_contracts: buildNeuralModuleContractRegistry(),
+  };
+  const boundedRelevantCanon = truncateStructuredContextAtBoundaries(
+    bundle.relevant_canon ?? {},
+    Math.min(18_000, maxChars),
+    "formal_context.materials.relevant_canon",
+  );
+  const continuityRecordIds = new Set(
+    (boundedRelevantCanon.value?.continuity_facts ?? [])
+      .map((record) => record.entity_id),
+  );
+  const unresolvedRecordIds = new Set(
+    (boundedRelevantCanon.value?.current_status ?? [])
+      .filter((record) => record.category === "unresolved_state")
+      .map((record) => record.entity_id),
+  );
+  const materials = {
+    retrieval_plan: bundle.retrieval_plan ?? {},
+    planned_entity_manifest:
+      bundle.planned_entity_manifest ?? {},
+    planned_entity_hydration:
+      bundle.planned_entity_hydration ?? {
+        requested_entities: [],
+        resolved_entities: [],
+        unresolved_entities: [],
+        canon_coverage_complete: true,
+        character_count: 0,
+      },
+    planned_canon_coverage:
+      bundle.planned_canon_coverage ?? {
+        named_canon_entities: 0,
+        hydrated_entities: 0,
+        unresolved_entities: 0,
+        coverage_complete: true,
+      },
+    relevant_canon: boundedRelevantCanon.value,
+    continuity: {
+      report_id:
+        bundle.latest_settled_continuity?.report_id ?? null,
+      continuity_head:
+        bundle.latest_settled_continuity?.continuity_head ?? null,
+      continuity_fact_ids: [...continuityRecordIds],
+      unresolved_state_ids: [...unresolvedRecordIds],
+      transition_suggestion_included: false,
+    },
+    chapter_anchor: {
+      chapter:
+        bundle.latest_settled_continuity?.chapter
+        ?? bundle.content.chapter_anchor?.chapter
+        ?? "unknown",
+      display_heading:
+        bundle.latest_settled_continuity?.display_heading ?? null,
+      continuity_head:
+        bundle.latest_settled_continuity?.continuity_head ?? null,
+      requested_topics: [
+        ...(bundle.retrieval_plan?.characters ?? []),
+        ...(bundle.retrieval_plan?.status_effects ?? []),
+        ...(bundle.retrieval_plan?.world_rules ?? []),
+      ],
+    },
+    generation_context: bundle.inputs.generation_context ?? {},
+    retrieval_context: bundle.inputs.retrieval_context ?? {},
+    writing_card_director:
+      bundle.content.writing_card_director_context ?? null,
+  };
+  let materialBudget = Math.max(
+    2,
+    maxChars - serializedChars(fixed) - 512,
+  );
+  let boundedMaterials;
+  let formalContext;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    boundedMaterials = truncateStructuredContextAtBoundaries(
+      materials,
+      materialBudget,
+      "formal_context.materials",
+    );
+    formalContext = {
+      ...fixed,
+      materials: boundedMaterials.value,
+    };
+    const overflow = serializedChars(formalContext) - maxChars;
+    if (overflow <= 0) break;
+    materialBudget = Math.max(2, materialBudget - overflow - 32);
+  }
+  if (serializedChars(formalContext) > maxChars) {
+    const fallback = truncateStructuredContextAtBoundaries(
+      formalContext,
+      maxChars,
+      "formal_context",
+    );
+    return {
+      value: fallback.value,
+      text: fallback.text,
+      actual_chars: fallback.actual_chars,
+      truncated: true,
+      truncated_paths: fallback.truncated_paths,
+    };
+  }
+  return {
+    value: formalContext,
+    text: JSON.stringify(formalContext, null, 2),
+    actual_chars: serializedChars(formalContext),
+    truncated:
+      boundedRelevantCanon.truncated
+      || boundedMaterials.truncated,
+    truncated_paths: [
+      ...boundedRelevantCanon.truncated_paths,
+      ...boundedMaterials.truncated_paths,
+    ],
   };
 }
 
 function chatMarkdown(bundle) {
+  if (bundle.formal_context) {
+    return [
+      "# GPT Formal Writing Context",
+      "",
+      "```json",
+      JSON.stringify(bundle.formal_context, null, 2),
+      "```",
+      "",
+    ].join("\n");
+  }
   const sourceLines = Object.values(bundle.sources).map((source) => (
     `- ${source.label}: included=${source.included}, exists=${source.exists}, hash=${source.hash ?? "none"}, path=${source.path}`
   ));
@@ -481,7 +736,9 @@ async function engineStatusFor(options) {
 export async function buildGptWritingContext(rawInput, options = {}) {
   const input = normalizeInput(rawInput);
   const roots = rootsFor(options);
-  await mkdir(roots.gptWritingContexts, { recursive: true });
+  if (input.persistContext) {
+    await mkdir(roots.gptWritingContexts, { recursive: true });
+  }
   const {
     status: engineComponentsStatus,
     validationErrors: engineComponentValidationErrors,
@@ -515,13 +772,25 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       latestSettledContinuity,
       currentInputSettlementFreshness,
     );
+  const formalTaskPrompt = input.formalContextOnly
+    ? withoutRedundantCreativeAuthorityLanguage(input.taskPrompt)
+    : input.taskPrompt;
   const effectiveTaskPrompt =
     taskPromptWithContinuityGuard(
-      input.taskPrompt,
+      formalTaskPrompt,
       continuityTaskGuard,
     );
   const sourceList = await Promise.all([
-    sourceSnapshot("active_engine", activeEnginePath, input.includeActiveEngine, "active"),
+    sourceSnapshot(
+      "active_engine",
+      activeEnginePath,
+      input.includeActiveEngine,
+      "active",
+      {
+        metadataWhenExcluded: true,
+        authorityLevel: "active_hard_canon",
+      },
+    ),
     sourceSnapshot(
       "active_writing_card",
       path.join(projectRoot, "data", "writing_policy_db", "active_writing_card.md"),
@@ -562,32 +831,40 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       true,
       "active",
     );
+  const formalRelevantCanon = await buildFormalRelevantCanon({
+    taskPrompt: formalTaskPrompt,
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
+    latestContinuity: latestSettledContinuity,
+    activeEngineContent: groundingActiveEngine.content,
+    activeEnginePath: groundingActiveEngine.path,
+    activeEngineHash: groundingActiveEngine.hash,
+  }, options);
+  const plannedEntityHydration = await hydratePlannedEntityManifest({
+    plannedEntityManifest: input.plannedEntityManifest,
+    relevantCanon: formalRelevantCanon.relevant_canon,
+    activeEngineContent: groundingActiveEngine.content,
+    activeEnginePath: groundingActiveEngine.path,
+    activeEngineHash: groundingActiveEngine.hash,
+  }, options);
+  formalRelevantCanon.relevant_canon =
+    plannedEntityHydration.relevant_canon;
   const characterCanonGrounding = buildCharacterCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
     taskPrompt: effectiveTaskPrompt.text,
-    generationContext: withLatestSettledContinuity(
-      input.generationContext,
-      latestSettledContinuity,
-    ),
-    retrievalContext: withLatestSettledContinuity(
-      input.retrievalContext,
-      latestSettledContinuity,
-    ),
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
     currentLongline: byLabel.active_longline.content,
+    explicitCharacterNames:
+      formalRelevantCanon.retrieval_plan.characters,
   });
   const worldEntityCanonGrounding = buildWorldEntityCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
     taskPrompt: effectiveTaskPrompt.text,
-    generationContext: withLatestSettledContinuity(
-      input.generationContext,
-      latestSettledContinuity,
-    ),
-    retrievalContext: withLatestSettledContinuity(
-      input.retrievalContext,
-      latestSettledContinuity,
-    ),
+    generationContext: input.generationContext,
+    retrievalContext: input.retrievalContext,
     currentLongline: byLabel.active_longline.content,
   });
   const characterVoiceRegistry = characterVoiceRegistryMetadata(
@@ -598,7 +875,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       options.visualUploadedReferencesOptions ?? {},
     )
     : disabledVisualUploadedReferencesContext();
-  const generationContext = contextWithVisualUploadedReferences(
+  const rawGenerationContext = contextWithVisualUploadedReferences(
     contextWithCharacterVoiceRegistry(
       withLatestSettledContinuity(
         input.generationContext,
@@ -608,7 +885,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     ),
     visualUploadedReferences,
   );
-  const retrievalContext = contextWithVisualUploadedReferences(
+  const rawRetrievalContext = contextWithVisualUploadedReferences(
     contextWithCharacterVoiceRegistry(
       withLatestSettledContinuity(
         input.retrievalContext,
@@ -618,7 +895,79 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     ),
     visualUploadedReferences,
   );
+  const composed = composeWritingContextSources({
+    taskPrompt: effectiveTaskPrompt.text,
+    taskPromptSource: input.taskPromptSource,
+    continuityOverlay:
+      latestSettledContinuity.loaded === true
+        ? latestSettledContinuity.summary_text
+        : "",
+    generationContext: rawGenerationContext,
+    retrievalContext: rawRetrievalContext,
+  });
+  const boundedTaskPrompt = truncateContextTextAtBlockBoundaries(
+    composed.task_prompt,
+    Math.min(sectionBudgets.task_prompt, input.maxContextChars),
+    "task_prompt",
+  );
+  const remainingAfterTask = Math.max(
+    0,
+    input.maxContextChars - boundedTaskPrompt.actual_chars,
+  );
+  const boundedGenerationContext = truncateStructuredContextAtBoundaries(
+    composed.generation_context,
+    Math.min(
+      sectionBudgets.generation_context,
+      remainingAfterTask,
+    ),
+    "generation_context",
+  );
+  const remainingAfterGeneration = Math.max(
+    0,
+    remainingAfterTask
+      - boundedGenerationContext.actual_chars,
+  );
+  const boundedRetrievalContext = truncateStructuredContextAtBoundaries(
+    composed.retrieval_context,
+    Math.min(
+      sectionBudgets.retrieval_context,
+      remainingAfterGeneration,
+    ),
+    "retrieval_context",
+  );
+  const generationContext = boundedGenerationContext.value;
+  const retrievalContext = boundedRetrievalContext.value;
+  const composedLatestSettledContinuity =
+    latestSettledContinuity.loaded === true
+      ? {
+        ...latestSettledContinuity,
+        summary_text: composed.continuity_overlay,
+      }
+      : latestSettledContinuity;
+  const remainingContentBudget = Math.max(
+    0,
+    input.maxContextChars
+      - boundedTaskPrompt.actual_chars
+      - boundedGenerationContext.actual_chars
+      - boundedRetrievalContext.actual_chars,
+  );
   const allocated = allocateContent([
+    {
+      key: "writing_card_excerpt_or_reference",
+      text: byLabel.active_writing_card.content,
+      reference: byLabel.active_writing_card.path,
+      maxChars: sectionBudgets.writing_card,
+    },
+    {
+      key: "active_engine_excerpt_or_reference",
+      text: byLabel.active_engine.content,
+      reference: byLabel.active_engine.path,
+    },
+    {
+      key: "longline_excerpt_or_reference",
+      text: byLabel.active_longline.content,
+      reference: byLabel.active_longline.path,
+    },
     {
       key: "character_voice_registry_content",
       text: byLabel.character_voice_registry.content,
@@ -630,36 +979,14 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       reference: byLabel.visual_index.path,
     },
     {
-      key: "active_engine_excerpt_or_reference",
-      text: byLabel.active_engine.content,
-      reference: byLabel.active_engine.path,
-    },
-    {
-      key: "writing_card_excerpt_or_reference",
-      text: byLabel.active_writing_card.content,
-      reference: byLabel.active_writing_card.path,
-    },
-    {
       key: "proofing_card_excerpt_or_reference",
       text: byLabel.active_proofing_card.content,
       reference: byLabel.active_proofing_card.path,
+      maxChars: sectionBudgets.writing_card,
     },
-    {
-      key: "longline_excerpt_or_reference",
-      text: byLabel.active_longline.content,
-      reference: byLabel.active_longline.path,
-    },
-    {
-      key: "retrieval_context",
-      text: serializeContext(retrievalContext),
-      reference: "input.retrieval_context",
-    },
-    {
-      key: "generation_context",
-      text: serializeContext(generationContext),
-      reference: "input.generation_context",
-    },
-  ], input.maxContextChars);
+  ], remainingContentBudget);
+  allocated.content.retrieval_context = boundedRetrievalContext.text;
+  allocated.content.generation_context = boundedGenerationContext.text;
   const warnings = sourceList
     .filter((source) => source.included && source.exists === false)
     .map((source) => `Missing source: ${source.label}`);
@@ -679,8 +1006,31 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       "Original task prompt was truncated after the latest settled continuity guard was applied.",
     );
   }
+  const boundedInputTruncation = [
+    boundedTaskPrompt,
+    boundedGenerationContext,
+    boundedRetrievalContext,
+  ].filter((entry) => entry.truncated).map((entry) => ({
+    source: entry.source,
+    truncated: true,
+    original_chars: entry.original_chars,
+    actual_chars: entry.actual_chars,
+    budget_chars: entry.budget_chars,
+    ...(entry.truncated_paths?.length
+      ? { truncated_paths: entry.truncated_paths }
+      : {}),
+  }));
+  const truncatedSources = [
+    ...boundedInputTruncation,
+    ...allocated.truncated_sources,
+  ];
   if (allocated.truncated_sections.length) {
     warnings.push(`Context truncated: ${allocated.truncated_sections.join(", ")}`);
+  }
+  if (boundedInputTruncation.length) {
+    warnings.push(
+      `Context sections truncated at block boundaries: ${boundedInputTruncation.map((entry) => entry.source).join(", ")}`,
+    );
   }
   for (const error of engineComponentValidationErrors) {
     warnings.push(`Engine component validation: ${error}`);
@@ -705,11 +1055,11 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     bundle_kind: "gpt_writing_context",
     created_at: new Date().toISOString(),
     source: "gpt_writing_context_service",
-    task_prompt: effectiveTaskPrompt.text,
-    original_task_prompt: input.taskPrompt,
+    task_prompt: boundedTaskPrompt.text,
+    original_task_prompt: formalTaskPrompt,
     latest_settled_continuity_task_guard_applied:
       effectiveTaskPrompt.guard_applied,
-    latest_settled_continuity: latestSettledContinuity,
+    latest_settled_continuity: composedLatestSettledContinuity,
     current_input_settlement_freshness:
       currentInputSettlementFreshness,
     chapter_mode: input.chapterMode,
@@ -754,6 +1104,21 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     visual_uploaded_references_hash_sha256: visualUploadedReferences.visual_index_hash_sha256 ?? byLabel.visual_index.hash,
     visual_uploaded_references_count: visualUploadedReferences.reference_count ?? 0,
     visual_uploaded_references: visualUploadedReferences,
+    retrieval_plan: formalRelevantCanon.retrieval_plan,
+    relevant_canon: formalRelevantCanon.relevant_canon,
+    planned_entity_manifest:
+      plannedEntityHydration.planned_entity_manifest,
+    planned_entity_hydration:
+      plannedEntityHydration.planned_entity_hydration,
+    planned_canon_coverage:
+      plannedEntityHydration.planned_canon_coverage,
+    continuity_sections: {
+      continuity_facts:
+        formalRelevantCanon.continuity.continuity_facts,
+      unresolved_state:
+        formalRelevantCanon.continuity.unresolved_state,
+      transition_suggestion_included: false,
+    },
     inputs: {
       generation_context: generationContext,
       retrieval_context: retrievalContext,
@@ -783,8 +1148,8 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       visual_uploaded_reference_context:
         allocated.content.visual_uploaded_reference_context,
       latest_settled_continuity:
-        latestSettledContinuity.loaded === true
-          ? latestSettledContinuity
+        composedLatestSettledContinuity.loaded === true
+          ? composedLatestSettledContinuity
           : null,
       retrieval_context: retrievalContext,
       generation_context: generationContext,
@@ -792,14 +1157,65 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       generation_context_for_chat: allocated.content.generation_context,
       writing_card_director_context: null,
     },
-    context_chars_used: allocated.context_chars_used,
-    max_context_chars: allocated.context_chars_limit,
-    truncated_sections: allocated.truncated_sections,
+    context_chars_used:
+      boundedTaskPrompt.actual_chars
+      + boundedGenerationContext.actual_chars
+      + boundedRetrievalContext.actual_chars
+      + allocated.context_chars_used,
+    max_context_chars: input.maxContextChars,
+    truncated_sections: truncatedSources.map((entry) => entry.source),
+    context_composition: {
+      ...composed.metadata,
+      task_prompt_chars: boundedTaskPrompt.actual_chars,
+      generation_context_chars: boundedGenerationContext.actual_chars,
+      retrieval_context_chars: boundedRetrievalContext.actual_chars,
+      active_engine_full_text_included:
+        input.includeActiveEngine === true
+        && byLabel.active_engine.exists === true
+        && !allocated.truncated_sources.some(
+          (entry) => entry.source === "active_engine_excerpt_or_reference",
+        ),
+      active_engine_text_requested: input.includeActiveEngine === true,
+      active_engine_retrieval_chars: Math.min(
+        sectionBudgets.active_engine_retrieval,
+        formalRelevantCanon.relevant_canon
+          .active_engine_retrieval_chars
+          ?? countActiveEngineRetrievalChars(retrievalContext),
+      ),
+      proofing_card_included:
+        Boolean(allocated.content.proofing_card_excerpt_or_reference),
+      writing_card_included:
+        Boolean(allocated.content.writing_card_excerpt_or_reference),
+      longline_included:
+        Boolean(allocated.content.longline_excerpt_or_reference),
+      truncated_sources: truncatedSources,
+      duplicate_sources: composed.metadata.duplicate_sources,
+      total_chars_after_budget:
+        boundedTaskPrompt.actual_chars
+        + boundedGenerationContext.actual_chars
+        + boundedRetrievalContext.actual_chars
+        + allocated.context_chars_used,
+      section_budgets: { ...sectionBudgets },
+      relevant_canon_chars:
+        serializedChars(formalRelevantCanon.relevant_canon),
+      relevant_canon_budget_chars: 18_000,
+      planned_entity_hydration_chars:
+        plannedEntityHydration.composition
+          .planned_entity_hydration_chars,
+      planned_canon_coverage:
+        plannedEntityHydration.planned_canon_coverage,
+      transition_suggestion_included: false,
+    },
     warnings,
+    persistence: {
+      persisted: input.persistContext,
+      ephemeral: input.ephemeral,
+      writing_context_record_created: input.persistContext,
+    },
   };
   bundle.fixed_guard_section = [
     serializeLatestSettledContinuityFixedGuard(
-      latestSettledContinuity,
+      composedLatestSettledContinuity,
       currentInputSettlementFreshness,
     ),
     serializeCharacterCanonGroundingFixedGuard(
@@ -813,7 +1229,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   if (input.includeWritingCardDirector) {
     try {
       const director = buildWritingCardDirectorContext({
-        taskPrompt: effectiveTaskPrompt.text,
+        taskPrompt: bundle.task_prompt,
         generationContext,
         retrievalContext,
         writingCardText: byLabel.active_writing_card.content,
@@ -900,7 +1316,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
           // call wrapper; if adapter is null the wrapper will record a skipped trace
           try {
             await wrapper({
-              task_prompt: effectiveTaskPrompt.text,
+              task_prompt: bundle.task_prompt,
               generation_context: generationContext,
               retrieval_context: retrievalContext,
               character_voice_registry: characterVoiceRegistry,
@@ -944,21 +1360,84 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     }
   }
 
+  const boundedFormalContext = buildBoundedFormalContext(
+    bundle,
+    input.maxContextChars,
+  );
+  bundle.formal_context = boundedFormalContext.value;
+  bundle.context_composition.formal_context_only =
+    input.formalContextOnly;
+  if (input.formalContextOnly) {
+    bundle.context_chars_used = boundedFormalContext.actual_chars;
+    bundle.context_composition.total_chars_after_budget =
+      boundedFormalContext.actual_chars;
+    bundle.context_composition.active_engine_full_text_included =
+      containsFullText(
+        bundle.formal_context,
+        groundingActiveEngine.content,
+      );
+    bundle.context_composition.active_engine_retrieval_chars =
+      countRelevantCanonActiveEngineChars(
+        bundle.formal_context?.materials?.relevant_canon ?? {},
+      );
+    bundle.context_composition.relevant_canon_chars =
+      serializedChars(
+        bundle.formal_context?.materials?.relevant_canon ?? {},
+      );
+    bundle.context_composition.planned_entity_hydration_chars =
+      serializedChars(
+        bundle.formal_context?.materials?.planned_entity_hydration
+        ?? {},
+      );
+    bundle.context_composition.planned_canon_coverage =
+      bundle.formal_context?.materials?.planned_canon_coverage
+      ?? null;
+    bundle.context_composition.proofing_card_included =
+      containsFullText(
+        bundle.formal_context,
+        byLabel.active_proofing_card.content,
+      );
+  } else {
+    bundle.context_composition.active_engine_full_text_included =
+      containsFullText(
+        bundle.content,
+        groundingActiveEngine.content,
+      );
+  }
+  bundle.context_composition.formal_context_truncated =
+    boundedFormalContext.truncated;
+  bundle.context_composition.formal_context_truncated_paths =
+    boundedFormalContext.truncated_paths;
+  if (boundedFormalContext.truncated) {
+    bundle.truncated_sections = [
+      ...new Set([
+        ...bundle.truncated_sections,
+        "formal_context",
+      ]),
+    ];
+  }
+
   const markdown = chatMarkdown(bundle);
-  await commitFileTransaction("build-gpt-writing-context", [
-    { filePath: paths.bundle, content: `${JSON.stringify(bundle, null, 2)}\n` },
-    { filePath: paths.chat, content: markdown },
-  ], {
-    bundle_id: bundleId,
-    phase: "phase_8b_gpt_writing_context",
-    ...(options.fixtureRoot ? {
-      test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions"),
-    } : {}),
-  });
+  if (input.persistContext) {
+    await commitFileTransaction("build-gpt-writing-context", [
+      { filePath: paths.bundle, content: `${JSON.stringify(bundle, null, 2)}\n` },
+      { filePath: paths.chat, content: markdown },
+    ], {
+      bundle_id: bundleId,
+      phase: "phase_8b_gpt_writing_context",
+      ...(options.fixtureRoot ? {
+        test_transaction_dir: path.join(options.fixtureRoot, "data", "outputs", "logs", "transactions"),
+      } : {}),
+    });
+  }
   return {
     bundle,
-    context_bundle_path: normalizeProjectPath(paths.bundle),
-    context_for_chat_path: normalizeProjectPath(paths.chat),
+    context_bundle_path: input.persistContext
+      ? normalizeProjectPath(paths.bundle)
+      : null,
+    context_for_chat_path: input.persistContext
+      ? normalizeProjectPath(paths.chat)
+      : null,
   };
 }
 
@@ -1007,4 +1486,3 @@ export async function listGptWritingContextBundles(input = {}, options = {}) {
     .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))
     .slice(0, limit);
 }
-

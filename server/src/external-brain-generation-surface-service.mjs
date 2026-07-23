@@ -202,6 +202,10 @@ const generationVisibleKeys = Object.freeze({
     "draft_sha256",
     "draft_line_count",
     "findings",
+    "draft_entity_audit",
+    "draft_canon_coverage",
+    "scene_compatibility",
+    "post_draft_diagnostic_composition",
     "hard_risks",
     "summary",
     "release_recommendation",
@@ -320,13 +324,20 @@ function contextObject(value) {
 }
 
 function focusCharacters(writingContext = {}, capabilityInput = {}) {
+  const formalMaterials = contextObject(
+    writingContext.formal_context?.materials
+    ?? writingContext.materials,
+  );
+  const relevantCanon = contextObject(formalMaterials.relevant_canon);
   const generation = contextObject(
     writingContext.inputs?.generation_context
-    ?? writingContext.content?.generation_context,
+    ?? writingContext.content?.generation_context
+    ?? writingContext.materials?.generation_context,
   );
   const retrieval = contextObject(
     writingContext.inputs?.retrieval_context
-    ?? writingContext.content?.retrieval_context,
+    ?? writingContext.content?.retrieval_context
+    ?? writingContext.materials?.retrieval_context,
   );
   const characters = sourceArray(
     capabilityInput.active_characters,
@@ -335,6 +346,9 @@ function focusCharacters(writingContext = {}, capabilityInput = {}) {
     generation.focus_characters,
     retrieval.active_characters,
     retrieval.focus_characters,
+    Array.isArray(relevantCanon.characters)
+      ? relevantCanon.characters.map((record) => record.name).filter(Boolean)
+      : [],
   );
   const singular = firstNonEmpty(
     capabilityInput.character,
@@ -349,11 +363,28 @@ function focusCharacters(writingContext = {}, capabilityInput = {}) {
 }
 
 export function buildDeterministicScenePlan({
-  taskPrompt = "",
+  taskPrompt: ignoredTaskPrompt = "",
   writingContext = {},
   capabilityInput = {},
 } = {}) {
-  const anchor = contextObject(writingContext.content?.chapter_anchor);
+  void ignoredTaskPrompt;
+  const anchor = contextObject(
+    writingContext.content?.chapter_anchor
+    ?? writingContext.formal_context?.materials?.chapter_anchor
+    ?? writingContext.materials?.chapter_anchor,
+  );
+  const relevantCanon = contextObject(
+    writingContext.formal_context?.materials?.relevant_canon
+    ?? writingContext.materials?.relevant_canon,
+  );
+  const continuityFacts = Array.isArray(relevantCanon.continuity_facts)
+    ? relevantCanon.continuity_facts
+    : [];
+  const unresolvedState = Array.isArray(relevantCanon.current_status)
+    ? relevantCanon.current_status.filter(
+      (record) => record.category === "unresolved_state",
+    )
+    : [];
   const characters = focusCharacters(writingContext, capabilityInput);
   return {
     result_type: "scene_plan",
@@ -361,13 +392,14 @@ export function buildDeterministicScenePlan({
       capabilityInput.scene_now,
       anchor.current_event,
       anchor.scene_now,
-      taskPrompt,
+      continuityFacts[0]?.content,
     ),
     active_characters: characters,
     immediate_pressure: firstNonEmpty(
       capabilityInput.immediate_pressure,
       anchor.unresolved_consequence,
       anchor.immediate_pressure,
+      unresolvedState[0]?.content,
     ),
     next_natural_turn: firstNonEmpty(
       capabilityInput.next_natural_turn,
@@ -426,14 +458,14 @@ export function buildDeterministicStyleDriftReport({
 }
 
 export function buildDeterministicOverGovernanceReport({
-  taskPrompt = "",
+  taskPrompt: ignoredTaskPrompt = "",
   capabilityInput = {},
 } = {}) {
+  void ignoredTaskPrompt;
   return {
     result_type: "over_governance_report",
+    analysis_status: "governance_risk_review_complete",
     findings: sourceArray(capabilityInput.findings),
-    target: taskPrompt,
-    hard_boundary: "Keep workflow and governance language out of story prose.",
   };
 }
 
@@ -463,7 +495,7 @@ export function buildDeterministicWritingCard({
     ...compactArray(character.uncertainty, { maxItems: 6, maxChars: 240 }),
   ].slice(0, 8);
   const generationCard = {
-    scene_now: scene.scene_now ?? compactString(taskPrompt, 480),
+    scene_now: scene.scene_now ?? null,
     active_characters: scene.active_characters
       ?? character.characters
       ?? (character.character ? [character.character] : []),

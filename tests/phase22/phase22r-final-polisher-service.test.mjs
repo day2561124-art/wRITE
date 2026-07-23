@@ -18,6 +18,16 @@ async function main() {
   assert(Array.isArray(res2.revision_report.paragraph_level_issues));
   assert(Array.isArray(res2.revision_report.dialogue_subtext_issues));
   assert(typeof res2.polished_text === "string");
+  assert.equal(res2.polished_text, sample);
+  assert.equal(
+    res2.output_hash_sha256,
+    res2.input_hash_sha256,
+  );
+  assert.equal(res2.text_identity_preserved, true);
+  assert.equal(
+    res2.polished_text.includes("握筆時指節發涼"),
+    false,
+  );
   console.log("Final polisher completed test passed.");
 }
 

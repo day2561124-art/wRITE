@@ -72,6 +72,7 @@ import {
   chatgpt_bridge_build_writing_context,
   chatgpt_bridge_build_full_neural_writing_handoff,
   chatgpt_bridge_begin_external_brain_writing_session,
+  chatgpt_bridge_review_draft_ephemeral,
   chatgpt_bridge_use_scene_planner,
   chatgpt_bridge_use_character_simulator,
   chatgpt_bridge_use_neural_critic,
@@ -2002,6 +2003,10 @@ const toolDefinitions = [
       useCurrentInputs: { type: "boolean", default: true },
       generationContext: { type: "object" },
       retrievalContext: { type: "object" },
+      plannedEntityManifest: {
+        type: "object",
+        description: "Optional ChatGPT-selected entity manifest for bounded pre-writing Canon hydration. It does not restrict cast or create Canon.",
+      },
       chapterMode: {
         type: "string",
         enum: ["next_chapter", "specific_scene", "rewrite_candidate"],
@@ -2014,7 +2019,7 @@ const toolDefinitions = [
       },
       includeActiveEngine: { type: "boolean", default: false },
       includeWritingCard: { type: "boolean", default: true },
-      includeProofingCard: { type: "boolean", default: true },
+      includeProofingCard: { type: "boolean", default: false },
       includeLongline: { type: "boolean", default: true },
       includeEntityRegistry: { type: "boolean", default: false },
       entityQuery: { type: "string", maxLength: 120 },
@@ -2023,7 +2028,7 @@ const toolDefinitions = [
       entityLimit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
       includeEntityEvidence: { type: "boolean", default: true },
       includeEntityProvenance: { type: "boolean", default: false },
-      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 120000 },
+      maxContextChars: { type: "integer", minimum: 1, maximum: 250000, default: 48000 },
     }),
     handler: async (args) => jsonContent(await chatgpt_bridge_build_writing_context(args)),
   },
@@ -2068,16 +2073,52 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_begin_external_brain_writing_session",
-    description: "[low-risk-write] Architecture-primary formal writing entry. Build persistent Writer Workbench context and begin one ChatGPT-owned external brain session. ChatGPT individually orchestrates six pre-generation cognitive capabilities; neural_critic and style_drift_detector remain pre-generation-compatible but become active exact-line diagnostics only when draft_text is supplied after drafting. ChatGPT generates prose itself and may then use diagnostics and the final polisher. Writer Workbench hosts capability implementations only; no candidate, Canon, active_engine, adoption, or settlement mutation occurs.",
+    description: "[low-risk-write] Architecture-primary formal writing entry. By default it persists the bounded context and begins one ChatGPT-owned external brain session. For read-only acceptance, ephemeral=true returns the formal context without creating a writing-context record or agent run. No candidate, Canon, active_engine, adoption, or settlement mutation occurs.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       task_prompt: { type: "string", maxLength: 12000 },
       generation_context: { type: "object" },
       retrieval_context: { type: "object" },
+      planned_entity_manifest: {
+        type: "object",
+        description: "ChatGPT-selected possible characters, organizations, locations, abilities, weapons, statuses, and events for bounded Canon hydration; this is not a cast whitelist.",
+      },
       chapter_mode: { type: "string", enum: ["next_chapter", "specific_scene", "rewrite_candidate"] },
       max_context_chars: { type: "integer", minimum: 4000, maximum: 120000, default: 48000 },
+      ephemeral: { type: "boolean", default: false },
+      persist_context: { type: "boolean", default: true },
     }, ["task_prompt"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_begin_external_brain_writing_session(args)),
+  },
+  {
+    name: "chatgpt_bridge_review_draft_ephemeral",
+    description: "[read-only] Architecture-primary ephemeral draft review. Requires non-blank draft_text, builds a non-persisted formal context, runs post-draft Canon and logic diagnostics plus the existing Neural Critic, and returns exact-line findings. It is not a generator, proofreader, or automatic rewriting tool. It creates no candidate and performs no Canon, active_engine, adoption, approval, activation, or settlement mutation.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      task_prompt: { type: "string", maxLength: 12000 },
+      draft_text: { type: "string", maxLength: 300000 },
+      planned_entity_manifest: {
+        type: "object",
+        description: "Optional planned characters, organizations, locations, abilities, weapons, status effects, timeline events, and chapter events for bounded Canon hydration.",
+      },
+      generation_context: { type: "object" },
+      retrieval_context: { type: "object" },
+      chapter_mode: {
+        type: "string",
+        enum: ["next_chapter", "specific_scene", "rewrite_candidate"],
+        default: "next_chapter",
+      },
+      max_context_chars: {
+        type: "integer",
+        minimum: 4000,
+        maximum: 120000,
+        default: 48000,
+      },
+    }, ["task_prompt", "draft_text"]),
+    handler: async (args) => jsonContent(
+      await chatgpt_bridge_review_draft_ephemeral(args),
+    ),
   },
   {
     name: "chatgpt_bridge_use_scene_planner",
@@ -2850,6 +2891,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_full_neural_writing_handoff",
   "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_review_draft_ephemeral",
   "chatgpt_bridge_use_scene_planner",
   "chatgpt_bridge_use_character_simulator",
   "chatgpt_bridge_use_neural_critic",
@@ -2957,6 +2999,9 @@ const permissionSources = {
   ],
   chatgpt_bridge_begin_external_brain_writing_session: [
     "user_input", "registered_project_sources", "gpt_writing_context_records",
+  ],
+  chatgpt_bridge_review_draft_ephemeral: [
+    "user_input", "registered_project_sources", "entity_registry", "active_engine",
   ],
   chatgpt_bridge_seal_raw_story_handoff: [
     "user_input", "gpt_writing_context_records", "agent_run_records", "neural_trace_records",

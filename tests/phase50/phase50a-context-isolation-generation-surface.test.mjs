@@ -329,10 +329,25 @@ try {
       response.trace.trace_id,
     );
     assert.equal(stored.output_hash, response.trace.output_hash);
-    assert(stored.capability_output.story_material_cognition);
-    assert(Array.isArray(
-      stored.capability_output.story_material_cognition.grounded_material,
-    ));
+    if (
+      moduleName === "neural_critic"
+      || moduleName === "style_drift_detector"
+    ) {
+      assert.equal(
+        stored.capability_output.module_contract,
+        undefined,
+      );
+      assert.equal(
+        stored.capability_output.analysis_status,
+        "inactive_without_draft_evidence",
+      );
+    } else {
+      assert(stored.capability_output.module_contract);
+      assert.equal(
+        stored.capability_output.module_contract.module,
+        moduleName,
+      );
+    }
   }
 
   const storedCharacter = await persistedRecord(
@@ -340,14 +355,19 @@ try {
     "character_simulator",
     character.trace.trace_id,
   );
-  assert(
-    JSON.stringify(storedCharacter.capability_output).includes(
-      "unrelated_visuals",
-    )
-    || JSON.stringify(storedCharacter.capability_output).includes(
-      "forbidden_characters",
-    ),
-    "full cognition/control evidence should remain retained outside the generation surface",
+  const storedCharacterText =
+    JSON.stringify(storedCharacter.capability_output);
+  assert.equal(
+    storedCharacterText.includes("unrelated_visuals"),
+    false,
+  );
+  assert.equal(
+    storedCharacterText.includes("forbidden_characters"),
+    false,
+  );
+  assert.equal(
+    storedCharacter.capability_output.module_contract.module,
+    "character_simulator",
   );
 
   const director = await chatgpt_bridge_use_writing_card_director({

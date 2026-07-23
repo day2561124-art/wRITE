@@ -28,6 +28,7 @@ const publicToolNames = [
   "chatgpt_bridge_save_candidate",
   "chatgpt_bridge_build_full_neural_writing_handoff",
   "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_review_draft_ephemeral",
   "chatgpt_bridge_use_scene_planner",
   "chatgpt_bridge_use_character_simulator",
   "chatgpt_bridge_use_neural_critic",
@@ -132,7 +133,7 @@ const listRequest = {
 
 const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
-assert.equal(fullNames.length, 80, "full profile tool count changed");
+assert.equal(fullNames.length, 81, "full profile tool count changed");
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }
@@ -248,6 +249,43 @@ assert.match(
 
 const primaryEntry = publicToolMap.get("chatgpt_bridge_begin_external_brain_writing_session");
 assert.match(primaryEntry?.description ?? "", /Architecture-primary formal writing entry/i);
+const ephemeralDraftReview = publicToolMap.get(
+  "chatgpt_bridge_review_draft_ephemeral",
+);
+assert(ephemeralDraftReview, "chatgpt_public missing ephemeral draft review");
+assert.equal(
+  ephemeralDraftReview?.annotations?.readOnlyHint,
+  true,
+  "ephemeral draft review is not marked read-only",
+);
+assert.match(
+  ephemeralDraftReview?.description ?? "",
+  /ephemeral.*draft review|draft review.*ephemeral/i,
+);
+assert.match(
+  ephemeralDraftReview?.description ?? "",
+  /no candidate|creates no candidate/i,
+);
+assert.match(
+  ephemeralDraftReview?.description ?? "",
+  /no Canon|performs no Canon/i,
+);
+const ephemeralReviewSchema = ephemeralDraftReview?.inputSchema ?? {};
+assert.deepEqual(
+  [...(ephemeralReviewSchema.required ?? [])].sort(),
+  ["draft_text", "task_prompt"],
+);
+for (const forbiddenField of [
+  "persist_context",
+  "external_brain_session_id",
+  "writing_context_bundle_id",
+]) {
+  assert.equal(
+    Object.hasOwn(ephemeralReviewSchema.properties ?? {}, forbiddenField),
+    false,
+    `ephemeral draft review exposed forbidden field ${forbiddenField}`,
+  );
+}
 for (const name of [
   "scene_planner", "character_simulator", "neural_critic", "style_drift_detector",
   "over_governance_detector", "writing_card_director", "final_polisher",

@@ -88,12 +88,17 @@ async function main() {
     });
     assert.equal(completed.status, "completed");
     assert.equal(completed.needs_structural_revision, false);
+    assert.equal(completed.polished_text, rawDraft);
     assert(completed.polished_text.includes("難以言喻的壓迫感"));
     assert(!completed.polished_text.includes("胸口悶了一下"));
     assert(!/[。！？]{2,}/u.test(completed.polished_text), "Polished text contains duplicate sentence punctuation.");
     assert(!completed.polished_text.includes("這事不對。。"), "Human diction polish left duplicate punctuation.");
     assert.equal(completed.revision_report.raw_draft_hash, hash(rawDraft));
     assert.equal(completed.revision_report.polished_text_hash, hash(completed.polished_text));
+    assert.equal(
+      completed.revision_report.polished_text_hash,
+      completed.revision_report.raw_draft_hash,
+    );
 
     const context = await buildGptWritingContext({
       taskPrompt: "Phase22T: save polished text as candidate.",

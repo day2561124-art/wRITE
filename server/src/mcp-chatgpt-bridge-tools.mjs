@@ -59,6 +59,11 @@ import {
   sealChatgptOwnedRawStoryHandoff,
   useChatgptOwnedExternalBrainCapability,
 } from "./chatgpt-owned-external-brain-service.mjs";
+import {
+  EphemeralDraftReviewValidationError,
+  ephemeralDraftReviewMutationGuards,
+  reviewDraftEphemeral,
+} from "./ephemeral-draft-review-service.mjs";
 import { createRawStoryHandoffBrokerIpcClient } from "./raw-story-handoff-broker-ipc.mjs";
 
 // An HTTP-spawned mcp-server has a dedicated Node IPC channel. Capture that
@@ -11820,6 +11825,39 @@ export async function chatgpt_bridge_begin_external_brain_writing_session(input 
   }
 }
 
+export async function chatgpt_bridge_review_draft_ephemeral(input = {}, options = {}) {
+  try {
+    return await reviewDraftEphemeral(input, options);
+  } catch (error) {
+    const validationError =
+      error instanceof EphemeralDraftReviewValidationError;
+    return {
+      ok: false,
+      tool_name: "chatgpt_bridge_review_draft_ephemeral",
+      status: validationError
+        ? "validation_error"
+        : "ephemeral_draft_review_failed",
+      validation_error: validationError
+        ? {
+          message: error.message,
+        }
+        : null,
+      blocked: true,
+      blocked_reason: error instanceof Error
+        ? error.message
+        : String(error),
+      external_brain_session_id: null,
+      writing_context_bundle_id: null,
+      neural_critic: {
+        status: validationError ? "not_run_validation_error" : "failed",
+        exact_line_evidence: [],
+        hard_conflicts: [],
+      },
+      mutation_guards: { ...ephemeralDraftReviewMutationGuards },
+    };
+  }
+}
+
 export async function chatgpt_bridge_seal_raw_story_handoff(input = {}, options = {}) {
   try {
     return await sealChatgptOwnedRawStoryHandoff(input, rawStoryBrokerOptions(options));
@@ -12013,6 +12051,7 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_save_candidate,
   chatgpt_bridge_build_full_neural_writing_handoff,
   chatgpt_bridge_begin_external_brain_writing_session,
+  chatgpt_bridge_review_draft_ephemeral,
   chatgpt_bridge_use_scene_planner,
   chatgpt_bridge_use_character_simulator,
   chatgpt_bridge_use_neural_critic,
@@ -12111,6 +12150,18 @@ export const chatgptBridgeToolMetadata = {
     runtime_host: "writer_workbench_runtime",
     final_prose_generator: "chatgpt",
   }),
+  chatgpt_bridge_review_draft_ephemeral: {
+    ...readMetadata,
+    architecture_primary_route: true,
+    review_scope: "post_draft_canon_continuity_logic_hard_risks",
+    ephemeral: true,
+    requires_draft_text: true,
+    session_required: false,
+    writing_context_record_created: false,
+    neural_critic_executed: true,
+    style_drift_detector_executed: false,
+    final_polisher_executed: false,
+  },
   chatgpt_bridge_seal_raw_story_handoff: {
     permission: "write_low_risk",
     writes_files: false,
@@ -12239,5 +12290,4 @@ export const chatgptBridgeToolMetadata = {
   chatgpt_bridge_get_entity_conflicts: { ...readMetadata },
   chatgpt_bridge_get_entity_registry_provenance: { ...readMetadata },
 };
-
 

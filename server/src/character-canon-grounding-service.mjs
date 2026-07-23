@@ -206,6 +206,18 @@ export function parseActiveEngineCharacterRecords(activeEngineContent, options =
     const affiliationIndex = indexFor(headers, fieldAliases.affiliation);
     const appearanceIndex = indexFor(headers, fieldAliases.appearance);
     const positionIndex = indexFor(headers, fieldAliases.position);
+    const hasCharacterProfileColumns = [
+      genderIndex,
+      genderAndIdentityIndex,
+      identityIndex,
+      affiliationIndex,
+      appearanceIndex,
+      positionIndex,
+    ].some((columnIndex) => columnIndex >= 0);
+    // A vertical key/value table may begin with `| 角色 | 某角色 |` and
+    // then contain rows such as `| 異能武裝 | ... |`. Those row labels are
+    // fields, not character names.
+    if (!hasCharacterProfileColumns) continue;
 
     let rowIndex = index + 2;
     while (rowIndex < lines.length && lines[rowIndex].trim().startsWith("|")) {
@@ -658,7 +670,33 @@ export function buildCharacterCanonGrounding(input = {}) {
 
   const matched = [];
   const ambiguousMentions = [];
+  const explicitCharacterNames = new Set(
+    Array.isArray(input.explicitCharacterNames)
+      ? input.explicitCharacterNames
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean)
+      : [],
+  );
   for (const record of records) {
+    if (explicitCharacterNames.has(record.canonical_name)) {
+      matched.push({
+        ...record,
+        match_sources: ["typed_retrieval_plan"],
+        mention_resolution_status: canonCharacterMentionStatuses.confirmed,
+        mention_evidence: [{
+          source: "typed_retrieval_plan",
+          status: canonCharacterMentionStatuses.confirmed,
+          confidence: "high",
+          reason: "exact_category_scoped_character_match",
+          evidence_scores: [],
+          total_score: 100,
+          index: null,
+          passage: record.canonical_name,
+        }],
+        match_rank: matched.length,
+      });
+      continue;
+    }
     const resolvedInputs = primaryInputs.map((entry, inputIndex) => ({
       ...entry,
       inputIndex,

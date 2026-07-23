@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
+  buildDraftEntityAudit,
+} from "./draft-entity-audit-service.mjs";
+import {
+  hydratePlannedEntityManifest,
+} from "./canon-entity-hydration-service.mjs";
+import {
   createAgentRun,
   finalizeAgentRun,
   getAgentRun,
@@ -53,6 +59,9 @@ import {
   releaseRawStoryHandoffAcquisition,
   sealRawStoryHandoff,
 } from "./raw-story-handoff-seal-service.mjs";
+import {
+  formalWritingAuthorityContract,
+} from "./formal-writing-contracts.mjs";
 
 // Phase48 compatibility vocabulary retained in source-level contracts only:
 // hard_risk_scope; inactive_without_draft_evidence; do not convert diagnostics into prose requirements;
@@ -127,6 +136,13 @@ const safety = Object.freeze({
   active_engine_updated: false,
   adopted: false,
   settled: false,
+  approval_created: false,
+  activation_requested: false,
+  can_modify_active_engine: false,
+  can_update_canon: false,
+  can_approve: false,
+  can_confirm_adoption: false,
+  can_settle: false,
 });
 
 export const externalBrainMutationGuards = safety;
@@ -597,8 +613,11 @@ export function buildFinalPolisherEditorialContract(
 function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognition = {}) {
   return async (capabilityInput) => {
     const moduleName = capabilityName.slice(4);
-    const taskPrompt = compactText(capabilityInput.task_prompt);
     const writingContext = capabilityInput.writing_context ?? {};
+    const taskPrompt = compactText(
+      writingContext.original_task_prompt
+        ?? capabilityInput.task_prompt,
+    );
     const preGenerationCharacterCanonGrounding = capabilityInput
       .pre_generation_character_canon_grounding
       ?? writingContext.content?.character_canon_grounding
@@ -804,48 +823,125 @@ async function buildVerifiedGeneratedWorldEntityGrounding({
 }
 
 export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, options = {}) {
+  const activeEngineOption =
+    input.include_active_engine ?? input.includeActiveEngine;
+  const visualReferencesOption =
+    input.include_visual_references ?? input.includeVisualReferences;
+  const ephemeralOption =
+    input.ephemeral ?? input.dry_run ?? input.dryRun ?? false;
+  const persistContextOption =
+    input.persist_context ?? input.persistContext;
+  if (
+    activeEngineOption !== undefined
+    && typeof activeEngineOption !== "boolean"
+  ) {
+    throw new Error("include_active_engine must be a boolean.");
+  }
+  if (
+    visualReferencesOption !== undefined
+    && typeof visualReferencesOption !== "boolean"
+  ) {
+    throw new Error("include_visual_references must be a boolean.");
+  }
+  if (typeof ephemeralOption !== "boolean") {
+    throw new Error("ephemeral must be a boolean.");
+  }
+  if (
+    persistContextOption !== undefined
+    && typeof persistContextOption !== "boolean"
+  ) {
+    throw new Error("persist_context must be a boolean.");
+  }
+  const persistContext =
+    ephemeralOption === true
+      ? false
+      : persistContextOption ?? true;
   const context = await buildGptWritingContext({
     task_prompt: input.task_prompt,
     generation_context: input.generation_context ?? {},
     retrieval_context: input.retrieval_context ?? {},
+    planned_entity_manifest:
+      input.planned_entity_manifest
+      ?? input.plannedEntityManifest
+      ?? {},
     chapter_mode: input.chapter_mode ?? "next_chapter",
     output_mode: "chat_only",
     max_context_chars: input.max_context_chars ?? 48000,
-    include_active_engine: true,
-    include_writing_card: true,
-    include_proofing_card: true,
-    include_longline: true,
+    include_active_engine: false,
+    include_writing_card: false,
+    include_proofing_card: false,
+    include_longline: false,
+    include_visual_references: visualReferencesOption ?? false,
+    formal_context_only: true,
+    ephemeral: ephemeralOption,
+    persist_context: persistContext,
   }, options);
-  const run = await createAgentRun({
-    task_type: "draft_generation",
-    mode: externalBrainOwnership.orchestration_mode,
-    created_by: "chatgpt",
-    writing_context_bundle_id: context.bundle.bundle_id,
-    requires_neural_modules: true,
-    required_neural_modules: [...externalBrainPreGenerationCapabilities, "run_final_polisher"]
-      .map((name) => name.slice(4)),
-    input: JSON.stringify({
-      task_prompt: input.task_prompt,
+  const run = persistContext
+    ? await createAgentRun({
+      task_type: "draft_generation",
+      mode: externalBrainOwnership.orchestration_mode,
+      created_by: "chatgpt",
       writing_context_bundle_id: context.bundle.bundle_id,
-      orchestration_owner: "chatgpt",
-    }),
-  }, options);
+      requires_neural_modules: true,
+      required_neural_modules: [...externalBrainPreGenerationCapabilities, "run_final_polisher"]
+        .map((name) => name.slice(4)),
+      input: JSON.stringify({
+        task_prompt: input.task_prompt,
+        writing_context_bundle_id: context.bundle.bundle_id,
+        orchestration_owner: "chatgpt",
+      }),
+    }, options)
+    : null;
   return {
     ok: true,
     tool_name: "chatgpt_bridge_begin_external_brain_writing_session",
-    status: "ready_for_chatgpt_owned_orchestration",
+    status: persistContext
+      ? "ready_for_chatgpt_owned_orchestration"
+      : "ephemeral_context_ready",
     architecture_route: externalBrainOwnership.orchestration_mode,
-    external_brain_session_id: run.run_id,
-    writing_context_bundle_id: context.bundle.bundle_id,
+    external_brain_session_id: run?.run_id ?? null,
+    writing_context_bundle_id: persistContext
+      ? context.bundle.bundle_id
+      : null,
+    ephemeral_context_id: persistContext
+      ? null
+      : context.bundle.bundle_id,
+    context_persisted: persistContext,
+    writing_context_record_created: persistContext,
+    ...(persistContext ? {} : {
+      formal_context: context.bundle.formal_context,
+    }),
     orchestration_owner: "ChatGPT",
     prose_generator: "ChatGPT",
+    ...formalWritingAuthorityContract(),
     next_capabilities: [...compactBootstrapCapabilities],
+    active_pre_generation_capabilities: [
+      "scene_planner",
+      "character_simulator",
+      "over_governance_detector",
+      "writing_card_director",
+    ],
+    pre_generation_compatibility_capabilities: [
+      "neural_critic",
+      "style_drift_detector",
+    ],
     post_draft_diagnostics: [
       "neural_critic",
       "style_drift_detector",
     ],
-    diagnostic_activation:
-      "Supply capability_input.draft_text after ChatGPT drafts prose; pre-generation calls remain inactive compatibility checks.",
+    diagnostic_activation: {
+      requires: "capability_input.draft_text",
+      without_draft: "inactive",
+    },
+    planned_entity_hydration:
+      context.bundle.formal_context?.materials
+        ?.planned_entity_hydration
+      ?? null,
+    planned_canon_coverage:
+      context.bundle.formal_context?.materials
+        ?.planned_canon_coverage
+      ?? null,
+    context_composition: context.bundle.context_composition,
     mutation_guards: { ...safety },
     ...safety,
   };
@@ -1239,6 +1335,89 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
           capability_output: source.capability_output,
         })))
       : [];
+  const suppliedCapabilityInput =
+    input.capability_input
+    && typeof input.capability_input === "object"
+    && !Array.isArray(input.capability_input)
+      ? input.capability_input
+      : {};
+  const dynamicPlannedManifest =
+    suppliedCapabilityInput.planned_entity_manifest
+    ?? suppliedCapabilityInput.plannedEntityManifest
+    ?? null;
+  const dynamicPlannedHydration =
+    dynamicPlannedManifest
+    && typeof dynamicPlannedManifest === "object"
+    && !Array.isArray(dynamicPlannedManifest)
+      ? await hydratePlannedEntityManifest({
+        plannedEntityManifest: dynamicPlannedManifest,
+        relevantCanon:
+          context.bundle.formal_context?.materials?.relevant_canon
+          ?? {},
+      }, options)
+      : null;
+  let draftEntityDiagnostic = null;
+  if (
+    capabilityName === "run_neural_critic"
+    && requestedDraftText(input)
+  ) {
+    draftEntityDiagnostic = await buildDraftEntityAudit({
+      draftText: requestedDraftText(input),
+      plannedEntityManifest:
+        dynamicPlannedManifest
+        ?? context.bundle.formal_context?.materials
+          ?.planned_entity_manifest
+        ?? {},
+      plannedEntityHydration:
+        dynamicPlannedHydration?.planned_entity_hydration
+        ?? context.bundle.formal_context?.materials
+          ?.planned_entity_hydration
+        ?? {},
+      relevantCanon:
+        dynamicPlannedHydration?.relevant_canon
+        ?? context.bundle.formal_context?.materials?.relevant_canon
+        ?? {},
+      sceneLocation:
+        suppliedCapabilityInput.scene_location
+        ?? suppliedCapabilityInput.sceneLocation
+        ?? null,
+      timelineConstraints:
+        suppliedCapabilityInput.timeline_constraints
+        ?? [],
+      statusConstraints:
+        suppliedCapabilityInput.status_constraints
+        ?? [],
+    }, options);
+  }
+  const effectiveCapabilityInput = draftEntityDiagnostic
+    ? {
+      ...suppliedCapabilityInput,
+      draft_entity_audit:
+        draftEntityDiagnostic.draft_entity_audit,
+      draft_canon_coverage:
+        draftEntityDiagnostic.draft_canon_coverage,
+      scene_compatibility:
+        draftEntityDiagnostic.scene_compatibility,
+      relevant_canon:
+        draftEntityDiagnostic.relevant_canon,
+      structured_hard_conflict_candidates:
+        draftEntityDiagnostic.scene_compatibility.findings,
+      post_draft_diagnostic_composition:
+        draftEntityDiagnostic.post_draft_diagnostic_composition,
+    }
+    : dynamicPlannedHydration
+      ? {
+        ...suppliedCapabilityInput,
+        planned_entity_hydration:
+          dynamicPlannedHydration.planned_entity_hydration,
+        planned_canon_coverage:
+          dynamicPlannedHydration.planned_canon_coverage,
+        relevant_canon:
+          dynamicPlannedHydration.relevant_canon,
+        dynamic_canon_composition:
+          dynamicPlannedHydration.composition,
+      }
+      : suppliedCapabilityInput;
   const capabilityInput = isFinalPolisher ? {
     module_name: capabilityName,
     generation_boundary: generationBoundary,
@@ -1267,14 +1446,26 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       expandedWorldEntityCanonGrounding
       ?? context.bundle.content?.world_entity_canon_grounding
       ?? null,
-    capability_input: input.capability_input ?? {},
+    capability_input: effectiveCapabilityInput,
   } : {
     module_name: capabilityName,
     generation_boundary: generationBoundary,
-    task_prompt: context.bundle.task_prompt,
+    task_prompt:
+      context.bundle.formal_context?.user_request
+      ?? context.bundle.original_task_prompt
+      ?? context.bundle.task_prompt,
     writing_context_bundle_id: contextBundleId,
-    writing_context: context.bundle,
-    capability_input: input.capability_input ?? {},
+    writing_context: capabilityName === "run_neural_critic"
+      ? {
+        materials: {
+          relevant_canon:
+            effectiveCapabilityInput.relevant_canon
+            ?? context.bundle.formal_context?.materials?.relevant_canon
+            ?? {},
+        },
+      }
+      : context.bundle.formal_context,
+    capability_input: effectiveCapabilityInput,
     ...(capabilityName === "run_writing_card_director" ? {
       authorship_cognition_sources: {
         integration_mode: "same_author_cognition_synthesis",
@@ -1397,6 +1588,19 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       },
     } : {}),
     capability_output: safeCapabilityOutput,
+    ...(dynamicPlannedHydration ? {
+      dynamic_canon_context: {
+        planned_entity_hydration:
+          dynamicPlannedHydration.planned_entity_hydration,
+        planned_canon_coverage:
+          dynamicPlannedHydration.planned_canon_coverage,
+        relevant_canon:
+          dynamicPlannedHydration.relevant_canon,
+        composition:
+          dynamicPlannedHydration.composition,
+        original_formal_context_mutated: false,
+      },
+    } : {}),
     ...(!isFinalPolisher && execution.control_plane?.generation_surface_compacted ? {
       generation_surface: {
         used: true,

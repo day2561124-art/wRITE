@@ -64,6 +64,7 @@ async function main() {
       "chatgpt_bridge_get_workbench_status",
       "chatgpt_bridge_get_current_inputs",
       "chatgpt_bridge_build_writing_context",
+      "chatgpt_bridge_review_draft_ephemeral",
       "chatgpt_bridge_save_candidate",
       "chatgpt_bridge_build_proofing_context",
       "chatgpt_bridge_save_proof_report",

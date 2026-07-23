@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import path from "node:path";
 import { buildChatgptNativeNeuralWritingHandoff } from "../../server/src/chatgpt-native-neural-writing-handoff-service.mjs";
+import { projectRoot } from "../../server/src/project-paths.mjs";
+
+const fixtureRoot = path.join(
+  projectRoot,
+  "tests",
+  ".tmp",
+  "phase38h-chatgpt-native-handoff",
+);
+await rm(fixtureRoot, { recursive: true, force: true });
+await mkdir(fixtureRoot, { recursive: true });
 
 const fakeBundle = {
   bundle_id: "phase38h-test-bundle",
@@ -32,6 +43,19 @@ const fakeBundle = {
       },
     },
   },
+  formal_context: {
+    context_kind: "formal_writing_context",
+    user_request: "依最新主核對表正式續寫下一章。只輸出正文，從章名開始。",
+    active_engine_metadata: {
+      path: "data/canon_db/active_engine.md",
+      sha256: "a".repeat(64),
+      full_text_included: false,
+    },
+    materials: {
+      generation_context: { chapter_goal: "continue" },
+      retrieval_context: { latest_main_checklist: "loaded" },
+    },
+  },
   allocated: {
     active_engine_excerpt_or_reference: { text: "active_engine excerpt: engine-first neural writing context." },
     writing_card_excerpt_or_reference: { text: "writing card excerpt: write vivid long-form prose." },
@@ -61,10 +85,13 @@ const result = await buildChatgptNativeNeuralWritingHandoff({
     receivedContextInput = input;
     return { bundle: fakeBundle };
   },
+  fixtureRoot,
 });
 
 assert.equal(receivedContextInput.output_mode, "chat_only");
 assert.equal(receivedContextInput.task_prompt, fakeBundle.task_prompt);
+assert.equal(receivedContextInput.include_active_engine, false);
+assert.equal(receivedContextInput.include_proofing_card, false);
 assert.equal(result.tool_name, "chatgpt_bridge_build_full_neural_writing_handoff");
 assert.equal(result.status, "ready_for_chatgpt_native_generation");
 assert.equal(result.output_mode, "chatgpt_native_handoff");
@@ -90,8 +117,40 @@ assert.equal(handoff.constraints.backend_provider_required, false);
 assert.equal(handoff.neural_modules_diagnostics.required_modules_checked, true);
 assert.equal(handoff.neural_modules_diagnostics.contract_valid, true);
 assert.deepEqual(handoff.neural_modules_diagnostics.missing_required_modules, []);
-assert.match(handoff.writing_context.active_engine_summary, /active_engine excerpt/u);
-assert.match(handoff.writing_context.aesthetic_memory_context, /aesthetic memory excerpt/u);
+assert.equal(
+  handoff.writing_context.active_engine_metadata.full_text_included,
+  false,
+);
+assert.equal(
+  handoff.writing_context.active_engine_metadata.sha256,
+  "a".repeat(64),
+);
+assert.equal(handoff.creative_authority.owner, "ChatGPT");
+assert.equal(handoff.external_research.authority, "reference_only");
+assert.equal(
+  JSON.stringify(handoff.writing_context).includes(
+    "active_engine excerpt",
+  ),
+  false,
+);
+const resultByModule = Object.fromEntries(
+  handoff.neural_module_execution_results.map((item) => [
+    item.canonical_module_name,
+    item,
+  ]),
+);
+assert.match(
+  resultByModule.neural_critic.result_excerpt,
+  /inactive_without_draft_evidence/u,
+);
+assert.match(
+  resultByModule.style_drift_detector.result_excerpt,
+  /inactive_without_draft_evidence/u,
+);
+assert.match(
+  resultByModule.final_polisher.result_excerpt,
+  /final_polisher_requires_existing_draft_text/u,
+);
 
 const serialized = JSON.stringify(result);
 assert.equal(serialized.includes('"pipeline_stage":"generation_provider_required"'), false);
@@ -117,4 +176,5 @@ assert.equal(nativeToolDefinition.includes("generation_provider"), false);
 const runAllSource = await readFile(new URL("../run-all.mjs", import.meta.url), "utf8");
 assert.match(runAllSource, /Phase 38H ChatGPT native full neural writing handoff mode/u);
 
+await rm(fixtureRoot, { recursive: true, force: true });
 console.log("Phase38H ChatGPT native full neural writing handoff mode tests passed.");

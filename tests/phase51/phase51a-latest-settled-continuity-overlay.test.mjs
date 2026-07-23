@@ -224,9 +224,20 @@ try {
     retrievalOverlay.report_id,
     chapter20.settlement_report_id,
   );
+  assert.equal(generationOverlay.summary_text, "");
+  assert.equal(retrievalOverlay.summary_text, "");
   assert.match(
-    generationOverlay.summary_text,
+    bundle.latest_settled_continuity.summary_text,
     /隔日複查/u,
+  );
+  assert(
+    bundle.context_composition.duplicate_sources.some(
+      (entry) =>
+        entry.source.includes("generation_context")
+        && entry.duplicate_of.includes(
+          "latest_continuity_overlay",
+        ),
+    ),
   );
   assert.equal(
     bundle.current_input_settlement_freshness
@@ -299,9 +310,25 @@ try {
     });
 
   assert.equal(capturedNeuralInputs.length > 0, true);
-  assert.match(
+  assert.equal(
     capturedNeuralInputs[0].task_prompt,
-    /LATEST_SETTLED_CONTINUITY_OVERRIDE/u,
+    oldTaskPrompt,
+  );
+  assert.equal(
+    capturedNeuralInputs[0]
+      .writing_context
+      .materials
+      .continuity
+      .report_id,
+    chapter20.settlement_report_id,
+  );
+  assert.equal(
+    capturedNeuralInputs[0]
+      .writing_context
+      .materials
+      .continuity
+      .transition_suggestion_included,
+    false,
   );
   assert.equal(
     capturedNeuralInputs[0]
@@ -320,7 +347,7 @@ try {
   assert.match(
     nativeResult.chatgpt_native_writing_handoff
       .final_chatgpt_writing_instruction,
-    /LATEST_SETTLED_CONTINUITY_OVERRIDE/u,
+    /依第十九章結尾續寫下一章/u,
   );
   assert.equal(nativeResult.active_engine_updated, false);
   assert.equal(nativeResult.canon_updated, false);

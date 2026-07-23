@@ -15,10 +15,6 @@ function sha256(value) {
     .digest("hex");
 }
 
-function textOrEmpty(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function objectOrNull(value) {
   return value
     && typeof value === "object"
@@ -133,22 +129,6 @@ function evaluateStructuralGate(rawDraftText, input) {
   });
 }
 
-function applyMinimalFormatting(text) {
-  return String(text ?? "")
-    .replace(/[ \t]+\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .replace(/\u3002{2,}/gu, "\u3002")
-    .replace(/\uff01{2,}/gu, "\uff01")
-    .replace(/\uff1f{2,}/gu, "\uff1f")
-    .replace(/\uff0c{2,}/gu, "\uff0c")
-    .replace(/\u3001{2,}/gu, "\u3001")
-    .replace(/\uff1b{2,}/gu, "\uff1b")
-    .replace(/\uff1a{2,}/gu, "\uff1a")
-    .replace(/\u3002([\u300d\u300f])/gu, "\u3002$1")
-    .replace(/([\u3002\uff01\uff1f])\u3002([\u300d\u300f])/gu, "$1$2")
-    .trim();
-}
-
 export function runFinalPolisherEditorialBrain(
   rawInput = {},
   options = {},
@@ -161,12 +141,14 @@ export function runFinalPolisherEditorialBrain(
     throw new Error("input must be an object.");
   }
 
-  const rawDraftText = textOrEmpty(
-    rawInput.raw_draft_text
-    ?? rawInput.rawDraftText,
-  );
+  const rawDraftValue =
+    rawInput.raw_draft_text ?? rawInput.rawDraftText;
+  const rawDraftText =
+    typeof rawDraftValue === "string"
+      ? rawDraftValue
+      : "";
 
-  if (!rawDraftText) {
+  if (!rawDraftText.trim()) {
     const revisionReport = baseRevisionReport({
       revisionScope: "skipped",
       rawDraftText: "",
@@ -213,20 +195,8 @@ export function runFinalPolisherEditorialBrain(
     };
   }
 
-  const polishedText =
-    typeof options.editorialAdapter === "function"
-      ? textOrEmpty(
-        options.editorialAdapter(
-          rawDraftText,
-          rawInput,
-        ),
-      ) || rawDraftText
-      : applyMinimalFormatting(rawDraftText);
-
-  const changedDimensions =
-    polishedText === rawDraftText
-      ? []
-      : ["formatting"];
+  const polishedText = rawDraftText;
+  const changedDimensions = [];
 
   const revisionReport = baseRevisionReport({
     revisionScope: "line_edit",
@@ -244,7 +214,10 @@ export function runFinalPolisherEditorialBrain(
     needs_structural_revision: false,
     suggested_return_stage: null,
     writing_pipeline_complete: true,
-    warnings: [],
+    warnings:
+      typeof options.editorialAdapter === "function"
+        ? ["editorial_adapter_prose_ignored_to_preserve_exact_hash"]
+        : [],
   };
 }
 

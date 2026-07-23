@@ -269,7 +269,11 @@ try {
     "貓狼",
     "雪弟",
   ]) {
-    assert.equal(visible.includes(forbidden), false);
+    assert.equal(
+      visible.includes(forbidden),
+      false,
+      `generation surface leaked ${forbidden}`,
+    );
   }
   assert(Buffer.byteLength(JSON.stringify(character), "utf8") < 8 * 1024);
 
