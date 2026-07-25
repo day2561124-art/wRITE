@@ -1117,6 +1117,34 @@ async function main() {
       },
     ));
     assert(directActivation.response.status === 409, "Direct UI activation was not blocked.");
+
+    //
+    // Fixture isolation 與正式 activation lifecycle 必須使用不同候選。
+    // apiCandidateId 保持 test fixture，不得進入 production queue。
+    // 此候選只用於驗證 approval-confirmed activation 與 rollback。
+    //
+    const activationCandidateImport = await readJson(await fetch(
+      `${baseUrl}/api/canon/settlement/import`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceChapter: "正式啟用生命週期候選",
+          note: "Approval-confirmed activation lifecycle contract",
+          sourceKind: "manual_validation",
+          environment: "production",
+          rawText: settlementRaw,
+        }),
+      },
+    ));
+    assert(
+      activationCandidateImport.response.status === 201,
+      "Activation lifecycle candidate import failed.",
+    );
+    const activationCandidateId =
+      activationCandidateImport.payload.candidate.metadata.candidate_id;
+    createdCandidateIds.push(activationCandidateId);
+
     const activationApprovalScan = await readJson(await fetch(
       `${baseUrl}/api/approval-queue/scan`,
       {
@@ -1126,7 +1154,7 @@ async function main() {
       },
     ));
     const activationApproval = activationApprovalScan.payload.scan.items.find(
-      (item) => item.target_id === apiCandidateId
+      (item) => item.target_id === activationCandidateId
         && item.action_type === "activate_engine_candidate"
         && ["pending", "deferred"].includes(item.status.status),
     );
@@ -1159,7 +1187,7 @@ async function main() {
       "Activation did not write candidate content to active_engine.md.",
     );
     const activatedDetail = await readJson(await fetch(
-      `${baseUrl}/api/canon/pending-candidates/${apiCandidateId}`,
+      `${baseUrl}/api/canon/pending-candidates/${activationCandidateId}`,
     ));
     assert(
       activatedDetail.payload.candidate.status.status === "activated",
@@ -1178,7 +1206,7 @@ async function main() {
       logsResult.response.ok
         && logsResult.payload.logs.some(
           (entry) => entry.event === "activate_pending_engine_candidate"
-            && entry.candidate_id === apiCandidateId,
+            && entry.candidate_id === activationCandidateId,
         ),
       "Activation logs API omitted activation event.",
     );

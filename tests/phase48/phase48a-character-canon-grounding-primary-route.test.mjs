@@ -27,7 +27,7 @@ const fixtureRoot = path.join(
 );
 const options = { fixtureRoot };
 const expectedProtectedHashes = {
-  active_engine: "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  active_engine: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
   compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 
@@ -154,7 +154,13 @@ try {
     built.bundle.character_canon_grounding_source_authority,
     "active_engine_canon_high_authority",
   );
-  assert(built.bundle.truncated_sections.includes("active_engine_excerpt_or_reference"));
+  assert.equal(
+    built.bundle.truncated_sections.includes("active_engine_excerpt_or_reference"),
+    false,
+  );
+  assert(
+    built.bundle.context_chars_used <= built.bundle.max_context_chars,
+  );
   assert.deepEqual(
     built.bundle.content.character_canon_grounding.characters.map((character) => (
       character.canonical_name
@@ -163,14 +169,114 @@ try {
   );
 
   const stored = await getGptWritingContextBundle(built.bundle.bundle_id, options);
-  const guardIndex = stored.context_for_chat.indexOf("## 【P0｜Character Canon Grounding】");
-  const anchorIndex = stored.context_for_chat.indexOf("## 【P0｜本章錨點鎖】");
-  const taskIndex = stored.context_for_chat.indexOf("## Task Prompt");
-  assert(guardIndex >= 0 && guardIndex < anchorIndex && anchorIndex < taskIndex);
-  assert.match(stored.context_for_chat, /初日｜gender=male｜third_person=他｜second_person=你/u);
-  assert.match(stored.context_for_chat, /初夢｜gender=male｜third_person=他｜second_person=你/u);
-  assert.match(stored.context_for_chat, /晴禮｜gender=female｜third_person=她｜second_person=妳/u);
-  assert.match(stored.context_for_chat, /Do not invent animal ears, tails, horns, wings, scales/iu);
+  const contextJsonMatch = stored.context_for_chat.match(
+    /```json\r?\n([\s\S]*?)\r?\n```/u,
+  );
+  assert(contextJsonMatch);
+
+  const storedContextPayload = JSON.parse(contextJsonMatch[1]);
+
+  assert.equal(
+    storedContextPayload.user_request,
+    prompt,
+  );
+  assert.equal(
+    typeof built.bundle.fixed_guard_section,
+    "string",
+  );
+
+  const guardIndex = built.bundle.fixed_guard_section.indexOf(
+    "Character Canon Grounding",
+  );
+  const anchorIndex = built.bundle.fixed_guard_section.indexOf(
+    "\"must_continue_from\": \"latest settled continuity\"",
+  );
+
+  assert(guardIndex >= 0);
+  assert(anchorIndex >= 0);
+  assert(guardIndex < anchorIndex);
+  const expectedGroundedCharacters =
+    built.bundle.content.character_canon_grounding.characters;
+
+  const expectedGroundedNames = expectedGroundedCharacters.map(
+    (character) => character.canonical_name,
+  );
+
+  const storedRetrievalCharacters =
+    storedContextPayload.materials?.retrieval_plan?.characters;
+
+  const storedRelevantCanonCharacters =
+    storedContextPayload.materials?.relevant_canon?.characters;
+
+  assert(Array.isArray(storedRetrievalCharacters));
+  assert(Array.isArray(storedRelevantCanonCharacters));
+
+  assert.deepEqual(
+    storedRetrievalCharacters,
+    expectedGroundedNames,
+  );
+
+  assert.deepEqual(
+    storedRelevantCanonCharacters.map((character) => character.name),
+    expectedGroundedNames,
+  );
+
+  const fixedGuardLines =
+    built.bundle.fixed_guard_section.split(/\r?\n/u);
+
+  const expectedPronounGrounding = new Map([
+    ["初日", { gender: "male", third_person: "他", second_person: "你" }],
+    ["初夢", { gender: "male", third_person: "他", second_person: "你" }],
+    ["晴禮", { gender: "female", third_person: "她", second_person: "妳" }],
+  ]);
+
+  assert.deepEqual(
+    [...expectedPronounGrounding.keys()],
+    expectedGroundedNames,
+  );
+
+  for (const character of expectedGroundedCharacters) {
+    const storedCharacter = storedRelevantCanonCharacters.find(
+      (entry) => entry.name === character.canonical_name,
+    );
+
+    assert(storedCharacter);
+    assert.equal(typeof storedCharacter.entity_id, "string");
+    assert.equal(typeof storedCharacter.content, "string");
+    assert(storedCharacter.content.length > 0);
+
+    const expectedGrounding = expectedPronounGrounding.get(
+      character.canonical_name,
+    );
+
+    assert(
+      expectedGrounding,
+      `Missing expected pronoun fixture for ${character.canonical_name}`,
+    );
+
+    const groundingLine = fixedGuardLines.find(
+      (line) =>
+        line.includes(character.canonical_name) &&
+        line.includes(`gender=${expectedGrounding.gender}`),
+    );
+
+    assert(
+      groundingLine,
+      `Missing fixed grounding entry for ${character.canonical_name}`,
+    );
+    assert(
+      groundingLine.includes(`third_person=${expectedGrounding.third_person}`),
+      `Missing third-person grounding for ${character.canonical_name}`,
+    );
+    assert(
+      groundingLine.includes(`second_person=${expectedGrounding.second_person}`),
+      `Missing second-person grounding for ${character.canonical_name}`,
+    );
+  }
+  assert.match(
+    built.bundle.fixed_guard_section,
+    /Do not invent animal ears, tails, horns, wings, scales/iu,
+  );
   assert.equal(stored.context_for_chat.includes(activeEngine), false);
 
   const begin = await beginChatgptOwnedExternalBrainWritingSession({

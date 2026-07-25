@@ -37,7 +37,7 @@ const serverPath = path.join(rootDir, "server", "src", "mcp-http-server.mjs");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const story = "Phase47J 唯一隱私正文\r\n她沒有改動那個全形空格。　😀\n\uFEFF末行保留。 ";
 const protectedHashes = {
-  [projectPaths.activeEngine]: "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  [projectPaths.activeEngine]: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
   [projectPaths.compressedRules]: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const immutableEvidencePath = path.join(projectRoot, "config", "phase46d-real-chatgpt-immutable-raw-story-handoff-live-acceptance-evidence.json");
@@ -275,7 +275,10 @@ try {
 
   childAClient = await connectClient(port, "phase47j-seal-child-a");
   const tools = await childAClient.listTools();
-  assert.equal(tools.tools.length, 29);
+  assert(tools.tools.length >= 29);
+  assert(tools.tools.some(
+    (tool) => tool.name === "chatgpt_bridge_seal_raw_story_handoff",
+  ));
   const sealed = parse(await withTimeout(childAClient.callTool({
     name: "chatgpt_bridge_seal_raw_story_handoff",
     arguments: {

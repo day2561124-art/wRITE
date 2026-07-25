@@ -27,9 +27,16 @@ export function splitContextTextBlocks(value) {
     .filter(Boolean);
 }
 
+function isProtectedStructuredSubtree(path) {
+  return path.some((
+    segment
+  ) => segment === "visual_uploaded_references");
+}
+
 function shouldDeduplicateString(path, value) {
   const normalized = normalizeContextBlockText(value);
   if (!normalized) return false;
+  if (isProtectedStructuredSubtree(path)) return false;
   const key = path.at(-1) ?? "";
   return normalized.includes("\n")
     || normalized.length >= 80

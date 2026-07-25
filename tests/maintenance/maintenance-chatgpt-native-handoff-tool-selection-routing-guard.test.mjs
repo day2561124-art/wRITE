@@ -204,7 +204,7 @@ assert.match(
   primaryTool.description ?? "",
   /Architecture-primary formal writing entry/u,
 );
-assert.match(primaryTool.description ?? "", /ChatGPT individually orchestrates six pre-generation/u);
+assert.match(primaryTool.description ?? "", /begins one ChatGPT-owned external brain session/u);
 
 const statusPayload = parseToolPayload(responseById(messages, 3));
 const handoffPayload = parseToolPayload(responseById(messages, 4));

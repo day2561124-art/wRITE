@@ -14,6 +14,9 @@ import {
   chatgpt_bridge_review_draft_ephemeral,
 } from "../../server/src/mcp-chatgpt-bridge-tools.mjs";
 import {
+  beginChatgptOwnedExternalBrainWritingSession,
+} from "../../server/src/chatgpt-owned-external-brain-service.mjs";
+import {
   buildNeuralModuleContractRegistry,
 } from "../../server/src/neural-module-service.mjs";
 import {
@@ -129,7 +132,7 @@ async function review(draftText, extra = {}) {
 const hashesBefore = await protectedHashes();
 const writingContextsBefore = await writingContextDirectoryCount();
 
-const session = await chatgpt_bridge_begin_external_brain_writing_session({
+const sessionInput = {
   task_prompt: "依正式 Canon 與最新 continuity 自由創作下一章。",
   planned_entity_manifest: {
     characters: ["朝日奈美咲"],
@@ -138,7 +141,37 @@ const session = await chatgpt_bridge_begin_external_brain_writing_session({
   max_context_chars: 48_000,
   ephemeral: true,
   persist_context: false,
-});
+};
+
+const compactSession =
+  await chatgpt_bridge_begin_external_brain_writing_session(
+    sessionInput,
+  );
+assert.equal(compactSession.ok, true);
+assert.equal(compactSession.context_persisted, false);
+assert.equal(
+  compactSession.writing_context_record_created,
+  false,
+);
+assert.equal(
+  compactSession.bootstrap_surface.detail_level,
+  "metadata_only",
+);
+assert.equal(
+  Object.hasOwn(compactSession, "formal_context"),
+  false,
+);
+assert(
+  Buffer.byteLength(
+    JSON.stringify(compactSession),
+    "utf8",
+  ) < 4 * 1024,
+);
+
+const session =
+  await beginChatgptOwnedExternalBrainWritingSession(
+    sessionInput,
+  );
 assert.equal(session.ok, true);
 assert.equal(session.context_persisted, false);
 assert.equal(session.writing_context_record_created, false);

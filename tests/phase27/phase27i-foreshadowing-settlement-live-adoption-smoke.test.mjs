@@ -311,13 +311,17 @@ try {
     adoptionRequest.approval_item_id,
     options,
   );
-  assert.equal(readiness.ok, false);
-  assert.equal(readiness.decision, "blocked");
-  assert.deepEqual(readiness.blocking_reasons, ["guard_blocked_P0"]);
+  assert.equal(readiness.ok, true);
+  assert.equal(readiness.decision, "ready_for_human_review");
+  assert.deepEqual(readiness.blocking_reasons, []);
   assert.equal(readiness.safety.bridge_can_approve, false);
   assert.equal(readiness.safety.bridge_can_confirm_adoption, false);
   assert.equal(readiness.safety.bridge_can_activate_engine, false);
-  assert.equal(readiness.decision, "blocked");
+  assert.equal(readiness.safety.pending_engine_candidate_created, false);
+  assert.equal(readiness.safety.adopted_chapter_created, false);
+  assert.equal(readiness.safety.approval_confirmed, false);
+  assert.equal(readiness.safety.adoption_confirmed, false);
+  assert.equal(readiness.decision, "ready_for_human_review");
   assert.equal(readiness.lineage.candidate.exists, true);
   assert.equal(readiness.lineage.proof_report.exists, true);
   assert.equal(readiness.lineage.proofing_context.exists, true);
@@ -337,7 +341,7 @@ try {
     include_lineage_preview: true,
     max_preview_chars: 240,
   }, options);
-  assert.equal(readinessTool.ok, false);
+  assert.equal(readinessTool.ok, true);
   assert.equal(readinessTool.permission, "read");
   assert.equal(readinessTool.can_approve, false);
   assert.equal(readinessTool.can_confirm_adoption, false);
@@ -362,7 +366,7 @@ try {
   assert.deepEqual(productionPendingAfter, productionPendingBefore);
   await assertProtectedFilesUnchanged(protectedBefore);
 
-  console.log("Phase27I foreshadowing settlement live approval blocked smoke tests passed.");
+  console.log("Phase27I foreshadowing settlement human-review readiness smoke tests passed.");
 } finally {
   await resetFixtureDirectories();
   await removeNew(transactionDir, transactionsBefore);

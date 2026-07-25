@@ -10,6 +10,13 @@ const rootDir = path.resolve(__dirname, "..", "..");
 const serverPath = path.join(rootDir, "server", "src", "mcp-server.mjs");
 const toolsDir = path.join(rootDir, "server", "src", "tools");
 const auditLogPath = path.join(rootDir, "data", "outputs", "logs", "mcp_tool_audit.jsonl");
+const noOpEngineVersionPath = path.join(
+  rootDir,
+  "data",
+  "canon_db",
+  "versions",
+  "engine_v999.999.999.md",
+);
 const expectedMaxJsonRpcMessageBytes = 16 * 1024 * 1024;
 const expectedMaxContentLengthHeaderBytes = 8 * 1024;
 const expectedMaxPendingDispatchMessages = 256;
@@ -101,6 +108,9 @@ const watchedFiles = [
 const protectedRuntimePaths = [
   path.join(rootDir, "data", "outputs", "logs", "policy_import_backups"),
   path.join(rootDir, "data", "outputs", "logs", "policy_imports.jsonl"),
+  path.join(rootDir, "data", "outputs", "logs", "engine_activation_backups"),
+  path.join(rootDir, "data", "outputs", "logs", "engine_activations.jsonl"),
+  path.join(rootDir, "data", "outputs", "logs", "compressed_rule_updates.jsonl"),
 ];
 const transactionRuntimePath = path.join(
   rootDir,
@@ -123,9 +133,6 @@ const forbiddenCreatedPaths = [
   path.join(rootDir, "outputs", "current_prompt.md"),
   path.join(rootDir, "outputs", "retrieval_debug_report.json"),
   path.join(rootDir, "data", "proofing_policy_db", "versions", "proofing_card_v999.999.md"),
-  path.join(rootDir, "data", "outputs", "logs", "engine_activation_backups"),
-  path.join(rootDir, "data", "outputs", "logs", "engine_activations.jsonl"),
-  path.join(rootDir, "data", "outputs", "logs", "compressed_rule_updates.jsonl"),
 ];
 
 const expectedToolScripts = [
@@ -139,6 +146,8 @@ const expectedToolScripts = [
   "import-policy-file.mjs",
   "promote-latest-direct-settlement.mjs",
   "query-mcp-audit.mjs",
+  "repair-direct-settlement-promotion-candidate.mjs",
+  "repair-direct-settlement-promotion-traceability.mjs",
   "run-pipeline.mjs",
   "save-draft.mjs",
   "save-proof-report.mjs",
@@ -1647,13 +1656,13 @@ const expectedDefaultMetadata = new Map([
     outputMode: "chat_only",
     includeActiveEngine: false,
     includeWritingCard: true,
-    includeProofingCard: true,
+    includeProofingCard: false,
     includeLongline: true,
     includeEntityRegistry: false,
     entityLimit: 20,
     includeEntityEvidence: true,
     includeEntityProvenance: false,
-    maxContextChars: 120000,
+    maxContextChars: 48000,
   }],
   ["chatgpt_bridge_save_candidate", {
     source: "chatgpt",
@@ -2390,7 +2399,7 @@ const confirmedNoOpFixtures = [
     arguments: {
       kind: "engine",
       source: "data/canon_db/active_engine.md",
-      version: "v5.0.12",
+      version: "v999.999.999",
       dryRun: false,
       confirm: "IMPORT_POLICY",
     },
@@ -2407,7 +2416,7 @@ const confirmedNoOpFixtures = [
     name: "activate_engine_version",
     token: "ACTIVATE",
     arguments: {
-      version: "v5.0.12",
+      version: "v999.999.999",
       dryRun: false,
       confirm: "ACTIVATE",
     },
@@ -6697,13 +6706,19 @@ async function main() {
   const auditSnapshot = await snapshotFile(auditLogPath);
   const transactionSnapshot = await snapshotDirectoryEntries(transactionRuntimePath);
   const auditIntentSnapshot = await snapshotDirectoryEntries(auditIntentRuntimePath);
+  const noOpEngineVersionSnapshot = await snapshotFile(noOpEngineVersionPath);
   let result;
   try {
+    const activeEngineFixtureBytes = await readFile(
+      path.join(rootDir, "data", "canon_db", "active_engine.md"),
+    );
+    await writeFile(noOpEngineVersionPath, activeEngineFixtureBytes);
     result = await runSmokeTest(options);
   } finally {
     await restoreFileSnapshot(auditLogPath, auditSnapshot);
     await restoreDirectoryEntries(transactionRuntimePath, transactionSnapshot);
     await restoreDirectoryEntries(auditIntentRuntimePath, auditIntentSnapshot);
+    await restoreFileSnapshot(noOpEngineVersionPath, noOpEngineVersionSnapshot);
   }
   console.log("MCP smoke test passed.");
   console.log(`- Tool scripts syntax checked: ${result.tool_scripts_syntax_checked}`);

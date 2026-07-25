@@ -16,6 +16,9 @@ import {
   projectPaths,
   projectRoot,
 } from "../../server/src/project-paths.mjs";
+import {
+  getStructuredEntityRegistry,
+} from "../../server/src/structured-canon-entity-registry-service.mjs";
 
 const protectedRelativePaths = [
   "data/canon_db/active_engine.md",
@@ -151,6 +154,16 @@ function runStdioSession(profile, requests) {
 const hashesBefore = await protectedHashes();
 const writingContextsBefore = await writingContextDirectoryCount();
 const activeEngineText = await readFile(projectPaths.activeEngine, "utf8");
+const { registry: structuredRegistry } =
+  await getStructuredEntityRegistry();
+const expectedQianhan =
+  structuredRegistry.characters.find(
+    (entry) => entry.canonical_name === "千函",
+  );
+assert(
+  expectedQianhan,
+  "Phase59B must follow current structured registry entity identity.",
+);
 
 const validationResult =
   await chatgpt_bridge_review_draft_ephemeral({
@@ -189,11 +202,27 @@ const qianhanLate = restricted.draft_entity_audit
     (entry) => entry.canonical_name === "千函",
   );
 assert(qianhanLate);
-assert.equal(qianhanLate.entity_id, "CHAR-千函-7361D94E7D");
+assert.equal(
+  qianhanLate.entity_id,
+  expectedQianhan.entity_id,
+);
+assert.match(
+  qianhanLate.entity_id,
+  /^CHAR-千函-[A-F0-9]{10}$/u,
+);
 const qianhanHydrated = restricted.draft_entity_audit
   .hydrated_late_entities.find(
     (entry) => entry.canonical_name === "千函",
   );
+assert(qianhanHydrated);
+assert.equal(
+  qianhanHydrated.entity_id,
+  expectedQianhan.entity_id,
+);
+assert.equal(
+  qianhanHydrated.entity_id,
+  qianhanLate.entity_id,
+);
 assert.equal(qianhanHydrated.affiliation, "白樞軌道實習校");
 assert.match(qianhanHydrated.grade_or_role, /一年級/u);
 assert.match(qianhanHydrated.grade_or_role, /通訊導覽科/u);

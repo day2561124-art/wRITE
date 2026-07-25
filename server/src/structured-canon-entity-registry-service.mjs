@@ -8,6 +8,10 @@ import {
   normalizeProjectPath,
   projectPaths,
 } from "./project-paths.mjs";
+import {
+  buildMedicalContinuitySnapshot,
+  medicalStatusSummary,
+} from "./medical-continuity-service.mjs";
 
 export const entityTypes = Object.freeze([
   "characters",
@@ -477,6 +481,94 @@ function extractStatusEffects(sections, hashes, characterNameToId) {
   return uniqueEntities(results);
 }
 
+function extractNormalizedMedicalStatuses(
+  sections,
+  hashes,
+  characterNameToId,
+  medicalSnapshot,
+) {
+  const results = [];
+  for (const status of medicalSnapshot.character_statuses ?? []) {
+    const characterId = characterNameToId.get(status.character);
+    if (!characterId) continue;
+    const evidence = status.evidence?.[0] ?? status.missing_evidence?.[0] ?? {};
+    const matchedLine = evidence.matched_line ?? evidence.match ?? status.character;
+    const section = sections.find((item) => (
+      item.content.includes(matchedLine)
+      || item.title === evidence.source_section
+    )) ?? {
+      title: evidence.source_section || "現行正式狀態",
+      startLine: 1,
+      endLine: 1,
+      content: matchedLine,
+      lines: [matchedLine],
+    };
+    const activeRestrictionCount = status.active_restrictions?.length ?? 0;
+    const resolved = activeRestrictionCount === 0
+      && /recovered|no_active|stable_without_active/u.test(status.current_physical_status);
+    results.push(baseEntity(
+      "status_effect",
+      `${status.character}-current-medical-status`,
+      section,
+      hashes,
+      {
+        extractionRule: "medical_continuity_normalizer",
+        sourceExcerpt: matchedLine,
+        relatedCharacters: [status.character],
+        relatedEntities: [characterId],
+        riskLevel: status.exception_reason === "excluded_from_ordinary_cleanup" ? "P1" : "P2",
+        fields: {
+          target_character_id: characterId,
+          effect_type: "normalized_medical_status",
+          description: medicalStatusSummary(status),
+          state_model_version: status.state_model_version,
+          status_id: status.status_id,
+          injury_history: status.injury_history,
+          current_physical_status: status.current_physical_status,
+          current_spiritual_status: status.current_spiritual_status,
+          injury_class: status.injury_class,
+          affected_body_parts: status.affected_body_parts,
+          severity: status.severity,
+          treatment_completed: status.treatment_completed,
+          treatment_method: status.treatment_method,
+          active_restrictions: status.active_restrictions,
+          follow_up_required: status.follow_up_required,
+          follow_up_result: status.follow_up_result,
+          daily_activity_clearance: status.daily_activity_clearance,
+          low_load_training_clearance: status.low_load_training_clearance,
+          training_clearance: status.training_clearance,
+          competition_clearance: status.competition_clearance,
+          weapon_summon_clearance: status.weapon_summon_clearance,
+          high_load_manifestation_clearance: status.high_load_manifestation_clearance,
+          weapon_control_impact: status.weapon_control_impact,
+          expected_recovery_window: status.expected_recovery_window,
+          special_interference: status.special_interference,
+          exception_reason: status.exception_reason,
+          status_as_of_chapter: status.status_as_of_chapter,
+          last_confirmed_evidence: status.last_confirmed_evidence,
+          resolved_at: status.resolved_at,
+          resolution_basis: status.resolution_basis,
+          historical_consequences: status.historical_consequences,
+          injury_history_retained: true,
+          active_restrictions_current_only: true,
+          clearance_independent: true,
+          resolved,
+          source: "active_engine_medical_continuity_normalization",
+          normalization_provenance: {
+            policy_id: medicalSnapshot.policy_id,
+            config_path: medicalSnapshot.provenance.config_path,
+            config_hash_sha256: medicalSnapshot.provenance.config_hash_sha256,
+            evidence_complete: status.evidence_complete,
+            missing_evidence: status.missing_evidence,
+            direct_canon_write_allowed: false,
+          },
+        },
+      },
+    ));
+  }
+  return results;
+}
+
 function conflict(type, severity, entities, summary, evidence, action) {
   return {
     conflict_id: `CONFLICT-${sha256(`${type}|${entities.join("|")}|${summary}`).slice(0, 12).toUpperCase()}`,
@@ -693,6 +785,11 @@ export async function buildStructuredEntityRegistry(options = {}) {
   const mapped = mapPreviewEntities(preview, sections, hashes);
   const characterNameToId = new Map(mapped.characters.map((item) => [item.canonical_name, item.entity_id]));
   const weaponNameToId = new Map(mapped.weapons.map((item) => [item.canonical_name, item.entity_id]));
+  const medicalSnapshot = await buildMedicalContinuitySnapshot({
+    ...options.medicalContinuityOptions,
+    activeEngineText: activeEngine,
+    activeEnginePath,
+  });
   const abilities = extractAbilities(sections, hashes, characterNameToId, weaponNameToId);
   const { timeline, chapterEvents } = extractTimelineAndChapterEvents(sections, hashes);
   const provenance = {
@@ -707,6 +804,7 @@ export async function buildStructuredEntityRegistry(options = {}) {
       "data/error_report_db/compressed_rules.md",
       "config/canon-zones.json",
       "config/entity-registry.json",
+      medicalSnapshot.provenance.config_path,
     ],
     build_warnings: preview.warnings ?? [],
     direct_canon_write_allowed: false,
@@ -724,7 +822,15 @@ export async function buildStructuredEntityRegistry(options = {}) {
     locations: mapped.locations,
     chapter_events: uniqueEntities(chapterEvents),
     relationships: extractRelationships(sections, hashes, characterNameToId),
-    status_effects: extractStatusEffects(sections, hashes, characterNameToId),
+    status_effects: uniqueEntities([
+      ...extractStatusEffects(sections, hashes, characterNameToId),
+      ...extractNormalizedMedicalStatuses(
+        sections,
+        hashes,
+        characterNameToId,
+        medicalSnapshot,
+      ),
+    ]),
     provenance,
   };
   const conflicts = detectEntityRegistryConflicts(registry, provenance);
@@ -770,7 +876,10 @@ export async function buildStructuredEntityRegistry(options = {}) {
       conflicts.filter((item) => item.severity === severity).length,
     ])),
     validation_errors: validationErrors,
-    warnings: provenance.build_warnings,
+    warnings: [
+      ...provenance.build_warnings,
+      ...medicalSnapshot.warnings,
+    ],
     protected_sources_modified: false,
   };
   const conflictReport = {

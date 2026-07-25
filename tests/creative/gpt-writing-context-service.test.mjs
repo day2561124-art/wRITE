@@ -15,7 +15,7 @@ const fixtureApproval = path.join(projectPaths.approvalQueue, ".gpt-writing-cont
 const fixturePending = path.join(projectPaths.canonDb, ".gpt-writing-context-pending-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 const expectedActiveEngineLfHash = (
-  "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
+  "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8"
 );
 const expectedNeuralModules = [
   "run_scene_planner",
@@ -82,6 +82,7 @@ async function main() {
       task_prompt: "Write the next chapter candidate in chat.",
       generation_context: { chapter: 13, tone: "quiet" },
       retrieval_context: { characters: ["A", "B"] },
+      persist_context: true,
     }, options);
     const { bundle } = built;
     assert(bundle.bundle_kind === "gpt_writing_context", "Bundle kind was wrong.");
@@ -127,29 +128,43 @@ async function main() {
 
     const stored = await getGptWritingContextBundle(bundle.bundle_id, options);
     assert(
-      stored.context_for_chat.includes("# GPT Writing Context Bundle"),
-      "Chat markdown was not created.",
+      stored.context_for_chat.includes("# GPT Formal Writing Context"),
+      "Formal chat context markdown was not created.",
     );
     assert(
-      stored.context_for_chat.includes("Write the requested candidate directly in chat."),
-      "Chat markdown omitted GPT output instruction.",
+      stored.context_for_chat.includes('"context_kind": "formal_writing_context"')
+        && stored.context_for_chat.includes(
+          '"user_request": "Write the next chapter candidate in chat."',
+        ),
+      "Formal chat context omitted its kind or current user request.",
     );
     assert(
-      stored.context_for_chat.includes("Do not modify active_engine.md"),
-      "Chat markdown omitted active engine boundary.",
+      stored.context_for_chat.includes('"full_text_included": false')
+        && stored.context_for_chat.includes('"requires_explicit_candidate_workflow_to_persist": true')
+        && stored.context_for_chat.includes('"may_mutate_active_engine": false'),
+      "Formal chat context omitted the active-engine and persistence boundaries.",
     );
     assert(
-      stored.context_for_chat.includes("## 完整創作引擎狀態")
-        && stored.context_for_chat.includes("- active_engine：valid")
-        && stored.context_for_chat.includes("- writing_method：v3.0")
-        && stored.context_for_chat.includes("- proofing_method：v1.1")
-        && stored.context_for_chat.includes("- neural_pipeline：required")
-        && expectedNeuralModules.every((moduleName) => (
-          stored.context_for_chat.includes(`  - ${moduleName}`)
-        ))
-        && stored.context_for_chat.includes("- governance policy present：true")
-        && stored.context_for_chat.includes("- canon update permission：none"),
-      "Chat markdown omitted the integrated engine status summary.",
+      bundle.formal_context.context_kind === "formal_writing_context"
+        && bundle.formal_context.user_request
+          === "Write the next chapter candidate in chat.",
+      "Formal context omitted its kind or current request.",
+    );
+    assert(
+      bundle.formal_context.active_engine_metadata.full_text_included === false
+        && bundle.formal_context.original_candidate_policy
+          .canon_status.requires_explicit_candidate_workflow_to_persist === true
+        && bundle.formal_context.external_research.may_mutate_active_engine === false,
+      "Formal context omitted authority or active-engine boundaries.",
+    );
+    assert(
+      expectedNeuralModules.every((moduleName) => (
+          Object.hasOwn(
+            bundle.formal_context.neural_module_contracts.modules,
+            moduleName.replace(/^run_/u, ""),
+          )
+        )),
+      "Formal context omitted neural-module contracts.",
     );
     assert(
       (await listGptWritingContextBundles({ limit: 20 }, options))[0].bundle_id

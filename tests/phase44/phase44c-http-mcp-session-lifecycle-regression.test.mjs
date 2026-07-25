@@ -303,8 +303,8 @@ try {
 
   assert.equal(
     firstNames.length,
-    25,
-    "chatgpt_public HTTP surface must expose exactly 29 tools",
+    30,
+    "chatgpt_public HTTP surface must expose exactly 30 tools",
   );
 
   assert.deepEqual(

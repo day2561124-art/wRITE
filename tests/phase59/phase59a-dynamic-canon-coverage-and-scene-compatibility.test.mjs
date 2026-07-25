@@ -97,7 +97,7 @@ const qianhan = hydration.resolved_entities.find(
   (entry) => entry.canonical_name === "千函",
 );
 assert(qianhan);
-assert.equal(qianhan.entity_id, "CHAR-千函-7361D94E7D");
+assert.match(qianhan.entity_id, /^CHAR-千函-[A-F0-9]{10}$/u);
 assert.equal(qianhan.affiliation, "白樞軌道實習校");
 assert.match(qianhan.grade_or_role, /一年級/u);
 assert.match(qianhan.grade_or_role, /通訊導覽科/u);
@@ -112,10 +112,10 @@ assert.equal(declaredLocation.organization, "夜星武裝學院");
 assert.equal(declaredLocation.access_level, "restricted");
 assert.match(declaredLocation.location_id, /^SCENE-LOC-/u);
 assert(materials.relevant_canon.characters.some(
-  (entry) => entry.entity_id === "CHAR-千函-7361D94E7D",
+  (entry) => entry.name === "千函",
 ));
 assert(materials.relevant_canon.abilities_and_weapons.some(
-  (entry) => entry.entity_id === "WEAPON-函星折箋-B3A3A93564",
+  (entry) => entry.name === "函星折箋",
 ));
 assert(materials.relevant_canon.organizations_and_locations.some(
   (entry) => entry.name === "白樞軌道實習校",

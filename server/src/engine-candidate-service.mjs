@@ -433,54 +433,121 @@ export function generateEngineDiff(activeText, candidateText) {
   if (!String(candidateText ?? "").trim()) throw new Error("candidate_engine.md 為空白");
   const activeLines = String(activeText).replace(/\r\n?/gu, "\n").replace(/\n+$/u, "").split("\n");
   const candidateLines = String(candidateText).replace(/\r\n?/gu, "\n").replace(/\n+$/u, "").split("\n");
-  let prefix = 0;
-  while (
-    prefix < activeLines.length
-    && prefix < candidateLines.length
-    && activeLines[prefix] === candidateLines[prefix]
-  ) prefix += 1;
-  let suffix = 0;
-  while (
-    suffix < activeLines.length - prefix
-    && suffix < candidateLines.length - prefix
-    && activeLines[activeLines.length - 1 - suffix] === candidateLines[candidateLines.length - 1 - suffix]
-  ) suffix += 1;
-
-  const oldMiddle = activeLines.slice(prefix, activeLines.length - suffix);
-  const newMiddle = candidateLines.slice(prefix, candidateLines.length - suffix);
-  const paired = Math.min(oldMiddle.length, newMiddle.length);
-  const modified = [];
-  for (let index = 0; index < paired; index += 1) {
-    if (oldMiddle[index] !== newMiddle[index]) {
-      modified.push({
-        active_line: prefix + index + 1,
-        candidate_line: prefix + index + 1,
-        from: oldMiddle[index],
-        to: newMiddle[index],
-      });
+  const matrix = Array.from(
+    { length: activeLines.length + 1 },
+    () => new Uint32Array(candidateLines.length + 1),
+  );
+  for (let left = activeLines.length - 1; left >= 0; left -= 1) {
+    for (let right = candidateLines.length - 1; right >= 0; right -= 1) {
+      matrix[left][right] = activeLines[left] === candidateLines[right]
+        ? matrix[left + 1][right + 1] + 1
+        : Math.max(matrix[left + 1][right], matrix[left][right + 1]);
     }
   }
-  const deleted = oldMiddle.slice(paired).map((line, index) => ({
-    line: prefix + paired + index + 1,
-    text: line,
-  }));
-  const added = newMiddle.slice(paired).map((line, index) => ({
-    line: prefix + paired + index + 1,
-    text: line,
-  }));
-  const contextBefore = activeLines.slice(Math.max(0, prefix - 3), prefix).map((line) => ` ${line}`);
-  const contextAfter = activeLines.slice(activeLines.length - suffix, activeLines.length - suffix + 3)
-    .map((line) => ` ${line}`);
-  const rawLines = [
-    "--- active_engine.md",
-    "+++ candidate_engine.md",
-    `@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`,
-    ...contextBefore,
-    ...modified.flatMap((item) => [`-${item.from}`, `+${item.to}`]),
-    ...deleted.map((item) => `-${item.text}`),
-    ...added.map((item) => `+${item.text}`),
-    ...contextAfter,
-  ];
+  const operations = [];
+  let left = 0;
+  let right = 0;
+  while (left < activeLines.length || right < candidateLines.length) {
+    if (
+      left < activeLines.length
+      && right < candidateLines.length
+      && activeLines[left] === candidateLines[right]
+    ) {
+      operations.push({
+        type: "equal",
+        text: activeLines[left],
+        active_line: left + 1,
+        candidate_line: right + 1,
+      });
+      left += 1;
+      right += 1;
+    } else if (
+      right < candidateLines.length
+      && (
+        left >= activeLines.length
+        || matrix[left][right + 1] > matrix[left + 1][right]
+      )
+    ) {
+      operations.push({
+        type: "add",
+        text: candidateLines[right],
+        active_line: left + 1,
+        candidate_line: right + 1,
+      });
+      right += 1;
+    } else {
+      operations.push({
+        type: "delete",
+        text: activeLines[left],
+        active_line: left + 1,
+        candidate_line: right + 1,
+      });
+      left += 1;
+    }
+  }
+  const changedBlocks = [];
+  for (let index = 0; index < operations.length;) {
+    if (operations[index].type === "equal") {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < operations.length && operations[index].type !== "equal") index += 1;
+    changedBlocks.push({ start, end: index });
+  }
+  const modified = [];
+  const deleted = [];
+  const added = [];
+  for (const block of changedBlocks) {
+    const changes = operations.slice(block.start, block.end);
+    const deletions = changes.filter((entry) => entry.type === "delete");
+    const additions = changes.filter((entry) => entry.type === "add");
+    const paired = Math.min(deletions.length, additions.length);
+    for (let index = 0; index < paired; index += 1) {
+      modified.push({
+        active_line: deletions[index].active_line,
+        candidate_line: additions[index].candidate_line,
+        from: deletions[index].text,
+        to: additions[index].text,
+      });
+    }
+    deleted.push(...deletions.slice(paired).map((entry) => ({
+      line: entry.active_line,
+      text: entry.text,
+    })));
+    added.push(...additions.slice(paired).map((entry) => ({
+      line: entry.candidate_line,
+      text: entry.text,
+    })));
+  }
+  const hunkRanges = changedBlocks.map((block) => ({
+    start: Math.max(0, block.start - 3),
+    end: Math.min(operations.length, block.end + 3),
+  })).reduce((ranges, range) => {
+    const previous = ranges.at(-1);
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      ranges.push({ ...range });
+    }
+    return ranges;
+  }, []);
+  const rawLines = ["--- active_engine.md", "+++ candidate_engine.md"];
+  for (const range of hunkRanges) {
+    const hunk = operations.slice(range.start, range.end);
+    const oldStart = hunk.find((entry) => entry.type !== "add")?.active_line
+      ?? hunk[0]?.active_line
+      ?? 1;
+    const newStart = hunk.find((entry) => entry.type !== "delete")?.candidate_line
+      ?? hunk[0]?.candidate_line
+      ?? 1;
+    const oldCount = hunk.filter((entry) => entry.type !== "add").length;
+    const newCount = hunk.filter((entry) => entry.type !== "delete").length;
+    rawLines.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+    rawLines.push(...hunk.map((entry) => (
+      `${entry.type === "equal" ? " " : entry.type === "delete" ? "-" : "+"}${entry.text}`
+    )));
+  }
   return {
     summary: {
       added_count: added.length,
@@ -499,20 +566,26 @@ export function generateEngineDiff(activeText, candidateText) {
 export function detectRiskChanges(candidateText, diff, activeText) {
   const candidate = String(candidateText ?? "");
   const active = String(activeText ?? "");
-  const changedText = [
-    ...(diff?.added ?? []).map((item) => item.text),
-    ...(diff?.modified ?? []).map((item) => item.to),
-  ].join("\n");
-  const lowerChangedText = changedText.toLocaleLowerCase("zh-Hant");
-  const matchedKeywords = highRiskTerms.filter((term) => (
-    lowerChangedText.includes(term.toLocaleLowerCase("zh-Hant"))
-  ));
+  const sanitizeStateTokens = (value) => value.replace(
+    /`(?:unknown|not_recorded|not_applicable|deferred|cleared)`/giu,
+    "",
+  );
+  const introduced = (term, sanitize = (value) => value) => {
+    const expected = term.toLocaleLowerCase("zh-Hant");
+    if ((diff?.added ?? []).some((item) => (
+      sanitize(String(item.text ?? "").toLocaleLowerCase("zh-Hant")).includes(expected)
+    ))) return true;
+    return (diff?.modified ?? []).some((item) => {
+      const before = sanitize(String(item.from ?? "").toLocaleLowerCase("zh-Hant"));
+      const after = sanitize(String(item.to ?? "").toLocaleLowerCase("zh-Hant"));
+      return after.includes(expected) && !before.includes(expected);
+    });
+  };
+  const matchedKeywords = highRiskTerms.filter((term) => introduced(term));
   const blockedTerms = contaminationTerms.filter((term) => (
-    lowerChangedText.includes(term.toLocaleLowerCase("zh-Hant"))
+    introduced(term, sanitizeStateTokens)
   ));
-  const mediumTerms = mediumRiskTerms.filter((term) => (
-    lowerChangedText.includes(term.toLocaleLowerCase("zh-Hant"))
-  ));
+  const mediumTerms = mediumRiskTerms.filter((term) => introduced(term));
   const activeLines = Math.max(1, Number(diff?.active_line_count) || active.split(/\r?\n/u).length);
   const deleteRatio = ((diff?.summary?.deleted_count ?? 0) + (diff?.summary?.modified_count ?? 0)) / activeLines;
   const candidateLengthRatio = active.length ? candidate.length / active.length : 0;
@@ -675,8 +748,21 @@ export async function importSettlementResult(input, options = {}) {
     raw_hash: sha256(rawText),
     candidate_hash: evaluated.parsed.ok ? sha256(evaluated.parsed.candidateText) : "",
     active_engine_hash_at_import: evaluated.activeStatus.active_engine_hash ?? "",
+    base_active_engine_hash: before.active_engine_hash ?? "",
+    candidate_engine_hash_sha256: evaluated.parsed.ok
+      ? sha256(evaluated.parsed.candidateText)
+      : "",
     parser_version: parserVersion,
     canon_status: "pending",
+    candidate_kind: sourceKind || "settlement_import",
+    review_status: "pending_review",
+    activation_requested: false,
+    active_engine_modified: false,
+    source_lineage: {
+      lineage_mode: sourceKind || "settlement_import",
+      lineage_complete: Boolean(sourceChapter || note),
+      source_chapter: sourceChapter || null,
+    },
     requires_user_confirmation: true,
     requires_neural_modules: requiresNeuralModules,
     neural_modules_used_path: neuralModulesUsedPath,
@@ -688,7 +774,15 @@ export async function importSettlementResult(input, options = {}) {
     { filePath: paths.raw, content: rawText },
     { filePath: paths.metadata, content: json(metadata) },
     { filePath: paths.risk, content: json(evaluated.riskReport) },
-    { filePath: paths.status, content: json(evaluated.status) },
+    {
+      filePath: paths.status,
+      content: json({
+        ...evaluated.status,
+        review_status: "pending_review",
+        activation_requested: false,
+        active_engine_modified: false,
+      }),
+    },
   ];
   if (evaluated.parsed.ok) {
     operations.push({ filePath: paths.candidate, content: `${evaluated.parsed.candidateText}\n` });

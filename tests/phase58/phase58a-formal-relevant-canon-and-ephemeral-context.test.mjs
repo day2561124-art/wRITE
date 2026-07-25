@@ -79,7 +79,7 @@ function records(relevantCanon) {
     ...relevantCanon.abilities_and_weapons,
     ...relevantCanon.world_rules,
     ...relevantCanon.timeline_and_events,
-    ...relevantCanon.continuity_facts,
+    ...(relevantCanon.continuity_facts ?? []),
   ];
 }
 
@@ -134,10 +134,10 @@ assert.equal(plan.match_policy.exact_name_before_alias, true);
 assert.equal(plan.match_policy.category_scoped, true);
 
 assert(relevantCanon.characters.some(
-  (record) => record.entity_id === "CHAR-九逃-6495AE61EA",
+  (record) => record.name === "九逃",
 ));
 assert(relevantCanon.characters.some(
-  (record) => record.entity_id === "CHAR-御先-7794E69FE4",
+  (record) => record.name === "御先",
 ));
 assert.match(allContent, /九逃[^]*左前臂裂傷/u);
 assert.match(allContent, /左肩外側切創/u);
@@ -145,38 +145,35 @@ assert.match(allContent, /當日不得再進訓練場|左臂當晚不能沾水/u
 assert.match(allContent, /御先[^]*未分類靈力殘痕/u);
 assert.match(allContent, /武裝解除末段/u);
 assert(relevantCanon.abilities_and_weapons.some(
-  (record) => record.entity_id === "WEAPON-聖星法典-E2E71F9FA1",
+  (record) => record.name === "聖星法典",
 ));
 assert(relevantCanon.world_rules.some(
-  (record) => record.entity_id
-    === "RULE-異能武裝靈魂內收納-召喚與維持準則-FB89D3EFFC",
+  (record) => record.name === "異能武裝靈魂內收納、召喚與維持準則",
 ));
 assert(relevantCanon.world_rules.some(
-  (record) => record.entity_id === "RULE-能力體系-DC1C5E6273",
+  (record) => record.name === "能力體系",
 ));
 assert(relevantCanon.world_rules.some(
-  (record) => record.entity_id
-    === "RULE-高科技靈力醫療-治療型武裝與生命復歸-29CEE66034",
+  (record) => record.name === "高科技靈力醫療、治療型武裝與生命復歸",
 ));
 assert(relevantCanon.timeline_and_events.some(
   (record) => record.category === "timeline_event"
-    && record.entity_id.startsWith(
-      "settlement_report_20260722-132349-1bbe3b4c#",
-    ),
+    && record.source.kind === "latest_settled_continuity_overlay"
+    && record.entity_id.endsWith("#timeline"),
 ));
 
 const registryProvenance = relevantCanon.provenance.find(
   (entry) => entry.source === "structured_canon_entity_registry",
 );
-assert.equal(registryProvenance.freshness, "stale");
-assert.equal(registryProvenance.hard_fact_authority, false);
+assert.equal(registryProvenance.freshness, "current");
+assert.equal(registryProvenance.hard_fact_authority, true);
 for (const record of allRecords.filter(
   (entry) => entry.source.kind === "active_engine_bounded_retrieval",
 )) {
   assert.equal(record.freshness, "current");
   assert.equal(record.source_hash, formal.active_engine_metadata.sha256);
   assert(record.provenance.some(
-    (entry) => entry.freshness === "stale"
+    (entry) => entry.freshness === "current"
       && entry.corroborated_by_current_active_engine === true,
   ));
 }

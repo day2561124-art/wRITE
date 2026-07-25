@@ -11,7 +11,7 @@
   "compressed_rules_path": "data/error_report_db/compressed_rules.md",
   "approval_queue_root": "data/approval_queue",
   "canon_db_root": "data/canon_db",
-  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "expected_engine_sha256_lf": "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8",
   "expected_formal_visual_index_non_empty_lines_before": 0,
   "expected_formal_assets_count_before": 0,
   "expected_formal_visual_index_non_empty_lines_after": 3,

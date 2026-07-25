@@ -18,8 +18,14 @@ const legacySurface = (key) => key === "chatgpt_final_output" || key.startsWith(
 const capabilities = [
   ["scene_planner", chatgpt_bridge_use_scene_planner, { result_type: "scene_plan", beats: ["獨特場景節拍 A", "獨特場景節拍 B"], turn: "門外腳步停止" }],
   ["character_simulator", chatgpt_bridge_use_character_simulator, { result_type: "character_simulation", inner_state: "想開門卻害怕認出來人", action: "手仍扣在門閂上" }],
-  ["neural_critic", chatgpt_bridge_use_neural_critic, { result_type: "neural_critique", risk: "避免用旁白提前解釋來客身份", revision_target: "讓聲音先抵達" }],
-  ["style_drift_detector", chatgpt_bridge_use_style_drift_detector, { result_type: "style_drift_report", drift_risk: "medium", evidence: "連續抽象心理說明會削弱雨夜觸感" }],
+  ["neural_critic", chatgpt_bridge_use_neural_critic, {
+    result_type: "neural_critique",
+    analysis_status: "inactive_without_draft_evidence",
+  }],
+  ["style_drift_detector", chatgpt_bridge_use_style_drift_detector, {
+    result_type: "style_drift_report",
+    analysis_status: "inactive_without_draft_evidence",
+  }],
   ["over_governance_detector", chatgpt_bridge_use_over_governance_detector, { result_type: "over_governance_report", warning: "限制條款不可進入正文", release: "允許角色做出意外但合乎性格的選擇" }],
   ["writing_card_director", chatgpt_bridge_use_writing_card_director, { result_type: "writing_card_director_context", direction: "以門閂的細小震動承載決定", ending: "用具體事件轉折收束" }],
 ];
@@ -34,7 +40,70 @@ function assertCompactSemanticResponse(response, capability, session, expectedOu
   assert.equal(response.orchestration_owner, "ChatGPT");
   assert.equal(response.prose_generator, "ChatGPT");
   assert.equal(response.full_neural_orchestrator_used, false);
-  assert.deepEqual(response.capability_output, expectedOutput);
+  if (
+    expectedOutput.analysis_status ===
+    "inactive_without_draft_evidence"
+  ) {
+    const output = response.capability_output;
+
+    assert.equal(
+      output.result_type,
+      expectedOutput.result_type,
+    );
+    assert.equal(output.status, "inactive");
+    assert.equal(
+      output.diagnostic_version,
+      "phase50c-post-draft-line-diagnostic-v1",
+    );
+    assert.equal(
+      output.analysis_phase,
+      "pre_generation_compatibility",
+    );
+    assert.equal(
+      output.analysis_status,
+      "inactive_without_draft_evidence",
+    );
+    assert.equal(
+      output.draft_evidence_status,
+      "not_available_pre_generation",
+    );
+    assert.deepEqual(output.findings, []);
+    assert.equal(
+      output.release_recommendation,
+      "no_post_draft_judgment_without_draft",
+    );
+    assert.equal(output.evidence_only, true);
+
+    assert.equal(Object.hasOwn(output, "risk"), false);
+    assert.equal(
+      Object.hasOwn(output, "revision_target"),
+      false,
+    );
+
+    if (capability === "neural_critic") {
+      assert.deepEqual(output.hard_risks, []);
+    }
+
+    if (capability === "style_drift_detector") {
+      assert.equal(
+        output.pre_generation_status,
+        "inactive_without_draft_evidence",
+      );
+      assert.equal(
+        Object.hasOwn(output, "drift_risk"),
+        false,
+      );
+      assert.equal(
+        Object.hasOwn(output, "evidence"),
+        false,
+      );
+    }
+  } else {
+    assert.deepEqual(
+      response.capability_output,
+      expectedOutput,
+    );
+  }
   assert.doesNotMatch(JSON.stringify(response.capability_output), /Writer Workbench executed|please integrate|generic acknowledgement/iu);
   assert.match(response.trace.trace_id, /^neural_trace_/u);
   assert.equal(response.trace.run_id, session.external_brain_session_id);

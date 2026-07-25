@@ -15,6 +15,10 @@ import {
 } from "./agent-run-service.mjs";
 import { buildGptWritingContext, getGptWritingContextBundle } from "./gpt-writing-context-service.mjs";
 import {
+  canonCharacterMentionStatuses,
+  resolveCanonCharacterMention,
+} from "./character-canon-grounding-service.mjs";
+import {
   run_scene_planner,
   run_character_simulator,
   run_neural_critic,
@@ -318,6 +322,137 @@ function compactCharacterHardFacts(packet = {}) {
   }));
 }
 
+function normalizedCapabilityCharacterName(value) {
+  const text = compactText(value, 120);
+  return text
+    ? text.toLocaleLowerCase("zh-Hant-TW")
+    : null;
+}
+
+function characterNamesFromCapabilityValue(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.flatMap(characterNamesFromCapabilityValue);
+  }
+  if (!value || typeof value !== "object") return [];
+  return [
+    value.character,
+    value.character_name,
+    value.characterName,
+    value.canonical_name,
+    value.name,
+  ].flatMap(characterNamesFromCapabilityValue);
+}
+
+function explicitCapabilityCharacterNames(input = {}) {
+  const source = input
+    && typeof input === "object"
+    && !Array.isArray(input)
+      ? input
+      : {};
+  const names = [
+    source.character,
+    source.character_name,
+    source.characterName,
+    source.responding_character,
+    source.respondingCharacter,
+    source.active_character,
+    source.activeCharacter,
+    source.active_characters,
+    source.activeCharacters,
+    source.focus_characters,
+    source.focusCharacters,
+    source.characters,
+  ].flatMap(characterNamesFromCapabilityValue);
+
+  return new Set(
+    names
+      .map(normalizedCapabilityCharacterName)
+      .filter(Boolean),
+  );
+}
+
+function characterGroundingRecordIsCapabilityRelevant(
+  character = {},
+  explicitNames = new Set(),
+  taskPrompt = "",
+) {
+  const canonicalName =
+    normalizedCapabilityCharacterName(
+      character.canonical_name,
+    );
+
+  if (canonicalName && explicitNames.has(canonicalName)) {
+    return true;
+  }
+
+  const taskMention = resolveCanonCharacterMention(
+    taskPrompt,
+    character.canonical_name,
+  );
+
+  if (
+    taskMention.status
+    === canonCharacterMentionStatuses.confirmed
+  ) {
+    return true;
+  }
+
+  const relevantSources = new Set([
+    "task_prompt",
+  ]);
+
+  const matchSources = Array.isArray(character.match_sources)
+    ? character.match_sources
+    : [];
+
+  if (
+    matchSources.some((source) => (
+      relevantSources.has(String(source ?? ""))
+    ))
+  ) {
+    return true;
+  }
+
+  const evidence = Array.isArray(character.mention_evidence)
+    ? character.mention_evidence
+    : [];
+
+  return evidence.some((item) => (
+    relevantSources.has(String(item?.source ?? ""))
+  ));
+}
+
+function compactCapabilityCharacterHardFacts(
+  packet = {},
+  capabilityName,
+  capabilityInput = {},
+  taskPrompt = "",
+) {
+  if (
+    capabilityName !== "run_character_simulator"
+    && capabilityName !== "run_writing_card_director"
+  ) {
+    return compactCharacterHardFacts(packet);
+  }
+
+  const explicitNames =
+    explicitCapabilityCharacterNames(capabilityInput);
+  const characters = Array.isArray(packet?.characters)
+    ? packet.characters.filter((character) => (
+      characterGroundingRecordIsCapabilityRelevant(
+        character,
+        explicitNames,
+        taskPrompt,
+      )
+    ))
+    : [];
+
+  return compactCharacterHardFacts({
+    ...packet,
+    characters,
+  });
+}
 function compactFactText(values, maxChars) {
   return compactText(
     Array.isArray(values) ? values.join("；") : "",
@@ -673,13 +808,30 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
     const priorGenerationSurfaces =
       capabilityInput.authorship_cognition_sources?.prior_cognition_outputs
       ?? [];
+    const capabilityCharacterHardFacts =
+      compactCapabilityCharacterHardFacts(
+        characterCanonGrounding,
+        capabilityName,
+        requestedCapabilityInput,
+        writingContext.original_task_prompt
+          ?? capabilityInput.task_prompt
+          ?? taskPrompt,
+      );
+    const capabilityCharacterGroundingScoped =
+      capabilityName === "run_character_simulator"
+      || capabilityName === "run_writing_card_director";
+    const capabilityCharacterGroundingLoaded =
+      capabilityCharacterGroundingScoped
+        ? characterCanonGrounding.loaded === true
+          && capabilityCharacterHardFacts.length > 0
+        : characterCanonGrounding.loaded === true;
     const groundingSurface = {
       character_canon_grounding_loaded:
-        characterCanonGrounding.loaded === true,
+        capabilityCharacterGroundingLoaded,
       character_canon_grounding_count:
-        characterHardFacts.length,
+        capabilityCharacterHardFacts.length,
       character_hard_facts:
-        characterHardFacts,
+        capabilityCharacterHardFacts,
       original_entity_freedom:
         characterCanonGrounding.original_entity_freedom ?? null,
       ...(worldEntityCognitionRelevant ? {
@@ -702,7 +854,7 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           taskPrompt,
           writingContext,
           capabilityInput: requestedCapabilityInput,
-          characterHardFacts,
+          characterHardFacts: capabilityCharacterHardFacts,
         }),
         ...groundingSurface,
       },
@@ -711,7 +863,7 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
           taskPrompt,
           writingContext,
           capabilityInput: requestedCapabilityInput,
-          characterHardFacts,
+          characterHardFacts: capabilityCharacterHardFacts,
         }),
         ...groundingSurface,
       },
@@ -1455,6 +1607,14 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
       ?? context.bundle.original_task_prompt
       ?? context.bundle.task_prompt,
     writing_context_bundle_id: contextBundleId,
+    pre_generation_character_canon_grounding:
+      context.bundle.content?.character_canon_grounding ?? null,
+    character_canon_grounding:
+      context.bundle.content?.character_canon_grounding ?? null,
+    pre_generation_world_entity_canon_grounding:
+      context.bundle.content?.world_entity_canon_grounding ?? null,
+    world_entity_canon_grounding:
+      context.bundle.content?.world_entity_canon_grounding ?? null,
     writing_context: capabilityName === "run_neural_critic"
       ? {
         materials: {

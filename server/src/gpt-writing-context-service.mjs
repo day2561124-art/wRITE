@@ -414,11 +414,23 @@ function allocateContent(sections, maxChars) {
           : remaining,
       ),
     );
-    const bounded = truncateContextTextAtBlockBoundaries(
-      text,
-      sectionLimit,
-      section.key,
-    );
+    const preserveExactText =
+      section.preserveExactText === true
+      && text.length <= sectionLimit;
+    const bounded = preserveExactText
+      ? {
+        text,
+        truncated: false,
+        source: section.key,
+        original_chars: text.length,
+        actual_chars: text.length,
+        budget_chars: sectionLimit,
+      }
+      : truncateContextTextAtBlockBoundaries(
+        text,
+        sectionLimit,
+        section.key,
+      );
     content[section.key] = bounded.text;
     remaining -= bounded.actual_chars;
     if (bounded.truncated) {
@@ -593,6 +605,10 @@ function buildBoundedFormalContext(bundle, maxChars) {
 }
 
 function chatMarkdown(bundle) {
+  const visualUploadedReferences = bundle.visual_uploaded_references ?? {
+    loaded: false,
+    reference_count: 0,
+  };
   if (bundle.formal_context) {
     return [
       "# GPT Formal Writing Context",
@@ -600,6 +616,19 @@ function chatMarkdown(bundle) {
       "```json",
       JSON.stringify(bundle.formal_context, null, 2),
       "```",
+      "",
+      "## Visual Uploaded References (Visual-only)",
+      "",
+      `- loaded: ${visualUploadedReferences.loaded === true}`,
+      `- reference count: ${visualUploadedReferences.reference_count ?? 0}`,
+      `- injection scope: ${visualUploadedReferences.injection_scope ?? "writing_context_visual_only"}`,
+      "- authority: below canon; visual reference only",
+      "- usage: appearance, pose, style, and atmosphere guidance only",
+      "- forbidden: canon facts, ability mechanics, soul weapons, relationships, ranks, factions, timeline events, chapter outcomes",
+      "- active_engine update permission: none",
+      "- canon update permission: none",
+      "",
+      bundle.content?.visual_uploaded_reference_context || "[missing]",
       "",
     ].join("\n");
   }
@@ -610,7 +639,6 @@ function chatMarkdown(bundle) {
   const requiredNeuralModules = bundle.required_neural_modules
     .map((moduleName) => `  - ${moduleName}`);
   const writingCardDirectorPresent = bundle.content && bundle.content.writing_card_director_context ? "present" : "absent";
-  const visualUploadedReferences = bundle.visual_uploaded_references ?? { loaded: false, reference_count: 0 };
   return [
     "# GPT Writing Context Bundle",
     "",
@@ -972,6 +1000,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       key: "character_voice_registry_content",
       text: byLabel.character_voice_registry.content,
       reference: byLabel.character_voice_registry.path,
+      preserveExactText: true,
     },
     {
       key: "visual_uploaded_reference_context",

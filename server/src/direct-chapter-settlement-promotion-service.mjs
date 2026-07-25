@@ -377,6 +377,7 @@ export function buildCurrentInputRefresh({
     `- effective_canon_head: ${display}`,
     `- continuity_head: ${continuityHead}`,
     `- settlement_report_id: ${settlementReportId}`,
+    "- continuity_rollback: forbidden",
     "",
     "## Continuity Summary",
     "",

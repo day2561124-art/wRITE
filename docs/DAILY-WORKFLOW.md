@@ -111,3 +111,11 @@ git status --short --untracked-files=no
 git diff --stat
 .\scripts\show-active-engine-hash.ps1
 ```
+
+## Active engine SHA256 基線
+
+每日檢查使用下列正式 LF-normalized SHA256 baseline：
+
+- `data/canon_db/active_engine.md`：`238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8`
+
+正式啟用流程若改變 `active_engine.md`，必須同步更新檢查腳本、測試與本文件中的基線。

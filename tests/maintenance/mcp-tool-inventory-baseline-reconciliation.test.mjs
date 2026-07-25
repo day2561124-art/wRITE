@@ -19,6 +19,7 @@ const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
+  "chatgpt_bridge_review_draft_ephemeral",
   "chatgpt_bridge_use_scene_planner",
   "chatgpt_bridge_use_character_simulator",
   "chatgpt_bridge_use_neural_critic",
@@ -28,9 +29,9 @@ const externalBrainToolNames = [
   "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
 ];
-const expectedDirectDigest = "c614302e630e54e7dafd9419d33ec8ccf7a3c0d28ebebc425b509540629d7226";
+const expectedDirectDigest = "4c2cd5331d83c2ae4d82458c6d491d89ce746551c5455c260fecfa2d89e30ead";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "593691cb38f96d6bc621bfa8df3fa24807e1420ceb240bbac579278aeeb75291";
+const expectedPublicDigest = "3ef9fd9a7864067a3f95e848a6ea031d8f8f2cb9f8b7a41d7f05489751101e4a";
 const expectedPublicNames = [
   "get_engine_components_status",
   "chatgpt_bridge_get_workbench_status",
@@ -141,7 +142,7 @@ const directNames = extractDirectMcpToolNames(currentSource);
 assert(historicalNames);
 assert(directNames);
 assert.equal(historicalNames.length, 70);
-assert.equal(directNames.length, 80);
+assert.equal(directNames.length, 81);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
 assert.deepEqual(
@@ -194,7 +195,7 @@ const [fullTools, publicTools] = await Promise.all([
 ]);
 const fullNames = fullTools.map((tool) => tool.name);
 const publicNames = publicTools.map((tool) => tool.name);
-assert.equal(fullNames.length, 80);
+assert.equal(fullNames.length, 81);
 assert.deepEqual(duplicates(fullNames), []);
 assert.equal(digest(fullNames), expectedRuntimeDigest);
 assert.deepEqual(publicNames, expectedPublicNames);
@@ -215,8 +216,8 @@ assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_canon, f
 assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_active_engine, false);
 
 const preview = await runVisualLibraryFinalE2eAcceptancePreview();
-assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 80);
-assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 80);
+assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 81);
+assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 81);
 assert.equal(preview.bridge_readiness_acceptance.passed, true);
 assert.equal(preview.final_acceptance_decision, "visual_library_final_e2e_preview_acceptance_passed");
 

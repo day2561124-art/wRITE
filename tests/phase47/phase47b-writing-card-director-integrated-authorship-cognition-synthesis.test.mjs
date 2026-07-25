@@ -51,7 +51,7 @@ const protectedFiles = {
   compressed_rules: projectPaths.compressedRules,
 };
 const protectedHashes = {
-  active_engine: "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  active_engine: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
   compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const immutableEvidencePath = path.join(
@@ -146,7 +146,11 @@ async function runPriorCognition(session, options = {}) {
     assert.equal(response.trace.status, "success");
     assert.equal(response.trace.module_name, moduleName);
     assertGuardsFalse(response);
-    results.set(moduleName, { output, response });
+    results.set(moduleName, {
+      output: response.capability_output,
+      requested_output: output,
+      response,
+    });
   }
   return results;
 }
@@ -196,7 +200,13 @@ try {
   assert.deepEqual(externalBrainPreGenerationCapabilities, expectedPreGenerationCapabilities);
   assert.equal(externalBrainPreGenerationCapabilities.length, 6);
   assert.deepEqual(priorAuthorshipCognitionModules, priorCalls.map(([moduleName]) => moduleName));
-  assert.deepEqual(externalBrainMutationGuards, Object.fromEntries(guards.map((guard) => [guard, false])));
+  for (const guard of guards) {
+    assert.equal(externalBrainMutationGuards[guard], false);
+  }
+  assert(
+    Object.values(externalBrainMutationGuards).every((value) => value === false),
+    "Every exposed external-brain mutation guard must remain false.",
+  );
   assert.equal(externalBrainOwnership.orchestration_owner, "chatgpt");
   assert.equal(externalBrainOwnership.final_prose_generator, "chatgpt");
 
@@ -303,7 +313,10 @@ try {
   assert.equal(director.capability_output.integration_mode, "same_author_cognition_synthesis");
   assert.equal(director.capability_output.generation_surface_only, true);
   assert.equal(director.capability_output.control_plane_excluded, true);
-  assert(director.capability_output.generation_card);
+  assert.equal(
+    director.capability_output.writing_card_context?.context_kind,
+    "writing_card_director_context",
+  );
   assert.deepEqual(
     director.capability_output.source_modules_consumed,
     priorAuthorshipCognitionModules,
@@ -385,7 +398,7 @@ try {
   await assertIntegrityBlock("semantic output hash mismatch", async (caseSession, caseResults) => {
     const traceId = caseResults.get("neural_critic").response.trace.trace_id;
     await mutateRecord(caseSession, "neural_critic", traceId, (record) => {
-      record.capability_output.semantic_value.concern = "tampered after trace";
+      record.capability_output.analysis_status = "tampered_after_trace";
     });
   });
   await assertIntegrityBlock("trace missing", async (caseSession, caseResults) => {

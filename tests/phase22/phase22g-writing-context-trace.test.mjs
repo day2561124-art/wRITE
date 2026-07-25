@@ -42,8 +42,32 @@ try {
     include_active_engine: false,
     run_neural_traces: true,
   }, { fixtureRoot });
-  assert.deepEqual(ctxResult2.bundle.neural_modules_used, []);
+  assert.deepEqual(
+    [...ctxResult2.bundle.neural_modules_used].sort(),
+    ["neural_critic", "style_drift_detector"],
+  );
   assert.equal(ctxResult2.bundle.neural_trace_complete, false);
+  assert(
+    ctxResult2.bundle.warnings.includes(
+      "missing_required_neural_modules",
+    ),
+  );
+
+  const noAdapterTraceStatus = Object.fromEntries(
+    ctxResult2.bundle.neural_traces.map((trace) => [
+      trace.module_name,
+      trace.status,
+    ]),
+  );
+
+  assert.deepEqual(noAdapterTraceStatus, {
+    scene_planner: "skipped",
+    character_simulator: "skipped",
+    neural_critic: "success",
+    style_drift_detector: "success",
+    over_governance_detector: "skipped",
+    writing_card_director: "skipped",
+  });
 
   const ctxResult3 = await buildGptWritingContext({
     task_prompt: "Phase22G test: e2e",

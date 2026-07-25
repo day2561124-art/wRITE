@@ -11804,12 +11804,137 @@ export const chatgpt_bridge_build_full_neural_writing_handoff = tool(
   () => [],
 );
 
+const externalBrainBootstrapMutationGuardKeys = Object.freeze([
+  "candidate_created",
+  "canon_updated",
+  "active_engine_updated",
+  "adopted",
+  "settled",
+  "approval_created",
+  "activation_requested",
+  "can_modify_active_engine",
+  "can_update_canon",
+  "can_approve",
+  "can_confirm_adoption",
+  "can_settle",
+]);
+
+function compactExternalBrainBootstrapForMcp(result = {}) {
+  const sourceGuards =
+    result.mutation_guards
+    && typeof result.mutation_guards === "object"
+    && !Array.isArray(result.mutation_guards)
+      ? result.mutation_guards
+      : {};
+
+  const mutationGuards = Object.fromEntries(
+    externalBrainBootstrapMutationGuardKeys.map((key) => [
+      key,
+      sourceGuards[key]
+        ?? result[key]
+        ?? false,
+    ]),
+  );
+
+  const composition =
+    result.context_composition
+    && typeof result.context_composition === "object"
+    && !Array.isArray(result.context_composition)
+      ? result.context_composition
+      : {};
+
+  return {
+    ok: result.ok === true,
+    tool_name:
+      result.tool_name
+      ?? "chatgpt_bridge_begin_external_brain_writing_session",
+    status: result.status ?? null,
+    architecture_route:
+      result.architecture_route
+      ?? "chatgpt_owned_external_brain",
+    external_brain_session_id:
+      result.external_brain_session_id ?? null,
+    writing_context_bundle_id:
+      result.writing_context_bundle_id ?? null,
+    ephemeral_context_id:
+      result.ephemeral_context_id ?? null,
+    context_persisted:
+      result.context_persisted === true,
+    writing_context_record_created:
+      result.writing_context_record_created === true,
+    orchestration_owner:
+      result.orchestration_owner ?? "ChatGPT",
+    prose_generator:
+      result.prose_generator ?? "ChatGPT",
+    creative_authority_summary:
+      result.creative_authority_summary ?? null,
+    next_capabilities:
+      Array.isArray(result.next_capabilities)
+        ? [...result.next_capabilities]
+        : [],
+    active_pre_generation_capabilities:
+      Array.isArray(
+        result.active_pre_generation_capabilities,
+      )
+        ? [...result.active_pre_generation_capabilities]
+        : [],
+    pre_generation_compatibility_capabilities:
+      Array.isArray(
+        result.pre_generation_compatibility_capabilities,
+      )
+        ? [...result.pre_generation_compatibility_capabilities]
+        : [],
+    post_draft_diagnostics:
+      Array.isArray(result.post_draft_diagnostics)
+        ? [...result.post_draft_diagnostics]
+        : [],
+    diagnostic_activation:
+      result.diagnostic_activation ?? null,
+    planned_canon_coverage:
+      result.planned_canon_coverage ?? null,
+    context_composition_summary: {
+      detail_level: "metadata_only",
+      duplicate_source_count:
+        Array.isArray(composition.duplicate_sources)
+          ? composition.duplicate_sources.length
+          : 0,
+      section_budget_count:
+        composition.section_budgets
+        && typeof composition.section_budgets === "object"
+          ? Object.keys(composition.section_budgets).length
+          : 0,
+    },
+    bootstrap_surface: {
+      detail_level: "metadata_only",
+      persisted_bundle_retains_full_context:
+        result.context_persisted === true,
+      omitted_detail_fields: [
+        "creative_authority",
+        "creative_space_policy",
+        "original_candidate_policy",
+        "backend_authority",
+        "external_research",
+        "planned_entity_hydration",
+        "context_composition",
+      ],
+    },
+    mutation_guards: mutationGuards,
+    ...mutationGuards,
+    blocked: false,
+    blocked_reason: null,
+  };
+}
 export async function chatgpt_bridge_begin_external_brain_writing_session(input = {}, options = {}) {
   try {
     // This architecture-primary bootstrap deliberately bypasses the legacy bridge
     // diagnostics envelope. The opaque IDs must remain at the top level of a small
     // connector handoff; the persisted bundle stays inside Writer Workbench.
-    return await beginChatgptOwnedExternalBrainWritingSession(input, options);
+    const result =
+      await beginChatgptOwnedExternalBrainWritingSession(
+        input,
+        options,
+      );
+    return compactExternalBrainBootstrapForMcp(result);
   } catch (error) {
     return {
       ok: false,

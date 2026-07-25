@@ -90,7 +90,7 @@ const result = await buildChatgptNativeNeuralWritingHandoff({
 
 assert.equal(receivedContextInput.output_mode, "chat_only");
 assert.equal(receivedContextInput.task_prompt, fakeBundle.task_prompt);
-assert.equal(receivedContextInput.include_active_engine, false);
+assert.equal(receivedContextInput.include_active_engine, true);
 assert.equal(receivedContextInput.include_proofing_card, false);
 assert.equal(result.tool_name, "chatgpt_bridge_build_full_neural_writing_handoff");
 assert.equal(result.status, "ready_for_chatgpt_native_generation");

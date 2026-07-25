@@ -12,6 +12,7 @@ import { saveChatOutputAsProofReport } from "./candidate-proof-report-service.mj
 import { saveChatOutputAsWritingCandidate } from "./chat-output-candidate-service.mjs";
 import { buildGptWritingContext } from "./gpt-writing-context-service.mjs";
 import { runFullRecursiveWritingPipeline } from "./full-recursive-writing-pipeline-service.mjs";
+import { buildMedicalContinuitySnapshot } from "./medical-continuity-service.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -220,6 +221,59 @@ export async function getChatgptBridgeWorkbenchStatus(options = {}) {
   };
 }
 
+function compactMedicalContinuitySnapshot(snapshot = {}) {
+  const statuses = Array.isArray(snapshot.character_statuses)
+    ? snapshot.character_statuses
+    : [];
+  const warnings = Array.isArray(snapshot.warnings)
+    ? snapshot.warnings
+    : [];
+
+  return {
+    schema_version: snapshot.schema_version ?? null,
+    policy_id: snapshot.policy_id ?? null,
+    source_authority: snapshot.source_authority ?? null,
+    character_status_count: statuses.length,
+    character_statuses: statuses.map((status = {}) => ({
+      status_id: status.status_id ?? null,
+      character: status.character ?? null,
+      injury_class: status.injury_class ?? null,
+      severity: status.severity ?? null,
+      active_restriction_count: Array.isArray(status.active_restrictions)
+        ? status.active_restrictions.length
+        : 0,
+      follow_up_required: status.follow_up_required ?? null,
+      daily_activity_clearance: status.daily_activity_clearance ?? null,
+      training_clearance: status.training_clearance ?? null,
+      competition_clearance: status.competition_clearance ?? null,
+      weapon_summon_clearance: status.weapon_summon_clearance ?? null,
+      high_load_manifestation_clearance:
+        status.high_load_manifestation_clearance ?? null,
+      status_as_of_chapter: status.status_as_of_chapter ?? null,
+      evidence_complete: status.evidence_complete ?? null,
+    })),
+    provenance: snapshot.provenance ?? null,
+    warning_count: warnings.length,
+    warnings: warnings
+      .slice(0, 8)
+      .map((item) => String(item).slice(0, 240)),
+    detail_level: "metadata_only",
+    omitted_detail_fields: [
+      "injury_history",
+      "current_physical_status",
+      "current_spiritual_status",
+      "treatment_method",
+      "follow_up_result",
+      "expected_recovery_window",
+      "special_interference",
+      "exception_reason",
+      "last_confirmed_evidence",
+      "historical_consequences",
+      "evidence",
+      "missing_evidence",
+    ],
+  };
+}
 export async function getChatgptBridgeCurrentInputs(rawInput = {}, options = {}) {
   if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
     throw new Error("input must be an object.");
@@ -258,6 +312,10 @@ export async function getChatgptBridgeCurrentInputs(rawInput = {}, options = {})
   const activeEnginePath = options.activeEnginePath
     ? assertPathInside(options.activeEnginePath, projectPaths.canonDb, "active engine test path")
     : projectPaths.activeEngine;
+  const medicalContinuity = await buildMedicalContinuitySnapshot({
+    ...(options.medicalContinuityOptions ?? {}),
+    activeEnginePath,
+  });
   return {
     inputs: Object.fromEntries(inputs),
     // Provide a bounded task_prompt preview and metadata for bridge consumers.
@@ -273,6 +331,17 @@ export async function getChatgptBridgeCurrentInputs(rawInput = {}, options = {})
     active_engine: includeActiveEngineMetadata
       ? await fileSnapshot(activeEnginePath, includeActiveEngineText, maxChars)
       : null,
+    medical_continuity: includeText
+      ? {
+        schema_version: medicalContinuity.schema_version,
+        policy_id: medicalContinuity.policy_id,
+        source_authority: medicalContinuity.source_authority,
+        character_statuses: medicalContinuity.character_statuses,
+        provenance: medicalContinuity.provenance,
+        warnings: medicalContinuity.warnings,
+        detail_level: "full",
+      }
+      : compactMedicalContinuitySnapshot(medicalContinuity),
     max_chars: maxChars,
     safety: chatgptBridgeSafety,
   };

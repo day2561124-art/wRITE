@@ -289,6 +289,22 @@ try {
     character.capability_output.next_turn_reaction.likely_action,
     "視線移開",
   );
+  assert.equal(
+    character.capability_output.character_canon_grounding_loaded,
+    false,
+    "character capability retained unrelated canon hard facts",
+  );
+  assert.equal(
+    character.capability_output.character_canon_grounding_count,
+    0,
+  );
+  assert.equal(
+    Object.hasOwn(
+      character.capability_output,
+      "character_hard_facts",
+    ),
+    false,
+  );
 
   const critic = await chatgpt_bridge_use_neural_critic({
     external_brain_session_id: session.external_brain_session_id,
@@ -298,6 +314,22 @@ try {
   assert.equal(
     critic.capability_output.draft_evidence_status,
     "not_available_pre_generation",
+  );
+  assert.equal(
+    critic.capability_output.character_canon_grounding_loaded,
+    false,
+    "neural critic retained unrelated canon hard facts",
+  );
+  assert.equal(
+    critic.capability_output.character_canon_grounding_count,
+    0,
+  );
+  assert.equal(
+    Object.hasOwn(
+      critic.capability_output,
+      "character_hard_facts",
+    ),
+    false,
   );
 
   const style = await chatgpt_bridge_use_style_drift_detector({
@@ -386,6 +418,22 @@ try {
   assert.equal(
     director.capability_output.generation_card.next_natural_turn,
     "乙停頓，不立即解釋",
+  );
+  assert.equal(
+    director.capability_output.character_canon_grounding_loaded,
+    false,
+    "writing card director retained unrelated canon hard facts",
+  );
+  assert.equal(
+    director.capability_output.character_canon_grounding_count,
+    0,
+  );
+  assert.equal(
+    Object.hasOwn(
+      director.capability_output,
+      "character_hard_facts",
+    ),
+    false,
   );
   const directorVisible = JSON.stringify(director.capability_output);
   for (const unrelated of [

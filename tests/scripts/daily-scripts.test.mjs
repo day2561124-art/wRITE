@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(__filename), "..", "..");
-const expectedHash = "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB";
+const expectedHash = "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8";
 const scriptNames = [
   "safe-status.ps1",
   "daily-health-check.ps1",

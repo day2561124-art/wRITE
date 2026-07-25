@@ -1,0 +1,637 @@
+{
+  "schema_version": 1,
+  "policy_id": "RULE-MEDICAL-CONTINUITY-HIGHTECH-V1",
+  "mode": "derived_normalization_and_candidate_source",
+  "source_authority": "active_engine_plus_latest_settled_continuity",
+  "direct_canon_write_allowed": false,
+  "candidate_review_required": true,
+  "recovery_policy": {
+    "care_systems": [
+      "高科技生體醫療",
+      "靈力醫療",
+      "治療型異能武裝"
+    ],
+    "capabilities": [
+      "靈力與生體同步掃描",
+      "快速辨識骨折、內出血、神經、肌肉、血管與靈力失衡",
+      "智慧止血與血管封合",
+      "生體清創與異常靈力污染分離",
+      "自動對位縫合與組織接合",
+      "組織再生設備",
+      "骨骼復位、固定與再生刺激",
+      "神經及肌腱接合",
+      "智慧敷料、護具與負荷監測",
+      "武裝召喚時的傷處負荷監控",
+      "營養、血液、靈力與生命狀態補充"
+    ],
+    "treatment_costs": [
+      "體力",
+      "熱量與營養",
+      "水分",
+      "靈力",
+      "精神集中",
+      "治療者負荷",
+      "設備資源與觀察時間"
+    ],
+    "recovery_windows": {
+      "superficial_abrasion_or_shallow_cut": {
+        "daily_activity_hours_max": 24,
+        "high_load_hours_min": 12,
+        "high_load_hours_max": 24,
+        "requires_follow_up_for_high_load": false,
+        "label": "當日處理，通常當日或翌日恢復"
+      },
+      "sutured_laceration": {
+        "daily_activity_hours_max": 24,
+        "high_load_hours_min": 24,
+        "high_load_hours_max": 72,
+        "requires_follow_up_for_high_load": true,
+        "label": "日常通常當日至翌日；正式高負荷約一至三日並視複查"
+      },
+      "mild_contusion": {
+        "daily_activity_hours_max": 24,
+        "high_load_hours_min": 6,
+        "high_load_hours_max": 24,
+        "requires_follow_up_for_high_load": false,
+        "label": "數小時至翌日"
+      },
+      "mild_to_moderate_sprain": {
+        "daily_activity_hours_max": 72,
+        "high_load_hours_min": 24,
+        "high_load_hours_max": 72,
+        "requires_follow_up_for_high_load": true,
+        "label": "日常約一至三日；高精度或高負荷活動需複查"
+      },
+      "moderate_muscle_tear": {
+        "daily_activity_hours_max": 72,
+        "high_load_hours_min": 72,
+        "high_load_hours_max": 168,
+        "requires_follow_up_for_high_load": true,
+        "label": "日常約一至三日；高負荷約三至七日"
+      },
+      "ordinary_fracture": {
+        "daily_activity_hours_max": 168,
+        "high_load_hours_min": 72,
+        "high_load_hours_max": 336,
+        "requires_follow_up_for_high_load": true,
+        "label": "可快速復位與初步再生；日常功能約數日，正式競技另行檢查"
+      }
+    },
+    "ordinary_injury_classes": [
+      "superficial_abrasion_or_shallow_cut",
+      "sutured_laceration",
+      "mild_contusion",
+      "mild_to_moderate_sprain",
+      "moderate_muscle_tear",
+      "ordinary_fracture"
+    ],
+    "excluded_from_ordinary_cleanup": [
+      "nerve_precision_injury",
+      "tendon_injury",
+      "organ_injury",
+      "weapon_body_damage",
+      "source_damage",
+      "soul_damage",
+      "pollution",
+      "unclassified_spiritual_residue",
+      "reversal_imbalance",
+      "treatment_completion_blocked",
+      "explicit_long_term_injury"
+    ],
+    "extension_reasons": [
+      "treatment_obstructed",
+      "reinjury",
+      "continued_ability_use",
+      "spiritual_backflow",
+      "unknown_pollution",
+      "weapon_resonance_anomaly",
+      "nerve_or_source_damage",
+      "treatment_completion_blocked",
+      "explicit_long_term_canon",
+      "active_continuity_overlay"
+    ],
+    "clearance_axes": [
+      "daily_activity_clearance",
+      "low_load_training_clearance",
+      "training_clearance",
+      "competition_clearance",
+      "weapon_summon_clearance",
+      "high_load_manifestation_clearance"
+    ],
+    "clearance_values": [
+      "unknown",
+      "not_recorded",
+      "not_applicable",
+      "deferred",
+      "cleared"
+    ],
+    "preserved_consequences": [
+      "已成立的敗北或中止",
+      "缺席或錯失的場次",
+      "公開紀錄",
+      "已暴露的戰術",
+      "人際關係與心理後座",
+      "治療造成的疲倦、飢餓或靈力低下",
+      "對再次受傷的警覺",
+      "尚未恢復的精密控制",
+      "尚未核發的競技資格"
+    ]
+  },
+  "character_statuses": [
+    {
+      "status_id": "MED-STATUS-JIUTAO-CH25",
+      "character": "九逃",
+      "injury_history": [
+        {
+          "event_id": "JIUTAO-OLD-LEFT-SHOULDER",
+          "chapter": "第五至六章",
+          "injury_class": "ordinary_short_term_load",
+          "affected_body_parts": [
+            "左肩"
+          ],
+          "severity": "mild",
+          "treatment_completed": true,
+          "history_status": "resolved",
+          "resolved_at": "before_chapter_19",
+          "resolution_basis": "active_engine_3.4_resolved_short_term_index"
+        },
+        {
+          "event_id": "JIUTAO-CH19-FOREARM-SHOULDER",
+          "chapter": "第十九章",
+          "injury_class": "sutured_laceration",
+          "affected_body_parts": [
+            "左前臂",
+            "左肩外側"
+          ],
+          "severity": "mild_to_moderate",
+          "treatment_completed": true,
+          "treatment_method": [
+            "清創",
+            "縫合",
+            "靈力穩定"
+          ],
+          "historical_restrictions": [
+            "左臂當晚不能沾水",
+            "當日不得再進訓練場"
+          ],
+          "history_status": "resolved_from_active_restriction"
+        }
+      ],
+      "current_physical_status": "recovered_stable",
+      "current_spiritual_status": "stable",
+      "injury_class": "ordinary_treated_laceration_history",
+      "affected_body_parts": [
+        "左前臂",
+        "左肩外側"
+      ],
+      "severity": "mild_to_moderate_history",
+      "treatment_completed": true,
+      "treatment_method": [
+        "清創",
+        "縫合",
+        "靈力穩定"
+      ],
+      "active_restrictions": [],
+      "follow_up_required": true,
+      "follow_up_result": "not_recorded",
+      "daily_activity_clearance": "cleared",
+      "low_load_training_clearance": "not_recorded",
+      "training_clearance": "not_recorded",
+      "competition_clearance": "not_recorded",
+      "weapon_summon_clearance": "not_recorded",
+      "high_load_manifestation_clearance": "not_recorded",
+      "weapon_control_impact": "not_recorded",
+      "expected_recovery_window": "sutured_laceration",
+      "special_interference": "not_recorded",
+      "exception_reason": "none_confirmed",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "現行正式狀態",
+          "match": "作中時間頭已晚於第二十一章成立之正式選拔第二日個人戰第三場"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "3.2｜現行已成立狀態與禁止誤寫",
+          "match": "九逃成立左前臂裂傷、左肩外側切創"
+        }
+      ],
+      "resolved_at": "by_chapter_25_time_head",
+      "resolution_basis": "ordinary_recovery_policy_with_next_day_or_later_formal_anchor",
+      "historical_consequences": [
+        "第十九章正式勝負與裁定中止仍成立",
+        "場後關係與心理後座仍成立",
+        "複查結果尚無正式紀錄，競技許可不得推定"
+      ]
+    },
+    {
+      "status_id": "MED-STATUS-CHIYO-CH25",
+      "character": "朝日奈千夜",
+      "injury_history": [
+        {
+          "event_id": "CHIYO-CH19-RIB-WRIST-KNEE",
+          "chapter": "第十九章",
+          "injury_class": "mild_contusion_and_sprain",
+          "affected_body_parts": [
+            "左肋",
+            "右腕",
+            "右膝"
+          ],
+          "severity": "mild_to_moderate",
+          "treatment_completed": true,
+          "treatment_method": [
+            "右腕固定",
+            "右膝冰敷",
+            "醫療觀察"
+          ],
+          "historical_restrictions": [
+            "當日停止所有武裝訓練",
+            "次日上午複查"
+          ],
+          "history_status": "resolved_from_same_day_restriction"
+        }
+      ],
+      "current_physical_status": "stable_without_active_ordinary_restriction",
+      "current_spiritual_status": "stable",
+      "injury_class": "ordinary_treated_contusion_and_sprain_history",
+      "affected_body_parts": [
+        "左肋",
+        "右腕",
+        "右膝"
+      ],
+      "severity": "mild_to_moderate_history",
+      "treatment_completed": true,
+      "treatment_method": [
+        "固定",
+        "冰敷",
+        "觀察"
+      ],
+      "active_restrictions": [],
+      "follow_up_required": true,
+      "follow_up_result": "not_recorded",
+      "daily_activity_clearance": "cleared",
+      "low_load_training_clearance": "not_recorded",
+      "training_clearance": "not_recorded",
+      "competition_clearance": "not_recorded",
+      "weapon_summon_clearance": "not_recorded",
+      "high_load_manifestation_clearance": "not_recorded",
+      "weapon_control_impact": "not_recorded",
+      "expected_recovery_window": "mild_to_moderate_sprain",
+      "special_interference": "not_recorded",
+      "exception_reason": "none_confirmed",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "現行正式狀態",
+          "match": "作中時間頭已晚於第二十一章成立之正式選拔第二日個人戰第三場"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "第十九章｜第一聲鈴｜正式結算",
+          "match": "千夜成立左肋挫傷無骨折跡象、右腕扭傷／挫扭、右膝撞擊"
+        }
+      ],
+      "resolved_at": "by_chapter_25_time_head",
+      "resolution_basis": "same_day_orders_expired_under_ordinary_recovery_policy",
+      "historical_consequences": [
+        "敗北與裁定中止仍成立",
+        "頸部受制只屬戰鬥控制狀態，不建立頸椎傷勢",
+        "武裝精密控制、訓練與競技許可須各自有正式證據"
+      ]
+    },
+    {
+      "status_id": "MED-STATUS-MAOLANG-CH25",
+      "character": "貓狼",
+      "injury_history": [
+        {
+          "event_id": "MAOLANG-CH23-SURFACE-INJURIES",
+          "chapter": "第二十三章",
+          "injury_class": "treated_surface_and_compression_injuries",
+          "affected_body_parts": [
+            "左腳踝",
+            "右腕",
+            "左臂",
+            "頸側表皮"
+          ],
+          "severity": "mild_to_moderate",
+          "treatment_completed": true,
+          "treatment_method": [
+            "已接受治療"
+          ],
+          "history_status": "treated_recovery_status_not_recorded"
+        }
+      ],
+      "current_physical_status": "treated_recovery_status_not_recorded",
+      "current_spiritual_status": "not_recorded",
+      "injury_class": "ordinary_treated_surface_and_compression_injuries",
+      "affected_body_parts": [
+        "左腳踝",
+        "右腕",
+        "左臂",
+        "頸側表皮"
+      ],
+      "severity": "mild_to_moderate",
+      "treatment_completed": true,
+      "treatment_method": [
+        "已接受治療"
+      ],
+      "active_restrictions": [],
+      "follow_up_required": "not_recorded",
+      "follow_up_result": "not_recorded",
+      "daily_activity_clearance": "unknown",
+      "low_load_training_clearance": "not_recorded",
+      "training_clearance": "not_recorded",
+      "competition_clearance": "not_recorded",
+      "weapon_summon_clearance": "not_recorded",
+      "high_load_manifestation_clearance": "not_recorded",
+      "weapon_control_impact": "unknown",
+      "expected_recovery_window": "superficial_abrasion_or_shallow_cut_to_sutured_laceration",
+      "special_interference": "not_recorded",
+      "exception_reason": "recovery_time_anchor_missing",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "現行正式狀態",
+          "match": "貓狼左腳踝割傷、右腕與左臂有勒傷、頸側僅表皮傷，兩人均已接受治療"
+        }
+      ],
+      "resolved_at": "not_recorded",
+      "resolution_basis": "recovery_time_anchor_missing_no_long_term_inference",
+      "historical_consequences": [
+        "主動認輸與公開結果仍成立",
+        "高速落地、雙槍精密操作與日常走路許可分開"
+      ]
+    },
+    {
+      "status_id": "MED-STATUS-XUEDI-CH25",
+      "character": "雪弟",
+      "injury_history": [
+        {
+          "event_id": "XUEDI-EARLY-RIGHT-HAND-NUMBNESS",
+          "chapter": "第四章",
+          "injury_class": "ordinary_short_term_neuromuscular_load",
+          "affected_body_parts": [
+            "右手"
+          ],
+          "severity": "mild",
+          "treatment_completed": true,
+          "history_status": "resolved",
+          "resolved_at": "before_chapter_19",
+          "resolution_basis": "active_engine_3.4_resolved_short_term_index"
+        },
+        {
+          "event_id": "XUEDI-CH23-THIGH-SHOULDER",
+          "chapter": "第二十三章",
+          "injury_class": "moderate_treated_tear_and_contusion",
+          "affected_body_parts": [
+            "右大腿",
+            "左肩"
+          ],
+          "severity": "moderate",
+          "treatment_completed": true,
+          "treatment_method": [
+            "止血",
+            "縫合",
+            "已接受治療"
+          ],
+          "history_status": "treated_recovery_status_not_recorded"
+        }
+      ],
+      "current_physical_status": "treated_recovery_status_not_recorded",
+      "current_spiritual_status": "not_recorded",
+      "injury_class": "moderate_treated_tear_and_contusion",
+      "affected_body_parts": [
+        "右大腿",
+        "左肩"
+      ],
+      "severity": "moderate",
+      "treatment_completed": true,
+      "treatment_method": [
+        "止血",
+        "縫合",
+        "已接受治療"
+      ],
+      "active_restrictions": [],
+      "follow_up_required": "not_recorded",
+      "follow_up_result": "not_recorded",
+      "daily_activity_clearance": "unknown",
+      "low_load_training_clearance": "not_recorded",
+      "training_clearance": "not_recorded",
+      "competition_clearance": "not_recorded",
+      "weapon_summon_clearance": "not_recorded",
+      "high_load_manifestation_clearance": "not_recorded",
+      "weapon_control_impact": "unknown",
+      "expected_recovery_window": "moderate_muscle_tear",
+      "special_interference": "not_recorded",
+      "exception_reason": "recovery_time_anchor_missing",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "現行正式狀態",
+          "match": "雪弟右大腿撕裂需止血縫合、左肩有鈍擊與撕裂"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "全章正式進度索引",
+          "match": "雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可"
+        }
+      ],
+      "resolved_at": "not_recorded",
+      "resolution_basis": "recovery_time_anchor_missing_no_full_recovery_or_long_term_disability_inference",
+      "historical_consequences": [
+        "勝出與以傷換控制的戰術暴露仍成立",
+        "日常行走、肩臂活動、絲線／人偶控制與正式競技許可分開",
+        "沒有正式證據時不補寫肌腱、血管、神經或深層肌肉損傷"
+      ]
+    },
+    {
+      "status_id": "MED-STATUS-MISAKI-CH25",
+      "character": "御先",
+      "injury_history": [
+        {
+          "event_id": "MISAKI-OLD-NECK-SPIRITUAL-BURN",
+          "chapter": "not_recorded",
+          "injury_class": "spiritual_burn_history",
+          "affected_body_parts": [
+            "頸側"
+          ],
+          "severity": "not_recorded",
+          "treatment_completed": "not_recorded",
+          "history_status": "deferred_source_verification",
+          "resolved_at": "not_recorded",
+          "resolution_basis": "not_present_in_current_formal_sources"
+        },
+        {
+          "event_id": "MISAKI-PALM-SCAR",
+          "chapter": "not_recorded",
+          "injury_class": "physical_scar_history",
+          "affected_body_parts": [
+            "掌心"
+          ],
+          "severity": "not_recorded",
+          "treatment_completed": "not_recorded",
+          "history_status": "deferred_source_verification",
+          "resolved_at": "not_recorded",
+          "resolution_basis": "not_present_in_current_formal_sources"
+        },
+        {
+          "event_id": "MISAKI-WEAPON-RELEASE-RESIDUE",
+          "chapter": "第二十二至二十三章",
+          "injury_class": "unclassified_spiritual_residue",
+          "affected_body_parts": [
+            "武裝解除末段"
+          ],
+          "severity": "unknown",
+          "treatment_completed": "not_applicable",
+          "history_status": "unresolved"
+        },
+        {
+          "event_id": "MISAKI-BOARD-BLACK-MARK",
+          "chapter": "第二十四至二十五章",
+          "injury_class": "external_object_anomaly",
+          "affected_body_parts": [
+            "棋盤與棋子"
+          ],
+          "severity": "unknown",
+          "treatment_completed": "not_applicable",
+          "history_status": "unresolved_not_attributed_to_character"
+        }
+      ],
+      "current_physical_status": "normal_on_latest_exam",
+      "current_spiritual_status": "unresolved_unclassified_weapon_release_residue",
+      "injury_class": "unclassified_spiritual_residue",
+      "affected_body_parts": [
+        "武裝解除末段"
+      ],
+      "severity": "unknown",
+      "treatment_completed": "not_applicable",
+      "treatment_method": [
+        "監測",
+        "追加比對",
+        "保守觀察"
+      ],
+      "active_restrictions": [
+        {
+          "restriction_id": "MISAKI-NO-TEST-AREA-ENTRY",
+          "scope": "不得自行進入檢測區",
+          "status": "active",
+          "source_chapter": "第二十五章"
+        },
+        {
+          "restriction_id": "MISAKI-NO-BOARD-REPRODUCTION",
+          "scope": "不得使用其他棋盤自行重現",
+          "status": "active",
+          "source_chapter": "第二十五章"
+        }
+      ],
+      "follow_up_required": true,
+      "follow_up_result": "deferred",
+      "daily_activity_clearance": "cleared",
+      "low_load_training_clearance": "deferred",
+      "training_clearance": "deferred",
+      "competition_clearance": "deferred",
+      "weapon_summon_clearance": "deferred",
+      "high_load_manifestation_clearance": "deferred",
+      "weapon_control_impact": "unknown",
+      "expected_recovery_window": "not_applicable",
+      "special_interference": "unclassified_spiritual_residue",
+      "exception_reason": "excluded_from_ordinary_cleanup",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "現行正式狀態",
+          "match": "武裝解除末段之未分類靈力殘痕待追加比對"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "最新正式章節承接",
+          "match": "她的體檢指標正常"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "最新正式章節承接",
+          "match": "未測得可指向個人的靈力殘留"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "最新正式章節承接",
+          "match": "同類特徵至少在御先入學以前便曾出現"
+        },
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "最新正式章節承接",
+          "match": "不得自行前往檢測區或使用其他棋盤重現現象"
+        }
+      ],
+      "resolved_at": "not_recorded",
+      "resolution_basis": "ordinary_cleanup_forbidden_for_unclassified_spiritual_residue",
+      "historical_consequences": [
+        "普通物理檢查指標正常，沒有確認中的普通肉體傷勢",
+        "棋盤黑紋屬外部物件異常，不得歸因於御先",
+        "同類黑紋早於御先入學存在",
+        "來源不明時只監測與比對，不以醫療強行清除"
+      ]
+    },
+    {
+      "status_id": "MED-STATUS-SAYA-RESOLVED",
+      "character": "伊吹沙耶",
+      "injury_history": [
+        {
+          "event_id": "SAYA-EARLY-RIGHT-WRIST",
+          "chapter": "第八至九章",
+          "injury_class": "ordinary_short_term_wrist_restriction",
+          "affected_body_parts": [
+            "右腕"
+          ],
+          "severity": "mild",
+          "treatment_completed": true,
+          "history_status": "resolved",
+          "resolved_at": "第九章",
+          "resolution_basis": "formal_follow_up_passed_and_pause_lifted"
+        }
+      ],
+      "current_physical_status": "no_active_ordinary_injury_recorded",
+      "current_spiritual_status": "not_recorded",
+      "injury_class": "resolved_history_only",
+      "affected_body_parts": [
+        "右腕"
+      ],
+      "severity": "resolved",
+      "treatment_completed": true,
+      "treatment_method": [
+        "複查"
+      ],
+      "active_restrictions": [],
+      "follow_up_required": false,
+      "follow_up_result": "cleared",
+      "daily_activity_clearance": "cleared",
+      "low_load_training_clearance": "not_applicable",
+      "training_clearance": "not_recorded",
+      "competition_clearance": "not_recorded",
+      "weapon_summon_clearance": "not_recorded",
+      "high_load_manifestation_clearance": "not_recorded",
+      "weapon_control_impact": "not_applicable",
+      "expected_recovery_window": "resolved",
+      "special_interference": "not_applicable",
+      "exception_reason": "not_applicable",
+      "status_as_of_chapter": "第二十五章",
+      "last_confirmed_evidence": [
+        {
+          "source_file": "data/canon_db/active_engine.md",
+          "source_section": "角色總表",
+          "match": "右腕複查通過並解除短期暫停"
+        }
+      ],
+      "resolved_at": "第九章",
+      "resolution_basis": "formal_follow_up_passed_and_pause_lifted",
+      "historical_consequences": [
+        "右腕事件只保留歷史，不得重新進入 active state"
+      ]
+    }
+  ]
+}

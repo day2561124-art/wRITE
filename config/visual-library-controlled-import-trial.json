@@ -12,7 +12,7 @@
   "approval_queue_root": "data/approval_queue",
   "canon_db_root": "data/canon_db",
   "trial_output_root": "data/outputs/runs/visual_library_phase19g",
-  "expected_engine_sha256_lf": "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB",
+  "expected_engine_sha256_lf": "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8",
   "expected_compressed_rules_sha256_lf": "04D090072759CE46C4E9D4020BD78AD00A6F8215FE9DB8AF66DE0F3C6183AFEA",
   "required_simulation_confirmation_text": "確認模擬視覺匯入",
   "required_pre_write_confirmation_text": "確認進入視覺正式匯入準備",

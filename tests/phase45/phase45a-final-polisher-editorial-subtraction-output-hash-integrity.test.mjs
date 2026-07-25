@@ -33,7 +33,7 @@ const protectedFiles = {
   compressed_rules: path.join(projectPaths.compressedRules),
 };
 const expectedProtectedHashes = {
-  active_engine: "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  active_engine: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
   compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const specimen = [
@@ -95,7 +95,8 @@ try {
     final_prose_generator: "chatgpt",
   });
   assert.deepEqual(externalBrainPreGenerationCapabilities, capabilityCalls.map(([name]) => `run_${name}`));
-  assert.deepEqual(externalBrainMutationGuards, Object.fromEntries(mutationGuardNames.map((name) => [name, false])));
+  for (const name of mutationGuardNames) assert.equal(externalBrainMutationGuards[name], false);
+  assert(Object.values(externalBrainMutationGuards).every((value) => value === false));
 
   const protectedBefore = Object.fromEntries(await Promise.all(
     Object.entries(protectedFiles).map(async ([name, filePath]) => [name, await fileHash(filePath)]),

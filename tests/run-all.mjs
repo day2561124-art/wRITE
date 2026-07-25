@@ -44,6 +44,8 @@ const steps = [
 
   ["Engine candidate service", ["tests/canon/engine-candidate-service.test.mjs"]],
 
+  ["High-tech medical continuity normalization", ["tests/medical/medical-continuity-service.test.mjs"]],
+
   ["Writing workflow service", ["tests/workflow/writing-workflow-service.test.mjs"]],
 
   ["Settlement workflow service", ["tests/workflow/settlement-workflow-service.test.mjs"]],
@@ -294,7 +296,9 @@ const steps = [
 
   "tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs",
 
-  "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs"]],
+  "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs",
+
+  "tests/phase33/phase33j-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure-readiness.test.mjs"]],
 
   ["Phase 34A full neural writing pipeline single entry bridge", ["tests/phase34/phase34a-full-neural-writing-pipeline-single-entry-bridge.test.mjs"]],
 

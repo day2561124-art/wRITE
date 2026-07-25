@@ -276,18 +276,22 @@ function entityRecord({
   const corroborated = exactExcerptCurrent || Boolean(boundedCurrentSection);
   if (registryStale && !corroborated) return null;
   const factualContent = normalizeEvidence(
-    exactExcerptCurrent
-      ? entity.source_excerpt
-      : boundedCurrentSection || entity.source_excerpt,
+    entity.state_model_version
+      ? entity.description
+      : exactExcerptCurrent
+        ? entity.source_excerpt
+        : boundedCurrentSection || entity.source_excerpt,
   );
   if (!factualContent) return null;
-  return {
+  const record = {
     entity_id: entity.entity_id,
     category,
     name: entity.canonical_name,
     content: factualContent,
     source: {
-      kind: "active_engine_bounded_retrieval",
+      kind: entity.state_model_version
+        ? "active_engine_derived_medical_status"
+        : "active_engine_bounded_retrieval",
       path: activeEnginePath,
       section: entity.source_section ?? null,
       anchor: entity.source_anchor ?? null,
@@ -309,6 +313,47 @@ function entityRecord({
       },
     ],
   };
+  if (entity.state_model_version) {
+    record.structured_status = Object.fromEntries([
+      "state_model_version",
+      "status_id",
+      "injury_history",
+      "current_physical_status",
+      "current_spiritual_status",
+      "injury_class",
+      "affected_body_parts",
+      "severity",
+      "treatment_completed",
+      "treatment_method",
+      "active_restrictions",
+      "follow_up_required",
+      "follow_up_result",
+      "daily_activity_clearance",
+      "low_load_training_clearance",
+      "training_clearance",
+      "competition_clearance",
+      "weapon_summon_clearance",
+      "high_load_manifestation_clearance",
+      "weapon_control_impact",
+      "expected_recovery_window",
+      "special_interference",
+      "exception_reason",
+      "status_as_of_chapter",
+      "last_confirmed_evidence",
+      "resolved_at",
+      "resolution_basis",
+      "historical_consequences",
+    ].map((field) => [field, entity[field]]));
+    record.provenance.push({
+      source: entity.normalization_provenance?.config_path
+        ?? "config/medical-continuity.json",
+      source_hash: entity.normalization_provenance?.config_hash_sha256 ?? null,
+      freshness: "current",
+      authority: "derived_medical_continuity_normalization",
+      direct_canon_write_allowed: false,
+    });
+  }
+  return record;
 }
 
 function exactEntity(records, name) {
@@ -321,6 +366,12 @@ function exactEntity(records, name) {
 }
 
 function statusScore(entity, character, query) {
+  if (
+    entity.state_model_version
+    && !entity.related_characters?.includes(character)
+  ) {
+    return -1;
+  }
   const text = [
     entity.canonical_name,
     entity.source_section,
@@ -328,6 +379,7 @@ function statusScore(entity, character, query) {
   ].join("\n");
   if (!text.includes(character)) return -1;
   let score = 0;
+  if (entity.state_model_version === "medical-continuity-v1") score += 500;
   if (entity.resolved === false) score += 80;
   if (/現行已成立狀態|目前|當前/u.test(text)) score += 80;
   if (/傷勢|受傷|裂傷|切創|醫療|清創|縫合/u.test(query)) {

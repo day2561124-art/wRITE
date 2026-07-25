@@ -253,7 +253,10 @@ const serviceSource = await readFile(
   "utf8",
 );
 assert.match(serviceSource, /function buildChatgptNativeConsumerContract\(input\)/u);
-assert.match(serviceSource, /chatgpt_native_consumer_contract: buildChatgptNativeConsumerContract\(input\)/u);
+assert.match(
+  serviceSource,
+  /chatgpt_native_consumer_contract:\s*buildChatgptNativeConsumerContract\(\s*effectiveInput\s*\)/u,
+);
 assert.match(serviceSource, /must_not_emit_engineering_explanation/u);
 assert.match(serviceSource, /must_not_request_backend_provider/u);
 

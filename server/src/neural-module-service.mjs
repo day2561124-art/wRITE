@@ -210,6 +210,150 @@ function diagnosticCapabilityInput(input = {}) {
   return objectValue(input);
 }
 
+function normalizedPreAdapterCharacterName(value) {
+  const text = String(value ?? "").trim();
+  return text
+    ? text
+      .normalize("NFKC")
+      .toLocaleLowerCase("zh-Hant-TW")
+    : null;
+}
+
+function preAdapterCharacterNamesFromValue(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.flatMap(
+      preAdapterCharacterNamesFromValue,
+    );
+  }
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+  ) {
+    return [];
+  }
+  return [
+    value.character,
+    value.character_name,
+    value.characterName,
+    value.canonical_name,
+    value.name,
+  ].flatMap(preAdapterCharacterNamesFromValue);
+}
+
+function preAdapterExplicitCharacterNames(input = {}) {
+  const nested = objectValue(input.capability_input);
+  const names = [
+    nested.character,
+    nested.character_name,
+    nested.characterName,
+    nested.responding_character,
+    nested.respondingCharacter,
+    nested.active_character,
+    nested.activeCharacter,
+    nested.active_characters,
+    nested.activeCharacters,
+    nested.focus_characters,
+    nested.focusCharacters,
+    nested.characters,
+  ].flatMap(preAdapterCharacterNamesFromValue);
+
+  return new Set(
+    names
+      .map(normalizedPreAdapterCharacterName)
+      .filter(Boolean),
+  );
+}
+
+function preAdapterCharacterRecordIsRelevant(
+  character = {},
+  input = {},
+  explicitNames = new Set(),
+) {
+  const canonicalName =
+    normalizedPreAdapterCharacterName(
+      character.canonical_name,
+    );
+
+  if (!canonicalName) return false;
+
+  if (explicitNames.has(canonicalName)) {
+    return true;
+  }
+
+  const normalizedTaskPrompt =
+    normalizedPreAdapterCharacterName(
+      input.task_prompt,
+    ) ?? "";
+
+  if (normalizedTaskPrompt.includes(canonicalName)) {
+    return true;
+  }
+
+  const matchSources =
+    Array.isArray(character.match_sources)
+      ? character.match_sources
+      : [];
+
+  if (
+    matchSources.some((source) => (
+      String(source ?? "") === "task_prompt"
+    ))
+  ) {
+    return true;
+  }
+
+  const evidence =
+    Array.isArray(character.mention_evidence)
+      ? character.mention_evidence
+      : [];
+
+  return evidence.some((item) => (
+    String(item?.source ?? "") === "task_prompt"
+  ));
+}
+
+function preAdapterCharacterGroundingSurface(input = {}) {
+  const grounding = objectValue(
+    input.character_canon_grounding
+      ?? input.pre_generation_character_canon_grounding,
+  );
+  const explicitNames =
+    preAdapterExplicitCharacterNames(input);
+  const characterHardFacts =
+    Array.isArray(grounding.characters)
+      ? grounding.characters
+        .map((character) => objectValue(character))
+        .filter((character) => (
+          Object.keys(character).length > 0
+          && preAdapterCharacterRecordIsRelevant(
+            character,
+            input,
+            explicitNames,
+          )
+        ))
+        .map((character) => ({ ...character }))
+      : [];
+
+  return {
+    character_canon_grounding_loaded:
+      grounding.loaded === true
+      && characterHardFacts.length > 0,
+    character_canon_grounding_count:
+      characterHardFacts.length,
+    ...(characterHardFacts.length ? {
+      character_hard_facts: characterHardFacts,
+      ...(Object.hasOwn(
+        grounding,
+        "original_entity_freedom",
+      ) ? {
+        original_entity_freedom:
+          grounding.original_entity_freedom,
+      } : {}),
+    } : {}),
+  };
+}
 function preAdapterPhaseBoundaryOutput(moduleName, input = {}) {
   if (moduleName === "neural_critic") {
     const capabilityInput = diagnosticCapabilityInput(input);
@@ -227,6 +371,7 @@ function preAdapterPhaseBoundaryOutput(moduleName, input = {}) {
           taskPrompt: input.task_prompt ?? "",
           capabilityInput,
         }),
+        ...preAdapterCharacterGroundingSurface(input),
       };
     }
   }

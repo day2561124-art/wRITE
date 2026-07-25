@@ -500,7 +500,7 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     chapter_mode: input.chapterMode,
     output_mode: "chat_only",
     max_context_chars: input.maxContextChars,
-    include_active_engine: false,
+    include_active_engine: true,
     include_writing_card: false,
     include_proofing_card: false,
     include_longline: true,
@@ -519,20 +519,57 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     taskPrompt:
       bundle?.formal_context?.user_request
       ?? bundle?.original_task_prompt
+      ?? bundle?.task_prompt
       ?? input.taskPrompt,
     generationContext:
       bundle?.inputs?.generation_context
+      ?? bundle?.generation_context
       ?? input.generationContext,
     retrievalContext:
       bundle?.inputs?.retrieval_context
+      ?? bundle?.retrieval_context
       ?? input.retrievalContext,
+  };
+
+  const compactVisualUploadedReferences =
+    effectiveInput.retrievalContext?.visual_uploaded_references
+    ?? effectiveInput.generationContext?.visual_uploaded_references
+    ?? bundle?.visual_uploaded_references
+    ?? {
+      loaded: false,
+      reference_count: 0,
+      items: [],
+    };
+
+  const compactBundleExcerpt = {
+    retrieval_context: effectiveInput.retrievalContext ?? {},
+    generation_context: effectiveInput.generationContext ?? {},
+    visual_uploaded_references_loaded:
+      compactVisualUploadedReferences.loaded === true,
+    visual_uploaded_references_count:
+      compactVisualUploadedReferences.reference_count ?? 0,
+    visual_uploaded_references: compactVisualUploadedReferences,
   };
 
   const writingContext = {
     ...(bundle?.formal_context ?? {}),
+    task_prompt: effectiveInput.taskPrompt,
+    active_engine_summary:
+      text(bundle?.content?.active_engine_excerpt_or_reference)
+      || text(
+        bundle?.active_engine_excerpt_or_reference?.text
+        ?? bundle?.active_engine_excerpt_or_reference,
+      ),
+    retrieval_context:
+      text(bundle?.content?.retrieval_context_for_chat)
+      || JSON.stringify(effectiveInput.retrievalContext ?? {}, null, 2),
+    generation_context:
+      text(bundle?.content?.generation_context_for_chat)
+      || JSON.stringify(effectiveInput.generationContext ?? {}, null, 2),
     gpt_writing_context_bundle_id: bundle?.bundle_id ?? contextResult?.bundle_id ?? null,
     context_builder_output_mode: bundle?.output_mode ?? "chat_only",
     context_composition: bundle?.context_composition ?? null,
+    compact_bundle_excerpt: compactBundleExcerpt,
   };
 
   const neuralExecution = await executeChatgptNativeTraceOnlyNeuralModules({

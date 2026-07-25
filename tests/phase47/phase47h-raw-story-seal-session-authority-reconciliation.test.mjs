@@ -118,13 +118,16 @@ try {
   ]);
   assert.equal(externalBrainOwnership.orchestration_owner, "chatgpt");
   assert.equal(externalBrainOwnership.final_prose_generator, "chatgpt");
-  assert.deepEqual(externalBrainMutationGuards, Object.fromEntries([
-    ["candidate_created", false],
-    ["canon_updated", false],
-    ["active_engine_updated", false],
-    ["adopted", false],
-    ["settled", false],
-  ]));
+  for (const guard of [
+    "candidate_created",
+    "canon_updated",
+    "active_engine_updated",
+    "adopted",
+    "settled",
+  ]) {
+    assert.equal(externalBrainMutationGuards[guard], false);
+  }
+  assert(Object.values(externalBrainMutationGuards).every((value) => value === false));
 
   const { session } = await beginReadySession("authoritative seal validation");
   const persistenceRoots = [

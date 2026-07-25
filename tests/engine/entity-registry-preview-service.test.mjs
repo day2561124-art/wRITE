@@ -9,7 +9,7 @@ import {
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
 const expectedActiveEngineHash = (
-  "D797DF085CB179D99E2A7BED9AB4545F6B85E9B276574286DA4174E9538CB6CB"
+  "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8"
 );
 
 function sha256(value) {

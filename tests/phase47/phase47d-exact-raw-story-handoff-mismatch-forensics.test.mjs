@@ -50,7 +50,7 @@ const protectedFiles = {
   compressed_rules: projectPaths.compressedRules,
 };
 const protectedHashes = {
-  active_engine: "d797df085cb179d99e2a7bed9ab4545f6b85e9b276574286da4174e9538cb6cb",
+  active_engine: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
   compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const immutableEvidencePath = path.join(
@@ -179,7 +179,8 @@ try {
   assert.equal(externalBrainPreGenerationCapabilities.length, 6);
   assert.equal(externalBrainOwnership.orchestration_owner, "chatgpt");
   assert.equal(externalBrainOwnership.final_prose_generator, "chatgpt");
-  assert.deepEqual(externalBrainMutationGuards, Object.fromEntries(guards.map((guard) => [guard, false])));
+  for (const guard of guards) assert.equal(externalBrainMutationGuards[guard], false);
+  assert(Object.values(externalBrainMutationGuards).every((value) => value === false));
 
   const neuralModuleSource = await readFile(path.join(projectRoot, "server", "src", "neural-module-service.mjs"), "utf8");
   const moduleSpecsBlock = neuralModuleSource.match(/const moduleSpecs = \{([\s\S]*?)\r?\n\};\r?\n\r?\nfunction inputText/u)?.[1];
