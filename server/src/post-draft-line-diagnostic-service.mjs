@@ -372,6 +372,169 @@ function structuredCanonCompatibilityFindings(
   }
 }
 
+
+function medicalStatusRecords(capabilityInput = {}) {
+  const records = capabilityInput.relevant_canon?.current_status;
+  if (!Array.isArray(records)) return [];
+  return records.filter((record) => (
+    isObject(record)
+    && isObject(record.structured_status)
+    && record.structured_status.state_model_version === "medical-continuity-v1"
+    && compactText(record.name, 80)
+  ));
+}
+
+function medicalDisposition(status = {}) {
+  const activeRestrictions = Array.isArray(status.active_restrictions)
+    ? status.active_restrictions
+    : [];
+  if (activeRestrictions.length > 0) return "active";
+  if (
+    status.daily_activity_clearance === "cleared"
+    && /(?:recovered|no_active|stable_without_active|normal_on_latest_exam)/u.test(
+      String(status.current_physical_status ?? ""),
+    )
+  ) {
+    return "resolved";
+  }
+  return "ambiguous";
+}
+
+function nearestMedicalCharacter(lines, lineIndex, characters) {
+  for (let distance = 0; distance <= 2; distance += 1) {
+    const candidate = lines[lineIndex - distance];
+    if (!candidate) continue;
+    const matches = characters.filter((character) => (
+      candidate.text.includes(character)
+    ));
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+  }
+  return null;
+}
+
+const currentInjuryAssertionPattern =
+  /(?:(?:仍|還|依舊|尚未|未癒|沒好|未恢復)[^，。！？!?\n]{0,36}(?:傷|痛|腫|麻|包紮|繃帶|固定膜|固定|活動受限|不能|不得|無法)|(?:因為?|礙於)[^，。！？!?\n]{0,24}(?:傷勢|舊傷|醫囑)[^，。！？!?\n]{0,32}(?:不能|不得|無法|避免|不敢)|(?:貼著|纏著|拄著|坐著)[^，。！？!?\n]{0,12}(?:固定膜|繃帶|包紮|拐杖|輪椅))/u;
+const fullRecoveryAssertionPattern =
+  /(?:(?:已|已經|早已|完全)[^，。！？!?\n]{0,18}(?:痊癒|康復|恢復正常|好了|不受影響)|(?:傷|傷勢)[^，。！？!?\n]{0,12}(?:全好了|完全好了))/u;
+const clearanceConflationPattern =
+  /(?:競技|比賽|參賽|複檢|競技許可)[^。！？!?\n]{0,48}(?:不能|不得|無法|不准)[^。！？!?\n]{0,24}(?:走|跑|搬|拿|追|出門|日常活動|普通活動)/u;
+
+function staleMedicalStateFindings(
+  lines,
+  capabilityInput,
+  output,
+  seen,
+) {
+  const records = medicalStatusRecords(capabilityInput);
+  if (!records.length) return;
+  const byCharacter = new Map(
+    records.map((record) => [record.name, record]),
+  );
+  const characters = [...byCharacter.keys()];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (output.length >= MAX_FINDINGS) break;
+    const line = lines[index];
+    const text = line.text.trim();
+    if (!text) continue;
+    const character = nearestMedicalCharacter(
+      lines,
+      index,
+      characters,
+    );
+    if (!character) continue;
+    const record = byCharacter.get(character);
+    const status = record.structured_status;
+    const disposition = medicalDisposition(status);
+    const persistenceMatch = text.match(
+      currentInjuryAssertionPattern,
+    )?.[0] ?? null;
+    const recoveryMatch = text.match(
+      fullRecoveryAssertionPattern,
+    )?.[0] ?? null;
+    const clearanceMatch = text.match(
+      clearanceConflationPattern,
+    )?.[0] ?? null;
+
+    if (
+      clearanceMatch
+      && status.daily_activity_clearance === "cleared"
+      && ["not_recorded", "deferred", "unknown"].includes(
+        status.competition_clearance,
+      )
+    ) {
+      pushFinding(output, seen, {
+        ...lineEvidence(line, clearanceMatch),
+        issue_type: "medical_clearance_axis_conflation",
+        severity: "P1",
+        character,
+        reason:
+          "The line converts missing or deferred competition clearance into a daily-activity restriction, but those clearance axes are independent in the current medical state.",
+        must_fix: true,
+        minimal_direction:
+          "Remove only the competition-to-daily-activity causal link. Preserve the action, or give it a non-medical reason.",
+        confidence: "structured_temporal_medical_conflict",
+        medical_status_id: status.status_id ?? record.entity_id,
+        current_physical_status:
+          status.current_physical_status ?? null,
+        daily_activity_clearance:
+          status.daily_activity_clearance ?? null,
+        competition_clearance:
+          status.competition_clearance ?? null,
+        canon_evidence: [record.entity_id],
+      });
+      continue;
+    }
+
+    const unsupportedPersistence = persistenceMatch
+      && ["resolved", "ambiguous"].includes(disposition);
+    const unsupportedRecovery = recoveryMatch
+      && ["active", "ambiguous"].includes(disposition);
+    if (!unsupportedPersistence && !unsupportedRecovery) continue;
+
+    const matchText = unsupportedPersistence
+      ? persistenceMatch
+      : recoveryMatch;
+    pushFinding(output, seen, {
+      ...lineEvidence(line, matchText),
+      issue_type: disposition === "ambiguous"
+        ? "unsupported_medical_state_assertion"
+        : "stale_medical_state_conflict",
+      severity: "P1",
+      character,
+      reason: disposition === "resolved"
+        ? "The draft turns a historical, resolved ordinary injury back into a current restriction."
+        : disposition === "active"
+          ? "The draft declares recovery despite a current active medical restriction."
+          : "The draft settles an injury as either ongoing or fully recovered even though the current temporal evidence is explicitly ambiguous.",
+      must_fix: true,
+      minimal_direction: disposition === "resolved"
+        ? "Remove only the current injury or activity-limitation wording. Keep the historical consequence if the scene still needs it."
+        : disposition === "active"
+          ? "Remove only the unsupported recovery claim and preserve the surrounding scene."
+          : "Restore uncertainty or omit the medical assertion; do not choose either ongoing injury or complete recovery without a time anchor.",
+      confidence: "structured_temporal_medical_conflict",
+      medical_status_id: status.status_id ?? record.entity_id,
+      current_physical_status:
+        status.current_physical_status ?? null,
+      daily_activity_clearance:
+        status.daily_activity_clearance ?? null,
+      competition_clearance:
+        status.competition_clearance ?? null,
+      active_restrictions:
+        Array.isArray(status.active_restrictions)
+          ? status.active_restrictions.slice(0, 8)
+          : [],
+      evaluated_at_story_time:
+        status.evaluated_at_story_time
+        ?? status.temporal_resolution?.evaluated_at_story_time
+        ?? null,
+      canon_evidence: [record.entity_id],
+    });
+  }
+}
+
 function explicitRequirementFindings(lines, taskPrompt, capabilityInput, output, seen) {
   const phrases = forbiddenPhrasesFromPrompt(taskPrompt, capabilityInput);
   exactMatchFindings(
@@ -444,6 +607,12 @@ export function buildPostDraftNeuralCritique({
     findings,
     seen,
   );
+  staleMedicalStateFindings(
+    lines,
+    capabilityInput,
+    findings,
+    seen,
+  );
   explicitRequirementFindings(lines, taskPrompt, capabilityInput, findings, seen);
   boundaryFindings(lines, capabilityInput, findings, seen);
   canonIdentityFindings(
@@ -485,6 +654,7 @@ export function buildPostDraftNeuralCritique({
       "causality",
       "identity",
       "character_state",
+      "temporal_medical_state",
       "timeline",
       "explicit_user_requirement",
     ],

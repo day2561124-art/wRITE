@@ -74,6 +74,324 @@ function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+const structuredHourKeys = new Set([
+  "elapsedhours",
+  "timejumphours",
+  "storytimeoffsethours",
+  "hourssincestatus",
+  "hourssinceinjury",
+  "hoursafterpreviouschapter",
+]);
+const structuredDayKeys = new Set([
+  "elapseddays",
+  "timejumpdays",
+  "storytimeoffsetdays",
+  "dayssincestatus",
+  "dayssinceinjury",
+  "daysafterpreviouschapter",
+]);
+const structuredWeekKeys = new Set([
+  "elapsedweeks",
+  "timejumpweeks",
+  "storytimeoffsetweeks",
+  "weekssincestatus",
+  "weekssinceinjury",
+  "weeksafterpreviouschapter",
+]);
+
+function normalizedTemporalKey(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gu, "");
+}
+
+function finiteNonNegativeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function chineseInteger(value) {
+  const source = String(value ?? "").trim();
+  if (!source) return null;
+  if (/^\d+(?:\.\d+)?$/u.test(source)) return Number(source);
+
+  const digitMap = new Map([
+    ["〇", 0],
+    ["零", 0],
+    ["一", 1],
+    ["二", 2],
+    ["兩", 2],
+    ["三", 3],
+    ["四", 4],
+    ["五", 5],
+    ["六", 6],
+    ["七", 7],
+    ["八", 8],
+    ["九", 9],
+  ]);
+  const unitMap = new Map([
+    ["十", 10],
+    ["百", 100],
+    ["千", 1000],
+  ]);
+  if ([...source].every((character) => digitMap.has(character))) {
+    return Number([...source].map((character) => digitMap.get(character)).join(""));
+  }
+
+  let total = 0;
+  let current = 0;
+  for (const character of source) {
+    if (digitMap.has(character)) {
+      current = digitMap.get(character);
+      continue;
+    }
+    const unit = unitMap.get(character);
+    if (!unit) return null;
+    total += (current || 1) * unit;
+    current = 0;
+  }
+  return total + current;
+}
+
+function explicitRelativeHours(text) {
+  const source = String(text ?? "");
+  const matches = [];
+  const zhPattern =
+    /([0-9]+(?:\.[0-9]+)?|[〇零一二兩三四五六七八九十百千]+)\s*(小時|時|天|日|週|周)\s*(?:後|之後|以後|過後)/gu;
+  const enPattern =
+    /(?:after\s+)?([0-9]+(?:\.[0-9]+)?)\s*(hours?|days?|weeks?)\s*(?:later|after)?/giu;
+
+  for (const match of source.matchAll(zhPattern)) {
+    const amount = chineseInteger(match[1]);
+    if (!Number.isFinite(amount)) continue;
+    const multiplier = /週|周/u.test(match[2])
+      ? 24 * 7
+      : /天|日/u.test(match[2])
+        ? 24
+        : 1;
+    matches.push({
+      elapsedHours: amount * multiplier,
+      evidence: match[0],
+      source: "task_prompt_explicit_relative_time",
+    });
+  }
+  for (const match of source.matchAll(enPattern)) {
+    if (!/(?:later|after)/iu.test(match[0])) continue;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) continue;
+    const multiplier = /^weeks?/iu.test(match[2])
+      ? 24 * 7
+      : /^days?/iu.test(match[2])
+        ? 24
+        : 1;
+    matches.push({
+      elapsedHours: amount * multiplier,
+      evidence: match[0],
+      source: "task_prompt_explicit_relative_time",
+    });
+  }
+  return matches.at(-1) ?? null;
+}
+
+function structuredTemporalOffset(value, depth = 0, seen = new Set()) {
+  if (!value || typeof value !== "object" || depth > 6 || seen.has(value)) return null;
+  seen.add(value);
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = normalizedTemporalKey(key);
+    const numeric = finiteNonNegativeNumber(item);
+    if (numeric !== null) {
+      if (structuredHourKeys.has(normalizedKey)) {
+        return {
+          elapsedHours: numeric,
+          evidence: `${key}=${numeric}`,
+          source: "structured_temporal_context",
+          anchorScope: /sinceinjury|sincestatus/u.test(normalizedKey)
+            ? "status_or_injury"
+            : "latest_settled_continuity",
+        };
+      }
+      if (structuredDayKeys.has(normalizedKey)) {
+        return {
+          elapsedHours: numeric * 24,
+          evidence: `${key}=${numeric}`,
+          source: "structured_temporal_context",
+          anchorScope: /sinceinjury|sincestatus/u.test(normalizedKey)
+            ? "status_or_injury"
+            : "latest_settled_continuity",
+        };
+      }
+      if (structuredWeekKeys.has(normalizedKey)) {
+        return {
+          elapsedHours: numeric * 24 * 7,
+          evidence: `${key}=${numeric}`,
+          source: "structured_temporal_context",
+          anchorScope: /sinceinjury|sincestatus/u.test(normalizedKey)
+            ? "status_or_injury"
+            : "latest_settled_continuity",
+        };
+      }
+    }
+    const nested = structuredTemporalOffset(item, depth + 1, seen);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function chapterReferences(value) {
+  const output = [];
+  for (const match of String(value ?? "").matchAll(
+    /第([0-9]+|[〇零一二兩三四五六七八九十百千]+)章/gu,
+  )) {
+    const number = chineseInteger(match[1]);
+    if (!Number.isFinite(number)) continue;
+    output.push({
+      number,
+      label: match[0],
+    });
+  }
+  return output;
+}
+
+function latestContinuityChapterNumber(latestContinuity = {}) {
+  const direct = finiteNonNegativeNumber(latestContinuity.chapter_number);
+  if (direct !== null) return direct;
+  return chapterReferences([
+    latestContinuity.chapter,
+    latestContinuity.display_heading,
+    latestContinuity.continuity_head,
+  ].filter(Boolean).join("\n")).at(-1)?.number ?? null;
+}
+
+export function deriveMedicalTemporalContext({
+  taskPrompt = "",
+  generationContext = {},
+  retrievalContext = {},
+  latestContinuity = {},
+} = {}) {
+  const structured = structuredTemporalOffset(generationContext)
+    ?? structuredTemporalOffset(retrievalContext);
+  const explicit = explicitRelativeHours(taskPrompt);
+  const selected = structured ?? (
+    latestContinuity?.loaded === true ? explicit : null
+  );
+  const chapterRefs = chapterReferences(taskPrompt);
+  const requestedChapter = chapterRefs.length
+    ? chapterRefs.reduce((highest, current) => (
+      current.number > highest.number ? current : highest
+    ))
+    : null;
+  const latestChapterNumber = latestContinuityChapterNumber(latestContinuity);
+
+  if (!selected) {
+    return {
+      timeAnchorAvailable: false,
+      elapsedHours: null,
+      elapsedHoursLowerBound: false,
+      anchorScope: "not_recorded",
+      anchorSource: "not_recorded",
+      anchorEvidence: null,
+      latestContinuityChapterNumber: latestChapterNumber,
+      asOfChapter: requestedChapter?.label ?? null,
+      evaluatedAtStoryTime: "not_recorded",
+    };
+  }
+
+  const anchorScope = selected.anchorScope
+    ?? "latest_settled_continuity";
+  return {
+    timeAnchorAvailable: true,
+    elapsedHours: selected.elapsedHours,
+    elapsedHoursLowerBound:
+      anchorScope === "latest_settled_continuity",
+    anchorScope,
+    anchorSource: selected.source,
+    anchorEvidence: selected.evidence,
+    latestContinuityChapterNumber: latestChapterNumber,
+    asOfChapter: requestedChapter?.label
+      ?? latestContinuity.display_heading
+      ?? latestContinuity.chapter
+      ?? null,
+    evaluatedAtStoryTime:
+      `${selected.elapsedHours}h_after_${anchorScope}`,
+  };
+}
+
+function statusChapterNumber(status) {
+  return chapterReferences(status?.status_as_of_chapter).at(-1)?.number ?? null;
+}
+
+function temporalContextForStatus(status, context = {}) {
+  if (context?.timeAnchorAvailable !== true) return context;
+  if (context.anchorScope !== "latest_settled_continuity") return context;
+
+  const latestChapterNumber = finiteNonNegativeNumber(
+    context.latestContinuityChapterNumber,
+  );
+  const statusAsOfChapterNumber = statusChapterNumber(status);
+  if (
+    latestChapterNumber === null
+    || statusAsOfChapterNumber === null
+    || statusAsOfChapterNumber > latestChapterNumber
+  ) {
+    return {
+      ...context,
+      timeAnchorAvailable: false,
+      elapsedHours: null,
+      temporalApplicability: "status_chapter_order_not_proven",
+    };
+  }
+
+  return {
+    ...context,
+    temporalApplicability:
+      "status_at_or_before_latest_settled_continuity",
+  };
+}
+
+function recoveryClassForRecord(record, policy) {
+  const available = Object.keys(policy.recovery_windows ?? {});
+  const explicitCandidates = [
+    record.injury_class,
+    record.expected_recovery_window,
+    ...(record.injury_history ?? []).map((item) => item?.injury_class),
+  ].map((item) => String(item ?? "").trim()).filter(Boolean);
+
+  for (const candidate of explicitCandidates) {
+    if (available.includes(candidate)) return candidate;
+  }
+
+  const embedded = available.filter((recoveryClass) => (
+    explicitCandidates.some((candidate) => candidate.includes(recoveryClass))
+  ));
+  if (!embedded.length) return null;
+  return embedded.sort((left, right) => {
+    const leftWindow = policy.recovery_windows[left];
+    const rightWindow = policy.recovery_windows[right];
+    return rightWindow.daily_activity_hours_max - leftWindow.daily_activity_hours_max
+      || rightWindow.high_load_hours_max - leftWindow.high_load_hours_max
+      || left.localeCompare(right);
+  })[0];
+}
+
+function recordHasExcludedClass(record, policy) {
+  const classes = [
+    record.injury_class,
+    record.expected_recovery_window,
+    record.special_interference,
+    record.exception_reason,
+    ...(record.injury_history ?? []).flatMap((item) => [
+      item?.injury_class,
+      item?.special_interference,
+      item?.exception_reason,
+    ]),
+  ].map((item) => String(item ?? "").trim()).filter(Boolean);
+  return classes.some((candidate) => (
+    policy.excluded_from_ordinary_cleanup.some((excludedClass) => (
+      candidate === excludedClass || candidate.includes(excludedClass)
+    ))
+  ));
+}
+
 function configPathFor(options = {}) {
   return options.medicalContinuityConfig
     ? assertPathInside(
@@ -244,8 +562,9 @@ export function resolveInjuryStatus(rawRecord, context = {}, recoveryPolicy) {
     .map(normalizeRestriction)
     .filter((item) => item?.status === "active");
   const injuryClass = String(record.injury_class ?? "");
-  const ordinary = recoveryPolicy.ordinary_injury_classes.includes(injuryClass);
-  const excluded = recoveryPolicy.excluded_from_ordinary_cleanup.includes(injuryClass);
+  const recoveryClass = recoveryClassForRecord(record, recoveryPolicy);
+  const ordinary = Boolean(recoveryClass);
+  const excluded = recordHasExcludedClass(record, recoveryPolicy);
   const overlay = isObject(context.continuityOverlay) ? context.continuityOverlay : null;
   const validOverlay = overlay && !overlayIsExpired(overlay, context) ? overlay : null;
   const extensionActive = hasActiveExtension(record, recoveryPolicy, validOverlay);
@@ -272,8 +591,9 @@ export function resolveInjuryStatus(rawRecord, context = {}, recoveryPolicy) {
     return record;
   }
 
-  const window = recoveryPolicy.recovery_windows[injuryClass];
+  const window = recoveryPolicy.recovery_windows[recoveryClass];
   if (!window) return record;
+  record.resolved_recovery_class = recoveryClass;
   const timeAnchorAvailable = context.timeAnchorAvailable === true
     && Number.isFinite(context.elapsedHours);
   if (!timeAnchorAvailable) {
@@ -297,7 +617,14 @@ export function resolveInjuryStatus(rawRecord, context = {}, recoveryPolicy) {
   record.daily_activity_clearance = "cleared";
   record.resolved_at = context.asOfChapter ?? "resolved_by_elapsed_time_anchor";
   record.resolution_basis = "ordinary_recovery_window_elapsed_without_extension_evidence";
+  record.exception_reason = record.exception_reason === "recovery_time_anchor_missing"
+    ? "none_confirmed"
+    : record.exception_reason;
   record.competition_clearance = rawRecord.competition_clearance ?? "not_recorded";
+  record.evaluated_at_story_time = context.evaluatedAtStoryTime
+    ?? context.asOfTime
+    ?? context.asOfChapter
+    ?? "elapsed_time_anchor";
   return record;
 }
 
@@ -332,9 +659,19 @@ export async function buildMedicalContinuitySnapshot(options = {}) {
       ? String(options.activeEngineText)
       : readFile(activeEnginePathFor(options), "utf8"),
   ]);
+  const temporalContext = isObject(options.temporalContext)
+    ? clone(options.temporalContext)
+    : null;
   const statuses = config.character_statuses.map((status) => {
+    const statusContext = temporalContext
+      ? temporalContextForStatus(status, temporalContext)
+      : null;
     const evidence = resolveEvidence(status, activeEngineText);
-    const normalized = clone(status);
+    const shouldResolve = statusContext?.timeAnchorAvailable === true
+      || isObject(statusContext?.continuityOverlay);
+    const normalized = shouldResolve
+      ? resolveInjuryStatus(status, statusContext, config.recovery_policy)
+      : clone(status);
     normalized.active_restrictions = normalized.active_restrictions
       .map(normalizeRestriction)
       .filter(Boolean);
@@ -345,6 +682,21 @@ export async function buildMedicalContinuitySnapshot(options = {}) {
     normalized.injury_history_retained = true;
     normalized.active_restrictions_current_only = true;
     normalized.clearance_independent = true;
+    normalized.temporal_resolution = statusContext
+      ? {
+        time_anchor_available: statusContext.timeAnchorAvailable === true,
+        elapsed_hours: statusContext.elapsedHours ?? null,
+        elapsed_hours_lower_bound:
+          statusContext.elapsedHoursLowerBound === true,
+        anchor_scope: statusContext.anchorScope ?? "not_recorded",
+        anchor_source: statusContext.anchorSource ?? "not_recorded",
+        anchor_evidence: statusContext.anchorEvidence ?? null,
+        applicability:
+          statusContext.temporalApplicability ?? "not_evaluated",
+        evaluated_at_story_time:
+          statusContext.evaluatedAtStoryTime ?? "not_recorded",
+      }
+      : null;
     return normalized;
   });
   return {
@@ -353,6 +705,7 @@ export async function buildMedicalContinuitySnapshot(options = {}) {
     source_authority: config.source_authority,
     recovery_policy: clone(config.recovery_policy),
     character_statuses: statuses,
+    temporal_context: temporalContext,
     provenance: {
       config_path: configPath,
       config_hash_sha256: configHash,

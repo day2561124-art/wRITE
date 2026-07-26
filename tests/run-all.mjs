@@ -716,6 +716,7 @@ const steps = [
   ["Phase 59A dynamic Canon coverage and scene compatibility", ["tests/phase59/phase59a-dynamic-canon-coverage-and-scene-compatibility.test.mjs"]],
   ["Phase 59B ephemeral draft review MCP", ["tests/phase59/phase59b-ephemeral-draft-review-mcp.test.mjs"]],
   ["Phase 60A highest creative authority contract", ["tests/phase60/phase60a-highest-creative-authority-contract.test.mjs"]],
+  ["Phase 61A temporal medical current-state guard", ["tests/phase61/phase61a-temporal-medical-current-state-guard.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

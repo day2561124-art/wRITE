@@ -332,6 +332,102 @@ function taskPromptWithContinuityGuard(taskPrompt, guardText) {
   };
 }
 
+
+function temporalMedicalStatuses(relevantCanon = {}) {
+  return (relevantCanon.current_status ?? [])
+    .filter((record) => (
+      record?.structured_status?.state_model_version
+        === "medical-continuity-v1"
+    ))
+    .map((record) => {
+      const status = record.structured_status;
+      return {
+        character: record.name,
+        status_id: status.status_id ?? record.entity_id,
+        current_physical_status:
+          status.current_physical_status ?? "not_recorded",
+        current_spiritual_status:
+          status.current_spiritual_status ?? "not_recorded",
+        active_restrictions:
+          Array.isArray(status.active_restrictions)
+            ? status.active_restrictions
+            : [],
+        daily_activity_clearance:
+          status.daily_activity_clearance ?? "not_recorded",
+        training_clearance:
+          status.training_clearance ?? "not_recorded",
+        competition_clearance:
+          status.competition_clearance ?? "not_recorded",
+        weapon_summon_clearance:
+          status.weapon_summon_clearance ?? "not_recorded",
+        high_load_manifestation_clearance:
+          status.high_load_manifestation_clearance ?? "not_recorded",
+        evaluated_at_story_time:
+          status.evaluated_at_story_time
+          ?? status.temporal_resolution?.evaluated_at_story_time
+          ?? "not_recorded",
+        resolution_basis:
+          status.resolution_basis ?? "not_recorded",
+      };
+    });
+}
+
+function buildTemporalMedicalTaskGuard(relevantCanon = {}) {
+  const statuses = temporalMedicalStatuses(relevantCanon);
+  if (!statuses.length) return "";
+  const lines = statuses.map((status) => {
+    const restrictions = status.active_restrictions.length
+      ? status.active_restrictions.map((item) => (
+        typeof item === "string" ? item : item.scope
+      )).filter(Boolean).join("；")
+      : "none";
+    return [
+      `- ${status.character}`,
+      `current=${status.current_physical_status}`,
+      `active_restrictions=${restrictions}`,
+      `daily=${status.daily_activity_clearance}`,
+      `training=${status.training_clearance}`,
+      `competition=${status.competition_clearance}`,
+      `weapon=${status.weapon_summon_clearance}`,
+      `high_load=${status.high_load_manifestation_clearance}`,
+      `evaluated_at=${status.evaluated_at_story_time}`,
+    ].join(" | ");
+  });
+  return [
+    "[[TEMPORAL_MEDICAL_CURRENT_STATE_GUARD]]",
+    "Historical injury events are not current injuries. Use only the current medical state below for present-tense bodily limits.",
+    "Daily activity, training, competition, weapon summon, and high-load manifestation clearances are independent. Missing competition clearance must never create a daily-activity restriction.",
+    "When a status is ambiguous, do not assert either continued injury or complete recovery.",
+    ...lines,
+  ].join("\n");
+}
+
+function withTemporalMedicalState(context, relevantCanon = {}) {
+  const source = (
+    context
+    && typeof context === "object"
+    && !Array.isArray(context)
+  ) ? context : {};
+  const {
+    current_temporal_medical_state: ignoredOlderState,
+    ...remaining
+  } = source;
+  void ignoredOlderState;
+  const statuses = temporalMedicalStatuses(relevantCanon);
+  if (!statuses.length) return { ...remaining };
+  return {
+    current_temporal_medical_state: {
+      authority: "derived_temporal_medical_status",
+      precedence_note:
+        "Current status overrides historical injury wording for present-tense restrictions.",
+      clearance_axes_independent: true,
+      historical_injury_is_not_current_restriction: true,
+      statuses,
+    },
+    ...remaining,
+  };
+}
+
 function withoutRedundantCreativeAuthorityLanguage(value) {
   return String(value ?? "")
     .replace(
@@ -468,7 +564,233 @@ function containsFullText(value, fullText, seen = new Set()) {
   ));
 }
 
-function buildBoundedFormalContext(bundle, maxChars) {
+const criticalRelevantCanonMetadataKeys = Object.freeze([
+  "schema_version",
+  "provenance",
+  "retrieval_diagnostics",
+  "medical_temporal_resolution",
+  "active_engine_retrieval_chars",
+]);
+
+const requiredRelevantCanonCollectionKeys = Object.freeze([
+  "characters",
+  "current_status",
+  "abilities_and_weapons",
+  "organizations_and_locations",
+  "world_rules",
+  "timeline_and_events",
+  "continuity_facts",
+]);
+
+const medicalStructuredStatusBudgetKeys = Object.freeze([
+  "state_model_version",
+  "status_id",
+  "current_physical_status",
+  "current_spiritual_status",
+  "active_restrictions",
+  "daily_activity_clearance",
+  "low_load_training_clearance",
+  "training_clearance",
+  "competition_clearance",
+  "weapon_summon_clearance",
+  "high_load_manifestation_clearance",
+  "exception_reason",
+  "status_as_of_chapter",
+  "resolved_at",
+  "resolution_basis",
+  "resolved_recovery_class",
+  "evaluated_at_story_time",
+  "injury_history_count",
+  "injury_history_retained_in_snapshot",
+  "active_restrictions_current_only",
+  "clearance_independent",
+]);
+
+const relevantCanonRecordPriority = Object.freeze([
+  "characters",
+  "abilities_and_weapons",
+  "world_rules",
+  "timeline_and_events",
+  "continuity_facts",
+  "organizations_and_locations",
+]);
+
+const requiredFormalWorldRuleNames = Object.freeze([
+  "異能武裝靈魂內收納、召喚與維持準則",
+  "能力體系",
+  "高科技靈力醫療、治療型武裝與生命復歸",
+]);
+
+function normalizeRelevantCanonCollections(relevantCanon = {}) {
+  const source = relevantCanon && typeof relevantCanon === "object"
+    && !Array.isArray(relevantCanon)
+    ? relevantCanon
+    : {};
+  return Object.fromEntries(
+    requiredRelevantCanonCollectionKeys.map((key) => [
+      key,
+      Array.isArray(source[key]) ? source[key] : [],
+    ]),
+  );
+}
+
+function compactMedicalStatusRecordForBudget(record = {}) {
+  if (
+    record?.structured_status?.state_model_version
+      !== "medical-continuity-v1"
+  ) {
+    return record;
+  }
+  const structuredStatus = record.structured_status;
+  return {
+    ...record,
+    structured_status: Object.fromEntries(
+      medicalStructuredStatusBudgetKeys
+        .filter((key) => Object.hasOwn(structuredStatus, key))
+        .map((key) => [key, structuredStatus[key]]),
+    ),
+  };
+}
+
+function compactRelevantCanonForBudget(relevantCanon = {}) {
+  const source = relevantCanon && typeof relevantCanon === "object"
+    && !Array.isArray(relevantCanon)
+    ? relevantCanon
+    : {};
+  return {
+    ...source,
+    ...normalizeRelevantCanonCollections(source),
+    current_status: (source.current_status ?? [])
+      .map(compactMedicalStatusRecordForBudget),
+  };
+}
+
+function appendRecordWithinBudget(value, collection, record, maxChars) {
+  const candidate = {
+    ...value,
+    [collection]: [...value[collection], record],
+  };
+  if (serializedChars(candidate) > maxChars) return null;
+  return candidate;
+}
+
+export function boundRelevantCanonForFormalContext(
+  relevantCanon = {},
+  maxChars = 18_000,
+) {
+  const normalizedRelevantCanon = compactRelevantCanonForBudget(
+    relevantCanon,
+  );
+  const originalChars = serializedChars(normalizedRelevantCanon);
+  if (originalChars <= maxChars) {
+    return {
+      value: normalizedRelevantCanon,
+      text: JSON.stringify(normalizedRelevantCanon, null, 2),
+      truncated: false,
+      source: "formal_context.materials.relevant_canon",
+      original_chars: originalChars,
+      actual_chars: originalChars,
+      budget_chars: maxChars,
+      truncated_paths: [],
+    };
+  }
+
+  let value = {
+    ...Object.fromEntries(
+      requiredRelevantCanonCollectionKeys.map((key) => [key, []]),
+    ),
+  };
+  for (const key of criticalRelevantCanonMetadataKeys) {
+    if (Object.hasOwn(normalizedRelevantCanon, key)) {
+      value[key] = normalizedRelevantCanon[key];
+    }
+  }
+  value.current_status = normalizedRelevantCanon.current_status;
+
+  if (serializedChars(value) > maxChars) {
+    throw new Error(
+      "Current temporal medical status exceeds the relevant-Canon budget after safe compaction.",
+    );
+  }
+
+  const truncatedPaths = [];
+  const retainedRecords = new Set();
+  const skippedCollections = new Set();
+
+  const retainRecord = (collection, record) => {
+    if (!record || retainedRecords.has(record)) return true;
+    const candidate = appendRecordWithinBudget(
+      value,
+      collection,
+      record,
+      maxChars,
+    );
+    if (!candidate) {
+      skippedCollections.add(collection);
+      return false;
+    }
+    value = candidate;
+    retainedRecords.add(record);
+    return true;
+  };
+
+  // Preserve the minimum formal contract before spending remaining budget on
+  // optional records. This prevents a large secondary weapon or mirror table
+  // from displacing the world rules that define how the retained medical
+  // status may be interpreted.
+  for (const record of normalizedRelevantCanon.characters ?? []) {
+    retainRecord("characters", record);
+  }
+
+  const primaryWeapon = (
+    normalizedRelevantCanon.abilities_and_weapons ?? []
+  )[0];
+  retainRecord("abilities_and_weapons", primaryWeapon);
+
+  for (const ruleName of requiredFormalWorldRuleNames) {
+    const rule = (normalizedRelevantCanon.world_rules ?? [])
+      .find((record) => record?.name === ruleName);
+    retainRecord("world_rules", rule);
+  }
+
+  const timelineRecords = normalizedRelevantCanon.timeline_and_events ?? [];
+  const latestTimeline = timelineRecords.find((record) => (
+    record?.category === "timeline_event"
+    && record?.source?.kind === "latest_settled_continuity_overlay"
+  )) ?? timelineRecords[0];
+  retainRecord("timeline_and_events", latestTimeline);
+
+  for (const collection of relevantCanonRecordPriority) {
+    const records = normalizedRelevantCanon[collection] ?? [];
+    for (const record of records) {
+      if (retainedRecords.has(record)) continue;
+      retainRecord(collection, record);
+    }
+  }
+
+  for (const collection of skippedCollections) {
+    truncatedPaths.push(
+      `formal_context.materials.relevant_canon.${collection}`,
+    );
+  }
+
+  const actualChars = serializedChars(value);
+  return {
+    value,
+    text: JSON.stringify(value, null, 2),
+    truncated: true,
+    source: "formal_context.materials.relevant_canon",
+    original_chars: originalChars,
+    actual_chars: actualChars,
+    budget_chars: maxChars,
+    truncated_paths: [
+      "formal_context.materials.relevant_canon",
+      ...truncatedPaths,
+    ],
+  };
+}
+
+export function buildBoundedFormalContext(bundle, maxChars) {
   const activeEngine = bundle.sources.active_engine ?? {};
   const authority = formalWritingAuthorityContract();
   const fixed = {
@@ -493,11 +815,29 @@ function buildBoundedFormalContext(bundle, maxChars) {
     },
     neural_module_contracts: buildNeuralModuleContractRegistry(),
   };
-  const boundedRelevantCanon = truncateStructuredContextAtBoundaries(
+  let relevantCanonBudget = Math.min(18_000, maxChars);
+  let boundedRelevantCanon = boundRelevantCanonForFormalContext(
     bundle.relevant_canon ?? {},
-    Math.min(18_000, maxChars),
-    "formal_context.materials.relevant_canon",
+    relevantCanonBudget,
   );
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const minimumFormalContext = {
+      ...fixed,
+      materials: {
+        relevant_canon: boundedRelevantCanon.value,
+      },
+    };
+    const overflow = serializedChars(minimumFormalContext) - maxChars;
+    if (overflow <= 0) break;
+    relevantCanonBudget = Math.max(
+      2,
+      relevantCanonBudget - overflow - 64,
+    );
+    boundedRelevantCanon = boundRelevantCanonForFormalContext(
+      bundle.relevant_canon ?? {},
+      relevantCanonBudget,
+    );
+  }
   const continuityRecordIds = new Set(
     (boundedRelevantCanon.value?.continuity_facts ?? [])
       .map((record) => record.entity_id),
@@ -556,18 +896,43 @@ function buildBoundedFormalContext(bundle, maxChars) {
     writing_card_director:
       bundle.content.writing_card_director_context ?? null,
   };
+  const {
+    relevant_canon: preservedRelevantCanon,
+    ...otherMaterials
+  } = materials;
+  const reservedMaterials = {
+    relevant_canon: preservedRelevantCanon,
+  };
   let materialBudget = Math.max(
     2,
-    maxChars - serializedChars(fixed) - 512,
+    maxChars
+      - serializedChars(fixed)
+      - serializedChars(reservedMaterials)
+      - 512,
   );
   let boundedMaterials;
   let formalContext;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    boundedMaterials = truncateStructuredContextAtBoundaries(
-      materials,
+    const boundedOtherMaterials = truncateStructuredContextAtBoundaries(
+      otherMaterials,
       materialBudget,
       "formal_context.materials",
     );
+    boundedMaterials = {
+      ...boundedOtherMaterials,
+      value: {
+        ...boundedOtherMaterials.value,
+        relevant_canon: preservedRelevantCanon,
+      },
+      text: "",
+      actual_chars: 0,
+    };
+    boundedMaterials.text = JSON.stringify(
+      boundedMaterials.value,
+      null,
+      2,
+    );
+    boundedMaterials.actual_chars = boundedMaterials.text.length;
     formalContext = {
       ...fixed,
       materials: boundedMaterials.value,
@@ -803,7 +1168,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   const formalTaskPrompt = input.formalContextOnly
     ? withoutRedundantCreativeAuthorityLanguage(input.taskPrompt)
     : input.taskPrompt;
-  const effectiveTaskPrompt =
+  let effectiveTaskPrompt =
     taskPromptWithContinuityGuard(
       formalTaskPrompt,
       continuityTaskGuard,
@@ -864,10 +1229,20 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     generationContext: input.generationContext,
     retrievalContext: input.retrievalContext,
     latestContinuity: latestSettledContinuity,
+    plannedEntityManifest: input.plannedEntityManifest,
     activeEngineContent: groundingActiveEngine.content,
     activeEnginePath: groundingActiveEngine.path,
     activeEngineHash: groundingActiveEngine.hash,
   }, options);
+  const medicalTaskGuard = buildTemporalMedicalTaskGuard(
+    formalRelevantCanon.relevant_canon,
+  );
+  effectiveTaskPrompt = taskPromptWithContinuityGuard(
+    formalTaskPrompt,
+    [continuityTaskGuard, medicalTaskGuard]
+      .filter(Boolean)
+      .join("\n\n"),
+  );
   const plannedEntityHydration = await hydratePlannedEntityManifest({
     plannedEntityManifest: input.plannedEntityManifest,
     relevantCanon: formalRelevantCanon.relevant_canon,
@@ -903,25 +1278,31 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       options.visualUploadedReferencesOptions ?? {},
     )
     : disabledVisualUploadedReferencesContext();
-  const rawGenerationContext = contextWithVisualUploadedReferences(
-    contextWithCharacterVoiceRegistry(
-      withLatestSettledContinuity(
-        input.generationContext,
-        latestSettledContinuity,
+  const rawGenerationContext = withTemporalMedicalState(
+    contextWithVisualUploadedReferences(
+      contextWithCharacterVoiceRegistry(
+        withLatestSettledContinuity(
+          input.generationContext,
+          latestSettledContinuity,
+        ),
+        characterVoiceRegistry,
       ),
-      characterVoiceRegistry,
+      visualUploadedReferences,
     ),
-    visualUploadedReferences,
+    formalRelevantCanon.relevant_canon,
   );
-  const rawRetrievalContext = contextWithVisualUploadedReferences(
-    contextWithCharacterVoiceRegistry(
-      withLatestSettledContinuity(
-        input.retrievalContext,
-        latestSettledContinuity,
+  const rawRetrievalContext = withTemporalMedicalState(
+    contextWithVisualUploadedReferences(
+      contextWithCharacterVoiceRegistry(
+        withLatestSettledContinuity(
+          input.retrievalContext,
+          latestSettledContinuity,
+        ),
+        characterVoiceRegistry,
       ),
-      characterVoiceRegistry,
+      visualUploadedReferences,
     ),
-    visualUploadedReferences,
+    formalRelevantCanon.relevant_canon,
   );
   const composed = composeWritingContextSources({
     taskPrompt: effectiveTaskPrompt.text,

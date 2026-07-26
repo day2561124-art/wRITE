@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import {
   getStructuredEntityRegistry,
 } from "./structured-canon-entity-registry-service.mjs";
+import {
+  buildMedicalContinuitySnapshot,
+  deriveMedicalTemporalContext,
+} from "./medical-continuity-service.mjs";
 
 const categoryBuckets = Object.freeze({
   character: "characters",
@@ -48,6 +52,21 @@ function registryEntities(registry, category) {
   return registry?.[categoryBuckets[category]] ?? [];
 }
 
+
+function plannedCharacterNames(plannedEntityManifest = {}) {
+  const values = Array.isArray(plannedEntityManifest?.characters)
+    ? plannedEntityManifest.characters
+    : [];
+  return uniqueStrings(values.map((item) => (
+    typeof item === "string"
+      ? item
+      : item?.name
+        ?? item?.canonical_name
+        ?? item?.title
+        ?? ""
+  )));
+}
+
 function exactCharacterNames(source, registry, generationContext, retrievalContext) {
   const explicit = [
     ...(Array.isArray(generationContext?.focus_characters)
@@ -86,6 +105,7 @@ export function buildFormalRetrievalPlan({
   generationContext = {},
   retrievalContext = {},
   latestContinuity = {},
+  plannedEntityManifest = {},
   registry = {},
 } = {}) {
   const source = [
@@ -93,12 +113,15 @@ export function buildFormalRetrievalPlan({
     serialized(generationContext),
     serialized(retrievalContext),
   ].join("\n");
-  const characters = exactCharacterNames(
-    source,
-    registry,
-    generationContext,
-    retrievalContext,
-  );
+  const characters = uniqueStrings([
+    ...plannedCharacterNames(plannedEntityManifest),
+    ...exactCharacterNames(
+      source,
+      registry,
+      generationContext,
+      retrievalContext,
+    ),
+  ]);
   const statusEffects = [];
   for (const character of characters) {
     const escapedCharacter = character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -356,6 +379,201 @@ function entityRecord({
   return record;
 }
 
+
+const structuredMedicalFields = Object.freeze([
+  "state_model_version",
+  "status_id",
+  "current_physical_status",
+  "current_spiritual_status",
+  "active_restrictions",
+  "daily_activity_clearance",
+  "low_load_training_clearance",
+  "training_clearance",
+  "competition_clearance",
+  "weapon_summon_clearance",
+  "high_load_manifestation_clearance",
+  "exception_reason",
+  "status_as_of_chapter",
+  "last_confirmed_evidence",
+  "resolved_at",
+  "resolution_basis",
+  "resolved_recovery_class",
+  "evaluated_at_story_time",
+  "temporal_resolution",
+]);
+
+function compactMedicalStatusSummary(status = {}) {
+  const restrictions = Array.isArray(status.active_restrictions)
+    && status.active_restrictions.length
+    ? status.active_restrictions.map((item) => (
+      typeof item === "string" ? item : item?.scope
+    )).filter(Boolean).join("；")
+    : "無目前有效限制";
+  const historicalEvents = Array.isArray(status.injury_history)
+    ? status.injury_history
+    : [];
+  const history = historicalEvents.map((item) => {
+    const bodyParts = Array.isArray(item?.affected_body_parts)
+      ? item.affected_body_parts.join("、")
+      : "";
+    const pastRestrictions = Array.isArray(item?.historical_restrictions)
+      ? item.historical_restrictions.join("、")
+      : "";
+    return [
+      item?.chapter,
+      item?.injury_class,
+      bodyParts,
+      pastRestrictions ? `過去限制（已失效）：${pastRestrictions}` : "",
+    ].filter(Boolean).join("｜");
+  });
+  const evidenceAnchors = [...new Set(
+    (Array.isArray(status.last_confirmed_evidence)
+      ? status.last_confirmed_evidence
+      : [])
+      .map((item) => String(item?.match ?? "").trim())
+      .filter(Boolean),
+  )].slice(0, 4);
+  return [
+    `角色：${status.character}`,
+    `當前肉體狀態：${status.current_physical_status}`,
+    `當前靈力狀態：${status.current_spiritual_status}`,
+    `目前有效限制：${restrictions}`,
+    `日常活動許可：${status.daily_activity_clearance}`,
+    `訓練許可：${status.training_clearance}`,
+    `競技許可：${status.competition_clearance}`,
+    `武裝召喚許可：${status.weapon_summon_clearance}`,
+    `高負荷顯現許可：${status.high_load_manifestation_clearance}`,
+    `評估時間：${status.evaluated_at_story_time
+      ?? status.temporal_resolution?.evaluated_at_story_time
+      ?? "not_recorded"}`,
+    `歷史傷勢：${history.length ? history.join("；") : "無"}`,
+    `歷史證據錨點（僅供追溯，不代表目前仍有限制）：${
+      evidenceAnchors.length ? evidenceAnchors.join("；") : "無"
+    }`,
+  ].join("\n");
+}
+
+function dynamicMedicalStatusRecord(
+  status,
+  activeEnginePath,
+  activeEngineHash,
+  medicalSnapshot,
+) {
+  const content = compactMedicalStatusSummary(status);
+  return {
+    entity_id: status.status_id,
+    category: "status_effect",
+    name: status.character,
+    content,
+    source: {
+      kind: "derived_temporal_medical_status",
+      path: medicalSnapshot.provenance.config_path,
+      section: "medical_continuity_current_state",
+      anchor: status.status_id,
+    },
+    source_hash: medicalSnapshot.provenance.config_hash_sha256,
+    freshness: "current",
+    character_count: content.length,
+    structured_status: {
+      ...Object.fromEntries(
+        structuredMedicalFields.map((field) => [field, status[field]]),
+      ),
+      injury_history_count: Array.isArray(status.injury_history)
+        ? status.injury_history.length
+        : 0,
+      injury_history_retained_in_snapshot: true,
+      active_restrictions_current_only: true,
+      clearance_independent: true,
+    },
+    provenance: [
+      {
+        source: medicalSnapshot.provenance.config_path,
+        source_hash: medicalSnapshot.provenance.config_hash_sha256,
+        freshness: "current",
+        authority: "derived_temporal_medical_status",
+        direct_canon_write_allowed: false,
+      },
+      {
+        source: activeEnginePath,
+        source_hash: activeEngineHash,
+        freshness: "current",
+        authority: "active_hard_canon_evidence",
+        full_text_included: false,
+      },
+    ],
+  };
+}
+
+function medicalDisposition(status = {}) {
+  const restrictions = Array.isArray(status.active_restrictions)
+    ? status.active_restrictions
+    : [];
+  if (restrictions.length > 0) return "active";
+  if (
+    status.daily_activity_clearance === "cleared"
+    && /(?:recovered|no_active|stable_without_active|normal_on_latest_exam)/u.test(
+      String(status.current_physical_status ?? ""),
+    )
+  ) {
+    return "resolved";
+  }
+  return "ambiguous";
+}
+
+const medicalFactPattern =
+  /(?:傷勢|受傷|裂傷|切創|挫傷|扭傷|撕裂|骨折|包紮|繃帶|固定膜|醫囑|治療|復原|康復|痊癒|輪椅|拐杖|不能出力|不得訓練)/u;
+
+export function classifyContinuityMedicalFact(
+  content,
+  medicalStatuses = [],
+) {
+  const source = String(content ?? "").trim();
+  if (!source || !medicalFactPattern.test(source)) {
+    return {
+      content: source,
+      temporal_classification: "not_medical",
+      character: null,
+      status_id: null,
+    };
+  }
+  const status = medicalStatuses.find((item) => (
+    source.includes(item.character)
+  ));
+  if (!status) {
+    return {
+      content: source,
+      temporal_classification: "medical_without_resolved_character",
+      character: null,
+      status_id: null,
+    };
+  }
+  const disposition = medicalDisposition(status);
+  if (disposition === "resolved") {
+    return {
+      content:
+        `歷史傷勢事件（不得當作目前仍受傷或日常活動受限）：${source}`,
+      temporal_classification: "historical_injury_event",
+      character: status.character,
+      status_id: status.status_id,
+    };
+  }
+  if (disposition === "ambiguous") {
+    return {
+      content:
+        `恢復狀態未有足夠時間錨點（不得補寫成仍受傷或已完全痊癒）：${source}`,
+      temporal_classification: "medical_state_ambiguous",
+      character: status.character,
+      status_id: status.status_id,
+    };
+  }
+  return {
+    content: source,
+    temporal_classification: "current_medical_state",
+    character: status.character,
+    status_id: status.status_id,
+  };
+}
+
 function exactEntity(records, name) {
   return records.find((entity) => entity.canonical_name === name)
     ?? records.find((entity) => (
@@ -435,7 +653,12 @@ function deduplicateRecords(records) {
   return output;
 }
 
-function relevantContinuityRecords(latestContinuity, split, plan) {
+function relevantContinuityRecords(
+  latestContinuity,
+  split,
+  plan,
+  medicalStatuses = [],
+) {
   if (latestContinuity.loaded !== true) return [];
   const names = plan.characters;
   const relevant = uniqueStrings([
@@ -448,33 +671,44 @@ function relevantContinuityRecords(latestContinuity, split, plan) {
       && /追加比對/u.test(fact)
     )
   ));
-  return relevant.map((content, index) => ({
-    entity_id: `${latestContinuity.report_id}#continuity-${index + 1}`,
-    category: split.unresolved_state.includes(content)
-      ? "unresolved_state"
-      : "continuity_fact",
-    name: latestContinuity.display_heading
-      ?? latestContinuity.chapter
-      ?? latestContinuity.report_id,
-    content,
-    source: {
-      kind: "latest_settled_continuity_overlay",
-      path: latestContinuity.content_path ?? null,
-      section: split.unresolved_state.includes(content)
-        ? "待承接／未收事項"
-        : "已發生／角色狀態",
-      anchor: latestContinuity.report_id,
-    },
-    source_hash: latestContinuity.settlement_report_hash ?? null,
-    freshness: "current",
-    character_count: content.length,
-    provenance: [{
-      source: latestContinuity.report_id,
+  return relevant.map((originalContent, index) => {
+    const classified = classifyContinuityMedicalFact(
+      originalContent,
+      medicalStatuses,
+    );
+    const unresolved = split.unresolved_state.includes(originalContent);
+    return {
+      entity_id: `${latestContinuity.report_id}#continuity-${index + 1}`,
+      category: unresolved
+        ? "unresolved_state"
+        : "continuity_fact",
+      name: latestContinuity.display_heading
+        ?? latestContinuity.chapter
+        ?? latestContinuity.report_id,
+      content: classified.content,
+      original_content: originalContent,
+      temporal_classification: classified.temporal_classification,
+      medical_character: classified.character,
+      medical_status_id: classified.status_id,
+      source: {
+        kind: "latest_settled_continuity_overlay",
+        path: latestContinuity.content_path ?? null,
+        section: unresolved
+          ? "待承接／未收事項"
+          : "已發生／角色狀態",
+        anchor: latestContinuity.report_id,
+      },
       source_hash: latestContinuity.settlement_report_hash ?? null,
       freshness: "current",
-      authority: "latest_settled_continuity_overlay",
-    }],
-  }));
+      character_count: classified.content.length,
+      provenance: [{
+        source: latestContinuity.report_id,
+        source_hash: latestContinuity.settlement_report_hash ?? null,
+        freshness: "current",
+        authority: "latest_settled_continuity_overlay",
+      }],
+    };
+  });
 }
 
 export function countRelevantCanonActiveEngineChars(relevantCanon = {}) {
@@ -498,6 +732,7 @@ export async function buildFormalRelevantCanon({
   generationContext = {},
   retrievalContext = {},
   latestContinuity = {},
+  plannedEntityManifest = {},
   activeEngineContent = "",
   activeEnginePath = "data/canon_db/active_engine.md",
   activeEngineHash = null,
@@ -521,11 +756,35 @@ export async function buildFormalRelevantCanon({
     generationContext,
     retrievalContext,
     latestContinuity,
+    plannedEntityManifest,
     registry,
   });
   const continuity = splitLatestContinuityForFormalContext(
     latestContinuity,
   );
+  const medicalTemporalContext = deriveMedicalTemporalContext({
+    taskPrompt,
+    generationContext,
+    retrievalContext,
+    latestContinuity,
+  });
+  const medicalSnapshot = await buildMedicalContinuitySnapshot({
+    ...(options.medicalContinuityOptions ?? {}),
+    activeEngineText: activeEngineContent,
+    activeEnginePath,
+    temporalContext: medicalTemporalContext,
+  });
+  const relevantMedicalStatuses = medicalSnapshot.character_statuses.filter(
+    (status) => retrievalPlan.characters.includes(status.character),
+  );
+  const medicalStatusRecords = relevantMedicalStatuses.map((status) => (
+    dynamicMedicalStatusRecord(
+      status,
+      activeEnginePath,
+      currentActiveEngineHash,
+      medicalSnapshot,
+    )
+  ));
   const recordOptions = {
     currentActiveEngineHash,
     registryActiveEngineHash,
@@ -552,7 +811,10 @@ export async function buildFormalRelevantCanon({
         right.score - left.score
         || String(left.entity.entity_id).localeCompare(String(right.entity.entity_id))
       ));
-    if (ranked[0]) {
+    if (
+      ranked[0]
+      && ranked[0].entity.state_model_version !== "medical-continuity-v1"
+    ) {
       statusRecords.push(entityRecord({
         entity: ranked[0].entity,
         category: "status_effect",
@@ -591,6 +853,7 @@ export async function buildFormalRelevantCanon({
     latestContinuity,
     continuity,
     retrievalPlan,
+    relevantMedicalStatuses,
   );
   const timelineAndEvents = latestContinuity.loaded === true
     ? [{
@@ -625,6 +888,7 @@ export async function buildFormalRelevantCanon({
     }]
     : [];
   const currentStatus = deduplicateRecords([
+    ...medicalStatusRecords,
     ...statusRecords,
     ...continuityRecords.filter((record) => record.category === "unresolved_state"),
   ]);
@@ -639,6 +903,14 @@ export async function buildFormalRelevantCanon({
     continuity_facts: deduplicateRecords(
       continuityRecords.filter((record) => record.category === "continuity_fact"),
     ),
+    medical_temporal_resolution: {
+      context: medicalTemporalContext,
+      relevant_status_count: relevantMedicalStatuses.length,
+      recomputed_for_story_time:
+        medicalTemporalContext.timeAnchorAvailable === true,
+      stale_history_not_current_restriction: true,
+      clearance_axes_independent: true,
+    },
     provenance: [
       {
         source: latestContinuity.report_id ?? "latest_settled_continuity",
@@ -668,6 +940,11 @@ export async function buildFormalRelevantCanon({
       current_active_engine_hash: currentActiveEngineHash,
       stale_records_require_current_corroboration: true,
       stale_uncorroborated_records_excluded: true,
+      medical_temporal_recomputation_applied:
+        medicalTemporalContext.timeAnchorAvailable === true,
+      medical_temporal_anchor_source:
+        medicalTemporalContext.anchorSource,
+      medical_history_and_current_state_separated: true,
       full_active_engine_fallback_allowed: false,
     },
   };

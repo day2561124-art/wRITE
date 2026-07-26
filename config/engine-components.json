@@ -5,7 +5,7 @@
   "components": {
     "canon_data": {
       "path": "data/canon_db/active_engine.md",
-      "expected_sha256_lf": "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8",
+      "expected_sha256_lf": "712ADC217B674F60205CBFEEE9C17E70175A08CF0289190479D2A8B88B9A3B6D",
       "required": true
     },
     "writing_method": {
