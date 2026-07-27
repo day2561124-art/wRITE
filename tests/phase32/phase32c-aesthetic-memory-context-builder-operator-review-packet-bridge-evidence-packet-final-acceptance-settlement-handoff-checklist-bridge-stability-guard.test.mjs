@@ -31,7 +31,7 @@ const stabilityContract = {
     'execute_recovery',
   ],
   protectedHashes: {
-    active_engine: '238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8',
+    active_engine: 'd6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788',
     compressed_rules: 'f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db',
   },
   bridgeDryRunSafety: {
@@ -200,7 +200,7 @@ const deterministicDigest = `sha256:${crypto
 
 assert.equal(
   deterministicDigest,
-  'sha256:8eba71100e1d988bbf7955b8c9004010e3c35468d52d1497587fd87e492a07b1',
+  'sha256:eebd23fccf731551b307554cbe7215c0c77f05ab8b7268cc46bd3fc682bf9cbb',
   'Phase32C deterministic digest changed unexpectedly',
 );
 

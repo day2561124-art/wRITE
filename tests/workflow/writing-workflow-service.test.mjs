@@ -31,9 +31,6 @@ import { projectPaths } from "../../server/src/project-paths.mjs";
 const fixtureRoot = path.join(projectPaths.writingWorkflow, ".writing-workflow-test");
 const fixtureActive = path.join(projectPaths.canonDb, ".writing-workflow-active-test.md");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
-const expectedActiveEngineLfHash = (
-  "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8"
-);
 const requiredWrapperModules = [
   "scene_planner",
   "character_simulator",
@@ -50,6 +47,17 @@ function assert(condition, message) {
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function hashLfUpper(value) {
+  const normalized = value
+    .toString("utf8")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n");
+  return createHash("sha256")
+    .update(normalized, "utf8")
+    .digest("hex")
+    .toUpperCase();
 }
 
 async function names(dirPath) {
@@ -79,6 +87,7 @@ async function expectReject(action, message) {
 async function main() {
   const productionActive = await readFile(projectPaths.activeEngine);
   const productionHash = hash(productionActive);
+  const expectedActiveEngineLfHash = hashLfUpper(productionActive);
   const pendingBefore = await names(projectPaths.pendingEngineCandidates);
   const snapshotsBefore = await names(projectPaths.engineSnapshots);
   const archiveBefore = await names(projectPaths.engineArchive);

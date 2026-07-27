@@ -60,7 +60,7 @@ const finalSmokeContract = {
     'create_recovery_artifact',
   ],
   protectedHashes: {
-    active_engine: '238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8',
+    active_engine: 'd6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788',
     compressed_rules: 'f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db',
   },
   bridgeDryRunSafety: {
@@ -154,7 +154,7 @@ const deterministicDigest = `sha256:${crypto
 
 assert.equal(
   deterministicDigest,
-  'sha256:d2906ea02b631792a3510906ab7342ecf97ff86cc86c354a7398b102348edd43',
+  'sha256:e31df9f41018b0662be31e0054db469df25c4e0f4b15673b702f1ae187e04e64',
   'Phase32E deterministic digest changed unexpectedly',
 );
 

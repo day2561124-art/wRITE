@@ -12,7 +12,7 @@ const phase31MPath = path.join(root, "tests", "phase31", "phase31m-aesthetic-mem
 const phase31NPath = path.join(root, "tests", "phase31", "phase31n-aesthetic-memory-context-builder-operator-review-packet-bridge-stability-guard.test.mjs");
 const phase31OPath = path.join(root, "tests", "phase31", "phase31o-aesthetic-memory-context-builder-operator-review-packet-bridge-recovery-guide.test.mjs");
 
-const expectedActiveEngineHash = "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8";
+const expectedActiveEngineHash = "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 function hash(value) { return createHash("sha256").update(value, "utf8").digest("hex"); }

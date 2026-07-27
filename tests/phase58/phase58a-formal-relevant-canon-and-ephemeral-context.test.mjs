@@ -190,7 +190,8 @@ assert.equal(
   composition.relevant_canon_chars,
   JSON.stringify(relevantCanon, null, 2).length,
 );
-assert(composition.relevant_canon_chars <= 18_000);
+assert(composition.relevant_canon_chars <= 19_000);
+assert.equal(composition.relevant_canon_budget_chars, 19_000);
 assert.equal(
   composition.total_chars_after_budget,
   JSON.stringify(formal, null, 2).length,

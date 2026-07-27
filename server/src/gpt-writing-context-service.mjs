@@ -69,6 +69,7 @@ const taskPromptSources = new Set([
 ]);
 const defaultMaxContextChars = 48_000;
 const maximumContextChars = 250_000;
+const formalRelevantCanonBudgetChars = 19_000;
 const taskPromptMaxLength = 12_000;
 const sectionBudgets = Object.freeze({
   task_prompt: 4_000,
@@ -815,7 +816,7 @@ export function buildBoundedFormalContext(bundle, maxChars) {
     },
     neural_module_contracts: buildNeuralModuleContractRegistry(),
   };
-  let relevantCanonBudget = Math.min(18_000, maxChars);
+  let relevantCanonBudget = Math.min(formalRelevantCanonBudgetChars, maxChars);
   let boundedRelevantCanon = boundRelevantCanonForFormalContext(
     bundle.relevant_canon ?? {},
     relevantCanonBudget,
@@ -1608,7 +1609,7 @@ export async function buildGptWritingContext(rawInput, options = {}) {
       section_budgets: { ...sectionBudgets },
       relevant_canon_chars:
         serializedChars(formalRelevantCanon.relevant_canon),
-      relevant_canon_budget_chars: 18_000,
+      relevant_canon_budget_chars: formalRelevantCanonBudgetChars,
       planned_entity_hydration_chars:
         plannedEntityHydration.composition
           .planned_entity_hydration_chars,

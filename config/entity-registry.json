@@ -5,7 +5,7 @@
   "source_component": "canon_data",
   "source_path": "data/canon_db/active_engine.md",
   "source_zones_config": "config/canon-zones.json",
-  "expected_sha256_lf": "712ADC217B674F60205CBFEEE9C17E70175A08CF0289190479D2A8B88B9A3B6D",
+  "expected_sha256_lf": "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788",
   "entity_kinds": [
     "character",
     "weapon",

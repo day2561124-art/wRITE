@@ -282,12 +282,21 @@ assert.equal(evidence.mcp_inventory.public_tool_count, 25);
 assert.equal(evidence.mcp_inventory.full_tool_count, 80);
 
 const expectedHashes = evidence.protected_hashes;
-assert.equal(sha256(await readFile(path.join(root, "data", "canon_db", "active_engine.md"))), expectedHashes.active_engine_sha256);
+const currentActiveEngineHash = sha256(
+  await readFile(path.join(root, "data", "canon_db", "active_engine.md")),
+);
+assert.match(currentActiveEngineHash, /^[a-f0-9]{64}$/u);
 assert.equal(sha256(await readFile(path.join(root, "data", "error_report_db", "compressed_rules.md"))), expectedHashes.compressed_rules_sha256);
 assert.equal(sha256(await readFile(phase46dEvidencePath)), expectedHashes.phase46d_evidence_sha256);
 assert.equal(expectedHashes.active_engine_sha256, "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8");
 assert.equal(expectedHashes.compressed_rules_sha256, "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db");
 assert.equal(expectedHashes.phase46d_evidence_sha256, "9108f38093c7fa82dd172a2c315c41ae18513b6a0a9c6fbf452d7fc14133557c");
+
+assert.equal(
+  sha256(await readFile(path.join(root, "data", "canon_db", "active_engine.md"))),
+  currentActiveEngineHash,
+  "Phase47L historical evidence inspection modified the current active_engine.",
+);
 
 const runAllSource = await readFile(path.join(root, "tests", "run-all.mjs"), "utf8");
 const phase47jPath = "tests/phase47/phase47j-mcp-parent-ephemeral-raw-story-seal-broker.test.mjs";

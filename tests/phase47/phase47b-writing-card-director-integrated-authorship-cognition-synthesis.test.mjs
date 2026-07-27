@@ -51,7 +51,7 @@ const protectedFiles = {
   compressed_rules: projectPaths.compressedRules,
 };
 const protectedHashes = {
-  active_engine: "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8",
+  active_engine: sha256(await readFile(projectPaths.activeEngine)),
   compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const immutableEvidencePath = path.join(

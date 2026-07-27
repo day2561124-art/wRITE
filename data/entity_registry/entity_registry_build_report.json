@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "status": "complete",
-  "built_at": "2026-07-26T12:16:21.783Z",
-  "deterministic_source_hash": "db1b674259425379fe9d97bc9c116107afaf6d3f51f3dccf0ccd30fbf234ceb1",
+  "built_at": "2026-07-27T09:30:34.705Z",
+  "deterministic_source_hash": "b8ce1ccfb25d1128c27cd3de96815eab8c835c07b4d8d400ff5be258e4c9e213",
   "entity_count": 227,
   "entity_counts_by_type": {
-    "characters": 54,
+    "characters": 56,
     "abilities": 12,
     "weapons": 43,
     "timeline_events": 3,
@@ -14,7 +14,7 @@
     "locations": 2,
     "chapter_events": 3,
     "relationships": 0,
-    "status_effects": 73
+    "status_effects": 71
   },
   "status_counts": {
     "canon": 199,

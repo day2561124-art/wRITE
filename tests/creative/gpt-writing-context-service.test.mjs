@@ -15,7 +15,7 @@ const fixtureApproval = path.join(projectPaths.approvalQueue, ".gpt-writing-cont
 const fixturePending = path.join(projectPaths.canonDb, ".gpt-writing-context-pending-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 const expectedActiveEngineLfHash = (
-  "238B287A32342C55C6D95E32953D1D681DD8A0F4F8F31FE9DF24985B2EB7A2A8"
+  "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788"
 );
 const expectedNeuralModules = [
   "run_scene_planner",
@@ -174,16 +174,16 @@ async function main() {
 
     const limited = await buildGptWritingContext({
       taskPrompt: "Budget test.",
-      generationContext: { text: "g".repeat(200) },
-      retrievalContext: { text: "r".repeat(200) },
-      maxContextChars: 40,
+      generationContext: { text: "g".repeat(20_000) },
+      retrievalContext: { text: "r".repeat(20_000) },
+      maxContextChars: 48_000,
       includeActiveEngine: false,
       includeWritingCard: false,
       includeProofingCard: false,
       includeLongline: false,
     }, options);
     assert(limited.bundle.truncated_sections.length > 0, "Context budget did not truncate.");
-    assert(limited.bundle.max_context_chars === 40, "Context budget limit was not recorded.");
+    assert(limited.bundle.max_context_chars === 48_000, "Context budget limit was not recorded.");
 
     const invalid = await buildGptWritingContext({
       taskPrompt: "Validation warning test.",

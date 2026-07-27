@@ -16,7 +16,7 @@ const root = process.cwd();
 const runAllPath = path.join(root, "tests", "run-all.mjs");
 const activeEnginePath = path.join(root, "data", "canon_db", "active_engine.md");
 const compressedRulesPath = path.join(root, "data", "error_report_db", "compressed_rules.md");
-const expectedActiveEngineHash = "238b287a32342c55c6d95e32953d1d681dd8a0f4f8f31fe9df24985b2eb7a2a8";
+const expectedActiveEngineHash = "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 function hash(value) {
