@@ -14,7 +14,7 @@
   "visual_assets_root": "data/visual_db/assets",
   "visual_index_path": "data/visual_db/visual_index.jsonl",
   "active_engine_path": "data/canon_db/active_engine.md",
-  "expected_engine_sha256_lf": "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788",
+  "expected_engine_sha256_lf": "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE",
   "required_simulation_confirmation_text": "確認模擬視覺匯入",
   "required_pre_write_confirmation_text": "確認進入視覺正式匯入準備",
   "required_real_import_confirmation_text": "確認執行視覺正式匯入",

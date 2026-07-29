@@ -8,7 +8,7 @@
   "visual_trash_root": "data/visual_db/trash",
   "visual_restore_root": "data/visual_db/restore",
   "active_engine_path": "data/canon_db/active_engine.md",
-  "expected_engine_sha256_lf": "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788",
+  "expected_engine_sha256_lf": "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE",
   "required_rollback_confirmation_text": "確認執行視覺匯入回滾",
   "required_delete_confirmation_text": "確認執行視覺刪除",
   "required_restore_confirmation_text": "確認執行視覺復原",

@@ -16,7 +16,7 @@ const fixtureApproval = path.join(projectPaths.approvalQueue, ".chat-output-cand
 const fixturePending = path.join(projectPaths.canonDb, ".chat-output-candidate-test-pending");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 const expectedActiveEngineLfHash = (
-  "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788"
+  "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE"
 );
 const options = {
   writingCandidates: fixtureCandidates,

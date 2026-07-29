@@ -110,7 +110,7 @@ const activeEngineRel = "data/canon_db/active_engine.md";
 const compressedRulesRel = "data/error_report_db/compressed_rules.md";
 
 const expectedActiveEngineHash =
-  "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788";
+  "bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae";
 const expectedCompressedRulesHash =
   "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 

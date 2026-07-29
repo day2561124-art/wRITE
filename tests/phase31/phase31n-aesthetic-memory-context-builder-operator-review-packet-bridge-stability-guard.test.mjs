@@ -10,7 +10,7 @@ const compressedRulesPath = path.join(root, "data", "error_report_db", "compress
 const phase31LPath = path.join(root, "tests", "phase31", "phase31l-aesthetic-memory-context-builder-operator-review-packet-bridge-preview.test.mjs");
 const phase31MPath = path.join(root, "tests", "phase31", "phase31m-aesthetic-memory-context-builder-operator-review-packet-bridge-final-smoke.test.mjs");
 
-const expectedActiveEngineHash = "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788";
+const expectedActiveEngineHash = "bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 function hash(value) {

@@ -1,9 +1,9 @@
 {
   "registry_mode": "derived_preview",
   "source_tier": "T8 derived",
-  "built_at": "2026-07-27T09:30:34.705Z",
-  "active_engine_hash": "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788",
-  "canon_db_hash": "5d7d3a569496528e3991a119e42f46370e94f2f7bdd891c87fa08d95301766a8",
+  "built_at": "2026-07-29T17:29:54.311Z",
+  "active_engine_hash": "bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae",
+  "canon_db_hash": "2d6b82b7193c46f7aeffa0d483c96f31fe8b5c9c68f583eba99f40c48e7b81e3",
   "compressed_rules_hash": "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
   "source_files": [
     "data/canon_db/active_engine.md",

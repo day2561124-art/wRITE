@@ -8,7 +8,7 @@
   "active_engine_path": "data/canon_db/active_engine.md",
   "compressed_rules_path": "data/error_report_db/compressed_rules.md",
   "approval_queue_root": "data/approval_queue",
-  "expected_engine_sha256_lf": "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788",
+  "expected_engine_sha256_lf": "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE",
   "expected_formal_visual_index_non_empty_lines_before": 0,
   "expected_formal_assets_count_before": 0,
   "min_persistent_import_count": 1,

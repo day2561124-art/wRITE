@@ -7,7 +7,7 @@
   "visual_assets_root": "data/visual_db/assets",
   "visual_index_path": "data/visual_db/visual_index.jsonl",
   "active_engine_path": "data/canon_db/active_engine.md",
-  "expected_engine_sha256_lf": "D6723ADB13C407F8A0B2A75CEF353C75388447304DBE7C2C99A87E54CB901788",
+  "expected_engine_sha256_lf": "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE",
   "required_confirmation_text": "確認模擬視覺匯入",
   "approval_preview_source": "visual_library_approval_queue_import_dry_run_preview",
   "approval_item_type": "visual_library_import",

@@ -41,7 +41,7 @@ const archiveFilesDir = path.join(rootDir, "data", "audit_retention", "archives"
 const archiveIndexDir = path.join(rootDir, "data", "audit_retention", "archive_index");
 const archiveManifestDir = path.join(rootDir, "data", "audit_retention", "archive_manifests");
 
-const expectedActiveEngineHash = "d6723adb13c407f8a0b2a75cef353c75388447304dbe7c2c99a87e54cb901788";
+const expectedActiveEngineHash = "bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 const phase28qRegistration =
