@@ -37,7 +37,7 @@ const serverPath = path.join(rootDir, "server", "src", "mcp-http-server.mjs");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const story = "Phase47J 唯一隱私正文\r\n她沒有改動那個全形空格。　😀\n\uFEFF末行保留。 ";
 const protectedHashes = {
-  [projectPaths.activeEngine]: "bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae",
+  [projectPaths.activeEngine]: "514b71736d4b4c3c098520d8cf8683f6b28fc55d028774150a77cabd37ec3a0b",
   [projectPaths.compressedRules]: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
 };
 const immutableEvidencePath = path.join(projectRoot, "config", "phase46d-real-chatgpt-immutable-raw-story-handoff-live-acceptance-evidence.json");

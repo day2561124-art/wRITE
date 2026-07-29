@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $activeEnginePath = Join-Path $projectRoot "data\canon_db\active_engine.md"
-$expectedHash = "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE"
+$expectedHash = "514B71736D4B4C3C098520D8CF8683F6B28FC55D028774150A77CABD37EC3A0B"
 $text = [System.IO.File]::ReadAllText($activeEnginePath)
 $normalized = $text -replace "`r`n", "`n" -replace "`r", "`n"
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)

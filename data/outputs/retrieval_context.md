@@ -1,8 +1,8 @@
 # Retrieval Context｜最新正式承接
 
-- effective_canon_head: 第二十五章〈比她更早〉
-- continuity_head: 第二十五章〈比她更早〉結束後
-- settlement_report_id: settlement_report_20260723-183034-fe8db407
+- effective_canon_head: 第三十三章〈十一秒〉
+- continuity_head: 第三十三章〈十一秒〉結束後
+- settlement_report_id: settlement_report_20260729-153810-2c7bb48e
 
 ## Source Authority
 
@@ -11,15 +11,15 @@ current user instruction > latest formal continuity overlay > active_engine hard
 ## Active Engine Metadata
 
 - path: data/canon_db/active_engine.md
-- sha256: eeba5aae53166a9baaccf104341d78adb487ee10496d8bd8192657e95a41f001
+- sha256: 24b91a42f6d5cbcba1ae383ba72b2df39d23d27229fd4d293e9b3ad8aad8798d
 - authority_level: active_hard_canon
 
 ## Context References
 
-- generation_context_sha256: 8a1d8bb45acdc58c0f249e6a599cf076bc6451ded69072cb37991a42173e6427
+- generation_context_sha256: cb7099125428dbc28aab544b4b7b849e828fb29ad004d8931eb06790d63fcfef
 - generation_context_reference: data/outputs/generation_context.md
-- continuity_overlay_reference: data/outputs/settlement_reports/settlement_report_20260723-183034-fe8db407/settlement_report.md
-- continuity_overlay_created_at: 2026-07-23T18:30:34.175Z
+- continuity_overlay_reference: data/outputs/settlement_reports/settlement_report_20260729-153810-2c7bb48e/settlement_report.md
+- continuity_overlay_created_at: 2026-07-29T15:38:10.059Z
 
 ## Retrieved Sources
 

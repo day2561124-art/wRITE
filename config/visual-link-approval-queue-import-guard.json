@@ -9,7 +9,7 @@
   "source_entity_registry_config": "config/entity-registry.json",
   "source_engine_path": "data/canon_db/active_engine.md",
   "source_visual_index_path": "data/visual_db/visual_index.jsonl",
-  "expected_engine_sha256_lf": "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE",
+  "expected_engine_sha256_lf": "514B71736D4B4C3C098520D8CF8683F6B28FC55D028774150A77CABD37EC3A0B",
   "canon_write_allowed": false,
   "approval_queue_write_allowed": false,
   "visual_index_write_allowed": false,

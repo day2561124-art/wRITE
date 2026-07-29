@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const expectedActiveEngineHash = (
-  "BBD5B35DA0B4A7149B0400A886766427CE43305A2D46A384055CB2CA906B86AE"
+  "514B71736D4B4C3C098520D8CF8683F6B28FC55D028774150A77CABD37EC3A0B"
 );
 
 function sha256(content) {

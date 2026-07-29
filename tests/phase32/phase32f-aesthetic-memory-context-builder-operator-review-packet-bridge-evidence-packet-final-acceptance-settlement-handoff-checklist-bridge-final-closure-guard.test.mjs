@@ -63,7 +63,7 @@ const closureGuardContract = {
     'expand_mcp_surface',
   ],
   protectedHashes: {
-    active_engine: 'bbd5b35da0b4a7149b0400a886766427ce43305a2d46a384055cb2ca906b86ae',
+    active_engine: '514b71736d4b4c3c098520d8cf8683f6b28fc55d028774150a77cabd37ec3a0b',
     compressed_rules: 'f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db',
   },
   bridgeDryRunSafety: {
@@ -158,7 +158,7 @@ const deterministicDigest = `sha256:${crypto
 
 assert.equal(
   deterministicDigest,
-  'sha256:95648f48ad300ecd2d7b254781aeabce74422978e6b00c25b4b48c407ecccce8',
+  'sha256:e2fb2a5e258ddf535a24aec8f31d1fde6f6786491e77b7b968433ecb86f33db6',
   'Phase32F deterministic digest changed unexpectedly',
 );
 
