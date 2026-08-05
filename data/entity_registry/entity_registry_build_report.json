@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "status": "complete",
-  "built_at": "2026-07-29T17:29:54.311Z",
-  "deterministic_source_hash": "cc34b8a1862bae3a9ec2e387de6c12f18bf81ff6c574a91f70af1289db257e6c",
-  "entity_count": 234,
+  "built_at": "2026-08-04T12:59:50.073Z",
+  "deterministic_source_hash": "8babbee0bdffe2bd00e7f725ff05bb70c06d7469976ae78c46161c3180236e3a",
+  "entity_count": 236,
   "entity_counts_by_type": {
     "characters": 58,
     "abilities": 12,
@@ -14,10 +14,10 @@
     "locations": 2,
     "chapter_events": 3,
     "relationships": 0,
-    "status_effects": 75
+    "status_effects": 77
   },
   "status_counts": {
-    "canon": 206,
+    "canon": 208,
     "candidate": 28,
     "pending": 0,
     "deprecated": 0,

@@ -9,7 +9,7 @@ const activeEnginePath = path.join(root, "data", "canon_db", "active_engine.md")
 const compressedRulesPath = path.join(root, "data", "error_report_db", "compressed_rules.md");
 const phase31PPath = path.join(root, "tests", "phase31", "phase31p-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet.test.mjs");
 
-const expectedActiveEngineHash = "514b71736d4b4c3c098520d8cf8683f6b28fc55d028774150a77cabd37ec3a0b";
+const expectedActiveEngineHash = "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 function hash(value) { return createHash("sha256").update(value, "utf8").digest("hex"); }

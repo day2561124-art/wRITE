@@ -32,7 +32,7 @@ const backupProjectDir = path.join(rootDir, "data", "backups", "project_backups"
 const backupExportsDir = path.join(rootDir, "data", "backups", "exports");
 const restorePreviewsDir = path.join(rootDir, "data", "backups", "restore_previews");
 
-const expectedActiveEngineHash = "514b71736d4b4c3c098520d8cf8683f6b28fc55d028774150a77cabd37ec3a0b";
+const expectedActiveEngineHash = "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55";
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 const expectedRunAllRegistrations = [

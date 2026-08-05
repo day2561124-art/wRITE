@@ -116,6 +116,6 @@ git diff --stat
 
 每日檢查使用下列正式 LF-normalized SHA256 baseline：
 
-- `data/canon_db/active_engine.md`：`514B71736D4B4C3C098520D8CF8683F6B28FC55D028774150A77CABD37EC3A0B`
+- `data/canon_db/active_engine.md`：`9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55`
 
 正式啟用流程若改變 `active_engine.md`，必須同步更新檢查腳本、測試與本文件中的基線。
