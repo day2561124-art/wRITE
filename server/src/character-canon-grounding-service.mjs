@@ -655,9 +655,23 @@ export function resolveCanonCharacterMentions(text, records = []) {
 }
 
 export function buildCharacterCanonGrounding(input = {}) {
-  const records = parseActiveEngineCharacterRecords(input.activeEngineContent, {
+  const activeEngineRecords = parseActiveEngineCharacterRecords(input.activeEngineContent, {
     sourceFile: input.sourceFile,
   });
+  const additionalRecords = Array.isArray(input.additionalCharacterRecords)
+    ? input.additionalCharacterRecords.filter((record) => (
+      record && typeof record === "object" && record.canonical_name
+    ))
+    : [];
+  const recordsByName = new Map(
+    activeEngineRecords.map((record) => [record.canonical_name, record]),
+  );
+  for (const record of additionalRecords) {
+    if (!recordsByName.has(record.canonical_name)) {
+      recordsByName.set(record.canonical_name, record);
+    }
+  }
+  const records = [...recordsByName.values()];
   const primaryInputs = [
     { source: "task_prompt", text: serializedContext(input.taskPrompt) },
     { source: "generation_context", text: serializedContext(input.generationContext) },
@@ -766,10 +780,17 @@ export function buildCharacterCanonGrounding(input = {}) {
 
   return {
     schema_version: "phase48b-character-canon-grounding-v2",
-    loaded: String(input.activeEngineContent ?? "").length > 0,
-    source_authority: sourceAuthority,
+    loaded: String(input.activeEngineContent ?? "").length > 0 || additionalRecords.length > 0,
+    source_authority: additionalRecords.length
+      ? "active_engine_and_formal_canon_sources_high_authority"
+      : sourceAuthority,
     source_file: String(input.sourceFile ?? "data/canon_db/active_engine.md"),
-    source_scope: "full_active_engine_before_context_allocation",
+    supplemental_source_files: [...new Set(
+      additionalRecords.map((record) => record.source_file).filter(Boolean),
+    )],
+    source_scope: additionalRecords.length
+      ? "full_active_engine_and_hydrated_formal_canon_sources_before_context_allocation"
+      : "full_active_engine_before_context_allocation",
     matched_character_count: characters.length,
     characters,
     mention_resolution: {
@@ -819,6 +840,16 @@ export function serializeCharacterCanonGroundingFixedGuard(packet = {}) {
       + `｜affiliation=${character.affiliation_facts?.join("；") || "unresolved"}`
       + `｜appearance=${character.appearance_facts?.join("；") || "unresolved"}`
       + `｜position=${character.relationship_or_position_facts?.join("；") || "unresolved"}`
+      + (character.personality_facts?.length
+        ? `｜personality=${character.personality_facts.join("；")}` : "")
+      + (character.teaching_principles?.length
+        ? `｜teaching=${character.teaching_principles.join("；")}` : "")
+      + (character.combat_style?.length
+        ? `｜combat_style=${character.combat_style.join("；")}` : "")
+      + (character.usage_constraints?.length
+        ? `｜usage_constraints=${character.usage_constraints.join("；")}` : "")
+      + (character.unknown_fields?.length
+        ? `｜unknown_fields=${character.unknown_fields.join("；")}` : "")
       + `｜explicit_body_traits=${character.explicit_body_traits?.join("；") || "none_grounded"}`,
     );
   }

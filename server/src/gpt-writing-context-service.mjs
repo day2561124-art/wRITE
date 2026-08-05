@@ -1253,6 +1253,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   }, options);
   formalRelevantCanon.relevant_canon =
     plannedEntityHydration.relevant_canon;
+  const hydratedFormalCharacterRecords = plannedEntityHydration
+    .planned_entity_hydration.resolved_entities
+    .filter((entry) => entry.category === "characters" && entry.character_canon)
+    .map((entry) => entry.character_canon);
   const characterCanonGrounding = buildCharacterCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
@@ -1260,8 +1264,11 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     generationContext: input.generationContext,
     retrievalContext: input.retrievalContext,
     currentLongline: byLabel.active_longline.content,
-    explicitCharacterNames:
-      formalRelevantCanon.retrieval_plan.characters,
+    explicitCharacterNames: [
+      ...formalRelevantCanon.retrieval_plan.characters,
+      ...hydratedFormalCharacterRecords.map((record) => record.canonical_name),
+    ],
+    additionalCharacterRecords: hydratedFormalCharacterRecords,
   });
   const worldEntityCanonGrounding = buildWorldEntityCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,

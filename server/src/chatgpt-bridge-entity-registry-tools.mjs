@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { projectPaths, normalizeProjectPath } from "./project-paths.mjs";
+import {
+  getStructuredEntityRegistry,
+} from "./structured-canon-entity-registry-service.mjs";
 
 function clampLimit(limit, def = 20, max = 50) {
   if (limit === undefined || limit === null || limit === "") return def;
@@ -29,6 +29,19 @@ function entitySearchTokens(query) {
   if (!normalized) return [];
   return [...new Set(normalized.split(/\s+/u).filter(Boolean))];
 }
+
+const registryBucketByEntityType = Object.freeze({
+  character: "characters",
+  ability: "abilities",
+  weapon: "weapons",
+  timeline_event: "timeline_events",
+  world_rule: "world_rules",
+  organization: "organizations",
+  location: "locations",
+  chapter_event: "chapter_events",
+  relationship: "relationships",
+  status_effect: "status_effects",
+});
 
 function entitySearchHaystack(meta = {}, full = {}) {
   return normalizeEntitySearchText([
@@ -69,6 +82,14 @@ function entitySearchScore(meta = {}, full = {}, query = "") {
     else if (haystack.includes(token)) score += 10;
   }
 
+  if (
+    tokens.length > 1
+    && meta.entity_type === "character"
+    && tokens.every((token) => haystack.includes(token))
+  ) {
+    score += 300;
+  }
+
   if (tokens.length === 1) {
     const token = tokens[0];
     const isExactCanonical = canonical === token || metaCanonical === token;
@@ -90,16 +111,6 @@ function assertUnknownArgs(args, allowed = []) {
   }
 }
 
-async function loadJson(filePath) {
-  try {
-    const text = await readFile(filePath, "utf8");
-    return JSON.parse(text);
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
-}
-
 export async function chatgpt_bridge_get_entity_registry_summary(input = {}) {
   assertUnknownArgs(input, [
     "include_counts_by_status",
@@ -112,11 +123,13 @@ export async function chatgpt_bridge_get_entity_registry_summary(input = {}) {
   const include_conflict_summary = input.include_conflict_summary !== false;
   const include_provenance = input.include_provenance !== false;
 
-  const registry = await loadJson(projectPaths.entityRegistryData);
-  const index = await loadJson(projectPaths.entityRegistryIndex);
-  const buildReport = await loadJson(projectPaths.entityRegistryBuildReport);
-  const conflictReport = await loadJson(projectPaths.entityRegistryConflictReport);
-  const provenance = await loadJson(projectPaths.entityRegistryProvenance);
+  const {
+    registry,
+    index,
+    buildReport,
+    conflictReport,
+    provenance,
+  } = await getStructuredEntityRegistry();
 
   const total_entities = index?.entity_count ?? (registry ? Object.values(registry).flat().length : 0);
 
@@ -156,9 +169,7 @@ export async function chatgpt_bridge_search_canon_entities(input = {}) {
   const limit = typeof limitSpec === "object" ? limitSpec.value : limitSpec;
   const clamped = typeof limitSpec === "object" ? limitSpec.clamped : false;
 
-  const index = await loadJson(projectPaths.entityRegistryIndex);
-  const registry = await loadJson(projectPaths.entityRegistryData);
-  const provenance = await loadJson(projectPaths.entityRegistryProvenance);
+  const { index, registry, provenance } = await getStructuredEntityRegistry();
   if (!index || !registry) return { ok: false, warnings: ["entity registry not available"], entities: [], provenance: provenance ?? null };
 
   let entries = Object.entries(index.by_id).map(([id, meta]) => ({ entity_id: id, ...meta }));
@@ -167,7 +178,8 @@ export async function chatgpt_bridge_search_canon_entities(input = {}) {
   if (status) entries = entries.filter((e) => e.status === status);
   if (risk_level) entries = entries.filter((e) => String(e.risk_level) === risk_level);
   const fullForMeta = (meta) => (
-    (registry[`${meta.entity_type}s`] || []).find((it) => it.entity_id === meta.entity_id) ?? {}
+    (registry[registryBucketByEntityType[meta.entity_type]] || [])
+      .find((it) => it.entity_id === meta.entity_id) ?? {}
   );
   const queryScores = new Map();
 
@@ -249,11 +261,10 @@ export async function chatgpt_bridge_get_canon_entity_detail(input = {}) {
   const include_source_excerpt = input.include_source_excerpt !== false;
   const include_provenance = input.include_provenance !== false;
 
-  const registry = await loadJson(projectPaths.entityRegistryData);
-  const provenance = await loadJson(projectPaths.entityRegistryProvenance);
+  const { registry, provenance } = await getStructuredEntityRegistry();
   if (!registry) return { ok: false, warnings: ["entity registry missing"] };
 
-  const allTypes = Object.keys(registry).filter((k) => k !== "provenance");
+  const allTypes = Object.keys(registry).filter((key) => Array.isArray(registry[key]));
   for (const type of allTypes) {
     const list = registry[type] || [];
     const found = list.find((it) => it.entity_id === entity_id);
@@ -283,8 +294,7 @@ export async function chatgpt_bridge_get_entity_conflicts(input = {}) {
   const limit = typeof limitSpec === "object" ? limitSpec.value : limitSpec;
   const clamped = typeof limitSpec === "object" ? limitSpec.clamped : false;
 
-  const conflictReport = await loadJson(projectPaths.entityRegistryConflictReport);
-  const provenance = await loadJson(projectPaths.entityRegistryProvenance);
+  const { conflictReport, provenance } = await getStructuredEntityRegistry();
   const conflicts = (conflictReport?.conflicts ?? []).filter((c) => {
     if (severity && c.severity !== severity) return false;
     if (conflict_type && c.conflict_type !== conflict_type) return false;
@@ -323,8 +333,7 @@ export async function chatgpt_bridge_get_entity_registry_provenance(input = {}) 
   const include_build_report = input.include_build_report !== false;
   const include_warnings = input.include_warnings !== false;
 
-  const provenance = await loadJson(projectPaths.entityRegistryProvenance);
-  const buildReport = await loadJson(projectPaths.entityRegistryBuildReport);
+  const { provenance, buildReport } = await getStructuredEntityRegistry();
   if (!provenance) return { ok: false, warnings: ["provenance missing"] };
 
   return {

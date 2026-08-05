@@ -148,19 +148,20 @@ function sectionAnchor(section) {
 }
 
 function baseEntity(type, name, section, hashes, extras = {}) {
-  const excerpt = String(extras.sourceExcerpt ?? section.content ?? section.title).slice(0, 1_500);
+  const excerpt = String(extras.sourceExcerpt ?? section.content ?? section.title)
+    .slice(0, extras.sourceExcerptLimit ?? 1_500);
   const status = extras.status ?? (candidatePattern.test(`${section.title}\n${excerpt}`) ? "candidate" : "canon");
   const riskLevel = extras.riskLevel ?? (highRiskPattern.test(`${section.title}\n${excerpt}`) ? "P0" : "P2");
   const anchor = extras.sourceAnchor ?? sectionAnchor(section);
   const timestamp = hashes.source_modified_at;
   return {
-    entity_id: createDeterministicEntityId(type, name, anchor),
+    entity_id: extras.entityId ?? createDeterministicEntityId(type, name, anchor),
     entity_type: type,
     canonical_name: name,
     aliases: extras.aliases ?? [],
     status,
     source_tier: status === "canon" ? "T1 canon" : "T7 candidate",
-    source_file: "data/canon_db/active_engine.md",
+    source_file: extras.sourceFile ?? "data/canon_db/active_engine.md",
     source_section: section.title,
     source_anchor: anchor,
     source_excerpt: excerpt,
@@ -173,12 +174,13 @@ function baseEntity(type, name, section, hashes, extras = {}) {
       extraction_rule: extras.extractionRule ?? "section",
       derived_registry: true,
       canon_write_allowed: false,
+      ...(extras.provenance ?? {}),
     },
     active_engine_hash_at_build: hashes.active_engine_hash,
     canon_db_hash_at_build: hashes.canon_db_hash,
     compressed_rules_hash_at_build: hashes.compressed_rules_hash,
-    created_at: timestamp,
-    updated_at: timestamp,
+    created_at: extras.sourceModifiedAt ?? timestamp,
+    updated_at: extras.sourceModifiedAt ?? timestamp,
     ...extras.fields,
   };
 }
@@ -200,6 +202,342 @@ function tableRows(section) {
     index = cursor - 1;
   }
   return tables;
+}
+
+const formalEntitySourceNamePattern = /^entity_[a-z0-9_]+\.md$/u;
+const formalEntityHeadingPattern = /^(character|weapon|ability)｜(.+?)｜([a-z][a-z0-9_]*)$/u;
+
+function semicolonList(value) {
+  return [...new Set(String(value ?? "")
+    .split(/[；;]/u)
+    .map((item) => item.trim())
+    .filter(Boolean))];
+}
+
+function formalEntityFields(section) {
+  const table = tableRows(section).find((candidate) => (
+    candidate.headers.some((header) => /^欄位$/u.test(header))
+    && candidate.headers.some((header) => /正式\s*Canon/iu.test(header))
+  ));
+  if (!table) return null;
+  const fields = new Map();
+  for (const row of table.rows) {
+    const key = firstValue(row, [/^欄位$/u]);
+    const value = firstValue(row, [/正式\s*Canon/iu]);
+    if (key) fields.set(key, value);
+  }
+  return fields;
+}
+
+function canonField(fields, ...names) {
+  for (const name of names) {
+    const value = fields.get(name);
+    if (value !== undefined) return value;
+  }
+  return "";
+}
+
+function formalGender(value) {
+  if (/^男/u.test(String(value ?? ""))) return "male";
+  if (/^女/u.test(String(value ?? ""))) return "female";
+  return null;
+}
+
+function formalPronouns(gender) {
+  if (gender === "male") return { third_person: "他", second_person: "你", resolved: true };
+  if (gender === "female") return { third_person: "她", second_person: "妳", resolved: true };
+  return { third_person: null, second_person: null, resolved: false };
+}
+
+async function readFormalCanonEntitySources(options = {}) {
+  if (Array.isArray(options.formalCanonSources)) return options.formalCanonSources;
+  const sourceRoot = options.formalCanonSourceRoot ?? projectPaths.canonSources;
+  const entries = await readdir(sourceRoot, { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  return Promise.all(entries
+    .filter((entry) => entry.isFile() && formalEntitySourceNamePattern.test(entry.name))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(async (entry) => {
+      const filePath = path.join(sourceRoot, entry.name);
+      const [content, sourceStat] = await Promise.all([
+        readFile(filePath, "utf8"),
+        stat(filePath),
+      ]);
+      return {
+        content,
+        source_file: normalizeProjectPath(filePath),
+        source_hash: sha256(content),
+        source_modified_at: sourceStat.mtime.toISOString(),
+      };
+    }));
+}
+
+function parseFormalCanonEntitySources(sources, hashes) {
+  const buckets = { characters: [], abilities: [], weapons: [] };
+  const seenEntityIds = new Map();
+  for (const source of sources) {
+    const sourceLabel = source.source_file ?? "unknown entity source";
+    const entitySections = parseSections(source.content).filter((section) => (
+      /^(?:character|weapon|ability)｜/u.test(section.title)
+    ));
+    if (!entitySections.length) {
+      throw new Error(
+        `Invalid formal Canon entity source ${sourceLabel}: no character, weapon, or ability entity headings.`,
+      );
+    }
+    for (const section of entitySections) {
+      const heading = formalEntityHeadingPattern.exec(section.title);
+      if (!heading) {
+        throw new Error(
+          `Invalid formal Canon entity source ${sourceLabel} at line ${section.startLine}: malformed entity heading.`,
+        );
+      }
+      const [, entityType, headingName, entityId] = heading;
+      if (!entityId.startsWith(`${entityType}_`)) {
+        throw new Error(
+          `Invalid formal Canon entity source ${sourceLabel} at line ${section.startLine}: ${entityId} must use the ${entityType}_ prefix.`,
+        );
+      }
+      const previousSource = seenEntityIds.get(entityId);
+      if (previousSource) {
+        throw new Error(
+          `Duplicate formal Canon entity ID ${entityId} in ${sourceLabel}; already declared in ${previousSource}.`,
+        );
+      }
+      seenEntityIds.set(entityId, sourceLabel);
+      const fields = formalEntityFields(section);
+      if (!fields) {
+        throw new Error(
+          `Invalid formal Canon entity source ${sourceLabel} at line ${section.startLine}: missing 欄位 / 正式 Canon table.`,
+        );
+      }
+      const aliases = semicolonList(canonField(fields, "搜尋別名"));
+      const sourceExcerpt = `## ${section.title}\n\n${section.content}`;
+      const common = {
+        entityId,
+        aliases,
+        sourceFile: source.source_file,
+        sourceModifiedAt: source.source_modified_at,
+        sourceExcerpt,
+        sourceExcerptLimit: 12_000,
+        extractionRule: "formal_canon_entity_source",
+        confidence: 1,
+        provenance: {
+          source_hash: source.source_hash,
+          formal_canon_source: true,
+          source_scope: "second_layer_formal_setting",
+        },
+      };
+      if (entityType === "character") {
+        const canonicalName = canonField(fields, "中文名") || headingName;
+        const gender = formalGender(canonField(fields, "性別"));
+        const affiliation = canonField(fields, "所屬組織", "所屬");
+        const position = canonField(fields, "職位");
+        const department = canonField(fields, "部門");
+        const age = canonField(fields, "年齡");
+        const height = canonField(fields, "身高");
+        const appearanceFacts = semicolonList(canonField(fields, "外貌"));
+        const personalityFacts = semicolonList(canonField(fields, "性格"));
+        const teachingPrinciples = semicolonList(canonField(fields, "教學重點"));
+        const combatStyle = semicolonList(canonField(fields, "戰鬥風格"));
+        const speechConstraints = semicolonList(canonField(fields, "說話與教學限制"));
+        const abilityConstraints = semicolonList(canonField(fields, "能力使用限制"));
+        const unknownFields = semicolonList(canonField(fields, "未公開或未知"));
+        const weaponIds = semicolonList(canonField(fields, "武裝實體 ID"));
+        const abilityIds = semicolonList(canonField(fields, "能力實體 ID"));
+        const weaponNames = semicolonList(canonField(fields, "異能武裝"))
+          .map((name) => name.replace(/[《》]/gu, ""));
+        const identityFacts = [age, height, position, department].filter(Boolean);
+        const relationshipOrPositionFacts = [position, department].filter(Boolean);
+        const usageConstraints = [...speechConstraints, ...abilityConstraints];
+        buckets.characters.push(baseEntity("character", canonicalName, section, hashes, {
+          ...common,
+          fields: {
+            formal_name: canonicalName,
+            english_name: canonField(fields, "英文名"),
+            categories: semicolonList(canonField(fields, "分類")),
+            gender,
+            gender_canon: canonField(fields, "性別") || null,
+            age,
+            height,
+            identity: identityFacts.join("；"),
+            grade: "",
+            grade_or_role: position,
+            affiliation,
+            department,
+            position,
+            appearance_facts: appearanceFacts,
+            personality_facts: personalityFacts,
+            teaching_principles: teachingPrinciples,
+            combat_style: combatStyle,
+            usage_constraints: usageConstraints,
+            unknown_fields: unknownFields,
+            ability_ids: abilityIds,
+            weapon_ids: weaponIds,
+            weapon_names: weaponNames,
+            current_status: "",
+            recent_injuries: [],
+            relationships: [],
+            development_stage: canonField(fields, "正式階段"),
+            source: "formal_canon_entity_source",
+            canon_character_grounding: {
+              canonical_name: canonicalName,
+              source_authority: "formal_canon_source_high_authority",
+              source_file: source.source_file,
+              source_section: section.title,
+              gender,
+              gender_canon: canonField(fields, "性別") || null,
+              gender_conflict_detected: false,
+              pronouns: formalPronouns(gender),
+              identity_facts: identityFacts,
+              affiliation_facts: affiliation ? [affiliation] : [],
+              appearance_facts: appearanceFacts,
+              personality_facts: personalityFacts,
+              relationship_or_position_facts: relationshipOrPositionFacts,
+              teaching_principles: teachingPrinciples,
+              combat_style: combatStyle,
+              usage_constraints: usageConstraints,
+              unknown_fields: unknownFields,
+              explicit_body_traits: [],
+              provenance: [{
+                source_file: source.source_file,
+                source_section: section.title,
+                source_line: section.startLine,
+                record_context: canonicalName,
+              }],
+            },
+          },
+        }));
+      } else if (entityType === "weapon") {
+        const canonicalName = canonField(fields, "正式名稱")
+          .replace(/[《》]/gu, "") || headingName;
+        const holderName = canonField(fields, "持有者");
+        const holderId = canonField(fields, "持有者實體 ID") || null;
+        const abilityIds = semicolonList(canonField(fields, "能力實體 ID"));
+        buckets.weapons.push(baseEntity("weapon", canonicalName, section, hashes, {
+          ...common,
+          relatedCharacters: holderName ? [holderName] : [],
+          relatedEntities: [holderId, ...abilityIds].filter(Boolean),
+          fields: {
+            formal_name: canonField(fields, "正式名稱") || `《${canonicalName}》`,
+            categories: semicolonList(canonField(fields, "分類")),
+            holder_character_id: holderId,
+            holder_name: holderName,
+            weapon_type: canonField(fields, "分類"),
+            manifestation_type: "器具型",
+            appearance: canonField(fields, "外形"),
+            core_ability: canonField(fields, "核心能力"),
+            effects: semicolonList(canonField(fields, "具體效果")),
+            confirmed_limits: semicolonList(canonField(fields, "明確限制")),
+            forbidden_expansions: semicolonList(canonField(fields, "禁止擴張")),
+            unknown_fields: semicolonList(canonField(fields, "未公開或未知")),
+            ability_ids: abilityIds,
+            ability_relation: canonField(fields, "核心能力"),
+            risk_notes: semicolonList(canonField(fields, "禁止擴張")),
+          },
+        }));
+      } else if (entityType === "ability") {
+        const canonicalName = canonField(fields, "概念名稱") || headingName;
+        const holderName = canonField(fields, "使用者");
+        const holderId = canonField(fields, "使用者實體 ID") || null;
+        const weaponId = canonField(fields, "來源武裝實體 ID") || null;
+        buckets.abilities.push(baseEntity("ability", canonicalName, section, hashes, {
+          ...common,
+          relatedCharacters: holderName ? [holderName] : [],
+          relatedEntities: [holderId, weaponId].filter(Boolean),
+          fields: {
+            holder_character_ids: holderId ? [holderId] : [],
+            holder_name: holderName,
+            ability_type: "weapon_ability",
+            source_weapon: canonField(fields, "能力來源"),
+            essence: canonField(fields, "核心能力"),
+            effects: semicolonList(canonField(fields, "具體效果")),
+            activation_conditions: semicolonList(canonField(fields, "成立條件")),
+            confirmed_limits: semicolonList(canonField(fields, "明確限制")),
+            forbidden_normalizations: semicolonList(canonField(fields, "禁止正規化")),
+            unknown_fields: semicolonList(canonField(fields, "未公開或未知")),
+            development_stage: "依使用者與武裝現行設定",
+            related_weapons: weaponId ? [weaponId] : [],
+          },
+        }));
+      }
+    }
+  }
+  return buckets;
+}
+
+function selectSupplementalEntities(primary, supplemental) {
+  const protectedIds = new Set(primary.map((entity) => entity.entity_id));
+  return supplemental.filter((entity) => !protectedIds.has(entity.entity_id));
+}
+
+function appendSupplementalEntities(primary, supplemental) {
+  return uniqueEntities([...primary, ...selectSupplementalEntities(primary, supplemental)]);
+}
+
+function extractReferencedOrganizations(sections, hashes, names) {
+  const organizations = [];
+  for (const name of [...new Set(names.filter(Boolean))]) {
+    for (const section of sections) {
+      const lineOffset = section.lines.findIndex((line) => (
+        line.includes(`| ${name} |`) || line.includes(`|${name}|`)
+      ));
+      if (lineOffset < 0) continue;
+      const sourceLine = section.startLine + lineOffset + 1;
+      organizations.push(baseEntity("organization", name, section, hashes, {
+        extractionRule: "referenced_formal_organization_row",
+        sourceExcerpt: section.lines[lineOffset].trim(),
+        sourceAnchor: `L${sourceLine}-L${sourceLine}`,
+        confidence: 1,
+        fields: {
+          organization_type: /學院/u.test(name) ? "academy" : "organization",
+          members: [],
+          hierarchy: [],
+          related_locations: [],
+        },
+      }));
+      break;
+    }
+  }
+  return uniqueEntities(organizations);
+}
+
+function linkFormalCanonEntities(mapped, supplemental) {
+  const all = [
+    ...mapped.characters,
+    ...mapped.weapons,
+    ...mapped.organizations,
+    ...supplemental.characters,
+    ...supplemental.weapons,
+    ...supplemental.abilities,
+  ];
+  const byId = new Map(all.map((entity) => [entity.entity_id, entity]));
+  const organizationByName = new Map(
+    mapped.organizations.map((entity) => [entity.canonical_name, entity]),
+  );
+  for (const character of supplemental.characters) {
+    const relatedIds = [
+      ...(character.weapon_ids ?? []),
+      ...(character.ability_ids ?? []),
+    ];
+    const organization = organizationByName.get(character.affiliation);
+    if (organization) {
+      relatedIds.push(organization.entity_id);
+      organization.members = [...new Set([...(organization.members ?? []), character.entity_id])];
+    }
+    character.related_entities = [...new Set([
+      ...(character.related_entities ?? []),
+      ...relatedIds.filter((entityId) => byId.has(entityId)),
+    ])];
+  }
+  for (const weapon of supplemental.weapons) {
+    weapon.related_entities = [...new Set((weapon.related_entities ?? []).filter((id) => byId.has(id)))];
+  }
+  for (const ability of supplemental.abilities) {
+    ability.related_entities = [...new Set((ability.related_entities ?? []).filter((id) => byId.has(id)))];
+  }
 }
 
 function firstValue(row, patterns) {
@@ -765,15 +1103,38 @@ export function validateEntityRegistry(registry) {
   return errors;
 }
 
+function buildEntityIndex(registry, generatedAt) {
+  const allEntities = entityTypes.flatMap((type) => registry[type] ?? []);
+  return {
+    schema_version: schemaVersion,
+    generated_at: generatedAt,
+    entity_count: allEntities.length,
+    by_id: Object.fromEntries(allEntities.map((entity) => [
+      entity.entity_id,
+      {
+        entity_type: entity.entity_type,
+        canonical_name: entity.canonical_name,
+        status: entity.status,
+        risk_level: entity.risk_level,
+      },
+    ])),
+    by_type: Object.fromEntries(entityTypes.map((type) => [
+      type,
+      (registry[type] ?? []).map((entity) => entity.entity_id),
+    ])),
+  };
+}
+
 export async function buildStructuredEntityRegistry(options = {}) {
   const activeEnginePath = options.activeEnginePath ?? projectPaths.activeEngine;
   const compressedRulesPath = options.compressedRulesPath ?? projectPaths.compressedRules;
   const canonDbPath = options.canonDbPath ?? projectPaths.canonDb;
-  const [activeEngine, compressedRules, activeStat, preview] = await Promise.all([
+  const [activeEngine, compressedRules, activeStat, preview, formalCanonSources] = await Promise.all([
     readFile(activeEnginePath, "utf8"),
     readFile(compressedRulesPath),
     stat(activeEnginePath),
     options.preview ?? buildEntityRegistryPreview(options.previewOptions ?? {}),
+    readFormalCanonEntitySources(options),
   ]);
   const hashes = {
     active_engine_hash: sha256(activeEngine),
@@ -783,6 +1144,22 @@ export async function buildStructuredEntityRegistry(options = {}) {
   };
   const sections = parseSections(activeEngine);
   const mapped = mapPreviewEntities(preview, sections, hashes);
+  const supplemental = parseFormalCanonEntitySources(formalCanonSources, hashes);
+  const acceptedSupplemental = {
+    characters: selectSupplementalEntities(mapped.characters, supplemental.characters),
+    weapons: selectSupplementalEntities(mapped.weapons, supplemental.weapons),
+    abilities: [],
+  };
+  mapped.organizations = uniqueEntities([
+    ...mapped.organizations,
+    ...extractReferencedOrganizations(
+      sections,
+      hashes,
+      acceptedSupplemental.characters.map((character) => character.affiliation),
+    ),
+  ]);
+  mapped.characters = appendSupplementalEntities(mapped.characters, acceptedSupplemental.characters);
+  mapped.weapons = appendSupplementalEntities(mapped.weapons, acceptedSupplemental.weapons);
   const characterNameToId = new Map(mapped.characters.map((item) => [item.canonical_name, item.entity_id]));
   const weaponNameToId = new Map(mapped.weapons.map((item) => [item.canonical_name, item.entity_id]));
   const medicalSnapshot = await buildMedicalContinuitySnapshot({
@@ -790,7 +1167,21 @@ export async function buildStructuredEntityRegistry(options = {}) {
     activeEngineText: activeEngine,
     activeEnginePath,
   });
-  const abilities = extractAbilities(sections, hashes, characterNameToId, weaponNameToId);
+  const activeEngineAbilities = extractAbilities(
+    sections,
+    hashes,
+    characterNameToId,
+    weaponNameToId,
+  );
+  acceptedSupplemental.abilities = selectSupplementalEntities(
+    activeEngineAbilities,
+    supplemental.abilities,
+  );
+  linkFormalCanonEntities(mapped, acceptedSupplemental);
+  const abilities = appendSupplementalEntities(
+    activeEngineAbilities,
+    acceptedSupplemental.abilities,
+  );
   const { timeline, chapterEvents } = extractTimelineAndChapterEvents(sections, hashes);
   const provenance = {
     registry_mode: "derived_preview",
@@ -805,6 +1196,7 @@ export async function buildStructuredEntityRegistry(options = {}) {
       "config/canon-zones.json",
       "config/entity-registry.json",
       medicalSnapshot.provenance.config_path,
+      ...formalCanonSources.map((source) => source.source_file),
     ],
     build_warnings: preview.warnings ?? [],
     direct_canon_write_allowed: false,
@@ -836,24 +1228,7 @@ export async function buildStructuredEntityRegistry(options = {}) {
   const conflicts = detectEntityRegistryConflicts(registry, provenance);
   const validationErrors = validateEntityRegistry(registry);
   const allEntities = entityTypes.flatMap((type) => registry[type]);
-  const index = {
-    schema_version: schemaVersion,
-    generated_at: provenance.built_at,
-    entity_count: allEntities.length,
-    by_id: Object.fromEntries(allEntities.map((entity) => [
-      entity.entity_id,
-      {
-        entity_type: entity.entity_type,
-        canonical_name: entity.canonical_name,
-        status: entity.status,
-        risk_level: entity.risk_level,
-      },
-    ])),
-    by_type: Object.fromEntries(entityTypes.map((type) => [
-      type,
-      registry[type].map((entity) => entity.entity_id),
-    ])),
-  };
+  const index = buildEntityIndex(registry, provenance.built_at);
   const buildReport = {
     schema_version: schemaVersion,
     status: validationErrors.length ? "failed" : conflicts.some((item) => item.severity === "P0")
@@ -913,6 +1288,90 @@ async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
 }
 
+async function withFormalCanonSourceOverlay(result, options = {}) {
+  const formalCanonSources = await readFormalCanonEntitySources(options);
+  if (!formalCanonSources.length) return result;
+  const [activeEngine, compressedRules, activeStat] = await Promise.all([
+    readFile(options.activeEnginePath ?? projectPaths.activeEngine, "utf8"),
+    readFile(options.compressedRulesPath ?? projectPaths.compressedRules),
+    stat(options.activeEnginePath ?? projectPaths.activeEngine),
+  ]);
+  const hashes = {
+    active_engine_hash: sha256(activeEngine),
+    canon_db_hash: await hashDirectory(options.canonDbPath ?? projectPaths.canonDb),
+    compressed_rules_hash: sha256(compressedRules),
+    source_modified_at: activeStat.mtime.toISOString(),
+  };
+  const registry = structuredClone(result.registry);
+  const supplemental = parseFormalCanonEntitySources(formalCanonSources, hashes);
+  const mapped = {
+    characters: registry.characters ?? [],
+    weapons: registry.weapons ?? [],
+    organizations: registry.organizations ?? [],
+  };
+  const acceptedSupplemental = {
+    characters: selectSupplementalEntities(mapped.characters, supplemental.characters),
+    weapons: selectSupplementalEntities(mapped.weapons, supplemental.weapons),
+    abilities: selectSupplementalEntities(registry.abilities ?? [], supplemental.abilities),
+  };
+  mapped.organizations = uniqueEntities([
+    ...mapped.organizations,
+    ...extractReferencedOrganizations(
+      parseSections(activeEngine),
+      hashes,
+      acceptedSupplemental.characters.map((character) => character.affiliation),
+    ),
+  ]);
+  linkFormalCanonEntities(mapped, acceptedSupplemental);
+  registry.characters = appendSupplementalEntities(mapped.characters, acceptedSupplemental.characters);
+  registry.weapons = appendSupplementalEntities(mapped.weapons, acceptedSupplemental.weapons);
+  registry.abilities = appendSupplementalEntities(
+    registry.abilities ?? [],
+    acceptedSupplemental.abilities,
+  );
+  registry.organizations = mapped.organizations;
+  const overlayBuiltAt = formalCanonSources
+    .map((source) => source.source_modified_at)
+    .sort()
+    .at(-1) ?? result.provenance?.built_at ?? hashes.source_modified_at;
+  const provenance = {
+    ...(result.provenance ?? registry.provenance ?? {}),
+    canon_db_hash: hashes.canon_db_hash,
+    source_files: [...new Set([
+      ...(result.provenance?.source_files ?? registry.provenance?.source_files ?? []),
+      ...formalCanonSources.map((source) => source.source_file),
+    ])],
+    formal_canon_source_overlay: true,
+    formal_canon_source_overlay_built_at: overlayBuiltAt,
+    formal_canon_source_hashes: Object.fromEntries(
+      formalCanonSources.map((source) => [source.source_file, source.source_hash]),
+    ),
+  };
+  registry.provenance = provenance;
+  const index = buildEntityIndex(registry, overlayBuiltAt);
+  const allEntities = entityTypes.flatMap((type) => registry[type] ?? []);
+  const buildReport = {
+    ...(result.buildReport ?? {}),
+    entity_count: allEntities.length,
+    entity_counts_by_type: Object.fromEntries(
+      entityTypes.map((type) => [type, (registry[type] ?? []).length]),
+    ),
+    status_counts: Object.fromEntries(entityStatuses.map((status) => [
+      status,
+      allEntities.filter((entity) => entity.status === status).length,
+    ])),
+    validation_errors: validateEntityRegistry(registry),
+    formal_canon_source_overlay: true,
+  };
+  return {
+    ...result,
+    registry,
+    index,
+    buildReport,
+    provenance,
+  };
+}
+
 export async function getStructuredEntityRegistry(options = {}) {
   const roots = rootsFor(options);
   try {
@@ -923,7 +1382,13 @@ export async function getStructuredEntityRegistry(options = {}) {
       readJson(roots.conflicts),
       readJson(roots.provenance),
     ]);
-    return { registry, index, buildReport, conflictReport, provenance };
+    return withFormalCanonSourceOverlay({
+      registry,
+      index,
+      buildReport,
+      conflictReport,
+      provenance,
+    }, options);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     return rebuildStructuredEntityRegistryPreview(options);
@@ -965,8 +1430,7 @@ export async function getStructuredEntity(entityId, options = {}) {
   if (
     typeof entityId !== "string"
     || entityId.length > 200
-    || !/^[\p{Letter}\p{Number}-]+$/u.test(entityId)
-    || !/-[A-F0-9]{10}$/u.test(entityId)
+    || !/^(?:[\p{Letter}\p{Number}-]+-[A-F0-9]{10}|(?:character|weapon|ability)_[a-z0-9_]+)$/u.test(entityId)
   ) {
     throw new Error("Invalid entity_id.");
   }

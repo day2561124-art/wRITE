@@ -47,6 +47,7 @@ export const projectPaths = {
   neuralModuleOutputs: path.join(projectRoot, "data", "agent_runs", "neural_outputs"),
   canonDb: path.join(projectRoot, "data", "canon_db"),
   activeEngine: path.join(projectRoot, "data", "canon_db", "active_engine.md"),
+  canonSources: path.join(projectRoot, "data", "canon_db", "sources"),
   engineVersions: path.join(projectRoot, "data", "canon_db", "versions"),
   pendingEngineCandidates: path.join(projectRoot, "data", "canon_db", "pending_engine_candidates"),
   rejectedEngineCandidates: path.join(projectRoot, "data", "canon_db", "rejected_engine_candidates"),

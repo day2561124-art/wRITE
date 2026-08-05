@@ -44,6 +44,8 @@ const steps = [
 
   ["Engine candidate service", ["tests/canon/engine-candidate-service.test.mjs"]],
 
+  ["Ron Visal formal Canon entity integration", ["tests/canon/ron-visal-canon.test.mjs"]],
+
   ["High-tech medical continuity normalization", ["tests/medical/medical-continuity-service.test.mjs"]],
 
   ["Writing workflow service", ["tests/workflow/writing-workflow-service.test.mjs"]],

@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import { projectPaths } from "./project-paths.mjs";
+import {
+  assertPathInside,
+  projectPaths,
+} from "./project-paths.mjs";
 import {
   getStructuredEntityRegistry,
 } from "./structured-canon-entity-registry-service.mjs";
@@ -199,7 +202,7 @@ function currentSectionExcerpt(activeEngineContent, sourceSection, maxChars = 1_
   return retained.join("\n").trim();
 }
 
-function currentEntityRecord({
+async function currentEntityRecord({
   entity,
   entityType,
   activeEngineContent,
@@ -208,6 +211,66 @@ function currentEntityRecord({
   registryHash,
   registryStale,
 }) {
+  const isFormalCanonSource = entity.source_file
+    && entity.source_file !== activeEnginePath
+    && entity.provenance?.formal_canon_source === true;
+  if (isFormalCanonSource) {
+    const sourcePath = assertPathInside(
+      entity.source_file,
+      projectPaths.canonSources,
+      "formal Canon entity source",
+    );
+    const sourceContent = await readFile(sourcePath, "utf8").catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (sourceContent === null) return null;
+    const sourceHash = sha256(sourceContent);
+    if (
+      entity.provenance?.source_hash
+      && entity.provenance.source_hash !== sourceHash
+    ) {
+      return null;
+    }
+    const exactExcerpt = normalizedText(entity.source_excerpt);
+    const exactCurrent = Boolean(
+      exactExcerpt && normalizedText(sourceContent).includes(exactExcerpt),
+    );
+    const boundedSection = exactCurrent
+      ? ""
+      : currentSectionExcerpt(sourceContent, entity.source_section, 12_000);
+    const content = exactCurrent
+      ? exactExcerpt
+      : normalizedText(boundedSection);
+    if (!content) return null;
+    return {
+      entity_id: entity.entity_id,
+      category: entityType,
+      name: entity.canonical_name,
+      content,
+      content_hash: sha256(content),
+      source: {
+        kind: "canon_source_bounded_retrieval",
+        path: entity.source_file,
+        section: entity.source_section ?? null,
+        anchor: entity.source_anchor ?? null,
+      },
+      source_hash: sourceHash,
+      freshness: "current",
+      character_count: content.length,
+      provenance: [{
+        source: "structured_canon_entity_registry",
+        source_hash: registryHash,
+        freshness: registryStale ? "active_engine_changed_source_current" : "current",
+        formal_canon_source_hash: sourceHash,
+        formal_canon_source_current: true,
+        corroborated_by_current_active_engine: false,
+        corroboration_method: exactCurrent
+          ? "exact_formal_source_excerpt"
+          : "matching_formal_source_section",
+      }],
+    };
+  }
   const exactExcerpt = normalizedText(entity.source_excerpt);
   const exactCurrent = Boolean(
     exactExcerpt && normalizedText(activeEngineContent).includes(exactExcerpt),
@@ -337,11 +400,22 @@ function weaponNames(value) {
 }
 
 function relatedWeaponEntities(registry, characterName, parsed) {
-  const names = weaponNames(parsed.weapon_text);
+  const names = uniqueStrings([
+    ...weaponNames(parsed.weapon_text),
+    ...(parsed.weapon_names ?? []),
+  ]);
   return registryRecords(registry, "weapons").filter((entity) => (
     names.includes(entity.canonical_name)
     || String(entity.source_excerpt ?? "").includes(`| ${characterName} |`)
     || (entity.related_characters ?? []).includes(characterName)
+    || (parsed.weapon_ids ?? []).includes(entity.entity_id)
+  ));
+}
+
+function relatedAbilityEntities(registry, characterName, parsed) {
+  return registryRecords(registry, "abilities").filter((entity) => (
+    (entity.related_characters ?? []).includes(characterName)
+    || (parsed.ability_ids ?? []).includes(entity.entity_id)
   ));
 }
 
@@ -352,6 +426,8 @@ function compactResolvedEntity({
   matchType,
   recordIds,
   parsed = {},
+  linkedWeapons = [],
+  linkedAbilities = [],
 }) {
   const location = category === "locations"
     ? describeSceneLocation({
@@ -370,19 +446,41 @@ function compactResolvedEntity({
     entity_id: entity.entity_id,
     canonical_name: entity.canonical_name,
     match_type: matchType,
-    formal_name: parsed.formal_name ?? entity.canonical_name,
-    affiliation: parsed.affiliation ?? null,
-    grade_or_role: parsed.grade_or_role ?? null,
-    current_status: parsed.current_status
-      ? [parsed.current_status]
+    formal_name: parsed.formal_name ?? entity.formal_name ?? entity.canonical_name,
+    affiliation: parsed.affiliation ?? entity.affiliation ?? null,
+    grade_or_role: parsed.grade_or_role ?? entity.grade_or_role ?? entity.position ?? null,
+    current_status: (parsed.current_status ?? entity.current_status)
+      ? [parsed.current_status ?? entity.current_status]
       : [],
     timeline_constraints: parsed.timeline_or_identity_constraints
       ? [parsed.timeline_or_identity_constraints]
       : [],
-    related_abilities: parsed.ability_text
-      ? [parsed.ability_text]
-      : [],
-    related_weapons: weaponNames(parsed.weapon_text),
+    related_abilities: uniqueStrings([
+      ...(parsed.ability_text ? [parsed.ability_text] : []),
+      ...linkedAbilities.map((ability) => ability.essence || ability.canonical_name),
+    ]),
+    related_weapons: uniqueStrings([
+      ...weaponNames(parsed.weapon_text),
+      ...(parsed.weapon_names ?? []),
+      ...linkedWeapons.map((weapon) => weapon.canonical_name),
+    ]),
+    weapon_details: linkedWeapons.map((weapon) => ({
+      entity_id: weapon.entity_id,
+      canonical_name: weapon.canonical_name,
+      formal_name: weapon.formal_name ?? `《${weapon.canonical_name}》`,
+      core_ability: weapon.core_ability ?? null,
+      confirmed_limits: weapon.confirmed_limits ?? [],
+      forbidden_expansions: weapon.forbidden_expansions ?? [],
+    })),
+    ability_details: linkedAbilities.map((ability) => ({
+      entity_id: ability.entity_id,
+      canonical_name: ability.canonical_name,
+      essence: ability.essence ?? null,
+      activation_conditions: ability.activation_conditions ?? [],
+      confirmed_limits: ability.confirmed_limits ?? [],
+      forbidden_normalizations: ability.forbidden_normalizations ?? [],
+    })),
+    character_canon: entity.canon_character_grounding ?? null,
     relevant_canon_record_ids: uniqueStrings(recordIds),
     ...(location ? {
       location_id: location.location_id,
@@ -644,7 +742,7 @@ export async function hydratePlannedEntityManifest({
     }
 
     const entity = resolution.entity;
-    const record = currentEntityRecord({
+    const record = await currentEntityRecord({
       entity,
       entityType: categoryToEntityType[request.category],
       activeEngineContent: currentEngine,
@@ -669,15 +767,23 @@ export async function hydratePlannedEntityManifest({
     delta[categoryToRelevantCanon[request.category]].push(record);
     const linkedRecordIds = [record.entity_id];
     let parsed = {};
+    let linkedWeapons = [];
+    let linkedAbilities = [];
     if (request.category === "characters") {
-      parsed = characterRow(entity);
-      const linkedWeapons = relatedWeaponEntities(
+      parsed = entity.canon_character_grounding
+        ? {
+          ...entity,
+          formal_name: entity.formal_name ?? entity.canonical_name,
+          weapon_names: entity.weapon_names ?? [],
+        }
+        : characterRow(entity);
+      linkedWeapons = relatedWeaponEntities(
         registry,
         entity.canonical_name,
         parsed,
       );
       for (const linkedEntity of linkedWeapons) {
-        const linkedRecord = currentEntityRecord({
+        const linkedRecord = await currentEntityRecord({
           entity: linkedEntity,
           entityType: "weapon",
           activeEngineContent: currentEngine,
@@ -691,14 +797,46 @@ export async function hydratePlannedEntityManifest({
           linkedRecordIds.push(linkedRecord.entity_id);
         }
       }
-      if (parsed.affiliation) {
-        const organizationRecord = exactLineRecord({
-          name: parsed.affiliation,
-          entityType: "organization",
+      linkedAbilities = relatedAbilityEntities(
+        registry,
+        entity.canonical_name,
+        parsed,
+      );
+      for (const linkedEntity of linkedAbilities) {
+        const linkedRecord = await currentEntityRecord({
+          entity: linkedEntity,
+          entityType: "ability",
           activeEngineContent: currentEngine,
           activeEngineHash: currentHash,
           activeEnginePath,
+          registryHash,
+          registryStale,
         });
+        if (linkedRecord) {
+          delta.abilities_and_weapons.push(linkedRecord);
+          linkedRecordIds.push(linkedRecord.entity_id);
+        }
+      }
+      if (parsed.affiliation) {
+        const organizationEntity = registryRecords(registry, "organizations")
+          .find((candidate) => candidate.canonical_name === parsed.affiliation);
+        const organizationRecord = organizationEntity
+          ? await currentEntityRecord({
+            entity: organizationEntity,
+            entityType: "organization",
+            activeEngineContent: currentEngine,
+            activeEngineHash: currentHash,
+            activeEnginePath,
+            registryHash,
+            registryStale,
+          })
+          : exactLineRecord({
+            name: parsed.affiliation,
+            entityType: "organization",
+            activeEngineContent: currentEngine,
+            activeEngineHash: currentHash,
+            activeEnginePath,
+          });
         if (organizationRecord) {
           delta.organizations_and_locations.push(organizationRecord);
           linkedRecordIds.push(organizationRecord.entity_id);
@@ -712,6 +850,8 @@ export async function hydratePlannedEntityManifest({
       matchType: resolution.match_type,
       recordIds: linkedRecordIds,
       parsed,
+      linkedWeapons,
+      linkedAbilities,
     }));
   }
 
