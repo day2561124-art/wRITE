@@ -1,6 +1,8 @@
-import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { commitFileTransaction } from "./file-transactions.mjs";
+import { calculateSha256Lf } from "./active-engine-hash.mjs";
+export { calculateSha256Lf } from "./active-engine-hash.mjs";
 import {
   normalizeProjectPath,
   projectRoot,
@@ -185,16 +187,11 @@ export async function loadEngineComponentRegistry(options = {}) {
   };
 }
 
-function sha256Lf(content) {
-  const normalized = content
-    .toString("utf8")
-    .replaceAll("\r\n", "\n")
-    .replaceAll("\r", "\n");
-  return createHash("sha256").update(normalized, "utf8").digest("hex").toUpperCase();
-}
-
-async function fileStatus(component) {
-  const filePath = resolveProjectPath(component.path, "engine component path");
+async function fileStatus(component, overridePath = null) {
+  const filePath = resolveProjectPath(
+    overridePath ?? component.path,
+    "engine component path",
+  );
   try {
     const stats = await stat(filePath);
     return {
@@ -220,11 +217,16 @@ export async function getEngineComponentsStatus(options = {}) {
   const { registry, registry_path: registryPath } = await loadEngineComponentRegistry(options);
   const components = registry.components;
 
-  const canonData = await fileStatus(components.canon_data);
+  const canonData = await fileStatus(
+    components.canon_data,
+    options.activeEnginePath ?? null,
+  );
   if (canonData.exists) {
     canonData.expected_sha256_lf = components.canon_data.expected_sha256_lf;
-    canonData.actual_sha256_lf = sha256Lf(
-      await readFile(resolveProjectPath(components.canon_data.path)),
+    canonData.actual_sha256_lf = calculateSha256Lf(
+      await readFile(resolveProjectPath(
+        options.activeEnginePath ?? components.canon_data.path,
+      )),
     );
     canonData.hash_matches = (
       canonData.actual_sha256_lf === canonData.expected_sha256_lf
@@ -283,6 +285,99 @@ export async function getEngineComponentsStatus(options = {}) {
     schema_version: registry.schema_version,
     components: componentStatus,
     issues,
+  };
+}
+
+export function assertCanonDataComponentIntegrity(status) {
+  const canonData = status?.components?.canon_data;
+  const hashMismatchIssue = status?.issues?.includes("canon_data:hash_mismatch") === true;
+  if (
+    status?.ok !== true
+    || canonData?.exists !== true
+    || canonData?.hash_matches !== true
+    || canonData?.status !== "available"
+    || hashMismatchIssue
+  ) {
+    const error = new Error("Engine component integrity validation failed for canon_data.");
+    error.code = "engine_component_integrity_validation_failed";
+    error.componentStatus = status;
+    throw error;
+  }
+  return status;
+}
+
+export async function buildEngineComponentRegistryHashUpdate(options = {}) {
+  const registryPath = options.registryPath
+    ? resolveProjectPath(options.registryPath, "engine component registry")
+    : engineComponentRegistryPath;
+  const registryText = options.registryContent === undefined
+    ? await readFile(registryPath, "utf8")
+    : String(options.registryContent);
+  const registry = validateEngineComponentRegistry(JSON.parse(registryText));
+  const activeEnginePath = resolveProjectPath(
+    options.activeEnginePath ?? registry.components.canon_data.path,
+    "active engine component",
+  );
+
+  // Always hash the persisted formal file. This is the same canonicalization
+  // function used by getEngineComponentsStatus above.
+  const activeEngineContent = await readFile(activeEnginePath);
+  const actualSha256Lf = calculateSha256Lf(activeEngineContent);
+  const expectedSha256LfBefore = registry.components.canon_data.expected_sha256_lf;
+  const nextRegistry = structuredClone(registry);
+  nextRegistry.components.canon_data.expected_sha256_lf = actualSha256Lf;
+  validateEngineComponentRegistry(nextRegistry);
+
+  return {
+    registry_path: normalizeProjectPath(registryPath),
+    active_engine_path: normalizeProjectPath(activeEnginePath),
+    registry_content: `${JSON.stringify(nextRegistry, null, 2)}\n`,
+    registry: nextRegistry,
+    expected_sha256_lf_before: expectedSha256LfBefore,
+    expected_sha256_lf_after: actualSha256Lf,
+    active_engine_sha256_lf: actualSha256Lf,
+    changed: expectedSha256LfBefore !== actualSha256Lf,
+  };
+}
+
+export async function synchronizeEngineComponentRegistryHash(options = {}) {
+  let update;
+  let componentStatus;
+  const registryPath = options.registryPath
+    ? resolveProjectPath(options.registryPath, "engine component registry")
+    : engineComponentRegistryPath;
+  const transaction = await commitFileTransaction(
+    "synchronize-engine-component-registry-hash",
+    [{
+      filePath: registryPath,
+      contentFactory: async () => {
+        update = await buildEngineComponentRegistryHashUpdate(options);
+        return update.registry_content;
+      },
+      afterCommit: async () => {
+        componentStatus = assertCanonDataComponentIntegrity(
+          await getEngineComponentsStatus(options),
+        );
+      },
+    }],
+    {
+      phase: "engine_component_registry_maintenance",
+      ...(options.testTransactionDir
+        ? { test_transaction_dir: options.testTransactionDir }
+        : {}),
+    },
+  );
+  return {
+    ok: true,
+    registry_hash_synchronized: true,
+    engine_integrity_verified: true,
+    hash_matches: true,
+    active_engine_sha256_lf: update.active_engine_sha256_lf,
+    registry_expected_hash_before: update.expected_sha256_lf_before,
+    registry_expected_hash_after: update.expected_sha256_lf_after,
+    changed: update.changed,
+    component_status: componentStatus,
+    transaction_id: transaction.transaction_id,
   };
 }
 

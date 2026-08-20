@@ -8,6 +8,7 @@ import {
   getPendingCandidate,
 } from "./engine-candidate-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { activeEngineDependencyImpactPaths } from "./active-engine-dependency-manifest.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -60,6 +61,39 @@ function optionalInteger(value, fallback, label, maximum) {
     throw new Error(`${label} must be an integer between 1 and ${maximum}.`);
   }
   return value;
+}
+
+function activationWriteManifest(candidate) {
+  const existing = candidate?.metadata?.activation_write_manifest ?? {};
+  const existingModified = Array.isArray(existing.will_modify)
+    ? existing.will_modify
+    : [];
+  const corePaths = new Set([
+    "data/canon_db/active_engine.md",
+    ...activeEngineDependencyImpactPaths(),
+  ]);
+  const fallbackModified = [
+    ...(candidate?.metadata?.current_input_refresh ? [
+      "data/outputs/task_prompt.md",
+      "data/outputs/generation_context.md",
+      "data/outputs/retrieval_context.md",
+    ] : []),
+    ...(candidate?.metadata?.settlement_report_metadata_path
+      ? [candidate.metadata.settlement_report_metadata_path]
+      : []),
+  ];
+  return {
+    ...existing,
+    will_modify: [
+      ...corePaths,
+      ...(existingModified.length ? existingModified : fallbackModified)
+        .filter((item) => !corePaths.has(item)),
+    ],
+    will_create: Array.isArray(existing.will_create)
+      ? existing.will_create
+      : ["snapshot", "archive", "activation_log"],
+    rollback_available: existing.rollback_available !== false,
+  };
 }
 
 function rootsFor(options = {}) {
@@ -391,20 +425,8 @@ export async function buildPendingEngineCandidateReview(rawInput, options = {}) 
       settlement_context_id: candidate.metadata.settlement_context_id ?? null,
       adopted_chapter_id: candidate.metadata.adopted_chapter_id ?? null,
     },
-    activation_write_manifest: candidate.metadata.activation_write_manifest ?? {
-      will_modify: [
-        "data/canon_db/active_engine.md",
-        ...(candidate.metadata.current_input_refresh ? [
-          "data/outputs/task_prompt.md",
-          "data/outputs/generation_context.md",
-          "data/outputs/retrieval_context.md",
-        ] : []),
-        ...(candidate.metadata.settlement_report_metadata_path
-          ? [candidate.metadata.settlement_report_metadata_path]
-          : []),
-      ],
-      will_create: ["snapshot", "archive", "activation_log"],
-      rollback_available: true,
+    activation_write_manifest: {
+      ...activationWriteManifest(candidate),
       requires_user_confirmation: true,
       requires_second_confirmation:
         candidate.risk_report.requires_second_confirmation === true,

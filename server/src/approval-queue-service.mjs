@@ -31,6 +31,7 @@ import {
 } from "./external-brain-session-reconciliation-service.mjs";
 import { externalBrainSessionRoots } from "./external-brain-session-lineage-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
+import { activeEngineDependencyImpactPaths } from "./active-engine-dependency-manifest.mjs";
 import {
   assertPathInside,
   normalizeProjectPath,
@@ -165,6 +166,24 @@ function targetOptions(options = {}) {
     ...(options.engineArchive ? { engineArchive: options.engineArchive } : {}),
     ...(options.activationLog ? { activationLog: options.activationLog } : {}),
     ...(options.rollbackIndex ? { rollbackIndex: options.rollbackIndex } : {}),
+    ...(options.registryPath ? { registryPath: options.registryPath } : {}),
+    ...(options.activeEngineDependencyRoot
+      ? { activeEngineDependencyRoot: options.activeEngineDependencyRoot }
+      : {}),
+    ...(options.entityRegistryRoot ? { entityRegistryRoot: options.entityRegistryRoot } : {}),
+    ...(options.canonZoneConfigPath ? { canonZoneConfigPath: options.canonZoneConfigPath } : {}),
+    ...(options.entityRegistryConfigPath
+      ? { entityRegistryConfigPath: options.entityRegistryConfigPath }
+      : {}),
+    ...(options.entityIntakeConfigPath
+      ? { entityIntakeConfigPath: options.entityIntakeConfigPath }
+      : {}),
+    ...(options.dependencyCanonDbPath
+      ? { dependencyCanonDbPath: options.dependencyCanonDbPath }
+      : {}),
+    ...(options.includeExtendedDependencies !== undefined
+      ? { includeExtendedDependencies: options.includeExtendedDependencies }
+      : {}),
     ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
   };
 }
@@ -386,7 +405,10 @@ function baseStatus(status = "pending", reason = null) {
 }
 
 function activationImpact(candidate = null) {
-  const willModify = ["data/canon_db/active_engine.md"];
+  const willModify = [
+    "data/canon_db/active_engine.md",
+    ...activeEngineDependencyImpactPaths(),
+  ];
   if (candidate?.metadata?.current_input_refresh) {
     willModify.push(
       "data/outputs/task_prompt.md",

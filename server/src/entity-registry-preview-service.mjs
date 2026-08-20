@@ -11,16 +11,12 @@ import {
   validateCanonZoneConfig,
   buildCanonZonePreview,
 } from "./canon-zone-preview-service.mjs";
+import {
+  calculateSha256Lf as sha256Lf,
+  normalizeLfText as normalizeLf,
+} from "./active-engine-hash.mjs";
 
 const entityConfigPath = path.join(projectRoot, "config", "entity-registry.json");
-
-function normalizeLf(value) {
-  return String(value).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-}
-
-function sha256Lf(value) {
-  return createHash("sha256").update(normalizeLf(value), "utf8").digest("hex").toUpperCase();
-}
 
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -118,11 +114,17 @@ export async function buildEntityRegistryPreview(options = {}) {
   const { config, config_path } = await loadEntityRegistryConfig(options);
   // load canon zones config via canonical loader to ensure consistency
   const zonesConfigPath = resolveProjectPath(config.source_zones_config, "canon zones config");
-  const zonesConfig = JSON.parse(await readFile(zonesConfigPath, "utf8"));
+  const zonesConfig = options.canonZoneConfig
+    ? structuredClone(options.canonZoneConfig)
+    : JSON.parse(await readFile(zonesConfigPath, "utf8"));
   validateCanonZoneConfig(zonesConfig);
 
   // build canon zone preview (will validate source hash)
-  const canonPreview = await buildCanonZonePreview({ config: zonesConfig });
+  const canonPreview = options.canonPreview ?? await buildCanonZonePreview({
+    config: zonesConfig,
+    ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+    ...(options.sourceText !== undefined ? { sourceText: options.sourceText } : {}),
+  });
 
   if (canonPreview.source_sha256_lf !== config.expected_sha256_lf) {
     throw new Error(`Source hash mismatch between entity config and canon zones: expected ${config.expected_sha256_lf}, got ${canonPreview.source_sha256_lf}`);

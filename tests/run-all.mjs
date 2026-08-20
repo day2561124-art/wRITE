@@ -608,6 +608,9 @@ const steps = [
   ["Engine activation confirm service", ["tests/engine/engine-activation-confirm-service.test.mjs"]],
 
   ["Engine activation confirm E2E", ["tests/engine/engine-activation-confirm-e2e.test.mjs"]],
+  ["Engine activation component integrity", ["tests/engine/engine-activation-component-integrity.test.mjs"]],
+
+  ["Active Engine dependency synchronization", ["tests/engine/active-engine-dependency-synchronization.test.mjs"]],
 
   ["Engine component registry", ["tests/engine/engine-component-registry.test.mjs"]],
 

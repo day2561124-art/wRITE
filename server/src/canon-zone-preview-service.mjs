@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -6,6 +5,10 @@ import {
   projectRoot,
   resolveProjectPath,
 } from "./project-paths.mjs";
+import {
+  calculateSha256Lf as sha256Lf,
+  normalizeLfText as normalizeLf,
+} from "./active-engine-hash.mjs";
 
 export const canonZoneConfigPath = path.join(
   projectRoot,
@@ -25,17 +28,6 @@ function requireString(value, label) {
     throw new Error(`${label} must be a non-empty string.`);
   }
   return value.trim();
-}
-
-function normalizeLf(value) {
-  return String(value).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-}
-
-function sha256Lf(value) {
-  return createHash("sha256")
-    .update(normalizeLf(value), "utf8")
-    .digest("hex")
-    .toUpperCase();
 }
 
 function anchorOffsets(text, anchor) {

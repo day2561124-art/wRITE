@@ -19,7 +19,9 @@
     "audit:sessions": "node scripts/external-brain-session-lifecycle-audit.mjs",
     "audit:sessions:phase3b": "node scripts/external-brain-session-phase3b-audit.mjs",
     "test:bridge:approval-readiness": "node tests/mcp/mcp-approval-queue-bridge-readiness.test.mjs",
-    "mcp:http": "node server/src/mcp-http-server.mjs --config config/mcp-http.example.json"
+    "mcp:http": "node server/src/mcp-http-server.mjs --config config/mcp-http.example.json",
+    "maintenance:sync-engine-component-hashes": "node scripts/sync-engine-component-hashes.mjs",
+    "maintenance:sync-active-engine-dependencies": "node scripts/sync-active-engine-dependencies.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

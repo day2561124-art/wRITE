@@ -10,6 +10,17 @@ import {
 } from "./project-paths.mjs";
 import { assertAgentRunId, getAgentRun } from "./agent-run-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
+import {
+  calculateSha256Lf,
+  engineComponentRegistryPath,
+  getEngineComponentsStatus,
+} from "./engine-component-registry.mjs";
+import {
+  assertActiveEngineDependenciesCurrent,
+  getActiveEngineDependencyStatus,
+  prepareActiveEngineDependencyRefresh,
+  readActiveEngineDependencyStates,
+} from "./active-engine-dependency-service.mjs";
 
 export const engineCandidateIdPattern = /^engine_candidate_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 export const engineSnapshotIdPattern = /^engine_snapshot_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -244,6 +255,14 @@ function phase3PathsFor(options = {}) {
     rollbackIndex: options.rollbackIndex
       ? assertPathInside(options.rollbackIndex, projectPaths.canonDb, "rollback index")
       : projectPaths.rollbackIndex,
+    engineComponentRegistry: options.registryPath
+      ? resolveProjectPath(options.registryPath, "engine component registry")
+      : options.activeEnginePath
+        ? resolveProjectPath(
+          path.join(path.dirname(activePathFor(options)), "engine-components.json"),
+          "engine component registry",
+        )
+        : engineComponentRegistryPath,
     outputs: options.outputs
       ? assertPathInside(options.outputs, projectPaths.outputs, "activation outputs root")
       : projectPaths.outputs,
@@ -256,6 +275,8 @@ function snapshotPaths(snapshotId, roots) {
   return {
     directory,
     engine: path.join(directory, "active_engine_before_activation.md"),
+    componentRegistry: path.join(directory, "engine-components-before-activation.json"),
+    dependencies: path.join(directory, "active_engine_dependencies"),
     metadata: path.join(directory, "metadata.json"),
     taskPrompt: path.join(directory, "task_prompt_before_activation.md"),
     generationContext: path.join(directory, "generation_context_before_activation.md"),
@@ -265,6 +286,50 @@ function snapshotPaths(snapshotId, roots) {
       "settlement_report_metadata_before_activation.json",
     ),
   };
+}
+
+function dependencyOptionsFor(roots, options = {}) {
+  const inferredFixtureRoot = options.registryPath
+    && roots.activeEngine !== projectPaths.activeEngine
+    ? path.dirname(roots.engineComponentRegistry)
+    : null;
+  return {
+    activeEnginePath: roots.activeEngine,
+    registryPath: roots.engineComponentRegistry,
+    ...(options.activeEngineDependencyRoot || options.dependencyRoot || inferredFixtureRoot
+      ? {
+        dependencyRoot:
+          options.activeEngineDependencyRoot ?? options.dependencyRoot ?? inferredFixtureRoot,
+      }
+      : {}),
+    ...(options.entityRegistryRoot ? { entityRegistryRoot: options.entityRegistryRoot } : {}),
+    ...(options.canonZoneConfigPath ? { canonZoneConfigPath: options.canonZoneConfigPath } : {}),
+    ...(options.entityRegistryConfigPath
+      ? { entityRegistryConfigPath: options.entityRegistryConfigPath }
+      : {}),
+    ...(options.entityIntakeConfigPath
+      ? { entityIntakeConfigPath: options.entityIntakeConfigPath }
+      : {}),
+    ...(options.dependencyCanonDbPath || options.canonDbPath || inferredFixtureRoot
+      ? {
+        canonDbPath:
+          options.dependencyCanonDbPath ?? options.canonDbPath ?? inferredFixtureRoot,
+      }
+      : {}),
+    ...(options.includeExtendedDependencies !== undefined
+      ? { includeExtendedDependencies: options.includeExtendedDependencies }
+      : {}),
+    ...(options.medicalContinuityOptions
+      ? { medicalContinuityOptions: options.medicalContinuityOptions }
+      : {}),
+  };
+}
+
+function dependencySnapshotPath(snapshot, dependency) {
+  return path.join(
+    snapshot.dependencies,
+    `${dependency.id}--${path.basename(dependency.filePath)}`,
+  );
 }
 
 function archivePaths(archiveId, roots) {
@@ -995,16 +1060,31 @@ export async function activatePendingCandidate(
   assertEngineCandidateId(candidateId);
   if (confirm !== true) throw errorWithStatus("User confirmation is required.", 409);
   const roots = phase3PathsFor(options);
+  const dependencyOptions = dependencyOptionsFor(roots, options);
   const paths = candidatePaths(candidateId, {
     pendingEngineCandidates: roots.pendingEngineCandidates,
   });
-  const [metadata, status, riskReport, candidateText, activeText] = await Promise.all([
+  const [
+    metadata,
+    status,
+    riskReport,
+    candidateText,
+    activeText,
+    dependencyStateResult,
+  ] = await Promise.all([
     readJson(paths.metadata),
     readJson(paths.status),
     readJson(paths.risk),
     readFile(paths.candidate, "utf8"),
     readFile(roots.activeEngine, "utf8"),
+    readActiveEngineDependencyStates(dependencyOptions),
   ]);
+  const componentRegistryText = dependencyStateResult.states
+    .get("engine_components").content.toString("utf8");
+  const componentRegistryBefore = JSON.parse(componentRegistryText);
+  const dependencyStatusBefore = await getActiveEngineDependencyStatus(dependencyOptions);
+  const registryExpectedHashBefore =
+    componentRegistryBefore.components.canon_data.expected_sha256_lf;
   if (status.status !== "candidate") {
     throw errorWithStatus(`Candidate status cannot be activated: ${status.status}`, 409);
   }
@@ -1016,6 +1096,7 @@ export async function activatePendingCandidate(
     throw errorWithStatus("High-risk candidate requires second confirmation.", 409);
   }
   const currentHash = sha256(activeText);
+  const activeEngineSha256LfBefore = calculateSha256Lf(activeText);
   const baseActiveEngineHash =
     metadata.base_active_engine_hash ?? metadata.active_engine_hash_at_import;
   if (
@@ -1080,6 +1161,22 @@ export async function activatePendingCandidate(
     throw errorWithStatus("candidate_engine.md hash does not match metadata.", 409);
   }
   const activeAfterHash = sha256(candidateText);
+  let dependencyRefresh = null;
+  let dependencyStatus = null;
+  let componentIntegrityStatus = null;
+  const dependencySnapshots = dependencyStateResult.manifest.map((dependency) => {
+    const state = dependencyStateResult.states.get(dependency.id);
+    return {
+      id: dependency.id,
+      kind: dependency.kind,
+      path: normalizeProjectPath(dependency.filePath),
+      exists: state.exists,
+      sha256: state.exists ? sha256(state.content) : null,
+      snapshot_path: state.exists
+        ? normalizeProjectPath(dependencySnapshotPath(snapshot, dependency))
+        : null,
+    };
+  });
   const snapshotMetadata = {
     snapshot_id: snapshotId,
     snapshot_kind: "pre_engine_activation",
@@ -1093,6 +1190,14 @@ export async function activatePendingCandidate(
     previous_active_engine_hash: currentHash,
     active_engine_path: normalizeProjectPath(roots.activeEngine),
     snapshot_path: normalizeProjectPath(snapshot.engine),
+    component_registry_snapshot: {
+      path: normalizeProjectPath(roots.engineComponentRegistry),
+      snapshot_path: normalizeProjectPath(snapshot.componentRegistry),
+      expected_sha256_lf: registryExpectedHashBefore,
+      sha256: sha256(componentRegistryText),
+    },
+    active_engine_dependencies_snapshot: dependencySnapshots,
+    active_engine_dependencies_verified: dependencyStatusBefore.ok,
     current_inputs_snapshot: currentInputsBefore
       ? Object.fromEntries(Object.entries(currentInputsBefore).map(([label, record]) => [
         label,
@@ -1153,6 +1258,7 @@ export async function activatePendingCandidate(
     active_engine_path: normalizeProjectPath(roots.activeEngine),
     active_engine_before_hash: currentHash,
     active_engine_after_hash: activeAfterHash,
+    active_engine_sha256_lf_before: activeEngineSha256LfBefore,
     previous_active_engine_hash: currentHash,
     new_active_engine_hash: activeAfterHash,
     candidate_hash: candidateHash,
@@ -1228,13 +1334,101 @@ export async function activatePendingCandidate(
       current_inputs_refreshed: currentInputRefresh !== null,
     }],
   };
+  const dependencySnapshotOperations = dependencyStateResult.manifest
+    .filter((dependency) => dependencyStateResult.states.get(dependency.id).exists)
+    .map((dependency) => ({
+      filePath: dependencySnapshotPath(snapshot, dependency),
+      content: dependencyStateResult.states.get(dependency.id).content,
+    }));
+  const dependencyOperations = dependencyStateResult.manifest.map((dependency, index) => ({
+    filePath: dependency.filePath,
+    contentFactory: async () => {
+      if (
+        process.env.FILE_TRANSACTION_TEST_MODE === "1"
+        && options.testFailRegistryWrite === true
+        && dependency.id === "engine_components"
+      ) {
+        throw new Error("Injected engine component registry write failure.");
+      }
+      dependencyRefresh ??= await prepareActiveEngineDependencyRefresh({
+        ...dependencyOptions,
+        states: dependencyStateResult.states,
+        ...(process.env.FILE_TRANSACTION_TEST_MODE === "1" ? {
+          testCanonRoundtripMismatch: options.testCanonRoundtripMismatch,
+          testEntityRegistryRebuildFailure: options.testEntityRegistryRebuildFailure,
+          testStaleEntityProvenance: options.testStaleEntityProvenance,
+        } : {}),
+      });
+      if (
+        process.env.FILE_TRANSACTION_TEST_MODE === "1"
+        && options.testTamperRegistryHashBeforeValidation === true
+        && dependency.id === "engine_components"
+      ) {
+        const tamperedRegistry = JSON.parse(
+          dependencyRefresh.contents.get(dependency.filePath),
+        );
+        const actualHash = dependencyRefresh.active_engine_sha256_lf;
+        tamperedRegistry.components.canon_data.expected_sha256_lf =
+          `${actualHash[0] === "A" ? "B" : "A"}${actualHash.slice(1)}`;
+        dependencyRefresh.contents.set(dependency.filePath, json(tamperedRegistry));
+        dependencyRefresh.changes.engine_components.after =
+          tamperedRegistry.components.canon_data.expected_sha256_lf;
+      }
+      return dependencyRefresh.contents.get(dependency.filePath);
+    },
+    ...(index === dependencyStateResult.manifest.length - 1 ? {
+      afterCommit: async () => {
+        if (
+          process.env.FILE_TRANSACTION_TEST_MODE === "1"
+          && options.testFailAfterDependencyRebuild === true
+        ) {
+          throw new Error("Injected failure after active engine dependency rebuild.");
+        }
+        dependencyStatus = assertActiveEngineDependenciesCurrent(
+          await getActiveEngineDependencyStatus(dependencyOptions),
+        );
+        componentIntegrityStatus = await getEngineComponentsStatus({
+          registryPath: roots.engineComponentRegistry,
+          activeEnginePath: roots.activeEngine,
+        });
+      },
+    } : {}),
+  }));
   const activationOperations = [
     { filePath: snapshot.engine, content: activeText },
+    { filePath: snapshot.componentRegistry, content: componentRegistryText },
+    ...dependencySnapshotOperations,
     { filePath: snapshot.metadata, content: json(snapshotMetadata) },
     { filePath: archive.engine, content: activeText },
     { filePath: archive.metadata, content: json(archiveMetadata) },
     { filePath: roots.activeEngine, content: candidateText },
-    { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(activationRecord)}\n` },
+    ...dependencyOperations,
+    {
+      type: "append",
+      filePath: roots.activationLog,
+      contentFactory: async () => `${JSON.stringify({
+        ...activationRecord,
+        active_engine_sha256_lf_after: dependencyRefresh.active_engine_sha256_lf,
+        registry_expected_hash_before: registryExpectedHashBefore,
+        registry_expected_hash_after: dependencyRefresh.changes.engine_components.after,
+        component_integrity_verified: true,
+        hash_matches: dependencyStatus.dependencies.engine_components.hash_matches,
+        engine_components_current: dependencyStatus.dependencies.engine_components.current,
+        canon_zones_current: dependencyStatus.dependencies.canon_zones.current,
+        canon_zone_roundtrip_verified:
+          dependencyStatus.dependencies.canon_zones.roundtrip_matches,
+        canon_zone_anchor_validation_passed:
+          dependencyStatus.dependencies.canon_zones.anchors_valid,
+        entity_registry_rebuilt: dependencyRefresh.changes.entity_registry.rebuilt,
+        entity_registry_provenance_matches:
+          dependencyStatus.dependencies.entity_registry.provenance_matches,
+        entity_intake_current: dependencyStatus.dependencies.entity_intake.current,
+        active_engine_dependencies_verified: dependencyStatus.ok,
+        current_operational_dependency_ids: Object.entries(dependencyStatus.dependencies)
+          .filter(([, value]) => value.current === true)
+          .map(([id]) => id),
+      })}\n`,
+    },
     { filePath: paths.metadata, content: json(nextMetadata) },
     { filePath: paths.status, content: json(nextStatus) },
     { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
@@ -1286,6 +1480,14 @@ export async function activatePendingCandidate(
       rm(snapshot.directory, { recursive: true, force: true }),
       rm(archive.directory, { recursive: true, force: true }),
     ]);
+    if (error.code === "transaction_failed_and_rollback_failed") {
+      const rollbackFailure = new Error(
+        `activation_failed_and_rollback_failed: ${error.message}`,
+      );
+      rollbackFailure.code = "activation_failed_and_rollback_failed";
+      rollbackFailure.cause = error;
+      throw rollbackFailure;
+    }
     throw error;
   }
   const activeAfter = await readFile(roots.activeEngine, "utf8");
@@ -1317,6 +1519,15 @@ export async function activatePendingCandidate(
     transaction_id: transaction.transaction_id,
     status: nextStatus,
     neural_evidence: neuralEvidence,
+    engine_integrity_verified: true,
+    registry_hash_synchronized: true,
+    active_engine_sha256_lf: dependencyRefresh.active_engine_sha256_lf,
+    registry_expected_hash_before: registryExpectedHashBefore,
+    registry_expected_hash_after: dependencyRefresh.changes.engine_components.after,
+    hash_matches: componentIntegrityStatus.components.canon_data.hash_matches,
+    component_integrity: componentIntegrityStatus,
+    active_engine_dependencies_verified: dependencyStatus.ok,
+    dependency_status: dependencyStatus,
   };
 }
 
@@ -1363,12 +1574,20 @@ export async function rollbackActiveEngine(
   assertSnapshotId(snapshotId);
   if (confirm !== true) throw errorWithStatus("Rollback confirmation is required.", 409);
   const roots = phase3PathsFor(options);
+  const dependencyOptions = dependencyOptionsFor(roots, options);
   const target = snapshotPaths(snapshotId, roots);
-  const [targetText, targetMetadata, activeText] = await Promise.all([
+  const [targetText, targetMetadata, activeText, currentDependencyStateResult] = await Promise.all([
     readFile(target.engine, "utf8"),
     readJson(target.metadata),
     readFile(roots.activeEngine, "utf8"),
+    readActiveEngineDependencyStates(dependencyOptions),
   ]);
+  const componentRegistryText = currentDependencyStateResult.states
+    .get("engine_components").content.toString("utf8");
+  const targetComponentRegistryExists = await exists(target.componentRegistry);
+  const targetComponentRegistryText = targetComponentRegistryExists
+    ? await readFile(target.componentRegistry, "utf8")
+    : null;
   if (targetMetadata.rollback_available !== true) {
     throw errorWithStatus("Snapshot is not available for rollback.", 409);
   }
@@ -1401,6 +1620,31 @@ export async function rollbackActiveEngine(
   const rolledBackAt = new Date().toISOString();
   const safetySnapshotId = await uniqueSnapshotId(roots);
   const safety = snapshotPaths(safetySnapshotId, roots);
+  const targetDependencyRecords = Array.isArray(
+    targetMetadata.active_engine_dependencies_snapshot,
+  ) ? targetMetadata.active_engine_dependencies_snapshot : [];
+  const targetDependencyContents = new Map();
+  for (const record of targetDependencyRecords) {
+    if (record.exists === true) {
+      targetDependencyContents.set(
+        record.id,
+        await readFile(resolveProjectPath(record.snapshot_path, "dependency rollback snapshot")),
+      );
+    }
+  }
+  const safetyDependencySnapshots = currentDependencyStateResult.manifest.map((dependency) => {
+    const state = currentDependencyStateResult.states.get(dependency.id);
+    return {
+      id: dependency.id,
+      kind: dependency.kind,
+      path: normalizeProjectPath(dependency.filePath),
+      exists: state.exists,
+      sha256: state.exists ? sha256(state.content) : null,
+      snapshot_path: state.exists
+        ? normalizeProjectPath(dependencySnapshotPath(safety, dependency))
+        : null,
+    };
+  });
   const activeBeforeHash = sha256(activeText);
   const activeAfterHash = sha256(targetText);
   const safetyMetadata = {
@@ -1411,6 +1655,14 @@ export async function rollbackActiveEngine(
     source_chapter: targetMetadata.source_chapter ?? "",
     active_engine_hash: activeBeforeHash,
     active_engine_path: normalizeProjectPath(roots.activeEngine),
+    component_registry_snapshot: {
+      path: normalizeProjectPath(roots.engineComponentRegistry),
+      snapshot_path: normalizeProjectPath(safety.componentRegistry),
+      sha256: sha256(componentRegistryText),
+    },
+    active_engine_dependencies_snapshot: safetyDependencySnapshots,
+    active_engine_dependencies_verified:
+      (await getActiveEngineDependencyStatus(dependencyOptions)).ok,
     current_inputs_snapshot: currentInputsBeforeRollback
       ? Object.fromEntries(Object.entries(currentInputsBeforeRollback).map(([label, record]) => [
         label,
@@ -1457,11 +1709,50 @@ export async function rollbackActiveEngine(
   };
   const rollbackOperations = [
     { filePath: safety.engine, content: activeText },
+    { filePath: safety.componentRegistry, content: componentRegistryText },
+    ...currentDependencyStateResult.manifest
+      .filter((dependency) => currentDependencyStateResult.states.get(dependency.id).exists)
+      .map((dependency) => ({
+        filePath: dependencySnapshotPath(safety, dependency),
+        content: currentDependencyStateResult.states.get(dependency.id).content,
+      })),
     { filePath: safety.metadata, content: json(safetyMetadata) },
     { filePath: roots.activeEngine, content: targetText },
     { type: "append", filePath: roots.activationLog, content: `${JSON.stringify(rollbackRecord)}\n` },
     { filePath: roots.rollbackIndex, content: json(nextRollbackIndex) },
   ];
+  if (targetDependencyRecords.length > 0) {
+    const targetRecordById = new Map(targetDependencyRecords.map((record) => [record.id, record]));
+    const restoreOperations = currentDependencyStateResult.manifest.map((dependency, index) => {
+      const record = targetRecordById.get(dependency.id);
+      if (!record) {
+        throw new Error(`Snapshot is missing dependency state: ${dependency.id}`);
+      }
+      return {
+        ...(record.exists === true
+          ? { filePath: dependency.filePath, content: targetDependencyContents.get(dependency.id) }
+          : { type: "delete", filePath: dependency.filePath }),
+        ...(index === currentDependencyStateResult.manifest.length - 1
+          && targetMetadata.active_engine_dependencies_verified === true ? {
+            afterCommit: async () => {
+              assertActiveEngineDependenciesCurrent(
+                await getActiveEngineDependencyStatus(dependencyOptions),
+              );
+            },
+          } : {}),
+      };
+    });
+    rollbackOperations.splice(
+      rollbackOperations.findIndex((operation) => operation.filePath === roots.activationLog),
+      0,
+      ...restoreOperations,
+    );
+  } else if (targetComponentRegistryText !== null) {
+    rollbackOperations.splice(4, 0, {
+      filePath: roots.engineComponentRegistry,
+      content: targetComponentRegistryText,
+    });
+  }
   if (restoreCurrentInputs) {
     const safetyTargets = {
       task_prompt: safety.taskPrompt,
@@ -1524,6 +1815,7 @@ export async function rollbackActiveEngine(
   if (sha256(activeAfter) !== activeAfterHash) {
     throw new Error("Safety violation: active_engine.md hash mismatch after rollback.");
   }
+  const rollbackDependencyStatus = await getActiveEngineDependencyStatus(dependencyOptions);
   return {
     ok: true,
     target_snapshot_id: snapshotId,

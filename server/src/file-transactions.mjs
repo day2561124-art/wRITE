@@ -83,11 +83,11 @@ async function releaseProjectLock(handle) {
   }
 }
 
-function operationContent(operation, previous) {
+function operationContent(operation, previous, suppliedContent = operation.content) {
   if (operation.type === "delete") return null;
-  const content = Buffer.isBuffer(operation.content)
-    ? operation.content
-    : Buffer.from(String(operation.content ?? ""), operation.encoding ?? "utf8");
+  const content = Buffer.isBuffer(suppliedContent)
+    ? suppliedContent
+    : Buffer.from(String(suppliedContent ?? ""), operation.encoding ?? "utf8");
   return operation.type === "append"
     ? Buffer.concat([previous.content, content])
     : content;
@@ -147,6 +147,14 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
     if (!["write", "append", "delete"].includes(operation.type)) {
       throw new Error(`Unsupported transaction operation: ${operation.type}`);
     }
+    if (operation.contentFactory !== undefined
+      && typeof operation.contentFactory !== "function") {
+      throw new Error(`${name} contentFactory must be a function.`);
+    }
+    if (operation.afterCommit !== undefined
+      && typeof operation.afterCommit !== "function") {
+      throw new Error(`${name} afterCommit must be a function.`);
+    }
   }
 
   const lockHandle = await acquireProjectLock(transactionId);
@@ -156,9 +164,11 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
   try {
     for (const [index, operation] of normalizedOperations.entries()) {
       const previous = await readOptionalBuffer(operation.filePath);
-      const nextContent = operationContent(operation, previous);
+      const nextContent = operation.contentFactory
+        ? undefined
+        : operationContent(operation, previous);
       let tempPath = "";
-      if (nextContent !== null) {
+      if (nextContent !== null && nextContent !== undefined) {
         await mkdir(path.dirname(operation.filePath), { recursive: true });
         tempPath = path.join(
           path.dirname(operation.filePath),
@@ -169,13 +179,36 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       prepared.push({ ...operation, previous, nextContent, tempPath });
     }
 
-    for (const item of prepared) {
+    for (const [index, item] of prepared.entries()) {
+      if (item.contentFactory) {
+        const suppliedContent = await item.contentFactory({
+          transactionId,
+          operationIndex: index,
+          committedPaths: committed.map((entry) => entry.filePath),
+        });
+        item.nextContent = operationContent(item, item.previous, suppliedContent);
+        if (item.nextContent !== null) {
+          await mkdir(path.dirname(item.filePath), { recursive: true });
+          item.tempPath = path.join(
+            path.dirname(item.filePath),
+            `.${path.basename(item.filePath)}.${transactionId}.${index}.tmp`,
+          );
+          await writeFile(item.tempPath, item.nextContent, { flag: "wx" });
+        }
+      }
       if (item.type === "delete") {
         await rm(item.filePath, { force: true });
       } else {
         await renameWithRetry(item.tempPath, item.filePath);
       }
       committed.push(item);
+      if (item.afterCommit) {
+        await item.afterCommit({
+          transactionId,
+          operationIndex: index,
+          committedPaths: committed.map((entry) => entry.filePath),
+        });
+      }
       if (
         process.env.FILE_TRANSACTION_TEST_MODE === "1"
         && Number(metadata.test_fail_after_commits) === committed.length
@@ -247,7 +280,13 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       // Preserve the original transaction failure.
     }
     if (rollbackErrors.length > 0) {
-      throw new Error(`${error.message}; rollback failed: ${rollbackErrors.join("; ")}`);
+      const rollbackFailure = new Error(
+        `${error.message}; rollback failed: ${rollbackErrors.join("; ")}`,
+      );
+      rollbackFailure.code = "transaction_failed_and_rollback_failed";
+      rollbackFailure.cause = error;
+      rollbackFailure.rollbackErrors = rollbackErrors;
+      throw rollbackFailure;
     }
     throw error;
   } finally {

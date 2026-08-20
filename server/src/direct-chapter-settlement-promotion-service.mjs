@@ -5,6 +5,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { activeEngineDependencyImpactPaths } from "./active-engine-dependency-manifest.mjs";
 import {
   assertEngineCandidateId,
   importSettlementResult,
