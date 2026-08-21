@@ -4,7 +4,7 @@
   "source_visual_index_path": "data/visual_db/visual_index.jsonl",
   "source_entity_registry_config": "config/entity-registry.json",
   "source_engine_path": "data/canon_db/active_engine.md",
-  "expected_engine_sha256_lf": "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55",
+  "expected_engine_sha256_lf": "B36E227B07DC3B887617834AA941F74382CA5B26F8CDBFA2E25DD02B3A4C3618",
   "canon_write_allowed": false,
   "approval_required_for_canon_change": true,
   "updates_canon_db": false,
@@ -13,7 +13,6 @@
   "creates_patch_candidate": false,
   "creates_formal_visual_card": false,
   "creates_canon_visual_lock": false,
-
   "allowed_asset_kinds": [
     "character_visual",
     "weapon_visual",
@@ -24,7 +23,6 @@
     "reference_visual",
     "unknown_visual"
   ],
-
   "allowed_statuses": [
     "reference_only",
     "canon_link_candidate",
@@ -34,7 +32,6 @@
     "rejected",
     "ambiguous_visual_candidate"
   ],
-
   "forbidden_statuses": [
     "canon",
     "official",

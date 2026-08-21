@@ -2,14 +2,14 @@
 
 ## 正式承接點
 
-- effective_canon_head: 第三十三章〈十一秒〉
-- continuity_head: 第三十三章〈十一秒〉結束後
-- settlement_report_id: settlement_report_20260729-153810-2c7bb48e
+- effective_canon_head: 第五十五章〈晨紋工學院代表選拔・伊萊亞斯／阿灰異常〉
+- continuity_head: 第五十五章〈晨紋工學院代表選拔・伊萊亞斯／阿灰異常〉結束後
+- settlement_report_id: settlement_report_20260820-134203-3e2fa55d
 - continuity_rollback: forbidden
 
 ## 任務
 
-承接 第三十三章〈十一秒〉 的正式結算狀態，創作下一章正文候選。
+承接 第五十五章〈晨紋工學院代表選拔・伊萊亞斯／阿灰異常〉 的正式結算狀態，創作下一章正文候選。
 
 ## 必要硬性要求
 

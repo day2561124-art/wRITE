@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-04T12:59:50.073Z",
-  "entity_count": 236,
+  "generated_at": "2026-08-20T17:04:43.944Z",
+  "entity_count": 247,
   "by_id": {
     "CHAR-3-1-A-霧生棋乃-固定背景與人物邊界-BE15178741": {
       "entity_type": "character",
@@ -27,25 +27,43 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-3-3-A-MERIDIAN-RELAY-經緯中繼網與夜星外圈成年合作角色-DC7183D46F": {
+    "CHAR-3-1-F-香坂汐里-人物與說話方式-7CB96E70A4": {
+      "entity_type": "character",
+      "canonical_name": "3.1-F 香坂汐里｜人物與說話方式",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "CHAR-3-1-G-雪弟-性格與說話方式-5A6DCD40C3": {
+      "entity_type": "character",
+      "canonical_name": "3.1-G 雪弟｜性格與說話方式",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "CHAR-3-3-A-MERIDIAN-RELAY-經緯中繼網與夜星外圈成年合作角色-A06D6FB9C9": {
       "entity_type": "character",
       "canonical_name": "3.3-A Meridian Relay／經緯中繼網與夜星外圈成年合作角色",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-3-4-A-秦無月-人物補充資料-D5FF3FF87A": {
+    "CHAR-3-3-B-夜-性格與說話方式-F905B6B89D": {
+      "entity_type": "character",
+      "canonical_name": "3.3-B 夜｜性格與說話方式",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "CHAR-3-4-A-秦無月-人物補充資料-694475495C": {
       "entity_type": "character",
       "canonical_name": "3.4-A 秦無月｜人物補充資料",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-3-6-A-玄樞議庭正式反派角色-黎久瀨-55A7CDEB14": {
+    "CHAR-3-6-A-玄樞議庭正式反派角色-黎久瀨-2C4E575FC0": {
       "entity_type": "character",
       "canonical_name": "3.6-A 玄樞議庭正式反派角色｜黎久瀨",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-3-9-角色-關係與能力讀取索引-4B7B2FC111": {
+    "CHAR-3-9-角色-關係與能力讀取索引-503F017555": {
       "entity_type": "character",
       "canonical_name": "3.9｜角色、關係與能力讀取索引",
       "status": "canon",
@@ -57,13 +75,13 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-千函-F6E5606ED0": {
+    "CHAR-千函-AA8395D281": {
       "entity_type": "character",
       "canonical_name": "千函",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-央-D5A5DE9336": {
+    "CHAR-央-EAAED79858": {
       "entity_type": "character",
       "canonical_name": "央",
       "status": "canon",
@@ -81,7 +99,7 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-宇天-FD7192758B": {
+    "CHAR-宇天-07BD1C940B": {
       "entity_type": "character",
       "canonical_name": "宇天",
       "status": "canon",
@@ -93,43 +111,43 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-米洛-岑-25E2DA5D89": {
+    "CHAR-米洛-岑-B3B6D48B84": {
       "entity_type": "character",
       "canonical_name": "米洛・岑",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-艾爾瑪-芙洛-D3370B9404": {
+    "CHAR-艾爾瑪-芙洛-620961149D": {
       "entity_type": "character",
       "canonical_name": "艾爾瑪・芙洛",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-血-F7CF4E8766": {
+    "CHAR-血-6B174C698C": {
       "entity_type": "character",
       "canonical_name": "血",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-初日-104C96B023": {
+    "CHAR-初日-8EA82A9639": {
       "entity_type": "character",
       "canonical_name": "初日",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-初夢-8CB8C92D09": {
+    "CHAR-初夢-1E19570F3A": {
       "entity_type": "character",
       "canonical_name": "初夢",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-折原律-2165426AA0": {
+    "CHAR-折原律-087002E4C4": {
       "entity_type": "character",
       "canonical_name": "折原律",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-夜-68CC1F93C7": {
+    "CHAR-夜-59B88A928D": {
       "entity_type": "character",
       "canonical_name": "夜",
       "status": "canon",
@@ -147,25 +165,25 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-夜星-54FD98C410": {
+    "CHAR-夜星-8C9D29C519": {
       "entity_type": "character",
       "canonical_name": "夜星",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-岬戶霖-AA0EF74410": {
+    "CHAR-岬戶霖-2C3979C558": {
       "entity_type": "character",
       "canonical_name": "岬戶霖",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-拉芙蒂-里德斯特-27F5416162": {
+    "CHAR-拉芙蒂-里德斯特-0F7113878C": {
       "entity_type": "character",
       "canonical_name": "拉芙蒂・里德斯特",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-空音-C0C53E64CC": {
+    "CHAR-空音-61450D8F41": {
       "entity_type": "character",
       "canonical_name": "空音",
       "status": "canon",
@@ -177,13 +195,13 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-柊木璃央-92F0CA7DDE": {
+    "CHAR-柊木璃央-2570407236": {
       "entity_type": "character",
       "canonical_name": "柊木璃央",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-段篠折-63801EEB90": {
+    "CHAR-段篠折-43FDB1BE89": {
       "entity_type": "character",
       "canonical_name": "段篠折",
       "status": "canon",
@@ -195,37 +213,37 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-修傘店老闆娘-DB772F5FB4": {
+    "CHAR-修傘店老闆娘-C90AFB702F": {
       "entity_type": "character",
       "canonical_name": "修傘店老闆娘",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-夏朔真-964EAD07B0": {
+    "CHAR-夏朔真-F24826DD48": {
       "entity_type": "character",
       "canonical_name": "夏朔真",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-宮鷺澪-A62DD34C70": {
+    "CHAR-宮鷺澪-926D596984": {
       "entity_type": "character",
       "canonical_name": "宮鷺澪",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-浪杰-2D2D370CA0": {
+    "CHAR-浪杰-6F8048501E": {
       "entity_type": "character",
       "canonical_name": "浪杰",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-真砂柚鶴-772180DF29": {
+    "CHAR-真砂柚鶴-E2AD37B92E": {
       "entity_type": "character",
       "canonical_name": "真砂柚鶴",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-秦無月-2BE8160506": {
+    "CHAR-秦無月-D406EBBAA7": {
       "entity_type": "character",
       "canonical_name": "秦無月",
       "status": "canon",
@@ -243,13 +261,13 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-莉莉絲-A2914B32C9": {
+    "CHAR-莉莉絲-89118A8A8A": {
       "entity_type": "character",
       "canonical_name": "莉莉絲",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-莊-62A2721F12": {
+    "CHAR-莊-5ED17F70FA": {
       "entity_type": "character",
       "canonical_name": "莊",
       "status": "candidate",
@@ -261,13 +279,13 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-鹿梅-7DE11131DD": {
+    "CHAR-鹿梅-3EB87BC7D1": {
       "entity_type": "character",
       "canonical_name": "鹿梅",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "CHAR-晴禮-FC30FAF106": {
+    "CHAR-晴禮-56FE8526FA": {
       "entity_type": "character",
       "canonical_name": "晴禮",
       "status": "canon",
@@ -297,19 +315,19 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-遠坂滿-E0152F2670": {
+    "CHAR-遠坂滿-A54E8577D6": {
       "entity_type": "character",
       "canonical_name": "遠坂滿",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-鳴瀨紬-834EAAADBE": {
+    "CHAR-鳴瀨紬-A651A8DC73": {
       "entity_type": "character",
       "canonical_name": "鳴瀨紬",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-篠宮燈理-A27CF55860": {
+    "CHAR-篠宮燈理-F086AC99E9": {
       "entity_type": "character",
       "canonical_name": "篠宮燈理",
       "status": "canon",
@@ -321,13 +339,13 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-霜鈴-274CF693A2": {
+    "CHAR-霜鈴-30DB4C745C": {
       "entity_type": "character",
       "canonical_name": "霜鈴",
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-藍濱舜-CFCE7D68FB": {
+    "CHAR-藍濱舜-AE89BA8C98": {
       "entity_type": "character",
       "canonical_name": "藍濱舜",
       "status": "canon",
@@ -339,7 +357,7 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAR-羅棠穗-309FF8242A": {
+    "CHAR-羅棠穗-C170C6F7F6": {
       "entity_type": "character",
       "canonical_name": "羅棠穗",
       "status": "canon",
@@ -351,355 +369,379 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "ABILITY-5-14-1-A-朝日奈千夜-時櫻嘯命-時間操控完整能力體系-0B13E54B3F": {
+    "character_ron_visal": {
+      "entity_type": "character",
+      "canonical_name": "羅恩・維薩爾",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "ability_sever_continuing_force": {
+      "entity_type": "ability",
+      "canonical_name": "力量延續截斷",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "ABILITY-5-14-1-A-朝日奈千夜-時櫻嘯命-時間操控完整能力體系-ABA30C8111": {
       "entity_type": "ability",
       "canonical_name": "5.14.1-A｜朝日奈千夜｜《時櫻嘯命》時間操控完整能力體系",
       "status": "canon",
       "risk_level": "P2"
     },
-    "ABILITY-艾爾瑪-芙洛-高機動-風貼滑行與光紋加速之機動定位-F413A4C5F7": {
+    "ABILITY-艾爾瑪-芙洛-高機動-風貼滑行與光紋加速之機動定位-61ED894F21": {
       "entity_type": "ability",
       "canonical_name": "艾爾瑪・芙洛｜高機動、風貼滑行與光紋加速之機動定位。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-折原律-帶隊教師-場域校準教官之向量校正-誤差切斷與定域壓制-35A465E0F5": {
+    "ABILITY-折原律-帶隊教師-場域校準教官之向量校正-誤差切斷與定域壓制-E7426FBCFA": {
       "entity_type": "ability",
       "canonical_name": "折原律｜帶隊教師／場域校準教官之向量校正、誤差切斷與定域壓制。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-夜文澤-兒童未定型之感知-防護與引導-8E405AAD3C": {
+    "ABILITY-夜文澤-兒童未定型之感知-防護與引導-1DED3D932B": {
       "entity_type": "ability",
       "canonical_name": "夜文澤｜兒童未定型之感知、防護與引導。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-夜安晴-星鈴守護-願力回應與兒童可控支援-9B8D30E365": {
+    "ABILITY-夜安晴-星鈴守護-願力回應與兒童可控支援-11B3E2B6C1": {
       "entity_type": "ability",
       "canonical_name": "夜安晴｜星鈴守護、願力回應與兒童可控支援。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-南雲帆-風向與靈流觀測-導引及不催促之路線提示-CDD903F518": {
+    "ABILITY-南雲帆-風向與靈流觀測-導引及不催促之路線提示-A50C833081": {
       "entity_type": "ability",
       "canonical_name": "南雲帆｜風向與靈流觀測、導引及不催促之路線提示。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-柊木璃央-晶格切離-分析與冷霧結界之對戰型定位-05EE7CFBED": {
+    "ABILITY-柊木璃央-晶格切離-分析與冷霧結界之對戰型定位-4118B108E8": {
       "entity_type": "ability",
       "canonical_name": "柊木璃央｜晶格切離、分析與冷霧結界之對戰型定位。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-宮鷺澪-教師安全控場定位下之模式描定-銀律校正與封框結界-FD95B59498": {
+    "ABILITY-宮鷺澪-教師安全控場定位下之模式描定-銀律校正與封框結界-D1DF5322A8": {
       "entity_type": "ability",
       "canonical_name": "宮鷺澪｜教師安全控場定位下之模式描定、銀律校正與封框結界。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-槐野理子-記錄-分析-可信標線與視線盲判之支援定位-0F3A44BD54": {
+    "ABILITY-槐野理子-記錄-分析-可信標線與視線盲判之支援定位-88C5CC423D": {
       "entity_type": "ability",
       "canonical_name": "槐野理子｜記錄、分析、可信標線與視線盲判之支援定位。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-遠坂滿-重裝防禦-突破與承壓之正面定位-FB7AC5BC33": {
+    "ABILITY-遠坂滿-重裝防禦-突破與承壓之正面定位-FE45C44B08": {
       "entity_type": "ability",
       "canonical_name": "遠坂滿｜重裝防禦、突破與承壓之正面定位。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-鳴瀨紬-成年協調者之資料協調-樣式編譯與虛訊觸接-7EB67F0FE2": {
+    "ABILITY-鳴瀨紬-成年協調者之資料協調-樣式編譯與虛訊觸接-C6788AF87F": {
       "entity_type": "ability",
       "canonical_name": "鳴瀨紬｜成年協調者之資料協調、樣式編譯與虛訊觸接。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "ABILITY-篠宮燈理-導路照射-折光盾幕與曙因標記之學生支援定位-D6F3EE688D": {
+    "ABILITY-篠宮燈理-導路照射-折光盾幕與曙因標記之學生支援定位-EF3C9A48C8": {
       "entity_type": "ability",
       "canonical_name": "篠宮燈理｜導路照射、折光盾幕與曙因標記之學生支援定位。",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "WEAPON-天衡弓架-A63182C64E": {
+    "weapon_severing_tide": {
+      "entity_type": "weapon",
+      "canonical_name": "斷潮",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "WEAPON-天衡弓架-95E3792ED5": {
       "entity_type": "weapon",
       "canonical_name": "天衡弓架",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-未竟折門-F4702529B1": {
+    "WEAPON-未竟折門-7A40D1F917": {
       "entity_type": "weapon",
       "canonical_name": "未竟折門",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-羽簽哨笛-E5ADF03411": {
+    "WEAPON-羽簽哨笛-B437B866B8": {
       "entity_type": "weapon",
       "canonical_name": "羽簽哨笛",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-赤央影燈-6C38F5D544": {
+    "WEAPON-赤央影燈-9BA28B6007": {
       "entity_type": "weapon",
       "canonical_name": "赤央影燈",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-函星折箋-B5B504EFC7": {
+    "WEAPON-函星折箋-8B3A6585CF": {
       "entity_type": "weapon",
       "canonical_name": "函星折箋",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-夜影雙星-5C2FFEB42E": {
+    "WEAPON-夜影雙星-8E2AC26613": {
       "entity_type": "weapon",
       "canonical_name": "夜影雙星",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-封霖紙匣-15D705848D": {
+    "WEAPON-封霖紙匣-A4CBCC558E": {
       "entity_type": "weapon",
       "canonical_name": "封霖紙匣",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-星核法杖-157B62EFC5": {
+    "WEAPON-星核法杖-7FE3C56B30": {
       "entity_type": "weapon",
       "canonical_name": "星核法杖",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-星紋守願-CB7CBEFC8C": {
+    "WEAPON-星紋守願-3E45210F8C": {
       "entity_type": "weapon",
       "canonical_name": "星紋守願",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-星紋權杖-3DC97CDAB8": {
+    "WEAPON-星紋權杖-217E18476E": {
       "entity_type": "weapon",
       "canonical_name": "星紋權杖",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-星霜白貓-BBA594FDB8": {
+    "WEAPON-星霜白貓-DFE6AA7C79": {
       "entity_type": "weapon",
       "canonical_name": "星霜白貓",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-星願守鈴-F5867F5910": {
+    "WEAPON-星願守鈴-120817E0F0": {
       "entity_type": "weapon",
       "canonical_name": "星願守鈴",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-柔輪工具匣-7C7D12D542": {
+    "WEAPON-柔輪工具匣-48FA16628B": {
       "entity_type": "weapon",
       "canonical_name": "柔輪工具匣",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-重芯臂鎧-滿載-F083CC8531": {
+    "WEAPON-重芯臂鎧-滿載-3AFCEC3D27": {
       "entity_type": "weapon",
       "canonical_name": "重芯臂鎧・滿載",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-時櫻嘯命-B03E9E0192": {
+    "WEAPON-時櫻嘯命-A3C0A2B9BA": {
       "entity_type": "weapon",
       "canonical_name": "時櫻嘯命",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-校準槍戟-定式-D107683E17": {
+    "WEAPON-校準槍戟-定式-47F2F9ED02": {
       "entity_type": "weapon",
       "canonical_name": "校準槍戟・定式",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-紙鳶羅盤-B942F01927": {
+    "WEAPON-紙鳶羅盤-FF893035EB": {
       "entity_type": "weapon",
       "canonical_name": "紙鳶羅盤",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-缺月行鋒-CA06109557": {
+    "WEAPON-缺月行鋒-D6AEF5D5A0": {
       "entity_type": "weapon",
       "canonical_name": "缺月行鋒",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-彩暈晨鏡-A3866534D9": {
+    "WEAPON-彩暈晨鏡-62691DCB34": {
       "entity_type": "weapon",
       "canonical_name": "彩暈晨鏡",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-御絲人偶手套-717D1210AB": {
+    "WEAPON-御絲人偶手套-D868BDD46C": {
       "entity_type": "weapon",
       "canonical_name": "御絲人偶手套",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-晨紋雙刃-曉棱-CEEABCC3CC": {
+    "WEAPON-晨紋雙刃-曉棱-15FEC30613": {
       "entity_type": "weapon",
       "canonical_name": "晨紋雙刃・曉棱",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-晨導提燈-曉譜-658B0D3F43": {
+    "WEAPON-晨導提燈-曉譜-636A222ECD": {
       "entity_type": "weapon",
       "canonical_name": "晨導提燈・曉譜",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-晨織端環-1A9BBBD731": {
+    "WEAPON-晨織端環-8C118D6519": {
       "entity_type": "weapon",
       "canonical_name": "晨織端環",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-梅鹿靈冠-EBA1284AD1": {
+    "WEAPON-梅鹿靈冠-1030582FC2": {
       "entity_type": "weapon",
       "canonical_name": "梅鹿靈冠",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-理鍵書籤-1D837DAE05": {
+    "WEAPON-理鍵書籤-7D0BC9A1A4": {
       "entity_type": "weapon",
       "canonical_name": "理鍵書籤",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-莊界石庭-7664B45D47": {
+    "WEAPON-莊界石庭-0011AE1766": {
       "entity_type": "weapon",
       "canonical_name": "莊界石庭",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-晴彩祕綾-145706756A": {
+    "WEAPON-晴彩祕綾-9048210AEA": {
       "entity_type": "weapon",
       "canonical_name": "晴彩祕綾",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-晶格雙刃-零片-DC62374328": {
+    "WEAPON-晶格雙刃-零片-87D92713F0": {
       "entity_type": "weapon",
       "canonical_name": "晶格雙刃・零片",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-虛墜-星淵-951F792852": {
+    "WEAPON-虛墜-星淵-083D392F85": {
       "entity_type": "weapon",
       "canonical_name": "虛墜・星淵",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-極軌聖鑰-9AA5FD786C": {
+    "WEAPON-極軌聖鑰-3FD894CB92": {
       "entity_type": "weapon",
       "canonical_name": "極軌聖鑰",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-滑羽輪靴-3D1DF6D848": {
+    "WEAPON-滑羽輪靴-476F94188B": {
       "entity_type": "weapon",
       "canonical_name": "滑羽輪靴",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-聖星法典-CA000CE83F": {
+    "WEAPON-煌鱗導蛇-471F4162F1": {
+      "entity_type": "weapon",
+      "canonical_name": "煌鱗導蛇",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "WEAPON-聖星法典-342CCB7CD8": {
       "entity_type": "weapon",
       "canonical_name": "聖星法典",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-夢綴星紡-E153E71A96": {
+    "WEAPON-夢綴星紡-FC7C8CD610": {
       "entity_type": "weapon",
       "canonical_name": "夢綴星紡",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-緋薔薇匣-9809AA91BE": {
+    "WEAPON-緋薔薇匣-3C5D825702": {
       "entity_type": "weapon",
       "canonical_name": "緋薔薇匣",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-蝕月星槍-CDFDECFF3A": {
+    "WEAPON-蝕月星槍-9C0D9C6C3E": {
       "entity_type": "weapon",
       "canonical_name": "蝕月星槍",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-銀律構筆-C8F3CB867F": {
+    "WEAPON-銀律構筆-A61DF82144": {
       "entity_type": "weapon",
       "canonical_name": "銀律構筆",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-銀格弈簿-B9824CAA41": {
+    "WEAPON-銀格弈簿-8AC39AE5E2": {
       "entity_type": "weapon",
       "canonical_name": "銀格弈簿",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-影格棋匣-331688CC49": {
+    "WEAPON-影格棋匣-B45AFC7A1D": {
       "entity_type": "weapon",
       "canonical_name": "影格棋匣",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-澄月航儀-AF5B9934E7": {
+    "WEAPON-澄月航儀-5297896033": {
       "entity_type": "weapon",
       "canonical_name": "澄月航儀",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-墨界摺扇-A0F935889D": {
+    "WEAPON-墨界摺扇-79F72E93C3": {
       "entity_type": "weapon",
       "canonical_name": "墨界摺扇",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-靜拓墨盤-B0F533E11F": {
+    "WEAPON-靜拓墨盤-F4490717C9": {
       "entity_type": "weapon",
       "canonical_name": "靜拓墨盤",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-曙紋大太刀-分曉-A135D63482": {
+    "WEAPON-曙紋大太刀-分曉-BD243E8D1E": {
       "entity_type": "weapon",
       "canonical_name": "曙紋大太刀・分曉",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-斷途-CF5AC8C360": {
+    "WEAPON-斷途-612D2C8C66": {
       "entity_type": "weapon",
       "canonical_name": "斷途",
       "status": "canon",
       "risk_level": "P2"
     },
-    "WEAPON-曜徑短杖-981BF84209": {
+    "WEAPON-曜徑短杖-C4AB1ED36A": {
       "entity_type": "weapon",
       "canonical_name": "曜徑短杖",
       "status": "canon",
       "risk_level": "P0"
     },
-    "TL-第十七章-最後一個空帶-正式結算-1D645B6320": {
+    "TL-第十七章-最後一個空帶-正式結算-C262CBB040": {
       "entity_type": "timeline_event",
       "canonical_name": "第十七章｜最後一個空帶｜正式結算",
       "status": "canon",
       "risk_level": "P0"
     },
-    "TL-第十九章-第一聲鈴-正式結算-866AA86130": {
+    "TL-第十九章-第一聲鈴-正式結算-307F80D495": {
       "entity_type": "timeline_event",
       "canonical_name": "第十九章｜第一聲鈴｜正式結算",
       "status": "canon",
       "risk_level": "P0"
     },
-    "TL-第十八章-還沒輪到-正式結算-BE453893C9": {
+    "TL-第十八章-還沒輪到-正式結算-F2FC4969C1": {
       "entity_type": "timeline_event",
       "canonical_name": "第十八章｜還沒輪到｜正式結算",
       "status": "canon",
@@ -921,6 +963,12 @@
       "status": "canon",
       "risk_level": "P2"
     },
+    "ORG-夜星武裝學院-755BF2934E": {
+      "entity_type": "organization",
+      "canonical_name": "夜星武裝學院",
+      "status": "canon",
+      "risk_level": "P2"
+    },
     "ORG-織衡聯域-314E4E9C1C": {
       "entity_type": "organization",
       "canonical_name": "織衡聯域",
@@ -939,49 +987,49 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "CHAPTER-EVENT-第十七章-最後一個空帶-正式結算-B75510BCD3": {
+    "CHAPTER-EVENT-第十七章-最後一個空帶-正式結算-CF944AF8A5": {
       "entity_type": "chapter_event",
       "canonical_name": "第十七章｜最後一個空帶｜正式結算",
       "status": "canon",
       "risk_level": "P0"
     },
-    "CHAPTER-EVENT-第十九章-第一聲鈴-正式結算-6D887E48A1": {
+    "CHAPTER-EVENT-第十九章-第一聲鈴-正式結算-4043CE2830": {
       "entity_type": "chapter_event",
       "canonical_name": "第十九章｜第一聲鈴｜正式結算",
       "status": "canon",
       "risk_level": "P0"
     },
-    "CHAPTER-EVENT-第十八章-還沒輪到-正式結算-B7A60EFC87": {
+    "CHAPTER-EVENT-第十八章-還沒輪到-正式結算-37FB61D9D2": {
       "entity_type": "chapter_event",
       "canonical_name": "第十八章｜還沒輪到｜正式結算",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-九逃-19-第一聲鈴-四月第五週星期一-正式選拔第一日個人戰第一場於第一訓練館主場南側一號-F82ADD4EAA": {
+    "STATUS-九逃-19-第一聲鈴-四月第五週星期一-正式選拔第一日個人戰第一場於第一訓練館主場南側一號-07B7CA79EB": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 19 | 第一聲鈴 | 四月第五週星期一，正式選拔第一日個人戰第一場於第一訓練館主場南側一號",
       "status": "canon",
       "risk_level": "P0"
     },
-    "STATUS-九逃-5-未排定-星期二放學後-九逃先於保健室取得帶左肩限制之投影練習許可-後與伊吹沙耶於-23520011FE": {
+    "STATUS-九逃-5-未排定-星期二放學後-九逃先於保健室取得帶左肩限制之投影練習許可-後與伊吹沙耶於-C864B7C19D": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 5 | 未排定 | 星期二放學後，九逃先於保健室取得帶左肩限制之投影練習許可，後與伊吹沙耶於",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-九逃-九逃-聖星法典-聖光治癒-自我-他人修復-防護-淨化-增幅-結界-治療能實質-0BD387C20D": {
+    "STATUS-九逃-九逃-聖星法典-聖光治癒-自我-他人修復-防護-淨化-增幅-結界-治療能實質-E3A0DCCA62": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 九逃 | 《聖星法典》 | 聖光治癒、自我／他人修復、防護、淨化、增幅、結界 | 治療能實質",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-九逃-九逃與千夜第一場後座-第十九章正式選拔第一場後-九逃成立左前臂裂傷-左肩外側切創-需清創-F38971F877": {
+    "STATUS-九逃-九逃與千夜第一場後座-第十九章正式選拔第一場後-九逃成立左前臂裂傷-左肩外側切創-需清創-FD14990C04": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 九逃與千夜第一場後座 | 第十九章正式選拔第一場後，九逃成立左前臂裂傷、左肩外側切創，需清創",
       "status": "canon",
       "risk_level": "P0"
     },
-    "STATUS-九逃-已結案短期傷勢-沙耶右腕-九逃舊左肩-御先與雪弟早期短期負荷等普通短期狀態-除新正文另行-14DE6C2EED": {
+    "STATUS-九逃-已結案短期傷勢-沙耶右腕-九逃舊左肩-御先與雪弟早期短期負荷等普通短期狀態-除新正文另行-3814808305": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 已結案短期傷勢 | 沙耶右腕、九逃舊左肩、御先與雪弟早期短期負荷等普通短期狀態，除新正文另行",
       "status": "canon",
@@ -993,19 +1041,19 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-九逃-現行正史狀態-新版第一章至第十九章均已由使用者明確正式採用並完成結算-現行時間位置-C946DA1679": {
+    "STATUS-九逃-現行正史狀態-新版第一章至第十九章均已由使用者明確正式採用並完成結算-現行時間位置-D496024948": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-> **現行正史狀態：** 新版第一章至第十九章均已由使用者明確正式採用並完成結算。現行時間位置",
       "status": "canon",
       "risk_level": "P0"
     },
-    "STATUS-九逃-傷勢-醫療後座-九逃成立左前臂裂傷-左肩外側切創-需清創縫合與靈力穩定-左臂當晚不能沾水-531F44C6B9": {
+    "STATUS-九逃-傷勢-醫療後座-九逃成立左前臂裂傷-左肩外側切創-需清創縫合與靈力穩定-左臂當晚不能沾水-F114E73E57": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 傷勢／醫療後座 | 九逃成立左前臂裂傷、左肩外側切創，需清創縫合與靈力穩定；左臂當晚不能沾水",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-九逃-關係-生活後座-場後兩人因千夜停刀-九逃不想被誤認為不想贏-書包是否協助等產生摩擦-九逃-03F738B70B": {
+    "STATUS-九逃-關係-生活後座-場後兩人因千夜停刀-九逃不想被誤認為不想贏-書包是否協助等產生摩擦-九逃-BCF3DFEEC3": {
       "entity_type": "status_effect",
       "canonical_name": "九逃-| 關係／生活後座 | 場後兩人因千夜停刀、九逃不想被誤認為不想贏、書包是否協助等產生摩擦；九逃",
       "status": "canon",
@@ -1017,19 +1065,19 @@
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-央-央-5-9-視界記錄-撤離導引-反隱蔽與既有技能限制-AA456FF95B": {
+    "STATUS-央-央-5-9-視界記錄-撤離導引-反隱蔽與既有技能限制-76411B964F": {
       "entity_type": "status_effect",
       "canonical_name": "央-| 央 | `5.9` | 視界記錄、撤離導引、反隱蔽與既有技能限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-央-央-觀測星空-記錄-安靜的地方-衝突-破壞記錄裝置-溫和沉穩-觀察力敏銳-話不多-16FCA48268": {
+    "STATUS-央-央-觀測星空-記錄-安靜的地方-衝突-破壞記錄裝置-溫和沉穩-觀察力敏銳-話不多-C96CE0B1D5": {
       "entity_type": "status_effect",
       "canonical_name": "央-| 央 | 觀測星空、記錄、安靜的地方 | 衝突、破壞記錄裝置 | 溫和沉穩、觀察力敏銳、話不多",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-白瀨零夜-白瀨零夜-真名牽引-歸檔封緘-真名歸位-零頁檔案庫-深化仍受名字-記憶-邊界倫理限制-790346F25B": {
+    "STATUS-白瀨零夜-白瀨零夜-真名牽引-歸檔封緘-真名歸位-零頁檔案庫-深化仍受名字-記憶-邊界倫理限制-2FEB617C37": {
       "entity_type": "status_effect",
       "canonical_name": "白瀨零夜-| 白瀨零夜 | 真名牽引、歸檔封緘、真名歸位、零頁檔案庫 | 深化仍受名字／記憶／邊界倫理限制",
       "status": "candidate",
@@ -1041,7 +1089,7 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-伊吹沙耶-伊吹沙耶-曜徑短杖-橙金導環-短杖光刃-攻軌-近接突破與路徑改線-現行能力與-02780C1A0B": {
+    "STATUS-伊吹沙耶-伊吹沙耶-曜徑短杖-橙金導環-短杖光刃-攻軌-近接突破與路徑改線-現行能力與-395E29E79D": {
       "entity_type": "status_effect",
       "canonical_name": "伊吹沙耶-| 伊吹沙耶 | 《曜徑短杖》 | 橙金導環、短杖光刃／攻軌、近接突破與路徑改線 | 現行能力與",
       "status": "canon",
@@ -1059,13 +1107,13 @@
       "status": "canon",
       "risk_level": "P0"
     },
-    "STATUS-血-血-生命警戒精細化-毒理辨識深化-污染阻隔-急救前置-毒性靈流反制-荊棘封鎖擴張-戰場穩-339E8EB5D6": {
+    "STATUS-血-血-生命警戒精細化-毒理辨識深化-污染阻隔-急救前置-毒性靈流反制-荊棘封鎖擴張-戰場穩-D37C350221": {
       "entity_type": "status_effect",
       "canonical_name": "血-| 血 | 生命警戒精細化、毒理辨識深化、污染阻隔、急救前置、毒性靈流反制、荊棘封鎖擴張、戰場穩",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-血-條件與限制-不是吸血鬼-不操控人體內血液-不是萬能治療師-偏向防護-穩定-標記與封鎖-不-EDBBA44E7D": {
+    "STATUS-血-條件與限制-不是吸血鬼-不操控人體內血液-不是萬能治療師-偏向防護-穩定-標記與封鎖-不-8A4A12ADDE": {
       "entity_type": "status_effect",
       "canonical_name": "血-| 條件與限制 | 不是吸血鬼、不操控人體內血液、不是萬能治療師；偏向防護、穩定、標記與封鎖，不",
       "status": "canon",
@@ -1077,67 +1125,61 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初日-初日-5-12-靈感知-節奏輔助-幻彩干擾與能力限制-1E77932A95": {
+    "STATUS-初日-初日-5-12-靈感知-節奏輔助-幻彩干擾與能力限制-1BC4149786": {
       "entity_type": "status_effect",
       "canonical_name": "初日-| 初日 | `5.12` | 靈感知、節奏輔助、幻彩干擾與能力限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初夢-初夢-5-18-細織結界-拘束壓制-雙刃反制與現行限制-E53C189223": {
+    "STATUS-初夢-初夢-5-18-細織結界-拘束壓制-雙刃反制與現行限制-CA0BBB3A0B": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-| 初夢 | `5.18` | 細織結界、拘束壓制、雙刃反制與現行限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初夢-初夢-多目標舞台連結-撤離橋接-分層細織結界-反制節點設計-柔性控場-大範圍視覺-情緒干-9ABED8CD11": {
+    "STATUS-初夢-初夢-多目標舞台連結-撤離橋接-分層細織結界-反制節點設計-柔性控場-大範圍視覺-情緒干-C9FF41D544": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-| 初夢 | 多目標舞台連結、撤離橋接、分層細織結界、反制節點設計、柔性控場、大範圍視覺／情緒干",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-初夢-初夢之人物資料與固定背景唯一只讀-3-5-3-5-4-本節只保存其異能武裝-現行能力-限制-75C932009A": {
+    "STATUS-初夢-初夢之人物資料與固定背景唯一只讀-3-5-3-5-4-本節只保存其異能武裝-現行能力-限制-BDE0B3304E": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-初夢之人物資料與固定背景唯一只讀 `3.5～3.5.4`；本節只保存其異能武裝、現行能力、限制、",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初夢-絕對結界化-細織結界不是無敵防護-節點被切斷-污染或超負荷時會破碎並反饋初夢-A88BF2A6FB": {
+    "STATUS-初夢-絕對結界化-細織結界不是無敵防護-節點被切斷-污染或超負荷時會破碎並反饋初夢-934C3D2FD9": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-| 絕對結界化 | 細織結界不是無敵防護；節點被切斷、污染或超負荷時會破碎並反饋初夢。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初夢-夢紋封走-拘束壓制-輸出限制-以夢紋絲線鎖結目標肢體-武裝外緣或施術路徑-限制對方行-FDC8904541": {
+    "STATUS-初夢-夢紋封走-拘束壓制-輸出限制-以夢紋絲線鎖結目標肢體-武裝外緣或施術路徑-限制對方行-7931011D90": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-| 夢紋封走 | 拘束壓制／輸出限制 | 以夢紋絲線鎖結目標肢體、武裝外緣或施術路徑，限制對方行",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-初夢-靜眠護纏-柔性防護-節奏穩定-用柔性纖界包圍同伴-緩衝衝擊-降低未知雜訊-並讓隊友在-DF6FA362D0": {
+    "STATUS-初夢-靜眠護纏-柔性防護-節奏穩定-用柔性纖界包圍同伴-緩衝衝擊-降低未知雜訊-並讓隊友在-E51F0B9BEC": {
       "entity_type": "status_effect",
       "canonical_name": "初夢-| 靜眠護纏 | 柔性防護／節奏穩定 | 用柔性纖界包圍同伴，緩衝衝擊、降低未知雜訊，並讓隊友在",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-8-頁角-同日放學後-零夜在第二訓練館閱覽第四場公開副本-宮鷺完成沙耶右腕確認-成立-9ED0265154": {
+    "STATUS-夜-8-頁角-同日放學後-零夜在第二訓練館閱覽第四場公開副本-宮鷺完成沙耶右腕確認-成立-81755793AF": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 8 | 頁角 | 同日放學後，零夜在第二訓練館閱覽第四場公開副本；宮鷺完成沙耶右腕確認，成立",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-刀鞘-刀鞘可作為封印與穩定裝置-避免時間能力暴走-當千夜能力不足時-刀鞘會限制過度輸出-1CF0804642": {
+    "STATUS-夜-刀鞘-刀鞘可作為封印與穩定裝置-避免時間能力暴走-當千夜能力不足時-刀鞘會限制過度輸出-37FD0314B5": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 刀鞘 | 刀鞘可作為封印與穩定裝置，避免時間能力暴走。當千夜能力不足時，刀鞘會限制過度輸出。",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-下次訓練維持原本球速-目標改為-成功一次立刻收刀-只要手指慢半拍便結束-先建立停止與收束習慣-C595961482": {
-      "entity_type": "status_effect",
-      "canonical_name": "夜-下次訓練維持原本球速，目標改為「成功一次立刻收刀」，只要手指慢半拍便結束，先建立停止與收束習慣，",
-      "status": "canon",
-      "risk_level": "P2"
-    },
-    "STATUS-夜-夜文澤排行-夜文澤是夜星家的小兒子-也是夜安晴的弟弟-仍受兒童角色與非高危主戰邊界-93A7862491": {
+    "STATUS-夜-夜文澤排行-夜文澤是夜星家的小兒子-也是夜安晴的弟弟-仍受兒童角色與非高危主戰邊界-3E8CB03F42": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 夜文澤排行 | 夜文澤是夜星家的小兒子，也是夜安晴的弟弟。 | 仍受兒童角色與非高危主戰邊界",
       "status": "canon",
@@ -1149,27 +1191,21 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-夜安晴排行-夜安晴是夜星家的大女兒-也是夜文澤的姐姐-仍受兒童角色與安全邊界限制-D542ACED3F": {
+    "STATUS-夜-夜安晴排行-夜安晴是夜星家的大女兒-也是夜文澤的姐姐-仍受兒童角色與安全邊界限制-F9F0333EF8": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 夜安晴排行 | 夜安晴是夜星家的大女兒，也是夜文澤的姐姐。 | 仍受兒童角色與安全邊界限制。",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-夜星-星核法杖-星辰之力-星界結界-時間流轉-守護-院長級能力需兼顧責任與限-B33ADB5F75": {
+    "STATUS-夜-夜星-星核法杖-星辰之力-星界結界-時間流轉-守護-院長級能力需兼顧責任與限-A1D998D0C2": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 夜星 | 《星核法杖》 | 星辰之力、星界結界、時間流轉、守護 | 院長級能力需兼顧責任與限",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-定位-本節保存使用者明確指定之朝日奈千夜原本核心能力系統-此能力系統屬-時櫻嘯命-09887B4557": {
+    "STATUS-夜-定位-本節保存使用者明確指定之朝日奈千夜原本核心能力系統-此能力系統屬-時櫻嘯命-0651FD8C28": {
       "entity_type": "status_effect",
       "canonical_name": "夜-> **定位：** 本節保存使用者明確指定之朝日奈千夜原本核心能力系統。此能力系統屬《時櫻嘯命》",
-      "status": "canon",
-      "risk_level": "P2"
-    },
-    "STATUS-夜-保健室負荷檢查結果-右手麻木與刺痛的恢復時間-局部停滯能否在安全條件下穩定重現-目標辨識-意-7546E88285": {
-      "entity_type": "status_effect",
-      "canonical_name": "夜-保健室負荷檢查結果；右手麻木與刺痛的恢復時間；局部停滯能否在安全條件下穩定重現；目標辨識、意圖集",
       "status": "canon",
       "risk_level": "P2"
     },
@@ -1185,19 +1221,19 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-時間回溯-指定人-事-物-或指定區域內的所有人-事-物-使其時間回溯到先前狀態-可讓傷勢-E017EC7D05": {
+    "STATUS-夜-時間回溯-指定人-事-物-或指定區域內的所有人-事-物-使其時間回溯到先前狀態-可讓傷勢-6F2F923C1B": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 時間回溯 | 指定人、事、物，或指定區域內的所有人、事、物，使其時間回溯到先前狀態。可讓傷勢",
       "status": "canon",
       "risk_level": "P0"
     },
-    "STATUS-夜-現行武裝-能力-限制-反制-依-各角色-5-X-現行能力卡-5-2-僅作速查鏡像-7CAFD8C76F": {
+    "STATUS-夜-現行武裝-能力-限制-反制-依-各角色-5-X-現行能力卡-5-2-僅作速查鏡像-A96F9384EB": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 現行武裝／能力／限制／反制 | 依 各角色 `5.x` 現行能力卡；`5.2` 僅作速查鏡像",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-朝日奈千夜-完整時間操控能力體系讀-5-14-1-A-時間停止-時間加速-時間回溯-B8E5E53DBE": {
+    "STATUS-夜-朝日奈千夜-完整時間操控能力體系讀-5-14-1-A-時間停止-時間加速-時間回溯-293780118B": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 朝日奈千夜 | 完整時間操控能力體系讀 `5.14.1-A`：時間停止、時間加速、時間回溯、",
       "status": "candidate",
@@ -1227,61 +1263,91 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-權限限制-外校一年級學生只能處理現場可見的低位行動-節奏支援與撤位掩護-不得越權接觸夜星-B4CA428F34": {
+    "STATUS-夜-權限限制-外校一年級學生只能處理現場可見的低位行動-節奏支援與撤位掩護-不得越權接觸夜星-DA5ED5D635": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 權限限制 | 外校一年級學生只能處理現場可見的低位行動、節奏支援與撤位掩護，不得越權接觸夜星",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-夜-權限限制-外校二年級學生只能在正式協查或授權摘要範圍內支援撤離-防護-拘束與低位反制-不-B01FC04937": {
+    "STATUS-夜-權限限制-外校二年級學生只能在正式協查或授權摘要範圍內支援撤離-防護-拘束與低位反制-不-B2A20171D5": {
       "entity_type": "status_effect",
       "canonical_name": "夜-| 權限限制 | 外校二年級學生只能在正式協查或授權摘要範圍內支援撤離、防護、拘束與低位反制；不",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-岬戶霖-岬戶霖-5-4-文書安全-收件封存-閱讀保護與教師後勤防護限制-3A02E13916": {
+    "STATUS-岬戶霖-岬戶霖-5-4-文書安全-收件封存-閱讀保護與教師後勤防護限制-D98E177588": {
       "entity_type": "status_effect",
       "canonical_name": "岬戶霖-| 岬戶霖 | `5.4` | 文書安全、收件封存、閱讀保護與教師後勤防護限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-空音-空音-潮汐撕裂-事件視界護壁-擬似黑洞-終焉星域-空間-高密度重力深化須具高負荷-安-4E970F9E24": {
+    "STATUS-空音-空音-潮汐撕裂-事件視界護壁-擬似黑洞-終焉星域-空間-高密度重力深化須具高負荷-安-79F769F576": {
       "entity_type": "status_effect",
       "canonical_name": "空音-| 空音 | 潮汐撕裂、事件視界護壁、擬似黑洞、終焉星域 | 空間／高密度重力深化須具高負荷、安",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-夏朔真-夏朔真-晨紋雙刃-曉棱-光紋導路-弱點標記-精準切入-情報路徑判讀-現行能力-685A5E49BB": {
+    "STATUS-香坂汐里-本節只成立使用者明確指定-在代表資格決定戰-御先-VS-香坂汐里-中已展示的能力互動--5272A18205": {
+      "entity_type": "status_effect",
+      "canonical_name": "香坂汐里-本節只成立使用者明確指定、在代表資格決定戰「御先 vs 香坂汐里」中已展示的能力互動。它補充第五",
+      "status": "canon",
+      "risk_level": "P0"
+    },
+    "STATUS-香坂汐里-本節保存香坂汐里之人物-聲線與戰鬥參與方式-煌鱗導蛇-的完整外觀-導力規則-盤勢-蛇蛻-3921AC6317": {
+      "entity_type": "status_effect",
+      "canonical_name": "香坂汐里-本節保存香坂汐里之人物、聲線與戰鬥參與方式；《煌鱗導蛇》的完整外觀、導力規則、盤勢、蛇蛻、限制與",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "STATUS-香坂汐里-香坂汐里-5-21-煌鱗導蛇-之魔獸級巨蛇構造-導力-盤勢-外放-蛇蛻-本人協-2892341FD8": {
+      "entity_type": "status_effect",
+      "canonical_name": "香坂汐里-| 香坂汐里 | `5.21` | 《煌鱗導蛇》之魔獸級巨蛇構造、導力、盤勢、外放、蛇蛻、本人協",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "STATUS-香坂汐里-香坂汐里-煌鱗導蛇-生物型大型魔獸級巨蛇-中近距離壓制-重型封場-導力-外放與本-0469E0D1EA": {
+      "entity_type": "status_effect",
+      "canonical_name": "香坂汐里-| 香坂汐里 | 《煌鱗導蛇》 | 生物型大型魔獸級巨蛇；中近距離壓制、重型封場、導力、外放與本",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "STATUS-香坂汐里-香坂汐里之人物-聲線與戰鬥參與方式唯一只讀-3-1-F-本節保存-煌鱗導蛇-的正式外觀-2ADEF04967": {
+      "entity_type": "status_effect",
+      "canonical_name": "香坂汐里-香坂汐里之人物、聲線與戰鬥參與方式唯一只讀 `3.1-F`。本節保存《煌鱗導蛇》的正式外觀、核心",
+      "status": "canon",
+      "risk_level": "P2"
+    },
+    "STATUS-夏朔真-夏朔真-晨紋雙刃-曉棱-光紋導路-弱點標記-精準切入-情報路徑判讀-現行能力-CEC978E436": {
       "entity_type": "status_effect",
       "canonical_name": "夏朔真-| 夏朔真 | 《晨紋雙刃・曉棱》 | 光紋導路、弱點標記、精準切入、情報路徑判讀 | 現行能力",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-浪杰-不成立事項-不是普通裝飾寵物或萬能偵測器-不能讀心-不能治療傷勢-不能替浪杰戰鬥或單獨破-6FF9B495BD": {
+    "STATUS-浪杰-不成立事項-不是普通裝飾寵物或萬能偵測器-不能讀心-不能治療傷勢-不能替浪杰戰鬥或單獨破-CA36A85FF7": {
       "entity_type": "status_effect",
       "canonical_name": "浪杰-| 不成立事項 | 不是普通裝飾寵物或萬能偵測器；不能讀心、不能治療傷勢、不能替浪杰戰鬥或單獨破",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-浪杰-行動限制-不適合單獨離開浪杰太遠-不獨自執行高危任務-60EE87E372": {
+    "STATUS-浪杰-行動限制-不適合單獨離開浪杰太遠-不獨自執行高危任務-BC77624367": {
       "entity_type": "status_effect",
       "canonical_name": "浪杰-| 行動限制 | 不適合單獨離開浪杰太遠，不獨自執行高危任務。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-浪杰-浪杰-星域棋盤擴張-斷星寒域-終令級指揮-斬擊-大規模護送-雙型態與指揮深化仍有取捨-2F3A60A71F": {
+    "STATUS-浪杰-浪杰-星域棋盤擴張-斷星寒域-終令級指揮-斬擊-大規模護送-雙型態與指揮深化仍有取捨-1D8FC0150C": {
       "entity_type": "status_effect",
       "canonical_name": "浪杰-| 浪杰 | 星域棋盤擴張、斷星寒域、終令級指揮／斬擊、大規模護送 | 雙型態與指揮深化仍有取捨",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-真砂柚鶴-真砂柚鶴-5-7-武裝保養工具整理-停手夾與日常輔助限制-E56AA60935": {
+    "STATUS-真砂柚鶴-真砂柚鶴-5-7-武裝保養工具整理-停手夾與日常輔助限制-44C129E426": {
       "entity_type": "status_effect",
       "canonical_name": "真砂柚鶴-| 真砂柚鶴 | `5.7` | 武裝保養工具整理、停手夾與日常輔助限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-御先-9-不放慢-星期五早自習前-沙耶完成右腕複查並解除暫停-放學後-御先自主赴影術棋盤社-12BB688C72": {
+    "STATUS-御先-9-不放慢-星期五早自習前-沙耶完成右腕複查並解除暫停-放學後-御先自主赴影術棋盤社-06B1233979": {
       "entity_type": "status_effect",
       "canonical_name": "御先-| 9 | 不放慢 | 星期五早自習前，沙耶完成右腕複查並解除暫停；放學後，御先自主赴影術棋盤社",
       "status": "canon",
@@ -1293,7 +1359,7 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-御先-後續登記-邊界-御先登記下次開放桌-並表示若與正式場次衝突則取消-未成立正式選拔場次或資-833DED1E4E": {
+    "STATUS-御先-後續登記-邊界-御先登記下次開放桌-並表示若與正式場次衝突則取消-未成立正式選拔場次或資-68E6C6459D": {
       "entity_type": "status_effect",
       "canonical_name": "御先-| 後續登記／邊界 | 御先登記下次開放桌，並表示若與正式場次衝突則取消。未成立正式選拔場次或資",
       "status": "canon",
@@ -1305,13 +1371,13 @@
       "status": "candidate",
       "risk_level": "P1"
     },
-    "STATUS-雪弟-4-借影-星期二放學後-雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可-她與貓狼-B787CE986D": {
+    "STATUS-雪弟-4-借影-星期二放學後-雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可-她與貓狼-21CE268708": {
       "entity_type": "status_effect",
       "canonical_name": "雪弟-| 4 | 借影 | 星期二放學後，雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可；她與貓狼",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-雪弟-雪弟-多類人偶-複合人偶-人偶絲網陣-絲幕劇場-大型控場-人偶數量-絲線節點-維持負-5683A920CC": {
+    "STATUS-雪弟-雪弟-多類人偶-複合人偶-人偶絲網陣-絲幕劇場-大型控場-人偶數量-絲線節點-維持負-D08A138261": {
       "entity_type": "status_effect",
       "canonical_name": "雪弟-| 雪弟 | 多類人偶、複合人偶、人偶絲網陣、絲幕劇場、大型控場 | 人偶數量、絲線節點、維持負",
       "status": "candidate",
@@ -1323,31 +1389,31 @@
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-鹿梅-鹿梅-梅鹿靈冠-生命靈流-實質治療-自療-淨化-場域穩定-成形者可處理一般至-B29EB8B049": {
+    "STATUS-鹿梅-鹿梅-梅鹿靈冠-生命靈流-實質治療-自療-淨化-場域穩定-成形者可處理一般至-24C2D43DB8": {
       "entity_type": "status_effect",
       "canonical_name": "鹿梅-| 鹿梅 | 《梅鹿靈冠》 | 生命靈流、實質治療／自療、淨化、場域穩定 | 成形者可處理一般至",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-晴禮-晴禮-5-17-節奏支援-折光防護-中距牽制與現行限制-06C77FA67D": {
+    "STATUS-晴禮-晴禮-5-17-節奏支援-折光防護-中距牽制與現行限制-D422428E3B": {
       "entity_type": "status_effect",
       "canonical_name": "晴禮-| 晴禮 | `5.17` | 節奏支援、折光防護、中距牽制與現行限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-晴禮-晴禮-多拍標記-折光節奏干擾-多人撤位提示-短距離切入連攜-防護展演-隊形穩定方向-742712987E": {
+    "STATUS-晴禮-晴禮-多拍標記-折光節奏干擾-多人撤位提示-短距離切入連攜-防護展演-隊形穩定方向-6F972ABA33": {
       "entity_type": "status_effect",
       "canonical_name": "晴禮-| 晴禮 | 多拍標記、折光節奏干擾、多人撤位提示、短距離切入連攜、防護展演、隊形穩定方向 | ",
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-晴禮-晴禮之人物資料與固定背景唯一只讀-3-5-3-5-3-本節只保存其異能武裝-現行能力-限制-5803BD8FFE": {
+    "STATUS-晴禮-晴禮之人物資料與固定背景唯一只讀-3-5-3-5-3-本節只保存其異能武裝-現行能力-限制-2B3F4F8BC1": {
       "entity_type": "status_effect",
       "canonical_name": "晴禮-晴禮之人物資料與固定背景唯一只讀 `3.5～3.5.3`；本節只保存其異能武裝、現行能力、限制、",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-晴禮-節拍限制-敵方若刻意打亂節奏-連續假動作或製造多點同步壓力-晴禮容易判錯第一拍-6C978AD35F": {
+    "STATUS-晴禮-節拍限制-敵方若刻意打亂節奏-連續假動作或製造多點同步壓力-晴禮容易判錯第一拍-A57352DD91": {
       "entity_type": "status_effect",
       "canonical_name": "晴禮-| 節拍限制 | 敵方若刻意打亂節奏、連續假動作或製造多點同步壓力，晴禮容易判錯第一拍。 |",
       "status": "canon",
@@ -1359,19 +1425,19 @@
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-槐野理子-槐野理子-墨界摺扇-記錄-分析-可信標線-視線盲判-資訊取得與推判受現場紀錄-AAE4D4B1B0": {
+    "STATUS-槐野理子-槐野理子-墨界摺扇-記錄-分析-可信標線-視線盲判-資訊取得與推判受現場紀錄-E3ADC4361F": {
       "entity_type": "status_effect",
       "canonical_name": "槐野理子-| 槐野理子 | 《墨界摺扇》 | 記錄、分析、可信標線、視線盲判 | 資訊取得與推判受現場紀錄",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-蒲生硯里-蒲生硯里-5-5-紙本靈紋拓印支援-穩墨壓紙與生活型能力限制-842B1D739A": {
+    "STATUS-蒲生硯里-蒲生硯里-5-5-紙本靈紋拓印支援-穩墨壓紙與生活型能力限制-B7E182D17D": {
       "entity_type": "status_effect",
       "canonical_name": "蒲生硯里-| 蒲生硯里 | `5.5` | 紙本靈紋拓印支援、穩墨壓紙與生活型能力限制。 |",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-貓狼-限制-需要觀測-記錄或可辨識媒介-不得解讀為無條件讀心-改寫記憶-掌握真相-不可逃脫禁制-4F2357BF97": {
+    "STATUS-貓狼-限制-需要觀測-記錄或可辨識媒介-不得解讀為無條件讀心-改寫記憶-掌握真相-不可逃脫禁制-51476A6EA8": {
       "entity_type": "status_effect",
       "canonical_name": "貓狼-| 限制 | 需要觀測、記錄或可辨識媒介；不得解讀為無條件讀心、改寫記憶、掌握真相、不可逃脫禁制",
       "status": "canon",
@@ -1383,7 +1449,7 @@
       "status": "candidate",
       "risk_level": "P2"
     },
-    "STATUS-霜鈴-霜鈴為具人格化伴生存在之明示例外-本節只保存其基本辨識-固定代稱-能力邊界與限制代價-3--DFA917C830": {
+    "STATUS-霜鈴-霜鈴為具人格化伴生存在之明示例外-本節只保存其基本辨識-固定代稱-能力邊界與限制代價-3--EC5373A77E": {
       "entity_type": "status_effect",
       "canonical_name": "霜鈴-霜鈴為具人格化伴生存在之明示例外；本節只保存其基本辨識、固定代稱、能力邊界與限制代價；`3.11",
       "status": "canon",
@@ -1395,25 +1461,25 @@
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-瀨川奈緒-斷途-是由瀨川奈緒本人承載全部生物構造-依實際觀察累積敵方移動習慣並高速破壞已判斷退路-7FFAC33A27": {
+    "STATUS-瀨川奈緒-斷途-是由瀨川奈緒本人承載全部生物構造-依實際觀察累積敵方移動習慣並高速破壞已判斷退路-C869F68CAA": {
       "entity_type": "status_effect",
       "canonical_name": "瀨川奈緒-《斷途》是由瀨川奈緒本人承載全部生物構造、依實際觀察累積敵方移動習慣並高速破壞已判斷退路選項的生",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-瀨川奈緒-瀨川奈緒-5-20-斷途-之生物來源裝著構造-高速近戰追擊-落點預判-退路干擾-7B7047EAB2": {
+    "STATUS-瀨川奈緒-瀨川奈緒-5-20-斷途-之生物來源裝著構造-高速近戰追擊-落點預判-退路干擾-5F58031F6A": {
       "entity_type": "status_effect",
       "canonical_name": "瀨川奈緒-| 瀨川奈緒 | `5.20` | 《斷途》之生物來源裝著構造、高速近戰追擊、落點預判、退路干擾",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-瀨川奈緒-瀨川奈緒-斷途-生物來源裝著型-高速近戰追擊-敵方移動習慣分析-落點預判-退路干-F5E68A1B66": {
+    "STATUS-瀨川奈緒-瀨川奈緒-斷途-生物來源裝著型-高速近戰追擊-敵方移動習慣分析-落點預判-退路干-C7AF148023": {
       "entity_type": "status_effect",
       "canonical_name": "瀨川奈緒-| 瀨川奈緒 | 《斷途》 | 生物來源裝著型；高速近戰追擊、敵方移動習慣分析、落點預判、退路干",
       "status": "canon",
       "risk_level": "P2"
     },
-    "STATUS-瀨川奈緒-瀨川奈緒之人物-家庭-性格-日常習慣與成長主題唯一只讀-3-1-E-具名關係邊界只讀--85732E3C05": {
+    "STATUS-瀨川奈緒-瀨川奈緒之人物-家庭-性格-日常習慣與成長主題唯一只讀-3-1-E-具名關係邊界只讀--E639F3552E": {
       "entity_type": "status_effect",
       "canonical_name": "瀨川奈緒-瀨川奈緒之人物、家庭、性格、日常習慣與成長主題唯一只讀 `3.1-E`；具名關係邊界只讀 `4.",
       "status": "canon",
@@ -1426,125 +1492,132 @@
       "CHAR-3-1-C-宇月-人物補充資料-702D79653E",
       "CHAR-3-1-D-榛名小暮-人物與異能武裝補充資料-9487BF4949",
       "CHAR-3-1-E-瀨川奈緒-人物與關係補充資料-2448B1AA5B",
-      "CHAR-3-3-A-MERIDIAN-RELAY-經緯中繼網與夜星外圈成年合作角色-DC7183D46F",
-      "CHAR-3-4-A-秦無月-人物補充資料-D5FF3FF87A",
-      "CHAR-3-6-A-玄樞議庭正式反派角色-黎久瀨-55A7CDEB14",
-      "CHAR-3-9-角色-關係與能力讀取索引-4B7B2FC111",
+      "CHAR-3-1-F-香坂汐里-人物與說話方式-7CB96E70A4",
+      "CHAR-3-1-G-雪弟-性格與說話方式-5A6DCD40C3",
+      "CHAR-3-3-A-MERIDIAN-RELAY-經緯中繼網與夜星外圈成年合作角色-A06D6FB9C9",
+      "CHAR-3-3-B-夜-性格與說話方式-F905B6B89D",
+      "CHAR-3-4-A-秦無月-人物補充資料-694475495C",
+      "CHAR-3-6-A-玄樞議庭正式反派角色-黎久瀨-2C4E575FC0",
+      "CHAR-3-9-角色-關係與能力讀取索引-503F017555",
       "CHAR-九逃-0D9D72A3EB",
-      "CHAR-千函-F6E5606ED0",
-      "CHAR-央-D5A5DE9336",
+      "CHAR-千函-AA8395D281",
+      "CHAR-央-EAAED79858",
       "CHAR-白瀨零夜-3AA3BBD2EB",
       "CHAR-伊吹沙耶-3AE58ABFC9",
-      "CHAR-宇天-FD7192758B",
+      "CHAR-宇天-07BD1C940B",
       "CHAR-宇月-80A9601D4F",
-      "CHAR-米洛-岑-25E2DA5D89",
-      "CHAR-艾爾瑪-芙洛-D3370B9404",
-      "CHAR-血-F7CF4E8766",
-      "CHAR-初日-104C96B023",
-      "CHAR-初夢-8CB8C92D09",
-      "CHAR-折原律-2165426AA0",
-      "CHAR-夜-68CC1F93C7",
+      "CHAR-米洛-岑-B3B6D48B84",
+      "CHAR-艾爾瑪-芙洛-620961149D",
+      "CHAR-血-6B174C698C",
+      "CHAR-初日-8EA82A9639",
+      "CHAR-初夢-1E19570F3A",
+      "CHAR-折原律-087002E4C4",
+      "CHAR-夜-59B88A928D",
       "CHAR-夜文澤-6F0CEB31E7",
       "CHAR-夜安晴-86E3530A04",
-      "CHAR-夜星-54FD98C410",
-      "CHAR-岬戶霖-AA0EF74410",
-      "CHAR-拉芙蒂-里德斯特-27F5416162",
-      "CHAR-空音-C0C53E64CC",
+      "CHAR-夜星-8C9D29C519",
+      "CHAR-岬戶霖-2C3979C558",
+      "CHAR-拉芙蒂-里德斯特-0F7113878C",
+      "CHAR-空音-61450D8F41",
       "CHAR-南雲帆-2698A85D87",
-      "CHAR-柊木璃央-92F0CA7DDE",
-      "CHAR-段篠折-63801EEB90",
+      "CHAR-柊木璃央-2570407236",
+      "CHAR-段篠折-43FDB1BE89",
       "CHAR-香坂汐里-02B6E6A6F1",
-      "CHAR-修傘店老闆娘-DB772F5FB4",
-      "CHAR-夏朔真-964EAD07B0",
-      "CHAR-宮鷺澪-A62DD34C70",
-      "CHAR-浪杰-2D2D370CA0",
-      "CHAR-真砂柚鶴-772180DF29",
-      "CHAR-秦無月-2BE8160506",
+      "CHAR-修傘店老闆娘-C90AFB702F",
+      "CHAR-夏朔真-F24826DD48",
+      "CHAR-宮鷺澪-926D596984",
+      "CHAR-浪杰-6F8048501E",
+      "CHAR-真砂柚鶴-E2AD37B92E",
+      "CHAR-秦無月-D406EBBAA7",
       "CHAR-御先-022A32C384",
       "CHAR-梶浦澄斗-07901821E2",
-      "CHAR-莉莉絲-A2914B32C9",
-      "CHAR-莊-62A2721F12",
+      "CHAR-莉莉絲-89118A8A8A",
+      "CHAR-莊-5ED17F70FA",
       "CHAR-雪弟-E2CD30490E",
-      "CHAR-鹿梅-7DE11131DD",
-      "CHAR-晴禮-FC30FAF106",
+      "CHAR-鹿梅-3EB87BC7D1",
+      "CHAR-晴禮-56FE8526FA",
       "CHAR-朝日奈千夜-5DD8AB923D",
       "CHAR-榛名小暮-882A9AD238",
       "CHAR-槐野理子-EA628FB1B7",
       "CHAR-蒲生硯里-2A3A928D08",
-      "CHAR-遠坂滿-E0152F2670",
-      "CHAR-鳴瀨紬-834EAAADBE",
-      "CHAR-篠宮燈理-A27CF55860",
+      "CHAR-遠坂滿-A54E8577D6",
+      "CHAR-鳴瀨紬-A651A8DC73",
+      "CHAR-篠宮燈理-F086AC99E9",
       "CHAR-貓狼-3CE7C0F786",
-      "CHAR-霜鈴-274CF693A2",
-      "CHAR-藍濱舜-CFCE7D68FB",
+      "CHAR-霜鈴-30DB4C745C",
+      "CHAR-藍濱舜-AE89BA8C98",
       "CHAR-瀨川奈緒-543BF5AAF6",
-      "CHAR-羅棠穗-309FF8242A",
-      "CHAR-霧生棋乃-6B02265D11"
+      "CHAR-羅棠穗-C170C6F7F6",
+      "CHAR-霧生棋乃-6B02265D11",
+      "character_ron_visal"
     ],
     "abilities": [
-      "ABILITY-5-14-1-A-朝日奈千夜-時櫻嘯命-時間操控完整能力體系-0B13E54B3F",
-      "ABILITY-艾爾瑪-芙洛-高機動-風貼滑行與光紋加速之機動定位-F413A4C5F7",
-      "ABILITY-折原律-帶隊教師-場域校準教官之向量校正-誤差切斷與定域壓制-35A465E0F5",
-      "ABILITY-夜文澤-兒童未定型之感知-防護與引導-8E405AAD3C",
-      "ABILITY-夜安晴-星鈴守護-願力回應與兒童可控支援-9B8D30E365",
-      "ABILITY-南雲帆-風向與靈流觀測-導引及不催促之路線提示-CDD903F518",
-      "ABILITY-柊木璃央-晶格切離-分析與冷霧結界之對戰型定位-05EE7CFBED",
-      "ABILITY-宮鷺澪-教師安全控場定位下之模式描定-銀律校正與封框結界-FD95B59498",
-      "ABILITY-槐野理子-記錄-分析-可信標線與視線盲判之支援定位-0F3A44BD54",
-      "ABILITY-遠坂滿-重裝防禦-突破與承壓之正面定位-FB7AC5BC33",
-      "ABILITY-鳴瀨紬-成年協調者之資料協調-樣式編譯與虛訊觸接-7EB67F0FE2",
-      "ABILITY-篠宮燈理-導路照射-折光盾幕與曙因標記之學生支援定位-D6F3EE688D"
+      "ability_sever_continuing_force",
+      "ABILITY-5-14-1-A-朝日奈千夜-時櫻嘯命-時間操控完整能力體系-ABA30C8111",
+      "ABILITY-艾爾瑪-芙洛-高機動-風貼滑行與光紋加速之機動定位-61ED894F21",
+      "ABILITY-折原律-帶隊教師-場域校準教官之向量校正-誤差切斷與定域壓制-E7426FBCFA",
+      "ABILITY-夜文澤-兒童未定型之感知-防護與引導-1DED3D932B",
+      "ABILITY-夜安晴-星鈴守護-願力回應與兒童可控支援-11B3E2B6C1",
+      "ABILITY-南雲帆-風向與靈流觀測-導引及不催促之路線提示-A50C833081",
+      "ABILITY-柊木璃央-晶格切離-分析與冷霧結界之對戰型定位-4118B108E8",
+      "ABILITY-宮鷺澪-教師安全控場定位下之模式描定-銀律校正與封框結界-D1DF5322A8",
+      "ABILITY-槐野理子-記錄-分析-可信標線與視線盲判之支援定位-88C5CC423D",
+      "ABILITY-遠坂滿-重裝防禦-突破與承壓之正面定位-FE45C44B08",
+      "ABILITY-鳴瀨紬-成年協調者之資料協調-樣式編譯與虛訊觸接-C6788AF87F",
+      "ABILITY-篠宮燈理-導路照射-折光盾幕與曙因標記之學生支援定位-EF3C9A48C8"
     ],
     "weapons": [
-      "WEAPON-天衡弓架-A63182C64E",
-      "WEAPON-未竟折門-F4702529B1",
-      "WEAPON-羽簽哨笛-E5ADF03411",
-      "WEAPON-赤央影燈-6C38F5D544",
-      "WEAPON-函星折箋-B5B504EFC7",
-      "WEAPON-夜影雙星-5C2FFEB42E",
-      "WEAPON-封霖紙匣-15D705848D",
-      "WEAPON-星核法杖-157B62EFC5",
-      "WEAPON-星紋守願-CB7CBEFC8C",
-      "WEAPON-星紋權杖-3DC97CDAB8",
-      "WEAPON-星霜白貓-BBA594FDB8",
-      "WEAPON-星願守鈴-F5867F5910",
-      "WEAPON-柔輪工具匣-7C7D12D542",
-      "WEAPON-重芯臂鎧-滿載-F083CC8531",
-      "WEAPON-時櫻嘯命-B03E9E0192",
-      "WEAPON-校準槍戟-定式-D107683E17",
-      "WEAPON-紙鳶羅盤-B942F01927",
-      "WEAPON-缺月行鋒-CA06109557",
-      "WEAPON-彩暈晨鏡-A3866534D9",
-      "WEAPON-御絲人偶手套-717D1210AB",
-      "WEAPON-晨紋雙刃-曉棱-CEEABCC3CC",
-      "WEAPON-晨導提燈-曉譜-658B0D3F43",
-      "WEAPON-晨織端環-1A9BBBD731",
-      "WEAPON-梅鹿靈冠-EBA1284AD1",
-      "WEAPON-理鍵書籤-1D837DAE05",
-      "WEAPON-莊界石庭-7664B45D47",
-      "WEAPON-晴彩祕綾-145706756A",
-      "WEAPON-晶格雙刃-零片-DC62374328",
-      "WEAPON-虛墜-星淵-951F792852",
-      "WEAPON-極軌聖鑰-9AA5FD786C",
-      "WEAPON-滑羽輪靴-3D1DF6D848",
-      "WEAPON-聖星法典-CA000CE83F",
-      "WEAPON-夢綴星紡-E153E71A96",
-      "WEAPON-緋薔薇匣-9809AA91BE",
-      "WEAPON-蝕月星槍-CDFDECFF3A",
-      "WEAPON-銀律構筆-C8F3CB867F",
-      "WEAPON-銀格弈簿-B9824CAA41",
-      "WEAPON-影格棋匣-331688CC49",
-      "WEAPON-澄月航儀-AF5B9934E7",
-      "WEAPON-墨界摺扇-A0F935889D",
-      "WEAPON-靜拓墨盤-B0F533E11F",
-      "WEAPON-曙紋大太刀-分曉-A135D63482",
-      "WEAPON-斷途-CF5AC8C360",
-      "WEAPON-曜徑短杖-981BF84209"
+      "weapon_severing_tide",
+      "WEAPON-天衡弓架-95E3792ED5",
+      "WEAPON-未竟折門-7A40D1F917",
+      "WEAPON-羽簽哨笛-B437B866B8",
+      "WEAPON-赤央影燈-9BA28B6007",
+      "WEAPON-函星折箋-8B3A6585CF",
+      "WEAPON-夜影雙星-8E2AC26613",
+      "WEAPON-封霖紙匣-A4CBCC558E",
+      "WEAPON-星核法杖-7FE3C56B30",
+      "WEAPON-星紋守願-3E45210F8C",
+      "WEAPON-星紋權杖-217E18476E",
+      "WEAPON-星霜白貓-DFE6AA7C79",
+      "WEAPON-星願守鈴-120817E0F0",
+      "WEAPON-柔輪工具匣-48FA16628B",
+      "WEAPON-重芯臂鎧-滿載-3AFCEC3D27",
+      "WEAPON-時櫻嘯命-A3C0A2B9BA",
+      "WEAPON-校準槍戟-定式-47F2F9ED02",
+      "WEAPON-紙鳶羅盤-FF893035EB",
+      "WEAPON-缺月行鋒-D6AEF5D5A0",
+      "WEAPON-彩暈晨鏡-62691DCB34",
+      "WEAPON-御絲人偶手套-D868BDD46C",
+      "WEAPON-晨紋雙刃-曉棱-15FEC30613",
+      "WEAPON-晨導提燈-曉譜-636A222ECD",
+      "WEAPON-晨織端環-8C118D6519",
+      "WEAPON-梅鹿靈冠-1030582FC2",
+      "WEAPON-理鍵書籤-7D0BC9A1A4",
+      "WEAPON-莊界石庭-0011AE1766",
+      "WEAPON-晴彩祕綾-9048210AEA",
+      "WEAPON-晶格雙刃-零片-87D92713F0",
+      "WEAPON-虛墜-星淵-083D392F85",
+      "WEAPON-極軌聖鑰-3FD894CB92",
+      "WEAPON-滑羽輪靴-476F94188B",
+      "WEAPON-煌鱗導蛇-471F4162F1",
+      "WEAPON-聖星法典-342CCB7CD8",
+      "WEAPON-夢綴星紡-FC7C8CD610",
+      "WEAPON-緋薔薇匣-3C5D825702",
+      "WEAPON-蝕月星槍-9C0D9C6C3E",
+      "WEAPON-銀律構筆-A61DF82144",
+      "WEAPON-銀格弈簿-8AC39AE5E2",
+      "WEAPON-影格棋匣-B45AFC7A1D",
+      "WEAPON-澄月航儀-5297896033",
+      "WEAPON-墨界摺扇-79F72E93C3",
+      "WEAPON-靜拓墨盤-F4490717C9",
+      "WEAPON-曙紋大太刀-分曉-BD243E8D1E",
+      "WEAPON-斷途-612D2C8C66",
+      "WEAPON-曜徑短杖-C4AB1ED36A"
     ],
     "timeline_events": [
-      "TL-第十七章-最後一個空帶-正式結算-1D645B6320",
-      "TL-第十九章-第一聲鈴-正式結算-866AA86130",
-      "TL-第十八章-還沒輪到-正式結算-BE453893C9"
+      "TL-第十七章-最後一個空帶-正式結算-C262CBB040",
+      "TL-第十九章-第一聲鈴-正式結算-307F80D495",
+      "TL-第十八章-還沒輪到-正式結算-F2FC4969C1"
     ],
     "world_rules": [
       "RULE-世界性質-CE810C93C6",
@@ -1585,6 +1658,7 @@
       "ORG-2-8-學院日常制度-A5AC35B6AA",
       "ORG-白櫻學院區-B36DACCB7B",
       "ORG-巡禮局白櫻分局-91FF774C8C",
+      "ORG-夜星武裝學院-755BF2934E",
       "ORG-織衡聯域-314E4E9C1C"
     ],
     "locations": [
@@ -1592,89 +1666,92 @@
       "LOC-白櫻靈軌站-863E12BC89"
     ],
     "chapter_events": [
-      "CHAPTER-EVENT-第十七章-最後一個空帶-正式結算-B75510BCD3",
-      "CHAPTER-EVENT-第十九章-第一聲鈴-正式結算-6D887E48A1",
-      "CHAPTER-EVENT-第十八章-還沒輪到-正式結算-B7A60EFC87"
+      "CHAPTER-EVENT-第十七章-最後一個空帶-正式結算-CF944AF8A5",
+      "CHAPTER-EVENT-第十九章-第一聲鈴-正式結算-4043CE2830",
+      "CHAPTER-EVENT-第十八章-還沒輪到-正式結算-37FB61D9D2"
     ],
     "relationships": [],
     "status_effects": [
-      "STATUS-九逃-19-第一聲鈴-四月第五週星期一-正式選拔第一日個人戰第一場於第一訓練館主場南側一號-F82ADD4EAA",
-      "STATUS-九逃-5-未排定-星期二放學後-九逃先於保健室取得帶左肩限制之投影練習許可-後與伊吹沙耶於-23520011FE",
-      "STATUS-九逃-九逃-聖星法典-聖光治癒-自我-他人修復-防護-淨化-增幅-結界-治療能實質-0BD387C20D",
-      "STATUS-九逃-九逃與千夜第一場後座-第十九章正式選拔第一場後-九逃成立左前臂裂傷-左肩外側切創-需清創-F38971F877",
-      "STATUS-九逃-已結案短期傷勢-沙耶右腕-九逃舊左肩-御先與雪弟早期短期負荷等普通短期狀態-除新正文另行-14DE6C2EED",
+      "STATUS-九逃-19-第一聲鈴-四月第五週星期一-正式選拔第一日個人戰第一場於第一訓練館主場南側一號-07B7CA79EB",
+      "STATUS-九逃-5-未排定-星期二放學後-九逃先於保健室取得帶左肩限制之投影練習許可-後與伊吹沙耶於-C864B7C19D",
+      "STATUS-九逃-九逃-聖星法典-聖光治癒-自我-他人修復-防護-淨化-增幅-結界-治療能實質-E3A0DCCA62",
+      "STATUS-九逃-九逃與千夜第一場後座-第十九章正式選拔第一場後-九逃成立左前臂裂傷-左肩外側切創-需清創-FD14990C04",
+      "STATUS-九逃-已結案短期傷勢-沙耶右腕-九逃舊左肩-御先與雪弟早期短期負荷等普通短期狀態-除新正文另行-3814808305",
       "STATUS-九逃-宇月-男-19歲-四年級-二十七位平等主角之一-戰術導引與群體防護科-學生會戰術支援-DB461F2408",
-      "STATUS-九逃-現行正史狀態-新版第一章至第十九章均已由使用者明確正式採用並完成結算-現行時間位置-C946DA1679",
-      "STATUS-九逃-傷勢-醫療後座-九逃成立左前臂裂傷-左肩外側切創-需清創縫合與靈力穩定-左臂當晚不能沾水-531F44C6B9",
-      "STATUS-九逃-關係-生活後座-場後兩人因千夜停刀-九逃不想被誤認為不想贏-書包是否協助等產生摩擦-九逃-03F738B70B",
+      "STATUS-九逃-現行正史狀態-新版第一章至第十九章均已由使用者明確正式採用並完成結算-現行時間位置-D496024948",
+      "STATUS-九逃-傷勢-醫療後座-九逃成立左前臂裂傷-左肩外側切創-需清創縫合與靈力穩定-左臂當晚不能沾水-F114E73E57",
+      "STATUS-九逃-關係-生活後座-場後兩人因千夜停刀-九逃不想被誤認為不想贏-書包是否協助等產生摩擦-九逃-BCF3DFEEC3",
       "STATUS-九逃-CURRENT-MEDICAL-STATUS-BD71EA0E87",
-      "STATUS-央-央-5-9-視界記錄-撤離導引-反隱蔽與既有技能限制-AA456FF95B",
-      "STATUS-央-央-觀測星空-記錄-安靜的地方-衝突-破壞記錄裝置-溫和沉穩-觀察力敏銳-話不多-16FCA48268",
-      "STATUS-白瀨零夜-白瀨零夜-真名牽引-歸檔封緘-真名歸位-零頁檔案庫-深化仍受名字-記憶-邊界倫理限制-790346F25B",
+      "STATUS-央-央-5-9-視界記錄-撤離導引-反隱蔽與既有技能限制-76411B964F",
+      "STATUS-央-央-觀測星空-記錄-安靜的地方-衝突-破壞記錄裝置-溫和沉穩-觀察力敏銳-話不多-C96CE0B1D5",
+      "STATUS-白瀨零夜-白瀨零夜-真名牽引-歸檔封緘-真名歸位-零頁檔案庫-深化仍受名字-記憶-邊界倫理限制-2FEB617C37",
       "STATUS-伊吹沙耶-伊吹沙耶-女-第二章二號場突入測試參與者-第五章同場再次測試參與者-第七章第一批個人-0081ECF24D",
-      "STATUS-伊吹沙耶-伊吹沙耶-曜徑短杖-橙金導環-短杖光刃-攻軌-近接突破與路徑改線-現行能力與-02780C1A0B",
+      "STATUS-伊吹沙耶-伊吹沙耶-曜徑短杖-橙金導環-短杖光刃-攻軌-近接突破與路徑改線-現行能力與-395E29E79D",
       "STATUS-伊吹沙耶-CURRENT-MEDICAL-STATUS-E103A00D4A",
       "STATUS-血-成形者-快速修復一般傷勢並實質處理中度創傷-骨折-失血與靈力紊亂-可自療-在條件充分時參-30F1FAEA7F",
-      "STATUS-血-血-生命警戒精細化-毒理辨識深化-污染阻隔-急救前置-毒性靈流反制-荊棘封鎖擴張-戰場穩-339E8EB5D6",
-      "STATUS-血-條件與限制-不是吸血鬼-不操控人體內血液-不是萬能治療師-偏向防護-穩定-標記與封鎖-不-EDBBA44E7D",
+      "STATUS-血-血-生命警戒精細化-毒理辨識深化-污染阻隔-急救前置-毒性靈流反制-荊棘封鎖擴張-戰場穩-D37C350221",
+      "STATUS-血-條件與限制-不是吸血鬼-不操控人體內血液-不是萬能治療師-偏向防護-穩定-標記與封鎖-不-8A4A12ADDE",
       "STATUS-血-榛名小暮-女-16歲-二年級-戰術科-生日11月3日-血型AB型-夜星武裝學院-D701A54BA1",
-      "STATUS-初日-初日-5-12-靈感知-節奏輔助-幻彩干擾與能力限制-1E77932A95",
-      "STATUS-初夢-初夢-5-18-細織結界-拘束壓制-雙刃反制與現行限制-E53C189223",
-      "STATUS-初夢-初夢-多目標舞台連結-撤離橋接-分層細織結界-反制節點設計-柔性控場-大範圍視覺-情緒干-9ABED8CD11",
-      "STATUS-初夢-初夢之人物資料與固定背景唯一只讀-3-5-3-5-4-本節只保存其異能武裝-現行能力-限制-75C932009A",
-      "STATUS-初夢-絕對結界化-細織結界不是無敵防護-節點被切斷-污染或超負荷時會破碎並反饋初夢-A88BF2A6FB",
-      "STATUS-初夢-夢紋封走-拘束壓制-輸出限制-以夢紋絲線鎖結目標肢體-武裝外緣或施術路徑-限制對方行-FDC8904541",
-      "STATUS-初夢-靜眠護纏-柔性防護-節奏穩定-用柔性纖界包圍同伴-緩衝衝擊-降低未知雜訊-並讓隊友在-DF6FA362D0",
-      "STATUS-夜-8-頁角-同日放學後-零夜在第二訓練館閱覽第四場公開副本-宮鷺完成沙耶右腕確認-成立-9ED0265154",
-      "STATUS-夜-刀鞘-刀鞘可作為封印與穩定裝置-避免時間能力暴走-當千夜能力不足時-刀鞘會限制過度輸出-1CF0804642",
-      "STATUS-夜-下次訓練維持原本球速-目標改為-成功一次立刻收刀-只要手指慢半拍便結束-先建立停止與收束習慣-C595961482",
-      "STATUS-夜-夜文澤排行-夜文澤是夜星家的小兒子-也是夜安晴的弟弟-仍受兒童角色與非高危主戰邊界-93A7862491",
+      "STATUS-初日-初日-5-12-靈感知-節奏輔助-幻彩干擾與能力限制-1BC4149786",
+      "STATUS-初夢-初夢-5-18-細織結界-拘束壓制-雙刃反制與現行限制-CA0BBB3A0B",
+      "STATUS-初夢-初夢-多目標舞台連結-撤離橋接-分層細織結界-反制節點設計-柔性控場-大範圍視覺-情緒干-C9FF41D544",
+      "STATUS-初夢-初夢之人物資料與固定背景唯一只讀-3-5-3-5-4-本節只保存其異能武裝-現行能力-限制-BDE0B3304E",
+      "STATUS-初夢-絕對結界化-細織結界不是無敵防護-節點被切斷-污染或超負荷時會破碎並反饋初夢-934C3D2FD9",
+      "STATUS-初夢-夢紋封走-拘束壓制-輸出限制-以夢紋絲線鎖結目標肢體-武裝外緣或施術路徑-限制對方行-7931011D90",
+      "STATUS-初夢-靜眠護纏-柔性防護-節奏穩定-用柔性纖界包圍同伴-緩衝衝擊-降低未知雜訊-並讓隊友在-E51F0B9BEC",
+      "STATUS-夜-8-頁角-同日放學後-零夜在第二訓練館閱覽第四場公開副本-宮鷺完成沙耶右腕確認-成立-81755793AF",
+      "STATUS-夜-刀鞘-刀鞘可作為封印與穩定裝置-避免時間能力暴走-當千夜能力不足時-刀鞘會限制過度輸出-37FD0314B5",
+      "STATUS-夜-夜文澤排行-夜文澤是夜星家的小兒子-也是夜安晴的弟弟-仍受兒童角色與非高危主戰邊界-3E8CB03F42",
       "STATUS-夜-夜安晴-夜文澤為成形者特例-但不解除其兒童-學生競技-投影顯現-權限-能力限制與高危禁止邊界-9AA02BFF63",
-      "STATUS-夜-夜安晴排行-夜安晴是夜星家的大女兒-也是夜文澤的姐姐-仍受兒童角色與安全邊界限制-D542ACED3F",
-      "STATUS-夜-夜星-星核法杖-星辰之力-星界結界-時間流轉-守護-院長級能力需兼顧責任與限-B33ADB5F75",
-      "STATUS-夜-定位-本節保存使用者明確指定之朝日奈千夜原本核心能力系統-此能力系統屬-時櫻嘯命-09887B4557",
-      "STATUS-夜-保健室負荷檢查結果-右手麻木與刺痛的恢復時間-局部停滯能否在安全條件下穩定重現-目標辨識-意-7546E88285",
+      "STATUS-夜-夜安晴排行-夜安晴是夜星家的大女兒-也是夜文澤的姐姐-仍受兒童角色與安全邊界限制-F9F0333EF8",
+      "STATUS-夜-夜星-星核法杖-星辰之力-星界結界-時間流轉-守護-院長級能力需兼顧責任與限-A1D998D0C2",
+      "STATUS-夜-定位-本節保存使用者明確指定之朝日奈千夜原本核心能力系統-此能力系統屬-時櫻嘯命-0651FD8C28",
       "STATUS-夜-南雲帆-男-夜星學生-低年級觀測型-夜星武裝學院-身高146CM-灰白蓬鬆短-736F07C604",
       "STATUS-夜-首領室-由夏朔真統整風險優先序-合作條件-保護底線與高風險導路決策-不因首領位置無-96838B1EE9",
-      "STATUS-夜-時間回溯-指定人-事-物-或指定區域內的所有人-事-物-使其時間回溯到先前狀態-可讓傷勢-E017EC7D05",
-      "STATUS-夜-現行武裝-能力-限制-反制-依-各角色-5-X-現行能力卡-5-2-僅作速查鏡像-7CAFD8C76F",
-      "STATUS-夜-朝日奈千夜-完整時間操控能力體系讀-5-14-1-A-時間停止-時間加速-時間回溯-B8E5E53DBE",
+      "STATUS-夜-時間回溯-指定人-事-物-或指定區域內的所有人-事-物-使其時間回溯到先前狀態-可讓傷勢-6F2F923C1B",
+      "STATUS-夜-現行武裝-能力-限制-反制-依-各角色-5-X-現行能力卡-5-2-僅作速查鏡像-A96F9384EB",
+      "STATUS-夜-朝日奈千夜-完整時間操控能力體系讀-5-14-1-A-時間停止-時間加速-時間回溯-293780118B",
       "STATUS-夜-槐野理子-女-三年級-戰術記錄科-夜星武裝學院-深黑棕高馬尾-冷靜理性-A106C74854",
       "STATUS-夜-蒲生硯里-女-三年級-靈紋書藝社社長-夜星武裝學院-深茶色及肩髮-髮尾墨藍髮-394F529C5B",
       "STATUS-夜-靜封庫-保存經緯網自身依法取得且必須限制流通之情報底本與委託記錄-只保存組織自有資-C65960F5CC",
       "STATUS-夜-瀨川奈緒-女-15歲-一年級-戰術支援課-夜星武裝學院-身高157公分-及肩-6EA6C835C8",
-      "STATUS-夜-權限限制-外校一年級學生只能處理現場可見的低位行動-節奏支援與撤位掩護-不得越權接觸夜星-B4CA428F34",
-      "STATUS-夜-權限限制-外校二年級學生只能在正式協查或授權摘要範圍內支援撤離-防護-拘束與低位反制-不-B01FC04937",
-      "STATUS-岬戶霖-岬戶霖-5-4-文書安全-收件封存-閱讀保護與教師後勤防護限制-3A02E13916",
-      "STATUS-空音-空音-潮汐撕裂-事件視界護壁-擬似黑洞-終焉星域-空間-高密度重力深化須具高負荷-安-4E970F9E24",
-      "STATUS-夏朔真-夏朔真-晨紋雙刃-曉棱-光紋導路-弱點標記-精準切入-情報路徑判讀-現行能力-685A5E49BB",
-      "STATUS-浪杰-不成立事項-不是普通裝飾寵物或萬能偵測器-不能讀心-不能治療傷勢-不能替浪杰戰鬥或單獨破-6FF9B495BD",
-      "STATUS-浪杰-行動限制-不適合單獨離開浪杰太遠-不獨自執行高危任務-60EE87E372",
-      "STATUS-浪杰-浪杰-星域棋盤擴張-斷星寒域-終令級指揮-斬擊-大規模護送-雙型態與指揮深化仍有取捨-2F3A60A71F",
-      "STATUS-真砂柚鶴-真砂柚鶴-5-7-武裝保養工具整理-停手夾與日常輔助限制-E56AA60935",
-      "STATUS-御先-9-不放慢-星期五早自習前-沙耶完成右腕複查並解除暫停-放學後-御先自主赴影術棋盤社-12BB688C72",
+      "STATUS-夜-權限限制-外校一年級學生只能處理現場可見的低位行動-節奏支援與撤位掩護-不得越權接觸夜星-DA5ED5D635",
+      "STATUS-夜-權限限制-外校二年級學生只能在正式協查或授權摘要範圍內支援撤離-防護-拘束與低位反制-不-B2A20171D5",
+      "STATUS-岬戶霖-岬戶霖-5-4-文書安全-收件封存-閱讀保護與教師後勤防護限制-D98E177588",
+      "STATUS-空音-空音-潮汐撕裂-事件視界護壁-擬似黑洞-終焉星域-空間-高密度重力深化須具高負荷-安-79F769F576",
+      "STATUS-香坂汐里-本節只成立使用者明確指定-在代表資格決定戰-御先-VS-香坂汐里-中已展示的能力互動--5272A18205",
+      "STATUS-香坂汐里-本節保存香坂汐里之人物-聲線與戰鬥參與方式-煌鱗導蛇-的完整外觀-導力規則-盤勢-蛇蛻-3921AC6317",
+      "STATUS-香坂汐里-香坂汐里-5-21-煌鱗導蛇-之魔獸級巨蛇構造-導力-盤勢-外放-蛇蛻-本人協-2892341FD8",
+      "STATUS-香坂汐里-香坂汐里-煌鱗導蛇-生物型大型魔獸級巨蛇-中近距離壓制-重型封場-導力-外放與本-0469E0D1EA",
+      "STATUS-香坂汐里-香坂汐里之人物-聲線與戰鬥參與方式唯一只讀-3-1-F-本節保存-煌鱗導蛇-的正式外觀-2ADEF04967",
+      "STATUS-夏朔真-夏朔真-晨紋雙刃-曉棱-光紋導路-弱點標記-精準切入-情報路徑判讀-現行能力-CEC978E436",
+      "STATUS-浪杰-不成立事項-不是普通裝飾寵物或萬能偵測器-不能讀心-不能治療傷勢-不能替浪杰戰鬥或單獨破-CA36A85FF7",
+      "STATUS-浪杰-行動限制-不適合單獨離開浪杰太遠-不獨自執行高危任務-BC77624367",
+      "STATUS-浪杰-浪杰-星域棋盤擴張-斷星寒域-終令級指揮-斬擊-大規模護送-雙型態與指揮深化仍有取捨-1D8FC0150C",
+      "STATUS-真砂柚鶴-真砂柚鶴-5-7-武裝保養工具整理-停手夾與日常輔助限制-44C129E426",
+      "STATUS-御先-9-不放慢-星期五早自習前-沙耶完成右腕複查並解除暫停-放學後-御先自主赴影術棋盤社-06B1233979",
       "STATUS-御先-不成立事項與限制-不得解讀為只負責理解-照顧或等待御先的戀愛工具-不得解讀為讀心-預知未-5FCDA206B6",
-      "STATUS-御先-後續登記-邊界-御先登記下次開放桌-並表示若與正式場次衝突則取消-未成立正式選拔場次或資-833DED1E4E",
+      "STATUS-御先-後續登記-邊界-御先登記下次開放桌-並表示若與正式場次衝突則取消-未成立正式選拔場次或資-68E6C6459D",
       "STATUS-御先-CURRENT-MEDICAL-STATUS-5B16F35D68",
-      "STATUS-雪弟-4-借影-星期二放學後-雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可-她與貓狼-B787CE986D",
-      "STATUS-雪弟-雪弟-多類人偶-複合人偶-人偶絲網陣-絲幕劇場-大型控場-人偶數量-絲線節點-維持負-5683A920CC",
+      "STATUS-雪弟-4-借影-星期二放學後-雪弟已依右手仍麻之條件至保健室並取得低負荷訓練許可-她與貓狼-21CE268708",
+      "STATUS-雪弟-雪弟-多類人偶-複合人偶-人偶絲網陣-絲幕劇場-大型控場-人偶數量-絲線節點-維持負-D08A138261",
       "STATUS-雪弟-CURRENT-MEDICAL-STATUS-560ED58E2D",
-      "STATUS-鹿梅-鹿梅-梅鹿靈冠-生命靈流-實質治療-自療-淨化-場域穩定-成形者可處理一般至-B29EB8B049",
-      "STATUS-晴禮-晴禮-5-17-節奏支援-折光防護-中距牽制與現行限制-06C77FA67D",
-      "STATUS-晴禮-晴禮-多拍標記-折光節奏干擾-多人撤位提示-短距離切入連攜-防護展演-隊形穩定方向-742712987E",
-      "STATUS-晴禮-晴禮之人物資料與固定背景唯一只讀-3-5-3-5-3-本節只保存其異能武裝-現行能力-限制-5803BD8FFE",
-      "STATUS-晴禮-節拍限制-敵方若刻意打亂節奏-連續假動作或製造多點同步壓力-晴禮容易判錯第一拍-6C978AD35F",
+      "STATUS-鹿梅-鹿梅-梅鹿靈冠-生命靈流-實質治療-自療-淨化-場域穩定-成形者可處理一般至-24C2D43DB8",
+      "STATUS-晴禮-晴禮-5-17-節奏支援-折光防護-中距牽制與現行限制-D422428E3B",
+      "STATUS-晴禮-晴禮-多拍標記-折光節奏干擾-多人撤位提示-短距離切入連攜-防護展演-隊形穩定方向-6F972ABA33",
+      "STATUS-晴禮-晴禮之人物資料與固定背景唯一只讀-3-5-3-5-3-本節只保存其異能武裝-現行能力-限制-2B3F4F8BC1",
+      "STATUS-晴禮-節拍限制-敵方若刻意打亂節奏-連續假動作或製造多點同步壓力-晴禮容易判錯第一拍-A57352DD91",
       "STATUS-朝日奈千夜-CURRENT-MEDICAL-STATUS-ABBDAECC16",
-      "STATUS-槐野理子-槐野理子-墨界摺扇-記錄-分析-可信標線-視線盲判-資訊取得與推判受現場紀錄-AAE4D4B1B0",
-      "STATUS-蒲生硯里-蒲生硯里-5-5-紙本靈紋拓印支援-穩墨壓紙與生活型能力限制-842B1D739A",
-      "STATUS-貓狼-限制-需要觀測-記錄或可辨識媒介-不得解讀為無條件讀心-改寫記憶-掌握真相-不可逃脫禁制-4F2357BF97",
+      "STATUS-槐野理子-槐野理子-墨界摺扇-記錄-分析-可信標線-視線盲判-資訊取得與推判受現場紀錄-E3ADC4361F",
+      "STATUS-蒲生硯里-蒲生硯里-5-5-紙本靈紋拓印支援-穩墨壓紙與生活型能力限制-B7E182D17D",
+      "STATUS-貓狼-限制-需要觀測-記錄或可辨識媒介-不得解讀為無條件讀心-改寫記憶-掌握真相-不可逃脫禁制-51476A6EA8",
       "STATUS-貓狼-CURRENT-MEDICAL-STATUS-7AF32BA153",
-      "STATUS-霜鈴-霜鈴為具人格化伴生存在之明示例外-本節只保存其基本辨識-固定代稱-能力邊界與限制代價-3--DFA917C830",
+      "STATUS-霜鈴-霜鈴為具人格化伴生存在之明示例外-本節只保存其基本辨識-固定代稱-能力邊界與限制代價-3--EC5373A77E",
       "STATUS-瀨川奈緒-本節只建立瀨川奈緒之第二層正式人物設定-她尚未因本次設定治理而成立正文出場-比賽紀錄--87000E9958",
-      "STATUS-瀨川奈緒-斷途-是由瀨川奈緒本人承載全部生物構造-依實際觀察累積敵方移動習慣並高速破壞已判斷退路-7FFAC33A27",
-      "STATUS-瀨川奈緒-瀨川奈緒-5-20-斷途-之生物來源裝著構造-高速近戰追擊-落點預判-退路干擾-7B7047EAB2",
-      "STATUS-瀨川奈緒-瀨川奈緒-斷途-生物來源裝著型-高速近戰追擊-敵方移動習慣分析-落點預判-退路干-F5E68A1B66",
-      "STATUS-瀨川奈緒-瀨川奈緒之人物-家庭-性格-日常習慣與成長主題唯一只讀-3-1-E-具名關係邊界只讀--85732E3C05"
+      "STATUS-瀨川奈緒-斷途-是由瀨川奈緒本人承載全部生物構造-依實際觀察累積敵方移動習慣並高速破壞已判斷退路-C869F68CAA",
+      "STATUS-瀨川奈緒-瀨川奈緒-5-20-斷途-之生物來源裝著構造-高速近戰追擊-落點預判-退路干擾-5F58031F6A",
+      "STATUS-瀨川奈緒-瀨川奈緒-斷途-生物來源裝著型-高速近戰追擊-敵方移動習慣分析-落點預判-退路干-C7AF148023",
+      "STATUS-瀨川奈緒-瀨川奈緒之人物-家庭-性格-日常習慣與成長主題唯一只讀-3-1-E-具名關係邊界只讀--E639F3552E"
     ]
   }
 }
