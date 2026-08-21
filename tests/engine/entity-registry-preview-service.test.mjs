@@ -7,10 +7,9 @@ import {
   validateEntityRegistryConfig,
 } from "../../server/src/entity-registry-preview-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { currentActiveEngineSha256Lf } from "../helpers/active-engine-baseline.mjs";
 
-const expectedActiveEngineHash = (
-  "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55"
-);
+const expectedActiveEngineHash = currentActiveEngineSha256Lf;
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

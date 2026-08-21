@@ -8,6 +8,7 @@ import {
 import { createApprovalItem } from "../../server/src/approval-queue-service.mjs";
 import { importSettlementResult } from "../../server/src/engine-candidate-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 const root = path.join(projectPaths.canonDb, ".engine-activation-confirm-service-test");
 const approvalQueue = path.join(projectPaths.approvalQueue, ".engine-activation-confirm-service-test");
@@ -18,6 +19,7 @@ const options = {
   engineArchive: path.join(root, "archive"),
   activationLog: path.join(root, "logs", "activation.jsonl"),
   rollbackIndex: path.join(root, "rollback", "index.json"),
+  registryPath: path.join(root, "engine-components.json"),
   approvalQueue,
 };
 
@@ -47,6 +49,10 @@ async function main() {
   ]);
   await mkdir(root, { recursive: true });
   await writeFile(options.activeEnginePath, activeText, "utf8");
+  await createEngineComponentRegistryFixture({
+    registryPath: options.registryPath,
+    activeEnginePath: options.activeEnginePath,
+  });
   try {
     const candidate = await importSettlementResult({
       rawText: `## pending_engine_candidate\n\n\`\`\`md\n${activeText}Rule 2: approved.\n\`\`\`\n`,

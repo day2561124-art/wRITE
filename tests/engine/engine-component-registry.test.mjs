@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  calculateSha256Lf,
   getEngineComponentsStatus,
   loadEngineComponentRegistry,
   validateEngineComponentRegistry,
@@ -12,10 +13,6 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
-const expectedActiveEngineHash = (
-  "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55"
-);
-
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -55,7 +52,15 @@ const status = await getEngineComponentsStatus();
 assert.equal(status.ok, true);
 assert.equal(status.read_only, true);
 assert.equal(status.components.canon_data.hash_matches, true);
-assert.equal(status.components.canon_data.actual_sha256_lf, expectedActiveEngineHash);
+assert.equal(
+  status.components.canon_data.actual_sha256_lf,
+  registry.components.canon_data.expected_sha256_lf,
+);
+assert.equal(
+  calculateSha256Lf("line one\nline two\n"),
+  calculateSha256Lf("line one\r\nline two\r\n"),
+  "LF and CRLF content must produce the same canonical component hash.",
+);
 assert.equal(status.components.neural_pipeline.required, true);
 assert.equal(status.components.neural_pipeline.modules.length, 6);
 assert(

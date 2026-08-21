@@ -2,7 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $activeEnginePath = Join-Path $projectRoot "data\canon_db\active_engine.md"
-$expectedHash = "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55"
+$engineComponentsPath = Join-Path $projectRoot "config\engine-components.json"
+$engineComponents = Get-Content -LiteralPath $engineComponentsPath -Raw | ConvertFrom-Json
+$expectedHash = $engineComponents.components.canon_data.expected_sha256_lf
 $text = [System.IO.File]::ReadAllText($activeEnginePath)
 $normalized = $text -replace "`r`n", "`n" -replace "`r", "`n"
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
@@ -26,5 +28,5 @@ if ($hash -ne $expectedHash) {
   exit 1
 }
 
-Write-Host "Active engine SHA256 matches the Phase 12A baseline."
+Write-Host "Active engine SHA256 matches the current engine component registry."
 exit 0

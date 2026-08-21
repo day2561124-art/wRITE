@@ -22,6 +22,7 @@ import {
 } from "../../server/src/pending-engine-candidate-review-service.mjs";
 import { getEngineActivationConfirmLog } from "../../server/src/engine-activation-confirm-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 const suffix = ".full-creative-workflow-final-smoke.test";
 const root = path.join(projectPaths.canonDb, suffix);
@@ -32,6 +33,7 @@ const options = {
   engineArchive: path.join(root, "archive"),
   activationLog: path.join(root, "logs", "activation.jsonl"),
   rollbackIndex: path.join(root, "rollback", "index.json"),
+  registryPath: path.join(root, "engine-components.json"),
   approvalQueue: path.join(projectPaths.approvalQueue, suffix),
   gptWritingContexts: path.join(projectPaths.gptWritingContexts, suffix),
   writingCandidates: path.join(projectPaths.writingCandidates, suffix),
@@ -121,6 +123,10 @@ async function main() {
   await cleanupFixturePaths();
   await mkdir(root, { recursive: true });
   await writeFile(options.activeEnginePath, activeText, "utf8");
+  await createEngineComponentRegistryFixture({
+    registryPath: options.registryPath,
+    activeEnginePath: options.activeEnginePath,
+  });
   try {
     // Step 1: build GPT writing context bundle
     const context = await buildGptWritingContext({

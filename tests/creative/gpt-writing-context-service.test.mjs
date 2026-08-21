@@ -7,6 +7,7 @@ import {
   listGptWritingContextBundles,
 } from "../../server/src/gpt-writing-context-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { currentActiveEngineSha256Lf } from "../helpers/active-engine-baseline.mjs";
 
 const fixtureContexts = path.join(projectPaths.gptWritingContexts, ".gpt-writing-context-test");
 const fixtureActive = path.join(projectPaths.canonDb, ".gpt-writing-context-active-test.md");
@@ -14,9 +15,7 @@ const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".gpt-writing-co
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".gpt-writing-context-test");
 const fixturePending = path.join(projectPaths.canonDb, ".gpt-writing-context-pending-test");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
-const expectedActiveEngineLfHash = (
-  "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55"
-);
+const expectedActiveEngineLfHash = currentActiveEngineSha256Lf;
 const expectedNeuralModules = [
   "run_scene_planner",
   "run_character_simulator",

@@ -46,6 +46,7 @@ import {
   saveCandidateDraft,
   saveProofReport,
 } from "../../server/src/writing-workflow-service.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 const requiredNeuralModules = [
   "scene_planner",
@@ -70,6 +71,7 @@ const fixtureSnapshots = path.join(fixtureCanon, "engine_snapshots");
 const fixtureArchive = path.join(fixtureCanon, "archive");
 const fixtureActivationLog = path.join(fixtureCanon, "activation_logs", "activation_log.jsonl");
 const fixtureRollbackIndex = path.join(fixtureCanon, "rollback", "rollback_index.json");
+const fixtureRegistry = path.join(fixtureCanon, "engine-components.json");
 const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".full-workflow-smoke");
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".full-workflow-smoke");
 const fixtureCleanup = path.join(projectPaths.cleanupRoot, ".full-workflow-smoke");
@@ -84,6 +86,7 @@ const options = {
   engineArchive: fixtureArchive,
   activationLog: fixtureActivationLog,
   rollbackIndex: fixtureRollbackIndex,
+  registryPath: fixtureRegistry,
   approvalQueue: fixtureApproval,
   cleanupRoot: fixtureCleanup,
   candidateDrafts: path.join(fixtureWorkflow, "candidate_drafts"),
@@ -223,6 +226,10 @@ async function main() {
   ]);
   await mkdir(fixtureCanon, { recursive: true });
   await writeFile(fixtureActive, productionActive);
+  await createEngineComponentRegistryFixture({
+    registryPath: fixtureRegistry,
+    activeEnginePath: fixtureActive,
+  });
   const initialFixtureHash = sha256(await readFile(fixtureActive));
 
   try {

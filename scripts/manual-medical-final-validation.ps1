@@ -4,7 +4,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$ExpectedActiveEngineHash = '9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55'
+$EngineComponentsPath = Join-Path $ProjectRoot 'config\engine-components.json'
+$EngineComponents = Get-Content -LiteralPath $EngineComponentsPath -Raw | ConvertFrom-Json
+$ExpectedActiveEngineHash = $EngineComponents.components.canon_data.expected_sha256_lf.ToLowerInvariant()
 $ExpectedCompressedRulesHash = 'f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db'
 
 Set-Location $ProjectRoot
