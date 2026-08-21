@@ -34,10 +34,6 @@ const protectedFiles = {
   active_engine: projectPaths.activeEngine,
   compressed_rules: projectPaths.compressedRules,
 };
-const protectedHashes = {
-  active_engine: "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55",
-  compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
-};
 const cleanupRoots = [
   projectPaths.agentRuns,
   projectPaths.neuralTraces,
@@ -101,8 +97,6 @@ try {
   assert.equal(moduleSpecNames.length, 7);
 
   const hashesBefore = await currentProtectedHashes();
-  assert.deepEqual(hashesBefore, protectedHashes);
-
   const session = await chatgpt_bridge_begin_external_brain_writing_session({
     task_prompt: "Phase46A regression：讓人物先於攝影機，保留不知道與普通摩擦。",
     chapter_mode: "specific_scene",

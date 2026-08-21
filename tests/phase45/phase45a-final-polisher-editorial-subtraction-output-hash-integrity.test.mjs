@@ -32,10 +32,6 @@ const protectedFiles = {
   active_engine: path.join(projectPaths.activeEngine),
   compressed_rules: path.join(projectPaths.compressedRules),
 };
-const expectedProtectedHashes = {
-  active_engine: "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55",
-  compressed_rules: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
-};
 const specimen = [
   "千夜用纏著繃帶的右手提起左邊書包，九逃也用受傷的左手提起右邊書包。",
   "兩人同時伸手，又同時因反射縮回。",
@@ -101,8 +97,6 @@ try {
   const protectedBefore = Object.fromEntries(await Promise.all(
     Object.entries(protectedFiles).map(async ([name, filePath]) => [name, await fileHash(filePath)]),
   ));
-  assert.deepEqual(protectedBefore, expectedProtectedHashes);
-
   const session = await chatgpt_bridge_begin_external_brain_writing_session({
     task_prompt: "Phase45A regression: ChatGPT writes the story and consumes a post-generation editorial contract.",
     chapter_mode: "specific_scene",

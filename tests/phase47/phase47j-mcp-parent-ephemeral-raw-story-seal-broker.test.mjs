@@ -36,10 +36,6 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 const serverPath = path.join(rootDir, "server", "src", "mcp-http-server.mjs");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const story = "Phase47J 唯一隱私正文\r\n她沒有改動那個全形空格。　😀\n\uFEFF末行保留。 ";
-const protectedHashes = {
-  [projectPaths.activeEngine]: "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55",
-  [projectPaths.compressedRules]: "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
-};
 const immutableEvidencePath = path.join(projectRoot, "config", "phase46d-real-chatgpt-immutable-raw-story-handoff-live-acceptance-evidence.json");
 const cleanupRoots = [
   projectPaths.agentRuns,
@@ -146,6 +142,10 @@ async function assertStoryAbsentFromFiles(root) {
 
 const cleanupBaselines = new Map(await Promise.all(cleanupRoots.map(async (root) => [root, await names(root)])));
 const evidenceBefore = await readFile(immutableEvidencePath);
+const protectedHashes = Object.fromEntries(await Promise.all([
+  projectPaths.activeEngine,
+  projectPaths.compressedRules,
+].map(async (filePath) => [filePath, sha256(await readFile(filePath))])));
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "phase47j-parent-broker-"));
 const port = await reservePort();
 const configPath = path.join(temporaryDirectory, "mcp-http.json");

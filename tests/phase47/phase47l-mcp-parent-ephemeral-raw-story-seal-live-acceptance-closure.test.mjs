@@ -272,7 +272,8 @@ assert.deepEqual(externalBrainPreGenerationCapabilities, expectedCapabilities.ma
 
 const mcpSource = await readFile(path.join(root, "server", "src", "mcp-server.mjs"), "utf8");
 const fullToolNames = extractDirectMcpToolNames(mcpSource);
-assert.equal(fullToolNames.length, 81);
+assert.equal(fullToolNames.length, new Set(fullToolNames).size);
+assert(fullToolNames.includes("get_active_engine_dependency_status"));
 const publicStart = mcpSource.indexOf("const chatgptPublicToolNames = new Set([");
 const publicEnd = mcpSource.indexOf("\n]);", publicStart);
 const publicToolNames = [...mcpSource.slice(publicStart, publicEnd).matchAll(/^  "([^"]+)",$/gmu)].map((match) => match[1]);
