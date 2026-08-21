@@ -4,6 +4,7 @@ import { confirmApprovalItem, getApprovalItem } from "../../server/src/approval-
 import { importSettlementResult } from "../../server/src/engine-candidate-service.mjs";
 import { approvalRequestTools } from "../../server/src/mcp-approval-request-tools.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -19,6 +20,7 @@ async function main() {
     engineArchive: path.join(tempCanon, "archive"),
     activationLog: path.join(tempCanon, "activation_logs", "activation_log.jsonl"),
     rollbackIndex: path.join(tempCanon, "rollback", "rollback_index.json"),
+    registryPath: path.join(tempCanon, "engine-components.json"),
     approvalQueue,
   };
   await Promise.all([
@@ -27,6 +29,10 @@ async function main() {
   ]);
   await mkdir(tempCanon, { recursive: true });
   await writeFile(options.activeEnginePath, "# Active\n\nOriginal\n", "utf8");
+  await createEngineComponentRegistryFixture({
+    registryPath: options.registryPath,
+    activeEnginePath: options.activeEnginePath,
+  });
   try {
     const candidate = await importSettlementResult({
       rawText: "## pending_engine_candidate\n\n```md\n# Active\n\nOriginal\nNew candidate content\n```\n",

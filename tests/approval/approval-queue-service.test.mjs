@@ -20,6 +20,7 @@ import {
   saveCandidateDraft,
   saveProofReport,
 } from "../../server/src/writing-workflow-service.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".approval-queue-test");
 const fixtureWriting = path.join(projectPaths.writingWorkflow, ".approval-queue-test");
@@ -30,6 +31,7 @@ const fixtureSnapshots = path.join(fixtureCanon, "engine_snapshots");
 const fixtureArchive = path.join(fixtureCanon, "archive");
 const fixtureActivationLog = path.join(fixtureCanon, "activation_logs", "activation_log.jsonl");
 const fixtureRollbackIndex = path.join(fixtureCanon, "rollback", "rollback_index.json");
+const fixtureRegistry = path.join(fixtureCanon, "engine-components.json");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
 
 function assert(condition, message) {
@@ -85,12 +87,17 @@ async function main() {
     engineArchive: fixtureArchive,
     activationLog: fixtureActivationLog,
     rollbackIndex: fixtureRollbackIndex,
+    registryPath: fixtureRegistry,
   };
   await rm(fixtureApproval, { recursive: true, force: true });
   await rm(fixtureWriting, { recursive: true, force: true });
   await rm(fixtureCanon, { recursive: true, force: true });
   await mkdir(fixtureCanon, { recursive: true });
   await writeFile(fixtureActive, `${activeText}\n`, "utf8");
+  await createEngineComponentRegistryFixture({
+    registryPath: fixtureRegistry,
+    activeEnginePath: fixtureActive,
+  });
 
   try {
     const lowCandidate = await importSettlementResult({

@@ -15,6 +15,7 @@ import {
   reparsePendingCandidate,
   rollbackActiveEngine,
 } from "../../server/src/engine-candidate-service.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ const fixtureSnapshots = path.join(fixtureRoot, "engine_snapshots");
 const fixtureArchive = path.join(fixtureRoot, "archive");
 const fixtureActivationLog = path.join(fixtureRoot, "activation_logs", "activation_log.jsonl");
 const fixtureRollbackIndex = path.join(fixtureRoot, "rollback", "rollback_index.json");
+const fixtureRegistry = path.join(fixtureRoot, "engine-components.json");
 const productionActive = path.join(rootDir, "data", "canon_db", "active_engine.md");
 
 function assert(condition, message) {
@@ -57,7 +59,12 @@ async function main() {
     engineArchive: fixtureArchive,
     activationLog: fixtureActivationLog,
     rollbackIndex: fixtureRollbackIndex,
+    registryPath: fixtureRegistry,
   };
+  await createEngineComponentRegistryFixture({
+    registryPath: fixtureRegistry,
+    activeEnginePath: fixtureActive,
+  });
 
   try {
     const parsed = parseEngineCandidate(settlement(activeText));

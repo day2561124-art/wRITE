@@ -1406,7 +1406,7 @@ export async function createRollbackApprovalItem(snapshotId, options = {}) {
     requiresSecondConfirmation: true,
     neuralStatus: "not_required",
     impact: {
-      will_modify: ["data/canon_db/active_engine.md"],
+      will_modify: ["data/canon_db/active_engine.md", ...activeEngineDependencyImpactPaths()],
       will_create: ["safety_snapshot", "activation_log"],
       rollback_available: true,
     },

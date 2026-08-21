@@ -1826,6 +1826,8 @@ export async function rollbackActiveEngine(
     current_inputs_restored: restoreCurrentInputs,
     settlement_report_status_restored:
       settlementReportBeforeRollback !== null,
+    active_engine_dependencies_verified: rollbackDependencyStatus.ok,
+    dependency_status: rollbackDependencyStatus,
     transaction_id: transaction.transaction_id,
   };
 }

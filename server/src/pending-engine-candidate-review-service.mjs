@@ -680,21 +680,7 @@ export async function requestPendingEngineCandidateActivation(rawInput, options 
       active_engine_modified: false,
       approval_only: true,
     },
-    impact: candidate.metadata.activation_write_manifest ?? {
-      will_modify: [
-        "data/canon_db/active_engine.md",
-        ...(candidate.metadata.current_input_refresh ? [
-          "data/outputs/task_prompt.md",
-          "data/outputs/generation_context.md",
-          "data/outputs/retrieval_context.md",
-        ] : []),
-        ...(candidate.metadata.settlement_report_metadata_path
-          ? [candidate.metadata.settlement_report_metadata_path]
-          : []),
-      ],
-      will_create: ["snapshot", "archive", "activation_log"],
-      rollback_available: true,
-    },
+    impact: activationWriteManifest(candidate),
     links: {
       candidate_id: input.candidateId,
       adopted_chapter_id: candidate.metadata.adopted_chapter_id ?? null,
@@ -711,7 +697,7 @@ export async function requestPendingEngineCandidateActivation(rawInput, options 
       candidate_engine_hash_sha256: currentCandidateHash,
       candidate_hash_match: true,
       lineage: candidate.metadata.source_lineage ?? null,
-      activation_write_manifest: candidate.metadata.activation_write_manifest ?? null,
+      activation_write_manifest: activationWriteManifest(candidate),
       candidate_status: candidate.status.status,
       review_status: candidate.metadata.review_status ?? "pending_review",
       diff_summary: review.diff_summary,
