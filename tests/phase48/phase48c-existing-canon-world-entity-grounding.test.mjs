@@ -27,10 +27,8 @@ const sha256 = (value) => (
 );
 
 const expectedProtectedHashes = {
-  active_engine:
-    "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55",
-  compressed_rules:
-    "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db",
+  active_engine: sha256(await readFile(projectPaths.activeEngine)),
+  compressed_rules: sha256(await readFile(projectPaths.compressedRules)),
 };
 
 const guardNames = [
