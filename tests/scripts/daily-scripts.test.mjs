@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(__filename), "..", "..");
-const expectedHash = "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55";
+
 const scriptNames = [
   "safe-status.ps1",
   "daily-health-check.ps1",
@@ -88,12 +88,19 @@ async function main() {
     assert(preCommit.includes(`"${guarded}"`), `Pre-commit guard omitted ${guarded}.`);
   }
   const hashScript = await text("scripts/show-active-engine-hash.ps1");
-  assert(hashScript.includes(expectedHash), "Expected active engine SHA256 is missing.");
+  assert(
+    hashScript.includes("config\\engine-components.json"),
+    "Active engine hash script does not read the current component registry.",
+  );
 
   const docs = await Promise.all(docNames.map((name) => text(`docs/${name}`)));
   const combinedDocs = docs.join("\n");
   assert(combinedDocs.includes("git add ."), "Docs do not warn about broad staging.");
-  assert(combinedDocs.includes(expectedHash), "Docs omit the active engine SHA256 baseline.");
+  assert(
+    combinedDocs.includes("config/engine-components.json")
+      && combinedDocs.includes("expected_sha256_lf"),
+    "Docs do not identify the engine component registry as the active engine SHA256 baseline source.",
+  );
   assert(combinedDocs.includes("preview-only"), "Docs omit restore preview-only behavior.");
   assert(combinedDocs.includes("approval-only"), "Docs omit restore request approval-only behavior.");
   assert(combinedDocs.includes("Phase 10A"), "Phase map omits Phase 10A.");

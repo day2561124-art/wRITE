@@ -114,8 +114,8 @@ git diff --stat
 
 ## Active engine SHA256 基線
 
-每日檢查使用下列正式 LF-normalized SHA256 baseline：
+每日檢查以 `config/engine-components.json` 的 `components.canon_data.expected_sha256_lf` 作為正式 LF-normalized SHA256 baseline：
 
-- `data/canon_db/active_engine.md`：`9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55`
+- `data/canon_db/active_engine.md`：目前基線由上述 Engine Component Registry 欄位提供，不在文件或檢查腳本另行寫死 hash。
 
-正式啟用流程若改變 `active_engine.md`，必須同步更新檢查腳本、測試與本文件中的基線。
+正式啟用流程若改變 `active_engine.md`，必須同步更新 Engine Component Registry；檢查腳本與測試應讀取或驗證該 registry，不維護第二份固定 hash。
