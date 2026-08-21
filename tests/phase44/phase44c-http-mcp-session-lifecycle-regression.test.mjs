@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +20,13 @@ const serverPath = path.join(
   "server",
   "src",
   "mcp-http-server.mjs",
+);
+
+const directMcpServerPath = path.join(
+  rootDir,
+  "server",
+  "src",
+  "mcp-server.mjs",
 );
 
 const expectedExternalBrainTools = [
@@ -301,10 +308,18 @@ try {
     (tool) => tool.name,
   );
 
-  assert.equal(
-    firstNames.length,
-    30,
-    "chatgpt_public HTTP surface must expose exactly 30 tools",
+  const directMcpSource = await readFile(directMcpServerPath, "utf8");
+  const publicStart = directMcpSource.indexOf("const chatgptPublicToolNames = new Set([");
+  const publicEnd = directMcpSource.indexOf("\n]);", publicStart);
+  const registeredPublicNames = [...directMcpSource
+    .slice(publicStart, publicEnd)
+    .matchAll(/^  "([^"]+)",$/gmu)]
+    .map((match) => match[1]);
+
+  assert.deepEqual(
+    [...firstNames].sort(),
+    [...registeredPublicNames].sort(),
+    "chatgpt_public HTTP surface must match the direct public MCP registry",
   );
 
   assert.deepEqual(
