@@ -5,23 +5,27 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStdioSession } from "../../server/src/mcp-http-stdio-adapter.mjs";
+import { resolveActiveEngineDependencies } from "../../server/src/active-engine-dependency-manifest.mjs";
+import { extractDirectMcpToolNames } from "../../server/src/mcp-tool-inventory.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const serverPath = path.join(rootDir, "server", "src", "mcp-server.mjs");
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
-const publicReadPaths = [
+const publicReadPaths = [...new Set([
   path.join(rootDir, "config", "engine-components.json"),
   activeEnginePath,
+  ...resolveActiveEngineDependencies().map((dependency) => dependency.filePath),
   path.join(rootDir, "data", "writing_policy_db", "active_writing_card.md"),
   path.join(rootDir, "data", "proofing_policy_db", "active_proofing_card.md"),
   path.join(rootDir, "server", "src", "neural-module-service.mjs"),
   path.join(rootDir, "docs", "DAILY-WORKFLOW.md"),
-];
+])];
 
 const publicToolNames = [
   "get_engine_components_status",
+  "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -133,7 +137,8 @@ const listRequest = {
 
 const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
-assert.equal(fullNames.length, 81, "full profile tool count changed");
+const registeredNames = extractDirectMcpToolNames(await readFile(serverPath, "utf8"));
+assert.deepEqual(fullNames, registeredNames, "full tools/list drifted from the MCP registry");
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }
@@ -150,6 +155,15 @@ const publicRequests = [
     method: "tools/call",
     params: {
       name: "get_engine_components_status",
+      arguments: {},
+    },
+  },
+  {
+    jsonrpc: "2.0",
+    id: "dependency-status",
+    method: "tools/call",
+    params: {
+      name: "get_active_engine_dependency_status",
       arguments: {},
     },
   },
@@ -351,6 +365,15 @@ const componentStatus = JSON.parse(componentStatusResponse.result.content[0].tex
 assert.equal(componentStatus.ok, true);
 assert.equal(componentStatus.read_only, true);
 assert.equal(componentStatus.components.neural_pipeline.required, true);
+
+const dependencyStatusResponse = publicResponses.find(
+  (response) => response.id === "dependency-status",
+);
+assert.equal(dependencyStatusResponse.result.isError, undefined);
+const dependencyStatus = JSON.parse(dependencyStatusResponse.result.content[0].text);
+assert.equal(dependencyStatus.ok, true);
+assert.equal(dependencyStatus.read_only, true);
+assert.deepEqual(dependencyStatus.issues, []);
 
 for (const filePath of publicReadPaths) {
   assert.equal(

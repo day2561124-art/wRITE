@@ -612,6 +612,8 @@ const steps = [
 
   ["Active Engine dependency synchronization", ["tests/engine/active-engine-dependency-synchronization.test.mjs"]],
 
+  ["MCP Active Engine dependency status", ["tests/mcp/mcp-active-engine-dependency-status.test.mjs"]],
+
   ["Engine component registry", ["tests/engine/engine-component-registry.test.mjs"]],
 
   ["Canon zone preview service", ["tests/engine/canon-zone-preview-service.test.mjs"]],

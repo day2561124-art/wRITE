@@ -15,7 +15,8 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const endpointPath = "/api/system/inspect-sealed-chain-closure-metadata";
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
-const expectedPublicDigest = "3ef9fd9a7864067a3f95e848a6ea031d8f8f2cb9f8b7a41d7f05489751101e4a";
+const expectedBaselinePublicDigest = "3ef9fd9a7864067a3f95e848a6ea031d8f8f2cb9f8b7a41d7f05489751101e4a";
+const activeEngineDependencyStatusTool = "get_active_engine_dependency_status";
 const requiredIdentities = {
   capability_id: "inspect_sealed_chain_closure_metadata",
   capability_kind: "read_only_status_inspection",
@@ -189,6 +190,7 @@ const canonBefore = await directoryDigest(path.join(rootDir, "data", "canon_db")
 const activeEngineBefore = await readFile(activeEnginePath);
 const publicNamesBefore = await listPublicToolNames();
 assert(publicNamesBefore.length >= 29);
+assert(publicNamesBefore.includes(activeEngineDependencyStatusTool));
 assert.equal(publicNamesBefore.includes("inspect_sealed_chain_closure_metadata"), false);
 assert.equal(publicNamesBefore.includes("inspectSealedChainClosureMetadata"), false);
 
@@ -263,7 +265,12 @@ assert.equal(await directoryDigest(path.join(rootDir, "data", "canon_db")), cano
 
 const publicNamesAfter = await listPublicToolNames();
 assert.deepEqual(publicNamesAfter, publicNamesBefore);
-assert.equal(sha256(publicNamesAfter.join("\n")), expectedPublicDigest);
+assert.equal(
+  sha256(publicNamesAfter
+    .filter((name) => name !== activeEngineDependencyStatusTool)
+    .join("\n")),
+  expectedBaselinePublicDigest,
+);
 
 const runAllSource = await readFile(path.join(rootDir, "tests", "run-all.mjs"), "utf8");
 assert.equal(/Phase 43K|phase43k/iu.test(runAllSource), false);

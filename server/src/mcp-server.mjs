@@ -101,6 +101,9 @@ import {
 } from "./mcp-approval-queue-readiness-tools.mjs";
 import { readonlyTools } from "./mcp-readonly-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
+import {
+  get_active_engine_dependency_status,
+} from "./mcp-active-engine-dependency-tools.mjs";
 import { sourceFilePath } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -1322,6 +1325,14 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
     handler: async () => jsonContent(await getEngineComponentsStatus()),
+  },
+  {
+    name: "get_active_engine_dependency_status",
+    description: "[read-only] Aggregate Active Engine downstream dependency health check. Validates the current persisted Active Engine against engine-components, Canon zones, structured Entity Registry provenance, entity intake, and all current-engine-bound operational configs. This tool never repairs, synchronizes, rebuilds, activates, or mutates Canon or configuration files.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await get_active_engine_dependency_status()),
   },
   {
     name: "get_active_writing_card",
@@ -2885,6 +2896,7 @@ const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
   "get_engine_components_status",
+  "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -2936,6 +2948,14 @@ const permissionSources = {
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
   get_engine_components_status: ["engine_component_registry", "registered_engine_components"],
+  get_active_engine_dependency_status: [
+    "active_engine",
+    "engine_component_registry",
+    "canon_zones",
+    "entity_registry",
+    "entity_intake",
+    "current_engine_bound_operational_configs",
+  ],
   get_active_writing_card: ["writing_policy_db"],
   validate_jsonl: ["feedback_db", "error_report_db"],
   query_mcp_audit: ["mcp_audit_log"],

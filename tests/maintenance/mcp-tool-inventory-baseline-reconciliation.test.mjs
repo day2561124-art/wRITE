@@ -17,6 +17,7 @@ const historicalCommit = "4b4ec1e5c9fbe3347eb12b526680e542bcc201a5";
 const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
+const currentAddedToolName = "get_active_engine_dependency_status";
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
   "chatgpt_bridge_review_draft_ephemeral",
@@ -34,6 +35,7 @@ const expectedRuntimeDigest = expectedDirectDigest;
 const expectedPublicDigest = "3ef9fd9a7864067a3f95e848a6ea031d8f8f2cb9f8b7a41d7f05489751101e4a";
 const expectedPublicNames = [
   "get_engine_components_status",
+  currentAddedToolName,
   "chatgpt_bridge_get_workbench_status",
   "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
@@ -138,19 +140,20 @@ const historicalNames = extractDirectMcpToolNames(gitShow(
   "server/src/mcp-server.mjs",
 ));
 const directNames = extractDirectMcpToolNames(currentSource);
+const directBaselineNames = directNames.filter((name) => name !== currentAddedToolName);
 
 assert(historicalNames);
 assert(directNames);
 assert.equal(historicalNames.length, 70);
-assert.equal(directNames.length, 81);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
 assert.deepEqual(
-  directNames.filter((name) => !historicalNames.includes(name)),
+  directBaselineNames.filter((name) => !historicalNames.includes(name)),
   [...externalBrainToolNames, addedToolName],
 );
-assert.deepEqual(historicalNames.filter((name) => !directNames.includes(name)), []);
-assert.equal(digest(directNames), expectedDirectDigest);
+assert.deepEqual(historicalNames.filter((name) => !directBaselineNames.includes(name)), []);
+assert.equal(digest(directBaselineNames), expectedDirectDigest);
+assert.equal(directNames.filter((name) => name === currentAddedToolName).length, 1);
 
 const parserFixture = `const toolDefinitions = [
   /*
@@ -195,12 +198,18 @@ const [fullTools, publicTools] = await Promise.all([
 ]);
 const fullNames = fullTools.map((tool) => tool.name);
 const publicNames = publicTools.map((tool) => tool.name);
-assert.equal(fullNames.length, 81);
+assert.deepEqual(fullNames, directNames);
 assert.deepEqual(duplicates(fullNames), []);
-assert.equal(digest(fullNames), expectedRuntimeDigest);
+assert.equal(
+  digest(fullNames.filter((name) => name !== currentAddedToolName)),
+  expectedRuntimeDigest,
+);
 assert.deepEqual(publicNames, expectedPublicNames);
 assert.deepEqual(duplicates(publicNames), []);
-assert.equal(digest(publicNames), expectedPublicDigest);
+assert.equal(
+  digest(publicNames.filter((name) => name !== currentAddedToolName)),
+  expectedPublicDigest,
+);
 assert.equal(Object.keys(readonlyTools).length, 18);
 assert.equal(typeof readonlyTools[addedToolName], "function");
 
@@ -215,9 +224,24 @@ assert.equal(fullAddedTool._meta["armed-academy/permission"].permission_level, "
 assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_canon, false);
 assert.equal(fullAddedTool._meta["armed-academy/permission"].can_modify_active_engine, false);
 
+const dependencyStatusTool = fullTools.find((tool) => tool.name === currentAddedToolName);
+const publicDependencyStatusTool = publicTools.find((tool) => tool.name === currentAddedToolName);
+assert(dependencyStatusTool);
+assert(publicDependencyStatusTool);
+assert.match(dependencyStatusTool.description, /^\[read\] \[read-only\]/u);
+assert.equal(dependencyStatusTool.annotations.readOnlyHint, true);
+assert.equal(
+  dependencyStatusTool._meta["armed-academy/permission"].permission_level,
+  "read_only",
+);
+assert.equal(
+  dependencyStatusTool._meta["armed-academy/permission"].can_modify_active_engine,
+  false,
+);
+
 const preview = await runVisualLibraryFinalE2eAcceptancePreview();
-assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, 81);
-assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, 81);
+assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, directNames.length);
+assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, directNames.length);
 assert.equal(preview.bridge_readiness_acceptance.passed, true);
 assert.equal(preview.final_acceptance_decision, "visual_library_final_e2e_preview_acceptance_passed");
 
