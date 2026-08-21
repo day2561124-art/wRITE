@@ -260,7 +260,7 @@ try {
 
   const writing = result(await chatgptBridgeTools.chatgpt_bridge_build_writing_context({
     task_prompt: "Phase 27I live-like adoption fixture.",
-    use_current_inputs: true,
+    use_current_inputs: false,
     include_active_engine: false,
     include_writing_card: false,
     include_proofing_card: false,
