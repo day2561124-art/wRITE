@@ -8,6 +8,7 @@ import {
 } from "../../server/src/chat-output-candidate-service.mjs";
 import { buildGptWritingContext } from "../../server/src/gpt-writing-context-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { currentActiveEngineSha256Lf } from "../helpers/active-engine-baseline.mjs";
 
 const fixtureCandidates = path.join(projectPaths.writingCandidates, ".chat-output-candidate-test");
 const fixtureContexts = path.join(projectPaths.gptWritingContexts, ".chat-output-candidate-test");
@@ -15,9 +16,7 @@ const fixtureWorkflow = path.join(projectPaths.writingWorkflow, ".chat-output-ca
 const fixtureApproval = path.join(projectPaths.approvalQueue, ".chat-output-candidate-test");
 const fixturePending = path.join(projectPaths.canonDb, ".chat-output-candidate-test-pending");
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
-const expectedActiveEngineLfHash = (
-  "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55"
-);
+const expectedActiveEngineLfHash = currentActiveEngineSha256Lf;
 const options = {
   writingCandidates: fixtureCandidates,
   gptWritingContexts: fixtureContexts,
