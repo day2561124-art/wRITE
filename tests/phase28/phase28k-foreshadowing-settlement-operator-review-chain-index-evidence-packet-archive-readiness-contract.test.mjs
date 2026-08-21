@@ -1,3 +1,4 @@
+import { currentActiveEngineRawSha256 } from "../helpers/active-engine-baseline.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
@@ -32,7 +33,7 @@ const backupProjectDir = path.join(rootDir, "data", "backups", "project_backups"
 const backupExportsDir = path.join(rootDir, "data", "backups", "exports");
 const restorePreviewsDir = path.join(rootDir, "data", "backups", "restore_previews");
 
-const expectedActiveEngineHash = "9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55";
+const expectedActiveEngineHash = currentActiveEngineRawSha256;
 const expectedCompressedRulesHash = "f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db";
 
 const expectedRunAllRegistrations = [
