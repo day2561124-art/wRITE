@@ -314,6 +314,10 @@ function compactCharacterHardFacts(packet = {}) {
     affiliation_facts: character.affiliation_facts ?? [],
     appearance_facts: character.appearance_facts ?? [],
     relationship_or_position_facts: character.relationship_or_position_facts ?? [],
+    personality_facts: character.personality_facts ?? [],
+    teaching_principles: character.teaching_principles ?? [],
+    combat_style: character.combat_style ?? [],
+    usage_constraints: character.usage_constraints ?? [],
     explicit_body_traits: character.explicit_body_traits ?? [],
     grounding_classification: character.grounding_classification ?? null,
     unsupported_body_trait_policy: character.unsupported_body_trait_policy
@@ -372,6 +376,104 @@ function explicitCapabilityCharacterNames(input = {}) {
   );
 }
 
+function targetCapabilityCharacterNames(input = {}) {
+  const source = input
+    && typeof input === "object"
+    && !Array.isArray(input)
+      ? input
+      : {};
+  return [...new Set([
+    source.character,
+    source.character_name,
+    source.characterName,
+    source.responding_character,
+    source.respondingCharacter,
+    source.active_character,
+    source.activeCharacter,
+  ].map((value) => compactText(value, 120)).filter(Boolean))];
+}
+
+function manifestWithExplicitCharacterTargets(manifest, names) {
+  const source = manifest
+    && typeof manifest === "object"
+    && !Array.isArray(manifest)
+      ? manifest
+      : {};
+  if (!names.length) return Object.keys(source).length ? source : null;
+  return {
+    ...source,
+    characters: [
+      ...(Array.isArray(source.characters) ? source.characters : []),
+      ...names,
+    ],
+  };
+}
+
+function augmentCharacterCanonGrounding(packet = {}, hydration = null) {
+  const existing = Array.isArray(packet.characters) ? packet.characters : [];
+  const additions = hydration?.planned_entity_hydration?.resolved_entities
+    ?.filter((entry) => (
+      entry.category === "characters" && entry.character_canon
+    ))
+    .map((entry) => ({
+      ...entry.character_canon,
+      entity_id: entry.entity_id,
+      match_sources: ["explicit_capability_target"],
+      mention_resolution_status:
+        canonCharacterMentionStatuses.confirmed,
+      mention_evidence: [{
+        source: "explicit_capability_target",
+        status: canonCharacterMentionStatuses.confirmed,
+        confidence: "high",
+        reason: entry.match_type,
+        evidence_scores: [],
+        total_score: 100,
+        index: null,
+        passage: entry.canonical_name,
+      }],
+    })) ?? [];
+  const names = new Set(existing.map((entry) => entry.canonical_name));
+  const characters = [...existing];
+  for (const addition of additions) {
+    if (names.has(addition.canonical_name)) continue;
+    names.add(addition.canonical_name);
+    characters.push(addition);
+  }
+  return {
+    ...packet,
+    loaded: packet.loaded === true || additions.length > 0,
+    matched_character_count: characters.length,
+    characters,
+  };
+}
+
+function capabilityInputWithCanonicalCharacter(input = {}, hydration = null) {
+  const resolved = hydration?.planned_entity_hydration?.resolved_entities ?? [];
+  const aliases = new Map(resolved
+    .filter((entry) => entry.category === "characters")
+    .map((entry) => [entry.requested_name, entry.canonical_name]));
+  if (!aliases.size) return input;
+  const output = { ...input };
+  let aliasUsed = null;
+  for (const key of [
+    "character",
+    "character_name",
+    "characterName",
+    "responding_character",
+    "respondingCharacter",
+    "active_character",
+    "activeCharacter",
+  ]) {
+    const canonicalName = aliases.get(output[key]);
+    if (!canonicalName || canonicalName === output[key]) continue;
+    aliasUsed ??= output[key];
+    output[key] = canonicalName;
+  }
+  return aliasUsed
+    ? { ...output, requested_character_alias: aliasUsed }
+    : output;
+}
+
 function characterGroundingRecordIsCapabilityRelevant(
   character = {},
   explicitNames = new Set(),
@@ -385,6 +487,7 @@ function characterGroundingRecordIsCapabilityRelevant(
   if (canonicalName && explicitNames.has(canonicalName)) {
     return true;
   }
+  if (explicitNames.size > 0) return false;
 
   const taskMention = resolveCanonCharacterMention(
     taskPrompt,
@@ -805,6 +908,25 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
       && !Array.isArray(capabilityInput.capability_input)
         ? capabilityInput.capability_input
         : {};
+    const targetCharacterNames = targetCapabilityCharacterNames(
+      requestedCapabilityInput,
+    );
+    const hydratedVoiceProfiles = requestedCapabilityInput
+      .planned_entity_hydration?.resolved_entities
+      ?.filter((entry) => (
+        entry.category === "characters"
+        && entry.character_voice_registry_status === "resolved"
+        && entry.character_voice_profile
+        && (
+          !targetCharacterNames.length
+          || targetCharacterNames.includes(entry.canonical_name)
+        )
+      ))
+      .map((entry) => ({
+        canonical_name: entry.canonical_name,
+        entity_id: entry.entity_id ?? null,
+        ...entry.character_voice_profile,
+      })) ?? [];
     const priorGenerationSurfaces =
       capabilityInput.authorship_cognition_sources?.prior_cognition_outputs
       ?? [];
@@ -834,6 +956,18 @@ function deterministicAdapter(capabilityName, rawStoryText = null, runtimeCognit
         capabilityCharacterHardFacts,
       original_entity_freedom:
         characterCanonGrounding.original_entity_freedom ?? null,
+      ...(capabilityName === "run_character_simulator" ? {
+        character_voice_profile_loaded:
+          hydratedVoiceProfiles.length > 0,
+        character_voice_profile_count:
+          hydratedVoiceProfiles.length,
+        character_voice_profiles:
+          hydratedVoiceProfiles,
+        character_voice_fallback_used: false,
+        character_voice_hydration_diagnostics:
+          requestedCapabilityInput.planned_entity_hydration
+            ?.character_voice_diagnostics ?? [],
+      } : {}),
       ...(worldEntityCognitionRelevant ? {
         world_entity_canon_grounding_loaded:
           worldEntityCanonGrounding.loaded === true,
@@ -1493,11 +1627,17 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     && !Array.isArray(input.capability_input)
       ? input.capability_input
       : {};
-  const dynamicPlannedManifest =
+  const suppliedDynamicPlannedManifest =
     suppliedCapabilityInput.planned_entity_manifest
     ?? suppliedCapabilityInput.plannedEntityManifest
     ?? null;
-  const dynamicPlannedHydration =
+  const dynamicPlannedManifest = manifestWithExplicitCharacterTargets(
+    suppliedDynamicPlannedManifest,
+    capabilityName === "run_character_simulator"
+      ? targetCapabilityCharacterNames(suppliedCapabilityInput)
+      : [],
+  );
+  const attemptedDynamicPlannedHydration =
     dynamicPlannedManifest
     && typeof dynamicPlannedManifest === "object"
     && !Array.isArray(dynamicPlannedManifest)
@@ -1508,6 +1648,39 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
           ?? {},
       }, options)
       : null;
+  const dynamicPlannedHydration = attemptedDynamicPlannedHydration
+    && (
+      suppliedDynamicPlannedManifest
+      || attemptedDynamicPlannedHydration.planned_entity_hydration
+        .resolved_entities.length > 0
+      || attemptedDynamicPlannedHydration.planned_entity_hydration
+        .character_voice_hydration_failed === true
+    )
+      ? attemptedDynamicPlannedHydration
+      : null;
+  if (
+    dynamicPlannedHydration?.planned_entity_hydration
+      ?.character_voice_hydration_failed === true
+  ) {
+    const diagnostics = dynamicPlannedHydration.planned_entity_hydration
+      .character_voice_diagnostics;
+    const error = new Error(
+      `CHARACTER_VOICE_HYDRATION_FAILED: ${diagnostics
+        .map((item) => `${item.canonical_name}:${item.failure_stage}`)
+        .join(", ")}`,
+    );
+    error.code = "CHARACTER_VOICE_HYDRATION_FAILED";
+    error.diagnostics = diagnostics;
+    throw error;
+  }
+  const effectiveCharacterCanonGrounding = augmentCharacterCanonGrounding(
+    context.bundle.content?.character_canon_grounding ?? {},
+    dynamicPlannedHydration,
+  );
+  const canonicalCapabilityInput = capabilityInputWithCanonicalCharacter(
+    suppliedCapabilityInput,
+    dynamicPlannedHydration,
+  );
   let draftEntityDiagnostic = null;
   if (
     capabilityName === "run_neural_critic"
@@ -1543,7 +1716,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   }
   const effectiveCapabilityInput = draftEntityDiagnostic
     ? {
-      ...suppliedCapabilityInput,
+      ...canonicalCapabilityInput,
       draft_entity_audit:
         draftEntityDiagnostic.draft_entity_audit,
       draft_canon_coverage:
@@ -1559,7 +1732,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     }
     : dynamicPlannedHydration
       ? {
-        ...suppliedCapabilityInput,
+        ...canonicalCapabilityInput,
         planned_entity_hydration:
           dynamicPlannedHydration.planned_entity_hydration,
         planned_canon_coverage:
@@ -1569,7 +1742,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
         dynamic_canon_composition:
           dynamicPlannedHydration.composition,
       }
-      : suppliedCapabilityInput;
+      : canonicalCapabilityInput;
   const capabilityInput = isFinalPolisher ? {
     module_name: capabilityName,
     generation_boundary: generationBoundary,
@@ -1610,7 +1783,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     pre_generation_character_canon_grounding:
       context.bundle.content?.character_canon_grounding ?? null,
     character_canon_grounding:
-      context.bundle.content?.character_canon_grounding ?? null,
+      effectiveCharacterCanonGrounding,
     pre_generation_world_entity_canon_grounding:
       context.bundle.content?.world_entity_canon_grounding ?? null,
     world_entity_canon_grounding:

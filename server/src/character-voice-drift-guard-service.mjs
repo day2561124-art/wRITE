@@ -1,26 +1,25 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { projectPaths } from "./project-paths.mjs";
+import {
+  canonCharacterMentionStatuses,
+  resolveCanonCharacterMention,
+} from "./character-canon-grounding-service.mjs";
+import {
+  characterVoiceAliases,
+  inspectCharacterVoiceCoverage,
+  loadCharacterVoiceRegistry,
+  resolveCharacterVoiceProfile,
+} from "./character-voice-registry-service.mjs";
 
 const sourceType = "read_only_derived_index";
 const authority = "below_canon_db";
 const severityRank = { none: 0, low: 1, medium: 2, high: 3 };
 
-const characterAliases = new Map([
-  ["朝日奈千夜", ["朝日奈千夜", "千夜"]],
-  ["九逃", ["九逃"]],
-  ["貓狼", ["貓狼"]],
-  ["雪弟", ["雪弟"]],
-  ["夜安晴", ["夜安晴", "小晴"]],
-  ["夜文澤", ["夜文澤", "小澤"]],
-  ["宇天", ["宇天"]],
-  ["千函", ["千函"]],
-  ["拉芙蒂・里德斯特", ["拉芙蒂・里德斯特", "拉芙蒂", "拉芙蒂・里德ス特"]],
-  ["莉莉絲", ["莉莉絲"]],
-  ["鹿梅", ["鹿梅"]],
-  ["莊", ["莊"]],
-  ["夜", ["夜老師"]],
-]);
+const characterAliases = new Map(
+  Object.entries(characterVoiceAliases).map(([canonicalName, aliases]) => [
+    canonicalName,
+    [canonicalName, ...aliases],
+  ]),
+);
 
 const distinctPairs = [
   ["朝日奈千夜", "九逃"],
@@ -119,6 +118,7 @@ async function resolveRegistry(contextBundle, options) {
     && typeof bundleContent === "string"
     && bundleContent.trim()
   ) {
+    const coverage = inspectCharacterVoiceCoverage(bundleContent);
     return {
       loaded: true,
       content: bundleContent,
@@ -127,45 +127,121 @@ async function resolveRegistry(contextBundle, options) {
       authority: contextBundle.character_voice_registry_authority || authority,
       source: "writing_context",
       expected_but_not_loaded: false,
+      ...coverage,
     };
   }
 
   const expectedButNotLoaded = Boolean(contextBundle)
     && contextBundle.character_voice_registry_loaded !== true;
-  const registryPath = options.characterVoiceRegistryPath ?? projectPaths.characterVoiceRegistry;
-  try {
-    const content = await readFile(registryPath, "utf8");
-    if (!content.trim()) {
-      return {
-        loaded: false,
-        content: "",
-        hash: null,
-        source_type: sourceType,
-        authority,
-        source: "fallback",
-        expected_but_not_loaded: expectedButNotLoaded,
-      };
-    }
-    return {
-      loaded: true,
-      content,
-      hash: sha256(content),
-      source_type: sourceType,
-      authority,
-      source: "fallback",
-      expected_but_not_loaded: expectedButNotLoaded,
-    };
-  } catch {
-    return {
-      loaded: false,
-      content: "",
-      hash: null,
-      source_type: sourceType,
-      authority,
-      source: "fallback",
-      expected_but_not_loaded: expectedButNotLoaded,
-    };
+  const loaded = await loadCharacterVoiceRegistry(options);
+  return {
+    ...loaded,
+    source: "fallback",
+    expected_but_not_loaded: expectedButNotLoaded,
+  };
+}
+
+function characterNamesFromValue(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(characterNamesFromValue);
+  if (!value || typeof value !== "object") return [];
+  return [
+    value.character,
+    value.character_name,
+    value.characterName,
+    value.canonical_name,
+    value.name,
+  ].flatMap(characterNamesFromValue);
+}
+
+function manifestCharacterNames(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return characterNamesFromValue(value.characters ?? []);
+}
+
+function explicitVoiceCharacterNames(rawInput, contextBundle) {
+  const contextMaterials = contextBundle?.formal_context?.materials
+    ?? contextBundle?.materials
+    ?? {};
+  return [...new Set([
+    rawInput.target_character,
+    rawInput.targetCharacter,
+    rawInput.character,
+    rawInput.character_name,
+    ...characterNamesFromValue(rawInput.scene_cast),
+    ...characterNamesFromValue(rawInput.sceneCast),
+    ...characterNamesFromValue(rawInput.known_scene_cast),
+    ...characterNamesFromValue(rawInput.knownSceneCast),
+    ...manifestCharacterNames(
+      rawInput.planned_entity_manifest ?? rawInput.plannedEntityManifest,
+    ),
+    ...manifestCharacterNames(contextMaterials.planned_entity_manifest),
+    ...characterNamesFromValue(
+      contextMaterials.planned_entity_hydration?.resolved_entities
+        ?.filter((entry) => entry.category === "characters") ?? [],
+    ),
+  ].map((value) => String(value ?? "").trim()).filter(Boolean))];
+}
+
+function hydrateVoiceProfiles({ candidateText, rawInput, contextBundle, registry }) {
+  const coreNames = new Set(registry.core_protagonists ?? []);
+  const requested = new Map();
+  for (const name of explicitVoiceCharacterNames(rawInput, contextBundle)) {
+    requested.set(name, "explicit_or_scene_known");
   }
+  for (const entry of registry.entries ?? []) {
+    const mention = resolveCanonCharacterMention(
+      candidateText,
+      entry.canonical_name,
+    );
+    if (mention.status === canonCharacterMentionStatuses.confirmed) {
+      if (!requested.has(entry.canonical_name)) {
+        requested.set(entry.canonical_name, "heuristic_confirmed_mention");
+      }
+    }
+  }
+
+  const profiles = [];
+  const diagnostics = [];
+  for (const [name, selectionSource] of requested) {
+    const resolution = resolveCharacterVoiceProfile(registry.entries ?? [], name);
+    if (resolution.status === "resolved") {
+      if (!profiles.some((item) => (
+        item.canonical_name === resolution.canonical_name
+      ))) {
+        profiles.push({
+          canonical_name: resolution.canonical_name,
+          requested_name: name,
+          selection_source: selectionSource,
+          match_type: resolution.match_type,
+          personality: resolution.profile.personality,
+          voice: resolution.profile.voice,
+          source_status: resolution.profile.source_status,
+          source: resolution.profile.source,
+        });
+      }
+      continue;
+    }
+    if (coreNames.has(name) || resolution.candidates.some((candidate) => (
+      coreNames.has(candidate.canonical_name)
+    ))) {
+      diagnostics.push({
+        code: "CHARACTER_VOICE_HYDRATION_FAILED",
+        canonical_name: resolution.canonical_name ?? name,
+        entity_id: null,
+        failure_stage: "character_voice_guard_profile_lookup",
+        voice_registry_status: resolution.status,
+        fallback_used: false,
+      });
+    }
+  }
+  return {
+    requested_character_count: requested.size,
+    hydrated_profile_count: profiles.length,
+    profiles,
+    diagnostics,
+    fallback_used: false,
+  };
 }
 
 function detectPairConflation(text, findings) {
@@ -204,7 +280,7 @@ function detectTraitContradictions(text, findings) {
       `(?:${characterPattern("雪弟")})[^\\n]{0,100}(?:興奮地大喊|激動地尖叫|手舞足蹈|放聲大笑|滔滔不絕)`,
       "u",
     ),
-    message: "雪弟 is written with strongly expressive behavior that contradicts his low-display, short, direct voice.",
+    message: "雪弟 is written with strongly expressive behavior that contradicts her low-display, short, direct voice.",
     recommendation: "Reduce emotional display and use short direct speech; preserve focused detail around dolls when relevant.",
   });
   addPatternFinding(findings, text, {
@@ -263,7 +339,7 @@ function detectRoleReduction(text, findings) {
       "u",
     ),
     message: "雪弟 is reduced to a silent doll-operation tool.",
-    recommendation: "Keep his low-display voice while allowing observation, choice, and focused personal attention.",
+    recommendation: "Keep her low-display voice while allowing observation, choice, and focused personal attention.",
   });
 }
 
@@ -327,7 +403,7 @@ function detectColdOfficialConflation(text, findings) {
   ));
 }
 
-function summarize(registry, findings) {
+function summarize(registry, findings, hydration = null) {
   let severity = "none";
   for (const item of findings) {
     if (severityRank[item.severity] > severityRank[severity]) severity = item.severity;
@@ -342,6 +418,15 @@ function summarize(registry, findings) {
     character_voice_guard_verdict: verdict,
     character_voice_guard_severity: severity,
     character_voice_guard_findings_count: findings.length,
+    character_voice_profiles_hydrated:
+      hydration?.hydrated_profile_count ?? 0,
+    character_voice_profile_names:
+      hydration?.profiles?.map((profile) => profile.canonical_name) ?? [],
+    character_voice_profiles: hydration?.profiles ?? [],
+    character_voice_hydration_diagnostics:
+      hydration?.diagnostics ?? [],
+    character_voice_fallback_used:
+      hydration?.fallback_used ?? false,
     verdict,
     severity,
     findings,
@@ -358,6 +443,14 @@ export function characterVoiceGuardMetadata(result) {
     character_voice_guard_verdict: result.character_voice_guard_verdict,
     character_voice_guard_severity: result.character_voice_guard_severity,
     character_voice_guard_findings_count: result.character_voice_guard_findings_count,
+    character_voice_profiles_hydrated:
+      result.character_voice_profiles_hydrated,
+    character_voice_profile_names:
+      result.character_voice_profile_names,
+    character_voice_hydration_diagnostics:
+      result.character_voice_hydration_diagnostics,
+    character_voice_fallback_used:
+      result.character_voice_fallback_used,
     character_voice_guard: result,
   };
 }
@@ -394,6 +487,23 @@ export async function evaluateCharacterVoiceDrift(rawInput = {}, options = {}) {
     return summarize(registry, findings);
   }
 
+  const hydration = hydrateVoiceProfiles({
+    candidateText,
+    rawInput,
+    contextBundle,
+    registry,
+  });
+  for (const diagnostic of hydration.diagnostics) {
+    findings.push(finding(
+      diagnostic.code,
+      "high",
+      [diagnostic.canonical_name],
+      `Character Voice hydration failed for ${diagnostic.canonical_name}.`,
+      JSON.stringify(diagnostic),
+      "Restore the unique effective voice profile; generic fallback is forbidden.",
+    ));
+  }
+
   detectPairConflation(candidateText, findings);
   detectColdOfficialConflation(candidateText, findings);
   detectTraitContradictions(candidateText, findings);
@@ -401,7 +511,7 @@ export async function evaluateCharacterVoiceDrift(rawInput = {}, options = {}) {
   detectChildVoiceSafety(candidateText, findings);
   detectSupportTooling(candidateText, findings);
   detectOverConfidentInference(candidateText, findings);
-  return summarize(registry, findings);
+  return summarize(registry, findings, hydration);
 }
 
 export default {

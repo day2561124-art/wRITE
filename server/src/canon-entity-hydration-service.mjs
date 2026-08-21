@@ -14,6 +14,14 @@ import {
 import {
   originalCandidateStatus,
 } from "./formal-writing-contracts.mjs";
+import {
+  parseActiveEngineCharacterRecords,
+} from "./character-canon-grounding-service.mjs";
+import {
+  loadCharacterVoiceRegistry,
+  parseAuthoritativeCoreProtagonistNames,
+  resolveCharacterVoiceProfile,
+} from "./character-voice-registry-service.mjs";
 
 export const plannedEntityManifestCategories = Object.freeze([
   "characters",
@@ -147,7 +155,7 @@ function registryRecords(registry, category) {
   return registry?.[categoryToRegistry[category]] ?? [];
 }
 
-function resolveRegistryEntity(records, request, category) {
+export function resolveRegistryEntity(records, request, category) {
   if (request.entity_id) {
     const byId = records.find((record) => record.entity_id === request.entity_id);
     if (byId) return { status: "resolved", match_type: "entity_id", entity: byId };
@@ -428,6 +436,7 @@ function compactResolvedEntity({
   parsed = {},
   linkedWeapons = [],
   linkedAbilities = [],
+  characterCanon = null,
 }) {
   const location = category === "locations"
     ? describeSceneLocation({
@@ -480,7 +489,8 @@ function compactResolvedEntity({
       confirmed_limits: ability.confirmed_limits ?? [],
       forbidden_normalizations: ability.forbidden_normalizations ?? [],
     })),
-    character_canon: entity.canon_character_grounding ?? null,
+    character_canon:
+      characterCanon ?? entity.canon_character_grounding ?? null,
     relevant_canon_record_ids: uniqueStrings(recordIds),
     ...(location ? {
       location_id: location.location_id,
@@ -644,8 +654,18 @@ export async function hydratePlannedEntityManifest({
     "utf8",
   );
   const currentHash = activeEngineHash ?? sha256(currentEngine);
+  const activeCharacterRecords = new Map(
+    parseActiveEngineCharacterRecords(currentEngine).map((record) => [
+      record.canonical_name,
+      record,
+    ]),
+  );
   const { registry, provenance } = await getStructuredEntityRegistry(
     options.entityRegistryOptions ?? {},
+  );
+  const voiceRegistry = await loadCharacterVoiceRegistry(options);
+  const coreProtagonists = new Set(
+    parseAuthoritativeCoreProtagonistNames(currentEngine),
   );
   const registryHash =
     registry?.provenance?.active_engine_hash
@@ -661,12 +681,19 @@ export async function hydratePlannedEntityManifest({
   const resolvedEntities = [];
   const unresolvedEntities = [];
   const originalCandidates = [];
+  const characterVoiceDiagnostics = [];
 
   for (const request of requestedEntities) {
     const records = registryRecords(registry, request.category);
+    const requestedVoiceResolution = request.category === "characters"
+      ? resolveCharacterVoiceProfile(voiceRegistry.entries, request.name)
+      : null;
+    const registryRequest = requestedVoiceResolution?.status === "resolved"
+      ? { ...request, name: requestedVoiceResolution.canonical_name }
+      : request;
     const resolution = resolveRegistryEntity(
       records,
-      request,
+      registryRequest,
       request.category,
     );
     if (resolution.status === "ambiguous") {
@@ -702,7 +729,29 @@ export async function hydratePlannedEntityManifest({
           match_type: "current_active_engine_exact_row",
           relevant_canon_record_ids: [direct.entity_id],
         });
-      } else if (request.canon_expected === true) {
+      } else if (
+        request.canon_expected === true
+        || (
+          request.category === "characters"
+          && coreProtagonists.has(request.name)
+        )
+      ) {
+        if (
+          request.category === "characters"
+          && coreProtagonists.has(request.name)
+        ) {
+          characterVoiceDiagnostics.push({
+            code: "CHARACTER_VOICE_HYDRATION_FAILED",
+            canonical_name: request.name,
+            entity_id: request.entity_id ?? null,
+            failure_stage: "planned_entity_manifest_character_lookup",
+            voice_registry_status: resolveCharacterVoiceProfile(
+              voiceRegistry.entries,
+              request.name,
+            ).status,
+            fallback_used: false,
+          });
+        }
         unresolvedEntities.push({
           requested_name: request.name,
           category: request.category,
@@ -742,6 +791,36 @@ export async function hydratePlannedEntityManifest({
     }
 
     const entity = resolution.entity;
+    const voiceResolution = request.category === "characters"
+      ? resolveCharacterVoiceProfile(
+        voiceRegistry.entries,
+        entity.canonical_name,
+      )
+      : null;
+    if (
+      request.category === "characters"
+      && coreProtagonists.has(entity.canonical_name)
+      && voiceResolution?.status !== "resolved"
+    ) {
+      characterVoiceDiagnostics.push({
+        code: "CHARACTER_VOICE_HYDRATION_FAILED",
+        canonical_name: entity.canonical_name,
+        entity_id: entity.entity_id ?? null,
+        failure_stage: "planned_entity_manifest_voice_lookup",
+        voice_registry_status: voiceResolution?.status ?? "not_found",
+        fallback_used: false,
+      });
+      unresolvedEntities.push({
+        requested_name: request.name,
+        category: request.category,
+        reason: "character_voice_hydration_failed",
+        candidates: [{
+          entity_id: entity.entity_id,
+          canonical_name: entity.canonical_name,
+        }],
+      });
+      continue;
+    }
     const record = await currentEntityRecord({
       entity,
       entityType: categoryToEntityType[request.category],
@@ -843,7 +922,7 @@ export async function hydratePlannedEntityManifest({
         }
       }
     }
-    resolvedEntities.push(compactResolvedEntity({
+    const compact = compactResolvedEntity({
       request,
       category: request.category,
       entity,
@@ -852,7 +931,22 @@ export async function hydratePlannedEntityManifest({
       parsed,
       linkedWeapons,
       linkedAbilities,
-    }));
+      characterCanon: request.category === "characters"
+        ? activeCharacterRecords.get(entity.canonical_name) ?? null
+        : null,
+    });
+    if (requestedVoiceResolution?.match_type === "registered_alias") {
+      compact.match_type = "registered_alias_then_exact_canonical_name";
+    }
+    resolvedEntities.push({
+      ...compact,
+      ...(voiceResolution ? {
+        character_voice_registry_status: voiceResolution.status,
+        character_voice_profile: voiceResolution.status === "resolved"
+          ? voiceResolution.profile
+          : null,
+      } : {}),
+    });
   }
 
   for (const collection of relevantCanonEntityCollections) {
@@ -905,6 +999,10 @@ export async function hydratePlannedEntityManifest({
     resolved_entities: resolvedEntities,
     unresolved_entities: unresolvedEntities,
     original_candidates: originalCandidates,
+    character_voice_diagnostics: characterVoiceDiagnostics,
+    character_voice_hydration_failed:
+      characterVoiceDiagnostics.length > 0,
+    fallback_used: false,
     canon_coverage_complete: plannedCanonCoverage.coverage_complete,
     character_count: resolvedEntities.filter(
       (entry) => entry.category === "characters",

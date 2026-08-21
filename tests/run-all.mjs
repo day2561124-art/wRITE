@@ -109,6 +109,8 @@ const steps = [
 
   ["Phase 23I character voice live adoption smoke", ["tests/phase23/phase23i-character-voice-live-adoption-smoke.test.mjs"]],
 
+  ["Core character voice coverage and hydration", ["tests/engine/core-character-voice-hydration.test.mjs"]],
+
   ["Phase 24A backend full recursive writing pipeline", ["tests/phase24/phase24a-backend-full-recursive-writing-pipeline.test.mjs"]],
 
   ["Phase 24B backend generation provider bridge", ["tests/phase24/phase24b-backend-generation-provider-bridge.test.mjs"]],

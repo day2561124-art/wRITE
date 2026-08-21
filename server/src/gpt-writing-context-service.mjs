@@ -1251,6 +1251,21 @@ export async function buildGptWritingContext(rawInput, options = {}) {
     activeEnginePath: groundingActiveEngine.path,
     activeEngineHash: groundingActiveEngine.hash,
   }, options);
+  if (
+    plannedEntityHydration.planned_entity_hydration
+      .character_voice_hydration_failed === true
+  ) {
+    const diagnostics = plannedEntityHydration.planned_entity_hydration
+      .character_voice_diagnostics;
+    const error = new Error(
+      `CHARACTER_VOICE_HYDRATION_FAILED: ${diagnostics
+        .map((item) => `${item.canonical_name}:${item.failure_stage}`)
+        .join(", ")}`,
+    );
+    error.code = "CHARACTER_VOICE_HYDRATION_FAILED";
+    error.diagnostics = diagnostics;
+    throw error;
+  }
   formalRelevantCanon.relevant_canon =
     plannedEntityHydration.relevant_canon;
   const hydratedFormalCharacterRecords = plannedEntityHydration
