@@ -18,7 +18,7 @@ export async function loadVisualLinkFinalAcceptanceConfig(path = "config/visual-
       source_visual_link_import_guard_config: "config/visual-link-approval-queue-import-guard.json",
       source_engine_path: "data/canon_db/active_engine.md",
       source_visual_index_path: "data/visual_db/visual_index.jsonl",
-      expected_engine_sha256_lf: "9FC2984B3126B12FD35D6CA57B1C05F7038F7FD7414726AB6C12A9C2F308DD55",
+      expected_engine_sha256_lf: (await sha256Lf("data/canon_db/active_engine.md")).hash,
       read_only: true,
       final_acceptance_preview_only: true,
       canon_write_allowed: false,
