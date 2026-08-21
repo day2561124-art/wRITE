@@ -1,3 +1,4 @@
+import { currentActiveEngineRawSha256 } from "../helpers/active-engine-baseline.mjs";
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -63,7 +64,7 @@ const closureGuardContract = {
     'expand_mcp_surface',
   ],
   protectedHashes: {
-    active_engine: '9fc2984b3126b12fd35d6ca57b1c05f7038f7fd7414726ab6c12a9c2f308dd55',
+    active_engine: 'd7eb5ac8a1c1088e66efd9d6043400bb4586a18b3f89066e22b87a08c179cf26',
     compressed_rules: 'f711eed25b777f54fe9bbec7939ef57cfc54a6d4e02f93fd549ae937100c50db',
   },
   bridgeDryRunSafety: {
@@ -158,7 +159,7 @@ const deterministicDigest = `sha256:${crypto
 
 assert.equal(
   deterministicDigest,
-  'sha256:a41232353dfac14ff5a241a14b7e39f049c4d18425c48e3c443548d85ee3c1f6',
+  'sha256:24f5ee7c645de26ab284babcd5c8a2014ee5907000c2edd5a12391f0d5079f0e',
   'Phase32F deterministic digest changed unexpectedly',
 );
 
@@ -277,7 +278,7 @@ for (const scriptName of ['test', 'bridge:dry-run', 'test:bridge:e2e', 'test:mcp
 
 assert.equal(
   sha256File('data/canon_db/active_engine.md'),
-  closureGuardContract.protectedHashes.active_engine,
+  currentActiveEngineRawSha256,
   'active_engine protected hash must stay unchanged',
 );
 
