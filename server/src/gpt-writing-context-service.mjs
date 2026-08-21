@@ -1303,7 +1303,10 @@ export async function buildGptWritingContext(rawInput, options = {}) {
   const characterCanonGrounding = buildCharacterCanonGrounding({
     activeEngineContent: groundingActiveEngine.content,
     sourceFile: groundingActiveEngine.path,
-    taskPrompt: effectiveTaskPrompt.text,
+    // Control-plane continuity and medical guards must not be reinterpreted as
+    // heuristic scene-cast mentions. Explicit manifest/retrieval selections
+    // are already supplied separately and retain higher authority.
+    taskPrompt: formalTaskPrompt,
     generationContext: input.generationContext,
     retrievalContext: input.retrievalContext,
     currentLongline: byLabel.active_longline.content,
