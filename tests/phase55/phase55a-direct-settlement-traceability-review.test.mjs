@@ -19,6 +19,7 @@ import {
   buildPendingEngineCandidateReview,
 } from "../../server/src/pending-engine-candidate-review-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
+import { activeEngineDependencyImpactPaths } from "../../server/src/active-engine-dependency-manifest.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(String(value ?? "")).digest("hex");
@@ -96,6 +97,7 @@ try {
   assert.equal(metadata.source_lineage.legacy_adopted_writing_workflow_applicable, false);
   assert.deepEqual(metadata.activation_write_manifest.will_modify, [
     "data/canon_db/active_engine.md",
+    ...activeEngineDependencyImpactPaths(),
     "data/outputs/task_prompt.md",
     "data/outputs/generation_context.md",
     "data/outputs/retrieval_context.md",
@@ -150,7 +152,10 @@ try {
   assert.equal(metadata.candidate_hash, sha256(candidateText.trimEnd()));
   assert.equal(metadata.candidate_engine_hash_sha256, sha256(candidateText.trimEnd()));
   assert.equal(metadata.lineage_complete, true);
-  assert.equal(metadata.activation_write_manifest.will_modify.length, 5);
+  assert.equal(
+    metadata.activation_write_manifest.will_modify.length,
+    5 + activeEngineDependencyImpactPaths().length,
+  );
   assert.equal(await readFile(activeEnginePath, "utf8"), activeEngineText);
 
   const candidate = await getPendingCandidate(candidateId, options);

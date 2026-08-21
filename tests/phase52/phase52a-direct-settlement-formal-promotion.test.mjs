@@ -27,6 +27,8 @@ import {
 import {
   buildGptWritingContext,
 } from "../../server/src/gpt-writing-context-service.mjs";
+import { activeEngineDependencyImpactPaths } from "../../server/src/active-engine-dependency-manifest.mjs";
+import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 import {
   projectPaths,
 } from "../../server/src/project-paths.mjs";
@@ -84,6 +86,7 @@ const options = {
   engineArchive,
   activationLog,
   rollbackIndex,
+  registryPath: path.join(canonFixture, "engine-components.json"),
 };
 
 const activeEngineText = [
@@ -123,6 +126,10 @@ const summaryText = [
 try {
   await mkdir(outputFixture, { recursive: true });
   await writeFile(activeEnginePath, activeEngineText, "utf8");
+  await createEngineComponentRegistryFixture({
+    registryPath: options.registryPath,
+    activeEnginePath,
+  });
   await Promise.all(Object.entries(oldInputs).map(([label, content]) => (
     writeFile(
       path.join(outputFixture, `${label}.md`),
@@ -239,6 +246,7 @@ try {
     activationApproval.impact.will_modify,
     [
       "data/canon_db/active_engine.md",
+      ...activeEngineDependencyImpactPaths(),
       "data/outputs/task_prompt.md",
       "data/outputs/generation_context.md",
       "data/outputs/retrieval_context.md",

@@ -17,6 +17,21 @@ import {
 const reportIdPattern =
   /^settlement_report_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 
+const acceptedDirectSources = new Set([
+  "chatgpt",
+  "gpt",
+  "manual_paste",
+]);
+
+const invalidSettlementStatuses = new Set([
+  "deleted",
+  "invalid",
+  "dry_run",
+  "fixture",
+  "test_fixture",
+  "candidate_only",
+]);
+
 const currentInputFiles = Object.freeze({
   task_prompt: "task_prompt.md",
   generation_context: "generation_context.md",
@@ -80,12 +95,23 @@ async function loadCandidate(root, entryName) {
       stat(paths.report),
     ]);
     const metadata = JSON.parse(metadataText);
+    const canonStatus = String(metadata.canon_status ?? "").trim();
+    const settlementStatus = String(
+      metadata.settlement_status ?? "",
+    ).trim();
 
     if (
       metadata.report_kind
         !== "direct_chapter_continuity_handoff"
       || metadata.continuity_handoff !== true
       || metadata.full_chapter_persisted === true
+      || metadata.deleted === true
+      || metadata.invalid === true
+      || metadata.dry_run === true
+      || metadata.test_fixture === true
+      || invalidSettlementStatuses.has(canonStatus)
+      || invalidSettlementStatuses.has(settlementStatus)
+      || !acceptedDirectSources.has(String(metadata.source ?? ""))
     ) {
       return null;
     }
@@ -107,10 +133,16 @@ async function loadCandidate(root, entryName) {
       };
     }
 
-    const createdAt = metadata.created_at
-      ?? reportStat.mtime.toISOString();
-    const createdTimestamp = timestamp(createdAt)
-      ?? reportStat.mtimeMs;
+    const createdAt = metadata.created_at;
+    const createdTimestamp = timestamp(createdAt);
+    if (createdTimestamp === null) {
+      return {
+        valid: false,
+        report_id: entryName,
+        warning:
+          `Ignored settlement report with invalid created_at: ${entryName}`,
+      };
+    }
     const identity = deriveDirectSettlementChapterIdentity({
       summaryText: normalizedSummary,
       metadata,

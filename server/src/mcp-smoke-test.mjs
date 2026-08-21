@@ -485,6 +485,7 @@ const enumConstraintFixtures = [
     }, "full, facts_only, minimal"],
     ["chatgpt_bridge_save_settlement_report", "source", {
       adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+      settlementContextId: "settlement_ctx_20260612-000000-00000000",
       settlementReportText: "fixture",
     }, "chatgpt, gpt, manual_paste"],
   ].map(([name, field, baseArguments, values]) => ({
@@ -1213,10 +1214,16 @@ const requiredConstraintFixtures = [
     ["chatgpt_bridge_request_adoption", "candidateId", {}],
     ["chatgpt_bridge_build_settlement_context", "adoptedChapterId", {}],
     ["chatgpt_bridge_save_settlement_report", "adoptedChapterId", {
+      settlementContextId: "settlement_ctx_20260612-000000-00000000",
+      settlementReportText: "fixture",
+    }],
+    ["chatgpt_bridge_save_settlement_report", "settlementContextId", {
+      adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
       settlementReportText: "fixture",
     }],
     ["chatgpt_bridge_save_settlement_report", "settlementReportText", {
       adoptedChapterId: "adopted_chapter_20260612-000000-00000000",
+      settlementContextId: "settlement_ctx_20260612-000000-00000000",
     }],
     ["chatgpt_bridge_get_canon_entity_detail", "entity_id", {}],
     ["chatgpt_bridge_get_foreshadowing_settlement_surface", "id", {}],

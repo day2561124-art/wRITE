@@ -2418,7 +2418,7 @@ const toolDefinitions = [
         default: "chatgpt",
       },
       dryRun: { type: "boolean", default: false },
-    }, ["adoptedChapterId", "settlementReportText"]),
+    }, ["adoptedChapterId", "settlementContextId", "settlementReportText"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_save_settlement_report(args)),
   },
   {

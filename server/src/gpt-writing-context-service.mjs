@@ -653,6 +653,28 @@ function compactMedicalStatusRecordForBudget(record = {}) {
   };
 }
 
+function compactLatestTimelineRecordForBudget(record = {}) {
+  if (
+    record?.category !== "timeline_event"
+    || record?.source?.kind !== "latest_settled_continuity_overlay"
+  ) {
+    return record;
+  }
+
+  return {
+    entity_id: record.entity_id,
+    category: record.category,
+    name: record.name,
+    content: record.content,
+    source: {
+      kind: record.source.kind,
+      anchor: record.source.anchor ?? null,
+    },
+    source_hash: record.source_hash ?? null,
+    freshness: record.freshness ?? "current",
+  };
+}
+
 function compactRelevantCanonForBudget(relevantCanon = {}) {
   const source = relevantCanon && typeof relevantCanon === "object"
     && !Array.isArray(relevantCanon)
@@ -759,7 +781,13 @@ export function boundRelevantCanonForFormalContext(
     record?.category === "timeline_event"
     && record?.source?.kind === "latest_settled_continuity_overlay"
   )) ?? timelineRecords[0];
-  retainRecord("timeline_and_events", latestTimeline);
+  if (latestTimeline) {
+    retainRecord(
+      "timeline_and_events",
+      compactLatestTimelineRecordForBudget(latestTimeline),
+    );
+    retainedRecords.add(latestTimeline);
+  }
 
   for (const collection of relevantCanonRecordPriority) {
     const records = normalizedRelevantCanon[collection] ?? [];

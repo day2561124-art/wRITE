@@ -15,6 +15,13 @@ export const directSettlementEnvelopeMarkers = Object.freeze({
   finalize: "[[DIRECT_PASTED_CHAPTER_SETTLEMENT_FINALIZE]]",
 });
 
+export const directSettlementSentinelIds = Object.freeze({
+  adoptedChapterId:
+    "adopted_chapter_00000000-000000-00000000",
+  settlementContextId:
+    "settlement_ctx_00000000-000000-00000000",
+});
+
 const directSettlementSafety = Object.freeze({
   bridge_phase: "phase_42a_direct_pasted_chapter_settlement",
   existing_tool_schema_modified: false,
@@ -81,6 +88,18 @@ export async function chatgpt_bridge_save_settlement_report(input = {}, options 
   }
 
   if (envelope.mode === "summary") {
+    if (
+      adoptedChapterId
+        !== directSettlementSentinelIds.adoptedChapterId
+      || settlementContextId
+        !== directSettlementSentinelIds.settlementContextId
+    ) {
+      throw new Error(
+        "Direct chapter summary settlement requires the documented "
+        + "adopted chapter and settlement context sentinel IDs.",
+      );
+    }
+
     const result = await saveDirectChapterSettlementSummary({
       settlement_summary_text: envelope.payload,
       summary: input.summary,

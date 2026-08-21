@@ -466,7 +466,10 @@ function directSettlementLineage(metadata, identity, settlementReportId) {
 }
 
 function directSettlementActivationWriteManifest(metadataPath, currentInputRefresh) {
-  const willModify = ["data/canon_db/active_engine.md"];
+  const willModify = [
+    "data/canon_db/active_engine.md",
+    ...activeEngineDependencyImpactPaths(),
+  ];
   if (currentInputRefresh) {
     willModify.push(
       "data/outputs/task_prompt.md",
