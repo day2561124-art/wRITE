@@ -7,6 +7,7 @@ param(
   [switch]$CreateShortcut,
   [switch]$Status,
   [switch]$StartMcpTunnel,
+  [switch]$McpTunnelStatus,
   [switch]$NoOpen,
   [ValidateRange(1, 65535)]
   [int]$Port = 4173
@@ -21,6 +22,7 @@ $LogDir = Join-Path $Root "data\outputs\logs"
 $LogStem = if ($Port -eq 4173) { "ui-server" } else { "ui-server.$Port" }
 $StdoutLog = Join-Path $LogDir "$LogStem.stdout.log"
 $StderrLog = Join-Path $LogDir "$LogStem.stderr.log"
+$PidFile = Join-Path $LogDir "$LogStem.pid"
 
 function Write-Title {
   Clear-Host
@@ -47,6 +49,28 @@ function Get-UiListener {
   }
 }
 
+function Test-PortOpen {
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $task = $client.ConnectAsync("127.0.0.1", $Port)
+    if (-not $task.Wait(750)) { return $false }
+    return $client.Connected
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
+  }
+}
+
+function Test-WorkbenchHealth {
+  try {
+    $health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+    return ($health.ok -eq $true)
+  } catch {
+    return $false
+  }
+}
+
 function Test-IsWorkbenchProcess {
   param($Process)
 
@@ -67,16 +91,35 @@ function Get-ProcessLabel {
 }
 
 function Get-UiProcessInfo {
-  $listener = Get-UiListener
-  if (-not $listener) { return $null }
-
-  $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-  [pscustomobject]@{
-    Pid = $listener.OwningProcess
-    Name = $process.Name
-    CommandLine = $process.CommandLine
-    IsWorkbench = (Test-IsWorkbenchProcess $process)
+  if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
+    $recordedPid = 0
+    $pidText = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+    if ([int]::TryParse($pidText, [ref]$recordedPid)) {
+      $recordedProcess = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+      if (
+        $recordedProcess -and
+        $recordedProcess.ProcessName -eq "node" -and
+        (Test-WorkbenchHealth)
+      ) {
+        return [pscustomobject]@{
+          Pid = $recordedPid
+          Name = "node.exe"
+          CommandLine = $UiScriptPath
+          IsWorkbench = $true
+        }
+      }
+    }
   }
+
+  if (Test-PortOpen) {
+    return [pscustomobject]@{
+      Pid = $null
+      Name = $null
+      CommandLine = $null
+      IsWorkbench = $false
+    }
+  }
+  return $null
 }
 
 function Wait-ForHealth {
@@ -101,7 +144,7 @@ function Wait-ForPortRelease {
 
   $deadline = (Get-Date).AddSeconds($Seconds)
   do {
-    if (-not (Get-UiListener)) { return $true }
+    if (-not (Test-PortOpen)) { return $true }
     Start-Sleep -Milliseconds 100
   } while ((Get-Date) -lt $deadline)
 
@@ -160,6 +203,7 @@ function Start-Workbench {
     -PassThru
 
   if (Wait-ForHealth) {
+    Set-Content -LiteralPath $PidFile -Value "$($process.Id)" -Encoding Ascii
     Write-Host "UI server started. PID: $($process.Id)" -ForegroundColor Green
     if (-not $NoOpen) {
       try {
@@ -179,6 +223,7 @@ function Start-Workbench {
   } catch {
     # The process may have exited between the health check and cleanup.
   }
+  Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $StderrLog) {
     Write-Host ""
     Get-Content -LiteralPath $StderrLog -Tail 20
@@ -194,6 +239,7 @@ function Stop-Workbench {
       Write-Host "UI process was stopped, but port $Port is still occupied." -ForegroundColor Red
       return $false
     }
+    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
     Write-Host "UI server stopped. PID: $($info.Pid)" -ForegroundColor Green
     return $true
   }
@@ -274,10 +320,29 @@ function Start-McpTunnel {
   return ($LASTEXITCODE -eq 0)
 }
 
+function Show-McpTunnelStatus {
+  $script = Join-Path $Root "scripts\start-mcp-tunnel.ps1"
+  if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    Write-Host "MCP tunnel script was not found: $script" -ForegroundColor Red
+    return $false
+  }
+
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Status
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Show-AllStatus {
+  $uiRunning = Show-Status
+  Write-Host ""
+  Write-Host "MCP / Cloudflare tunnel:"
+  Show-McpTunnelStatus | Out-Null
+  return $uiRunning
+}
+
 function Show-Menu {
   while ($true) {
     Write-Title
-    Show-Status | Out-Null
+    Show-AllStatus | Out-Null
     Write-Host ""
     Write-Host "  1. Start / restart UI"
     Write-Host "  2. Open UI in browser"
@@ -316,7 +381,8 @@ try {
   if ($RunTests) { if (Run-Validation) { exit 0 } else { exit 1 } }
   if ($CreateShortcut) { if (New-DesktopShortcut) { exit 0 } else { exit 1 } }
   if ($StartMcpTunnel) { if (Start-McpTunnel) { exit 0 } else { exit 1 } }
-  if ($Status) { if (Show-Status) { exit 0 } else { exit 1 } }
+  if ($McpTunnelStatus) { if (Show-McpTunnelStatus) { exit 0 } else { exit 1 } }
+  if ($Status) { if (Show-AllStatus) { exit 0 } else { exit 1 } }
 
   Show-Menu
 } catch {

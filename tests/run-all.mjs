@@ -37,6 +37,7 @@ const steps = [
   ["Neural trace service", ["tests/agent/neural-trace-service.test.mjs"]],
 
   ["Launcher contract", ["tests/launcher.test.mjs"]],
+  ["MCP tunnel launcher", ["tests/mcp-tunnel-launcher.test.mjs"]],
 
   ["Path policy security", ["tests/security/path-policy.test.mjs"]],
 

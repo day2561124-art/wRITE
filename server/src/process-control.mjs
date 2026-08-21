@@ -1,14 +1,20 @@
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 export function terminateProcessTree(child, { forceAfterMs = 2_000 } = {}) {
   if (!child || child.exitCode !== null || child.killed || !child.pid) return;
 
   if (process.platform === "win32") {
-    const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    killer.unref();
+    const result = spawnSync(
+      "taskkill.exe",
+      ["/pid", String(child.pid), "/t", "/f"],
+      {
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
+    if (result.status !== 0 && child.exitCode === null) {
+      child.kill();
+    }
     return;
   }
 

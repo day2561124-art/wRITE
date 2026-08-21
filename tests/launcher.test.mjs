@@ -1,6 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
-import { readFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  rm,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
@@ -29,15 +35,23 @@ function getFreePort() {
   });
 }
 
-function runLauncher(args, expectedStatus) {
+function runLauncher(
+  args,
+  expectedStatus,
+  cwd = rootDir,
+  scriptPath = launcherPath,
+  captureOutput = true,
+) {
   const result = spawnSync(
     "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath, ...args],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args],
     {
-      cwd: rootDir,
+      cwd,
       timeout: 30_000,
       windowsHide: true,
-      stdio: "ignore",
+      ...(captureOutput
+        ? { encoding: "utf8" }
+        : { stdio: "ignore" }),
     },
   );
 
@@ -46,19 +60,20 @@ function runLauncher(args, expectedStatus) {
   }
   assert(
     result.status === expectedStatus,
-    `Launcher ${args.join(" ")} exited ${result.status}; expected ${expectedStatus}.`,
+    `Launcher ${args.join(" ")} exited ${result.status}; expected ${expectedStatus}. stderr=${result.stderr ?? ""}`,
   );
+  return result;
 }
 
-function runBatchLauncher(args, expectedStatus) {
+function runBatchLauncher(args, expectedStatus, cwd = rootDir) {
   const result = spawnSync(
     "cmd.exe",
     ["/d", "/c", launcherCmdPath, ...args],
     {
-      cwd: rootDir,
+      cwd,
       timeout: 30_000,
       windowsHide: true,
-      stdio: "ignore",
+      encoding: "utf8",
     },
   );
 
@@ -69,6 +84,42 @@ function runBatchLauncher(args, expectedStatus) {
     result.status === expectedStatus,
     `launcher.cmd ${args.join(" ")} exited ${result.status}; expected ${expectedStatus}.`,
   );
+  return result;
+}
+
+function runNpmLauncher(args, expectedStatus, cwd = rootDir) {
+  const result = spawnSync(
+    "cmd.exe",
+    [
+      "/d",
+      "/c",
+      "npm.cmd",
+      "--prefix",
+      rootDir,
+      "run",
+      "launcher",
+      "--",
+      ...args,
+    ],
+    {
+      cwd,
+      timeout: 30_000,
+      windowsHide: true,
+      encoding: "utf8",
+    },
+  );
+  if (result.error) {
+    throw new Error(`npm launcher failed to run: ${result.error.message}`);
+  }
+  assert(
+    result.status === expectedStatus,
+    `npm launcher ${args.join(" ")} exited ${result.status}; expected ${expectedStatus}. stderr=${result.stderr}`,
+  );
+  return result;
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function waitForListening(port) {
@@ -88,15 +139,59 @@ async function waitForListening(port) {
 async function runWindowsRuntimeChecks() {
   const port = await getFreePort();
   const portArgs = ["-Port", String(port)];
+  const activeEnginePath = path.join(
+    rootDir,
+    "data",
+    "canon_db",
+    "active_engine.md",
+  );
+  const activeEngineBefore = await readFile(activeEnginePath);
+  const nonRootCwd = path.join(rootDir, "scripts");
+  const quotedFixtureRoot = path.join(
+    rootDir,
+    "tests",
+    ".tmp",
+    "launcher path fixture",
+  );
+  const quotedLauncherPath = path.join(quotedFixtureRoot, "launcher.ps1");
+  await mkdir(quotedFixtureRoot, { recursive: true });
+  await copyFile(launcherPath, quotedLauncherPath);
 
-  runLauncher(["-Status", ...portArgs], 1);
-  runBatchLauncher(["-Status", ...portArgs], 1);
-  runLauncher(["-StartUi", "-NoOpen", ...portArgs], 0);
   try {
+    const stoppedFromRoot = runLauncher(["-Status", ...portArgs], 1);
+    const stoppedFromNonRoot = runLauncher(
+      ["-Status", ...portArgs],
+      1,
+      nonRootCwd,
+    );
+    assert(
+      stoppedFromRoot.stdout.trim() === stoppedFromNonRoot.stdout.trim(),
+      "Status output must not depend on the current working directory.",
+    );
+    runBatchLauncher(["-Status", ...portArgs], 1, nonRootCwd);
+    runNpmLauncher(["-Status", ...portArgs], 1, nonRootCwd);
+    runLauncher(
+      ["-Status", ...portArgs],
+      1,
+      nonRootCwd,
+      quotedLauncherPath,
+    );
+
+    runLauncher(
+      ["-StartUi", "-NoOpen", ...portArgs],
+      0,
+      rootDir,
+      launcherPath,
+      false,
+    );
     await waitForListening(port);
     runLauncher(["-Status", ...portArgs], 0);
+    runLauncher(["-Status", ...portArgs], 0, nonRootCwd);
+    runBatchLauncher(["-Status", ...portArgs], 0, nonRootCwd);
+    runNpmLauncher(["-Status", ...portArgs], 0, nonRootCwd);
   } finally {
     runLauncher(["-StopUi", ...portArgs], 0);
+    await rm(quotedFixtureRoot, { recursive: true, force: true });
   }
 
   const occupiedPort = await getFreePort();
@@ -111,7 +206,14 @@ async function runWindowsRuntimeChecks() {
     assert(dummy.exitCode === null, "Launcher terminated an unrelated Node process.");
   } finally {
     terminateProcessTree(dummy);
+    if (dummy.exitCode === null) dummy.kill();
   }
+
+  const activeEngineAfter = await readFile(activeEnginePath);
+  assert(
+    sha256(activeEngineAfter) === sha256(activeEngineBefore),
+    "Launcher status checks must not modify active_engine.",
+  );
 }
 
 async function main() {
