@@ -99,6 +99,10 @@ import {
 import {
   approval_queue_bridge_readiness_report,
 } from "./mcp-approval-queue-readiness-tools.mjs";
+import {
+  chatgptBridgeGetVisualAsset,
+  chatgptBridgeSearchVisualAssets,
+} from "./chatgpt-visual-reference-bridge-service.mjs";
 import { readonlyTools } from "./mcp-readonly-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -2855,6 +2859,89 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await request_pending_engine_candidate_activation(args)),
   },
   {
+    name: "chatgpt_bridge_search_visual_assets",
+    description: "READ ONLY visual-reference lookup over the existing persistent visual library index. Searches metadata only and never returns image base64, writes the visual index, mutates visual assets, updates Canon, or updates active_engine.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      query: {
+        type: "string",
+        maxLength: 500,
+        description: "Free-text search across visual id, character/entity, category, title, status, source, description, notes, ability state, and tags.",
+      },
+      character: {
+        type: "string",
+        maxLength: 300,
+        description: "Optional character or entity name filter.",
+      },
+      entity: {
+        type: "string",
+        maxLength: 300,
+        description: "Alias of character for callers that use entity terminology.",
+      },
+      category: {
+        type: "string",
+        maxLength: 200,
+        description: "Optional visual category filter such as character_design, character_sheet, or armed_form.",
+      },
+      status: {
+        type: "string",
+        maxLength: 200,
+        description: "Optional visual record status/canon-status filter.",
+      },
+      title: {
+        type: "string",
+        maxLength: 500,
+        description: "Optional visual title filter.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 50,
+        default: 20,
+      },
+    }),
+    handler: async (args) => jsonContent(
+      await chatgptBridgeSearchVisualAssets(args),
+    ),
+  },
+  {
+    name: "chatgpt_bridge_get_visual_asset",
+    description: "READ ONLY visual-reference asset retrieval. Resolves an existing registered visual asset and returns MCP native image content plus metadata directly to ChatGPT. It never writes the visual index, changes image files, updates Canon, or updates active_engine.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      visual_id: {
+        type: "string",
+        maxLength: 300,
+        description: "Preferred existing visual_id from visual_index.jsonl.",
+      },
+      visualId: {
+        type: "string",
+        maxLength: 300,
+        description: "camelCase alias of visual_id.",
+      },
+      asset_path: {
+        type: "string",
+        maxLength: 2000,
+        description: "Fallback registered project-relative path under data/visual_db/assets.",
+      },
+      assetPath: {
+        type: "string",
+        maxLength: 2000,
+        description: "camelCase alias of asset_path.",
+      },
+    }),
+    handler: async (args) => {
+      /*
+       * IMPORTANT:
+       * Do not wrap this result in jsonContent().
+       * The service returns MCP native image content.
+       */
+      return await chatgptBridgeGetVisualAsset(args);
+    },
+  },
+  {
     name: "preview_visual_reference_consumer_output_guard",
     description: "Read-only ChatGPT public profile preview of the visual reference consumer output guard readiness packet.",
     risk: "read",
@@ -2925,6 +3012,8 @@ const chatgptPublicToolNames = new Set([
   "list_pending_engine_candidate_reviews",
   "request_pending_engine_candidate_activation",
   "approval_queue_bridge_readiness_report",
+  "chatgpt_bridge_search_visual_assets",
+  "chatgpt_bridge_get_visual_asset",
   "preview_visual_reference_consumer_output_guard",
 ]);
 
@@ -3058,6 +3147,17 @@ const permissionSources = {
     "gpt_writing_context_records",
     "active_engine",
     "compressed_rules",
+  ],
+  chatgpt_bridge_search_visual_assets: [
+    "visual_index_records",
+    "visual_assets",
+    "mcp_readonly_visual_reference",
+  ],
+  chatgpt_bridge_get_visual_asset: [
+    "visual_index_records",
+    "visual_assets",
+    "mcp_native_image_content",
+    "mcp_readonly_visual_reference",
   ],
   preview_visual_reference_consumer_output_guard: [
     "visual_reference_consumer_guard",
