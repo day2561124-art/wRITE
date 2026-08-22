@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "complete",
-  "built_at": "2026-08-20T17:04:43.944Z",
-  "deterministic_source_hash": "b3db531bd6856647a032e190137fcec50b6832d98de4ac3c1f1272f70d7fed95",
+  "built_at": "2026-08-22T19:45:21.477Z",
+  "deterministic_source_hash": "3b6c9ebcf7ae4f164b2270a0cf7465e6ad53fe5b48fbb625aba78621a8b3d29a",
   "entity_count": 247,
   "entity_counts_by_type": {
     "characters": 62,
