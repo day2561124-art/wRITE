@@ -257,6 +257,7 @@ export async function commitWorldSimulationTurn(
             action_outcomes: input.action_outcomes ?? [],
             knowledge_transitions: input.knowledge_transitions ?? [],
             scheduled_events: input.scheduled_events ?? [],
+            causal_timeline: input.causal_timeline ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });

@@ -312,8 +312,9 @@ function defenseWindow(candidate, rules) {
   return { startMs, endMs: startMs + activeMs, activeMs };
 }
 
-function defenseAtContact(worldState, resourceState, target, selectedActionIntents, contactTimeMs, rules) {
+function defenseAtContact(worldState, resourceState, target, selectedActionIntents, contactTimeMs, rules, suppressedActionIds = new Set()) {
   const candidate = candidateForCharacter(selectedActionIntents, target);
+  if (suppressedActionIds.has(String(candidate.action_id ?? ""))) return null;
   const defense = object(candidate.defense);
   const type = String(defense.type ?? defense.mode ?? "").trim().toLowerCase();
   if (!type || type === "dodge" || type === "evade") return null;
@@ -635,6 +636,49 @@ export function applyWorldSimulationCombatImpact(input = {}) {
   };
 }
 
+
+export function buildWorldSimulationCombatTimelineEntries(input = {}) {
+  const snapshot = cloneJson(object(input.world_state));
+  const rules = object(snapshot.world_rules ?? snapshot.rules);
+  const suppressed = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
+  const entries = [];
+  for (const selected of array(input.selected_action_intents)) {
+    const actor = String(selected?.character ?? "").trim();
+    const candidate = object(selected?.candidate);
+    const actionId = String(candidate.action_id ?? "").trim();
+    if (!actor || !actionId || suppressed.has(actionId)) continue;
+    if (isObject(candidate.attack)) {
+      const timeline = attackTimeline(snapshot, actor, candidate, rules);
+      if (Number.isFinite(timeline.contactTimeMs)) {
+        entries.push({
+          kind: "melee_contact",
+          actor,
+          action_id: actionId,
+          time_ms: timeline.contactTimeMs,
+          total_ms: timeline.totalMs,
+          target: String(candidate.attack.target_character ?? candidate.attack.target ?? candidate.target ?? "").trim() || null,
+        });
+      }
+    }
+    if (isObject(candidate.defense)) {
+      const window = defenseWindow(candidate, rules);
+      entries.push({
+        kind: "defense_start",
+        actor,
+        action_id: actionId,
+        time_ms: window.startMs,
+        end_time_ms: window.endMs,
+      });
+    }
+  }
+  return entries.sort((left, right) => (
+    left.time_ms - right.time_ms
+    || left.kind.localeCompare(right.kind)
+    || left.actor.localeCompare(right.actor, "zh-Hant-TW")
+    || left.action_id.localeCompare(right.action_id)
+  ));
+}
+
 export function buildWorldSimulationCombatCausalContract() {
   return {
     version: worldSimulationCombatCausalVersion,
@@ -675,6 +719,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
   const rules = object(snapshot.world_rules ?? snapshot.rules);
   const selectedActionIntents = array(input.selected_action_intents);
   const existingOutcomes = array(input.resolved_action_outcomes);
+  const suppressedActionIds = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
   const outcomes = [];
   const transitions = [];
   const combatResolutions = [];
@@ -684,7 +729,8 @@ export function adjudicateWorldSimulationCombat(input = {}) {
     .map((selected) => {
       const actor = String(selected?.character ?? "").trim();
       const candidate = object(selected?.candidate);
-      if (!actor || !isObject(candidate.attack)) return null;
+      const actionId = String(candidate.action_id ?? "");
+      if (!actor || suppressedActionIds.has(actionId) || !isObject(candidate.attack)) return null;
       const timeline = attackTimeline(snapshot, actor, candidate, rules);
       return { selected, actor, candidate, timeline };
     })
@@ -790,6 +836,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       selectedActionIntents,
       timeline.contactTimeMs,
       rules,
+      suppressedActionIds,
     );
     const armor = armorProfile(snapshot, target, hitRegion);
     const mitigation = mitigateDamage(profile.baseDamage, profile.penetration, defense, armor);
@@ -868,6 +915,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
     state_transitions: transitions,
     action_outcomes: outcomes,
     combat_resolutions: combatResolutions,
+    timeline_entries: buildWorldSimulationCombatTimelineEntries({ ...input, world_state: snapshot, suppressed_action_ids: [...suppressedActionIds] }),
     elapsed_ms: elapsedMs,
     boundary: {
       character_brain_selected_intent_only: true,

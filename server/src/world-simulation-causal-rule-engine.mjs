@@ -9,6 +9,11 @@ import {
   adjudicateWorldSimulationContinuousPhysics,
   buildWorldSimulationContinuousPhysicsContract,
 } from "./world-simulation-continuous-physics-service.mjs";
+import {
+  arbitrateWorldSimulationGlobalTimeline,
+  buildResolvedWorldSimulationGlobalTimeline,
+  buildWorldSimulationGlobalCausalTimelineContract,
+} from "./world-simulation-global-causal-timeline-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -532,8 +537,10 @@ export function buildWorldSimulationCausalRuleContract() {
       combat_causal_layer: buildWorldSimulationCombatCausalContract(),
     },
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
+    global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
+      cross_layer_point_event_order: "global_programmatic_timeline",
     },
   };
 }
@@ -655,6 +662,34 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     pushOutcome(outcomes, actor, candidate, "passive_action_recorded", "action declared no spatial or object mutation fields");
   }
 
+  const spatialActionOutcomes = cloneJson(outcomes);
+  const timelineArbitration = arbitrateWorldSimulationGlobalTimeline({
+    world_state: snapshot,
+    next_world_state: next,
+    scene_id: sceneId,
+    event,
+    turn_id: input.turn_id ?? null,
+    selected_action_intents: selectedActionIntents,
+    resolved_action_outcomes: spatialActionOutcomes,
+    elapsed_ms: elapsedMs,
+  });
+  const suppressedActionIds = array(timelineArbitration.suppressed_action_ids);
+  for (const preemption of array(timelineArbitration.preemptions)) {
+    outcomes.push({
+      actor: preemption.actor ?? null,
+      action_id: preemption.action_id ?? null,
+      action: null,
+      result: "action_preempted_by_earlier_incapacitation",
+      causal_evidence: `${preemption.cause} at ${Number(preemption.preempted_at_ms).toFixed(3)}ms occurred before scheduled ${preemption.action_kind} execution at ${Number(preemption.scheduled_time_ms).toFixed(3)}ms`,
+      preempted_at_ms: preemption.preempted_at_ms,
+      scheduled_time_ms: preemption.scheduled_time_ms,
+      caused_by_actor: preemption.caused_by_actor ?? null,
+      caused_by_action_id: preemption.caused_by_action_id ?? null,
+      projectile_id: preemption.projectile_id ?? null,
+      adjudication: "programmatic_global_causal_timeline",
+    });
+  }
+
   const combatResolution = adjudicateWorldSimulationCombat({
     world_state: snapshot,
     next_world_state: next,
@@ -662,6 +697,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     event,
     selected_action_intents: selectedActionIntents,
     resolved_action_outcomes: outcomes,
+    suppressed_action_ids: suppressedActionIds,
   });
   next = combatResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
@@ -678,11 +714,19 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     selected_action_intents: selectedActionIntents,
     resolved_action_outcomes: outcomes,
     elapsed_ms: elapsedMs,
+    suppressed_action_ids: suppressedActionIds,
   });
   next = physicsResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   transitions.push(...array(physicsResolution.state_transitions));
   outcomes.push(...array(physicsResolution.action_outcomes));
+
+  const causalTimeline = buildResolvedWorldSimulationGlobalTimeline({
+    arbitration: timelineArbitration,
+    spatial_action_outcomes: spatialActionOutcomes,
+    combat_resolution: combatResolution,
+    physics_resolution: physicsResolution,
+  });
 
   const previousTime = snapshot.simulation_time ?? event.simulation_time ?? null;
   if (typeof previousTime === "string" && elapsedMs > 0) {
@@ -721,6 +765,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     selected_action_intents: selectedActionIntents,
     transitions,
     outcomes,
+    causal_timeline_hash: causalTimeline.timeline_hash,
   }).slice(0, 24)}`;
 
   return {
@@ -732,6 +777,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     knowledge_transitions: knowledgeTransitions,
     scheduled_events: scheduledEvents,
     object_holders: finalObjectHolders(next),
+    causal_timeline: causalTimeline,
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -742,6 +788,9 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       combat_causal_version: combatResolution.combat_causal_version,
       projectile_and_ability_physics_are_programmatic: true,
       continuous_physics_version: physicsResolution.continuous_physics_version,
+      cross_layer_point_events_ordered_by_global_timeline: true,
+      earlier_incapacitation_preempts_later_execution: true,
+      global_causal_timeline_version: causalTimeline.version,
     },
   };
 }

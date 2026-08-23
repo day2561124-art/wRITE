@@ -362,11 +362,13 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
   const spawned = [];
   const selectedActionIntents = array(input.selected_action_intents);
   nextWorldState.projectiles = object(nextWorldState.projectiles);
+  const suppressedActionIds = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
   for (const selected of selectedActionIntents) {
     const actor = String(selected?.character ?? "").trim();
     const candidate = object(selected?.candidate);
+    const actionId = String(candidate.action_id ?? "");
     const intent = object(candidate.projectile);
-    if (!actor || !Object.keys(intent).length) continue;
+    if (!actor || suppressedActionIds.has(actionId) || !Object.keys(intent).length) continue;
     const profile = weaponProjectileProfile(input.world_state, actor, intent);
     if (!profile.ok) {
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", profile.reason, { projectile_resolved: false });
@@ -430,11 +432,13 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
   const spawned = [];
   nextWorldState.ability_fields = object(nextWorldState.ability_fields);
   nextWorldState.characters = object(nextWorldState.characters);
+  const suppressedActionIds = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
   for (const selected of array(input.selected_action_intents)) {
     const actor = String(selected?.character ?? "").trim();
     const candidate = object(selected?.candidate);
+    const actionId = String(candidate.action_id ?? "");
     const intent = object(candidate.ability);
-    if (!actor || !Object.keys(intent).length) continue;
+    if (!actor || suppressedActionIds.has(actionId) || !Object.keys(intent).length) continue;
     const abilityId = String(intent.ability_id ?? intent.id ?? "").trim();
     const profile = abilityProfile(input.world_state, actor, abilityId);
     const fieldProfile = object(profile.field ?? profile.area_effect);
@@ -634,7 +638,7 @@ function resolveProjectile(input, projectile, activeStartMs, activeEndMs, nextWo
     if (event.kind === "bounds") {
       projectile.active = false;
       projectile.termination_reason = "left_scene_bounds";
-      resolutions.push({ projectile_id: projectile.projectile_id, result: "left_scene_bounds", time_ms: currentTimeMs, position: cloneJson(projectile.position) });
+      resolutions.push({ projectile_id: projectile.projectile_id, owner: projectile.owner, source_action_id: projectile.source_action_id, result: "left_scene_bounds", time_ms: currentTimeMs, position: cloneJson(projectile.position) });
       break;
     }
     if (event.kind === "obstacle") {
@@ -644,6 +648,8 @@ function resolveProjectile(input, projectile, activeStartMs, activeEndMs, nextWo
         projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
         resolutions.push({
           projectile_id: projectile.projectile_id,
+          owner: projectile.owner,
+          source_action_id: projectile.source_action_id,
           result: "projectile_penetrated_cover",
           obstacle_id: event.obstacleId,
           time_ms: currentTimeMs,
@@ -665,7 +671,7 @@ function resolveProjectile(input, projectile, activeStartMs, activeEndMs, nextWo
       projectile.active = false;
       projectile.termination_reason = "stopped_by_cover";
       projectile.remaining_penetration_energy = 0;
-      resolutions.push({ projectile_id: projectile.projectile_id, result: "projectile_stopped_by_cover", obstacle_id: event.obstacleId, time_ms: currentTimeMs });
+      resolutions.push({ projectile_id: projectile.projectile_id, owner: projectile.owner, source_action_id: projectile.source_action_id, result: "projectile_stopped_by_cover", obstacle_id: event.obstacleId, time_ms: currentTimeMs });
       pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_stopped_by_cover", `cover resistance ${impact.resistance} was not exceeded by projectile energy ${impact.beforeEnergy}`, {
         projectile_id: projectile.projectile_id,
         obstacle_id: event.obstacleId,
@@ -695,6 +701,8 @@ function resolveProjectile(input, projectile, activeStartMs, activeEndMs, nextWo
       projectile.remaining_penetration_energy = 0;
       resolutions.push({
         projectile_id: projectile.projectile_id,
+        owner: projectile.owner,
+        source_action_id: projectile.source_action_id,
         result: "projectile_hit_character",
         target: event.character,
         time_ms: currentTimeMs,
@@ -816,6 +824,44 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
   void rules;
 }
 
+
+export function buildWorldSimulationContinuousIntentTimelineEntries(input = {}) {
+  const suppressed = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
+  const entries = [];
+  for (const selected of array(input.selected_action_intents)) {
+    const actor = String(selected?.character ?? "").trim();
+    const candidate = object(selected?.candidate);
+    const actionId = String(candidate.action_id ?? "").trim();
+    if (!actor || !actionId || suppressed.has(actionId)) continue;
+    const projectile = object(candidate.projectile);
+    if (Object.keys(projectile).length) {
+      entries.push({
+        kind: "projectile_launch",
+        actor,
+        action_id: actionId,
+        time_ms: nonNegativeNumber(projectile.fire_delay_ms, 0),
+        target: String(projectile.target_character ?? projectile.target ?? candidate.target ?? "").trim() || null,
+      });
+    }
+    const ability = object(candidate.ability);
+    if (Object.keys(ability).length) {
+      entries.push({
+        kind: "ability_activation",
+        actor,
+        action_id: actionId,
+        time_ms: nonNegativeNumber(ability.start_delay_ms, 0),
+        ability_id: String(ability.ability_id ?? ability.id ?? "").trim() || null,
+      });
+    }
+  }
+  return entries.sort((left, right) => (
+    left.time_ms - right.time_ms
+    || left.kind.localeCompare(right.kind)
+    || left.actor.localeCompare(right.actor, "zh-Hant-TW")
+    || left.action_id.localeCompare(right.action_id)
+  ));
+}
+
 export function buildWorldSimulationContinuousPhysicsContract() {
   return {
     version: worldSimulationContinuousPhysicsVersion,
@@ -922,6 +968,24 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
     action_outcomes: outcomes,
     projectile_resolutions: projectileResolutions,
     ability_resolutions: abilityResolutions,
+    timeline_entries: [
+      ...buildWorldSimulationContinuousIntentTimelineEntries({ ...input, world_state: snapshot }),
+      ...projectileResolutions.map((resolution) => ({
+        kind: "projectile_resolution",
+        actor: resolution.owner ?? null,
+        action_id: resolution.source_action_id ?? null,
+        projectile_id: resolution.projectile_id ?? null,
+        result: resolution.result ?? null,
+        target: resolution.target ?? null,
+        obstacle_id: resolution.obstacle_id ?? null,
+        time_ms: nonNegativeNumber(resolution.time_ms, 0),
+      })),
+    ].sort((left, right) => (
+      left.time_ms - right.time_ms
+      || String(left.kind ?? "").localeCompare(String(right.kind ?? ""))
+      || String(left.actor ?? "").localeCompare(String(right.actor ?? ""), "zh-Hant-TW")
+      || String(left.action_id ?? "").localeCompare(String(right.action_id ?? ""))
+    )),
     elapsed_ms: elapsedMs,
     boundary: {
       projectile_collision_is_programmatic: true,
