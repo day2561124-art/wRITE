@@ -3,6 +3,11 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs";
+import {
+  assertNeuralSessionCreationShape,
+  assertNeuralSessionRunShape,
+  neuralSessionModes,
+} from "./shared-neural-core-service.mjs";
 
 export const agentRunIdPattern = /^agent_run_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const gptWritingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
@@ -185,6 +190,11 @@ export async function createAgentRun(input = {}, options = {}) {
   const runId = `agent_run_${isoStamp()}-${randomBytes(4).toString("hex")}`;
   const createdAt = new Date().toISOString();
   const mode = input.mode ? requireString(input.mode, "mode", 50) : "local";
+  const sessionMode = assertNeuralSessionCreationShape({
+    session_mode: input.session_mode,
+    task_type: taskType,
+    mode,
+  });
   const writingContextBundleId = input.writing_context_bundle_id === undefined
     ? null
     : requireString(input.writing_context_bundle_id, "writing_context_bundle_id", 100);
@@ -197,6 +207,7 @@ export async function createAgentRun(input = {}, options = {}) {
     created_at: createdAt,
     created_by: input.created_by ? requireString(input.created_by, "created_by", 100) : "local_ui",
     mode,
+    ...(sessionMode ? { session_mode: sessionMode } : {}),
     ...(mode === "chatgpt_owned_external_brain" ? {
       external_brain_session_id: runId,
       session_lifecycle_status: "ACTIVE",
@@ -260,6 +271,9 @@ export async function updateAgentRunStatus(runId, status, updates = {}, options 
     throw new Error(`status must be one of: ${[...runStatuses].join(", ")}.`);
   }
   requireObject(updates, "agent run updates");
+  if (Object.hasOwn(updates, "session_mode")) {
+    throw new Error("session_mode is immutable after agent run creation.");
+  }
   const run = await getAgentRun(runId, options);
   const next = {
     ...run,
@@ -373,7 +387,8 @@ function validIsoTimestamp(value, label) {
 export async function recordExternalBrainSessionActivity(runId, input = {}, options = {}) {
   requireObject(input, "external brain session activity");
   const run = await getAgentRun(runId, options);
-  if (run.mode !== "chatgpt_owned_external_brain" || run.external_brain_session_id !== run.run_id) {
+  assertNeuralSessionRunShape(run, neuralSessionModes.WRITING);
+  if (run.external_brain_session_id !== run.run_id) {
     throw new Error("run_id is not a ChatGPT-owned external brain session.");
   }
   const activityAt = input.activity_at
@@ -404,7 +419,8 @@ export async function transitionExternalBrainSessionLifecycle(runId, lifecycleSt
   }
   requireObject(input, "external brain lifecycle transition");
   const run = await getAgentRun(runId, options);
-  if (run.mode !== "chatgpt_owned_external_brain" || run.external_brain_session_id !== run.run_id) {
+  assertNeuralSessionRunShape(run, neuralSessionModes.WRITING);
+  if (run.external_brain_session_id !== run.run_id) {
     throw new Error("run_id is not a ChatGPT-owned external brain session.");
   }
   const transitionedAt = input.transitioned_at

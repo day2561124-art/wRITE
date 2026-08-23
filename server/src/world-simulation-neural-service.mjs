@@ -5,6 +5,11 @@ import {
   hashNeuralValue,
   recordNeuralWrapperTrace,
 } from "./neural-trace-service.mjs";
+import {
+  assertNeuralSessionRunShape,
+  invokeSharedNeuralCoreAdapter,
+  neuralSessionModes,
+} from "./shared-neural-core-service.mjs";
 
 export const worldSimulationCapabilityNames = Object.freeze([
   "world_scene_causal_analyzer",
@@ -685,9 +690,10 @@ export async function runWorldSimulationCapability(
     ? { fixtureRoot: options.fixtureRoot }
     : {};
   const run = await getAgentRun(runId, runOptions);
-  if (run.task_type !== "world_simulation") {
-    throw new Error("World simulation neural capabilities require a world_simulation agent run.");
-  }
+  assertNeuralSessionRunShape(
+    run,
+    neuralSessionModes.WORLD_SIMULATION,
+  );
 
   const calledAt = new Date().toISOString();
   const startedAt = performance.now();
@@ -696,6 +702,7 @@ export async function runWorldSimulationCapability(
   const modelName = options.model_name ?? spec.model_name;
   const modelVersion = options.model_version ?? spec.model_version;
   let output = null;
+  let sharedNeuralCore = null;
   let status = "success";
   let errorMessage = null;
   let warnings = [];
@@ -704,14 +711,23 @@ export async function runWorldSimulationCapability(
     const adapter = typeof options.adapter === "function"
       ? options.adapter
       : async (value) => builder(value);
-    output = await adapter(input, {
-      run_id: runId,
-      task_type: "world_simulation",
+    const invocation = await invokeSharedNeuralCoreAdapter({
+      run,
+      session_mode: neuralSessionModes.WORLD_SIMULATION,
       capability_name: capabilityName,
-      model_name: modelName,
-      model_version: modelVersion,
-      permissions: worldSimulationCommonPermissions,
+      input,
+      adapter,
+      adapter_context: {
+        run_id: runId,
+        task_type: "world_simulation",
+        capability_name: capabilityName,
+        model_name: modelName,
+        model_version: modelVersion,
+        permissions: worldSimulationCommonPermissions,
+      },
     });
+    output = invocation.output;
+    sharedNeuralCore = invocation.descriptor;
     if (!isObject(output)) {
       throw new Error("World simulation capability output must be an object.");
     }
@@ -749,12 +765,17 @@ export async function runWorldSimulationCapability(
       chars: inputText.length,
       source: options.source ?? "world_simulation_bridge",
       domain: "world_simulation",
+      session_mode: neuralSessionModes.WORLD_SIMULATION,
+      shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
+      shared_capability_family: sharedNeuralCore?.capability_family ?? null,
     },
     output_summary: {
       chars: serializedOutput.length,
       result_type: spec.result_type,
       domain: "world_simulation",
       mutates_world_state: false,
+      shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
+      shared_capability_family: sharedNeuralCore?.capability_family ?? null,
     },
   }, runOptions);
 
@@ -765,6 +786,7 @@ export async function runWorldSimulationCapability(
   return {
     output,
     trace,
+    shared_neural_core: sharedNeuralCore,
     mutation_guards: { ...worldSimulationCommonPermissions },
   };
 }

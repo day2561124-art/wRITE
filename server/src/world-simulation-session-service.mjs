@@ -7,8 +7,14 @@ import {
   worldSimulationCapabilityNames,
   worldSimulationCommonPermissions,
 } from "./world-simulation-neural-service.mjs";
+import {
+  assertNeuralSessionRunShape,
+  buildSharedNeuralCoreRegistry,
+  neuralSessionModes,
+  sharedNeuralCoreVersion,
+} from "./shared-neural-core-service.mjs";
 
-export const worldSimulationSessionVersion = "phase62a-world-simulation-session-v1";
+export const worldSimulationSessionVersion = "phase62b-world-simulation-session-v2";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -33,6 +39,7 @@ export async function beginWorldSimulationSession(input = {}, options = {}) {
   const run = await createAgentRun({
     task_type: "world_simulation",
     mode: "chatgpt_owned_world_simulation",
+    session_mode: neuralSessionModes.WORLD_SIMULATION,
     created_by: "chatgpt_world_simulation_bridge",
     requires_neural_modules: false,
     required_neural_modules: [],
@@ -42,6 +49,14 @@ export async function beginWorldSimulationSession(input = {}, options = {}) {
     ok: true,
     architecture_route: "chatgpt_owned_world_simulation",
     session_version: worldSimulationSessionVersion,
+    session_mode: neuralSessionModes.WORLD_SIMULATION,
+    shared_neural_core: {
+      core_version: sharedNeuralCoreVersion,
+      mode_locked: true,
+      character_cognition_family:
+        buildSharedNeuralCoreRegistry().modes.world_simulation
+          .capabilities.world_character_cognition,
+    },
     world_simulation_session_id: run.run_id,
     orchestration_owner: "ChatGPT",
     world_state_owner: "programmatic_world_simulator",
@@ -56,12 +71,10 @@ export async function assertWorldSimulationSession(sessionId, options = {}) {
     ? { fixtureRoot: options.fixtureRoot }
     : {};
   const run = await getAgentRun(sessionId, agentRunOptions);
-  if (run.task_type !== "world_simulation") {
-    throw new Error("world_simulation_session_id does not reference a world_simulation run.");
-  }
-  if (run.mode !== "chatgpt_owned_world_simulation") {
-    throw new Error("world_simulation_session_id is not a ChatGPT-owned world simulation session.");
-  }
+  assertNeuralSessionRunShape(
+    run,
+    neuralSessionModes.WORLD_SIMULATION,
+  );
   return run;
 }
 
@@ -87,6 +100,8 @@ export async function useWorldSimulationCapability(
     architecture_route: "chatgpt_owned_world_simulation",
     world_simulation_session_id: sessionId,
     capability_name: capabilityName,
+    session_mode: neuralSessionModes.WORLD_SIMULATION,
+    shared_neural_core: execution.shared_neural_core,
     output: execution.output,
     trace: execution.trace,
     mutation_guards: execution.mutation_guards,

@@ -66,6 +66,12 @@ import {
 import {
   formalWritingAuthorityContract,
 } from "./formal-writing-contracts.mjs";
+import {
+  assertNeuralSessionRunShape,
+  buildSharedNeuralCoreRegistry,
+  neuralSessionModes,
+  sharedNeuralCoreVersion,
+} from "./shared-neural-core-service.mjs";
 
 // Phase48 compatibility vocabulary retained in source-level contracts only:
 // hard_risk_scope; inactive_without_draft_evidence; do not convert diagnostics into prose requirements;
@@ -652,6 +658,14 @@ function blockedDirectorResponse({ runId, contextBundleId, run, continuity, reas
     ok: false,
     tool_name: "chatgpt_bridge_use_writing_card_director",
     architecture_route: externalBrainOwnership.orchestration_mode,
+    session_mode: neuralSessionModes.WRITING,
+    shared_neural_core: {
+      core_version: sharedNeuralCoreVersion,
+      mode_locked: true,
+      character_cognition_family:
+        buildSharedNeuralCoreRegistry().modes.writing
+          .capabilities.character_simulator,
+    },
     capability_name: "run_writing_card_director",
     generation_boundary: "pre_generation",
     orchestration_owner: "ChatGPT",
@@ -1108,6 +1122,30 @@ async function buildVerifiedGeneratedWorldEntityGrounding({
   });
 }
 
+export async function createChatgptOwnedWritingSessionRun(input = {}, options = {}) {
+  const writingContextBundleId = requiredText(
+    input.writing_context_bundle_id,
+    "writing_context_bundle_id",
+  );
+  return createAgentRun({
+    task_type: "draft_generation",
+    mode: externalBrainOwnership.orchestration_mode,
+    session_mode: neuralSessionModes.WRITING,
+    created_by: "chatgpt",
+    writing_context_bundle_id: writingContextBundleId,
+    requires_neural_modules: true,
+    required_neural_modules: [
+      ...externalBrainPreGenerationCapabilities,
+      "run_final_polisher",
+    ].map((name) => name.slice(4)),
+    input: JSON.stringify({
+      task_prompt: input.task_prompt ?? null,
+      writing_context_bundle_id: writingContextBundleId,
+      orchestration_owner: "chatgpt",
+    }),
+  }, options);
+}
+
 export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, options = {}) {
   const activeEngineOption =
     input.include_active_engine ?? input.includeActiveEngine;
@@ -1163,19 +1201,9 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
     persist_context: persistContext,
   }, options);
   const run = persistContext
-    ? await createAgentRun({
-      task_type: "draft_generation",
-      mode: externalBrainOwnership.orchestration_mode,
-      created_by: "chatgpt",
+    ? await createChatgptOwnedWritingSessionRun({
       writing_context_bundle_id: context.bundle.bundle_id,
-      requires_neural_modules: true,
-      required_neural_modules: [...externalBrainPreGenerationCapabilities, "run_final_polisher"]
-        .map((name) => name.slice(4)),
-      input: JSON.stringify({
-        task_prompt: input.task_prompt,
-        writing_context_bundle_id: context.bundle.bundle_id,
-        orchestration_owner: "chatgpt",
-      }),
+      task_prompt: input.task_prompt,
     }, options)
     : null;
   return {
@@ -1185,6 +1213,14 @@ export async function beginChatgptOwnedExternalBrainWritingSession(input = {}, o
       ? "ready_for_chatgpt_owned_orchestration"
       : "ephemeral_context_ready",
     architecture_route: externalBrainOwnership.orchestration_mode,
+    session_mode: neuralSessionModes.WRITING,
+    shared_neural_core: {
+      core_version: sharedNeuralCoreVersion,
+      mode_locked: true,
+      character_cognition_family:
+        buildSharedNeuralCoreRegistry().modes.writing
+          .capabilities.character_simulator,
+    },
     external_brain_session_id: run?.run_id ?? null,
     writing_context_bundle_id: persistContext
       ? context.bundle.bundle_id
@@ -1243,8 +1279,9 @@ async function missingPreGenerationCapabilities(runId, options = {}) {
 
 async function validateSealAuthority(runId, contextBundleId, options = {}) {
   const run = await getAgentRun(runId, options);
-  if (run.mode !== externalBrainOwnership.orchestration_mode) {
-    throw new Error("agent_run_id is not a ChatGPT-owned external brain writing session.");
+  assertNeuralSessionRunShape(run, neuralSessionModes.WRITING);
+  if (run.writing_context_bundle_id !== contextBundleId) {
+    throw new Error("writing_context_bundle_id does not belong to the supplied writing session.");
   }
   await getGptWritingContextBundle(contextBundleId, options);
   const missing = await missingPreGenerationCapabilities(runId, options);
@@ -1384,8 +1421,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
   const runId = requiredText(sessionId(input), "external_brain_session_id");
   const contextBundleId = requiredText(bundleId(input), "writing_context_bundle_id");
   const run = await getAgentRun(runId, options);
-  if (run.mode !== externalBrainOwnership.orchestration_mode) {
-    throw new Error("agent_run_id is not a ChatGPT-owned external brain writing session.");
+  assertNeuralSessionRunShape(run, neuralSessionModes.WRITING);
+  if (run.writing_context_bundle_id !== contextBundleId) {
+    throw new Error("writing_context_bundle_id does not belong to the supplied writing session.");
   }
   const context = await getGptWritingContextBundle(contextBundleId, options);
   const isFinalPolisher = capabilityName === "run_final_polisher";
@@ -1818,6 +1856,7 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     execution = await wrapper(capabilityInput, {
       run_id: runId,
       task_type: "draft_generation",
+      session_mode: neuralSessionModes.WRITING,
       source: "chatgpt_owned_external_brain_mcp",
       external_brain_cognition_output: priorAuthorshipCognitionModules.includes(capabilityName.slice(4)),
       story_material_cognition_output: shouldEnableStoryMaterialCognition(capabilityName, options),
@@ -1875,6 +1914,9 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
     architecture_route: externalBrainOwnership.orchestration_mode,
     capability_name: capabilityName,
     generation_boundary: generationBoundary,
+    session_mode: neuralSessionModes.WRITING,
+    shared_neural_core:
+      execution.control_plane?.shared_neural_core ?? null,
     orchestration_owner: "ChatGPT",
     prose_generator: "ChatGPT",
     full_neural_orchestrator_used: false,

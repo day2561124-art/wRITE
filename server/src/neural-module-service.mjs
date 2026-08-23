@@ -16,6 +16,11 @@ import {
   buildPostDraftNeuralCritique,
   buildPostDraftStyleDriftReport,
 } from "./post-draft-line-diagnostic-service.mjs";
+import {
+  buildSharedNeuralCoreDescriptor,
+  inferNeuralSessionModeFromRun,
+  invokeSharedNeuralCoreAdapter,
+} from "./shared-neural-core-service.mjs";
 
 const moduleSpecs = {
   scene_planner: {
@@ -461,6 +466,10 @@ async function runModule(moduleName, input, options = {}) {
   const run = await getAgentRun(runId, agentRunOptions);
   const taskType = options.task_type ?? run.task_type;
   if (taskType !== run.task_type) throw new Error("task_type must match the agent run.");
+  const sessionMode = options.session_mode ?? inferNeuralSessionModeFromRun(run);
+  const sharedNeuralCore = sessionMode
+    ? buildSharedNeuralCoreDescriptor(sessionMode, moduleName, run)
+    : null;
   const source = options.source ?? "local_ui";
   const calledAt = new Date().toISOString();
   const startedAt = performance.now();
@@ -498,13 +507,26 @@ async function runModule(moduleName, input, options = {}) {
     warnings = ["Local neural model adapter is not configured."];
   } else {
     try {
-      output = await options.adapter(input, {
+      const adapterContext = {
         run_id: runId,
         task_type: taskType,
         module_name: moduleName,
         model_name: modelName,
         model_version: modelVersion,
-      });
+      };
+      if (sharedNeuralCore) {
+        const invocation = await invokeSharedNeuralCoreAdapter({
+          run,
+          session_mode: sharedNeuralCore.session_mode,
+          capability_name: moduleName,
+          input,
+          adapter: options.adapter,
+          adapter_context: adapterContext,
+        });
+        output = invocation.output;
+      } else {
+        output = await options.adapter(input, adapterContext);
+      }
       persistedOutput = attachModuleContract(
         moduleName,
         input,
@@ -555,6 +577,11 @@ async function runModule(moduleName, input, options = {}) {
     input_summary: {
       chars: inputValue.length,
       source,
+      ...(sharedNeuralCore ? {
+        session_mode: sharedNeuralCore.session_mode,
+        shared_neural_core_version: sharedNeuralCore.core_version,
+        shared_capability_family: sharedNeuralCore.capability_family,
+      } : {}),
     },
     output_summary: {
       chars: persistedOutput === null ? 0 : outputText(persistedOutput).length,
@@ -562,6 +589,11 @@ async function runModule(moduleName, input, options = {}) {
       generation_surface_hash: generationSurfaceHash,
       generation_surface_compacted: generationSurfaceCompacted,
       result_type: spec.result_type,
+      ...(sharedNeuralCore ? {
+        session_mode: sharedNeuralCore.session_mode,
+        shared_neural_core_version: sharedNeuralCore.core_version,
+        shared_capability_family: sharedNeuralCore.capability_family,
+      } : {}),
     },
   }, agentRunOptions);
   if (
@@ -586,6 +618,7 @@ async function runModule(moduleName, input, options = {}) {
       persisted_output_hash: outputHash,
       generation_surface_hash: generationSurfaceHash,
       generation_surface_compacted: generationSurfaceCompacted,
+      ...(sharedNeuralCore ? { shared_neural_core: sharedNeuralCore } : {}),
     },
   };
 }

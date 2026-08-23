@@ -11852,6 +11852,12 @@ function compactExternalBrainBootstrapForMcp(result = {}) {
     architecture_route:
       result.architecture_route
       ?? "chatgpt_owned_external_brain",
+    session_mode: result.session_mode ?? "writing",
+    shared_neural_core:
+      result.shared_neural_core
+      && typeof result.shared_neural_core === "object"
+        ? { ...result.shared_neural_core }
+        : null,
     external_brain_session_id:
       result.external_brain_session_id ?? null,
     writing_context_bundle_id:
