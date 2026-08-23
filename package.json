@@ -30,7 +30,8 @@
     "test:phase62b": "node tests/phase62/phase62b-shared-neural-core-dual-mode-isolation.test.mjs",
     "test:phase62c": "node tests/phase62/phase62c-world-simulation-main-loop-integration.test.mjs",
     "test:phase62d": "node tests/phase62/phase62d-programmatic-spatial-causal-rule-engine.test.mjs",
-    "test:phase62e": "node tests/phase62/phase62e-programmatic-combat-causal-layer.test.mjs"
+    "test:phase62e": "node tests/phase62/phase62e-programmatic-combat-causal-layer.test.mjs",
+    "test:phase62f": "node tests/phase62/phase62f-continuous-projectile-ability-physics.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

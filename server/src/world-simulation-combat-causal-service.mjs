@@ -499,7 +499,7 @@ function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, t
   );
 }
 
-function applyInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions) {
+export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions) {
   if (damage <= 0) return { severity: "none", healthBefore: null, healthAfter: null };
   nextWorldState.characters = object(nextWorldState.characters);
   const snapshotCharacter = object(object(snapshot.characters)[target]);
@@ -596,6 +596,43 @@ function applyInjury(nextWorldState, snapshot, target, hitRegion, damage, damage
   currentCharacter.physical_state = physical;
   nextWorldState.characters[target] = currentCharacter;
   return { severity, healthBefore, healthAfter };
+}
+
+export function applyWorldSimulationCombatImpact(input = {}) {
+  const snapshot = object(input.world_state);
+  const nextWorldState = object(input.next_world_state);
+  const target = String(input.target ?? "").trim();
+  const hitRegion = String(input.hit_region ?? "torso").trim() || "torso";
+  const baseDamage = nonNegativeNumber(input.base_damage, 0);
+  const penetration = nonNegativeNumber(input.penetration, 0);
+  const damageType = String(input.damage_type ?? "impact");
+  const source = String(input.source ?? "programmatic_impact");
+  const rules = object(snapshot.world_rules ?? snapshot.rules);
+  const transitions = array(input.state_transitions);
+  const armor = input.ignore_armor === true
+    ? { absorption: 0, mitigationFraction: 0 }
+    : armorProfile(snapshot, target, hitRegion);
+  const mitigation = mitigateDamage(baseDamage, penetration, null, armor);
+  const injury = applyWorldSimulationCombatInjury(
+    nextWorldState,
+    snapshot,
+    target,
+    hitRegion,
+    mitigation.finalDamage,
+    damageType,
+    source,
+    rules,
+    transitions,
+  );
+  return {
+    base_damage: baseDamage,
+    damage_applied: mitigation.finalDamage,
+    armor_absorption: mitigation.armorAbsorption,
+    armor_mitigation_fraction: armor.mitigationFraction,
+    injury_severity: injury.severity,
+    health_before: injury.healthBefore,
+    health_after: injury.healthAfter,
+  };
 }
 
 export function buildWorldSimulationCombatCausalContract() {
@@ -764,7 +801,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       applyBarrierCapacity(nextWorldState, target, defense, defenseAbsorptionUsed, transitions, defenseCause);
     }
 
-    const injury = applyInjury(
+    const injury = applyWorldSimulationCombatInjury(
       nextWorldState,
       snapshot,
       target,

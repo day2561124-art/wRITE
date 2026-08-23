@@ -5,6 +5,10 @@ import {
   adjudicateWorldSimulationCombat,
   buildWorldSimulationCombatCausalContract,
 } from "./world-simulation-combat-causal-service.mjs";
+import {
+  adjudicateWorldSimulationContinuousPhysics,
+  buildWorldSimulationContinuousPhysicsContract,
+} from "./world-simulation-continuous-physics-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -227,6 +231,8 @@ function objectPosition(worldState, scene, objectState) {
 function actionKind(candidate) {
   if (isObject(candidate.door_interaction)) return "door_interaction";
   if (isObject(candidate.object_interaction)) return "object_interaction";
+  if (isObject(candidate.projectile)) return "projectile";
+  if (isObject(candidate.ability)) return "ability";
   if (isObject(candidate.attack)) return "attack";
   if (isObject(candidate.movement)) return "movement";
   if (isObject(candidate.defense)) return "defense";
@@ -348,7 +354,9 @@ function validateMovement(worldState, scene, actor, candidate, movementConflict)
     }
   }
   for (const raw of array(scene.obstacles)) {
-    const rectangle = rectangleForObstacle(raw);
+    const obstacle = object(raw);
+    if (obstacle.destroyed === true || obstacle.passable === true || obstacle.collision_enabled === false) continue;
+    const rectangle = rectangleForObstacle(obstacle);
     if (rectangle && segmentIntersectsRectangle(start, destination, rectangle)) {
       return {
         ok: false,
@@ -523,6 +531,7 @@ export function buildWorldSimulationCausalRuleContract() {
       range_validity_does_not_imply_hit: true,
       combat_causal_layer: buildWorldSimulationCombatCausalContract(),
     },
+    continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
     },
@@ -605,6 +614,21 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       elapsedMs = Math.max(elapsedMs, durationMs);
       continue;
     }
+    if (kind === "projectile" || kind === "ability") {
+      const durationMs = parseDurationMs(
+        candidate,
+        positiveNumber(rules.physics_action_seconds, 0.5) * 1000,
+      );
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      pushOutcome(
+        outcomes,
+        actor,
+        candidate,
+        "continuous_physics_intent_registered",
+        `${kind} intent registered; launch, resource use, collision, penetration, and persistent effects are resolved by the programmatic continuous-physics layer`,
+      );
+      continue;
+    }
     if (kind === "attack") {
       // Phase62E resolves attack timing/contact/damage jointly after all same-turn
       // movement/defense declarations have been validated from the turn-start snapshot.
@@ -644,6 +668,21 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   transitions.push(...array(combatResolution.state_transitions));
   outcomes.push(...array(combatResolution.action_outcomes));
   elapsedMs = Math.max(elapsedMs, finiteNumber(combatResolution.elapsed_ms, 0));
+
+  const physicsResolution = adjudicateWorldSimulationContinuousPhysics({
+    world_state: snapshot,
+    next_world_state: next,
+    scene_id: sceneId,
+    event,
+    turn_id: input.turn_id ?? null,
+    selected_action_intents: selectedActionIntents,
+    resolved_action_outcomes: outcomes,
+    elapsed_ms: elapsedMs,
+  });
+  next = physicsResolution.next_world_state;
+  nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  transitions.push(...array(physicsResolution.state_transitions));
+  outcomes.push(...array(physicsResolution.action_outcomes));
 
   const previousTime = snapshot.simulation_time ?? event.simulation_time ?? null;
   if (typeof previousTime === "string" && elapsedMs > 0) {
@@ -701,6 +740,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       combat_range_validity_does_not_equal_hit: true,
       combat_contact_damage_and_injury_are_programmatic: true,
       combat_causal_version: combatResolution.combat_causal_version,
+      projectile_and_ability_physics_are_programmatic: true,
+      continuous_physics_version: physicsResolution.continuous_physics_version,
     },
   };
 }
