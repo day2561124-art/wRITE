@@ -66,6 +66,24 @@ export function collectWorldSimulationInjuryRateEvents(input = {}) {
       injury_severity: outcome?.injury_severity ?? null,
     });
   }
+  for (const resolution of array(input.physics_resolution?.ability_resolutions)) {
+    if (resolution?.result !== "ability_field_tick") continue;
+    const target = String(resolution?.target ?? "").trim();
+    const damage = finiteNumber(resolution?.damage_applied, 0);
+    const healthAfter = finiteNumber(resolution?.health_after);
+    const timeMs = finiteNumber(resolution?.time_ms);
+    if (!target || damage <= 0 || healthAfter === null || healthAfter <= 0 || timeMs === null) continue;
+    events.push({
+      target,
+      time_ms: timeMs,
+      source_layer: "ability_field",
+      source_action_id: resolution?.source_action_id ?? null,
+      field_id: resolution?.field_id ?? null,
+      movement_multiplier_after: positiveNumber(resolution?.movement_multiplier_after, 1),
+      combat_multiplier_after: positiveNumber(resolution?.combat_multiplier_after, 1),
+      injury_severity: resolution?.injury_severity ?? null,
+    });
+  }
   return events.sort((left, right) => (
     left.time_ms - right.time_ms
     || left.target.localeCompare(right.target, "zh-Hant-TW")

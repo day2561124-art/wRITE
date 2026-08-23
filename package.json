@@ -33,7 +33,8 @@
     "test:phase62e": "node tests/phase62/phase62e-programmatic-combat-causal-layer.test.mjs",
     "test:phase62f": "node tests/phase62/phase62f-continuous-projectile-ability-physics.test.mjs",
     "test:phase62g": "node tests/phase62/phase62g-unified-global-causal-timeline.test.mjs",
-    "test:phase62h": "node tests/phase62/phase62h-dynamic-timeline-refinement.test.mjs"
+    "test:phase62h": "node tests/phase62/phase62h-dynamic-timeline-refinement.test.mjs",
+    "test:phase62i": "node tests/phase62/phase62i-continuous-actor-state-scheduler.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

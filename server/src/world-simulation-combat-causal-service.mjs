@@ -1,6 +1,9 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import {
+  positionAtWorldSimulationActorTrajectory,
+} from "./world-simulation-actor-state-scheduler.mjs";
 
 export const worldSimulationCombatCausalVersion = "phase62e-combat-causal-layer-v1";
 
@@ -114,7 +117,11 @@ function movementDestination(candidate, start) {
   return { x: start.x + dx, y: start.y + dy };
 }
 
-function positionAtCombatTime(snapshotScene, character, candidate, existingOutcomes, timeMs) {
+function positionAtCombatTime(snapshotScene, character, candidate, existingOutcomes, timeMs, actorTrajectories = {}) {
+  const trajectory = object(object(actorTrajectories)[character]);
+  if (Object.keys(trajectory).length) {
+    return positionAtWorldSimulationActorTrajectory(trajectory, timeMs);
+  }
   const start = positionFor(snapshotScene, character);
   if (!start) return null;
   if (!isObject(candidate.movement)) return start;
@@ -827,6 +834,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       targetCandidate,
       existingOutcomes,
       timeline.contactTimeMs,
+      input.actor_trajectories,
     );
     const endpoint = attackEndpoint(actorPosition, targetStart, attack, profile.rangeM);
     if (!targetAtContact || !endpoint) {

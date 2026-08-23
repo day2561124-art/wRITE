@@ -2,6 +2,11 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 import {
+  positionAtWorldSimulationActorTrajectory,
+  velocityAtWorldSimulationActorTrajectory,
+  worldSimulationActorTrajectoryBreakpoints,
+} from "./world-simulation-actor-state-scheduler.mjs";
+import {
   applyWorldSimulationCombatImpact,
 } from "./world-simulation-combat-causal-service.mjs";
 
@@ -127,7 +132,22 @@ function selectedCandidateFor(selectedActionIntents, character) {
   return found ? object(found.candidate) : {};
 }
 
-function movementProfile(snapshotScene, nextScene, selectedActionIntents, outcomes, character) {
+function movementProfile(snapshotScene, nextScene, selectedActionIntents, outcomes, character, actorTrajectories = {}) {
+  const trajectory = object(object(actorTrajectories)[character]);
+  if (Object.keys(trajectory).length) {
+    const start = point(trajectory.start);
+    const end = point(trajectory.final_position ?? trajectory.destination) ?? start;
+    const completion = finiteNumber(trajectory.completion_time_ms);
+    const interrupted = finiteNumber(trajectory.interrupted_at_ms);
+    const durationMs = completion ?? interrupted ?? 0;
+    return {
+      start,
+      end,
+      durationMs,
+      trajectory,
+      breakpoints: worldSimulationActorTrajectoryBreakpoints(trajectory),
+    };
+  }
   const start = scenePosition(snapshotScene, character);
   if (!start) return null;
   const candidate = selectedCandidateFor(selectedActionIntents, character);
@@ -140,6 +160,9 @@ function movementProfile(snapshotScene, nextScene, selectedActionIntents, outcom
 
 function positionAt(profile, timeMs) {
   if (!profile) return null;
+  if (Object.keys(object(profile.trajectory)).length) {
+    return positionAtWorldSimulationActorTrajectory(profile.trajectory, timeMs);
+  }
   if (profile.durationMs <= 0) return profile.start;
   const ratio = Math.min(1, Math.max(0, timeMs / profile.durationMs));
   return {
@@ -149,7 +172,11 @@ function positionAt(profile, timeMs) {
 }
 
 function velocityDuring(profile, timeMs) {
-  if (!profile || profile.durationMs <= 0 || timeMs >= profile.durationMs) return { x: 0, y: 0 };
+  if (!profile) return { x: 0, y: 0 };
+  if (Object.keys(object(profile.trajectory)).length) {
+    return velocityAtWorldSimulationActorTrajectory(profile.trajectory, timeMs);
+  }
+  if (profile.durationMs <= 0 || timeMs >= profile.durationMs) return { x: 0, y: 0 };
   const seconds = profile.durationMs / 1000;
   return {
     x: (profile.end.x - profile.start.x) / seconds,
@@ -176,6 +203,9 @@ function movingCharacterContact(projectile, profile, startMs, endMs, targetRadiu
   const projectileRadius = positiveNumber(projectile.radius_m, 0.05);
   const radius = projectileRadius + targetRadius;
   const boundaries = [startMs, endMs];
+  for (const breakpoint of array(profile?.breakpoints)) {
+    if (breakpoint > startMs && breakpoint < endMs) boundaries.push(breakpoint);
+  }
   if (profile?.durationMs > startMs && profile.durationMs < endMs) boundaries.push(profile.durationMs);
   boundaries.sort((a, b) => a - b);
   for (let index = 0; index < boundaries.length - 1; index += 1) {
@@ -557,6 +587,7 @@ function characterEntry(input, projectile, startMs, endMs, snapshotScene, nextSc
       input.selected_action_intents,
       input.resolved_action_outcomes,
       character,
+      input.actor_trajectories,
     );
     if (!profile) continue;
     const contactTimeMs = movingCharacterContact(
@@ -836,6 +867,9 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
 function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
   if (!profile || endMs <= startMs) return 0;
   const boundaries = [startMs, endMs];
+  for (const breakpoint of array(profile?.breakpoints)) {
+    if (breakpoint > startMs && breakpoint < endMs) boundaries.push(breakpoint);
+  }
   if (profile.durationMs > startMs && profile.durationMs < endMs) boundaries.push(profile.durationMs);
   boundaries.sort((a, b) => a - b);
   let insideMs = 0;
@@ -878,6 +912,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
   nextWorldState.ability_fields = object(nextWorldState.ability_fields);
   const newStart = new Map(newFields.map((item) => [item.fieldId, item.activeAfterMs]));
   const rules = object(input.world_state.world_rules ?? input.world_state.rules);
+  const defaultTickMs = positiveNumber(rules.ability_field_tick_ms, 100);
   for (const [fieldId, rawField] of Object.entries(nextWorldState.ability_fields)) {
     const field = object(rawField);
     if (field.active !== true || String(field.scene_id ?? "") !== input.scene_id) continue;
@@ -890,44 +925,107 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
     if (!center || !radius) continue;
     const effect = object(field.effect);
     const dps = nonNegativeNumber(effect.damage_per_second, 0);
+    const tickMs = positiveNumber(field.tick_ms ?? effect.tick_ms, defaultTickMs);
+    const profiles = new Map();
+    const exposureTotals = new Map();
     for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
-      if (character === field.owner && field.affects_owner !== true) continue;
-      const profile = movementProfile(snapshotScene, nextScene, input.selected_action_intents, input.resolved_action_outcomes, character);
-      const insideMs = timeInsideStaticCircle(profile, center, radius, startMs, startMs + activeMs);
-      if (insideMs <= 0 || dps <= 0) continue;
-      const rawDamage = dps * insideMs / 1000;
-      const impact = applyWorldSimulationCombatImpact({
-        world_state: input.world_state,
-        next_world_state: nextWorldState,
-        target: character,
-        hit_region: "whole_body",
-        base_damage: rawDamage,
-        penetration: nonNegativeNumber(effect.penetration, 0),
-        damage_type: effect.damage_type,
-        source: fieldId,
-        ignore_armor: effect.ignore_armor === true,
-        state_transitions: transitions,
-      });
-      resolutions.push({ field_id: fieldId, result: "ability_field_applied", target: character, inside_ms: insideMs, damage_applied: impact.damage_applied });
-      pushOutcome(outcomes, field.owner, { action_id: field.source_action_id, intent: null }, "ability_field_applied", `${character} occupied field ${fieldId} for ${insideMs.toFixed(3)}ms`, {
+      profiles.set(character, movementProfile(
+        snapshotScene,
+        nextScene,
+        input.selected_action_intents,
+        input.resolved_action_outcomes,
+        character,
+        input.actor_trajectories,
+      ));
+    }
+
+    let tickStartMs = startMs;
+    const fieldEndMs = startMs + activeMs;
+    let tickIndex = 0;
+    while (tickStartMs < fieldEndMs - 1e-9) {
+      tickIndex += 1;
+      const tickEndMs = Math.min(fieldEndMs, tickStartMs + tickMs);
+      for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
+        if (character === field.owner && field.affects_owner !== true) continue;
+        const profile = profiles.get(character);
+        const insideMs = timeInsideStaticCircle(profile, center, radius, tickStartMs, tickEndMs);
+        if (insideMs <= 0 || dps <= 0) continue;
+        const rawDamage = dps * insideMs / 1000;
+        const impact = applyWorldSimulationCombatImpact({
+          world_state: input.world_state,
+          next_world_state: nextWorldState,
+          target: character,
+          hit_region: "whole_body",
+          base_damage: rawDamage,
+          penetration: nonNegativeNumber(effect.penetration, 0),
+          damage_type: effect.damage_type,
+          source: fieldId,
+          ignore_armor: effect.ignore_armor === true,
+          state_transitions: transitions,
+        });
+        resolutions.push({
+          field_id: fieldId,
+          owner: field.owner,
+          source_action_id: field.source_action_id ?? null,
+          result: "ability_field_tick",
+          target: character,
+          tick_index: tickIndex,
+          tick_start_ms: tickStartMs,
+          time_ms: tickEndMs,
+          inside_ms: insideMs,
+          damage_applied: impact.damage_applied,
+          health_before: impact.health_before,
+          health_after: impact.health_after,
+          injury_severity: impact.injury_severity,
+          movement_multiplier_after: impact.movement_multiplier_after,
+          combat_multiplier_after: impact.combat_multiplier_after,
+        });
+        pushOutcome(outcomes, field.owner, { action_id: field.source_action_id, intent: null }, "ability_field_tick", `${character} occupied field ${fieldId} for ${insideMs.toFixed(3)}ms during tick ${tickIndex}`, {
+          ability_field_id: fieldId,
+          target: character,
+          tick_index: tickIndex,
+          tick_start_ms: tickStartMs,
+          time_ms: tickEndMs,
+          inside_ms: insideMs,
+          damage_applied: impact.damage_applied,
+          health_before: impact.health_before,
+          health_after: impact.health_after,
+          injury_severity: impact.injury_severity,
+          movement_multiplier_after: impact.movement_multiplier_after,
+          combat_multiplier_after: impact.combat_multiplier_after,
+        });
+        const previousExposure = exposureTotals.get(character) ?? { inside_ms: 0, damage_applied: 0, health_before: impact.health_before, health_after: impact.health_after };
+        previousExposure.inside_ms += insideMs;
+        previousExposure.damage_applied += impact.damage_applied;
+        previousExposure.health_after = impact.health_after;
+        exposureTotals.set(character, previousExposure);
+      }
+      tickStartMs = tickEndMs;
+    }
+
+    for (const [character, total] of exposureTotals.entries()) {
+      pushOutcome(outcomes, field.owner, { action_id: field.source_action_id, intent: null }, "ability_field_applied", `${character} occupied field ${fieldId} for ${total.inside_ms.toFixed(3)}ms across deterministic ticks`, {
         ability_field_id: fieldId,
         target: character,
-        inside_ms: insideMs,
-        damage_applied: impact.damage_applied,
-        health_before: impact.health_before,
-        health_after: impact.health_after,
+        inside_ms: total.inside_ms,
+        damage_applied: total.damage_applied,
+        health_before: total.health_before,
+        health_after: total.health_after,
+        ticked: true,
       });
     }
+
     const beforeRemaining = nonNegativeNumber(field.remaining_ms, 0);
     field.remaining_ms = Math.max(0, beforeRemaining - activeMs);
     if (field.remaining_ms <= 0) {
       field.active = false;
       field.termination_reason = "duration_expired";
     }
-    pushTransition(transitions, fieldId, "remaining_ms", beforeRemaining, field.remaining_ms, `ability field advanced ${activeMs}ms through continuous physics`);
+    field.last_advanced_ms = elapsedMs;
+    field.tick_ms = tickMs;
+    pushTransition(transitions, fieldId, "remaining_ms", beforeRemaining, field.remaining_ms, `ability field advanced ${activeMs}ms through deterministic ${tickMs}ms exposure ticks`);
     nextWorldState.ability_fields[fieldId] = field;
   }
-  void rules;
 }
 
 
@@ -1007,6 +1105,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
       activation_energy_cost_enforced: true,
       area_fields_persist_across_turns: true,
       moving_character_exposure_integrated_over_time: true,
+      deterministic_field_ticks: true,
+      field_ticks_sample_piecewise_actor_trajectory: true,
     },
     topology: {
       destructible_cover_updates_scene_obstacle_state: true,
@@ -1014,7 +1114,7 @@ export function buildWorldSimulationContinuousPhysicsContract() {
       projectile_collisions_resolve_in_global_time_order: true,
       earlier_cover_destruction_changes_later_projectile_paths: true,
     },
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Exact-timestamp contacts retain their pre-timestamp collision candidates; field-damage microticks and partial movement interruption remain later refinements.",
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62I adds deterministic ability-field ticks and piecewise actor trajectories; exact cross-type simultaneity still uses deterministic subsystem reconciliation rather than an infinitesimal-step solver.",
   };
 }
 
@@ -1082,6 +1182,17 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
         result: resolution.result ?? null,
         target: resolution.target ?? null,
         obstacle_id: resolution.obstacle_id ?? null,
+        time_ms: nonNegativeNumber(resolution.time_ms, 0),
+      })),
+      ...abilityResolutions.map((resolution) => ({
+        kind: "ability_field_tick",
+        actor: resolution.owner ?? null,
+        action_id: resolution.source_action_id ?? null,
+        field_id: resolution.field_id ?? null,
+        result: resolution.result ?? null,
+        target: resolution.target ?? null,
+        damage_applied: resolution.damage_applied ?? 0,
+        health_after: resolution.health_after ?? null,
         time_ms: nonNegativeNumber(resolution.time_ms, 0),
       })),
     ].sort((left, right) => (

@@ -14,6 +14,11 @@ import {
   buildResolvedWorldSimulationGlobalTimeline,
   buildWorldSimulationGlobalCausalTimelineContract,
 } from "./world-simulation-global-causal-timeline-service.mjs";
+import {
+  applyWorldSimulationActorTrajectories,
+  buildWorldSimulationActorStateContract,
+  reconcileWorldSimulationMovementOutcomes,
+} from "./world-simulation-actor-state-scheduler.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -538,6 +543,7 @@ export function buildWorldSimulationCausalRuleContract() {
     },
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
+    continuous_actor_state: buildWorldSimulationActorStateContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -662,7 +668,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     pushOutcome(outcomes, actor, candidate, "passive_action_recorded", "action declared no spatial or object mutation fields");
   }
 
-  const spatialActionOutcomes = cloneJson(outcomes);
+  const spatialPreviewOutcomes = cloneJson(outcomes);
   const timelineArbitration = arbitrateWorldSimulationGlobalTimeline({
     world_state: snapshot,
     next_world_state: next,
@@ -670,16 +676,46 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     event,
     turn_id: input.turn_id ?? null,
     selected_action_intents: selectedActionIntents,
-    resolved_action_outcomes: spatialActionOutcomes,
+    resolved_action_outcomes: spatialPreviewOutcomes,
     elapsed_ms: elapsedMs,
   });
   const suppressedActionIds = array(timelineArbitration.suppressed_action_ids);
   const actionTimeOverrides = object(timelineArbitration.action_time_overrides);
+  const actorTrajectories = object(timelineArbitration.actor_trajectories);
   for (const override of Object.values(actionTimeOverrides)) {
     for (const value of Object.values(object(override))) {
       elapsedMs = Math.max(elapsedMs, finiteNumber(value, 0));
     }
   }
+  for (const trajectory of Object.values(actorTrajectories)) {
+    const completion = finiteNumber(trajectory?.completion_time_ms);
+    const interrupted = finiteNumber(trajectory?.interrupted_at_ms);
+    if (completion !== null) elapsedMs = Math.max(elapsedMs, completion);
+    else if (interrupted !== null) elapsedMs = Math.max(elapsedMs, interrupted);
+  }
+  reconcileWorldSimulationMovementOutcomes(outcomes, actorTrajectories);
+  for (let index = transitions.length - 1; index >= 0; index -= 1) {
+    const transition = transitions[index];
+    if (transition?.field === "position" && Object.hasOwn(actorTrajectories, String(transition.entity ?? ""))) {
+      transitions.splice(index, 1);
+    }
+  }
+  nextScene.entity_positions = object(nextScene.entity_positions);
+  for (const [actor, trajectory] of Object.entries(actorTrajectories)) {
+    if (trajectory?.start) nextScene.entity_positions[actor] = cloneJson(trajectory.start);
+  }
+  if (isObject(next.scenes) && Object.hasOwn(next.scenes, sceneId)) next.scenes[sceneId] = nextScene;
+  else next.scene_state = nextScene;
+  const actorStateApplied = applyWorldSimulationActorTrajectories(
+    next,
+    sceneId,
+    actorTrajectories,
+    elapsedMs,
+    transitions,
+  );
+  next = actorStateApplied.next_world_state;
+  nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  const spatialActionOutcomes = cloneJson(outcomes);
   for (const preemption of array(timelineArbitration.preemptions)) {
     outcomes.push({
       actor: preemption.actor ?? null,
@@ -705,6 +741,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     resolved_action_outcomes: outcomes,
     suppressed_action_ids: suppressedActionIds,
     action_time_overrides: actionTimeOverrides,
+    actor_trajectories: actorTrajectories,
   });
   next = combatResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
@@ -723,11 +760,14 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     elapsed_ms: elapsedMs,
     suppressed_action_ids: suppressedActionIds,
     action_time_overrides: actionTimeOverrides,
+    actor_trajectories: actorTrajectories,
   });
   next = physicsResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   transitions.push(...array(physicsResolution.state_transitions));
   outcomes.push(...array(physicsResolution.action_outcomes));
+  applyWorldSimulationActorTrajectories(next, sceneId, actorTrajectories, elapsedMs, transitions);
+  nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
 
   const causalTimeline = buildResolvedWorldSimulationGlobalTimeline({
     arbitration: timelineArbitration,
@@ -800,6 +840,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       earlier_incapacitation_preempts_later_execution: true,
       global_causal_timeline_version: causalTimeline.version,
       timeline_refinement_version: causalTimeline.refinement_version,
+      actor_state_scheduler_version: causalTimeline.actor_state_scheduler_version,
       earlier_nonfatal_injury_can_delay_later_execution: true,
       earlier_topology_destruction_changes_later_projectile_paths: true,
     },
