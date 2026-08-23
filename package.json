@@ -42,7 +42,8 @@
     "test:phase62n": "node tests/phase62/phase62n-immutable-causal-effect-evaluators.test.mjs",
     "test:phase62o": "node tests/phase62/phase62o-immutable-physics-effect-evaluators.test.mjs",
     "test:phase62p": "node tests/phase62/phase62p-immutable-projectile-lifecycle.test.mjs",
-    "test:phase62q": "node tests/phase62/phase62q-immutable-ability-field-lifecycle.test.mjs"
+    "test:phase62q": "node tests/phase62/phase62q-immutable-ability-field-lifecycle.test.mjs",
+    "test:phase62r": "node tests/phase62/phase62r-immutable-event-discovery-queries.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

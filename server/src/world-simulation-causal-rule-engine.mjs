@@ -48,6 +48,10 @@ import {
   buildWorldSimulationImmutableAbilityFieldLifecycleContract,
   worldSimulationImmutableAbilityFieldLifecycleVersion,
 } from "./world-simulation-immutable-ability-field-lifecycle-service.mjs";
+import {
+  buildWorldSimulationImmutableEventQueryContract,
+  worldSimulationImmutableEventQueryVersion,
+} from "./world-simulation-immutable-event-query-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -711,6 +715,7 @@ export function buildWorldSimulationCausalRuleContract() {
     immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
     immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
     immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
+    immutable_event_queries: buildWorldSimulationImmutableEventQueryContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -732,6 +737,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   const mutationProposalBoundaryAudits = [];
   const pureProposalProducerAudits = [];
   const immutableCausalEvaluatorAudits = [];
+  const immutableCausalQueryAudits = [];
   let elapsedMs = 0;
 
   const spatialProduced = runWorldSimulationPureProposalProducer({
@@ -946,6 +952,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     mutation_proposals: cloneJson(physicsProduced.proposal_package.mutation_proposals),
   };
   immutableCausalEvaluatorAudits.push(...array(physicsResolution.immutable_causal_evaluator_audits));
+  immutableCausalQueryAudits.push(...array(physicsResolution.immutable_causal_query_audits));
   transitions.push(...array(physicsProduced.proposal_package.mutation_proposals));
   outcomes.push(...array(physicsResolution.action_outcomes));
   mutationProposalBoundaryAudits.push(physicsProduced.audit);
@@ -1164,6 +1171,15 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
         deterministic_replay_verified: audits.every((audit) => audit?.deterministic_replay_verified === true),
       };
     })(),
+    immutable_event_queries: {
+      version: worldSimulationImmutableEventQueryVersion,
+      audit_count: immutableCausalQueryAudits.length,
+      audits: immutableCausalQueryAudits,
+      query_inputs_immutable: immutableCausalQueryAudits.every((audit) => audit?.input_context_immutable === true),
+      query_outputs_contain_world_state: false,
+      query_outputs_contain_mutation_proposals: false,
+      deterministic_replay_verified: immutableCausalQueryAudits.every((audit) => audit?.deterministic_replay_verified === true),
+    },
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -1171,6 +1187,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       same_turn_actions_do_not_retroactively_change_each_others_preconditions: true,
       combat_range_validity_does_not_equal_hit: true,
       combat_contact_damage_and_injury_are_programmatic: true,
+      projectile_collision_and_field_exposure_discovery_are_immutable_read_only_queries: true,
       final_world_state_written_only_by_chronological_mutation_queue: true,
       subsystem_preview_states_not_used_as_inter_subsystem_authority: true,
       inter_subsystem_handoffs_use_executor_projection: true,

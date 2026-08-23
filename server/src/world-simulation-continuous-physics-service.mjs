@@ -33,6 +33,12 @@ import {
   projectWorldSimulationImmutableAbilityFieldLifecycleProposals,
   worldSimulationImmutableAbilityFieldLifecycleVersion,
 } from "./world-simulation-immutable-ability-field-lifecycle-service.mjs";
+import {
+  buildWorldSimulationImmutableEventQueryContract,
+  queryWorldSimulationAbilityFieldExposure,
+  queryWorldSimulationProjectileNextEvent,
+  worldSimulationImmutableEventQueryVersion,
+} from "./world-simulation-immutable-event-query-service.mjs";
 
 export const worldSimulationContinuousPhysicsVersion = "phase62f-continuous-physics-v1";
 
@@ -211,134 +217,6 @@ function velocityDuring(profile, timeMs) {
     x: (profile.end.x - profile.start.x) / seconds,
     y: (profile.end.y - profile.start.y) / seconds,
   };
-}
-
-function solveCircleContact(relativePosition, relativeVelocity, radius, maxSeconds) {
-  const c = relativePosition.x ** 2 + relativePosition.y ** 2 - radius ** 2;
-  if (c <= 0) return 0;
-  const a = relativeVelocity.x ** 2 + relativeVelocity.y ** 2;
-  if (a <= 1e-12) return null;
-  const b = 2 * (relativePosition.x * relativeVelocity.x + relativePosition.y * relativeVelocity.y);
-  const discriminant = b ** 2 - 4 * a * c;
-  if (discriminant < 0) return null;
-  const root = Math.sqrt(discriminant);
-  const candidates = [(-b - root) / (2 * a), (-b + root) / (2 * a)]
-    .filter((value) => value >= -1e-9 && value <= maxSeconds + 1e-9)
-    .sort((left, right) => left - right);
-  return candidates.length ? Math.max(0, candidates[0]) : null;
-}
-
-function movingCharacterContact(projectile, profile, startMs, endMs, targetRadius) {
-  const projectileRadius = positiveNumber(projectile.radius_m, 0.05);
-  const radius = projectileRadius + targetRadius;
-  const boundaries = [startMs, endMs];
-  for (const breakpoint of array(profile?.breakpoints)) {
-    if (breakpoint > startMs && breakpoint < endMs) boundaries.push(breakpoint);
-  }
-  if (profile?.durationMs > startMs && profile.durationMs < endMs) boundaries.push(profile.durationMs);
-  boundaries.sort((a, b) => a - b);
-  for (let index = 0; index < boundaries.length - 1; index += 1) {
-    const segmentStartMs = boundaries[index];
-    const segmentEndMs = boundaries[index + 1];
-    const seconds = (segmentEndMs - segmentStartMs) / 1000;
-    if (seconds <= 0) continue;
-    const projectileStart = {
-      x: projectile.position.x + projectile.velocity_mps.x * ((segmentStartMs - startMs) / 1000),
-      y: projectile.position.y + projectile.velocity_mps.y * ((segmentStartMs - startMs) / 1000),
-    };
-    const targetStart = positionAt(profile, segmentStartMs);
-    if (!targetStart) continue;
-    const targetVelocity = velocityDuring(profile, segmentStartMs);
-    const relativePosition = {
-      x: projectileStart.x - targetStart.x,
-      y: projectileStart.y - targetStart.y,
-    };
-    const relativeVelocity = {
-      x: projectile.velocity_mps.x - targetVelocity.x,
-      y: projectile.velocity_mps.y - targetVelocity.y,
-    };
-    const contactSeconds = solveCircleContact(relativePosition, relativeVelocity, radius, seconds);
-    if (contactSeconds !== null) return segmentStartMs + contactSeconds * 1000;
-  }
-  return null;
-}
-
-function rectangleForObstacle(raw, expansion = 0) {
-  const obstacle = object(raw);
-  const xMin = finiteNumber(obstacle.x_min ?? obstacle.left);
-  const xMax = finiteNumber(obstacle.x_max ?? obstacle.right);
-  const yMin = finiteNumber(obstacle.y_min ?? obstacle.top);
-  const yMax = finiteNumber(obstacle.y_max ?? obstacle.bottom);
-  if ([xMin, xMax, yMin, yMax].every((item) => item !== null)) {
-    return {
-      xMin: Math.min(xMin, xMax) - expansion,
-      xMax: Math.max(xMin, xMax) + expansion,
-      yMin: Math.min(yMin, yMax) - expansion,
-      yMax: Math.max(yMin, yMax) + expansion,
-    };
-  }
-  const center = point(obstacle.position ?? obstacle.center);
-  const width = finiteNumber(obstacle.width_m ?? obstacle.width);
-  const depth = finiteNumber(obstacle.depth_m ?? obstacle.depth ?? obstacle.height_m ?? obstacle.height);
-  if (!center || width === null || depth === null) return null;
-  return {
-    xMin: center.x - width / 2 - expansion,
-    xMax: center.x + width / 2 + expansion,
-    yMin: center.y - depth / 2 - expansion,
-    yMax: center.y + depth / 2 + expansion,
-  };
-}
-
-function segmentRectangleEntry(from, to, rectangle) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  let t0 = 0;
-  let t1 = 1;
-  const checks = [
-    [-dx, from.x - rectangle.xMin],
-    [dx, rectangle.xMax - from.x],
-    [-dy, from.y - rectangle.yMin],
-    [dy, rectangle.yMax - from.y],
-  ];
-  for (const [p, q] of checks) {
-    if (Math.abs(p) <= 1e-12) {
-      if (q < 0) return null;
-      continue;
-    }
-    const ratio = q / p;
-    if (p < 0) {
-      if (ratio > t1) return null;
-      if (ratio > t0) t0 = ratio;
-    } else {
-      if (ratio < t0) return null;
-      if (ratio < t1) t1 = ratio;
-    }
-  }
-  return t0 <= t1 ? Math.max(0, t0) : null;
-}
-
-function sceneBoundsExitTime(scene, projectile, startMs, endMs) {
-  const dimensions = object(scene.dimensions);
-  const width = positiveNumber(dimensions.width_m ?? dimensions.width, Number.POSITIVE_INFINITY);
-  const depth = positiveNumber(dimensions.depth_m ?? dimensions.depth, Number.POSITIVE_INFINITY);
-  const seconds = (endMs - startMs) / 1000;
-  const end = {
-    x: projectile.position.x + projectile.velocity_mps.x * seconds,
-    y: projectile.position.y + projectile.velocity_mps.y * seconds,
-  };
-  if (end.x >= 0 && end.y >= 0 && end.x <= width && end.y <= depth) return null;
-  const rect = { xMin: 0, xMax: width, yMin: 0, yMax: depth };
-  const dx = end.x - projectile.position.x;
-  const dy = end.y - projectile.position.y;
-  const candidates = [];
-  if (dx > 0 && Number.isFinite(width)) candidates.push((width - projectile.position.x) / dx);
-  if (dx < 0) candidates.push((0 - projectile.position.x) / dx);
-  if (dy > 0 && Number.isFinite(depth)) candidates.push((depth - projectile.position.y) / dy);
-  if (dy < 0) candidates.push((0 - projectile.position.y) / dy);
-  const t = candidates.filter((value) => value >= 0 && value <= 1).sort((a, b) => a - b)[0];
-  if (t === undefined) return null;
-  void rect;
-  return startMs + t * (endMs - startMs);
 }
 
 function characterRadius(worldState, character, rules) {
@@ -659,55 +537,6 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
   return spawned;
 }
 
-function obstacleEntry(scene, projectile, startMs, endMs) {
-  const durationSeconds = (endMs - startMs) / 1000;
-  const end = {
-    x: projectile.position.x + projectile.velocity_mps.x * durationSeconds,
-    y: projectile.position.y + projectile.velocity_mps.y * durationSeconds,
-  };
-  let best = null;
-  for (let index = 0; index < array(scene.obstacles).length; index += 1) {
-    const obstacle = object(scene.obstacles[index]);
-    const obstacleId = String(obstacle.id ?? obstacle.obstacle_id ?? `obstacle_${index}`);
-    if (obstacle.destroyed === true || obstacle.passable === true || obstacle.collision_enabled === false) continue;
-    if (array(projectile.penetrated_obstacles).includes(obstacleId)) continue;
-    const rectangle = rectangleForObstacle(obstacle, positiveNumber(projectile.radius_m, 0.05));
-    if (!rectangle) continue;
-    const fraction = segmentRectangleEntry(projectile.position, end, rectangle);
-    if (fraction === null) continue;
-    const timeMs = startMs + fraction * (endMs - startMs);
-    if (!best || timeMs < best.timeMs) best = { index, obstacleId, obstacle, timeMs };
-  }
-  return best;
-}
-
-function characterEntry(input, projectile, startMs, endMs, snapshotScene, nextScene) {
-  let best = null;
-  const rules = object(input.world_state.world_rules ?? input.world_state.rules);
-  for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
-    if (character === projectile.owner) continue;
-    const profile = movementProfile(
-      snapshotScene,
-      nextScene,
-      input.selected_action_intents,
-      input.resolved_action_outcomes,
-      character,
-      input.actor_trajectories,
-    );
-    if (!profile) continue;
-    const contactTimeMs = movingCharacterContact(
-      projectile,
-      profile,
-      startMs,
-      endMs,
-      characterRadius(input.world_state, character, rules),
-    );
-    if (contactTimeMs === null) continue;
-    if (!best || contactTimeMs < best.timeMs) best = { character, timeMs: contactTimeMs, profile };
-  }
-  return best;
-}
-
 function obstacleResistance(obstacle) {
   const material = object(obstacle.material);
   return nonNegativeNumber(
@@ -751,36 +580,40 @@ function updateObstacleAfterImpact(input, nextWorldState, nextScene, collision, 
   return cloneJson(evaluation.result);
 }
 
-function projectilePositionAt(projectile, deltaMs) {
-  return {
-    x: projectile.position.x + projectile.velocity_mps.x * (deltaMs / 1000),
-    y: projectile.position.y + projectile.velocity_mps.y * (deltaMs / 1000),
-  };
-}
-
 function nextProjectileTimelineStep(input, projectile, currentTimeMs, activeEndMs, snapshotScene, nextScene) {
-  const ageRemaining = Math.max(
-    0,
-    positiveNumber(projectile.max_lifetime_ms, 5000) - nonNegativeNumber(projectile.age_ms, 0),
-  );
-  if (ageRemaining <= 1e-9) {
-    return { kind: "lifetime", timeMs: currentTimeMs };
+  const rules = object(input.world_state.world_rules ?? input.world_state.rules);
+  const characterMotionProfiles = [];
+  for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
+    if (character === projectile.owner) continue;
+    const profile = movementProfile(
+      snapshotScene,
+      nextScene,
+      input.selected_action_intents,
+      input.resolved_action_outcomes,
+      character,
+      input.actor_trajectories,
+    );
+    if (!profile) continue;
+    characterMotionProfiles.push({
+      character,
+      target_radius_m: characterRadius(input.world_state, character, rules),
+      profile,
+    });
   }
-  const windowEndMs = Math.min(activeEndMs, currentTimeMs + ageRemaining);
-  const obstacle = obstacleEntry(nextScene, projectile, currentTimeMs, windowEndMs);
-  const character = characterEntry(input, projectile, currentTimeMs, windowEndMs, snapshotScene, nextScene);
-  const boundsTime = sceneBoundsExitTime(nextScene, projectile, currentTimeMs, windowEndMs);
-  const events = [
-    obstacle ? { kind: "obstacle", ...obstacle } : null,
-    character ? { kind: "character", ...character } : null,
-    boundsTime !== null ? { kind: "bounds", timeMs: boundsTime } : null,
-  ].filter(Boolean).sort((left, right) => (
-    left.timeMs - right.timeMs
-    || left.kind.localeCompare(right.kind)
-  ));
-  if (events.length) return events[0];
-  if (windowEndMs < activeEndMs - 1e-9) return { kind: "lifetime", timeMs: windowEndMs };
-  return { kind: "advance_end", timeMs: activeEndMs };
+  const query = queryWorldSimulationProjectileNextEvent({
+    projectile,
+    scene: nextScene,
+    character_motion_profiles: characterMotionProfiles,
+    current_time_ms: currentTimeMs,
+    active_end_ms: activeEndMs,
+  });
+  if (Array.isArray(input.immutable_causal_query_audits)) input.immutable_causal_query_audits.push(query.audit);
+  if (!query.result.ok || !query.result.event) {
+    const error = new Error(query.result.reason ?? `projectile ${projectile.projectile_id ?? "unknown"} event discovery failed`);
+    error.code = "WORLD_SIMULATION_PROJECTILE_EVENT_QUERY_FAILED";
+    throw error;
+  }
+  return cloneJson(query.result.event);
 }
 
 function advanceProjectileTimelineClock(input, state, nextWorldState, transitions, toMs) {
@@ -1033,50 +866,6 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
   return { iterations };
 }
 
-function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
-  if (!profile || endMs <= startMs) return 0;
-  const boundaries = [startMs, endMs];
-  for (const breakpoint of array(profile?.breakpoints)) {
-    if (breakpoint > startMs && breakpoint < endMs) boundaries.push(breakpoint);
-  }
-  if (profile.durationMs > startMs && profile.durationMs < endMs) boundaries.push(profile.durationMs);
-  boundaries.sort((a, b) => a - b);
-  let insideMs = 0;
-  for (let index = 0; index < boundaries.length - 1; index += 1) {
-    const aMs = boundaries[index];
-    const bMs = boundaries[index + 1];
-    const durationMs = bMs - aMs;
-    if (durationMs <= 0) continue;
-    const start = positionAt(profile, aMs);
-    const end = positionAt(profile, bMs);
-    if (!start || !end) continue;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const fx = start.x - center.x;
-    const fy = start.y - center.y;
-    const qa = dx * dx + dy * dy;
-    const qb = 2 * (fx * dx + fy * dy);
-    const qc = fx * fx + fy * fy - radius * radius;
-    if (qa <= 1e-12) {
-      if (qc <= 0) insideMs += durationMs;
-      continue;
-    }
-    const discriminant = qb * qb - 4 * qa * qc;
-    if (discriminant < 0) {
-      if (qc <= 0) insideMs += durationMs;
-      continue;
-    }
-    const root = Math.sqrt(discriminant);
-    const r1 = (-qb - root) / (2 * qa);
-    const r2 = (-qb + root) / (2 * qa);
-    const enter = Math.max(0, Math.min(r1, r2));
-    const exit = Math.min(1, Math.max(r1, r2));
-    if (exit > enter) insideMs += durationMs * (exit - enter);
-    else if (qc <= 0) insideMs += durationMs;
-  }
-  return insideMs;
-}
-
 function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, nextScene, elapsedMs, transitions, outcomes, resolutions) {
   nextWorldState.ability_fields = object(nextWorldState.ability_fields);
   const newStart = new Map(newFields.map((item) => [item.fieldId, item.activeAfterMs]));
@@ -1123,7 +912,18 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
       for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
         if (character === field.owner && field.affects_owner !== true) continue;
         const profile = profiles.get(character);
-        const insideMs = timeInsideStaticCircle(profile, center, radius, tickStartMs, tickEndMs);
+        const exposureQuery = queryWorldSimulationAbilityFieldExposure({
+          profile,
+          center,
+          radius_m: radius,
+          start_ms: tickStartMs,
+          end_ms: tickEndMs,
+          character,
+          field_id: fieldId,
+        });
+        if (Array.isArray(input.immutable_causal_query_audits)) input.immutable_causal_query_audits.push(exposureQuery.audit);
+        if (!exposureQuery.result.ok) continue;
+        const insideMs = nonNegativeNumber(exposureQuery.result.inside_ms, 0);
         if (insideMs <= 0 || dps <= 0) continue;
         const rawDamage = dps * insideMs / 1000;
         const impact = applyWorldSimulationCombatImpact({
@@ -1287,7 +1087,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
     immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
     immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
     immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62Q makes ability-field spawn, deterministic tick-window progression, remaining duration, and expiration immutable proposal evaluation; geometric exposure discovery remains programmatic.",
+    immutable_event_queries: buildWorldSimulationImmutableEventQueryContract(),
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62R moves projectile next-event discovery and ability-field geometric exposure into immutable deterministic read-only causal queries; global scheduling and broader spatial discovery remain programmatic.",
   };
 }
 
@@ -1303,11 +1104,13 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const projectileResolutions = [];
   const abilityResolutions = [];
   const immutableCausalEvaluatorAudits = [];
+  const immutableCausalQueryAudits = [];
   const physicsEffectInput = {
     ...input,
     world_state: snapshot,
     scene_id: sceneId,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
+    immutable_causal_query_audits: immutableCausalQueryAudits,
   };
 
   const spawnedProjectiles = spawnProjectiles(physicsEffectInput, nextWorldState, snapshotScene, transitions, outcomes);
@@ -1316,7 +1119,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   nextWorldState.projectiles = object(nextWorldState.projectiles);
 
   const projectileScheduler = resolveProjectilesInGlobalTimeOrder(
-    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits },
+    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits, immutable_causal_query_audits: immutableCausalQueryAudits },
     projectileStart,
     elapsedMs,
     nextWorldState,
@@ -1328,7 +1131,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   );
 
   resolveAbilityFields(
-    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits },
+    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits, immutable_causal_query_audits: immutableCausalQueryAudits },
     spawnedFields,
     nextWorldState,
     snapshotScene,
@@ -1355,6 +1158,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
     projectile_resolutions: projectileResolutions,
     ability_resolutions: abilityResolutions,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
+    immutable_causal_query_audits: immutableCausalQueryAudits,
     timeline_entries: [
       ...buildWorldSimulationContinuousIntentTimelineEntries({ ...input, world_state: snapshot }),
       ...projectileResolutions.map((resolution) => ({
@@ -1397,9 +1201,12 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       immutable_physics_effect_version: worldSimulationImmutablePhysicsEffectVersion,
       immutable_projectile_lifecycle_version: worldSimulationImmutableProjectileLifecycleVersion,
       immutable_ability_field_lifecycle_version: worldSimulationImmutableAbilityFieldLifecycleVersion,
+      immutable_event_query_version: worldSimulationImmutableEventQueryVersion,
       ammo_energy_spawn_and_cover_effects_are_immutable_proposal_evaluators: true,
       projectile_flight_penetration_and_termination_are_immutable_proposal_evaluators: true,
       ability_field_spawn_tick_progression_and_expiration_are_immutable_proposal_evaluators: true,
+      projectile_collision_discovery_is_immutable_read_only_query: true,
+      ability_field_geometric_exposure_is_immutable_read_only_query: true,
       character_brain_selects_intent_only: true,
     },
   };
