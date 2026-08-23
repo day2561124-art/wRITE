@@ -26,8 +26,12 @@ import {
 } from "./world-simulation-chronological-mutation-queue-service.mjs";
 import {
   buildWorldSimulationMutationProposalBoundaryContract,
-  projectWorldSimulationMutationProposals,
 } from "./world-simulation-mutation-proposal-service.mjs";
+import {
+  buildWorldSimulationPureProposalProducerContract,
+  projectWorldSimulationPureProposalTransitions,
+  runWorldSimulationPureProposalProducer,
+} from "./world-simulation-pure-proposal-producer-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -539,56 +543,18 @@ function resolveAttack(snapshot, snapshotScene, actor, candidate, rules, outcome
   return durationMs;
 }
 
-export function buildWorldSimulationCausalRuleContract() {
-  return {
-    version: worldSimulationCausalRuleEngineVersion,
-    owner: "programmatic_causal_adjudicator",
-    reads_world_truth: true,
-    writes_world_truth: "through_world_state_commit_only",
-    simultaneous_action_preconditions: "turn_start_snapshot",
-    movement: {
-      bounds_enforced: true,
-      speed_and_duration_enforced: true,
-      route_door_state_enforced: true,
-      rectangular_obstacle_intersection_enforced: true,
-      end_position_collision_enforced: true,
-    },
-    objects: {
-      exclusive_holder_enforced: true,
-      reach_enforced: true,
-      simultaneous_pickup_contention_blocks_all_claimants: true,
-    },
-    combat: {
-      weapon_holder_state_enforced: true,
-      range_enforced: true,
-      range_validity_does_not_imply_hit: true,
-      combat_causal_layer: buildWorldSimulationCombatCausalContract(),
-    },
-    continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
-    global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
-    continuous_actor_state: buildWorldSimulationActorStateContract(),
-    chronological_mutation_queue: buildWorldSimulationChronologicalMutationQueueContract(),
-    mutation_proposal_boundary: buildWorldSimulationMutationProposalBoundaryContract(),
-    time: {
-      turn_elapsed_ms: "maximum_resolved_action_duration",
-      cross_layer_point_event_order: "global_programmatic_timeline",
-    },
-  };
-}
 
-export async function adjudicateWorldSimulationCausality(input = {}) {
+function resolveSpatialRulePreview(input = {}) {
   const snapshot = cloneJson(object(input.world_state));
-  let next = cloneJson(snapshot);
+  const next = cloneJson(snapshot);
   const event = object(input.event);
   const selectedActionIntents = array(input.selected_action_intents);
-  const { sceneId, scene: snapshotScene } = sceneForEvent(snapshot, event);
-  let nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  const sceneId = String(input.scene_id ?? event.scene_id ?? event.location_id ?? "").trim();
+  const snapshotScene = object(object(snapshot.scenes)[sceneId] ?? snapshot.scene_state);
+  const nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   const rules = object(snapshot.world_rules ?? snapshot.rules);
   const transitions = [];
   const outcomes = [];
-  const knowledgeTransitions = [];
-  const scheduledEvents = [];
-  const mutationProposalBoundaryAudits = [];
   const claims = pickupClaims(selectedActionIntents);
   const plans = movementPlans(snapshot, snapshotScene, selectedActionIntents);
   const movementConflicts = movementDestinationConflicts(snapshot, snapshotScene, plans);
@@ -626,7 +592,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
         actor,
         candidate,
         "movement_completed",
-        `destination in bounds, route open, obstacle path clear, and destination collision-free`,
+        "destination in bounds, route open, obstacle path clear, and destination collision-free",
         { distance_m: movement.travelDistance, duration_ms: movement.durationMs },
       );
       continue;
@@ -654,10 +620,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       continue;
     }
     if (kind === "projectile" || kind === "ability") {
-      const durationMs = parseDurationMs(
-        candidate,
-        positiveNumber(rules.physics_action_seconds, 0.5) * 1000,
-      );
+      const durationMs = parseDurationMs(candidate, positiveNumber(rules.physics_action_seconds, 0.5) * 1000);
       elapsedMs = Math.max(elapsedMs, durationMs);
       pushOutcome(
         outcomes,
@@ -668,17 +631,10 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       );
       continue;
     }
-    if (kind === "attack") {
-      // Phase62E resolves attack timing/contact/damage jointly after all same-turn
-      // movement/defense declarations have been validated from the turn-start snapshot.
-      continue;
-    }
+    if (kind === "attack") continue;
     if (kind === "defense") {
       const defense = object(candidate.defense);
-      const durationMs = parseDurationMs(
-        candidate,
-        positiveNumber(rules.defense_action_seconds, 0.5) * 1000,
-      );
+      const durationMs = parseDurationMs(candidate, positiveNumber(rules.defense_action_seconds, 0.5) * 1000);
       elapsedMs = Math.max(elapsedMs, durationMs);
       pushOutcome(
         outcomes,
@@ -694,19 +650,100 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     pushOutcome(outcomes, actor, candidate, "passive_action_recorded", "action declared no spatial or object mutation fields");
   }
 
-  const spatialProjection = projectWorldSimulationMutationProposals({
+  return {
+    next_world_state: next,
+    next_world_state_authority: "private_solver_preview_only",
+    state_transitions: transitions,
+    mutation_proposals: transitions,
+    action_outcomes: outcomes,
+    elapsed_ms: elapsedMs,
+  };
+}
+
+export function buildWorldSimulationCausalRuleContract() {
+  return {
+    version: worldSimulationCausalRuleEngineVersion,
+    owner: "programmatic_causal_adjudicator",
+    reads_world_truth: true,
+    writes_world_truth: "through_world_state_commit_only",
+    simultaneous_action_preconditions: "turn_start_snapshot",
+    movement: {
+      bounds_enforced: true,
+      speed_and_duration_enforced: true,
+      route_door_state_enforced: true,
+      rectangular_obstacle_intersection_enforced: true,
+      end_position_collision_enforced: true,
+    },
+    objects: {
+      exclusive_holder_enforced: true,
+      reach_enforced: true,
+      simultaneous_pickup_contention_blocks_all_claimants: true,
+    },
+    combat: {
+      weapon_holder_state_enforced: true,
+      range_enforced: true,
+      range_validity_does_not_imply_hit: true,
+      combat_causal_layer: buildWorldSimulationCombatCausalContract(),
+    },
+    continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
+    global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
+    continuous_actor_state: buildWorldSimulationActorStateContract(),
+    chronological_mutation_queue: buildWorldSimulationChronologicalMutationQueueContract(),
+    mutation_proposal_boundary: buildWorldSimulationMutationProposalBoundaryContract(),
+    pure_proposal_producers: buildWorldSimulationPureProposalProducerContract(),
+    time: {
+      turn_elapsed_ms: "maximum_resolved_action_duration",
+      cross_layer_point_event_order: "global_programmatic_timeline",
+    },
+  };
+}
+
+export async function adjudicateWorldSimulationCausality(input = {}) {
+  const snapshot = cloneJson(object(input.world_state));
+  let next = cloneJson(snapshot);
+  const event = object(input.event);
+  const selectedActionIntents = array(input.selected_action_intents);
+  const { sceneId, scene: snapshotScene } = sceneForEvent(snapshot, event);
+  let nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  const transitions = [];
+  const outcomes = [];
+  const knowledgeTransitions = [];
+  const scheduledEvents = [];
+  const mutationProposalBoundaryAudits = [];
+  const pureProposalProducerAudits = [];
+  let elapsedMs = 0;
+
+  const spatialProduced = runWorldSimulationPureProposalProducer({
     producer: "spatial_rules",
-    producer_transition_start: 0,
     turn_id: input.turn_id ?? null,
     world_state_hash: input.world_state_hash ?? null,
-    world_state: snapshot,
-    preview_world_state: next,
+    root_world_state: snapshot,
+    authoritative_world_state: next,
+    existing_state_transitions: transitions,
+    causal_timeline: { entries: [] },
+    elapsed_ms: 0,
+    scene_id: sceneId,
+    solve: ({ isolated_preview_world_state: isolatedPreview }) => resolveSpatialRulePreview({
+      world_state: isolatedPreview,
+      event,
+      scene_id: sceneId,
+      selected_action_intents: selectedActionIntents,
+    }),
+  });
+  transitions.push(...array(spatialProduced.proposal_package.mutation_proposals));
+  outcomes.push(...array(spatialProduced.result.action_outcomes));
+  elapsedMs = Math.max(elapsedMs, finiteNumber(spatialProduced.result.elapsed_ms, 0));
+  mutationProposalBoundaryAudits.push(spatialProduced.audit);
+  pureProposalProducerAudits.push(spatialProduced.audit);
+  const spatialProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
     state_transitions: transitions,
     causal_timeline: { entries: [] },
     elapsed_ms: elapsedMs,
     scene_id: sceneId,
   });
-  mutationProposalBoundaryAudits.push(spatialProjection.audit);
   next = spatialProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
 
@@ -742,33 +779,58 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       transitions.splice(index, 1);
     }
   }
-  nextScene.entity_positions = object(nextScene.entity_positions);
-  for (const [actor, trajectory] of Object.entries(actorTrajectories)) {
-    if (trajectory?.start) nextScene.entity_positions[actor] = cloneJson(trajectory.start);
-  }
-  if (isObject(next.scenes) && Object.hasOwn(next.scenes, sceneId)) next.scenes[sceneId] = nextScene;
-  else next.scene_state = nextScene;
-  const actorStateTransitionStart = transitions.length;
-  const actorStateApplied = applyWorldSimulationActorTrajectories(
-    next,
-    sceneId,
-    actorTrajectories,
-    elapsedMs,
-    transitions,
-  );
-  const actorStateProjection = projectWorldSimulationMutationProposals({
-    producer: "continuous_actor_state_precombat",
-    producer_transition_start: actorStateTransitionStart,
+  const movementProposalBaseProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
     turn_id: input.turn_id ?? null,
     world_state_hash: input.world_state_hash ?? null,
-    world_state: snapshot,
-    preview_world_state: actorStateApplied.next_world_state,
     state_transitions: transitions,
     causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
     elapsed_ms: elapsedMs,
     scene_id: sceneId,
   });
-  mutationProposalBoundaryAudits.push(actorStateProjection.audit);
+  next = movementProposalBaseProjection.projected_world_state;
+  nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+
+  const actorStateProduced = runWorldSimulationPureProposalProducer({
+    producer: "continuous_actor_state_precombat",
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    root_world_state: snapshot,
+    authoritative_world_state: next,
+    existing_state_transitions: transitions,
+    causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+    elapsed_ms: elapsedMs,
+    scene_id: sceneId,
+    solve: ({ isolated_preview_world_state: isolatedPreview }) => {
+      const producerTransitions = [];
+      const applied = applyWorldSimulationActorTrajectories(
+        isolatedPreview,
+        sceneId,
+        actorTrajectories,
+        elapsedMs,
+        producerTransitions,
+      );
+      return {
+        next_world_state: applied.next_world_state,
+        next_world_state_authority: "private_solver_preview_only",
+        state_transitions: producerTransitions,
+        mutation_proposals: producerTransitions,
+        final_positions: applied.final_positions,
+      };
+    },
+  });
+  transitions.push(...array(actorStateProduced.proposal_package.mutation_proposals));
+  mutationProposalBoundaryAudits.push(actorStateProduced.audit);
+  pureProposalProducerAudits.push(actorStateProduced.audit);
+  const actorStateProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    state_transitions: transitions,
+    causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+    elapsed_ms: elapsedMs,
+    scene_id: sceneId,
+  });
   next = actorStateProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   const spatialActionOutcomes = cloneJson(outcomes);
@@ -788,84 +850,135 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     });
   }
 
-  const combatTransitionStart = transitions.length;
-  const combatResolution = adjudicateWorldSimulationCombat({
-    world_state: snapshot,
-    next_world_state: next,
-    scene_id: sceneId,
-    event,
-    selected_action_intents: selectedActionIntents,
-    resolved_action_outcomes: outcomes,
-    suppressed_action_ids: suppressedActionIds,
-    action_time_overrides: actionTimeOverrides,
-    actor_trajectories: actorTrajectories,
-  });
-  transitions.push(...array(combatResolution.state_transitions));
-  outcomes.push(...array(combatResolution.action_outcomes));
-  elapsedMs = Math.max(elapsedMs, finiteNumber(combatResolution.elapsed_ms, 0));
-  const combatProjection = projectWorldSimulationMutationProposals({
+  const combatProduced = runWorldSimulationPureProposalProducer({
     producer: "combat",
-    producer_transition_start: combatTransitionStart,
     turn_id: input.turn_id ?? null,
     world_state_hash: input.world_state_hash ?? null,
-    world_state: snapshot,
-    preview_world_state: combatResolution.next_world_state,
+    root_world_state: snapshot,
+    authoritative_world_state: next,
+    existing_state_transitions: transitions,
+    causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+    elapsed_ms: elapsedMs,
+    scene_id: sceneId,
+    solve: ({ isolated_preview_world_state: isolatedPreview }) => adjudicateWorldSimulationCombat({
+      world_state: snapshot,
+      next_world_state: isolatedPreview,
+      scene_id: sceneId,
+      event,
+      selected_action_intents: selectedActionIntents,
+      resolved_action_outcomes: outcomes,
+      suppressed_action_ids: suppressedActionIds,
+      action_time_overrides: actionTimeOverrides,
+      actor_trajectories: actorTrajectories,
+    }),
+  });
+  const combatResolution = {
+    ...combatProduced.result,
+    state_transitions: cloneJson(combatProduced.proposal_package.mutation_proposals),
+    mutation_proposals: cloneJson(combatProduced.proposal_package.mutation_proposals),
+  };
+  transitions.push(...array(combatProduced.proposal_package.mutation_proposals));
+  outcomes.push(...array(combatResolution.action_outcomes));
+  elapsedMs = Math.max(elapsedMs, finiteNumber(combatResolution.elapsed_ms, 0));
+  mutationProposalBoundaryAudits.push(combatProduced.audit);
+  pureProposalProducerAudits.push(combatProduced.audit);
+  const combatProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
     state_transitions: transitions,
     causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
     elapsed_ms: elapsedMs,
     scene_id: sceneId,
   });
-  mutationProposalBoundaryAudits.push(combatProjection.audit);
   next = combatProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
 
-  const physicsTransitionStart = transitions.length;
-  const physicsResolution = adjudicateWorldSimulationContinuousPhysics({
-    world_state: snapshot,
-    next_world_state: next,
-    scene_id: sceneId,
-    event,
-    turn_id: input.turn_id ?? null,
-    selected_action_intents: selectedActionIntents,
-    resolved_action_outcomes: outcomes,
-    elapsed_ms: elapsedMs,
-    suppressed_action_ids: suppressedActionIds,
-    action_time_overrides: actionTimeOverrides,
-    actor_trajectories: actorTrajectories,
-  });
-  transitions.push(...array(physicsResolution.state_transitions));
-  outcomes.push(...array(physicsResolution.action_outcomes));
-  const physicsProjection = projectWorldSimulationMutationProposals({
+  const physicsProduced = runWorldSimulationPureProposalProducer({
     producer: "continuous_physics",
-    producer_transition_start: physicsTransitionStart,
     turn_id: input.turn_id ?? null,
     world_state_hash: input.world_state_hash ?? null,
-    world_state: snapshot,
-    preview_world_state: physicsResolution.next_world_state,
+    root_world_state: snapshot,
+    authoritative_world_state: next,
+    existing_state_transitions: transitions,
+    causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+    elapsed_ms: elapsedMs,
+    scene_id: sceneId,
+    solve: ({ isolated_preview_world_state: isolatedPreview }) => adjudicateWorldSimulationContinuousPhysics({
+      world_state: snapshot,
+      next_world_state: isolatedPreview,
+      scene_id: sceneId,
+      event,
+      turn_id: input.turn_id ?? null,
+      selected_action_intents: selectedActionIntents,
+      resolved_action_outcomes: outcomes,
+      elapsed_ms: elapsedMs,
+      suppressed_action_ids: suppressedActionIds,
+      action_time_overrides: actionTimeOverrides,
+      actor_trajectories: actorTrajectories,
+    }),
+  });
+  const physicsResolution = {
+    ...physicsProduced.result,
+    state_transitions: cloneJson(physicsProduced.proposal_package.mutation_proposals),
+    mutation_proposals: cloneJson(physicsProduced.proposal_package.mutation_proposals),
+  };
+  transitions.push(...array(physicsProduced.proposal_package.mutation_proposals));
+  outcomes.push(...array(physicsResolution.action_outcomes));
+  mutationProposalBoundaryAudits.push(physicsProduced.audit);
+  pureProposalProducerAudits.push(physicsProduced.audit);
+  const physicsProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
     state_transitions: transitions,
     causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
     elapsed_ms: elapsedMs,
     scene_id: sceneId,
   });
-  mutationProposalBoundaryAudits.push(physicsProjection.audit);
   next = physicsProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
 
-  const postPhysicsActorTransitionStart = transitions.length;
-  const postPhysicsActorState = applyWorldSimulationActorTrajectories(next, sceneId, actorTrajectories, elapsedMs, transitions);
-  const postPhysicsActorProjection = projectWorldSimulationMutationProposals({
+  const postPhysicsActorProduced = runWorldSimulationPureProposalProducer({
     producer: "continuous_actor_state_postphysics",
-    producer_transition_start: postPhysicsActorTransitionStart,
     turn_id: input.turn_id ?? null,
     world_state_hash: input.world_state_hash ?? null,
-    world_state: snapshot,
-    preview_world_state: postPhysicsActorState.next_world_state,
+    root_world_state: snapshot,
+    authoritative_world_state: next,
+    existing_state_transitions: transitions,
+    causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+    elapsed_ms: elapsedMs,
+    scene_id: sceneId,
+    solve: ({ isolated_preview_world_state: isolatedPreview }) => {
+      const producerTransitions = [];
+      const applied = applyWorldSimulationActorTrajectories(
+        isolatedPreview,
+        sceneId,
+        actorTrajectories,
+        elapsedMs,
+        producerTransitions,
+      );
+      return {
+        next_world_state: applied.next_world_state,
+        next_world_state_authority: "private_solver_preview_only",
+        state_transitions: producerTransitions,
+        mutation_proposals: producerTransitions,
+        final_positions: applied.final_positions,
+      };
+    },
+  });
+  transitions.push(...array(postPhysicsActorProduced.proposal_package.mutation_proposals));
+  mutationProposalBoundaryAudits.push(postPhysicsActorProduced.audit);
+  pureProposalProducerAudits.push(postPhysicsActorProduced.audit);
+  const postPhysicsActorProjection = projectWorldSimulationPureProposalTransitions({
+    root_world_state: snapshot,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
     state_transitions: transitions,
     causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
     elapsed_ms: elapsedMs,
     scene_id: sceneId,
   });
-  mutationProposalBoundaryAudits.push(postPhysicsActorProjection.audit);
   next = postPhysicsActorProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
 
@@ -973,6 +1086,14 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       subsystem_preview_world_state_authoritative: false,
       executor_projection_is_only_inter_subsystem_handoff_state: true,
     },
+    pure_proposal_producers: {
+      version: buildWorldSimulationPureProposalProducerContract().version,
+      audit_count: pureProposalProducerAudits.length,
+      audits: pureProposalProducerAudits,
+      producer_outputs_contain_world_state: false,
+      internal_preview_states_discarded_before_return: true,
+      inter_subsystem_handoffs_use_executor_projection_only: true,
+    },
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -983,6 +1104,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       final_world_state_written_only_by_chronological_mutation_queue: true,
       subsystem_preview_states_not_used_as_inter_subsystem_authority: true,
       inter_subsystem_handoffs_use_executor_projection: true,
+      causal_subsystems_return_mutation_proposals_without_world_state: true,
+      private_solver_previews_discarded_before_orchestration: true,
       combat_causal_version: combatResolution.combat_causal_version,
       projectile_and_ability_physics_are_programmatic: true,
       continuous_physics_version: physicsResolution.continuous_physics_version,

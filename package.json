@@ -37,7 +37,8 @@
     "test:phase62i": "node tests/phase62/phase62i-continuous-actor-state-scheduler.test.mjs",
     "test:phase62j": "node tests/phase62/phase62j-unified-chronological-mutation-queue.test.mjs",
     "test:phase62k": "node tests/phase62/phase62k-authoritative-mutation-executor.test.mjs",
-    "test:phase62l": "node tests/phase62/phase62l-proposal-only-subsystem-boundary.test.mjs"
+    "test:phase62l": "node tests/phase62/phase62l-proposal-only-subsystem-boundary.test.mjs",
+    "test:phase62m": "node tests/phase62/phase62m-pure-proposal-producer-interface.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

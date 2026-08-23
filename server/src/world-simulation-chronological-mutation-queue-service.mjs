@@ -337,6 +337,56 @@ function changedLeafPaths(left, right, prefix = [], output = []) {
   return output;
 }
 
+
+export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
+  const queue = object(input.queue);
+  const executed = cloneJson(object(input.world_state));
+  const applied = [];
+  for (const batch of array(queue.batches)) {
+    for (const mutation of array(batch?.mutations)) {
+      const worldPath = mutationWorldPath(mutation, executed, executed, input.scene_id ?? null);
+      if (!worldPath) {
+        const error = new Error(`Mutation projection cannot resolve world path for ${mutation?.mutation_path ?? mutation?.mutation_id ?? "<unknown>"}.`);
+        error.code = "WORLD_SIMULATION_MUTATION_PATH_UNRESOLVED";
+        throw error;
+      }
+      const before = effectiveMutationBefore(executed, worldPath, mutation);
+      if (!sameValue(before, mutation.from)) {
+        const error = new Error(`Mutation projection precondition mismatch at ${worldPath.join(".")}.`);
+        error.code = "WORLD_SIMULATION_MUTATION_PRECONDITION_MISMATCH";
+        error.world_path = worldPath.join(".");
+        error.expected_from = cloneJson(mutation.from);
+        error.actual_from = cloneJson(before);
+        throw error;
+      }
+      setAtPath(executed, worldPath, mutation.to);
+      applied.push({
+        mutation_id: mutation.mutation_id,
+        batch_id: batch.batch_id,
+        time_ms: batch.time_ms,
+        world_path: worldPath.join("."),
+      });
+    }
+  }
+  const projection = {
+    version: worldSimulationMutationExecutorVersion,
+    queue_hash: queue.queue_hash ?? null,
+    applied_mutation_count: applied.length,
+    applied_batch_count: array(queue.batches).length,
+    projection_only: true,
+    final_world_state_commit_authority: false,
+    mutation_preconditions_checked_at_apply_time: true,
+    applied,
+  };
+  projection.projection_hash = hashAgentRunValue({
+    version: projection.version,
+    queue_hash: projection.queue_hash,
+    applied,
+    projected_world_state: executed,
+  });
+  return { projected_world_state: executed, projection };
+}
+
 export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
   const queue = object(input.queue);
   const preview = cloneJson(object(input.preview_world_state));
