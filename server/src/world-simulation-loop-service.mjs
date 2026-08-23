@@ -395,6 +395,7 @@ export async function resolveWorldSimulationTurn(
       immutable_causal_evaluators: cloneJson(causalResolution.immutable_causal_evaluators ?? null),
       immutable_physics_effects: cloneJson(causalResolution.immutable_physics_effects ?? null),
       immutable_projectile_lifecycle: cloneJson(causalResolution.immutable_projectile_lifecycle ?? null),
+      immutable_ability_field_lifecycle: cloneJson(causalResolution.immutable_ability_field_lifecycle ?? null),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },

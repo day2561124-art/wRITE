@@ -26,6 +26,13 @@ import {
   projectWorldSimulationImmutableProjectileLifecycleProposals,
   worldSimulationImmutableProjectileLifecycleVersion,
 } from "./world-simulation-immutable-projectile-lifecycle-service.mjs";
+import {
+  buildWorldSimulationImmutableAbilityFieldLifecycleContract,
+  evaluateWorldSimulationAbilityFieldLifecycle,
+  evaluateWorldSimulationAbilityFieldSpawn,
+  projectWorldSimulationImmutableAbilityFieldLifecycleProposals,
+  worldSimulationImmutableAbilityFieldLifecycleVersion,
+} from "./world-simulation-immutable-ability-field-lifecycle-service.mjs";
 
 export const worldSimulationContinuousPhysicsVersion = "phase62f-continuous-physics-v1";
 
@@ -424,6 +431,18 @@ function projectProjectileLifecycleIntoPrivatePreview(input, nextWorldState, eva
   }).projected_world_state;
 }
 
+function projectAbilityFieldLifecycleIntoPrivatePreview(input, nextWorldState, evaluation, elapsedMs = 0) {
+  if (!array(evaluation?.mutation_proposals).length) return nextWorldState;
+  return projectWorldSimulationImmutableAbilityFieldLifecycleProposals({
+    world_state: nextWorldState,
+    mutation_proposals: evaluation.mutation_proposals,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    scene_id: input.scene_id ?? null,
+    elapsed_ms: Math.max(0, finiteNumber(elapsedMs, 0)),
+  }).projected_world_state;
+}
+
 function applyProjectileLifecycleEvaluation(input, state, nextWorldState, transitions, evaluation, timeMs = 0) {
   recordImmutablePhysicsAudit(input, evaluation?.audit);
   transitions.push(...array(evaluation?.mutation_proposals));
@@ -616,9 +635,22 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
       },
       start_delay_ms: startDelayMs,
     };
-    nextWorldState.ability_fields[fieldId] = field;
-    spawned.push({ fieldId, field, actor, candidate, activeAfterMs: startDelayMs });
-    pushTransition(transitions, fieldId, "ability_field", null, field, `ability ${abilityId} created persistent programmatic field`, transitionTimeExtra(startDelayMs));
+    const fieldSpawnEvaluation = evaluateWorldSimulationAbilityFieldSpawn({
+      field_id: fieldId,
+      field,
+      existing_field: nextWorldState.ability_fields[fieldId] ?? null,
+      time_ms: startDelayMs,
+    });
+    recordImmutablePhysicsAudit(input, fieldSpawnEvaluation.audit);
+    if (!fieldSpawnEvaluation.result.ok) {
+      pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", fieldSpawnEvaluation.result.reason ?? `ability field ${fieldId} could not be spawned`);
+      continue;
+    }
+    transitions.push(...array(fieldSpawnEvaluation.mutation_proposals));
+    const projectedFieldSpawn = projectAbilityFieldLifecycleIntoPrivatePreview(input, nextWorldState, fieldSpawnEvaluation, startDelayMs);
+    nextWorldState.ability_fields = cloneJson(object(projectedFieldSpawn.ability_fields));
+    const spawnedField = cloneJson(object(nextWorldState.ability_fields[fieldId]));
+    spawned.push({ fieldId, field: spawnedField, actor, candidate, activeAfterMs: startDelayMs });
     pushOutcome(outcomes, actor, candidate, "ability_field_created", `ability ${abilityId} created field ${fieldId}; radius/duration/effect came from world state`, {
       ability_field_id: fieldId,
       energy_cost: energyCost,
@@ -1053,17 +1085,23 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
   for (const [fieldId, rawField] of Object.entries(nextWorldState.ability_fields)) {
     const field = object(rawField);
     if (field.active !== true || String(field.scene_id ?? "") !== input.scene_id) continue;
-    const fieldBeforeAdvance = cloneJson(field);
     const startMs = newStart.has(fieldId) ? newStart.get(fieldId) : 0;
-    const availableMs = Math.max(0, elapsedMs - startMs);
-    const activeMs = Math.min(nonNegativeNumber(field.remaining_ms, 0), availableMs);
+    const lifecycleEvaluation = evaluateWorldSimulationAbilityFieldLifecycle({
+      field,
+      start_ms: startMs,
+      elapsed_ms: elapsedMs,
+      default_tick_ms: defaultTickMs,
+    });
+    recordImmutablePhysicsAudit(input, lifecycleEvaluation.audit);
+    if (!lifecycleEvaluation.result.ok) continue;
+    const activeMs = nonNegativeNumber(lifecycleEvaluation.result.active_ms, 0);
     if (activeMs <= 0) continue;
     const center = point(field.center);
     const radius = positiveNumber(field.radius_m, null);
     if (!center || !radius) continue;
     const effect = object(field.effect);
     const dps = nonNegativeNumber(effect.damage_per_second, 0);
-    const tickMs = positiveNumber(field.tick_ms ?? effect.tick_ms, defaultTickMs);
+    const tickMs = positiveNumber(lifecycleEvaluation.result.tick_ms, defaultTickMs);
     const profiles = new Map();
     const exposureTotals = new Map();
     for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
@@ -1077,12 +1115,11 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
       ));
     }
 
-    let tickStartMs = startMs;
-    const fieldEndMs = startMs + activeMs;
-    let tickIndex = 0;
-    while (tickStartMs < fieldEndMs - 1e-9) {
-      tickIndex += 1;
-      const tickEndMs = Math.min(fieldEndMs, tickStartMs + tickMs);
+    const fieldEndMs = nonNegativeNumber(lifecycleEvaluation.result.field_end_ms, startMs + activeMs);
+    for (const tickWindow of array(lifecycleEvaluation.result.tick_windows)) {
+      const tickIndex = Math.max(1, Math.trunc(nonNegativeNumber(tickWindow.tick_index, 1)));
+      const tickStartMs = nonNegativeNumber(tickWindow.tick_start_ms, startMs);
+      const tickEndMs = nonNegativeNumber(tickWindow.tick_end_ms, fieldEndMs);
       for (const character of characterNamesInScene(snapshotScene, input.world_state)) {
         if (character === field.owner && field.affects_owner !== true) continue;
         const profile = profiles.get(character);
@@ -1141,7 +1178,6 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
         previousExposure.health_after = impact.health_after;
         exposureTotals.set(character, previousExposure);
       }
-      tickStartMs = tickEndMs;
     }
 
     for (const [character, total] of exposureTotals.entries()) {
@@ -1156,16 +1192,9 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
       });
     }
 
-    const beforeRemaining = nonNegativeNumber(field.remaining_ms, 0);
-    field.remaining_ms = Math.max(0, beforeRemaining - activeMs);
-    if (field.remaining_ms <= 0) {
-      field.active = false;
-      field.termination_reason = "duration_expired";
-    }
-    field.last_advanced_ms = elapsedMs;
-    field.tick_ms = tickMs;
-    pushTransition(transitions, fieldId, "ability_field_state", fieldBeforeAdvance, field, `ability field state advanced through ${activeMs}ms window`, transitionTimeExtra(fieldEndMs));
-    nextWorldState.ability_fields[fieldId] = field;
+    transitions.push(...array(lifecycleEvaluation.mutation_proposals));
+    const projectedLifecycle = projectAbilityFieldLifecycleIntoPrivatePreview(input, nextWorldState, lifecycleEvaluation, fieldEndMs);
+    nextWorldState.ability_fields = cloneJson(object(projectedLifecycle.ability_fields));
   }
 }
 
@@ -1257,7 +1286,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
     },
     immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
     immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62P moves projectile flight advance, penetration continuation, and termination state into immutable deterministic lifecycle evaluators; collision discovery remains programmatic and ability-field lifecycle advancement still uses an isolated mutable solver preview.",
+    immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62Q makes ability-field spawn, deterministic tick-window progression, remaining duration, and expiration immutable proposal evaluation; geometric exposure discovery remains programmatic.",
   };
 }
 
@@ -1366,8 +1396,10 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       ability_cost_and_field_effect_are_programmatic: true,
       immutable_physics_effect_version: worldSimulationImmutablePhysicsEffectVersion,
       immutable_projectile_lifecycle_version: worldSimulationImmutableProjectileLifecycleVersion,
+      immutable_ability_field_lifecycle_version: worldSimulationImmutableAbilityFieldLifecycleVersion,
       ammo_energy_spawn_and_cover_effects_are_immutable_proposal_evaluators: true,
       projectile_flight_penetration_and_termination_are_immutable_proposal_evaluators: true,
+      ability_field_spawn_tick_progression_and_expiration_are_immutable_proposal_evaluators: true,
       character_brain_selects_intent_only: true,
     },
   };

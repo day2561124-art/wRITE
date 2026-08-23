@@ -44,6 +44,10 @@ import {
   buildWorldSimulationImmutableProjectileLifecycleContract,
   worldSimulationImmutableProjectileLifecycleVersion,
 } from "./world-simulation-immutable-projectile-lifecycle-service.mjs";
+import {
+  buildWorldSimulationImmutableAbilityFieldLifecycleContract,
+  worldSimulationImmutableAbilityFieldLifecycleVersion,
+} from "./world-simulation-immutable-ability-field-lifecycle-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -706,6 +710,7 @@ export function buildWorldSimulationCausalRuleContract() {
     immutable_causal_evaluators: buildWorldSimulationImmutableCausalEvaluatorContract(),
     immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
     immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
+    immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -1146,6 +1151,19 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
         deterministic_replay_verified: audits.every((audit) => audit?.deterministic_replay_verified === true),
       };
     })(),
+    immutable_ability_field_lifecycle: (() => {
+      const contract = buildWorldSimulationImmutableAbilityFieldLifecycleContract();
+      const migrated = new Set(contract.migrated_lifecycle_evaluators);
+      const audits = immutableCausalEvaluatorAudits.filter((audit) => migrated.has(String(audit?.evaluator ?? "")));
+      return {
+        version: worldSimulationImmutableAbilityFieldLifecycleVersion,
+        audit_count: audits.length,
+        audits,
+        evaluator_inputs_immutable: audits.every((audit) => audit?.input_context_immutable === true),
+        evaluator_outputs_contain_world_state: false,
+        deterministic_replay_verified: audits.every((audit) => audit?.deterministic_replay_verified === true),
+      };
+    })(),
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -1161,6 +1179,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       combat_injury_and_barrier_effects_use_immutable_causal_evaluators: true,
       projectile_resource_spawn_and_cover_effects_use_immutable_causal_evaluators: true,
       projectile_lifecycle_state_uses_immutable_causal_evaluators: true,
+      ability_field_lifecycle_state_uses_immutable_causal_evaluators: true,
       causal_effect_evaluator_outputs_do_not_contain_world_state: true,
       combat_causal_version: combatResolution.combat_causal_version,
       projectile_and_ability_physics_are_programmatic: true,
