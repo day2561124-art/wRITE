@@ -11,6 +11,7 @@ export const agentTaskTypes = new Set([
   "proofing",
   "chapter_settlement",
   "settlement_import",
+  "world_simulation",
   "test",
 ]);
 export const neuralModuleNames = new Set([

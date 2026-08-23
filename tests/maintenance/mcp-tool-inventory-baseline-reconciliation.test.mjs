@@ -18,6 +18,16 @@ const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const currentAddedToolName = "get_active_engine_dependency_status";
+const worldSimulationToolNames = [
+  "chatgpt_bridge_begin_world_simulation_session",
+  "chatgpt_bridge_use_world_scene_causal_analyzer",
+  "chatgpt_bridge_use_world_perception_filter",
+  "chatgpt_bridge_use_world_memory_retriever",
+  "chatgpt_bridge_use_world_character_cognition",
+  "chatgpt_bridge_use_world_action_proposer",
+  "chatgpt_bridge_use_world_agency_guard",
+  "chatgpt_bridge_use_world_consistency_critic",
+];
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
   "chatgpt_bridge_review_draft_ephemeral",
@@ -30,13 +40,18 @@ const externalBrainToolNames = [
   "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
 ];
-const expectedDirectDigest = "4c2cd5331d83c2ae4d82458c6d491d89ce746551c5455c260fecfa2d89e30ead";
+const visualBridgeToolNames = [
+  "chatgpt_bridge_search_visual_assets",
+  "chatgpt_bridge_get_visual_asset",
+];
+const expectedDirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "3ef9fd9a7864067a3f95e848a6ea031d8f8f2cb9f8b7a41d7f05489751101e4a";
+const expectedPublicDigest = "6cd2b4e6cfc3d9519cb660ac04964e0af9d96c21e23b8425ce414a1494d733bf";
 const expectedPublicNames = [
   "get_engine_components_status",
   currentAddedToolName,
   "chatgpt_bridge_get_workbench_status",
+  ...worldSimulationToolNames,
   "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -55,6 +70,7 @@ const expectedPublicNames = [
   "get_pending_engine_candidate_review",
   "list_pending_engine_candidate_reviews",
   "request_pending_engine_candidate_activation",
+  ...visualBridgeToolNames,
   addedToolName,
 ];
 
@@ -149,7 +165,7 @@ assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
 assert.deepEqual(
   directBaselineNames.filter((name) => !historicalNames.includes(name)),
-  [...externalBrainToolNames, addedToolName],
+  [...worldSimulationToolNames, ...externalBrainToolNames, ...visualBridgeToolNames, addedToolName],
 );
 assert.deepEqual(historicalNames.filter((name) => !directBaselineNames.includes(name)), []);
 assert.equal(digest(directBaselineNames), expectedDirectDigest);

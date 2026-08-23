@@ -25,7 +25,8 @@
     "mcp:tunnel:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-mcp-tunnel.ps1 -Status",
     "test:mcp:tunnel": "node tests/mcp-tunnel-launcher.test.mjs",
     "maintenance:sync-engine-component-hashes": "node scripts/sync-engine-component-hashes.mjs",
-    "maintenance:sync-active-engine-dependencies": "node scripts/sync-active-engine-dependencies.mjs"
+    "maintenance:sync-active-engine-dependencies": "node scripts/sync-active-engine-dependencies.mjs",
+    "test:phase62a": "node tests/phase62/phase62a-world-simulation-neural-bridge.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

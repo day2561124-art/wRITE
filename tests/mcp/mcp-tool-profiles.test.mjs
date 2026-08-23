@@ -27,6 +27,14 @@ const publicToolNames = [
   "get_engine_components_status",
   "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
+  "chatgpt_bridge_begin_world_simulation_session",
+  "chatgpt_bridge_use_world_scene_causal_analyzer",
+  "chatgpt_bridge_use_world_perception_filter",
+  "chatgpt_bridge_use_world_memory_retriever",
+  "chatgpt_bridge_use_world_character_cognition",
+  "chatgpt_bridge_use_world_action_proposer",
+  "chatgpt_bridge_use_world_agency_guard",
+  "chatgpt_bridge_use_world_consistency_critic",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
@@ -54,6 +62,8 @@ const publicToolNames = [
   "list_pending_engine_candidate_reviews",
   "request_pending_engine_candidate_activation",
   "approval_queue_bridge_readiness_report",
+  "chatgpt_bridge_search_visual_assets",
+  "chatgpt_bridge_get_visual_asset",
   "preview_visual_reference_consumer_output_guard",
 ];
 
