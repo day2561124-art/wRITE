@@ -477,8 +477,14 @@ function normalizeAction(action, index) {
     known_costs: cloneJson(value.known_costs ?? value.costs ?? []),
     blocked_by: cloneJson(value.blocked_by ?? value.blockers ?? []),
     duration_estimate: value.duration_estimate ?? value.duration ?? null,
+    duration_ms: value.duration_ms ?? null,
+    duration_s: value.duration_s ?? value.duration_seconds ?? null,
     target: cloneJson(value.target ?? null),
+    target_position: cloneJson(value.target_position ?? null),
     movement: cloneJson(value.movement ?? null),
+    door_interaction: cloneJson(value.door_interaction ?? null),
+    object_interaction: cloneJson(value.object_interaction ?? null),
+    attack: cloneJson(value.attack ?? null),
     resource_commitment: cloneJson(value.resource_commitment ?? null),
   };
 }

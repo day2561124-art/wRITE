@@ -2,6 +2,10 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 import {
+  adjudicateWorldSimulationCausality,
+  buildWorldSimulationCausalRuleContract,
+} from "./world-simulation-causal-rule-engine.mjs";
+import {
   runWorldSimulationCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -168,6 +172,8 @@ export function buildWorldSimulationLoopContract() {
     character_brain_receives_world_truth: false,
     neural_capabilities_may_mutate_world_state: false,
     causal_adjudicator_required: true,
+    built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
+    custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
     replay_chain_uses_state_hashes: true,
   };
@@ -310,11 +316,9 @@ export async function resolveWorldSimulationTurn(
     stale.code = "WORLD_SIMULATION_PREPARED_TURN_STALE";
     throw stale;
   }
-  if (typeof options.causalAdjudicator !== "function") {
-    const error = new Error("Phase62C requires a programmatic causalAdjudicator function.");
-    error.code = "WORLD_SIMULATION_CAUSAL_ADJUDICATOR_REQUIRED";
-    throw error;
-  }
+  const causalAdjudicator = typeof options.causalAdjudicator === "function"
+    ? options.causalAdjudicator
+    : adjudicateWorldSimulationCausality;
 
   const selected = [];
   for (const packet of array(preparedTurn.decision_packets)) {
@@ -327,7 +331,7 @@ export async function resolveWorldSimulationTurn(
   }
 
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
-  const causalResolution = assertCausalResolution(await options.causalAdjudicator({
+  const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
     turn_id: preparedTurn.turn_id,
     world_state: cloneJson(snapshot.state),
