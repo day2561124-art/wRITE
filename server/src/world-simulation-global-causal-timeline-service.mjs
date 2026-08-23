@@ -25,6 +25,13 @@ import {
   buildWorldSimulationCrossLayerEventArbitrationContract,
   worldSimulationCrossLayerEventArbitrationVersion,
 } from "./world-simulation-cross-layer-event-arbitration-service.mjs";
+import {
+  assertWorldSimulationCausalEpochCandidatesFresh,
+  bindWorldSimulationCandidatesToCausalEpoch,
+  buildWorldSimulationCausalEpochContract,
+  openWorldSimulationCausalEpoch,
+  worldSimulationCausalEpochVersion,
+} from "./world-simulation-causal-epoch-service.mjs";
 
 export const worldSimulationGlobalCausalTimelineVersion = "phase62g-global-causal-timeline-v1";
 
@@ -263,6 +270,7 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
     timeline_refinement: buildWorldSimulationTimelineRefinementContract(),
     continuous_actor_state: buildWorldSimulationActorStateContract(),
     cross_layer_event_arbitration: buildWorldSimulationCrossLayerEventArbitrationContract(),
+    causal_epoch_freshness: buildWorldSimulationCausalEpochContract(),
     character_brain_may_decide_timestamps_as_outcomes: false,
     known_boundary: "Phase62G supplies the global point-event clock. Phase62H refines deferred execution/topology, and Phase62I integrates in-progress actor movement with injury/incapacitation plus piecewise ability-field exposure.",
   };
@@ -270,6 +278,11 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
 
 export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
   const snapshot = cloneJson(object(input.world_state));
+  const persistedWorldStateHash = String(input.world_state_hash ?? hashAgentRunValue(snapshot));
+  const persistedWorldStateRevision = Number.isSafeInteger(Number(input.world_state_revision))
+    && Number(input.world_state_revision) >= 0
+    ? Number(input.world_state_revision)
+    : 0;
   const baseNext = cloneJson(object(input.next_world_state ?? snapshot));
   const suppressed = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
   const preemptions = [];
@@ -282,12 +295,24 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
   let lastPhysics = null;
   let lastCrossLayerArbitration = null;
   const crossLayerArbitrationAudits = [];
+  const causalEpochRecords = [];
   let iterations = 0;
   const maxIterations = Math.max(4, array(input.selected_action_intents).length * 2 + 4);
 
   while (iterations < maxIterations) {
     iterations += 1;
     const suppressedList = [...suppressed].sort();
+    const causalEpoch = openWorldSimulationCausalEpoch({
+      world_state: snapshot,
+      world_state_revision: persistedWorldStateRevision,
+      world_state_hash: persistedWorldStateHash,
+      epoch_index: iterations,
+      derivation_context: {
+        suppressed_action_ids: suppressedList,
+        action_time_overrides: cloneJson(actionTimeOverrides),
+        actor_trajectories: cloneJson(actorTrajectories),
+      },
+    });
     const combatEntries = buildWorldSimulationCombatTimelineEntries({
       world_state: snapshot,
       selected_action_intents: input.selected_action_intents,
@@ -347,8 +372,16 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       ...continuousEntries.map((entry) => crossLayerCandidate({ ...entry, source_layer: "continuous_physics" }, "execution")),
     ];
     const fatalCandidates = fatals.map((entry) => crossLayerCandidate(entry, "incapacitation"));
-    lastCrossLayerArbitration = arbitrateWorldSimulationCrossLayerEventCandidates({
+    const epochBoundCandidates = bindWorldSimulationCandidatesToCausalEpoch({
+      epoch: causalEpoch.epoch,
       candidates: [...executionCandidates, ...fatalCandidates],
+    });
+    const freshness = assertWorldSimulationCausalEpochCandidatesFresh({
+      epoch: causalEpoch.epoch,
+      candidates: epochBoundCandidates.candidates,
+    });
+    lastCrossLayerArbitration = arbitrateWorldSimulationCrossLayerEventCandidates({
+      candidates: epochBoundCandidates.candidates,
       simultaneous_tolerance_ms: 1e-6,
     });
     crossLayerArbitrationAudits.push(lastCrossLayerArbitration.audit);
@@ -390,7 +423,21 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       suppressed.add(item.action_id);
       preemptions.push(item);
     }
-    if (!additions.length && !overridesChanged && !trajectoriesChanged) break;
+    const invalidationReasons = [];
+    if (additions.length) invalidationReasons.push("suppressed_action_set_changed");
+    if (overridesChanged) invalidationReasons.push("action_time_overrides_changed");
+    if (trajectoriesChanged) invalidationReasons.push("actor_trajectories_changed");
+    causalEpochRecords.push({
+      ...cloneJson(causalEpoch.epoch),
+      candidate_count: freshness.candidate_count,
+      candidate_set_hash: freshness.candidate_set_hash,
+      candidate_freshness_verified: freshness.candidate_freshness_verified,
+      arbitration_audit_hash: lastCrossLayerArbitration.audit.audit_hash,
+      invalidated_after_iteration: invalidationReasons.length > 0,
+      invalidation_reasons: invalidationReasons,
+      next_iteration_requires_requery_and_rearbitration: invalidationReasons.length > 0,
+    });
+    if (!invalidationReasons.length) break;
   }
 
   const suppressedActionIds = [...suppressed].sort();
@@ -430,6 +477,20 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
     refinement_version: worldSimulationTimelineRefinementVersion,
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
     cross_layer_event_arbitration_version: worldSimulationCrossLayerEventArbitrationVersion,
+    causal_epoch_version: worldSimulationCausalEpochVersion,
+    causal_epochs: {
+      version: worldSimulationCausalEpochVersion,
+      world_state_revision: persistedWorldStateRevision,
+      world_state_hash: persistedWorldStateHash,
+      epoch_count: causalEpochRecords.length,
+      epochs: cloneJson(causalEpochRecords),
+      all_candidates_bound_to_epoch: causalEpochRecords.every((epoch) => epoch?.candidate_freshness_verified === true),
+      stale_candidate_rejection_enabled: true,
+      prior_epoch_candidates_reused: false,
+      requery_rearbitration_after_epoch_invalidation: causalEpochRecords
+        .filter((epoch) => epoch?.invalidated_after_iteration === true)
+        .every((epoch) => epoch?.next_iteration_requires_requery_and_rearbitration === true),
+    },
     cross_layer_event_arbitration: {
       version: worldSimulationCrossLayerEventArbitrationVersion,
       audit_count: crossLayerArbitrationAudits.length,
@@ -457,6 +518,8 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
       cross_layer_event_arbitration_version: worldSimulationCrossLayerEventArbitrationVersion,
       cross_layer_event_arbitration: cloneJson(lastCrossLayerArbitration?.result ?? null),
+      causal_epoch_version: worldSimulationCausalEpochVersion,
+      causal_epochs: cloneJson(causalEpochRecords),
       turn_id: input.turn_id ?? null,
       suppressed_action_ids: suppressedActionIds,
       preemptions,
@@ -548,6 +611,8 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     actor_state_scheduler_version: input.arbitration?.actor_state_scheduler_version ?? null,
     cross_layer_event_arbitration_version: input.arbitration?.cross_layer_event_arbitration_version ?? null,
     cross_layer_event_arbitration: cloneJson(input.arbitration?.cross_layer_event_arbitration ?? null),
+    causal_epoch_version: input.arbitration?.causal_epoch_version ?? null,
+    causal_epochs: cloneJson(input.arbitration?.causal_epochs ?? null),
     action_time_overrides: cloneJson(object(input.arbitration?.action_time_overrides)),
     rate_adjustments: cloneJson(array(input.arbitration?.rate_adjustments)),
     actor_trajectories: cloneJson(object(input.arbitration?.actor_trajectories)),

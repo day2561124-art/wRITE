@@ -788,6 +788,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   const spatialPreviewOutcomes = cloneJson(outcomes);
   const timelineArbitration = arbitrateWorldSimulationGlobalTimeline({
     world_state: snapshot,
+    world_state_revision: input.world_state_revision ?? 0,
+    world_state_hash: input.world_state_hash ?? hashAgentRunValue(snapshot),
     next_world_state: next,
     scene_id: sceneId,
     event,
@@ -1119,6 +1121,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     scheduled_events: scheduledEvents,
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
+    causal_epochs: cloneJson(causalTimeline.causal_epochs ?? null),
     chronological_mutation_queue: chronologicalMutationQueue,
     chronological_mutation_execution: mutationExecution.execution,
     mutation_proposal_boundary: {
@@ -1226,6 +1229,9 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       projectile_collision_and_field_exposure_discovery_are_immutable_read_only_queries: true,
       queried_projectile_candidates_use_immutable_deterministic_batch_arbitration: true,
       cross_layer_point_event_candidates_use_immutable_exact_time_batches: true,
+      causal_candidates_are_bound_to_world_revision_hash_and_fixed_point_epoch: true,
+      stale_causal_candidates_are_rejected_between_epochs: true,
+      invalidated_epochs_require_candidate_requery_and_rearbitration: true,
       same_timestamp_cross_layer_events_are_simultaneous: true,
       exact_timestamp_arbitration_order_is_not_causal_precedence: true,
       final_world_state_written_only_by_chronological_mutation_queue: true,
