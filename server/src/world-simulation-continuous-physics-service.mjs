@@ -9,6 +9,15 @@ import {
 import {
   applyWorldSimulationCombatImpact,
 } from "./world-simulation-combat-causal-service.mjs";
+import {
+  buildWorldSimulationImmutablePhysicsEffectContract,
+  evaluateWorldSimulationAbilityEnergyConsumption,
+  evaluateWorldSimulationAmmoConsumption,
+  evaluateWorldSimulationCoverStructuralImpact,
+  evaluateWorldSimulationProjectileSpawn,
+  projectWorldSimulationImmutablePhysicsEffectProposals,
+  worldSimulationImmutablePhysicsEffectVersion,
+} from "./world-simulation-immutable-physics-effect-service.mjs";
 
 export const worldSimulationContinuousPhysicsVersion = "phase62f-continuous-physics-v1";
 
@@ -377,24 +386,35 @@ function weaponProjectileProfile(worldState, actor, intent) {
   };
 }
 
-function consumeAmmo(nextWorldState, weaponId, transitions, timeMs = null) {
-  const weapon = object(object(nextWorldState.objects)[weaponId]);
-  const ammo = object(weapon.ammo);
-  const direct = finiteNumber(weapon.ammo_current);
-  const nested = finiteNumber(ammo.current);
-  if (direct === null && nested === null) return { ok: true, remaining: null };
-  const current = direct ?? nested;
-  if (current <= 0) return { ok: false, remaining: current };
-  if (direct !== null) {
-    weapon.ammo_current = current - 1;
-    pushTransition(transitions, weaponId, "ammo_current", current, current - 1, "programmatic projectile launch consumed one round", transitionTimeExtra(timeMs));
-  } else {
-    weapon.ammo = ammo;
-    ammo.current = current - 1;
-    pushTransition(transitions, weaponId, "ammo.current", current, current - 1, "programmatic projectile launch consumed one round", transitionTimeExtra(timeMs));
+function recordImmutablePhysicsAudit(input, audit) {
+  if (audit && Array.isArray(input.immutable_causal_evaluator_audits)) {
+    input.immutable_causal_evaluator_audits.push(audit);
   }
-  nextWorldState.objects[weaponId] = weapon;
-  return { ok: true, remaining: current - 1 };
+}
+
+function projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, evaluation, elapsedMs = 0) {
+  if (!array(evaluation?.mutation_proposals).length) return nextWorldState;
+  return projectWorldSimulationImmutablePhysicsEffectProposals({
+    world_state: nextWorldState,
+    mutation_proposals: evaluation.mutation_proposals,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    scene_id: input.scene_id ?? null,
+    elapsed_ms: Math.max(0, finiteNumber(elapsedMs, 0)),
+  }).projected_world_state;
+}
+
+function consumeAmmo(input, nextWorldState, weaponId, transitions, timeMs = null) {
+  const evaluation = evaluateWorldSimulationAmmoConsumption({
+    world_state: nextWorldState,
+    weapon_id: weaponId,
+    time_ms: timeMs,
+  });
+  recordImmutablePhysicsAudit(input, evaluation.audit);
+  transitions.push(...array(evaluation.mutation_proposals));
+  const projected = projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, evaluation, timeMs);
+  nextWorldState.objects = cloneJson(object(projected.objects));
+  return cloneJson(evaluation.result);
 }
 
 function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, outcomes) {
@@ -418,7 +438,7 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
       actionTimeOverride(input, actionId).projectile_launch_ms,
       nominalFireDelayMs,
     );
-    const ammo = consumeAmmo(nextWorldState, profile.weaponId, transitions, fireDelayMs);
+    const ammo = consumeAmmo(input, nextWorldState, profile.weaponId, transitions, fireDelayMs);
     if (!ammo.ok) {
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", `projectile weapon ${profile.weaponId} has no ammunition`, { projectile_resolved: false });
       continue;
@@ -459,9 +479,22 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
       target_character: targetCharacter || null,
       penetrated_obstacles: [],
     };
-    nextWorldState.projectiles[projectileId] = projectile;
-    spawned.push({ projectileId, projectile, actor, candidate, activeAfterMs: fireDelayMs });
-    pushTransition(transitions, projectileId, "projectile", null, projectile, `projectile spawned from world-state weapon profile ${profile.weaponId}`, transitionTimeExtra(fireDelayMs));
+    const spawnEvaluation = evaluateWorldSimulationProjectileSpawn({
+      world_state: nextWorldState,
+      projectile_id: projectileId,
+      projectile,
+      weapon_id: profile.weaponId,
+      time_ms: fireDelayMs,
+    });
+    recordImmutablePhysicsAudit(input, spawnEvaluation.audit);
+    if (!spawnEvaluation.result.ok) {
+      pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", spawnEvaluation.result.reason ?? `projectile ${projectileId} could not be spawned`, { projectile_resolved: false });
+      continue;
+    }
+    transitions.push(...array(spawnEvaluation.mutation_proposals));
+    const projectedSpawn = projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, spawnEvaluation, fireDelayMs);
+    nextWorldState.projectiles = cloneJson(object(projectedSpawn.projectiles));
+    spawned.push({ projectileId, projectile: cloneJson(nextWorldState.projectiles[projectileId]), actor, candidate, activeAfterMs: fireDelayMs });
     pushOutcome(outcomes, actor, candidate, "projectile_spawned", `projectile ${projectileId} spawned from ${profile.weaponId}; speed/damage/penetration came from world state`, {
       projectile_id: projectileId,
       projectile_resolved: false,
@@ -498,18 +531,22 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
       pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", `ability ${abilityId} has no world-state field profile`);
       continue;
     }
-    const currentCharacter = object(nextWorldState.characters[actor]);
-    const energy = energyRecord(currentCharacter);
     const energyCost = nonNegativeNumber(profile.energy_cost ?? fieldProfile.energy_cost, 0);
-    if (energyCost > 0 && (!energy || energy.value < energyCost)) {
+    const energyEvaluation = evaluateWorldSimulationAbilityEnergyConsumption({
+      world_state: nextWorldState,
+      actor,
+      ability_id: abilityId,
+      energy_cost: energyCost,
+      time_ms: startDelayMs,
+    });
+    recordImmutablePhysicsAudit(input, energyEvaluation.audit);
+    if (!energyEvaluation.result.ok) {
       pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", `ability ${abilityId} requires ${energyCost} energy but current world state is insufficient`);
       continue;
     }
-    if (energy && energyCost > 0) {
-      const before = energy.value;
-      energy.container[energy.field] = before - energyCost;
-      pushTransition(transitions, actor, energy.path, before, before - energyCost, `ability ${abilityId} activation consumed world-state energy cost`, transitionTimeExtra(startDelayMs));
-    }
+    transitions.push(...array(energyEvaluation.mutation_proposals));
+    const projectedEnergy = projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, energyEvaluation, startDelayMs);
+    nextWorldState.characters = cloneJson(object(projectedEnergy.characters));
     const origin = scenePosition(snapshotScene, actor);
     const center = point(intent.center ?? intent.target_point) ?? origin;
     if (!center) {
@@ -623,34 +660,32 @@ function obstacleIntegrity(obstacle) {
   return current === null ? null : Math.max(0, current);
 }
 
-function updateObstacleAfterImpact(nextScene, collision, projectile, transitions, timeMs = null) {
-  nextScene.obstacles = array(nextScene.obstacles);
-  const current = object(nextScene.obstacles[collision.index]);
-  const resistance = obstacleResistance(current);
-  const beforeEnergy = nonNegativeNumber(projectile.remaining_penetration_energy, 0);
-  const beforeIntegrity = obstacleIntegrity(current);
-  const structuralDamage = beforeIntegrity === null ? 0 : Math.min(beforeIntegrity, beforeEnergy);
-  let destroyed = current.destroyed === true;
-  if (beforeIntegrity !== null && structuralDamage > 0) {
-    const afterIntegrity = Math.max(0, beforeIntegrity - structuralDamage);
-    current.integrity_current = afterIntegrity;
-    pushTransition(transitions, collision.obstacleId, "integrity_current", beforeIntegrity, afterIntegrity, `projectile ${projectile.projectile_id} transferred structural energy to cover`, transitionTimeExtra(timeMs, { scene_id: nextScene.scene_id ?? null }));
-    if (afterIntegrity <= 0) {
-      destroyed = true;
-      const beforePassable = current.passable === true;
-      const beforeCollisionEnabled = current.collision_enabled !== false;
-      current.destroyed = true;
-      current.passable = true;
-      current.collision_enabled = false;
-      const transitionExtra = transitionTimeExtra(timeMs, { scene_id: nextScene.scene_id ?? null });
-      pushTransition(transitions, collision.obstacleId, "destroyed", false, true, `projectile ${projectile.projectile_id} destroyed scene obstacle`, transitionExtra);
-      pushTransition(transitions, collision.obstacleId, "passable", beforePassable, true, `projectile ${projectile.projectile_id} made destroyed obstacle passable`, transitionExtra);
-      pushTransition(transitions, collision.obstacleId, "collision_enabled", beforeCollisionEnabled, false, `projectile ${projectile.projectile_id} disabled destroyed obstacle collision`, transitionExtra);
-    }
+function replaceObjectContents(target, source) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, cloneJson(source));
+}
+
+function updateObstacleAfterImpact(input, nextWorldState, nextScene, collision, projectile, transitions, timeMs = null) {
+  const evaluation = evaluateWorldSimulationCoverStructuralImpact({
+    world_state: nextWorldState,
+    scene_id: input.scene_id,
+    obstacle_id: collision.obstacleId,
+    projectile_id: projectile.projectile_id,
+    penetration_energy: projectile.remaining_penetration_energy,
+    time_ms: timeMs,
+  });
+  recordImmutablePhysicsAudit(input, evaluation.audit);
+  if (!evaluation.result.ok) return evaluation.result;
+  transitions.push(...array(evaluation.mutation_proposals));
+  const projected = projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, evaluation, timeMs);
+  const projectedScene = object(object(projected.scenes)[input.scene_id] ?? projected.scene_state);
+  replaceObjectContents(nextScene, projectedScene);
+  if (isObject(nextWorldState.scenes) && Object.hasOwn(nextWorldState.scenes, input.scene_id)) {
+    nextWorldState.scenes[input.scene_id] = nextScene;
+  } else if (isObject(nextWorldState.scene_state)) {
+    nextWorldState.scene_state = nextScene;
   }
-  nextScene.obstacles[collision.index] = current;
-  const penetrated = beforeEnergy > resistance;
-  return { resistance, beforeEnergy, penetrated, destroyed, structuralDamage };
+  return cloneJson(evaluation.result);
 }
 
 function projectilePositionAt(projectile, deltaMs) {
@@ -720,7 +755,7 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
     return;
   }
   if (event.kind === "obstacle") {
-    const impact = updateObstacleAfterImpact(nextScene, event, projectile, transitions, state.currentTimeMs);
+    const impact = updateObstacleAfterImpact(input, nextWorldState, nextScene, event, projectile, transitions, state.currentTimeMs);
     if (impact.penetrated) {
       projectile.remaining_penetration_energy = Math.max(0, impact.beforeEnergy - impact.resistance);
       projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
@@ -1133,7 +1168,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
       projectile_collisions_resolve_in_global_time_order: true,
       earlier_cover_destruction_changes_later_projectile_paths: true,
     },
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62I adds deterministic ability-field ticks and piecewise actor trajectories; exact cross-type simultaneity still uses deterministic subsystem reconciliation rather than an infinitesimal-step solver.",
+    immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62O moves ammo consumption, ability energy consumption, projectile spawn, and cover structural impact into immutable deterministic effect evaluators; projectile flight-state evolution and ability-field lifecycle advancement still use isolated mutable solver previews.",
   };
 }
 
@@ -1149,9 +1185,15 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const projectileResolutions = [];
   const abilityResolutions = [];
   const immutableCausalEvaluatorAudits = [];
+  const physicsEffectInput = {
+    ...input,
+    world_state: snapshot,
+    scene_id: sceneId,
+    immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
+  };
 
-  const spawnedProjectiles = spawnProjectiles({ ...input, world_state: snapshot, scene_id: sceneId }, nextWorldState, snapshotScene, transitions, outcomes);
-  const spawnedFields = spawnAbilityFields({ ...input, world_state: snapshot, scene_id: sceneId }, nextWorldState, snapshotScene, transitions, outcomes);
+  const spawnedProjectiles = spawnProjectiles(physicsEffectInput, nextWorldState, snapshotScene, transitions, outcomes);
+  const spawnedFields = spawnAbilityFields(physicsEffectInput, nextWorldState, snapshotScene, transitions, outcomes);
   const projectileStart = new Map(spawnedProjectiles.map((item) => [item.projectileId, item.activeAfterMs]));
   nextWorldState.projectiles = object(nextWorldState.projectiles);
 
@@ -1234,6 +1276,8 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       projectile_collision_is_programmatic: true,
       cover_penetration_is_programmatic: true,
       ability_cost_and_field_effect_are_programmatic: true,
+      immutable_physics_effect_version: worldSimulationImmutablePhysicsEffectVersion,
+      ammo_energy_spawn_and_cover_effects_are_immutable_proposal_evaluators: true,
       character_brain_selects_intent_only: true,
     },
   };

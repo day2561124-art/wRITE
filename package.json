@@ -39,7 +39,8 @@
     "test:phase62k": "node tests/phase62/phase62k-authoritative-mutation-executor.test.mjs",
     "test:phase62l": "node tests/phase62/phase62l-proposal-only-subsystem-boundary.test.mjs",
     "test:phase62m": "node tests/phase62/phase62m-pure-proposal-producer-interface.test.mjs",
-    "test:phase62n": "node tests/phase62/phase62n-immutable-causal-effect-evaluators.test.mjs"
+    "test:phase62n": "node tests/phase62/phase62n-immutable-causal-effect-evaluators.test.mjs",
+    "test:phase62o": "node tests/phase62/phase62o-immutable-physics-effect-evaluators.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"
