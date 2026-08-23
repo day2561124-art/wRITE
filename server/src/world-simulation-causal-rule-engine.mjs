@@ -1,6 +1,10 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import {
+  adjudicateWorldSimulationCombat,
+  buildWorldSimulationCombatCausalContract,
+} from "./world-simulation-combat-causal-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -225,6 +229,7 @@ function actionKind(candidate) {
   if (isObject(candidate.object_interaction)) return "object_interaction";
   if (isObject(candidate.attack)) return "attack";
   if (isObject(candidate.movement)) return "movement";
+  if (isObject(candidate.defense)) return "defense";
   return "passive";
 }
 
@@ -516,6 +521,7 @@ export function buildWorldSimulationCausalRuleContract() {
       weapon_holder_state_enforced: true,
       range_enforced: true,
       range_validity_does_not_imply_hit: true,
+      combat_causal_layer: buildWorldSimulationCombatCausalContract(),
     },
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
@@ -525,11 +531,11 @@ export function buildWorldSimulationCausalRuleContract() {
 
 export async function adjudicateWorldSimulationCausality(input = {}) {
   const snapshot = cloneJson(object(input.world_state));
-  const next = cloneJson(snapshot);
+  let next = cloneJson(snapshot);
   const event = object(input.event);
   const selectedActionIntents = array(input.selected_action_intents);
   const { sceneId, scene: snapshotScene } = sceneForEvent(snapshot, event);
-  const nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  let nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   const rules = object(snapshot.world_rules ?? snapshot.rules);
   const transitions = [];
   const outcomes = [];
@@ -600,14 +606,44 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       continue;
     }
     if (kind === "attack") {
-      const durationMs = resolveAttack(snapshot, snapshotScene, actor, candidate, rules, outcomes);
+      // Phase62E resolves attack timing/contact/damage jointly after all same-turn
+      // movement/defense declarations have been validated from the turn-start snapshot.
+      continue;
+    }
+    if (kind === "defense") {
+      const defense = object(candidate.defense);
+      const durationMs = parseDurationMs(
+        candidate,
+        positiveNumber(rules.defense_action_seconds, 0.5) * 1000,
+      );
       elapsedMs = Math.max(elapsedMs, durationMs);
+      pushOutcome(
+        outcomes,
+        actor,
+        candidate,
+        "defense_declared",
+        `defense intent ${String(defense.type ?? defense.mode ?? "unspecified")} is registered; efficacy is resolved by the programmatic combat causal layer`,
+      );
       continue;
     }
     const durationMs = parseDurationMs(candidate, positiveNumber(rules.passive_action_seconds, 0.25) * 1000);
     elapsedMs = Math.max(elapsedMs, durationMs);
     pushOutcome(outcomes, actor, candidate, "passive_action_recorded", "action declared no spatial or object mutation fields");
   }
+
+  const combatResolution = adjudicateWorldSimulationCombat({
+    world_state: snapshot,
+    next_world_state: next,
+    scene_id: sceneId,
+    event,
+    selected_action_intents: selectedActionIntents,
+    resolved_action_outcomes: outcomes,
+  });
+  next = combatResolution.next_world_state;
+  nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  transitions.push(...array(combatResolution.state_transitions));
+  outcomes.push(...array(combatResolution.action_outcomes));
+  elapsedMs = Math.max(elapsedMs, finiteNumber(combatResolution.elapsed_ms, 0));
 
   const previousTime = snapshot.simulation_time ?? event.simulation_time ?? null;
   if (typeof previousTime === "string" && elapsedMs > 0) {
@@ -663,6 +699,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       character_brain_did_not_decide_outcome: true,
       same_turn_actions_do_not_retroactively_change_each_others_preconditions: true,
       combat_range_validity_does_not_equal_hit: true,
+      combat_contact_damage_and_injury_are_programmatic: true,
+      combat_causal_version: combatResolution.combat_causal_version,
     },
   };
 }

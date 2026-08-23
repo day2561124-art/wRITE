@@ -485,6 +485,7 @@ function normalizeAction(action, index) {
     door_interaction: cloneJson(value.door_interaction ?? null),
     object_interaction: cloneJson(value.object_interaction ?? null),
     attack: cloneJson(value.attack ?? null),
+    defense: cloneJson(value.defense ?? null),
     resource_commitment: cloneJson(value.resource_commitment ?? null),
   };
 }
