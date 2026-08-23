@@ -36,7 +36,8 @@
     "test:phase62h": "node tests/phase62/phase62h-dynamic-timeline-refinement.test.mjs",
     "test:phase62i": "node tests/phase62/phase62i-continuous-actor-state-scheduler.test.mjs",
     "test:phase62j": "node tests/phase62/phase62j-unified-chronological-mutation-queue.test.mjs",
-    "test:phase62k": "node tests/phase62/phase62k-authoritative-mutation-executor.test.mjs"
+    "test:phase62k": "node tests/phase62/phase62k-authoritative-mutation-executor.test.mjs",
+    "test:phase62l": "node tests/phase62/phase62l-proposal-only-subsystem-boundary.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

@@ -983,7 +983,9 @@ export function adjudicateWorldSimulationCombat(input = {}) {
   return {
     combat_causal_version: worldSimulationCombatCausalVersion,
     next_world_state: nextWorldState,
+    next_world_state_authority: "ephemeral_preview_only",
     state_transitions: transitions,
+    mutation_proposals: transitions,
     action_outcomes: outcomes,
     combat_resolutions: combatResolutions,
     timeline_entries: buildWorldSimulationCombatTimelineEntries({ ...input, world_state: snapshot, suppressed_action_ids: [...suppressedActionIds] }),

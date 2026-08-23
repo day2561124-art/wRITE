@@ -1185,7 +1185,9 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   return {
     continuous_physics_version: worldSimulationContinuousPhysicsVersion,
     next_world_state: nextWorldState,
+    next_world_state_authority: "ephemeral_preview_only",
     state_transitions: transitions,
+    mutation_proposals: transitions,
     action_outcomes: outcomes,
     projectile_resolutions: projectileResolutions,
     ability_resolutions: abilityResolutions,
