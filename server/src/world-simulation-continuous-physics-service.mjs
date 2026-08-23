@@ -18,6 +18,14 @@ import {
   projectWorldSimulationImmutablePhysicsEffectProposals,
   worldSimulationImmutablePhysicsEffectVersion,
 } from "./world-simulation-immutable-physics-effect-service.mjs";
+import {
+  buildWorldSimulationImmutableProjectileLifecycleContract,
+  evaluateWorldSimulationProjectileAdvance,
+  evaluateWorldSimulationProjectilePenetrationContinuation,
+  evaluateWorldSimulationProjectileTermination,
+  projectWorldSimulationImmutableProjectileLifecycleProposals,
+  worldSimulationImmutableProjectileLifecycleVersion,
+} from "./world-simulation-immutable-projectile-lifecycle-service.mjs";
 
 export const worldSimulationContinuousPhysicsVersion = "phase62f-continuous-physics-v1";
 
@@ -404,6 +412,29 @@ function projectPhysicsEffectIntoPrivatePreview(input, nextWorldState, evaluatio
   }).projected_world_state;
 }
 
+function projectProjectileLifecycleIntoPrivatePreview(input, nextWorldState, evaluation, elapsedMs = 0) {
+  if (!array(evaluation?.mutation_proposals).length) return nextWorldState;
+  return projectWorldSimulationImmutableProjectileLifecycleProposals({
+    world_state: nextWorldState,
+    mutation_proposals: evaluation.mutation_proposals,
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    scene_id: input.scene_id ?? null,
+    elapsed_ms: Math.max(0, finiteNumber(elapsedMs, 0)),
+  }).projected_world_state;
+}
+
+function applyProjectileLifecycleEvaluation(input, state, nextWorldState, transitions, evaluation, timeMs = 0) {
+  recordImmutablePhysicsAudit(input, evaluation?.audit);
+  transitions.push(...array(evaluation?.mutation_proposals));
+  if (!array(evaluation?.mutation_proposals).length) return cloneJson(evaluation?.result ?? {});
+  const projected = projectProjectileLifecycleIntoPrivatePreview(input, nextWorldState, evaluation, timeMs);
+  const projectedProjectile = object(object(projected.projectiles)[state.projectileId]);
+  replaceObjectContents(state.projectile, projectedProjectile);
+  nextWorldState.projectiles[state.projectileId] = state.projectile;
+  return cloneJson(evaluation?.result ?? {});
+}
+
 function consumeAmmo(input, nextWorldState, weaponId, transitions, timeMs = null) {
   const evaluation = evaluateWorldSimulationAmmoConsumption({
     world_state: nextWorldState,
@@ -720,29 +751,99 @@ function nextProjectileTimelineStep(input, projectile, currentTimeMs, activeEndM
   return { kind: "advance_end", timeMs: activeEndMs };
 }
 
-function advanceProjectileTimelineClock(projectile, fromMs, toMs) {
+function advanceProjectileTimelineClock(input, state, nextWorldState, transitions, toMs) {
+  const fromMs = state.currentTimeMs;
   const travelMs = Math.max(0, toMs - fromMs);
-  projectile.position = projectilePositionAt(projectile, travelMs);
-  projectile.age_ms = nonNegativeNumber(projectile.age_ms, 0) + travelMs;
+  if (travelMs > 0) {
+    const evaluation = evaluateWorldSimulationProjectileAdvance({
+      projectile: state.projectile,
+      delta_ms: travelMs,
+      time_ms: toMs,
+    });
+    const result = applyProjectileLifecycleEvaluation(
+      input,
+      state,
+      nextWorldState,
+      transitions,
+      evaluation,
+      toMs,
+    );
+    if (!result.ok) {
+      const error = new Error(result.reason ?? `projectile ${state.projectileId} could not advance`);
+      error.code = "WORLD_SIMULATION_PROJECTILE_LIFECYCLE_ADVANCE_FAILED";
+      throw error;
+    }
+  }
+  state.currentTimeMs = toMs;
   return toMs;
+}
+
+function terminateProjectileLifecycle(input, state, nextWorldState, transitions, reason, options = {}) {
+  const evaluation = evaluateWorldSimulationProjectileTermination({
+    projectile: state.projectile,
+    reason,
+    zero_penetration_energy: options.zero_penetration_energy === true,
+    time_ms: state.currentTimeMs,
+  });
+  const result = applyProjectileLifecycleEvaluation(
+    input,
+    state,
+    nextWorldState,
+    transitions,
+    evaluation,
+    state.currentTimeMs,
+  );
+  if (!result.ok) {
+    const error = new Error(result.reason ?? `projectile ${state.projectileId} could not terminate`);
+    error.code = "WORLD_SIMULATION_PROJECTILE_LIFECYCLE_TERMINATION_FAILED";
+    throw error;
+  }
+  return result;
+}
+
+function continueProjectileAfterPenetration(input, state, nextWorldState, transitions, obstacleId, resistance) {
+  const evaluation = evaluateWorldSimulationProjectilePenetrationContinuation({
+    projectile: state.projectile,
+    obstacle_id: obstacleId,
+    resistance,
+    time_ms: state.currentTimeMs,
+    epsilon_ms: 0.01,
+  });
+  const result = applyProjectileLifecycleEvaluation(
+    input,
+    state,
+    nextWorldState,
+    transitions,
+    evaluation,
+    resultTime(evaluation, state.currentTimeMs),
+  );
+  if (!result.ok) {
+    const error = new Error(result.reason ?? `projectile ${state.projectileId} could not continue after penetration`);
+    error.code = "WORLD_SIMULATION_PROJECTILE_LIFECYCLE_PENETRATION_FAILED";
+    throw error;
+  }
+  state.currentTimeMs = nonNegativeNumber(result.time_ms_after, state.currentTimeMs);
+  return result;
+}
+
+function resultTime(evaluation, fallback) {
+  return nonNegativeNumber(evaluation?.result?.time_ms_after, fallback);
 }
 
 function applyProjectileTimelineStep(input, state, event, nextWorldState, nextScene, transitions, outcomes, resolutions) {
   const projectile = state.projectile;
-  state.currentTimeMs = advanceProjectileTimelineClock(projectile, state.currentTimeMs, event.timeMs);
+  advanceProjectileTimelineClock(input, state, nextWorldState, transitions, event.timeMs);
   if (event.kind === "advance_end") {
     state.doneForTurn = true;
     return;
   }
   if (event.kind === "lifetime") {
-    projectile.active = false;
-    projectile.termination_reason = "lifetime_expired";
+    terminateProjectileLifecycle(input, state, nextWorldState, transitions, "lifetime_expired");
     state.doneForTurn = true;
     return;
   }
   if (event.kind === "bounds") {
-    projectile.active = false;
-    projectile.termination_reason = "left_scene_bounds";
+    terminateProjectileLifecycle(input, state, nextWorldState, transitions, "left_scene_bounds");
     resolutions.push({
       projectile_id: projectile.projectile_id,
       owner: projectile.owner,
@@ -757,33 +858,33 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
   if (event.kind === "obstacle") {
     const impact = updateObstacleAfterImpact(input, nextWorldState, nextScene, event, projectile, transitions, state.currentTimeMs);
     if (impact.penetrated) {
-      projectile.remaining_penetration_energy = Math.max(0, impact.beforeEnergy - impact.resistance);
-      projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
+      const continuation = continueProjectileAfterPenetration(
+        input,
+        state,
+        nextWorldState,
+        transitions,
+        event.obstacleId,
+        impact.resistance,
+      );
       resolutions.push({
         projectile_id: projectile.projectile_id,
         owner: projectile.owner,
         source_action_id: projectile.source_action_id,
         result: "projectile_penetrated_cover",
         obstacle_id: event.obstacleId,
-        time_ms: state.currentTimeMs,
-        remaining_penetration_energy: projectile.remaining_penetration_energy,
+        time_ms: event.timeMs,
+        remaining_penetration_energy: continuation.remaining_penetration_energy,
         cover_destroyed: impact.destroyed,
       });
       pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_penetrated_cover", `projectile energy ${impact.beforeEnergy.toFixed(3)} exceeded cover resistance ${impact.resistance.toFixed(3)}`, {
         projectile_id: projectile.projectile_id,
         obstacle_id: event.obstacleId,
-        remaining_penetration_energy: projectile.remaining_penetration_energy,
+        remaining_penetration_energy: continuation.remaining_penetration_energy,
         cover_destroyed: impact.destroyed,
       });
-      const epsilonMs = 0.01;
-      projectile.position = projectilePositionAt(projectile, epsilonMs);
-      projectile.age_ms += epsilonMs;
-      state.currentTimeMs += epsilonMs;
       return;
     }
-    projectile.active = false;
-    projectile.termination_reason = "stopped_by_cover";
-    projectile.remaining_penetration_energy = 0;
+    terminateProjectileLifecycle(input, state, nextWorldState, transitions, "stopped_by_cover", { zero_penetration_energy: true });
     resolutions.push({
       projectile_id: projectile.projectile_id,
       owner: projectile.owner,
@@ -821,9 +922,7 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
       source_layer: "continuous_physics",
     });
     if (impact.evaluator_audit) array(input.immutable_causal_evaluator_audits).push(impact.evaluator_audit);
-    projectile.active = false;
-    projectile.termination_reason = "character_contact";
-    projectile.remaining_penetration_energy = 0;
+    terminateProjectileLifecycle(input, state, nextWorldState, transitions, "character_contact", { zero_penetration_energy: true });
     resolutions.push({
       projectile_id: projectile.projectile_id,
       owner: projectile.owner,
@@ -851,13 +950,11 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
 
 function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, nextWorldState, snapshotScene, nextScene, transitions, outcomes, resolutions) {
   const states = [];
-  const beforeById = new Map();
   for (const [projectileId, rawProjectile] of Object.entries(object(nextWorldState.projectiles))) {
     const projectile = object(rawProjectile);
     if (projectile.active !== true || String(projectile.scene_id ?? "") !== input.scene_id) continue;
     const startMs = projectileStart.has(projectileId) ? projectileStart.get(projectileId) : 0;
     if (startMs >= elapsedMs) continue;
-    beforeById.set(projectileId, cloneJson(projectile));
     states.push({ projectileId, projectile, currentTimeMs: startMs, doneForTurn: false });
   }
 
@@ -896,20 +993,10 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
 
   for (const state of states) {
     if (iterations >= maxIterations && state.projectile.active === true && state.doneForTurn !== true) {
-      state.projectile.active = false;
-      state.projectile.termination_reason = "global_physics_iteration_guard";
+      terminateProjectileLifecycle(input, state, nextWorldState, transitions, "global_physics_iteration_guard");
+      state.doneForTurn = true;
     }
     nextWorldState.projectiles[state.projectileId] = state.projectile;
-    const before = beforeById.get(state.projectileId);
-    pushTransition(
-      transitions,
-      state.projectileId,
-      "projectile_state",
-      before,
-      state.projectile,
-      `global-time projectile scheduler advanced through ${Math.max(0, elapsedMs - (projectileStart.get(state.projectileId) ?? 0))}ms window`,
-      transitionTimeExtra(Math.min(elapsedMs, state.currentTimeMs)),
-    );
   }
   return { iterations };
 }
@@ -1169,7 +1256,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
       earlier_cover_destruction_changes_later_projectile_paths: true,
     },
     immutable_physics_effects: buildWorldSimulationImmutablePhysicsEffectContract(),
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62O moves ammo consumption, ability energy consumption, projectile spawn, and cover structural impact into immutable deterministic effect evaluators; projectile flight-state evolution and ability-field lifecycle advancement still use isolated mutable solver previews.",
+    immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62P moves projectile flight advance, penetration continuation, and termination state into immutable deterministic lifecycle evaluators; collision discovery remains programmatic and ability-field lifecycle advancement still uses an isolated mutable solver preview.",
   };
 }
 
@@ -1277,7 +1365,9 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       cover_penetration_is_programmatic: true,
       ability_cost_and_field_effect_are_programmatic: true,
       immutable_physics_effect_version: worldSimulationImmutablePhysicsEffectVersion,
+      immutable_projectile_lifecycle_version: worldSimulationImmutableProjectileLifecycleVersion,
       ammo_energy_spawn_and_cover_effects_are_immutable_proposal_evaluators: true,
+      projectile_flight_penetration_and_termination_are_immutable_proposal_evaluators: true,
       character_brain_selects_intent_only: true,
     },
   };

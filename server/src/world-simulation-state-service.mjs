@@ -264,6 +264,7 @@ export async function commitWorldSimulationTurn(
             pure_proposal_producers: input.pure_proposal_producers ?? null,
             immutable_causal_evaluators: input.immutable_causal_evaluators ?? null,
             immutable_physics_effects: input.immutable_physics_effects ?? null,
+            immutable_projectile_lifecycle: input.immutable_projectile_lifecycle ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });
