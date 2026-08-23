@@ -39,6 +39,11 @@ import {
   queryWorldSimulationProjectileNextEvent,
   worldSimulationImmutableEventQueryVersion,
 } from "./world-simulation-immutable-event-query-service.mjs";
+import {
+  arbitrateWorldSimulationEventCandidates,
+  buildWorldSimulationImmutableEventArbitrationContract,
+  worldSimulationImmutableEventArbitrationVersion,
+} from "./world-simulation-immutable-event-arbitration-service.mjs";
 
 export const worldSimulationContinuousPhysicsVersion = "phase62f-continuous-physics-v1";
 
@@ -827,32 +832,43 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
   const maxIterations = Math.max(128, states.length * 96);
   while (iterations < maxIterations) {
     iterations += 1;
-    const candidates = states
-      .filter((state) => state.projectile.active === true && state.doneForTurn !== true && state.currentTimeMs < elapsedMs - 1e-6)
-      .map((state) => ({
-        state,
-        event: nextProjectileTimelineStep(input, state.projectile, state.currentTimeMs, elapsedMs, snapshotScene, nextScene),
-      }));
+    const activeStates = states
+      .filter((state) => state.projectile.active === true && state.doneForTurn !== true && state.currentTimeMs < elapsedMs - 1e-6);
+    const candidates = activeStates.map((state) => {
+      const event = nextProjectileTimelineStep(input, state.projectile, state.currentTimeMs, elapsedMs, snapshotScene, nextScene);
+      return {
+        candidate_id: `projectile:${state.projectileId}:${event.kind}:${event.timeMs}`,
+        source: "projectile_collision_discovery",
+        subject_id: state.projectileId,
+        time_ms: event.timeMs,
+        event,
+      };
+    });
     if (!candidates.length) break;
-    candidates.sort((left, right) => (
-      left.event.timeMs - right.event.timeMs
-      || left.state.projectileId.localeCompare(right.state.projectileId)
-      || left.event.kind.localeCompare(right.event.kind)
-    ));
-    const earliestTimeMs = candidates[0].event.timeMs;
-    const simultaneous = candidates.filter((item) => Math.abs(item.event.timeMs - earliestTimeMs) <= 1e-6);
-    for (const item of simultaneous) {
+    const arbitration = arbitrateWorldSimulationEventCandidates({
+      candidates,
+      simultaneous_tolerance_ms: 1e-6,
+    });
+    if (Array.isArray(input.immutable_event_arbitration_audits)) input.immutable_event_arbitration_audits.push(arbitration.audit);
+    const selectedBatch = array(arbitration.result.selected_batch);
+    if (!selectedBatch.length) break;
+    const stateByProjectileId = new Map(activeStates.map((state) => [state.projectileId, state]));
+    // The selected set is frozen before any batch mutation is applied. Member order is replay-only,
+    // not world-time causal precedence; all unresolved candidates are queried again next epoch.
+    for (const candidate of selectedBatch) {
+      const state = stateByProjectileId.get(String(candidate.subject_id ?? ""));
+      if (!state) continue;
       applyProjectileTimelineStep(
         input,
-        item.state,
-        item.event,
+        state,
+        object(candidate.event),
         nextWorldState,
         nextScene,
         transitions,
         outcomes,
         resolutions,
       );
-      nextWorldState.projectiles[item.state.projectileId] = item.state.projectile;
+      nextWorldState.projectiles[state.projectileId] = state.projectile;
     }
   }
 
@@ -1088,7 +1104,8 @@ export function buildWorldSimulationContinuousPhysicsContract() {
     immutable_projectile_lifecycle: buildWorldSimulationImmutableProjectileLifecycleContract(),
     immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
     immutable_event_queries: buildWorldSimulationImmutableEventQueryContract(),
-    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62R moves projectile next-event discovery and ability-field geometric exposure into immutable deterministic read-only causal queries; global scheduling and broader spatial discovery remain programmatic.",
+    immutable_event_arbitration: buildWorldSimulationImmutableEventArbitrationContract(),
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Phase62S moves queried projectile candidate batch selection into immutable deterministic arbitration; the broader cross-layer global timeline fixed point remains programmatic.",
   };
 }
 
@@ -1105,12 +1122,14 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const abilityResolutions = [];
   const immutableCausalEvaluatorAudits = [];
   const immutableCausalQueryAudits = [];
+  const immutableEventArbitrationAudits = [];
   const physicsEffectInput = {
     ...input,
     world_state: snapshot,
     scene_id: sceneId,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     immutable_causal_query_audits: immutableCausalQueryAudits,
+    immutable_event_arbitration_audits: immutableEventArbitrationAudits,
   };
 
   const spawnedProjectiles = spawnProjectiles(physicsEffectInput, nextWorldState, snapshotScene, transitions, outcomes);
@@ -1119,7 +1138,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   nextWorldState.projectiles = object(nextWorldState.projectiles);
 
   const projectileScheduler = resolveProjectilesInGlobalTimeOrder(
-    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits, immutable_causal_query_audits: immutableCausalQueryAudits },
+    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits, immutable_causal_query_audits: immutableCausalQueryAudits, immutable_event_arbitration_audits: immutableEventArbitrationAudits },
     projectileStart,
     elapsedMs,
     nextWorldState,
@@ -1159,6 +1178,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
     ability_resolutions: abilityResolutions,
     immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     immutable_causal_query_audits: immutableCausalQueryAudits,
+    immutable_event_arbitration_audits: immutableEventArbitrationAudits,
     timeline_entries: [
       ...buildWorldSimulationContinuousIntentTimelineEntries({ ...input, world_state: snapshot }),
       ...projectileResolutions.map((resolution) => ({
@@ -1193,6 +1213,8 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       ordering: "global_collision_time",
       iterations: projectileScheduler.iterations,
       strict_earlier_topology_mutation_visible_to_later_projectiles: true,
+      candidate_batch_selection: "immutable_event_arbitration",
+      unresolved_candidates_requeried_after_each_batch: true,
     },
     boundary: {
       projectile_collision_is_programmatic: true,
@@ -1202,11 +1224,14 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       immutable_projectile_lifecycle_version: worldSimulationImmutableProjectileLifecycleVersion,
       immutable_ability_field_lifecycle_version: worldSimulationImmutableAbilityFieldLifecycleVersion,
       immutable_event_query_version: worldSimulationImmutableEventQueryVersion,
+      immutable_event_arbitration_version: worldSimulationImmutableEventArbitrationVersion,
       ammo_energy_spawn_and_cover_effects_are_immutable_proposal_evaluators: true,
       projectile_flight_penetration_and_termination_are_immutable_proposal_evaluators: true,
       ability_field_spawn_tick_progression_and_expiration_are_immutable_proposal_evaluators: true,
       projectile_collision_discovery_is_immutable_read_only_query: true,
       ability_field_geometric_exposure_is_immutable_read_only_query: true,
+      projectile_candidate_batch_selection_is_immutable_deterministic_arbitration: true,
+      exact_timestamp_batch_member_order_is_replay_only: true,
       character_brain_selects_intent_only: true,
     },
   };
