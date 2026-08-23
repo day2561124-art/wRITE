@@ -302,23 +302,41 @@ function resolveHitRegion(worldState, target, attack) {
   return "feet";
 }
 
-function defenseWindow(candidate, rules) {
+function actionTimeOverride(input, actionId) {
+  return object(object(input?.action_time_overrides)[String(actionId ?? "")]);
+}
+
+function attackTimelineWithOverride(input, worldState, actor, candidate, rules) {
+  const timeline = attackTimeline(worldState, actor, candidate, rules);
+  const override = actionTimeOverride(input, candidate.action_id);
+  const contactTimeMs = finiteNumber(override.contact_time_ms, timeline.contactTimeMs);
+  const totalMs = finiteNumber(override.total_ms, timeline.totalMs);
+  return {
+    ...timeline,
+    contactTimeMs,
+    totalMs: Math.max(contactTimeMs, totalMs),
+    timelineRefined: contactTimeMs !== timeline.contactTimeMs || totalMs !== timeline.totalMs,
+  };
+}
+
+function defenseWindow(candidate, rules, override = {}) {
   const defense = object(candidate.defense);
-  const startMs = nonNegativeNumber(defense.start_ms ?? defense.start_delay_ms, 0);
+  const nominalStartMs = nonNegativeNumber(defense.start_ms ?? defense.start_delay_ms, 0);
+  const startMs = nonNegativeNumber(override.defense_start_ms, nominalStartMs);
   const activeMs = positiveNumber(
     defense.active_ms ?? defense.window_ms,
     positiveNumber(parseDurationMs(candidate, positiveNumber(rules.defense_action_seconds, 0.5) * 1000), 1),
   );
-  return { startMs, endMs: startMs + activeMs, activeMs };
+  return { startMs, endMs: startMs + activeMs, activeMs, nominalStartMs };
 }
 
-function defenseAtContact(worldState, resourceState, target, selectedActionIntents, contactTimeMs, rules, suppressedActionIds = new Set()) {
+function defenseAtContact(worldState, resourceState, target, selectedActionIntents, contactTimeMs, rules, suppressedActionIds = new Set(), actionTimeOverrides = {}) {
   const candidate = candidateForCharacter(selectedActionIntents, target);
   if (suppressedActionIds.has(String(candidate.action_id ?? ""))) return null;
   const defense = object(candidate.defense);
   const type = String(defense.type ?? defense.mode ?? "").trim().toLowerCase();
   if (!type || type === "dodge" || type === "evade") return null;
-  const window = defenseWindow(candidate, rules);
+  const window = defenseWindow(candidate, rules, object(actionTimeOverrides)[String(candidate.action_id ?? "")]);
   if (contactTimeMs < window.startMs || contactTimeMs > window.endMs) return null;
   if (type === "block" || type === "parry") {
     const objectId = String(defense.object_id ?? defense.weapon_id ?? defense.shield_id ?? "").trim();
@@ -501,7 +519,17 @@ function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, t
 }
 
 export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions) {
-  if (damage <= 0) return { severity: "none", healthBefore: null, healthAfter: null };
+  if (damage <= 0) {
+    const character = object(object(snapshot.characters)[target]);
+    const physical = object(character.physical_state);
+    return {
+      severity: "none",
+      healthBefore: null,
+      healthAfter: null,
+      movementMultiplierAfter: finiteNumber(physical.movement_multiplier, 1),
+      combatMultiplierAfter: finiteNumber(physical.combat_multiplier, 1),
+    };
+  }
   nextWorldState.characters = object(nextWorldState.characters);
   const snapshotCharacter = object(object(snapshot.characters)[target]);
   const currentCharacter = object(nextWorldState.characters[target]);
@@ -596,7 +624,13 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
   }
   currentCharacter.physical_state = physical;
   nextWorldState.characters[target] = currentCharacter;
-  return { severity, healthBefore, healthAfter };
+  return {
+    severity,
+    healthBefore,
+    healthAfter,
+    movementMultiplierAfter: nextMovement,
+    combatMultiplierAfter: nextCombat,
+  };
 }
 
 export function applyWorldSimulationCombatImpact(input = {}) {
@@ -633,6 +667,8 @@ export function applyWorldSimulationCombatImpact(input = {}) {
     injury_severity: injury.severity,
     health_before: injury.healthBefore,
     health_after: injury.healthAfter,
+    movement_multiplier_after: injury.movementMultiplierAfter,
+    combat_multiplier_after: injury.combatMultiplierAfter,
   };
 }
 
@@ -648,7 +684,7 @@ export function buildWorldSimulationCombatTimelineEntries(input = {}) {
     const actionId = String(candidate.action_id ?? "").trim();
     if (!actor || !actionId || suppressed.has(actionId)) continue;
     if (isObject(candidate.attack)) {
-      const timeline = attackTimeline(snapshot, actor, candidate, rules);
+      const timeline = attackTimelineWithOverride(input, snapshot, actor, candidate, rules);
       if (Number.isFinite(timeline.contactTimeMs)) {
         entries.push({
           kind: "melee_contact",
@@ -661,7 +697,7 @@ export function buildWorldSimulationCombatTimelineEntries(input = {}) {
       }
     }
     if (isObject(candidate.defense)) {
-      const window = defenseWindow(candidate, rules);
+      const window = defenseWindow(candidate, rules, actionTimeOverride(input, actionId));
       entries.push({
         kind: "defense_start",
         actor,
@@ -731,7 +767,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       const candidate = object(selected?.candidate);
       const actionId = String(candidate.action_id ?? "");
       if (!actor || suppressedActionIds.has(actionId) || !isObject(candidate.attack)) return null;
-      const timeline = attackTimeline(snapshot, actor, candidate, rules);
+      const timeline = attackTimelineWithOverride(input, snapshot, actor, candidate, rules);
       return { selected, actor, candidate, timeline };
     })
     .filter(Boolean)
@@ -837,6 +873,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       timeline.contactTimeMs,
       rules,
       suppressedActionIds,
+      input.action_time_overrides,
     );
     const armor = armorProfile(snapshot, target, hitRegion);
     const mitigation = mitigateDamage(profile.baseDamage, profile.penetration, defense, armor);
@@ -894,6 +931,8 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       injury_severity: injury.severity,
       health_before: injury.healthBefore,
       health_after: injury.healthAfter,
+      movement_multiplier_after: injury.movementMultiplierAfter,
+      combat_multiplier_after: injury.combatMultiplierAfter,
       resolution_trace: resolutionTrace,
     });
     combatResolutions.push({

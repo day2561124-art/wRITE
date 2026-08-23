@@ -9,6 +9,12 @@ import {
   adjudicateWorldSimulationContinuousPhysics,
   buildWorldSimulationContinuousIntentTimelineEntries,
 } from "./world-simulation-continuous-physics-service.mjs";
+import {
+  buildWorldSimulationTimelineRefinementContract,
+  collectWorldSimulationInjuryRateEvents,
+  refineWorldSimulationExecutionTimes,
+  worldSimulationTimelineRefinementVersion,
+} from "./world-simulation-timeline-refinement-service.mjs";
 
 export const worldSimulationGlobalCausalTimelineVersion = "phase62g-global-causal-timeline-v1";
 
@@ -130,17 +136,19 @@ function fatalProjectileEvents(physicsResolution) {
   return entries.filter((entry) => entry.target);
 }
 
-function executionEntries(input, suppressedActionIds) {
+function executionEntries(input, suppressedActionIds, actionTimeOverrides = {}) {
   return stableSort([
     ...buildWorldSimulationCombatTimelineEntries({
       world_state: input.world_state,
       selected_action_intents: input.selected_action_intents,
       suppressed_action_ids: suppressedActionIds,
+      action_time_overrides: actionTimeOverrides,
     }),
     ...buildWorldSimulationContinuousIntentTimelineEntries({
       world_state: input.world_state,
       selected_action_intents: input.selected_action_intents,
       suppressed_action_ids: suppressedActionIds,
+      action_time_overrides: actionTimeOverrides,
     }),
   ]);
 }
@@ -189,8 +197,9 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
       "ability_activation",
     ],
     persisted_history: true,
+    timeline_refinement: buildWorldSimulationTimelineRefinementContract(),
     character_brain_may_decide_timestamps_as_outcomes: false,
-    known_boundary: "Phase62G v1 unifies cross-layer point-event ordering and incapacitation preemption. Continuous nonfatal injury rate changes, mid-turn topology replay, and field-damage microticks remain delegated to their causal layers until a later timeline refinement.",
+    known_boundary: "Phase62G supplies the global point-event clock. Phase62H refinement can delay later execution after nonfatal injury and makes later projectiles observe strictly earlier topology destruction; field-damage microticks and partial movement interruption remain future refinements.",
   };
 }
 
@@ -199,10 +208,13 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
   const baseNext = cloneJson(object(input.next_world_state ?? snapshot));
   const suppressed = new Set(array(input.suppressed_action_ids).map((value) => String(value)));
   const preemptions = [];
+  let actionTimeOverrides = {};
+  let rateAdjustments = [];
+  let injuryRateEvents = [];
   let lastCombat = null;
   let lastPhysics = null;
   let iterations = 0;
-  const maxIterations = Math.max(2, array(input.selected_action_intents).length + 2);
+  const maxIterations = Math.max(4, array(input.selected_action_intents).length * 2 + 4);
 
   while (iterations < maxIterations) {
     iterations += 1;
@@ -211,8 +223,20 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       world_state: snapshot,
       selected_action_intents: input.selected_action_intents,
       suppressed_action_ids: suppressedList,
+      action_time_overrides: actionTimeOverrides,
     });
-    const elapsedMs = actionWindowMs(input, combatEntries);
+    const continuousEntries = buildWorldSimulationContinuousIntentTimelineEntries({
+      world_state: snapshot,
+      selected_action_intents: input.selected_action_intents,
+      suppressed_action_ids: suppressedList,
+      action_time_overrides: actionTimeOverrides,
+    });
+    let elapsedMs = actionWindowMs(input, combatEntries);
+    for (const entry of continuousEntries) elapsedMs = Math.max(elapsedMs, nonNegativeNumber(entry.time_ms, 0));
+    for (const override of Object.values(object(actionTimeOverrides))) {
+      for (const value of Object.values(object(override))) elapsedMs = Math.max(elapsedMs, nonNegativeNumber(value, 0));
+    }
+
     lastCombat = adjudicateWorldSimulationCombat({
       world_state: snapshot,
       next_world_state: baseNext,
@@ -221,6 +245,7 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       selected_action_intents: input.selected_action_intents,
       resolved_action_outcomes: input.resolved_action_outcomes,
       suppressed_action_ids: suppressedList,
+      action_time_overrides: actionTimeOverrides,
     });
     lastPhysics = adjudicateWorldSimulationContinuousPhysics({
       world_state: snapshot,
@@ -232,26 +257,53 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       resolved_action_outcomes: input.resolved_action_outcomes,
       elapsed_ms: Math.max(elapsedMs, nonNegativeNumber(lastCombat.elapsed_ms, 0)),
       suppressed_action_ids: suppressedList,
+      action_time_overrides: actionTimeOverrides,
     });
 
     const fatals = stableSort([
       ...fatalCombatEvents(lastCombat),
       ...fatalProjectileEvents(lastPhysics),
     ]);
-    const executions = executionEntries(input, suppressedList);
+    const executions = executionEntries(input, suppressedList, actionTimeOverrides);
     const additions = preemptionsFor(executions, fatals, suppressed);
-    if (!additions.length) break;
+
+    injuryRateEvents = collectWorldSimulationInjuryRateEvents({
+      combat_resolution: lastCombat,
+      physics_resolution: lastPhysics,
+    });
+    const nominalExecutions = executionEntries(input, suppressedList, {});
+    const refinement = refineWorldSimulationExecutionTimes({
+      world_state: snapshot,
+      execution_entries: nominalExecutions,
+      injury_events: injuryRateEvents,
+    });
+    const nextOverrides = refinement.action_time_overrides;
+    const overridesChanged = JSON.stringify(nextOverrides) !== JSON.stringify(actionTimeOverrides);
+    actionTimeOverrides = nextOverrides;
+    rateAdjustments = refinement.rate_adjustments;
+
     for (const item of additions) {
       if (suppressed.has(item.action_id)) continue;
       suppressed.add(item.action_id);
       preemptions.push(item);
     }
+    if (!additions.length && !overridesChanged) break;
   }
 
   const suppressedActionIds = [...suppressed].sort();
   const previewEntries = stableSort([
     ...array(lastCombat?.timeline_entries).map((entry) => ({ ...entry, source_layer: "combat" })),
     ...array(lastPhysics?.timeline_entries).map((entry) => ({ ...entry, source_layer: "continuous_physics" })),
+    ...rateAdjustments.map((item) => ({
+      kind: "action_rate_adjusted",
+      actor: item.actor,
+      action_id: item.action_id,
+      time_ms: item.refined_time_ms,
+      nominal_time_ms: item.nominal_time_ms,
+      refined_time_ms: item.refined_time_ms,
+      cause: item.cause,
+      source_layer: "timeline_refinement",
+    })),
     ...preemptions.map((item) => ({
       kind: "action_preempted",
       actor: item.actor,
@@ -268,15 +320,23 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
 
   return {
     version: worldSimulationGlobalCausalTimelineVersion,
+    refinement_version: worldSimulationTimelineRefinementVersion,
     iterations,
     suppressed_action_ids: suppressedActionIds,
     preemptions,
+    injury_rate_events: injuryRateEvents,
+    action_time_overrides: actionTimeOverrides,
+    rate_adjustments: rateAdjustments,
     preview_entries: previewEntries,
     timeline_hash: hashAgentRunValue({
       version: worldSimulationGlobalCausalTimelineVersion,
+      refinement_version: worldSimulationTimelineRefinementVersion,
       turn_id: input.turn_id ?? null,
       suppressed_action_ids: suppressedActionIds,
       preemptions,
+      injury_rate_events: injuryRateEvents,
+      action_time_overrides: actionTimeOverrides,
+      rate_adjustments: rateAdjustments,
       preview_entries: previewEntries,
     }),
   };
@@ -316,6 +376,16 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     });
   }
   entries.push(...array(input.physics_resolution?.timeline_entries).map((entry) => ({ ...entry, source_layer: "continuous_physics" })));
+  entries.push(...array(input.arbitration?.rate_adjustments).map((item) => ({
+    kind: "action_rate_adjusted",
+    actor: item.actor ?? null,
+    action_id: item.action_id ?? null,
+    time_ms: item.refined_time_ms ?? 0,
+    nominal_time_ms: item.nominal_time_ms ?? null,
+    refined_time_ms: item.refined_time_ms ?? null,
+    result: "execution_delayed_by_earlier_nonfatal_injury",
+    source_layer: "timeline_refinement",
+  })));
   entries.push(...array(input.arbitration?.preemptions).map((item) => ({
     kind: "action_preempted",
     actor: item.actor,
@@ -339,6 +409,9 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     ordering: "time_ms_then_stable_programmatic_tie_break",
     suppressed_action_ids: array(input.arbitration?.suppressed_action_ids),
     arbitration_iterations: input.arbitration?.iterations ?? 0,
+    refinement_version: input.arbitration?.refinement_version ?? null,
+    action_time_overrides: cloneJson(object(input.arbitration?.action_time_overrides)),
+    rate_adjustments: cloneJson(array(input.arbitration?.rate_adjustments)),
     entries: ordered,
   };
   timeline.timeline_hash = hashAgentRunValue(timeline);

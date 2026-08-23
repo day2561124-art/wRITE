@@ -674,6 +674,12 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     elapsed_ms: elapsedMs,
   });
   const suppressedActionIds = array(timelineArbitration.suppressed_action_ids);
+  const actionTimeOverrides = object(timelineArbitration.action_time_overrides);
+  for (const override of Object.values(actionTimeOverrides)) {
+    for (const value of Object.values(object(override))) {
+      elapsedMs = Math.max(elapsedMs, finiteNumber(value, 0));
+    }
+  }
   for (const preemption of array(timelineArbitration.preemptions)) {
     outcomes.push({
       actor: preemption.actor ?? null,
@@ -698,6 +704,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     selected_action_intents: selectedActionIntents,
     resolved_action_outcomes: outcomes,
     suppressed_action_ids: suppressedActionIds,
+    action_time_overrides: actionTimeOverrides,
   });
   next = combatResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
@@ -715,6 +722,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     resolved_action_outcomes: outcomes,
     elapsed_ms: elapsedMs,
     suppressed_action_ids: suppressedActionIds,
+    action_time_overrides: actionTimeOverrides,
   });
   next = physicsResolution.next_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
@@ -791,6 +799,9 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       cross_layer_point_events_ordered_by_global_timeline: true,
       earlier_incapacitation_preempts_later_execution: true,
       global_causal_timeline_version: causalTimeline.version,
+      timeline_refinement_version: causalTimeline.refinement_version,
+      earlier_nonfatal_injury_can_delay_later_execution: true,
+      earlier_topology_destruction_changes_later_projectile_paths: true,
     },
   };
 }

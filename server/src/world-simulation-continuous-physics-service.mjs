@@ -80,6 +80,10 @@ function parseDurationMs(candidate, fallbackMs = 0) {
   return fallbackMs;
 }
 
+function actionTimeOverride(input, actionId) {
+  return object(object(input?.action_time_overrides)[String(actionId ?? "")]);
+}
+
 function pushOutcome(outcomes, actor, candidate, result, causalEvidence, extra = {}) {
   outcomes.push({
     actor: actor || null,
@@ -388,7 +392,11 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", "projectile launch requires actor position and a non-zero aim direction", { projectile_resolved: false });
       continue;
     }
-    const fireDelayMs = nonNegativeNumber(intent.fire_delay_ms, 0);
+    const nominalFireDelayMs = nonNegativeNumber(intent.fire_delay_ms, 0);
+    const fireDelayMs = nonNegativeNumber(
+      actionTimeOverride(input, actionId).projectile_launch_ms,
+      nominalFireDelayMs,
+    );
     const projectileId = `projectile_${hashAgentRunValue({
       owner: actor,
       action_id: candidate.action_id ?? null,
@@ -474,7 +482,11 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
       pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", `ability ${abilityId} field radius/duration must exist in world state`);
       continue;
     }
-    const startDelayMs = nonNegativeNumber(intent.start_delay_ms, 0);
+    const nominalStartDelayMs = nonNegativeNumber(intent.start_delay_ms, 0);
+    const startDelayMs = nonNegativeNumber(
+      actionTimeOverride(input, actionId).ability_activation_ms,
+      nominalStartDelayMs,
+    );
     const fieldId = `field_${hashAgentRunValue({
       actor,
       ability_id: abilityId,
@@ -607,124 +619,218 @@ function projectilePositionAt(projectile, deltaMs) {
   };
 }
 
-function resolveProjectile(input, projectile, activeStartMs, activeEndMs, nextWorldState, snapshotScene, nextScene, transitions, outcomes, resolutions) {
-  let currentTimeMs = activeStartMs;
-  let loops = 0;
-  while (projectile.active === true && currentTimeMs < activeEndMs - 1e-6 && loops < 32) {
-    loops += 1;
-    const ageRemaining = Math.max(0, positiveNumber(projectile.max_lifetime_ms, 5000) - nonNegativeNumber(projectile.age_ms, 0));
-    const windowEndMs = Math.min(activeEndMs, currentTimeMs + ageRemaining);
-    if (windowEndMs <= currentTimeMs + 1e-9) {
-      projectile.active = false;
-      projectile.termination_reason = "lifetime_expired";
-      break;
-    }
-    const obstacle = obstacleEntry(nextScene, projectile, currentTimeMs, windowEndMs);
-    const character = characterEntry(input, projectile, currentTimeMs, windowEndMs, snapshotScene, nextScene);
-    const boundsTime = sceneBoundsExitTime(nextScene, projectile, currentTimeMs, windowEndMs);
-    const events = [
-      obstacle ? { kind: "obstacle", ...obstacle } : null,
-      character ? { kind: "character", ...character } : null,
-      boundsTime !== null ? { kind: "bounds", timeMs: boundsTime } : null,
-    ].filter(Boolean).sort((a, b) => a.timeMs - b.timeMs || a.kind.localeCompare(b.kind));
-    const event = events[0] ?? null;
-    const stopTimeMs = event ? event.timeMs : windowEndMs;
-    const travelMs = Math.max(0, stopTimeMs - currentTimeMs);
-    projectile.position = projectilePositionAt(projectile, travelMs);
-    projectile.age_ms = nonNegativeNumber(projectile.age_ms, 0) + travelMs;
-    currentTimeMs = stopTimeMs;
+function nextProjectileTimelineStep(input, projectile, currentTimeMs, activeEndMs, snapshotScene, nextScene) {
+  const ageRemaining = Math.max(
+    0,
+    positiveNumber(projectile.max_lifetime_ms, 5000) - nonNegativeNumber(projectile.age_ms, 0),
+  );
+  if (ageRemaining <= 1e-9) {
+    return { kind: "lifetime", timeMs: currentTimeMs };
+  }
+  const windowEndMs = Math.min(activeEndMs, currentTimeMs + ageRemaining);
+  const obstacle = obstacleEntry(nextScene, projectile, currentTimeMs, windowEndMs);
+  const character = characterEntry(input, projectile, currentTimeMs, windowEndMs, snapshotScene, nextScene);
+  const boundsTime = sceneBoundsExitTime(nextScene, projectile, currentTimeMs, windowEndMs);
+  const events = [
+    obstacle ? { kind: "obstacle", ...obstacle } : null,
+    character ? { kind: "character", ...character } : null,
+    boundsTime !== null ? { kind: "bounds", timeMs: boundsTime } : null,
+  ].filter(Boolean).sort((left, right) => (
+    left.timeMs - right.timeMs
+    || left.kind.localeCompare(right.kind)
+  ));
+  if (events.length) return events[0];
+  if (windowEndMs < activeEndMs - 1e-9) return { kind: "lifetime", timeMs: windowEndMs };
+  return { kind: "advance_end", timeMs: activeEndMs };
+}
 
-    if (!event) break;
-    if (event.kind === "bounds") {
-      projectile.active = false;
-      projectile.termination_reason = "left_scene_bounds";
-      resolutions.push({ projectile_id: projectile.projectile_id, owner: projectile.owner, source_action_id: projectile.source_action_id, result: "left_scene_bounds", time_ms: currentTimeMs, position: cloneJson(projectile.position) });
-      break;
-    }
-    if (event.kind === "obstacle") {
-      const impact = updateObstacleAfterImpact(nextScene, event, projectile, transitions);
-      if (impact.penetrated) {
-        projectile.remaining_penetration_energy = Math.max(0, impact.beforeEnergy - impact.resistance);
-        projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
-        resolutions.push({
-          projectile_id: projectile.projectile_id,
-          owner: projectile.owner,
-          source_action_id: projectile.source_action_id,
-          result: "projectile_penetrated_cover",
-          obstacle_id: event.obstacleId,
-          time_ms: currentTimeMs,
-          remaining_penetration_energy: projectile.remaining_penetration_energy,
-          cover_destroyed: impact.destroyed,
-        });
-        pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_penetrated_cover", `projectile energy ${impact.beforeEnergy.toFixed(3)} exceeded cover resistance ${impact.resistance.toFixed(3)}`, {
-          projectile_id: projectile.projectile_id,
-          obstacle_id: event.obstacleId,
-          remaining_penetration_energy: projectile.remaining_penetration_energy,
-          cover_destroyed: impact.destroyed,
-        });
-        const epsilonMs = 0.01;
-        projectile.position = projectilePositionAt(projectile, epsilonMs);
-        projectile.age_ms += epsilonMs;
-        currentTimeMs += epsilonMs;
-        continue;
-      }
-      projectile.active = false;
-      projectile.termination_reason = "stopped_by_cover";
-      projectile.remaining_penetration_energy = 0;
-      resolutions.push({ projectile_id: projectile.projectile_id, owner: projectile.owner, source_action_id: projectile.source_action_id, result: "projectile_stopped_by_cover", obstacle_id: event.obstacleId, time_ms: currentTimeMs });
-      pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_stopped_by_cover", `cover resistance ${impact.resistance} was not exceeded by projectile energy ${impact.beforeEnergy}`, {
-        projectile_id: projectile.projectile_id,
-        obstacle_id: event.obstacleId,
-        cover_destroyed: impact.destroyed,
-      });
-      break;
-    }
-    if (event.kind === "character") {
-      const initialEnergy = nonNegativeNumber(projectile.initial_penetration_energy, 0);
-      const energyRatio = initialEnergy > 0
-        ? Math.min(1, Math.max(0, nonNegativeNumber(projectile.remaining_penetration_energy, 0) / initialEnergy))
-        : 1;
-      const baseDamage = nonNegativeNumber(projectile.base_damage, 0) * energyRatio;
-      const impact = applyWorldSimulationCombatImpact({
-        world_state: input.world_state,
-        next_world_state: nextWorldState,
-        target: event.character,
-        hit_region: "torso",
-        base_damage: baseDamage,
-        penetration: nonNegativeNumber(projectile.remaining_penetration_energy, 0),
-        damage_type: projectile.damage_type,
-        source: projectile.projectile_id,
-        state_transitions: transitions,
-      });
-      projectile.active = false;
-      projectile.termination_reason = "character_contact";
-      projectile.remaining_penetration_energy = 0;
+function advanceProjectileTimelineClock(projectile, fromMs, toMs) {
+  const travelMs = Math.max(0, toMs - fromMs);
+  projectile.position = projectilePositionAt(projectile, travelMs);
+  projectile.age_ms = nonNegativeNumber(projectile.age_ms, 0) + travelMs;
+  return toMs;
+}
+
+function applyProjectileTimelineStep(input, state, event, nextWorldState, nextScene, transitions, outcomes, resolutions) {
+  const projectile = state.projectile;
+  state.currentTimeMs = advanceProjectileTimelineClock(projectile, state.currentTimeMs, event.timeMs);
+  if (event.kind === "advance_end") {
+    state.doneForTurn = true;
+    return;
+  }
+  if (event.kind === "lifetime") {
+    projectile.active = false;
+    projectile.termination_reason = "lifetime_expired";
+    state.doneForTurn = true;
+    return;
+  }
+  if (event.kind === "bounds") {
+    projectile.active = false;
+    projectile.termination_reason = "left_scene_bounds";
+    resolutions.push({
+      projectile_id: projectile.projectile_id,
+      owner: projectile.owner,
+      source_action_id: projectile.source_action_id,
+      result: "left_scene_bounds",
+      time_ms: state.currentTimeMs,
+      position: cloneJson(projectile.position),
+    });
+    state.doneForTurn = true;
+    return;
+  }
+  if (event.kind === "obstacle") {
+    const impact = updateObstacleAfterImpact(nextScene, event, projectile, transitions);
+    if (impact.penetrated) {
+      projectile.remaining_penetration_energy = Math.max(0, impact.beforeEnergy - impact.resistance);
+      projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
       resolutions.push({
         projectile_id: projectile.projectile_id,
         owner: projectile.owner,
         source_action_id: projectile.source_action_id,
-        result: "projectile_hit_character",
-        target: event.character,
-        time_ms: currentTimeMs,
-        damage_applied: impact.damage_applied,
+        result: "projectile_penetrated_cover",
+        obstacle_id: event.obstacleId,
+        time_ms: state.currentTimeMs,
+        remaining_penetration_energy: projectile.remaining_penetration_energy,
+        cover_destroyed: impact.destroyed,
       });
-      pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_hit_character", `continuous relative-motion collision occurred at ${currentTimeMs.toFixed(3)}ms`, {
+      pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_penetrated_cover", `projectile energy ${impact.beforeEnergy.toFixed(3)} exceeded cover resistance ${impact.resistance.toFixed(3)}`, {
         projectile_id: projectile.projectile_id,
-        target: event.character,
-        hit: true,
-        contact_resolved: true,
-        damage_applied: impact.damage_applied,
-        health_before: impact.health_before,
-        health_after: impact.health_after,
-        injury_severity: impact.injury_severity,
+        obstacle_id: event.obstacleId,
+        remaining_penetration_energy: projectile.remaining_penetration_energy,
+        cover_destroyed: impact.destroyed,
       });
-      break;
+      const epsilonMs = 0.01;
+      projectile.position = projectilePositionAt(projectile, epsilonMs);
+      projectile.age_ms += epsilonMs;
+      state.currentTimeMs += epsilonMs;
+      return;
+    }
+    projectile.active = false;
+    projectile.termination_reason = "stopped_by_cover";
+    projectile.remaining_penetration_energy = 0;
+    resolutions.push({
+      projectile_id: projectile.projectile_id,
+      owner: projectile.owner,
+      source_action_id: projectile.source_action_id,
+      result: "projectile_stopped_by_cover",
+      obstacle_id: event.obstacleId,
+      time_ms: state.currentTimeMs,
+    });
+    pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_stopped_by_cover", `cover resistance ${impact.resistance} was not exceeded by projectile energy ${impact.beforeEnergy}`, {
+      projectile_id: projectile.projectile_id,
+      obstacle_id: event.obstacleId,
+      cover_destroyed: impact.destroyed,
+    });
+    state.doneForTurn = true;
+    return;
+  }
+  if (event.kind === "character") {
+    const initialEnergy = nonNegativeNumber(projectile.initial_penetration_energy, 0);
+    const energyRatio = initialEnergy > 0
+      ? Math.min(1, Math.max(0, nonNegativeNumber(projectile.remaining_penetration_energy, 0) / initialEnergy))
+      : 1;
+    const baseDamage = nonNegativeNumber(projectile.base_damage, 0) * energyRatio;
+    const impact = applyWorldSimulationCombatImpact({
+      world_state: input.world_state,
+      next_world_state: nextWorldState,
+      target: event.character,
+      hit_region: "torso",
+      base_damage: baseDamage,
+      penetration: nonNegativeNumber(projectile.remaining_penetration_energy, 0),
+      damage_type: projectile.damage_type,
+      source: projectile.projectile_id,
+      state_transitions: transitions,
+    });
+    projectile.active = false;
+    projectile.termination_reason = "character_contact";
+    projectile.remaining_penetration_energy = 0;
+    resolutions.push({
+      projectile_id: projectile.projectile_id,
+      owner: projectile.owner,
+      source_action_id: projectile.source_action_id,
+      result: "projectile_hit_character",
+      target: event.character,
+      time_ms: state.currentTimeMs,
+      damage_applied: impact.damage_applied,
+    });
+    pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_hit_character", `continuous relative-motion collision occurred at ${state.currentTimeMs.toFixed(3)}ms`, {
+      projectile_id: projectile.projectile_id,
+      target: event.character,
+      hit: true,
+      contact_resolved: true,
+      damage_applied: impact.damage_applied,
+      health_before: impact.health_before,
+      health_after: impact.health_after,
+      injury_severity: impact.injury_severity,
+      movement_multiplier_after: impact.movement_multiplier_after,
+      combat_multiplier_after: impact.combat_multiplier_after,
+    });
+    state.doneForTurn = true;
+  }
+}
+
+function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, nextWorldState, snapshotScene, nextScene, transitions, outcomes, resolutions) {
+  const states = [];
+  const beforeById = new Map();
+  for (const [projectileId, rawProjectile] of Object.entries(object(nextWorldState.projectiles))) {
+    const projectile = object(rawProjectile);
+    if (projectile.active !== true || String(projectile.scene_id ?? "") !== input.scene_id) continue;
+    const startMs = projectileStart.has(projectileId) ? projectileStart.get(projectileId) : 0;
+    if (startMs >= elapsedMs) continue;
+    beforeById.set(projectileId, cloneJson(projectile));
+    states.push({ projectileId, projectile, currentTimeMs: startMs, doneForTurn: false });
+  }
+
+  let iterations = 0;
+  const maxIterations = Math.max(128, states.length * 96);
+  while (iterations < maxIterations) {
+    iterations += 1;
+    const candidates = states
+      .filter((state) => state.projectile.active === true && state.doneForTurn !== true && state.currentTimeMs < elapsedMs - 1e-6)
+      .map((state) => ({
+        state,
+        event: nextProjectileTimelineStep(input, state.projectile, state.currentTimeMs, elapsedMs, snapshotScene, nextScene),
+      }));
+    if (!candidates.length) break;
+    candidates.sort((left, right) => (
+      left.event.timeMs - right.event.timeMs
+      || left.state.projectileId.localeCompare(right.state.projectileId)
+      || left.event.kind.localeCompare(right.event.kind)
+    ));
+    const earliestTimeMs = candidates[0].event.timeMs;
+    const simultaneous = candidates.filter((item) => Math.abs(item.event.timeMs - earliestTimeMs) <= 1e-6);
+    for (const item of simultaneous) {
+      applyProjectileTimelineStep(
+        input,
+        item.state,
+        item.event,
+        nextWorldState,
+        nextScene,
+        transitions,
+        outcomes,
+        resolutions,
+      );
+      nextWorldState.projectiles[item.state.projectileId] = item.state.projectile;
     }
   }
-  if (loops >= 32 && projectile.active === true) {
-    projectile.active = false;
-    projectile.termination_reason = "physics_iteration_guard";
+
+  for (const state of states) {
+    if (iterations >= maxIterations && state.projectile.active === true && state.doneForTurn !== true) {
+      state.projectile.active = false;
+      state.projectile.termination_reason = "global_physics_iteration_guard";
+    }
+    nextWorldState.projectiles[state.projectileId] = state.projectile;
+    const before = beforeById.get(state.projectileId);
+    pushTransition(
+      transitions,
+      state.projectileId,
+      "projectile_state",
+      before,
+      state.projectile,
+      `global-time projectile scheduler advanced through ${Math.max(0, elapsedMs - (projectileStart.get(state.projectileId) ?? 0))}ms window`,
+    );
   }
+  return { iterations };
 }
 
 function timeInsideStaticCircle(profile, center, radius, startMs, endMs) {
@@ -839,7 +945,10 @@ export function buildWorldSimulationContinuousIntentTimelineEntries(input = {}) 
         kind: "projectile_launch",
         actor,
         action_id: actionId,
-        time_ms: nonNegativeNumber(projectile.fire_delay_ms, 0),
+        time_ms: nonNegativeNumber(
+          actionTimeOverride(input, actionId).projectile_launch_ms,
+          nonNegativeNumber(projectile.fire_delay_ms, 0),
+        ),
         target: String(projectile.target_character ?? projectile.target ?? candidate.target ?? "").trim() || null,
       });
     }
@@ -849,7 +958,10 @@ export function buildWorldSimulationContinuousIntentTimelineEntries(input = {}) 
         kind: "ability_activation",
         actor,
         action_id: actionId,
-        time_ms: nonNegativeNumber(ability.start_delay_ms, 0),
+        time_ms: nonNegativeNumber(
+          actionTimeOverride(input, actionId).ability_activation_ms,
+          nonNegativeNumber(ability.start_delay_ms, 0),
+        ),
         ability_id: String(ability.ability_id ?? ability.id ?? "").trim() || null,
       });
     }
@@ -899,8 +1011,10 @@ export function buildWorldSimulationContinuousPhysicsContract() {
     topology: {
       destructible_cover_updates_scene_obstacle_state: true,
       destroyed_cover_becomes_non_colliding_and_passable: true,
+      projectile_collisions_resolve_in_global_time_order: true,
+      earlier_cover_destruction_changes_later_projectile_paths: true,
     },
-    known_boundary: "Projectile/field contacts are continuous within this layer. A later phase may unify projectile contact timestamps with melee contact timestamps into one global combat timeline.",
+    known_boundary: "Projectile collisions share strict time order and observe earlier topology mutations. Exact-timestamp contacts retain their pre-timestamp collision candidates; field-damage microticks and partial movement interruption remain later refinements.",
   };
 }
 
@@ -921,27 +1035,17 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const projectileStart = new Map(spawnedProjectiles.map((item) => [item.projectileId, item.activeAfterMs]));
   nextWorldState.projectiles = object(nextWorldState.projectiles);
 
-  for (const [projectileId, rawProjectile] of Object.entries(nextWorldState.projectiles)) {
-    const projectile = object(rawProjectile);
-    if (projectile.active !== true || String(projectile.scene_id ?? "") !== sceneId) continue;
-    const startMs = projectileStart.has(projectileId) ? projectileStart.get(projectileId) : 0;
-    if (startMs >= elapsedMs) continue;
-    const before = cloneJson(projectile);
-    resolveProjectile(
-      { ...input, world_state: snapshot, scene_id: sceneId },
-      projectile,
-      startMs,
-      elapsedMs,
-      nextWorldState,
-      snapshotScene,
-      nextScene,
-      transitions,
-      outcomes,
-      projectileResolutions,
-    );
-    nextWorldState.projectiles[projectileId] = projectile;
-    pushTransition(transitions, projectileId, "projectile_state", before, projectile, `continuous projectile physics advanced through ${Math.max(0, elapsedMs - startMs)}ms window`);
-  }
+  const projectileScheduler = resolveProjectilesInGlobalTimeOrder(
+    { ...input, world_state: snapshot, scene_id: sceneId },
+    projectileStart,
+    elapsedMs,
+    nextWorldState,
+    snapshotScene,
+    nextScene,
+    transitions,
+    outcomes,
+    projectileResolutions,
+  );
 
   resolveAbilityFields(
     { ...input, world_state: snapshot, scene_id: sceneId },
@@ -987,6 +1091,11 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
       || String(left.action_id ?? "").localeCompare(String(right.action_id ?? ""))
     )),
     elapsed_ms: elapsedMs,
+    projectile_scheduler: {
+      ordering: "global_collision_time",
+      iterations: projectileScheduler.iterations,
+      strict_earlier_topology_mutation_visible_to_later_projectiles: true,
+    },
     boundary: {
       projectile_collision_is_programmatic: true,
       cover_penetration_is_programmatic: true,
