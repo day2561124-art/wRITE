@@ -398,6 +398,7 @@ export async function resolveWorldSimulationTurn(
       immutable_ability_field_lifecycle: cloneJson(causalResolution.immutable_ability_field_lifecycle ?? null),
       immutable_event_queries: cloneJson(causalResolution.immutable_event_queries ?? null),
       immutable_event_arbitration: cloneJson(causalResolution.immutable_event_arbitration ?? null),
+      cross_layer_event_arbitration: cloneJson(causalResolution.cross_layer_event_arbitration ?? null),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },

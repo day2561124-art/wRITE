@@ -56,6 +56,10 @@ import {
   buildWorldSimulationImmutableEventArbitrationContract,
   worldSimulationImmutableEventArbitrationVersion,
 } from "./world-simulation-immutable-event-arbitration-service.mjs";
+import {
+  buildWorldSimulationCrossLayerEventArbitrationContract,
+  worldSimulationCrossLayerEventArbitrationVersion,
+} from "./world-simulation-cross-layer-event-arbitration-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -721,6 +725,7 @@ export function buildWorldSimulationCausalRuleContract() {
     immutable_ability_field_lifecycle: buildWorldSimulationImmutableAbilityFieldLifecycleContract(),
     immutable_event_queries: buildWorldSimulationImmutableEventQueryContract(),
     immutable_event_arbitration: buildWorldSimulationImmutableEventArbitrationContract(),
+    cross_layer_event_arbitration: buildWorldSimulationCrossLayerEventArbitrationContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -1199,6 +1204,18 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       unresolved_candidates_requeried_after_batch_application: true,
       deterministic_replay_verified: immutableEventArbitrationAudits.every((audit) => audit?.deterministic_replay_verified === true),
     },
+    cross_layer_event_arbitration: {
+      version: worldSimulationCrossLayerEventArbitrationVersion,
+      audit_count: causalTimeline?.cross_layer_event_arbitration?.audit_count ?? 0,
+      audits: cloneJson(array(causalTimeline?.cross_layer_event_arbitration?.audits)),
+      final_result: cloneJson(causalTimeline?.cross_layer_event_arbitration?.final_result ?? null),
+      candidate_inputs_immutable: causalTimeline?.cross_layer_event_arbitration?.candidate_inputs_immutable === true,
+      arbitration_outputs_contain_world_state: false,
+      arbitration_outputs_contain_mutation_proposals: false,
+      candidate_order_invariant: causalTimeline?.cross_layer_event_arbitration?.candidate_order_invariant === true,
+      exact_timestamp_batches_preserved: causalTimeline?.cross_layer_event_arbitration?.exact_timestamp_batches_preserved === true,
+      deterministic_replay_verified: causalTimeline?.cross_layer_event_arbitration?.deterministic_replay_verified === true,
+    },
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -1208,6 +1225,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       combat_contact_damage_and_injury_are_programmatic: true,
       projectile_collision_and_field_exposure_discovery_are_immutable_read_only_queries: true,
       queried_projectile_candidates_use_immutable_deterministic_batch_arbitration: true,
+      cross_layer_point_event_candidates_use_immutable_exact_time_batches: true,
+      same_timestamp_cross_layer_events_are_simultaneous: true,
       exact_timestamp_arbitration_order_is_not_causal_precedence: true,
       final_world_state_written_only_by_chronological_mutation_queue: true,
       subsystem_preview_states_not_used_as_inter_subsystem_authority: true,

@@ -44,7 +44,8 @@
     "test:phase62p": "node tests/phase62/phase62p-immutable-projectile-lifecycle.test.mjs",
     "test:phase62q": "node tests/phase62/phase62q-immutable-ability-field-lifecycle.test.mjs",
     "test:phase62r": "node tests/phase62/phase62r-immutable-event-discovery-queries.test.mjs",
-    "test:phase62s": "node tests/phase62/phase62s-immutable-event-arbitration.test.mjs"
+    "test:phase62s": "node tests/phase62/phase62s-immutable-event-arbitration.test.mjs",
+    "test:phase62t": "node tests/phase62/phase62t-cross-layer-event-arbitration.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

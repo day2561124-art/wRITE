@@ -268,6 +268,7 @@ export async function commitWorldSimulationTurn(
             immutable_ability_field_lifecycle: input.immutable_ability_field_lifecycle ?? null,
             immutable_event_queries: input.immutable_event_queries ?? null,
             immutable_event_arbitration: input.immutable_event_arbitration ?? null,
+            cross_layer_event_arbitration: input.cross_layer_event_arbitration ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });

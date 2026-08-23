@@ -20,6 +20,11 @@ import {
   buildWorldSimulationActorTrajectories,
   worldSimulationActorStateSchedulerVersion,
 } from "./world-simulation-actor-state-scheduler.mjs";
+import {
+  arbitrateWorldSimulationCrossLayerEventCandidates,
+  buildWorldSimulationCrossLayerEventArbitrationContract,
+  worldSimulationCrossLayerEventArbitrationVersion,
+} from "./world-simulation-cross-layer-event-arbitration-service.mjs";
 
 export const worldSimulationGlobalCausalTimelineVersion = "phase62g-global-causal-timeline-v1";
 
@@ -178,6 +183,39 @@ function executionEntries(input, suppressedActionIds, actionTimeOverrides = {}) 
   ]);
 }
 
+function crossLayerCandidate(entry, role) {
+  const observation = cloneJson(object(entry));
+  const sourceLayer = String(observation.source_layer ?? "unknown").trim() || "unknown";
+  const kind = String(observation.kind ?? "event").trim() || "event";
+  const actor = String(observation.actor ?? observation.target ?? "").trim();
+  const actionId = String(observation.action_id ?? "").trim();
+  const subjectId = String(
+    observation.projectile_id
+      ?? observation.field_id
+      ?? actor
+      ?? actionId
+      ?? "",
+  ).trim();
+  return {
+    candidate_id: `${sourceLayer}:${role}:${kind}:${subjectId || actionId || "anonymous"}:${nonNegativeNumber(observation.time_ms, 0)}`,
+    source_layer: sourceLayer,
+    role,
+    kind,
+    subject_id: subjectId || null,
+    action_id: actionId || null,
+    time_ms: nonNegativeNumber(observation.time_ms, 0),
+    observation,
+  };
+}
+
+function crossLayerObservations(arbitration, role) {
+  return array(arbitration?.result?.batches).flatMap((batch) => (
+    array(batch.members)
+      .filter((candidate) => candidate?.role === role)
+      .map((candidate) => cloneJson(object(candidate.observation)))
+  ));
+}
+
 function preemptionsFor(executions, fatalEvents, suppressed) {
   const additions = [];
   for (const execution of executions) {
@@ -224,6 +262,7 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
     persisted_history: true,
     timeline_refinement: buildWorldSimulationTimelineRefinementContract(),
     continuous_actor_state: buildWorldSimulationActorStateContract(),
+    cross_layer_event_arbitration: buildWorldSimulationCrossLayerEventArbitrationContract(),
     character_brain_may_decide_timestamps_as_outcomes: false,
     known_boundary: "Phase62G supplies the global point-event clock. Phase62H refines deferred execution/topology, and Phase62I integrates in-progress actor movement with injury/incapacitation plus piecewise ability-field exposure.",
   };
@@ -241,6 +280,8 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
   let movementAdjustments = [];
   let lastCombat = null;
   let lastPhysics = null;
+  let lastCrossLayerArbitration = null;
+  const crossLayerArbitrationAudits = [];
   let iterations = 0;
   const maxIterations = Math.max(4, array(input.selected_action_intents).length * 2 + 4);
 
@@ -301,8 +342,19 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       ...fatalProjectileEvents(lastPhysics),
       ...fatalAbilityFieldEvents(lastPhysics),
     ]);
-    const executions = executionEntries(input, suppressedList, actionTimeOverrides);
-    const additions = preemptionsFor(executions, fatals, suppressed);
+    const executionCandidates = [
+      ...combatEntries.map((entry) => crossLayerCandidate({ ...entry, source_layer: "combat" }, "execution")),
+      ...continuousEntries.map((entry) => crossLayerCandidate({ ...entry, source_layer: "continuous_physics" }, "execution")),
+    ];
+    const fatalCandidates = fatals.map((entry) => crossLayerCandidate(entry, "incapacitation"));
+    lastCrossLayerArbitration = arbitrateWorldSimulationCrossLayerEventCandidates({
+      candidates: [...executionCandidates, ...fatalCandidates],
+      simultaneous_tolerance_ms: 1e-6,
+    });
+    crossLayerArbitrationAudits.push(lastCrossLayerArbitration.audit);
+    const executions = crossLayerObservations(lastCrossLayerArbitration, "execution");
+    const orderedFatals = crossLayerObservations(lastCrossLayerArbitration, "incapacitation");
+    const additions = preemptionsFor(executions, orderedFatals, suppressed);
 
     injuryRateEvents = collectWorldSimulationInjuryRateEvents({
       combat_resolution: lastCombat,
@@ -377,6 +429,19 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
     version: worldSimulationGlobalCausalTimelineVersion,
     refinement_version: worldSimulationTimelineRefinementVersion,
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
+    cross_layer_event_arbitration_version: worldSimulationCrossLayerEventArbitrationVersion,
+    cross_layer_event_arbitration: {
+      version: worldSimulationCrossLayerEventArbitrationVersion,
+      audit_count: crossLayerArbitrationAudits.length,
+      audits: cloneJson(crossLayerArbitrationAudits),
+      final_result: cloneJson(lastCrossLayerArbitration?.result ?? null),
+      candidate_inputs_immutable: crossLayerArbitrationAudits.every((audit) => audit?.input_candidates_immutable === true),
+      candidate_order_invariant: crossLayerArbitrationAudits.every((audit) => audit?.candidate_order_invariant === true),
+      exact_timestamp_batches_preserved: crossLayerArbitrationAudits.every((audit) => audit?.exact_timestamp_batches_preserved === true),
+      deterministic_replay_verified: crossLayerArbitrationAudits.every((audit) => audit?.deterministic_replay_verified === true),
+      arbitration_outputs_contain_world_state: false,
+      arbitration_outputs_contain_mutation_proposals: false,
+    },
     iterations,
     suppressed_action_ids: suppressedActionIds,
     preemptions,
@@ -390,6 +455,8 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       version: worldSimulationGlobalCausalTimelineVersion,
       refinement_version: worldSimulationTimelineRefinementVersion,
       actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
+      cross_layer_event_arbitration_version: worldSimulationCrossLayerEventArbitrationVersion,
+      cross_layer_event_arbitration: cloneJson(lastCrossLayerArbitration?.result ?? null),
       turn_id: input.turn_id ?? null,
       suppressed_action_ids: suppressedActionIds,
       preemptions,
@@ -479,6 +546,8 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     arbitration_iterations: input.arbitration?.iterations ?? 0,
     refinement_version: input.arbitration?.refinement_version ?? null,
     actor_state_scheduler_version: input.arbitration?.actor_state_scheduler_version ?? null,
+    cross_layer_event_arbitration_version: input.arbitration?.cross_layer_event_arbitration_version ?? null,
+    cross_layer_event_arbitration: cloneJson(input.arbitration?.cross_layer_event_arbitration ?? null),
     action_time_overrides: cloneJson(object(input.arbitration?.action_time_overrides)),
     rate_adjustments: cloneJson(array(input.arbitration?.rate_adjustments)),
     actor_trajectories: cloneJson(object(input.arbitration?.actor_trajectories)),
