@@ -32,6 +32,10 @@ import {
   projectWorldSimulationPureProposalTransitions,
   runWorldSimulationPureProposalProducer,
 } from "./world-simulation-pure-proposal-producer-service.mjs";
+import {
+  buildWorldSimulationImmutableCausalEvaluatorContract,
+  worldSimulationImmutableCausalEvaluatorVersion,
+} from "./world-simulation-immutable-causal-evaluator-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -691,6 +695,7 @@ export function buildWorldSimulationCausalRuleContract() {
     chronological_mutation_queue: buildWorldSimulationChronologicalMutationQueueContract(),
     mutation_proposal_boundary: buildWorldSimulationMutationProposalBoundaryContract(),
     pure_proposal_producers: buildWorldSimulationPureProposalProducerContract(),
+    immutable_causal_evaluators: buildWorldSimulationImmutableCausalEvaluatorContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -711,6 +716,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   const scheduledEvents = [];
   const mutationProposalBoundaryAudits = [];
   const pureProposalProducerAudits = [];
+  const immutableCausalEvaluatorAudits = [];
   let elapsedMs = 0;
 
   const spatialProduced = runWorldSimulationPureProposalProducer({
@@ -877,6 +883,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     state_transitions: cloneJson(combatProduced.proposal_package.mutation_proposals),
     mutation_proposals: cloneJson(combatProduced.proposal_package.mutation_proposals),
   };
+  immutableCausalEvaluatorAudits.push(...array(combatResolution.immutable_causal_evaluator_audits));
   transitions.push(...array(combatProduced.proposal_package.mutation_proposals));
   outcomes.push(...array(combatResolution.action_outcomes));
   elapsedMs = Math.max(elapsedMs, finiteNumber(combatResolution.elapsed_ms, 0));
@@ -923,6 +930,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     state_transitions: cloneJson(physicsProduced.proposal_package.mutation_proposals),
     mutation_proposals: cloneJson(physicsProduced.proposal_package.mutation_proposals),
   };
+  immutableCausalEvaluatorAudits.push(...array(physicsResolution.immutable_causal_evaluator_audits));
   transitions.push(...array(physicsProduced.proposal_package.mutation_proposals));
   outcomes.push(...array(physicsResolution.action_outcomes));
   mutationProposalBoundaryAudits.push(physicsProduced.audit);
@@ -1094,6 +1102,14 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       internal_preview_states_discarded_before_return: true,
       inter_subsystem_handoffs_use_executor_projection_only: true,
     },
+    immutable_causal_evaluators: {
+      version: worldSimulationImmutableCausalEvaluatorVersion,
+      audit_count: immutableCausalEvaluatorAudits.length,
+      audits: immutableCausalEvaluatorAudits,
+      evaluator_inputs_immutable: immutableCausalEvaluatorAudits.every((audit) => audit?.input_context_immutable === true),
+      evaluator_outputs_contain_world_state: false,
+      deterministic_replay_verified: immutableCausalEvaluatorAudits.every((audit) => audit?.deterministic_replay_verified === true),
+    },
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -1106,6 +1122,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       inter_subsystem_handoffs_use_executor_projection: true,
       causal_subsystems_return_mutation_proposals_without_world_state: true,
       private_solver_previews_discarded_before_orchestration: true,
+      combat_injury_and_barrier_effects_use_immutable_causal_evaluators: true,
+      causal_effect_evaluator_outputs_do_not_contain_world_state: true,
       combat_causal_version: combatResolution.combat_causal_version,
       projectile_and_ability_physics_are_programmatic: true,
       continuous_physics_version: physicsResolution.continuous_physics_version,

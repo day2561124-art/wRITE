@@ -4,6 +4,12 @@ import {
 import {
   positionAtWorldSimulationActorTrajectory,
 } from "./world-simulation-actor-state-scheduler.mjs";
+import {
+  buildWorldSimulationImmutableCausalEvaluatorContract,
+  projectWorldSimulationImmutableEvaluatorProposals,
+  runWorldSimulationImmutableCausalEvaluator,
+  worldSimulationImmutableCausalEvaluatorVersion,
+} from "./world-simulation-immutable-causal-evaluator-service.mjs";
 
 export const worldSimulationCombatCausalVersion = "phase62e-combat-causal-layer-v1";
 
@@ -502,161 +508,288 @@ function healthSnapshot(character) {
   return { current, max, physical, healthObject };
 }
 
+function overwritePrivatePreview(target, replacement) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, cloneJson(replacement));
+  return target;
+}
+
+export function evaluateWorldSimulationBarrierCapacity(input = {}) {
+  const worldState = object(input.world_state);
+  const target = String(input.target ?? "").trim();
+  const defense = object(input.defense);
+  const usedAbsorption = nonNegativeNumber(input.used_absorption, 0);
+  const cause = input.cause ?? null;
+  const timeMs = input.time_ms ?? null;
+  return runWorldSimulationImmutableCausalEvaluator({
+    evaluator: "barrier_capacity_depletion",
+    context: {
+      world_state: worldState,
+      target,
+      defense,
+      used_absorption: usedAbsorption,
+      cause,
+      time_ms: timeMs,
+    },
+    evaluate: (context) => {
+      const proposals = [];
+      const frozenDefense = object(context.defense);
+      if (!frozenDefense.valid || !frozenDefense.abilityId || context.used_absorption <= 0) {
+        return {
+          mutation_proposals: proposals,
+          applied: false,
+          capacity_before: null,
+          capacity_after: null,
+        };
+      }
+      const character = object(object(context.world_state.characters)[context.target]);
+      const ability = object(object(character.abilities)[frozenDefense.abilityId]);
+      const key = Object.hasOwn(ability, "capacity_remaining")
+        ? "capacity_remaining"
+        : Object.hasOwn(ability, "remaining_capacity")
+          ? "remaining_capacity"
+          : Object.hasOwn(ability, "current_capacity")
+            ? "current_capacity"
+            : null;
+      if (!key) {
+        return {
+          mutation_proposals: proposals,
+          applied: false,
+          capacity_before: null,
+          capacity_after: null,
+        };
+      }
+      const before = nonNegativeNumber(ability[key], 0);
+      const after = Math.max(0, before - context.used_absorption);
+      pushTransition(
+        proposals,
+        context.target,
+        `abilities.${frozenDefense.abilityId}.${key}`,
+        before,
+        after,
+        context.cause,
+        transitionTimeExtra(context.time_ms),
+      );
+      return {
+        mutation_proposals: proposals,
+        applied: true,
+        ability_id: frozenDefense.abilityId,
+        capacity_field: key,
+        capacity_before: before,
+        capacity_after: after,
+      };
+    },
+  });
+}
+
 function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, transitions, cause, timeMs = null) {
-  if (!defense?.valid || !defense.abilityId || usedAbsorption <= 0) return;
-  const nextCharacter = object(object(nextWorldState.characters)[target]);
-  nextCharacter.abilities = object(nextCharacter.abilities);
-  const nextAbility = object(nextCharacter.abilities[defense.abilityId]);
-  const key = Object.hasOwn(nextAbility, "capacity_remaining")
-    ? "capacity_remaining"
-    : Object.hasOwn(nextAbility, "remaining_capacity")
-      ? "remaining_capacity"
-      : Object.hasOwn(nextAbility, "current_capacity")
-        ? "current_capacity"
-        : null;
-  if (!key) return;
-  const before = nonNegativeNumber(nextAbility[key], 0);
-  const after = Math.max(0, before - usedAbsorption);
-  nextAbility[key] = after;
-  nextCharacter.abilities[defense.abilityId] = nextAbility;
-  nextWorldState.characters[target] = nextCharacter;
-  pushTransition(
-    transitions,
+  const evaluated = evaluateWorldSimulationBarrierCapacity({
+    world_state: nextWorldState,
     target,
-    `abilities.${defense.abilityId}.${key}`,
-    before,
-    after,
+    defense,
+    used_absorption: usedAbsorption,
     cause,
-    transitionTimeExtra(timeMs),
-  );
+    time_ms: timeMs,
+  });
+  if (evaluated.mutation_proposals.length) {
+    const projection = projectWorldSimulationImmutableEvaluatorProposals({
+      world_state: nextWorldState,
+      mutation_proposals: evaluated.mutation_proposals,
+      elapsed_ms: nonNegativeNumber(timeMs, 0),
+    });
+    overwritePrivatePreview(nextWorldState, projection.projected_world_state);
+    transitions.push(...cloneJson(evaluated.mutation_proposals));
+  }
+  return evaluated;
+}
+
+export function evaluateWorldSimulationCombatInjury(input = {}) {
+  const worldState = object(input.world_state);
+  const snapshot = object(input.snapshot_world_state ?? worldState);
+  const target = String(input.target ?? "").trim();
+  const hitRegion = String(input.hit_region ?? "torso").trim() || "torso";
+  const damage = nonNegativeNumber(input.damage, 0);
+  const damageType = String(input.damage_type ?? "impact");
+  const source = String(input.source ?? "programmatic_impact");
+  const rules = object(input.rules ?? snapshot.world_rules ?? snapshot.rules);
+  const timeMs = input.time_ms ?? null;
+  const sourceLayer = String(input.source_layer ?? "combat");
+  return runWorldSimulationImmutableCausalEvaluator({
+    evaluator: "combat_injury",
+    context: {
+      world_state: worldState,
+      snapshot_world_state: snapshot,
+      target,
+      hit_region: hitRegion,
+      damage,
+      damage_type: damageType,
+      source,
+      rules,
+      time_ms: timeMs,
+      source_layer: sourceLayer,
+    },
+    evaluate: (context) => {
+      const proposals = [];
+      const currentCharacter = object(object(context.world_state.characters)[context.target]);
+      const snapshotCharacter = object(object(context.snapshot_world_state.characters)[context.target]);
+      const currentPhysical = object(currentCharacter.physical_state);
+      if (context.damage <= 0) {
+        return {
+          mutation_proposals: proposals,
+          severity: "none",
+          healthBefore: null,
+          healthAfter: null,
+          movementMultiplierAfter: finiteNumber(currentPhysical.movement_multiplier, 1),
+          combatMultiplierAfter: finiteNumber(currentPhysical.combat_multiplier, 1),
+        };
+      }
+
+      const health = healthSnapshot(currentCharacter);
+      const fallbackHealth = healthSnapshot(snapshotCharacter);
+      const healthBefore = health.current ?? fallbackHealth.current;
+      const healthMax = health.max ?? fallbackHealth.max;
+      let healthAfter = null;
+      if (healthBefore !== null) {
+        healthAfter = Math.max(0, healthBefore - context.damage);
+        pushTransition(
+          proposals,
+          context.target,
+          "physical_state.health_current",
+          healthBefore,
+          healthAfter,
+          `combat damage from ${context.source}`,
+          transitionTimeExtra(context.time_ms, {
+            hit_region: context.hit_region,
+            damage_type: context.damage_type,
+            source_layer: context.source_layer,
+          }),
+        );
+      }
+
+      const severity = severityForDamage(context.damage, healthMax, object(context.rules));
+      const previousInjuries = array(
+        currentPhysical.injuries
+          ?? currentCharacter.injuries
+          ?? object(snapshotCharacter.physical_state).injuries
+          ?? snapshotCharacter.injuries,
+      );
+      const nextInjuries = [...previousInjuries, {
+        injury_id: `injury_${hashAgentRunValue({
+          target: context.target,
+          hitRegion: context.hit_region,
+          damage: context.damage,
+          damageType: context.damage_type,
+          source: context.source,
+          count: previousInjuries.length,
+        }).slice(0, 18)}`,
+        region: context.hit_region,
+        damage: context.damage,
+        damage_type: context.damage_type,
+        severity,
+        source: context.source,
+      }];
+      pushTransition(
+        proposals,
+        context.target,
+        "physical_state.injuries",
+        previousInjuries,
+        nextInjuries,
+        `resolved combat contact applied ${context.damage.toFixed(3)} damage to ${context.hit_region}`,
+        transitionTimeExtra(context.time_ms, { source_layer: context.source_layer }),
+      );
+
+      const multipliers = injuryMultipliers(severity, object(context.rules));
+      const oldMovement = finiteNumber(
+        currentPhysical.movement_multiplier
+          ?? object(snapshotCharacter.physical_state).movement_multiplier,
+        1,
+      );
+      const oldCombat = finiteNumber(
+        currentPhysical.combat_multiplier
+          ?? object(snapshotCharacter.physical_state).combat_multiplier,
+        1,
+      );
+      const nextMovement = Math.min(oldMovement, multipliers.movement);
+      const nextCombat = Math.min(oldCombat, multipliers.combat);
+      pushTransition(
+        proposals,
+        context.target,
+        "physical_state.movement_multiplier",
+        oldMovement,
+        nextMovement,
+        `injury severity ${severity} limits movement`,
+        transitionTimeExtra(context.time_ms, { source_layer: context.source_layer }),
+      );
+      pushTransition(
+        proposals,
+        context.target,
+        "physical_state.combat_multiplier",
+        oldCombat,
+        nextCombat,
+        `injury severity ${severity} limits combat execution`,
+        transitionTimeExtra(context.time_ms, { source_layer: context.source_layer }),
+      );
+
+      if (healthAfter !== null && healthAfter <= 0) {
+        const oldIncapacitated = currentPhysical.incapacitated === true;
+        const oldImmobilized = currentPhysical.immobilized === true;
+        pushTransition(
+          proposals,
+          context.target,
+          "physical_state.incapacitated",
+          oldIncapacitated,
+          true,
+          "health reached zero after resolved combat damage",
+          transitionTimeExtra(context.time_ms, { source_layer: context.source_layer }),
+        );
+        pushTransition(
+          proposals,
+          context.target,
+          "physical_state.immobilized",
+          oldImmobilized,
+          true,
+          "health reached zero after resolved combat damage",
+          transitionTimeExtra(context.time_ms, { source_layer: context.source_layer }),
+        );
+      }
+
+      return {
+        mutation_proposals: proposals,
+        severity,
+        healthBefore,
+        healthAfter,
+        movementMultiplierAfter: nextMovement,
+        combatMultiplierAfter: nextCombat,
+      };
+    },
+  });
 }
 
 export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions, timeMs = null, sourceLayer = "combat") {
-  if (damage <= 0) {
-    const character = object(object(snapshot.characters)[target]);
-    const physical = object(character.physical_state);
-    return {
-      severity: "none",
-      healthBefore: null,
-      healthAfter: null,
-      movementMultiplierAfter: finiteNumber(physical.movement_multiplier, 1),
-      combatMultiplierAfter: finiteNumber(physical.combat_multiplier, 1),
-    };
-  }
-  nextWorldState.characters = object(nextWorldState.characters);
-  const snapshotCharacter = object(object(snapshot.characters)[target]);
-  const currentCharacter = object(nextWorldState.characters[target]);
-  const health = healthSnapshot(currentCharacter);
-  const fallbackHealth = healthSnapshot(snapshotCharacter);
-  currentCharacter.physical_state = object(currentCharacter.physical_state);
-  const physical = currentCharacter.physical_state;
-  const healthBefore = health.current ?? fallbackHealth.current;
-  const healthMax = health.max ?? fallbackHealth.max;
-  let healthAfter = null;
-  if (healthBefore !== null) {
-    healthAfter = Math.max(0, healthBefore - damage);
-    physical.health_current = healthAfter;
-    pushTransition(
-      transitions,
-      target,
-      "physical_state.health_current",
-      healthBefore,
-      healthAfter,
-      `combat damage from ${source}`,
-      transitionTimeExtra(timeMs, { hit_region: hitRegion, damage_type: damageType, source_layer: sourceLayer }),
-    );
-  }
-  const severity = severityForDamage(damage, healthMax, rules);
-  const previousInjuries = array(
-    physical.injuries
-      ?? currentCharacter.injuries
-      ?? object(snapshotCharacter.physical_state).injuries
-      ?? snapshotCharacter.injuries,
-  );
-  const nextInjuries = [...previousInjuries, {
-    injury_id: `injury_${hashAgentRunValue({ target, hitRegion, damage, damageType, source, count: previousInjuries.length }).slice(0, 18)}`,
-    region: hitRegion,
+  const evaluated = evaluateWorldSimulationCombatInjury({
+    world_state: nextWorldState,
+    snapshot_world_state: snapshot,
+    target,
+    hit_region: hitRegion,
     damage,
     damage_type: damageType,
-    severity,
     source,
-  }];
-  physical.injuries = nextInjuries;
-  pushTransition(
-    transitions,
-    target,
-    "physical_state.injuries",
-    previousInjuries,
-    nextInjuries,
-    `resolved combat contact applied ${damage.toFixed(3)} damage to ${hitRegion}`,
-    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
-  );
-
-  const multipliers = injuryMultipliers(severity, rules);
-  const oldMovement = finiteNumber(
-    physical.movement_multiplier
-      ?? object(snapshotCharacter.physical_state).movement_multiplier,
-    1,
-  );
-  const oldCombat = finiteNumber(
-    physical.combat_multiplier
-      ?? object(snapshotCharacter.physical_state).combat_multiplier,
-    1,
-  );
-  const nextMovement = Math.min(oldMovement, multipliers.movement);
-  const nextCombat = Math.min(oldCombat, multipliers.combat);
-  physical.movement_multiplier = nextMovement;
-  physical.combat_multiplier = nextCombat;
-  pushTransition(
-    transitions,
-    target,
-    "physical_state.movement_multiplier",
-    oldMovement,
-    nextMovement,
-    `injury severity ${severity} limits movement`,
-    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
-  );
-  pushTransition(
-    transitions,
-    target,
-    "physical_state.combat_multiplier",
-    oldCombat,
-    nextCombat,
-    `injury severity ${severity} limits combat execution`,
-    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
-  );
-  if (healthAfter !== null && healthAfter <= 0) {
-    const oldIncapacitated = physical.incapacitated === true;
-    const oldImmobilized = physical.immobilized === true;
-    physical.incapacitated = true;
-    physical.immobilized = true;
-    pushTransition(
-      transitions,
-      target,
-      "physical_state.incapacitated",
-      oldIncapacitated,
-      true,
-      "health reached zero after resolved combat damage",
-      transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
-    );
-    pushTransition(
-      transitions,
-      target,
-      "physical_state.immobilized",
-      oldImmobilized,
-      true,
-      "health reached zero after resolved combat damage",
-      transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
-    );
+    rules,
+    time_ms: timeMs,
+    source_layer: sourceLayer,
+  });
+  if (evaluated.mutation_proposals.length) {
+    const projection = projectWorldSimulationImmutableEvaluatorProposals({
+      world_state: nextWorldState,
+      mutation_proposals: evaluated.mutation_proposals,
+      elapsed_ms: nonNegativeNumber(timeMs, 0),
+    });
+    overwritePrivatePreview(nextWorldState, projection.projected_world_state);
+    transitions.push(...cloneJson(evaluated.mutation_proposals));
   }
-  currentCharacter.physical_state = physical;
-  nextWorldState.characters[target] = currentCharacter;
   return {
-    severity,
-    healthBefore,
-    healthAfter,
-    movementMultiplierAfter: nextMovement,
-    combatMultiplierAfter: nextCombat,
+    ...evaluated.result,
+    evaluator_audit: evaluated.audit,
   };
 }
 
@@ -698,6 +831,7 @@ export function applyWorldSimulationCombatImpact(input = {}) {
     health_after: injury.healthAfter,
     movement_multiplier_after: injury.movementMultiplierAfter,
     combat_multiplier_after: injury.combatMultiplierAfter,
+    evaluator_audit: injury.evaluator_audit,
   };
 }
 
@@ -773,6 +907,7 @@ export function buildWorldSimulationCombatCausalContract() {
       injury_severity_can_reduce_future_movement_and_combat_rate: true,
       zero_health_can_incapacitate: true,
     },
+    immutable_causal_evaluators: buildWorldSimulationImmutableCausalEvaluatorContract(),
   };
 }
 
@@ -788,6 +923,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
   const outcomes = [];
   const transitions = [];
   const combatResolutions = [];
+  const immutableCausalEvaluatorAudits = [];
   let elapsedMs = 0;
 
   const attackEntries = selectedActionIntents
@@ -912,7 +1048,8 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       ? `${defense.source} overlapped attack contact at ${timeline.contactTimeMs.toFixed(3)}ms`
       : null;
     if (defense?.valid && defense.abilityId) {
-      applyBarrierCapacity(nextWorldState, target, defense, defenseAbsorptionUsed, transitions, defenseCause, timeline.contactTimeMs);
+      const barrierEvaluation = applyBarrierCapacity(nextWorldState, target, defense, defenseAbsorptionUsed, transitions, defenseCause, timeline.contactTimeMs);
+      immutableCausalEvaluatorAudits.push(barrierEvaluation.audit);
     }
 
     const injury = applyWorldSimulationCombatInjury(
@@ -928,6 +1065,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       timeline.contactTimeMs,
       "combat",
     );
+    immutableCausalEvaluatorAudits.push(injury.evaluator_audit);
     const defenseEffective = Boolean(defense?.valid)
       && (mitigation.defenseAbsorption > 0 || finiteNumber(defense.mitigationFraction, 0) > 0);
     let result = "hit_resolved";
@@ -988,12 +1126,15 @@ export function adjudicateWorldSimulationCombat(input = {}) {
     mutation_proposals: transitions,
     action_outcomes: outcomes,
     combat_resolutions: combatResolutions,
+    immutable_causal_evaluator_version: worldSimulationImmutableCausalEvaluatorVersion,
+    immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     timeline_entries: buildWorldSimulationCombatTimelineEntries({ ...input, world_state: snapshot, suppressed_action_ids: [...suppressedActionIds] }),
     elapsed_ms: elapsedMs,
     boundary: {
       character_brain_selected_intent_only: true,
       hit_or_miss_created_programmatically: true,
       damage_and_injury_created_programmatically: true,
+      combat_injury_and_barrier_effects_evaluated_immutably: true,
       same_turn_target_motion_sampled_from_validated_movement: true,
     },
   };

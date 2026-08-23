@@ -785,6 +785,7 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
       time_ms: state.currentTimeMs,
       source_layer: "continuous_physics",
     });
+    if (impact.evaluator_audit) array(input.immutable_causal_evaluator_audits).push(impact.evaluator_audit);
     projectile.active = false;
     projectile.termination_reason = "character_contact";
     projectile.remaining_penetration_energy = 0;
@@ -980,6 +981,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
           time_ms: tickEndMs,
           source_layer: "continuous_physics",
         });
+        if (impact.evaluator_audit) array(input.immutable_causal_evaluator_audits).push(impact.evaluator_audit);
         resolutions.push({
           field_id: fieldId,
           owner: field.owner,
@@ -1146,6 +1148,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   const outcomes = [];
   const projectileResolutions = [];
   const abilityResolutions = [];
+  const immutableCausalEvaluatorAudits = [];
 
   const spawnedProjectiles = spawnProjectiles({ ...input, world_state: snapshot, scene_id: sceneId }, nextWorldState, snapshotScene, transitions, outcomes);
   const spawnedFields = spawnAbilityFields({ ...input, world_state: snapshot, scene_id: sceneId }, nextWorldState, snapshotScene, transitions, outcomes);
@@ -1153,7 +1156,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   nextWorldState.projectiles = object(nextWorldState.projectiles);
 
   const projectileScheduler = resolveProjectilesInGlobalTimeOrder(
-    { ...input, world_state: snapshot, scene_id: sceneId },
+    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits },
     projectileStart,
     elapsedMs,
     nextWorldState,
@@ -1165,7 +1168,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
   );
 
   resolveAbilityFields(
-    { ...input, world_state: snapshot, scene_id: sceneId },
+    { ...input, world_state: snapshot, scene_id: sceneId, immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits },
     spawnedFields,
     nextWorldState,
     snapshotScene,
@@ -1191,6 +1194,7 @@ export function adjudicateWorldSimulationContinuousPhysics(input = {}) {
     action_outcomes: outcomes,
     projectile_resolutions: projectileResolutions,
     ability_resolutions: abilityResolutions,
+    immutable_causal_evaluator_audits: immutableCausalEvaluatorAudits,
     timeline_entries: [
       ...buildWorldSimulationContinuousIntentTimelineEntries({ ...input, world_state: snapshot }),
       ...projectileResolutions.map((resolution) => ({
