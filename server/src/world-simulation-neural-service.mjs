@@ -287,12 +287,15 @@ function buildWorldPerceptionPacket(input = {}) {
   );
   const observations = object(input.observations);
   const sensory = object(input.sensory_inputs);
+  const programmaticVisibility = object(input.programmatic_visibility);
+  const visibilityEnforced = programmaticVisibility.enforced === true;
 
   const observed = [
     ...array(observations.visual),
     ...array(sensory.visual),
-    ...array(scoped.visual),
-    ...array(scene.public_visual),
+    ...array(programmaticVisibility.visual_observations),
+    ...(visibilityEnforced ? [] : array(scoped.visual)),
+    ...(visibilityEnforced ? [] : array(scene.public_visual)),
   ].map(cloneJson);
   const audible = [
     ...array(observations.audible),
@@ -325,7 +328,11 @@ function buildWorldPerceptionPacket(input = {}) {
       other_character_internal_state_read: false,
       private_device_contents_read: false,
       through_wall_vision: false,
-      rule: "Only explicit observations, sensory inputs, observer-scoped observable_by/perception_by data, and public scene signals may enter this packet.",
+      programmatic_visibility_enforced: visibilityEnforced,
+      raw_scene_visual_sources_bypassed_when_visibility_enforced: visibilityEnforced,
+      rule: visibilityEnforced
+        ? "Visual inputs are supplied by the programmatic visibility/occlusion query. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+        : "Only explicit observations, sensory inputs, observer-scoped observable_by/perception_by data, and public scene signals may enter this packet.",
     },
   };
 }

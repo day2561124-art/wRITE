@@ -9,6 +9,11 @@ import {
   runWorldSimulationCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
+  buildWorldSimulationVisibilityQueryContract,
+  queryWorldSimulationObserverVisibility,
+  worldSimulationVisibilityQueryVersion,
+} from "./world-simulation-visibility-query-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -172,6 +177,8 @@ export function buildWorldSimulationLoopContract() {
     character_brain_receives_world_truth: false,
     neural_capabilities_may_mutate_world_state: false,
     causal_adjudicator_required: true,
+    visibility_and_occlusion: buildWorldSimulationVisibilityQueryContract(),
+    character_perception_visuals_use_programmatic_visibility: true,
     built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
     custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
@@ -191,6 +198,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const sceneState = currentScene(worldState, event);
   const participants = participantsForEvent(worldState, event);
   const traceIds = [];
+  const visibilityQueries = [];
 
   const sceneAnalysis = await capability(
     sessionId,
@@ -211,6 +219,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     const availableActions = array(
       characterMapValue(worldState.available_actions, character),
     );
+    const visibilityQuery = queryWorldSimulationObserverVisibility({
+      world_state: worldState,
+      scene_state: sceneState,
+      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
+      observer: character,
+    });
+    visibilityQueries.push({
+      observer: character,
+      version: visibilityQuery.visibility_query_version,
+      result: cloneJson(visibilityQuery.result),
+      audit: cloneJson(visibilityQuery.audit),
+    });
     const perception = await capability(
       sessionId,
       "world_perception_filter",
@@ -218,6 +238,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         character,
         scene_state: sceneState,
         simulation_time: worldState.simulation_time ?? event.simulation_time ?? null,
+        programmatic_visibility: {
+          enforced: true,
+          version: visibilityQuery.visibility_query_version,
+          visual_observations: cloneJson(visibilityQuery.result.perception_visual_observations),
+        },
       },
       options,
       traceIds,
@@ -268,6 +293,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         world_truth_exposed: false,
         may_choose_action_intent_only: true,
         may_decide_outcome: false,
+        programmatic_visibility_enforced: true,
+        engine_visibility_target_ids_exposed: false,
       },
     });
   }
@@ -289,11 +316,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     event,
     scene_analysis: cloneJson(sceneAnalysis),
     decision_packets: decisionPackets,
+    visibility_queries: visibilityQueries,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
       character_brain_selects_intent_only: true,
       causal_adjudicator_has_exclusive_outcome_authority: true,
+      programmatic_visibility_query_version: worldSimulationVisibilityQueryVersion,
+      visibility_engine_target_ids_not_forwarded_to_character_brain: true,
     },
   };
 }
@@ -402,6 +432,7 @@ export async function resolveWorldSimulationTurn(
       cross_layer_event_arbitration: cloneJson(causalResolution.cross_layer_event_arbitration ?? null),
       causal_epochs: cloneJson(causalResolution.causal_epochs ?? null),
       fixed_point_convergence: cloneJson(causalResolution.fixed_point_convergence ?? null),
+      visibility_queries: cloneJson(preparedTurn.visibility_queries ?? []),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },
