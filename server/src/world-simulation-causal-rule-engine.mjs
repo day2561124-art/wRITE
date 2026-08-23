@@ -19,6 +19,10 @@ import {
   buildWorldSimulationActorStateContract,
   reconcileWorldSimulationMovementOutcomes,
 } from "./world-simulation-actor-state-scheduler.mjs";
+import {
+  buildWorldSimulationChronologicalMutationQueue,
+  buildWorldSimulationChronologicalMutationQueueContract,
+} from "./world-simulation-chronological-mutation-queue-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -400,7 +404,12 @@ function resolveDoorInteraction(snapshotScene, nextScene, actor, candidate, rule
   const before = currentDoor.value.open === true;
   const after = operation === "open";
   nextDoor.value.open = after;
-  pushTransition(transitions, doorId, "open", before, after, `${actor} performed ${operation} on ${doorId}`);
+  pushTransition(transitions, doorId, "open", before, after, `${actor} performed ${operation} on ${doorId}`, {
+    time_ms: durationMs,
+    actor,
+    action_id: candidate.action_id ?? null,
+    source_layer: "spatial_rules",
+  });
   pushOutcome(outcomes, actor, candidate, `door_${operation}ed`, `door ${doorId} was ${before ? "open" : "closed"} and not causally blocked`);
   return durationMs;
 }
@@ -443,7 +452,12 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
     nextObject.holder = actor;
     nextObject.scene_id = null;
     nextObject.position = null;
-    pushTransition(transitions, objectId, "holder", snapshotObject.holder ?? null, actor, `${actor} picked up ${objectId}`);
+    pushTransition(transitions, objectId, "holder", snapshotObject.holder ?? null, actor, `${actor} picked up ${objectId}`, {
+      time_ms: durationMs,
+      actor,
+      action_id: candidate.action_id ?? null,
+      source_layer: "spatial_rules",
+    });
     pushOutcome(outcomes, actor, candidate, "pickup_completed", `${objectId} was unheld and within ${reach}m reach`);
     return durationMs;
   }
@@ -455,7 +469,12 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
     nextObject.holder = null;
     nextObject.scene_id = sceneId;
     nextObject.position = actorPosition ? cloneJson(actorPosition) : null;
-    pushTransition(transitions, objectId, "holder", actor, null, `${actor} dropped ${objectId}`);
+    pushTransition(transitions, objectId, "holder", actor, null, `${actor} dropped ${objectId}`, {
+      time_ms: durationMs,
+      actor,
+      action_id: candidate.action_id ?? null,
+      source_layer: "spatial_rules",
+    });
     pushOutcome(outcomes, actor, candidate, "drop_completed", `${actor} held ${objectId} at turn start`);
     return durationMs;
   }
@@ -468,7 +487,12 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
   nextObject.holder = target;
   nextObject.scene_id = null;
   nextObject.position = null;
-  pushTransition(transitions, objectId, "holder", actor, target, `${actor} transferred ${objectId} to ${target}`);
+  pushTransition(transitions, objectId, "holder", actor, target, `${actor} transferred ${objectId} to ${target}`, {
+    time_ms: durationMs,
+    actor,
+    action_id: candidate.action_id ?? null,
+    source_layer: "spatial_rules",
+  });
   pushOutcome(outcomes, actor, candidate, "transfer_completed", `${actor} held ${objectId} and ${target} was within reach`);
   return durationMs;
 }
@@ -544,6 +568,7 @@ export function buildWorldSimulationCausalRuleContract() {
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
     continuous_actor_state: buildWorldSimulationActorStateContract(),
+    chronological_mutation_queue: buildWorldSimulationChronologicalMutationQueueContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -788,6 +813,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       previousTime,
       nextTime,
       `maximum resolved action duration elapsed: ${elapsedMs}ms`,
+      { time_ms: elapsedMs, source_layer: "causal_resolution" },
     );
   }
 
@@ -801,9 +827,26 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   }
   const followUps = array(event.next_events ?? event.follow_up_events).map(cloneJson);
   next.event_queue = [...queue.slice(1), ...followUps];
+  pushTransition(
+    transitions,
+    "world",
+    "event_queue",
+    queue,
+    next.event_queue,
+    `resolved queue-head event ${currentEventId || "<unnamed>"} and scheduled follow-ups`,
+    { time_ms: elapsedMs, source_layer: "causal_resolution" },
+  );
   for (const followUp of followUps) {
     scheduledEvents.push(followUp.event_id ?? followUp.id ?? followUp);
   }
+
+  const chronologicalMutationQueue = buildWorldSimulationChronologicalMutationQueue({
+    turn_id: input.turn_id ?? null,
+    world_state_hash: input.world_state_hash ?? null,
+    state_transitions: transitions,
+    causal_timeline: causalTimeline,
+    elapsed_ms: elapsedMs,
+  });
 
   const causalResolutionId = `causal_${hashAgentRunValue({
     engine: worldSimulationCausalRuleEngineVersion,
@@ -814,6 +857,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     transitions,
     outcomes,
     causal_timeline_hash: causalTimeline.timeline_hash,
+    chronological_mutation_queue_hash: chronologicalMutationQueue.queue_hash,
   }).slice(0, 24)}`;
 
   return {
@@ -826,6 +870,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     scheduled_events: scheduledEvents,
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
+    chronological_mutation_queue: chronologicalMutationQueue,
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -841,6 +886,9 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       global_causal_timeline_version: causalTimeline.version,
       timeline_refinement_version: causalTimeline.refinement_version,
       actor_state_scheduler_version: causalTimeline.actor_state_scheduler_version,
+      chronological_mutation_queue_version: chronologicalMutationQueue.version,
+      all_resolved_state_transitions_enter_one_timestamped_mutation_queue: true,
+      same_timestamp_mutations_are_batched_without_retroactive_preemption: true,
       earlier_nonfatal_injury_can_delay_later_execution: true,
       earlier_topology_destruction_changes_later_projectile_paths: true,
     },

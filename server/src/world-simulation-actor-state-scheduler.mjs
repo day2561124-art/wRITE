@@ -407,6 +407,9 @@ export function applyWorldSimulationActorTrajectories(nextWorldState, sceneId, a
           : `continuous actor-state scheduler integrated movement through ${Number(elapsedMs).toFixed(3)}ms`,
         adjudication: "programmatic_continuous_actor_state_scheduler",
         scene_id: sceneId,
+        time_ms: object(trajectory).interrupted
+          ? nonNegativeNumber(trajectory.interrupted_at_ms, elapsedMs)
+          : nonNegativeNumber(trajectory.completion_time_ms, elapsedMs),
       });
     }
   }

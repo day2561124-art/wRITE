@@ -95,6 +95,11 @@ function pushTransition(transitions, entity, field, from, to, cause, extra = {})
   });
 }
 
+function transitionTimeExtra(timeMs, extra = {}) {
+  const value = finiteNumber(timeMs);
+  return value === null ? extra : { ...extra, time_ms: Math.max(0, value) };
+}
+
 function candidateForCharacter(selectedActionIntents, character) {
   const selected = array(selectedActionIntents).find((item) => String(item?.character ?? "") === character);
   return selected ? object(selected.candidate) : {};
@@ -497,7 +502,7 @@ function healthSnapshot(character) {
   return { current, max, physical, healthObject };
 }
 
-function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, transitions, cause) {
+function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, transitions, cause, timeMs = null) {
   if (!defense?.valid || !defense.abilityId || usedAbsorption <= 0) return;
   const nextCharacter = object(object(nextWorldState.characters)[target]);
   nextCharacter.abilities = object(nextCharacter.abilities);
@@ -522,10 +527,11 @@ function applyBarrierCapacity(nextWorldState, target, defense, usedAbsorption, t
     before,
     after,
     cause,
+    transitionTimeExtra(timeMs),
   );
 }
 
-export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions) {
+export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, target, hitRegion, damage, damageType, source, rules, transitions, timeMs = null, sourceLayer = "combat") {
   if (damage <= 0) {
     const character = object(object(snapshot.characters)[target]);
     const physical = object(character.physical_state);
@@ -557,7 +563,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
       healthBefore,
       healthAfter,
       `combat damage from ${source}`,
-      { hit_region: hitRegion, damage_type: damageType },
+      transitionTimeExtra(timeMs, { hit_region: hitRegion, damage_type: damageType, source_layer: sourceLayer }),
     );
   }
   const severity = severityForDamage(damage, healthMax, rules);
@@ -583,6 +589,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
     previousInjuries,
     nextInjuries,
     `resolved combat contact applied ${damage.toFixed(3)} damage to ${hitRegion}`,
+    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
   );
 
   const multipliers = injuryMultipliers(severity, rules);
@@ -607,6 +614,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
     oldMovement,
     nextMovement,
     `injury severity ${severity} limits movement`,
+    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
   );
   pushTransition(
     transitions,
@@ -615,6 +623,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
     oldCombat,
     nextCombat,
     `injury severity ${severity} limits combat execution`,
+    transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
   );
   if (healthAfter !== null && healthAfter <= 0) {
     const oldIncapacitated = physical.incapacitated === true;
@@ -627,6 +636,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
       oldIncapacitated,
       true,
       "health reached zero after resolved combat damage",
+      transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
     );
   }
   currentCharacter.physical_state = physical;
@@ -665,6 +675,8 @@ export function applyWorldSimulationCombatImpact(input = {}) {
     source,
     rules,
     transitions,
+    input.time_ms ?? null,
+    String(input.source_layer ?? "combat"),
   );
   return {
     base_damage: baseDamage,
@@ -890,7 +902,7 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       ? `${defense.source} overlapped attack contact at ${timeline.contactTimeMs.toFixed(3)}ms`
       : null;
     if (defense?.valid && defense.abilityId) {
-      applyBarrierCapacity(nextWorldState, target, defense, defenseAbsorptionUsed, transitions, defenseCause);
+      applyBarrierCapacity(nextWorldState, target, defense, defenseAbsorptionUsed, transitions, defenseCause, timeline.contactTimeMs);
     }
 
     const injury = applyWorldSimulationCombatInjury(
@@ -903,6 +915,8 @@ export function adjudicateWorldSimulationCombat(input = {}) {
       profile.weaponId ?? actor,
       rules,
       transitions,
+      timeline.contactTimeMs,
+      "combat",
     );
     const defenseEffective = Boolean(defense?.valid)
       && (mitigation.defenseAbsorption > 0 || finiteNumber(defense.mitigationFraction, 0) > 0);

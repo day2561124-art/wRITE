@@ -115,6 +115,11 @@ function pushTransition(transitions, entity, field, from, to, cause, extra = {})
   });
 }
 
+function transitionTimeExtra(timeMs, extra = {}) {
+  const value = finiteNumber(timeMs);
+  return value === null ? extra : { ...extra, time_ms: Math.max(0, value) };
+}
+
 function scenePosition(scene, entity) {
   return point(object(scene.entity_positions)[entity]);
 }
@@ -372,7 +377,7 @@ function weaponProjectileProfile(worldState, actor, intent) {
   };
 }
 
-function consumeAmmo(nextWorldState, weaponId, transitions) {
+function consumeAmmo(nextWorldState, weaponId, transitions, timeMs = null) {
   const weapon = object(object(nextWorldState.objects)[weaponId]);
   const ammo = object(weapon.ammo);
   const direct = finiteNumber(weapon.ammo_current);
@@ -382,11 +387,11 @@ function consumeAmmo(nextWorldState, weaponId, transitions) {
   if (current <= 0) return { ok: false, remaining: current };
   if (direct !== null) {
     weapon.ammo_current = current - 1;
-    pushTransition(transitions, weaponId, "ammo_current", current, current - 1, "programmatic projectile launch consumed one round");
+    pushTransition(transitions, weaponId, "ammo_current", current, current - 1, "programmatic projectile launch consumed one round", transitionTimeExtra(timeMs));
   } else {
     weapon.ammo = ammo;
     ammo.current = current - 1;
-    pushTransition(transitions, weaponId, "ammo.current", current, current - 1, "programmatic projectile launch consumed one round");
+    pushTransition(transitions, weaponId, "ammo.current", current, current - 1, "programmatic projectile launch consumed one round", transitionTimeExtra(timeMs));
   }
   nextWorldState.objects[weaponId] = weapon;
   return { ok: true, remaining: current - 1 };
@@ -408,7 +413,12 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", profile.reason, { projectile_resolved: false });
       continue;
     }
-    const ammo = consumeAmmo(nextWorldState, profile.weaponId, transitions);
+    const nominalFireDelayMs = nonNegativeNumber(intent.fire_delay_ms, 0);
+    const fireDelayMs = nonNegativeNumber(
+      actionTimeOverride(input, actionId).projectile_launch_ms,
+      nominalFireDelayMs,
+    );
+    const ammo = consumeAmmo(nextWorldState, profile.weaponId, transitions, fireDelayMs);
     if (!ammo.ok) {
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", `projectile weapon ${profile.weaponId} has no ammunition`, { projectile_resolved: false });
       continue;
@@ -422,11 +432,6 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
       pushOutcome(outcomes, actor, candidate, "projectile_launch_blocked", "projectile launch requires actor position and a non-zero aim direction", { projectile_resolved: false });
       continue;
     }
-    const nominalFireDelayMs = nonNegativeNumber(intent.fire_delay_ms, 0);
-    const fireDelayMs = nonNegativeNumber(
-      actionTimeOverride(input, actionId).projectile_launch_ms,
-      nominalFireDelayMs,
-    );
     const projectileId = `projectile_${hashAgentRunValue({
       owner: actor,
       action_id: candidate.action_id ?? null,
@@ -456,7 +461,7 @@ function spawnProjectiles(input, nextWorldState, snapshotScene, transitions, out
     };
     nextWorldState.projectiles[projectileId] = projectile;
     spawned.push({ projectileId, projectile, actor, candidate, activeAfterMs: fireDelayMs });
-    pushTransition(transitions, projectileId, "projectile", null, projectile, `projectile spawned from world-state weapon profile ${profile.weaponId}`);
+    pushTransition(transitions, projectileId, "projectile", null, projectile, `projectile spawned from world-state weapon profile ${profile.weaponId}`, transitionTimeExtra(fireDelayMs));
     pushOutcome(outcomes, actor, candidate, "projectile_spawned", `projectile ${projectileId} spawned from ${profile.weaponId}; speed/damage/penetration came from world state`, {
       projectile_id: projectileId,
       projectile_resolved: false,
@@ -480,6 +485,11 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
     const abilityId = String(intent.ability_id ?? intent.id ?? "").trim();
     const profile = abilityProfile(input.world_state, actor, abilityId);
     const fieldProfile = object(profile.field ?? profile.area_effect);
+    const nominalStartDelayMs = nonNegativeNumber(intent.start_delay_ms, 0);
+    const startDelayMs = nonNegativeNumber(
+      actionTimeOverride(input, actionId).ability_activation_ms,
+      nominalStartDelayMs,
+    );
     if (!abilityId || !Object.keys(profile).length || profile.enabled === false || profile.available === false) {
       pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", `ability ${abilityId || "<missing>"} is unavailable in world state`);
       continue;
@@ -498,7 +508,7 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
     if (energy && energyCost > 0) {
       const before = energy.value;
       energy.container[energy.field] = before - energyCost;
-      pushTransition(transitions, actor, energy.path, before, before - energyCost, `ability ${abilityId} activation consumed world-state energy cost`);
+      pushTransition(transitions, actor, energy.path, before, before - energyCost, `ability ${abilityId} activation consumed world-state energy cost`, transitionTimeExtra(startDelayMs));
     }
     const origin = scenePosition(snapshotScene, actor);
     const center = point(intent.center ?? intent.target_point) ?? origin;
@@ -512,11 +522,6 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
       pushOutcome(outcomes, actor, candidate, "ability_activation_blocked", `ability ${abilityId} field radius/duration must exist in world state`);
       continue;
     }
-    const nominalStartDelayMs = nonNegativeNumber(intent.start_delay_ms, 0);
-    const startDelayMs = nonNegativeNumber(
-      actionTimeOverride(input, actionId).ability_activation_ms,
-      nominalStartDelayMs,
-    );
     const fieldId = `field_${hashAgentRunValue({
       actor,
       ability_id: abilityId,
@@ -545,7 +550,7 @@ function spawnAbilityFields(input, nextWorldState, snapshotScene, transitions, o
     };
     nextWorldState.ability_fields[fieldId] = field;
     spawned.push({ fieldId, field, actor, candidate, activeAfterMs: startDelayMs });
-    pushTransition(transitions, fieldId, "ability_field", null, field, `ability ${abilityId} created persistent programmatic field`);
+    pushTransition(transitions, fieldId, "ability_field", null, field, `ability ${abilityId} created persistent programmatic field`, transitionTimeExtra(startDelayMs));
     pushOutcome(outcomes, actor, candidate, "ability_field_created", `ability ${abilityId} created field ${fieldId}; radius/duration/effect came from world state`, {
       ability_field_id: fieldId,
       energy_cost: energyCost,
@@ -618,7 +623,7 @@ function obstacleIntegrity(obstacle) {
   return current === null ? null : Math.max(0, current);
 }
 
-function updateObstacleAfterImpact(nextScene, collision, projectile, transitions) {
+function updateObstacleAfterImpact(nextScene, collision, projectile, transitions, timeMs = null) {
   nextScene.obstacles = array(nextScene.obstacles);
   const current = object(nextScene.obstacles[collision.index]);
   const resistance = obstacleResistance(current);
@@ -629,13 +634,13 @@ function updateObstacleAfterImpact(nextScene, collision, projectile, transitions
   if (beforeIntegrity !== null && structuralDamage > 0) {
     const afterIntegrity = Math.max(0, beforeIntegrity - structuralDamage);
     current.integrity_current = afterIntegrity;
-    pushTransition(transitions, collision.obstacleId, "integrity_current", beforeIntegrity, afterIntegrity, `projectile ${projectile.projectile_id} transferred structural energy to cover`);
+    pushTransition(transitions, collision.obstacleId, "integrity_current", beforeIntegrity, afterIntegrity, `projectile ${projectile.projectile_id} transferred structural energy to cover`, transitionTimeExtra(timeMs));
     if (afterIntegrity <= 0) {
       destroyed = true;
       current.destroyed = true;
       current.passable = true;
       current.collision_enabled = false;
-      pushTransition(transitions, collision.obstacleId, "destroyed", false, true, `projectile ${projectile.projectile_id} destroyed scene obstacle`);
+      pushTransition(transitions, collision.obstacleId, "destroyed", false, true, `projectile ${projectile.projectile_id} destroyed scene obstacle`, transitionTimeExtra(timeMs));
     }
   }
   nextScene.obstacles[collision.index] = current;
@@ -710,7 +715,7 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
     return;
   }
   if (event.kind === "obstacle") {
-    const impact = updateObstacleAfterImpact(nextScene, event, projectile, transitions);
+    const impact = updateObstacleAfterImpact(nextScene, event, projectile, transitions, state.currentTimeMs);
     if (impact.penetrated) {
       projectile.remaining_penetration_energy = Math.max(0, impact.beforeEnergy - impact.resistance);
       projectile.penetrated_obstacles = [...array(projectile.penetrated_obstacles), event.obstacleId];
@@ -746,6 +751,7 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
       result: "projectile_stopped_by_cover",
       obstacle_id: event.obstacleId,
       time_ms: state.currentTimeMs,
+      source_layer: "continuous_physics",
     });
     pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null }, "projectile_stopped_by_cover", `cover resistance ${impact.resistance} was not exceeded by projectile energy ${impact.beforeEnergy}`, {
       projectile_id: projectile.projectile_id,
@@ -771,6 +777,8 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
       damage_type: projectile.damage_type,
       source: projectile.projectile_id,
       state_transitions: transitions,
+      time_ms: state.currentTimeMs,
+      source_layer: "continuous_physics",
     });
     projectile.active = false;
     projectile.termination_reason = "character_contact";
@@ -859,6 +867,7 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
       before,
       state.projectile,
       `global-time projectile scheduler advanced through ${Math.max(0, elapsedMs - (projectileStart.get(state.projectileId) ?? 0))}ms window`,
+      transitionTimeExtra(Math.min(elapsedMs, state.currentTimeMs)),
     );
   }
   return { iterations };
@@ -962,6 +971,8 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
           source: fieldId,
           ignore_armor: effect.ignore_armor === true,
           state_transitions: transitions,
+          time_ms: tickEndMs,
+          source_layer: "continuous_physics",
         });
         resolutions.push({
           field_id: fieldId,
@@ -1023,7 +1034,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
     }
     field.last_advanced_ms = elapsedMs;
     field.tick_ms = tickMs;
-    pushTransition(transitions, fieldId, "remaining_ms", beforeRemaining, field.remaining_ms, `ability field advanced ${activeMs}ms through deterministic ${tickMs}ms exposure ticks`);
+    pushTransition(transitions, fieldId, "remaining_ms", beforeRemaining, field.remaining_ms, `ability field advanced ${activeMs}ms through deterministic ${tickMs}ms exposure ticks`, transitionTimeExtra(fieldEndMs));
     nextWorldState.ability_fields[fieldId] = field;
   }
 }
