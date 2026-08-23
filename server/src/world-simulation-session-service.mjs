@@ -1,6 +1,7 @@
 import {
   createAgentRun,
   getAgentRun,
+  hashAgentRunValue,
 } from "./agent-run-service.mjs";
 import {
   runWorldSimulationCapability,
@@ -8,13 +9,16 @@ import {
   worldSimulationCommonPermissions,
 } from "./world-simulation-neural-service.mjs";
 import {
+  initializeWorldSimulationState,
+} from "./world-simulation-state-service.mjs";
+import {
   assertNeuralSessionRunShape,
   buildSharedNeuralCoreRegistry,
   neuralSessionModes,
   sharedNeuralCoreVersion,
 } from "./shared-neural-core-service.mjs";
 
-export const worldSimulationSessionVersion = "phase62b-world-simulation-session-v2";
+export const worldSimulationSessionVersion = "phase62c-world-simulation-session-v3";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -28,6 +32,9 @@ function compactBootstrapInput(input = {}) {
     seed: input.seed ?? null,
     rules: object(input.rules),
     initial_world_state_summary: object(input.initial_world_state_summary),
+    initial_world_state_hash: input.initial_world_state && typeof input.initial_world_state === "object" && !Array.isArray(input.initial_world_state)
+      ? hashAgentRunValue(input.initial_world_state)
+      : null,
     metadata: object(input.metadata),
   };
 }
@@ -45,6 +52,16 @@ export async function beginWorldSimulationSession(input = {}, options = {}) {
     required_neural_modules: [],
     input: compactBootstrapInput(input),
   }, agentRunOptions);
+  const hasInitialWorldState = input.initial_world_state
+    && typeof input.initial_world_state === "object"
+    && !Array.isArray(input.initial_world_state);
+  const initializedState = hasInitialWorldState
+    ? await initializeWorldSimulationState(
+      run.run_id,
+      input.initial_world_state,
+      agentRunOptions,
+    )
+    : null;
   return {
     ok: true,
     architecture_route: "chatgpt_owned_world_simulation",
@@ -58,6 +75,9 @@ export async function beginWorldSimulationSession(input = {}, options = {}) {
           .capabilities.world_character_cognition,
     },
     world_simulation_session_id: run.run_id,
+    world_state_initialized: Boolean(initializedState),
+    world_state_revision: initializedState?.revision ?? null,
+    world_state_hash: initializedState?.state_hash ?? null,
     orchestration_owner: "ChatGPT",
     world_state_owner: "programmatic_world_simulator",
     capability_provider: "writer_workbench",
@@ -76,6 +96,15 @@ export async function assertWorldSimulationSession(sessionId, options = {}) {
     neuralSessionModes.WORLD_SIMULATION,
   );
   return run;
+}
+
+export async function initializeWorldSimulationSessionState(
+  sessionId,
+  initialWorldState,
+  options = {},
+) {
+  await assertWorldSimulationSession(sessionId, options);
+  return initializeWorldSimulationState(sessionId, initialWorldState, options);
 }
 
 export async function useWorldSimulationCapability(
