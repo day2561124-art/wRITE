@@ -270,6 +270,7 @@ export async function commitWorldSimulationTurn(
             immutable_event_arbitration: input.immutable_event_arbitration ?? null,
             cross_layer_event_arbitration: input.cross_layer_event_arbitration ?? null,
             causal_epochs: input.causal_epochs ?? null,
+            fixed_point_convergence: input.fixed_point_convergence ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });

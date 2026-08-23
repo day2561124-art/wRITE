@@ -60,6 +60,10 @@ import {
   buildWorldSimulationCrossLayerEventArbitrationContract,
   worldSimulationCrossLayerEventArbitrationVersion,
 } from "./world-simulation-cross-layer-event-arbitration-service.mjs";
+import {
+  buildWorldSimulationFixedPointConvergenceContract,
+  worldSimulationFixedPointConvergenceVersion,
+} from "./world-simulation-fixed-point-convergence-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
@@ -726,6 +730,7 @@ export function buildWorldSimulationCausalRuleContract() {
     immutable_event_queries: buildWorldSimulationImmutableEventQueryContract(),
     immutable_event_arbitration: buildWorldSimulationImmutableEventArbitrationContract(),
     cross_layer_event_arbitration: buildWorldSimulationCrossLayerEventArbitrationContract(),
+    fixed_point_convergence: buildWorldSimulationFixedPointConvergenceContract(),
     time: {
       turn_elapsed_ms: "maximum_resolved_action_duration",
       cross_layer_point_event_order: "global_programmatic_timeline",
@@ -1122,6 +1127,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
     causal_epochs: cloneJson(causalTimeline.causal_epochs ?? null),
+    fixed_point_convergence: cloneJson(causalTimeline.fixed_point_convergence ?? null),
     chronological_mutation_queue: chronologicalMutationQueue,
     chronological_mutation_execution: mutationExecution.execution,
     mutation_proposal_boundary: {
@@ -1232,6 +1238,11 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       causal_candidates_are_bound_to_world_revision_hash_and_fixed_point_epoch: true,
       stale_causal_candidates_are_rejected_between_epochs: true,
       invalidated_epochs_require_candidate_requery_and_rearbitration: true,
+      fixed_point_convergence_requires_identical_derivation_context_hash: true,
+      fixed_point_oscillation_is_rejected: true,
+      fixed_point_iteration_limit_without_convergence_is_rejected: true,
+      fixed_point_silent_last_iteration_acceptance_forbidden: true,
+      fixed_point_convergence_version: worldSimulationFixedPointConvergenceVersion,
       same_timestamp_cross_layer_events_are_simultaneous: true,
       exact_timestamp_arbitration_order_is_not_causal_precedence: true,
       final_world_state_written_only_by_chronological_mutation_queue: true,

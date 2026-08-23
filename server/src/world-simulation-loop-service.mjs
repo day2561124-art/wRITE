@@ -401,6 +401,7 @@ export async function resolveWorldSimulationTurn(
       immutable_event_arbitration: cloneJson(causalResolution.immutable_event_arbitration ?? null),
       cross_layer_event_arbitration: cloneJson(causalResolution.cross_layer_event_arbitration ?? null),
       causal_epochs: cloneJson(causalResolution.causal_epochs ?? null),
+      fixed_point_convergence: cloneJson(causalResolution.fixed_point_convergence ?? null),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },

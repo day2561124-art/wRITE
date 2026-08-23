@@ -32,6 +32,11 @@ import {
   openWorldSimulationCausalEpoch,
   worldSimulationCausalEpochVersion,
 } from "./world-simulation-causal-epoch-service.mjs";
+import {
+  buildWorldSimulationFixedPointConvergenceContract,
+  evaluateWorldSimulationFixedPointIteration,
+  worldSimulationFixedPointConvergenceVersion,
+} from "./world-simulation-fixed-point-convergence-service.mjs";
 
 export const worldSimulationGlobalCausalTimelineVersion = "phase62g-global-causal-timeline-v1";
 
@@ -271,6 +276,7 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
     continuous_actor_state: buildWorldSimulationActorStateContract(),
     cross_layer_event_arbitration: buildWorldSimulationCrossLayerEventArbitrationContract(),
     causal_epoch_freshness: buildWorldSimulationCausalEpochContract(),
+    fixed_point_convergence: buildWorldSimulationFixedPointConvergenceContract(),
     character_brain_may_decide_timestamps_as_outcomes: false,
     known_boundary: "Phase62G supplies the global point-event clock. Phase62H refines deferred execution/topology, and Phase62I integrates in-progress actor movement with injury/incapacitation plus piecewise ability-field exposure.",
   };
@@ -296,22 +302,26 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
   let lastCrossLayerArbitration = null;
   const crossLayerArbitrationAudits = [];
   const causalEpochRecords = [];
+  const fixedPointConvergenceRecords = [];
+  let fixedPointSeenContextHashes = [];
+  let fixedPointConvergence = null;
   let iterations = 0;
   const maxIterations = Math.max(4, array(input.selected_action_intents).length * 2 + 4);
 
   while (iterations < maxIterations) {
     iterations += 1;
     const suppressedList = [...suppressed].sort();
+    const currentDerivationContext = {
+      suppressed_action_ids: suppressedList,
+      action_time_overrides: cloneJson(actionTimeOverrides),
+      actor_trajectories: cloneJson(actorTrajectories),
+    };
     const causalEpoch = openWorldSimulationCausalEpoch({
       world_state: snapshot,
       world_state_revision: persistedWorldStateRevision,
       world_state_hash: persistedWorldStateHash,
       epoch_index: iterations,
-      derivation_context: {
-        suppressed_action_ids: suppressedList,
-        action_time_overrides: cloneJson(actionTimeOverrides),
-        actor_trajectories: cloneJson(actorTrajectories),
-      },
+      derivation_context: currentDerivationContext,
     });
     const combatEntries = buildWorldSimulationCombatTimelineEntries({
       world_state: snapshot,
@@ -427,6 +437,35 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
     if (additions.length) invalidationReasons.push("suppressed_action_set_changed");
     if (overridesChanged) invalidationReasons.push("action_time_overrides_changed");
     if (trajectoriesChanged) invalidationReasons.push("actor_trajectories_changed");
+    const nextDerivationContext = {
+      suppressed_action_ids: [...suppressed].sort(),
+      action_time_overrides: cloneJson(actionTimeOverrides),
+      actor_trajectories: cloneJson(actorTrajectories),
+    };
+    fixedPointConvergence = evaluateWorldSimulationFixedPointIteration({
+      iteration: iterations,
+      max_iterations: maxIterations,
+      current_derivation_context: currentDerivationContext,
+      next_derivation_context: nextDerivationContext,
+      seen_context_hashes: fixedPointSeenContextHashes,
+    });
+    fixedPointSeenContextHashes = fixedPointConvergence.next_seen_context_hashes;
+    const contextChanged = !fixedPointConvergence.converged;
+    if (contextChanged !== (invalidationReasons.length > 0)) {
+      const error = new Error("World-simulation fixed-point invalidation reasons disagree with derivation-context convergence.");
+      error.code = "WORLD_SIMULATION_CAUSAL_FIXED_POINT_INVALIDATION_MISMATCH";
+      error.diagnostics = cloneJson({
+        iteration: iterations,
+        invalidation_reasons: invalidationReasons,
+        convergence: fixedPointConvergence,
+      });
+      throw error;
+    }
+    fixedPointConvergenceRecords.push({
+      ...cloneJson(fixedPointConvergence),
+      causal_epoch_id: causalEpoch.epoch.epoch_id,
+      invalidation_reasons: cloneJson(invalidationReasons),
+    });
     causalEpochRecords.push({
       ...cloneJson(causalEpoch.epoch),
       candidate_count: freshness.candidate_count,
@@ -436,8 +475,22 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       invalidated_after_iteration: invalidationReasons.length > 0,
       invalidation_reasons: invalidationReasons,
       next_iteration_requires_requery_and_rearbitration: invalidationReasons.length > 0,
+      fixed_point_context_hash: fixedPointConvergence.current_context_hash,
+      fixed_point_next_context_hash: fixedPointConvergence.next_context_hash,
+      fixed_point_converged_after_iteration: fixedPointConvergence.converged,
     });
-    if (!invalidationReasons.length) break;
+    if (fixedPointConvergence.converged) break;
+  }
+
+  if (!fixedPointConvergence?.converged) {
+    const error = new Error("World-simulation causal fixed point exited without a convergence proof.");
+    error.code = "WORLD_SIMULATION_CAUSAL_FIXED_POINT_DID_NOT_CONVERGE";
+    error.diagnostics = cloneJson({
+      iteration_count: iterations,
+      max_iterations: maxIterations,
+      convergence_records: fixedPointConvergenceRecords,
+    });
+    throw error;
   }
 
   const suppressedActionIds = [...suppressed].sort();
@@ -478,6 +531,19 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
     actor_state_scheduler_version: worldSimulationActorStateSchedulerVersion,
     cross_layer_event_arbitration_version: worldSimulationCrossLayerEventArbitrationVersion,
     causal_epoch_version: worldSimulationCausalEpochVersion,
+    fixed_point_convergence_version: worldSimulationFixedPointConvergenceVersion,
+    fixed_point_convergence: {
+      version: worldSimulationFixedPointConvergenceVersion,
+      converged: fixedPointConvergence?.converged === true,
+      convergence_iteration: fixedPointConvergence?.iteration ?? null,
+      iteration_count: fixedPointConvergenceRecords.length,
+      max_iterations: maxIterations,
+      final_context_hash: fixedPointConvergence?.next_context_hash ?? null,
+      oscillation_rejection_enabled: true,
+      iteration_limit_rejection_enabled: true,
+      silent_last_iteration_acceptance: false,
+      records: cloneJson(fixedPointConvergenceRecords),
+    },
     causal_epochs: {
       version: worldSimulationCausalEpochVersion,
       world_state_revision: persistedWorldStateRevision,
@@ -520,6 +586,8 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       cross_layer_event_arbitration: cloneJson(lastCrossLayerArbitration?.result ?? null),
       causal_epoch_version: worldSimulationCausalEpochVersion,
       causal_epochs: cloneJson(causalEpochRecords),
+      fixed_point_convergence_version: worldSimulationFixedPointConvergenceVersion,
+      fixed_point_convergence: cloneJson(fixedPointConvergenceRecords),
       turn_id: input.turn_id ?? null,
       suppressed_action_ids: suppressedActionIds,
       preemptions,
@@ -613,6 +681,8 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     cross_layer_event_arbitration: cloneJson(input.arbitration?.cross_layer_event_arbitration ?? null),
     causal_epoch_version: input.arbitration?.causal_epoch_version ?? null,
     causal_epochs: cloneJson(input.arbitration?.causal_epochs ?? null),
+    fixed_point_convergence_version: input.arbitration?.fixed_point_convergence_version ?? null,
+    fixed_point_convergence: cloneJson(input.arbitration?.fixed_point_convergence ?? null),
     action_time_overrides: cloneJson(object(input.arbitration?.action_time_overrides)),
     rate_adjustments: cloneJson(array(input.arbitration?.rate_adjustments)),
     actor_trajectories: cloneJson(object(input.arbitration?.actor_trajectories)),
