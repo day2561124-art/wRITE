@@ -3,6 +3,7 @@ import {
 } from "./agent-run-service.mjs";
 
 export const worldSimulationChronologicalMutationQueueVersion = "phase62j-chronological-mutation-queue-v1";
+export const worldSimulationMutationExecutorVersion = "phase62k-authoritative-mutation-executor-v1";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -132,10 +133,18 @@ function normalizeMutation(transition, index, input) {
   return normalized;
 }
 
+
+function mutationWritePriority(mutation) {
+  const field = String(mutation?.field ?? "");
+  if (field === "ability_field_state" || field === "projectile_state") return 90;
+  return 10;
+}
+
 function stableSortMutations(mutations) {
   return [...mutations].sort((left, right) => (
     left.time_ms - right.time_ms
     || sourcePriority(left.source_layer) - sourcePriority(right.source_layer)
+    || mutationWritePriority(left) - mutationWritePriority(right)
     || String(left.mutation_path ?? "").localeCompare(String(right.mutation_path ?? ""), "zh-Hant-TW")
     || left.transition_index - right.transition_index
   ));
@@ -209,8 +218,9 @@ function buildBatches(mutations, input) {
         time_ms: group.time_ms,
         mutation_revision_from: batchIndex,
         mutation_revision_to: batchIndex + 1,
-        read_semantics: "all_mutations_read_pre_batch_world_state",
+        read_semantics: "causal_subsystems_resolve_same_timestamp_inputs_before_execution; executor_checks_declared_from_to_continuity",
         commit_semantics: "same_timestamp_batch_commits_atomically",
+        deterministic_write_order_does_not_create_world_time_precedence: true,
         same_timestamp_does_not_create_preemption: true,
         point_events: pointEventsForBatch(object(input.causal_timeline).entries, group.time_ms),
         same_path_reductions: samePathReductions,
@@ -225,15 +235,192 @@ function buildBatches(mutations, input) {
   };
 }
 
+
+function splitFieldPath(field) {
+  return String(field ?? "").split(".").filter(Boolean);
+}
+
+function sceneContainerPath(worldState, sceneId) {
+  if (sceneId && isObject(worldState?.scenes) && Object.hasOwn(worldState.scenes, sceneId)) {
+    return ["scenes", sceneId];
+  }
+  return ["scene_state"];
+}
+
+function obstacleIndex(worldState, sceneId, obstacleId) {
+  const base = sceneContainerPath(worldState, sceneId);
+  let scene = worldState;
+  for (const key of base) scene = object(scene?.[key]);
+  return array(scene.obstacles).findIndex((item) => String(item?.id ?? item?.obstacle_id ?? "") === String(obstacleId ?? ""));
+}
+
+function mutationWorldPath(mutation, worldState, previewWorldState, defaultSceneId = null) {
+  const entity = String(mutation?.entity ?? "");
+  const field = String(mutation?.field ?? "");
+  const sceneId = String(mutation?.scene_id ?? defaultSceneId ?? "") || null;
+  const characterExists = Object.hasOwn(object(worldState?.characters), entity)
+    || Object.hasOwn(object(previewWorldState?.characters), entity);
+  const objectExists = Object.hasOwn(object(worldState?.objects), entity)
+    || Object.hasOwn(object(previewWorldState?.objects), entity);
+  const fieldExists = Object.hasOwn(object(worldState?.ability_fields), entity)
+    || Object.hasOwn(object(previewWorldState?.ability_fields), entity);
+
+  if (entity === "world") return splitFieldPath(field);
+  if (sceneId && entity === sceneId && field === "simulation_time") return [...sceneContainerPath(worldState, sceneId), "simulation_time"];
+  if (field === "position" && objectExists) return ["objects", entity, "position"];
+  if (field === "position" && characterExists) return [...sceneContainerPath(worldState, sceneId), "entity_positions", entity];
+  if (field === "open") return [...sceneContainerPath(worldState, sceneId), "doors", entity, "open"];
+  if (field === "projectile" || field === "projectile_state") return ["projectiles", entity];
+  if (field === "ability_field" || field === "ability_field_state") return ["ability_fields", entity];
+  if (characterExists) return ["characters", entity, ...splitFieldPath(field)];
+  if (objectExists) return ["objects", entity, ...splitFieldPath(field)];
+  if (fieldExists) return ["ability_fields", entity, ...splitFieldPath(field)];
+
+  const obstacle = obstacleIndex(previewWorldState ?? worldState, sceneId, entity);
+  if (obstacle >= 0) return [...sceneContainerPath(previewWorldState ?? worldState, sceneId), "obstacles", obstacle, ...splitFieldPath(field)];
+  return null;
+}
+function getAtPath(root, pathParts) {
+  let value = root;
+  for (const key of pathParts) {
+    if (value === null || value === undefined) return undefined;
+    value = value[key];
+  }
+  return value;
+}
+
+function effectiveMutationBefore(root, worldPath, mutation) {
+  const actual = getAtPath(root, worldPath);
+  if (actual !== undefined) return actual;
+  const field = String(mutation?.field ?? "");
+  if (["physical_state.movement_multiplier", "physical_state.combat_multiplier"].includes(field)) return 1;
+  if (["physical_state.incapacitated", "physical_state.immobilized", "destroyed", "passable"].includes(field)) return false;
+  if (field === "collision_enabled") return true;
+  if (field === "physical_state.injuries") return [];
+  if (field === "simulation_time" && worldPath[0] === "scenes") return root.simulation_time ?? null;
+  if (["holder", "scene_id", "position"].includes(field)) return null;
+  return actual;
+}
+
+function setAtPath(root, pathParts, value) {
+  if (!pathParts.length) throw new Error("Authoritative mutation path must not be empty.");
+  let current = root;
+  for (let index = 0; index < pathParts.length - 1; index += 1) {
+    const key = pathParts[index];
+    const nextKey = pathParts[index + 1];
+    if (current[key] === null || current[key] === undefined || typeof current[key] !== "object") {
+      current[key] = Number.isInteger(nextKey) ? [] : {};
+    }
+    current = current[key];
+  }
+  current[pathParts[pathParts.length - 1]] = cloneJson(value);
+}
+
+function changedLeafPaths(left, right, prefix = [], output = []) {
+  if (sameValue(left, right)) return output;
+  const leftObj = left && typeof left === "object";
+  const rightObj = right && typeof right === "object";
+  if (!leftObj || !rightObj || Array.isArray(left) !== Array.isArray(right)) {
+    output.push(prefix.join("."));
+    return output;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      output.push(prefix.join("."));
+      return output;
+    }
+    for (let i = 0; i < left.length; i += 1) changedLeafPaths(left[i], right[i], [...prefix, i], output);
+    return output;
+  }
+  const keys = new Set([...Object.keys(object(left)), ...Object.keys(object(right))]);
+  for (const key of keys) changedLeafPaths(left?.[key], right?.[key], [...prefix, key], output);
+  return output;
+}
+
+export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
+  const queue = object(input.queue);
+  const preview = cloneJson(object(input.preview_world_state));
+  const executed = cloneJson(object(input.world_state));
+  const applied = [];
+  for (const batch of array(queue.batches)) {
+    for (const mutation of array(batch?.mutations)) {
+      const worldPath = mutationWorldPath(mutation, executed, preview, input.scene_id ?? null);
+      if (!worldPath) {
+        const error = new Error(`Authoritative mutation queue cannot resolve world path for ${mutation?.mutation_path ?? mutation?.mutation_id ?? "<unknown>"}.`);
+        error.code = "WORLD_SIMULATION_MUTATION_PATH_UNRESOLVED";
+        throw error;
+      }
+      const before = effectiveMutationBefore(executed, worldPath, mutation);
+      if (!sameValue(before, mutation.from)) {
+        const error = new Error(`Authoritative mutation precondition mismatch at ${worldPath.join(".")}.`);
+        error.code = "WORLD_SIMULATION_MUTATION_PRECONDITION_MISMATCH";
+        error.world_path = worldPath.join(".");
+        error.expected_from = cloneJson(mutation.from);
+        error.actual_from = cloneJson(before);
+        throw error;
+      }
+      setAtPath(executed, worldPath, mutation.to);
+      applied.push({
+        mutation_id: mutation.mutation_id,
+        batch_id: batch.batch_id,
+        time_ms: batch.time_ms,
+        world_path: worldPath.join("."),
+      });
+    }
+  }
+  for (const key of ["projectiles", "ability_fields"]) {
+    if (executed[key] === undefined && isObject(preview[key]) && Object.keys(preview[key]).length === 0) executed[key] = {};
+  }
+  for (const [characterId, previewCharacter] of Object.entries(object(preview.characters))) {
+    const previewPhysical = object(previewCharacter?.physical_state);
+    if (!Object.keys(previewPhysical).length) continue;
+    executed.characters = object(executed.characters);
+    const executedCharacter = object(executed.characters[characterId]);
+    executedCharacter.physical_state = object(executedCharacter.physical_state);
+    const physical = executedCharacter.physical_state;
+    if (physical.movement_multiplier === undefined && previewPhysical.movement_multiplier === 1) physical.movement_multiplier = 1;
+    if (physical.combat_multiplier === undefined && previewPhysical.combat_multiplier === 1) physical.combat_multiplier = 1;
+    if (physical.incapacitated === undefined && previewPhysical.incapacitated === false) physical.incapacitated = false;
+    if (physical.immobilized === undefined && previewPhysical.immobilized === false) physical.immobilized = false;
+    if (physical.injuries === undefined && Array.isArray(previewPhysical.injuries) && previewPhysical.injuries.length === 0) physical.injuries = [];
+    executed.characters[characterId] = executedCharacter;
+  }
+  const uncovered = changedLeafPaths(executed, preview).filter(Boolean);
+  if (uncovered.length) {
+    const error = new Error(`Subsystem preview contains ${uncovered.length} state changes not reproduced by the authoritative mutation queue.`);
+    error.code = "WORLD_SIMULATION_UNQUEUED_STATE_MUTATION";
+    error.uncovered_paths = uncovered.slice(0, 64);
+    throw error;
+  }
+  const execution = {
+    version: worldSimulationMutationExecutorVersion,
+    queue_hash: queue.queue_hash ?? null,
+    applied_mutation_count: applied.length,
+    applied_batch_count: array(queue.batches).length,
+    sole_final_world_state_writer: true,
+    subsystem_world_state_mutations_are_ephemeral_preview_only: true,
+    all_preview_changes_reproduced_by_queue: true,
+    applied,
+  };
+  execution.execution_hash = hashAgentRunValue({
+    version: execution.version,
+    queue_hash: execution.queue_hash,
+    applied,
+    final_world_state: executed,
+  });
+  return { next_world_state: executed, execution };
+}
+
 export function buildWorldSimulationChronologicalMutationQueueContract() {
   return {
     version: worldSimulationChronologicalMutationQueueVersion,
-    owner: "programmatic_chronological_mutation_queue",
+    owner: "programmatic_authoritative_mutation_executor",
     ordering: {
       timestamp_ordered: true,
       exact_same_timestamp_batched: true,
       earlier_batch_commits_before_later_batch_reads: true,
       same_timestamp_batch_does_not_create_retroactive_preemption: true,
+      deterministic_same_batch_reduction_does_not_imply_causal_precedence: true,
       deterministic_replay_hash_chain: true,
     },
     coverage: {
@@ -244,7 +431,13 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
     },
     persistence: "world_history_turn.chronological_mutation_queue",
     character_brain_may_create_or_reorder_mutations: false,
-    known_boundary: "Phase62J v1 centralizes resolved state mutations into one timestamped, batched, replay-hashed queue. Existing subsystem adjudicators still compute mutation contents; a later phase may make the queue the sole mutation executor.",
+    execution: {
+      sole_final_world_state_writer: true,
+      subsystem_mutations_are_ephemeral_preview_only: true,
+      unqueued_preview_state_changes_rejected: true,
+      mutation_preconditions_checked_at_apply_time: true,
+    },
+    known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
 }
 

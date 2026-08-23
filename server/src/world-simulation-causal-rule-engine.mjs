@@ -22,6 +22,7 @@ import {
 import {
   buildWorldSimulationChronologicalMutationQueue,
   buildWorldSimulationChronologicalMutationQueueContract,
+  executeWorldSimulationChronologicalMutationQueue,
 } from "./world-simulation-chronological-mutation-queue-service.mjs";
 
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
@@ -452,12 +453,10 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
     nextObject.holder = actor;
     nextObject.scene_id = null;
     nextObject.position = null;
-    pushTransition(transitions, objectId, "holder", snapshotObject.holder ?? null, actor, `${actor} picked up ${objectId}`, {
-      time_ms: durationMs,
-      actor,
-      action_id: candidate.action_id ?? null,
-      source_layer: "spatial_rules",
-    });
+    const transitionExtra = { time_ms: durationMs, actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" };
+    pushTransition(transitions, objectId, "holder", snapshotObject.holder ?? null, actor, `${actor} picked up ${objectId}`, transitionExtra);
+    pushTransition(transitions, objectId, "scene_id", snapshotObject.scene_id ?? null, null, `${actor} picked up ${objectId}`, transitionExtra);
+    pushTransition(transitions, objectId, "position", snapshotObject.position ?? null, null, `${actor} picked up ${objectId}`, transitionExtra);
     pushOutcome(outcomes, actor, candidate, "pickup_completed", `${objectId} was unheld and within ${reach}m reach`);
     return durationMs;
   }
@@ -469,12 +468,10 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
     nextObject.holder = null;
     nextObject.scene_id = sceneId;
     nextObject.position = actorPosition ? cloneJson(actorPosition) : null;
-    pushTransition(transitions, objectId, "holder", actor, null, `${actor} dropped ${objectId}`, {
-      time_ms: durationMs,
-      actor,
-      action_id: candidate.action_id ?? null,
-      source_layer: "spatial_rules",
-    });
+    const transitionExtra = { time_ms: durationMs, actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" };
+    pushTransition(transitions, objectId, "holder", actor, null, `${actor} dropped ${objectId}`, transitionExtra);
+    pushTransition(transitions, objectId, "scene_id", snapshotObject.scene_id ?? null, sceneId, `${actor} dropped ${objectId}`, transitionExtra);
+    pushTransition(transitions, objectId, "position", snapshotObject.position ?? null, actorPosition ? cloneJson(actorPosition) : null, `${actor} dropped ${objectId}`, transitionExtra);
     pushOutcome(outcomes, actor, candidate, "drop_completed", `${actor} held ${objectId} at turn start`);
     return durationMs;
   }
@@ -487,12 +484,10 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
   nextObject.holder = target;
   nextObject.scene_id = null;
   nextObject.position = null;
-  pushTransition(transitions, objectId, "holder", actor, target, `${actor} transferred ${objectId} to ${target}`, {
-    time_ms: durationMs,
-    actor,
-    action_id: candidate.action_id ?? null,
-    source_layer: "spatial_rules",
-  });
+  const transitionExtra = { time_ms: durationMs, actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" };
+  pushTransition(transitions, objectId, "holder", actor, target, `${actor} transferred ${objectId} to ${target}`, transitionExtra);
+  pushTransition(transitions, objectId, "scene_id", snapshotObject.scene_id ?? null, null, `${actor} transferred ${objectId} to ${target}`, transitionExtra);
+  pushTransition(transitions, objectId, "position", snapshotObject.position ?? null, null, `${actor} transferred ${objectId} to ${target}`, transitionExtra);
   pushOutcome(outcomes, actor, candidate, "transfer_completed", `${actor} held ${objectId} and ${target} was within reach`);
   return durationMs;
 }
@@ -815,6 +810,17 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       `maximum resolved action duration elapsed: ${elapsedMs}ms`,
       { time_ms: elapsedMs, source_layer: "causal_resolution" },
     );
+    if (nextScene) {
+      pushTransition(
+        transitions,
+        sceneId,
+        "simulation_time",
+        snapshotScene.simulation_time ?? previousTime,
+        nextTime,
+        `scene clock advanced with world time by ${elapsedMs}ms`,
+        { time_ms: elapsedMs, source_layer: "causal_resolution", scene_id: sceneId },
+      );
+    }
   }
 
   const queue = array(snapshot.event_queue);
@@ -847,6 +853,13 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     causal_timeline: causalTimeline,
     elapsed_ms: elapsedMs,
   });
+  const mutationExecution = executeWorldSimulationChronologicalMutationQueue({
+    world_state: snapshot,
+    preview_world_state: next,
+    queue: chronologicalMutationQueue,
+    scene_id: sceneId,
+  });
+  next = mutationExecution.next_world_state;
 
   const causalResolutionId = `causal_${hashAgentRunValue({
     engine: worldSimulationCausalRuleEngineVersion,
@@ -858,6 +871,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     outcomes,
     causal_timeline_hash: causalTimeline.timeline_hash,
     chronological_mutation_queue_hash: chronologicalMutationQueue.queue_hash,
+    mutation_execution_hash: mutationExecution.execution.execution_hash,
   }).slice(0, 24)}`;
 
   return {
@@ -871,6 +885,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
     chronological_mutation_queue: chronologicalMutationQueue,
+    chronological_mutation_execution: mutationExecution.execution,
     elapsed_ms: elapsedMs,
     resolution_boundary: {
       result_created_from_world_state_and_machine_readable_action_fields: true,
@@ -878,6 +893,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       same_turn_actions_do_not_retroactively_change_each_others_preconditions: true,
       combat_range_validity_does_not_equal_hit: true,
       combat_contact_damage_and_injury_are_programmatic: true,
+      final_world_state_written_only_by_chronological_mutation_queue: true,
       combat_causal_version: combatResolution.combat_causal_version,
       projectile_and_ability_physics_are_programmatic: true,
       continuous_physics_version: physicsResolution.continuous_physics_version,

@@ -389,6 +389,7 @@ export async function resolveWorldSimulationTurn(
       scheduled_events: array(causalResolution.scheduled_events),
       causal_timeline: cloneJson(causalResolution.causal_timeline ?? null),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
+      chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },

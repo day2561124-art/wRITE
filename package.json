@@ -35,7 +35,8 @@
     "test:phase62g": "node tests/phase62/phase62g-unified-global-causal-timeline.test.mjs",
     "test:phase62h": "node tests/phase62/phase62h-dynamic-timeline-refinement.test.mjs",
     "test:phase62i": "node tests/phase62/phase62i-continuous-actor-state-scheduler.test.mjs",
-    "test:phase62j": "node tests/phase62/phase62j-unified-chronological-mutation-queue.test.mjs"
+    "test:phase62j": "node tests/phase62/phase62j-unified-chronological-mutation-queue.test.mjs",
+    "test:phase62k": "node tests/phase62/phase62k-authoritative-mutation-executor.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

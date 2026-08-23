@@ -627,6 +627,7 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
   );
   if (healthAfter !== null && healthAfter <= 0) {
     const oldIncapacitated = physical.incapacitated === true;
+    const oldImmobilized = physical.immobilized === true;
     physical.incapacitated = true;
     physical.immobilized = true;
     pushTransition(
@@ -634,6 +635,15 @@ export function applyWorldSimulationCombatInjury(nextWorldState, snapshot, targe
       target,
       "physical_state.incapacitated",
       oldIncapacitated,
+      true,
+      "health reached zero after resolved combat damage",
+      transitionTimeExtra(timeMs, { source_layer: sourceLayer }),
+    );
+    pushTransition(
+      transitions,
+      target,
+      "physical_state.immobilized",
+      oldImmobilized,
       true,
       "health reached zero after resolved combat damage",
       transitionTimeExtra(timeMs, { source_layer: sourceLayer }),

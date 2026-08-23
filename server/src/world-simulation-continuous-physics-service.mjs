@@ -634,13 +634,18 @@ function updateObstacleAfterImpact(nextScene, collision, projectile, transitions
   if (beforeIntegrity !== null && structuralDamage > 0) {
     const afterIntegrity = Math.max(0, beforeIntegrity - structuralDamage);
     current.integrity_current = afterIntegrity;
-    pushTransition(transitions, collision.obstacleId, "integrity_current", beforeIntegrity, afterIntegrity, `projectile ${projectile.projectile_id} transferred structural energy to cover`, transitionTimeExtra(timeMs));
+    pushTransition(transitions, collision.obstacleId, "integrity_current", beforeIntegrity, afterIntegrity, `projectile ${projectile.projectile_id} transferred structural energy to cover`, transitionTimeExtra(timeMs, { scene_id: nextScene.scene_id ?? null }));
     if (afterIntegrity <= 0) {
       destroyed = true;
+      const beforePassable = current.passable === true;
+      const beforeCollisionEnabled = current.collision_enabled !== false;
       current.destroyed = true;
       current.passable = true;
       current.collision_enabled = false;
-      pushTransition(transitions, collision.obstacleId, "destroyed", false, true, `projectile ${projectile.projectile_id} destroyed scene obstacle`, transitionTimeExtra(timeMs));
+      const transitionExtra = transitionTimeExtra(timeMs, { scene_id: nextScene.scene_id ?? null });
+      pushTransition(transitions, collision.obstacleId, "destroyed", false, true, `projectile ${projectile.projectile_id} destroyed scene obstacle`, transitionExtra);
+      pushTransition(transitions, collision.obstacleId, "passable", beforePassable, true, `projectile ${projectile.projectile_id} made destroyed obstacle passable`, transitionExtra);
+      pushTransition(transitions, collision.obstacleId, "collision_enabled", beforeCollisionEnabled, false, `projectile ${projectile.projectile_id} disabled destroyed obstacle collision`, transitionExtra);
     }
   }
   nextScene.obstacles[collision.index] = current;
@@ -925,6 +930,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
   for (const [fieldId, rawField] of Object.entries(nextWorldState.ability_fields)) {
     const field = object(rawField);
     if (field.active !== true || String(field.scene_id ?? "") !== input.scene_id) continue;
+    const fieldBeforeAdvance = cloneJson(field);
     const startMs = newStart.has(fieldId) ? newStart.get(fieldId) : 0;
     const availableMs = Math.max(0, elapsedMs - startMs);
     const activeMs = Math.min(nonNegativeNumber(field.remaining_ms, 0), availableMs);
@@ -1034,7 +1040,7 @@ function resolveAbilityFields(input, newFields, nextWorldState, snapshotScene, n
     }
     field.last_advanced_ms = elapsedMs;
     field.tick_ms = tickMs;
-    pushTransition(transitions, fieldId, "remaining_ms", beforeRemaining, field.remaining_ms, `ability field advanced ${activeMs}ms through deterministic ${tickMs}ms exposure ticks`, transitionTimeExtra(fieldEndMs));
+    pushTransition(transitions, fieldId, "ability_field_state", fieldBeforeAdvance, field, `ability field state advanced through ${activeMs}ms window`, transitionTimeExtra(fieldEndMs));
     nextWorldState.ability_fields[fieldId] = field;
   }
 }
