@@ -10,12 +10,28 @@ import {
   projectWorldSimulationImmutableAbilityFieldLifecycleProposals,
   worldSimulationImmutableAbilityFieldLifecycleVersion,
 } from "../../server/src/world-simulation-immutable-ability-field-lifecycle-service.mjs";
-import { runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
+import { runWorldSimulationTurn as runWorldSimulationTurnRuntime } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
 const fixtureRoot = path.join(projectRoot, "tests", ".tmp", `phase62q-ability-field-lifecycle-${process.pid}-${Date.now()}`);
 const options = { fixtureRoot };
+
+let testHarnessEventId = null;
+async function runWorldSimulationTurn(input, runtimeOptions) {
+  const sessionId = input?.world_simulation_session_id ?? null;
+  const harnessState = sessionId
+    ? await getWorldSimulationState(sessionId, runtimeOptions)
+    : null;
+  testHarnessEventId = input?.event_id
+    ?? harnessState?.state?.event_queue?.[0]?.event_id
+    ?? null;
+  try {
+    return await runWorldSimulationTurnRuntime(input, runtimeOptions);
+  } finally {
+    testHarnessEventId = null;
+  }
+}
 await rm(fixtureRoot, { recursive: true, force: true });
 
 const owner = "場域術者";
@@ -185,7 +201,7 @@ try {
     characters: [owner, target],
     initial_world_state: initialWorldState,
   }, options);
-  const characterBrain = async (packet) => ({ action_id: actionFor(packet.event.event_id, packet.character) });
+  const characterBrain = async (packet) => ({ action_id: actionFor(testHarnessEventId, packet.character) });
 
   const createTurn = await runWorldSimulationTurn({ world_simulation_session_id: session.world_simulation_session_id }, { ...options, characterBrain });
   assert.equal(createTurn.ok, true);

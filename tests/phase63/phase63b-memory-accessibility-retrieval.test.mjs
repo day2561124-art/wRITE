@@ -2377,7 +2377,7 @@ try {
         brainInputs.push(packet);
         assert.equal(
           Object.hasOwn(
-            packet.event,
+            packet.event ?? {},
             "memory_retrieval_context",
           ),
           false,
@@ -2385,7 +2385,7 @@ try {
 
         assert.equal(
           Object.hasOwn(
-            packet.event,
+            packet.event ?? {},
             "memory_projection_policy",
           ),
           false,
@@ -2984,7 +2984,7 @@ try {
       brainInputs.some(
         (packet) =>
           Object.hasOwn(
-            packet.event,
+            packet.event ?? {},
             "memory_retrieval_context",
           ),
       ),
@@ -2993,7 +2993,7 @@ try {
       brainInputs.some(
         (packet) =>
           Object.hasOwn(
-            packet.event,
+            packet.event ?? {},
             "memory_projection_policy",
           ),
       ),

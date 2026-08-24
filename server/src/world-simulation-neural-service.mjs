@@ -9,7 +9,6 @@ import {
   assertNeuralSessionRunShape,
   assertWorldSimulationInputBoundary,
   buildSharedNeuralCoreDescriptor,
-  createWorldSimulationCapabilityMediationAttestation,
   invokeSharedNeuralCoreAdapter,
   neuralSessionModes,
 } from "./shared-neural-core-service.mjs";
@@ -1329,13 +1328,6 @@ async function executeWorldSimulationCapability(
         require_compiler_attestation: true,
       },
     );
-    const mediationAttestation =
-      createWorldSimulationCapabilityMediationAttestation({
-        capability_name: capabilityName,
-        envelope_id: prepared.adapter_envelope.envelope_id,
-        envelope_hash: prepared.adapter_envelope.envelope_hash,
-      });
-
     capabilityEnvelopeId = prepared.adapter_envelope.envelope_id;
     capabilityEnvelopeHash = prepared.adapter_envelope.envelope_hash;
     traceInputText = JSON.stringify(prepared.adapter_envelope);
@@ -1360,8 +1352,8 @@ async function executeWorldSimulationCapability(
           session_mode: neuralSessionModes.WORLD_SIMULATION,
           capability_name: capabilityName,
           input: detachedAdapterEnvelope,
-          world_capability_mediation_attestation:
-            mediationAttestation,
+          world_capability_canonical_envelope:
+            prepared.adapter_envelope,
           adapter: options.adapter,
           adapter_context: {
             run_id: runId,
@@ -1451,6 +1443,12 @@ async function executeWorldSimulationCapability(
     ? hashNeuralValue(serializedOutput)
     : null;
   const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
+  const persistedErrorMessage = status === "failed"
+    ? `world_simulation_error:${errorCode ?? "UNCLASSIFIED"}`
+    : null;
+  if (status === "failed") {
+    warnings.push(`failure_code:${errorCode ?? "UNCLASSIFIED"}`);
+  }
   const trace = await recordNeuralWrapperTrace({
     run_id: runId,
     task_type: "world_simulation",
@@ -1463,7 +1461,7 @@ async function executeWorldSimulationCapability(
     status,
     latency_ms: latencyMs,
     warnings,
-    error_message: errorMessage,
+    error_message: persistedErrorMessage,
     input_summary: {
       chars: traceInputText.length,
       source: options.source ?? "world_simulation_bridge",

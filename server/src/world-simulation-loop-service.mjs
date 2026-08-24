@@ -432,6 +432,8 @@ export function buildWorldSimulationLoopContract() {
     character_brain_receives_engine_simulation_time: false,
     character_brain_receives_engine_scene_id: false,
     character_brain_receives_capability_runtime_metadata: false,
+    character_brain_receives_raw_world_event: false,
+    character_brain_receives_session_or_turn_identity: false,
     character_facing_capability_envelopes_enforced: true,
     engine_integrity_capability_envelopes_enforced: true,
     scene_neural_advisory_is_causal_input: false,
@@ -1233,6 +1235,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         engine_scene_id_exposed: false,
         capability_contract_metadata_exposed: false,
         capability_runtime_metadata_exposed: false,
+        raw_world_event_exposed: false,
+        engine_event_identity_exposed: false,
+        engine_session_identity_exposed: false,
+        engine_turn_identity_exposed: false,
         may_choose_action_intent_only: true,
         may_decide_outcome: false,
         programmatic_visibility_enforced: true,
@@ -1318,6 +1324,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       character_brain_receives_engine_simulation_time: false,
       character_brain_receives_engine_scene_id: false,
       character_brain_receives_capability_runtime_metadata: false,
+      character_brain_receives_raw_world_event: false,
+      character_brain_receives_session_or_turn_identity: false,
       character_facing_capability_envelopes_enforced: true,
       causal_adjudicator_has_exclusive_outcome_authority: true,
       scene_neural_advisory_forwarded_to_causal_adjudicator: false,
@@ -1938,29 +1946,9 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const prepared = await prepareWorldSimulationTurn(input, options);
   const selections = {};
   for (const packet of prepared.decision_packets) {
-    const brainVisibleEvent =
-      cloneJson(
-        prepared.event,
-      );
-
-    if (
-      brainVisibleEvent
-      && typeof brainVisibleEvent === "object"
-      && !Array.isArray(
-        brainVisibleEvent,
-      )
-    ) {
-      delete brainVisibleEvent
-        .memory_retrieval_context;
-
-      delete brainVisibleEvent
-        .memory_projection_policy;
-    }
-
+    // Strict Character Brain ingress allowlist. Engine scheduler/session/turn
+    // identity stays outside the subjective decision channel.
     const brainInput = cloneJson({
-      world_simulation_session_id: prepared.world_simulation_session_id,
-      turn_id: prepared.turn_id,
-      event: brainVisibleEvent,
       character: packet.character,
       perception: packet.perception,
 

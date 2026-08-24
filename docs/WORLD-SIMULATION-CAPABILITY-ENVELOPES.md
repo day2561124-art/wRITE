@@ -168,3 +168,15 @@ Step 3 completes R1 runtime adoption for `world_scene_causal_analyzer`, `world_a
 Every actual world-simulation neural invocation must pass through a compiler-attested canonical R1 envelope. Shared Neural Core rejects raw world neural calls. Canonical envelope hashes are recomputed before validation/materialization, capability binding is checked, and the adapter receives a detached clone rather than the engine-owned canonical object.
 
 Neural advisory uses a sealed non-authoritative vocabulary. Authority-like fields such as `must_fix`, `hard_conflict_count`, `commit_allowed`, `winner`, outcome fields, selected-action fields, and mutation fields are rejected recursively inside advisory output.
+
+## Phase62A-R1 Step 4A — Global Boundary Closure
+
+- Character Brain ingress is a strict subjective allowlist: raw scheduler event objects, session ids, turn ids, engine scene ids, and engine timestamps are not character knowledge.
+- Shared Neural Core verifies the compiler-minted canonical AdapterEnvelope directly and separately verifies the detached adapter copy. No independently mintable mediation-token API is exported.
+- Production imports of the native assurance runner and capability-envelope compiler are guarded by regression allowlists.
+- World-simulation MCP audit records use hash/size/schema summaries only; nested payload/output previews are omitted.
+- chatgpt_public cannot list or read data/outputs/logs resources. Full/debug profile behavior remains available for operators.
+- chatgpt_bridge_use_world_memory_retriever remains a legacy direct/debug compatibility tool but is removed from the formal chatgpt_public world-simulation surface. Phase63C recovered memory remains the formal Character Brain memory channel.
+- Adapter-originated failure text is not persisted verbatim in neural traces; direct caller exceptions may still report their immediate failure to the caller.
+
+Step 4A closes transport/audit/ingress bypasses only. Formal native MCP turn transport remains Step 4B.

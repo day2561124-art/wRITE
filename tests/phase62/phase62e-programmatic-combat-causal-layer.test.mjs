@@ -12,7 +12,7 @@ import {
   buildWorldSimulationCombatCausalContract,
 } from "../../server/src/world-simulation-combat-causal-service.mjs";
 import {
-  runWorldSimulationTurn,
+  runWorldSimulationTurn as runWorldSimulationTurnRuntime,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import {
   beginWorldSimulationSession,
@@ -29,6 +29,22 @@ const fixtureRoot = path.join(
   `phase62e-combat-${process.pid}-${Date.now()}`,
 );
 const options = { fixtureRoot };
+
+let testHarnessEventId = null;
+async function runWorldSimulationTurn(input, runtimeOptions) {
+  const sessionId = input?.world_simulation_session_id ?? null;
+  const harnessState = sessionId
+    ? await getWorldSimulationState(sessionId, runtimeOptions)
+    : null;
+  testHarnessEventId = input?.event_id
+    ?? harnessState?.state?.event_queue?.[0]?.event_id
+    ?? null;
+  try {
+    return await runWorldSimulationTurnRuntime(input, runtimeOptions);
+  } finally {
+    testHarnessEventId = null;
+  }
+}
 
 await rm(fixtureRoot, { recursive: true, force: true });
 
@@ -324,7 +340,7 @@ try {
   }, options);
 
   const characterBrain = async (packet) => ({
-    action_id: choice(packet.event.event_id, packet.character),
+    action_id: choice(testHarnessEventId, packet.character),
   });
 
   for (const eventId of [

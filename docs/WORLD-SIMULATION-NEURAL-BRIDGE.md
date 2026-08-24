@@ -15,7 +15,9 @@ Programmatic World Simulator
   -> Scene State / Character State
   -> world_scene_causal_analyzer
   -> world_perception_filter
-  -> world_memory_retriever
+  -> Phase63B memory accessibility candidates (engine-side)
+  -> Phase63C actual retrieval process
+  -> recovered_memories
   -> world_character_cognition
   -> world_action_proposer
   -> ChatGPT character brain chooses an action intent
@@ -31,7 +33,7 @@ Programmatic World Simulator
 - `chatgpt_bridge_begin_world_simulation_session`
 - `chatgpt_bridge_use_world_scene_causal_analyzer`
 - `chatgpt_bridge_use_world_perception_filter`
-- `chatgpt_bridge_use_world_memory_retriever`
+- `chatgpt_bridge_use_world_memory_retriever` — legacy full/debug compatibility only; not part of the formal `chatgpt_public` world path
 - `chatgpt_bridge_use_world_character_cognition`
 - `chatgpt_bridge_use_world_action_proposer`
 - `chatgpt_bridge_use_world_agency_guard`
@@ -63,3 +65,7 @@ npm run test:phase62a
 ```
 
 The Phase62A test verifies information isolation, memory provenance, non-binding actions, agency protection, consistency findings, trace creation, and no input mutation.
+
+## Step4A transport boundary note
+
+The formal `chatgpt_public` profile no longer exposes the legacy memory-candidate projector. Formal native MCP turn transport is intentionally deferred to Phase62A-R1 Step4B; until then, the programmatic native loop remains the authoritative end-to-end kernel.

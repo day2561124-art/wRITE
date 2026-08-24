@@ -107,6 +107,12 @@ import {
   chatgpt_bridge_use_world_consistency_critic,
 } from "./mcp-world-simulation-tools.mjs";
 import {
+  isMcpResourceAllowedForProfile,
+  isWorldSimulationMcpToolName,
+  summarizeWorldSimulationMcpAuditArguments,
+  summarizeWorldSimulationMcpAuditOutput,
+} from "./world-simulation-mcp-boundary-service.mjs";
+import {
   approval_queue_bridge_readiness_report,
 } from "./mcp-approval-queue-readiness-tools.mjs";
 import {
@@ -135,8 +141,9 @@ const serverInfo = {
 const defaultProtocolVersion = "2024-11-05";
 const maxChildOutputBytes = 20 * 1024 * 1024;
 const defaultTimeoutMs = 120_000;
-const mcpAuditLogPath = path.join(rootDir, "data", "outputs", "logs", "mcp_tool_audit.jsonl");
-const mcpAuditIntentDir = path.join(rootDir, "data", "outputs", "logs", "mcp_audit_intents");
+const outputLogsRoot = path.join(rootDir, "data", "outputs", "logs");
+const mcpAuditLogPath = path.join(outputLogsRoot, "mcp_tool_audit.jsonl");
+const mcpAuditIntentDir = path.join(outputLogsRoot, "mcp_audit_intents");
 
 const dataPaths = {
   activeEngine: sourceFilePath("active_engine"),
@@ -680,7 +687,10 @@ function summarizeInputValue(value, key = "") {
   return value ?? null;
 }
 
-function summarizeToolArguments(args) {
+function summarizeToolArguments(args, toolName = "") {
+  if (isWorldSimulationMcpToolName(toolName)) {
+    return summarizeWorldSimulationMcpAuditArguments(args);
+  }
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
     summary[key] = summarizeInputValue(value, key);
@@ -716,7 +726,10 @@ function confirmationGuardError(tool, args) {
   return args[metadata.field] === metadata.requiredValue ? "" : metadata.message;
 }
 
-function auditOutputSummary(result) {
+function auditOutputSummary(result, toolName = "") {
+  if (isWorldSimulationMcpToolName(toolName)) {
+    return summarizeWorldSimulationMcpAuditOutput(result);
+  }
   const text = Array.isArray(result?.content)
     ? result.content.map((item) => item?.text ?? "").join("\n")
     : "";
@@ -742,7 +755,7 @@ async function auditedToolCall(tool, args, actor) {
     tool_name: tool.name,
     risk: tool.risk,
     actor,
-    input_summary: summarizeToolArguments(args),
+    input_summary: summarizeToolArguments(args, tool.name),
   }, null, 2)}\n`, {
     tool: "mcp-audit-intent",
     audit_id: auditId,
@@ -776,12 +789,12 @@ async function auditedToolCall(tool, args, actor) {
     tool_name: tool.name,
     risk: tool.risk,
     actor,
-    input_summary: summarizeToolArguments(effectiveArgs),
+    input_summary: summarizeToolArguments(effectiveArgs, tool.name),
     affected_paths: changed.map((item) => item.path),
     previous_version: Object.fromEntries(changed.map((item) => [item.path, item.previous])),
     new_version: Object.fromEntries(changed.map((item) => [item.path, item.current])),
     confirmation_id: confirmationId(effectiveArgs),
-    result: auditOutputSummary(result),
+    result: auditOutputSummary(result, tool.name),
   };
   await commitFileTransaction("mcp-audit-complete", [
     {
@@ -1924,7 +1937,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_world_memory_retriever",
-    description: "[low-risk-write] Retrieve accessible character memories while preserving source, confidence, clarity, possible error, and source confusion. Memory is never promoted into objective world truth.",
+    description: "[low-risk-write] Legacy direct/debug memory-candidate context projector. This is not actual successful Phase63C retrieval and is excluded from the formal chatgpt_public world-simulation surface.",
     risk: "low-risk-write",
     inputSchema: baseSchema({ world_simulation_session_id: { type: "string" }, capability_input: { type: "object" } }, ["world_simulation_session_id", "capability_input"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_world_memory_retriever(args)),
@@ -3060,7 +3073,6 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
   "chatgpt_bridge_use_world_perception_filter",
-  "chatgpt_bridge_use_world_memory_retriever",
   "chatgpt_bridge_use_world_character_cognition",
   "chatgpt_bridge_use_world_action_proposer",
   "chatgpt_bridge_use_world_agency_guard",
@@ -3697,8 +3709,14 @@ async function publicResourceDefinition(resource) {
 }
 
 async function listResources() {
+  const allowedResources = resourceDefinitions.filter((resource) => (
+    isMcpResourceAllowedForProfile(resource, {
+      profile_name: activeToolProfileName,
+      output_logs_root: outputLogsRoot,
+    })
+  ));
   return {
-    resources: await Promise.all(resourceDefinitions.map((resource) => publicResourceDefinition(resource))),
+    resources: await Promise.all(allowedResources.map((resource) => publicResourceDefinition(resource))),
   };
 }
 
@@ -3711,6 +3729,12 @@ async function readResource(params) {
   const resource = resourceRegistry.get(uri);
   if (!resource) {
     throw new Error(`Unknown resource URI: ${uri}`);
+  }
+  if (!isMcpResourceAllowedForProfile(resource, {
+    profile_name: activeToolProfileName,
+    output_logs_root: outputLogsRoot,
+  })) {
+    throw new Error("Resource is unavailable in the active MCP profile.");
   }
 
   let text;

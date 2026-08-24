@@ -9,7 +9,7 @@ import {
   buildWorldSimulationCausalRuleContract,
 } from "../../server/src/world-simulation-causal-rule-engine.mjs";
 import {
-  runWorldSimulationTurn,
+  runWorldSimulationTurn as runWorldSimulationTurnRuntime,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import {
   beginWorldSimulationSession,
@@ -26,6 +26,22 @@ const fixtureRoot = path.join(
   `phase62d-causal-rules-${process.pid}-${Date.now()}`,
 );
 const options = { fixtureRoot };
+
+let testHarnessEventId = null;
+async function runWorldSimulationTurn(input, runtimeOptions) {
+  const sessionId = input?.world_simulation_session_id ?? null;
+  const harnessState = sessionId
+    ? await getWorldSimulationState(sessionId, runtimeOptions)
+    : null;
+  testHarnessEventId = input?.event_id
+    ?? harnessState?.state?.event_queue?.[0]?.event_id
+    ?? null;
+  try {
+    return await runWorldSimulationTurnRuntime(input, runtimeOptions);
+  } finally {
+    testHarnessEventId = null;
+  }
+}
 
 await rm(fixtureRoot, { recursive: true, force: true });
 
@@ -166,7 +182,7 @@ try {
   }, options);
 
   const characterBrain = async (packet) => ({
-    action_id: actionForEvent(packet.event.event_id),
+    action_id: actionForEvent(testHarnessEventId),
   });
 
   const closedDoorTurn = await runWorldSimulationTurn({

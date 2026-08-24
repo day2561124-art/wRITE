@@ -30,7 +30,6 @@ const publicToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
   "chatgpt_bridge_use_world_perception_filter",
-  "chatgpt_bridge_use_world_memory_retriever",
   "chatgpt_bridge_use_world_character_cognition",
   "chatgpt_bridge_use_world_action_proposer",
   "chatgpt_bridge_use_world_agency_guard",

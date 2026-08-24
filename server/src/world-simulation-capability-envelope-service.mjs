@@ -1,6 +1,6 @@
 import {
-  hashAgentRunValue,
-} from "./agent-run-service.mjs";
+  hashCanonicalValue,
+} from "./canonical-json-hash-service.mjs";
 
 export const worldSimulationCapabilityPolicyVersion =
   "phase62a-r1-capability-policy-v1";
@@ -526,7 +526,7 @@ function buildEnvelopeIdentity({
   protectedBase,
   sources,
 }) {
-  const identityHash = hashAgentRunValue({
+  const identityHash = hashCanonicalValue({
     version: worldSimulationCapabilityEnvelopeVersion,
     policy_version: worldSimulationCapabilityPolicyVersion,
     capability_name: capabilityName,
@@ -548,7 +548,7 @@ function buildEnvelopeIdentity({
 }
 
 function scopedAdapterRef(envelopeId, sourceRef) {
-  return `envsrc_${hashAgentRunValue({
+  return `envsrc_${hashCanonicalValue({
     version: worldSimulationCapabilityEnvelopeVersion,
     envelope_id: envelopeId,
     source_ref: sourceRef,
@@ -620,6 +620,8 @@ export function buildWorldSimulationCapabilityEnvelopeContract() {
     canonical_envelope_hash_reverified: true,
     adapter_receives_detached_copy_of_canonical_envelope: true,
     compiler_attestation_required_for_world_neural_invocation: true,
+    independently_mintable_mediation_token_required: false,
+    shared_core_verifies_canonical_compiler_object_directly: true,
   };
 }
 
@@ -688,7 +690,7 @@ export function compileWorldSimulationCapabilityEnvelope(
       unknown_fields_rejected: true,
     },
   };
-  const envelopeHash = hashAgentRunValue(adapterEnvelopeBase);
+  const envelopeHash = hashCanonicalValue(adapterEnvelopeBase);
   const adapterEnvelope = {
     ...adapterEnvelopeBase,
     envelope_hash: envelopeHash,
@@ -753,7 +755,7 @@ function assertEnvelopeShape(envelope) {
 function recomputeAdapterEnvelopeHash(envelope) {
   const base = cloneJson(envelope);
   delete base.envelope_hash;
-  return hashAgentRunValue(base);
+  return hashCanonicalValue(base);
 }
 
 export function verifyWorldSimulationCapabilityAdapterEnvelope(
@@ -979,7 +981,7 @@ export function validateWorldSimulationCapabilityNeuralExtension(
     envelope_id: envelope.envelope_id,
     capability_name: envelope.capability_name,
     extension: normalized,
-    extension_hash: hashAgentRunValue({
+    extension_hash: hashCanonicalValue({
       envelope_id: envelope.envelope_id,
       extension: normalized,
     }),

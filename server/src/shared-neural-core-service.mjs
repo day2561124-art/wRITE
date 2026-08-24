@@ -1,3 +1,7 @@
+import {
+  verifyWorldSimulationCapabilityAdapterEnvelope,
+} from "./world-simulation-capability-envelope-service.mjs";
+
 export const sharedNeuralCoreVersion = "phase62b-shared-neural-core-v1";
 
 export const neuralSessionModes = Object.freeze({
@@ -22,31 +26,6 @@ const modeRunContracts = Object.freeze({
     entry: "chatgpt_bridge_begin_world_simulation_session",
   }),
 });
-
-const worldSimulationMediationAttestations = new WeakMap();
-
-export function createWorldSimulationCapabilityMediationAttestation({
-  capability_name: capabilityName,
-  envelope_id: envelopeId,
-  envelope_hash: envelopeHash,
-} = {}) {
-  const capability = String(capabilityName ?? "").trim();
-  const id = String(envelopeId ?? "").trim();
-  const hash = String(envelopeHash ?? "").trim();
-  if (!capability || !id || !hash) {
-    throw errorWithCode(
-      "World capability mediation attestation requires capability, envelope id, and envelope hash.",
-      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_REQUIRED",
-    );
-  }
-  const token = Object.freeze({});
-  worldSimulationMediationAttestations.set(token, {
-    capability_name: capability,
-    envelope_id: id,
-    envelope_hash: hash,
-  });
-  return token;
-}
 
 const capabilityFamilies = Object.freeze({
   [neuralSessionModes.WRITING]: Object.freeze({
@@ -307,7 +286,7 @@ export async function invokeSharedNeuralCoreAdapter({
   input,
   adapter,
   adapter_context = {},
-  world_capability_mediation_attestation = null,
+  world_capability_canonical_envelope = null,
 } = {}) {
   if (typeof adapter !== "function") {
     throw new TypeError("shared neural core adapter must be a function.");
@@ -319,22 +298,37 @@ export async function invokeSharedNeuralCoreAdapter({
   );
   if (descriptor.session_mode === neuralSessionModes.WORLD_SIMULATION) {
     assertWorldSimulationInputBoundary(descriptor.capability_name, input);
-    const attestation = worldSimulationMediationAttestations.get(
-      world_capability_mediation_attestation,
-    );
-    if (!attestation) {
+    if (!world_capability_canonical_envelope) {
       throw errorWithCode(
-        "World-simulation neural invocation requires trusted Phase62A-R1 mediation.",
+        "World-simulation neural invocation requires the compiler-minted canonical Phase62A-R1 envelope.",
         "WORLD_SIMULATION_CAPABILITY_ENVELOPE_REQUIRED",
       );
     }
-    if (attestation.capability_name !== descriptor.capability_name
-      || String(input?.capability_name ?? "") !== descriptor.capability_name
-      || String(input?.envelope_id ?? "") !== attestation.envelope_id
-      || String(input?.envelope_hash ?? "") !== attestation.envelope_hash
+    const canonical = verifyWorldSimulationCapabilityAdapterEnvelope(
+      world_capability_canonical_envelope,
+      {
+        capability_name: descriptor.capability_name,
+        require_compiler_attestation: true,
+      },
+    );
+    if (input === world_capability_canonical_envelope) {
+      throw errorWithCode(
+        "World-simulation neural adapters must receive a detached envelope copy, never the engine-owned canonical object.",
+        "WORLD_SIMULATION_CAPABILITY_ADAPTER_COPY_REQUIRED",
+      );
+    }
+    const detached = verifyWorldSimulationCapabilityAdapterEnvelope(
+      input,
+      {
+        capability_name: descriptor.capability_name,
+        require_compiler_attestation: false,
+      },
+    );
+    if (detached.envelope_id !== canonical.envelope_id
+      || detached.envelope_hash !== canonical.envelope_hash
     ) {
       throw errorWithCode(
-        "World capability mediation attestation does not match the detached adapter envelope.",
+        "Detached world capability envelope does not match the compiler-minted canonical envelope.",
         "WORLD_SIMULATION_CAPABILITY_ENVELOPE_BINDING_INVALID",
       );
     }

@@ -28,6 +28,8 @@ const worldSimulationToolNames = [
   "chatgpt_bridge_use_world_agency_guard",
   "chatgpt_bridge_use_world_consistency_critic",
 ];
+const formalPublicWorldSimulationToolNames = worldSimulationToolNames
+  .filter((name) => name !== "chatgpt_bridge_use_world_memory_retriever");
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
   "chatgpt_bridge_review_draft_ephemeral",
@@ -46,12 +48,12 @@ const visualBridgeToolNames = [
 ];
 const expectedDirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
 const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "6cd2b4e6cfc3d9519cb660ac04964e0af9d96c21e23b8425ce414a1494d733bf";
+const expectedPublicDigest = "ab9fbe185a51d670c41cc8ecc1792c48551ffa0c8380a986e4a83570b097d695";
 const expectedPublicNames = [
   "get_engine_components_status",
   currentAddedToolName,
   "chatgpt_bridge_get_workbench_status",
-  ...worldSimulationToolNames,
+  ...formalPublicWorldSimulationToolNames,
   "approval_queue_bridge_readiness_report",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",

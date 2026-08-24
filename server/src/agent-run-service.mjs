@@ -1,6 +1,10 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import {
+  hashCanonicalValue,
+  stableSerializeCanonicalValue,
+} from "./canonical-json-hash-service.mjs";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs";
 import {
@@ -42,46 +46,12 @@ function isoStamp(date = new Date()) {
   return `${compact.slice(0, 8)}-${compact.slice(8)}`;
 }
 
-function canonicalJson(value, ancestors = new Set()) {
-  if (value === null) return "null";
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Cannot hash a non-finite number.");
-    return JSON.stringify(value);
-  }
-  if (typeof value === "bigint") throw new TypeError("Cannot hash a BigInt value.");
-  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") {
-    throw new TypeError(`Cannot hash a ${typeof value} value.`);
-  }
-  if (ancestors.has(value)) throw new TypeError("Cannot hash a circular value.");
-
-  ancestors.add(value);
-  try {
-    if (Array.isArray(value)) {
-      return `[${value.map((item) => canonicalJson(item, ancestors)).join(",")}]`;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new TypeError("Cannot hash a non-plain object.");
-    }
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key], ancestors)}`)
-      .join(",")}}`;
-  } finally {
-    ancestors.delete(value);
-  }
-}
-
 export function stableSerializeHashValue(value) {
-  if (Buffer.isBuffer(value)) return value;
-  if (typeof value === "string") return value;
-  return canonicalJson(value);
+  return stableSerializeCanonicalValue(value);
 }
 
 export function hashAgentRunValue(value) {
-  return createHash("sha256").update(stableSerializeHashValue(value)).digest("hex");
+  return hashCanonicalValue(value);
 }
 
 function requireObject(value, label) {
