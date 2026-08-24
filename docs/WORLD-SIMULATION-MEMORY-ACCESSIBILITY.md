@@ -173,7 +173,9 @@ Phase63B now supplies the authoritative canonical candidate set:
 candidate_memory_records
 ```
 
-The world loop passes that candidate set to `world_memory_retriever` as an engine-authoritative projection input.
+Historically, the world loop passed that candidate set to `world_memory_retriever` as an engine-authoritative Character Brain projection input.
+
+As of Phase63C Step 2, the native world-loop path may still invoke that compatibility projector engine-side, but projected candidate content is no longer forwarded into native cognition or Character Brain. The native Brain memory channel is `recovered_memories`, which remains empty until an actual Phase63C retrieval process recovers content.
 
 The projector does **not** re-run the legacy rule:
 

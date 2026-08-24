@@ -116,6 +116,24 @@ export const worldSimulationCapabilityContracts = Object.freeze({
     purpose:
       "Project an authoritative Phase63B memory-candidate set into bounded Character Brain context without asserting successful recall; keep engine provenance and accessibility diagnostics internal.",
 
+    architecture_role:
+      "legacy_candidate_context_projector_preserved_for_direct_compatibility",
+
+    native_phase63c_retrieval_process_owner:
+      "world_simulation_memory_retrieval_process_service",
+
+    phase63c_schema_contract_installed:
+      true,
+
+    direct_legacy_projector_api_preserved:
+      true,
+
+    candidate_content_barrier_enforced_in_native_world_loop:
+      true,
+
+    native_world_loop_forwards_projected_content_to_character_brain:
+      false,
+
     required_inputs:
       Object.freeze([
         "character",
@@ -145,16 +163,25 @@ export const worldSimulationCapabilityContracts = Object.freeze({
   }),
   world_character_cognition: Object.freeze({
     module: "world_character_cognition",
-    purpose: "Assemble one character's bounded cognition from perception, memory, emotion, needs, values, relations, attention, and current goals without selecting a world result.",
+    purpose: "Assemble one character's bounded cognition from perception, actually recovered memory content, emotion, needs, values, relations, attention, and current goals without selecting a world result.",
+
+    native_phase63c_memory_input:
+      "recovered_memories",
+
+    legacy_memory_inputs_supported_for_direct_compatibility:
+      true,
+
     required_inputs: Object.freeze(["character", "character_state"]),
     optional_inputs: Object.freeze([
       "perception",
+      "recovered_memories",
       "projected_memories",
       "retrieved_memories",
       "decision_context",
     ]),
     returns: Object.freeze([
       "character",
+      "recovered_memories",
       "known",
       "uncertain",
       "needs",
@@ -696,6 +723,24 @@ function buildWorldMemoryRetrieval(input = {}) {
       retrieval_event_owner:
         "Phase63C",
 
+      phase63c_schema_contract_installed:
+        true,
+
+      direct_legacy_projector_api_preserved:
+        true,
+
+      candidate_content_barrier_enforced_in_native_world_loop:
+        true,
+
+      candidate_content_barrier_owner:
+        "Phase63C Step2",
+
+      native_world_loop_forwards_projected_content_to_character_brain:
+        false,
+
+      native_retrieval_process_execution_installed:
+        false,
+
       projection_budget_is_cognitive_capacity:
         false,
 
@@ -795,13 +840,23 @@ function buildWorldCharacterCognition(input = {}) {
   const state = object(input.character_state);
   const character = suppliedCharacter(input);
   const perception = object(input.perception);
+  const nativeRecoveredMemoryInput =
+    Object.hasOwn(
+      input,
+      "recovered_memories",
+    );
+
   const memories = array(
-    input.projected_memories
-      ?? input.retrieved_memories
-      ?? input.memory_retrieval
-        ?.projected_memories
-      ?? input.memory_retrieval
-        ?.retrieved_memories,
+    nativeRecoveredMemoryInput
+      ? input.recovered_memories
+      : (
+        input.projected_memories
+        ?? input.retrieved_memories
+        ?? input.memory_retrieval
+          ?.projected_memories
+        ?? input.memory_retrieval
+          ?.retrieved_memories
+      ),
   ).map(cloneJson);
   const known = uniqueStrings([
     stateList(state, "known", "known_facts", "observed_facts"),
@@ -846,14 +901,28 @@ function buildWorldCharacterCognition(input = {}) {
       audible: perception.audible ?? [],
       other_senses: perception.other_senses ?? [],
     }),
-    projected_memories:
+    recovered_memories:
       memories,
 
-    // Deprecated compatibility alias.
-    retrieved_memories:
-      cloneJson(
-        memories,
-      ),
+    // Legacy fields are emitted only for legacy direct callers.
+    // An explicit recovered_memories input activates the native
+    // Phase63C information boundary and prevents these aliases
+    // from appearing in cognition.
+    ...(
+      nativeRecoveredMemoryInput
+        ? {}
+        : {
+          projected_memories:
+            cloneJson(
+              memories,
+            ),
+
+          retrieved_memories:
+            cloneJson(
+              memories,
+            ),
+        }
+    ),
 
     known,
     uncertain,
@@ -876,6 +945,15 @@ function buildWorldCharacterCognition(input = {}) {
       uncertain_not_promoted_to_known: true,
       no_action_outcome_selected:
         true,
+
+      native_recovered_memory_input_authoritative:
+        nativeRecoveredMemoryInput,
+
+      legacy_memory_input_fallback_used:
+        !nativeRecoveredMemoryInput,
+
+      unretrieved_candidate_content_accepted_when_recovered_input_present:
+        false,
 
       projected_memory_context_is_not_successful_retrieval:
         true,

@@ -2436,30 +2436,103 @@ try {
           false,
         );
 
-        assert.deepEqual(
-          packet.projected_memories
-            .map((item) => item.memory_id),
-
-          [
-            recentSameContext.memory_id,
-            recalledSameContext.memory_id,
-          ],
+        assert.equal(
+          Object.hasOwn(
+            packet,
+            "projected_memories",
+          ),
+          false,
         );
 
         assert.deepEqual(
-          packet.retrieved_memories
-            .map((item) => item.memory_id),
-
-          packet.projected_memories
-            .map((item) => item.memory_id),
+          packet.recovered_memories,
+          [],
         );
-        const serializedMemories = JSON.stringify(packet.retrieved_memories);
-        assert.equal(serializedMemories.includes("retrieval_strength"), false);
-        assert.equal(serializedMemories.includes("interference_penalty"), false);
-        assert.equal(serializedMemories.includes(oldStrongDifferentContext.content.perceptual_label), false);
-        const recent = packet.retrieved_memories[0];
-        assert.equal(recent.confidence, 0.77);
-        assert.equal(recent.clarity, 0.66);
+
+        assert.deepEqual(
+          packet.retrieved_memories,
+          [],
+        );
+
+        assert.equal(
+          packet.boundaries
+            .candidate_content_barrier_enforced,
+          true,
+        );
+
+        assert.equal(
+          packet.boundaries
+            .unretrieved_candidate_content_exposed_to_character_brain,
+          false,
+        );
+
+        // Technical accessibility diagnostics are forbidden
+        // from character-visible memory content. Do not scan the
+        // whole packet for these field-name substrings because the
+        // packet boundary metadata legitimately contains names such
+        // as memory_retrieval_strength_scores_exposed:false.
+        const serializedCharacterMemory =
+          JSON.stringify({
+            recovered_memories:
+              packet.recovered_memories,
+
+            retrieved_memories:
+              packet.retrieved_memories,
+
+            cognition_recovered_memories:
+              packet
+                .cognition
+                ?.recovered_memories
+              ?? [],
+          });
+
+        assert.equal(
+          serializedCharacterMemory.includes(
+            "retrieval_strength",
+          ),
+          false,
+        );
+
+        assert.equal(
+          serializedCharacterMemory.includes(
+            "interference_penalty",
+          ),
+          false,
+        );
+
+        // Actual unretrieved subjective content must not occur
+        // anywhere in the Character Brain packet.
+        const serializedBrainPacket =
+          JSON.stringify(
+            packet,
+          );
+
+        assert.equal(
+          serializedBrainPacket.includes(
+            recentSameContext
+              .content
+              .perceptual_label,
+          ),
+          false,
+        );
+
+        assert.equal(
+          serializedBrainPacket.includes(
+            recalledSameContext
+              .content
+              .perceptual_label,
+          ),
+          false,
+        );
+
+        assert.equal(
+          serializedBrainPacket.includes(
+            oldStrongDifferentContext
+              .content
+              .perceptual_label,
+          ),
+          false,
+        );
         return { action_id: "remain-still" };
       },
       causalAdjudicator: noOpAdjudicator,
@@ -2564,14 +2637,62 @@ try {
     1,
   );
 
+  // Phase63B still produces the authoritative candidate set,
+  // but Phase63C Step2 prevents those unretrieved candidates
+  // from becoming Character Brain memory content.
+  assert.equal(
+    Object.hasOwn(
+      brainInputs[0],
+      "projected_memories",
+    ),
+    false,
+  );
+
   assert.deepEqual(
     brainInputs[0]
-      .projected_memories
-      .map((item) => item.memory_id),
+      .recovered_memories,
+    [],
+  );
 
+  assert.deepEqual(
+    brainInputs[0]
+      .retrieved_memories,
+    [],
+  );
+
+  assert.equal(
+    brainInputs[0]
+      .boundaries
+      .candidate_content_barrier_enforced,
+    true,
+  );
+
+  assert.equal(
+    brainInputs[0]
+      .boundaries
+      .unretrieved_candidate_content_exposed_to_character_brain,
+    false,
+  );
+
+  assert.equal(
     loopAccessibilityResult
       .candidate_memory_records
-      .map((item) => item.memory_id),
+      .length,
+
+    loopAccessibilityResult
+      .candidate_memory_count,
+  );
+
+  assert.equal(
+    loopAccessibilityResult
+      .candidate_memory_count,
+    2,
+  );
+
+  assert.equal(
+    loopAccessibilityResult
+      .retrievable_memory_count,
+    1,
   );
 
   console.log(JSON.stringify({
@@ -2729,10 +2850,23 @@ try {
       loopAccessibilityResult
         .candidate_memory_count === 2
       && loopAccessibilityResult
+        .candidate_memory_records
+        .length === 2
+      && loopAccessibilityResult
         .retrievable_memory_count === 1
+      && Object.hasOwn(
+        brainInputs[0],
+        "projected_memories",
+      ) === false
       && brainInputs[0]
-        .projected_memories
-        .length === 2,
+        .recovered_memories
+        .length === 0
+      && brainInputs[0]
+        .boundaries
+        .candidate_content_barrier_enforced === true
+      && brainInputs[0]
+        .boundaries
+        .unretrieved_candidate_content_exposed_to_character_brain === false,
 
     projection_budget_separated_from_accessibility:
       brainInputs[0]

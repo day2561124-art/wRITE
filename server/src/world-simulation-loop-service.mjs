@@ -43,6 +43,11 @@ import {
   worldSimulationMemoryAccessibilityVersion,
 } from "./world-simulation-memory-accessibility-service.mjs";
 import {
+  buildWorldSimulationMemoryRetrievalProcessContract,
+  buildWorldSimulationMemoryRetrievalQuery,
+  worldSimulationMemoryRetrievalProcessVersion,
+} from "./world-simulation-memory-retrieval-process-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -347,6 +352,7 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
+    subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessContract(),
 
     memory_context_projection: {
       owner:
@@ -393,6 +399,36 @@ export function buildWorldSimulationLoopContract() {
 
       actual_retrieval_event_owner:
         "Phase63C",
+
+      phase63c_schema_contract_installed:
+        true,
+
+      phase63c_runtime_version:
+        worldSimulationMemoryRetrievalProcessVersion,
+
+      candidate_content_barrier_enforced:
+        true,
+
+      candidate_content_barrier_owner:
+        "Phase63C Step2",
+
+      native_character_brain_memory_channel:
+        "recovered_memories",
+
+      native_recovered_memories_default_empty_until_retrieval_kernel:
+        true,
+
+      legacy_projector_api_preserved:
+        true,
+
+      legacy_projector_output_engine_only_in_native_loop:
+        true,
+
+      legacy_projected_memory_content_forwarded_to_character_brain:
+        false,
+
+      native_retrieval_process_execution_installed:
+        false,
     },
 
     subjective_memory_encoding_decision_hook: {
@@ -479,6 +515,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const illuminationVisibilityQueries = [];
   const audibilityQueries = [];
   const memoryAccessibilityQueries = [];
+  const memoryRetrievalQueries = [];
+
+  const turnId = `world_turn_${hashAgentRunValue({
+    world_simulation_session_id: sessionId,
+    revision: snapshot.revision,
+    state_hash: snapshot.state_hash,
+    event_id: event.event_id,
+  }).slice(0, 20)}`;
 
   const sceneAnalysis = await capability(
     sessionId,
@@ -614,7 +658,54 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           .candidate_memory_records,
       );
 
-    const memoryRetrieval = await capability(
+    const retrievalContext =
+      object(
+        event.memory_retrieval_context,
+      );
+
+    const memoryRetrievalQuery =
+      buildWorldSimulationMemoryRetrievalQuery({
+        character,
+
+        turn_id:
+          turnId,
+
+        phase63b_version:
+          memoryAccessibilityQuery
+            .memory_accessibility_version,
+
+        candidate_memory_records:
+          authoritativeCandidateRecords,
+
+        initial_cues:
+          array(
+            retrievalContext
+              .active_cues,
+          ),
+
+        retrieval_goal:
+          retrievalContext
+            .retrieval_goal
+          ?? null,
+      });
+
+    memoryRetrievalQueries.push({
+      observer:
+        character,
+
+      version:
+        worldSimulationMemoryRetrievalProcessVersion,
+
+      query:
+        cloneJson(
+          memoryRetrievalQuery,
+        ),
+    });
+
+    // Step 2 preserves the legacy projector invocation for
+    // compatibility and neural trace continuity, but its output
+    // is engine-only in the native world-loop path.
+    const legacyMemoryProjection = await capability(
       sessionId,
       "world_memory_retriever",
       {
@@ -673,6 +764,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
+    // Phase63C Step 2 installs the information barrier before
+    // the retrieval kernel itself exists. Therefore no candidate
+    // memory content is considered recovered yet.
+    const recoveredMemories = [];
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -681,14 +777,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         character_state: characterState,
         perception,
 
-        projected_memories:
-          memoryRetrieval
-            .projected_memories,
-
-        // Deprecated compatibility alias.
-        retrieved_memories:
-          memoryRetrieval
-            .retrieved_memories,
+        recovered_memories:
+          recoveredMemories,
 
         current_action:
           characterState.current_action
@@ -717,18 +807,17 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           perception,
         ),
 
-      projected_memories:
+      recovered_memories:
         cloneJson(
-          memoryRetrieval
-            .projected_memories,
+          recoveredMemories,
         ),
 
-      // Deprecated compatibility alias until Phase63C
-      // installs actual retrieval outcomes.
+      // Deprecated compatibility alias. In the native Phase63C
+      // path this aliases actually recovered content only and
+      // never aliases Phase63B projected candidate content.
       retrieved_memories:
         cloneJson(
-          memoryRetrieval
-            .retrieved_memories,
+          recoveredMemories,
         ),
 
       cognition:
@@ -756,8 +845,23 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         memory_context_is_projection_not_successful_retrieval:
           true,
 
+        candidate_content_barrier_enforced:
+          true,
+
+        unretrieved_candidate_content_exposed_to_character_brain:
+          false,
+
+        native_character_brain_memory_channel:
+          "recovered_memories",
+
+        recovered_memory_count:
+          recoveredMemories.length,
+
+        legacy_memory_projection_engine_only:
+          true,
+
         memory_projection_max_items:
-          memoryRetrieval
+          legacyMemoryProjection
             .projection_max_items,
 
         memory_projection_budget_is_cognitive_capacity:
@@ -770,13 +874,6 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       },
     });
   }
-
-  const turnId = `world_turn_${hashAgentRunValue({
-    world_simulation_session_id: sessionId,
-    revision: snapshot.revision,
-    state_hash: snapshot.state_hash,
-    event_id: event.event_id,
-  }).slice(0, 20)}`;
 
   return {
     ok: true,
@@ -793,6 +890,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     illumination_visibility_queries: illuminationVisibilityQueries,
     audibility_queries: audibilityQueries,
     memory_accessibility_queries: memoryAccessibilityQueries,
+    memory_retrieval_queries: memoryRetrievalQueries,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
@@ -810,6 +908,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
       memory_accessibility_candidate_set_is_projection_input:
         true,
+
+      memory_accessibility_candidate_set_is_engine_only_in_native_loop:
+        true,
+
+      candidate_content_barrier_enforced:
+        true,
+
+      native_character_brain_memory_channel:
+        "recovered_memories",
+
+      native_recovered_memories_default_empty_until_retrieval_kernel:
+        true,
+
+      legacy_projected_memory_content_forwarded_to_character_brain:
+        false,
 
       memory_projection_budget_separate_from_accessibility:
         true,
@@ -1317,16 +1430,17 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       event: brainVisibleEvent,
       character: packet.character,
       perception: packet.perception,
-      projected_memories:
-        packet.projected_memories
-        ?? packet.retrieved_memories
+
+      recovered_memories:
+        packet.recovered_memories
         ?? [],
 
-      // Deprecated compatibility alias until Phase63C.
+      // Deprecated compatibility alias. This now aliases only
+      // actually recovered Phase63C content.
       retrieved_memories:
-        packet.retrieved_memories
-        ?? packet.projected_memories
+        packet.recovered_memories
         ?? [],
+
       cognition: packet.cognition,
       candidate_action_intents: packet.candidate_action_intents,
       boundaries: packet.boundaries,

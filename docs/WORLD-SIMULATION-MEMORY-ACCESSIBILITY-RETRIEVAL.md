@@ -1,3 +1,5 @@
+> **Legacy Phase63B v1 design note.** This document describes the older weighted accessibility model and is retained for compatibility/history. The canonical Phase63B v2 contract is `WORLD-SIMULATION-MEMORY-ACCESSIBILITY.md`; actual retrieval-process/event ownership is defined by Phase63C.
+
 # Phase63B — Subjective Memory Accessibility / Retrieval Strength / Interference
 
 Phase63B adds a deterministic read-only retrieval layer between persisted subjective memory and `world_memory_retriever`.
@@ -19,4 +21,4 @@ There is deliberately no universal built-in forgetting curve. Rubin & Wenzel (19
 - A retrieval threshold may suppress a scored memory from the current retrieval result, but does not delete or mutate that memory.
 - Exact retrieval-strength scores and component diagnostics remain simulator/history data and are not forwarded into the Character Brain packet.
 
-Phase63B reads recall history if already present but does not update it. Recall reinforcement/retrieval practice belongs to Phase63C; source confusion/distortion, consolidation/semanticization, and reconsolidation remain later phases.
+Phase63B reads recall history if already present but does not update it. Phase63C owns actual retrieval-process and immutable RetrievalEvent recording, but does not apply a generic recall-reinforcement rule. Retrieval-history effects require an explicit later accessibility model; source confusion/distortion, consolidation/semanticization, and conditional reconsolidation remain separately owned later phases.

@@ -1435,93 +1435,29 @@ try {
       ...options,
       characterBrain: async (packet) => {
         secondBrainInputs.push(packet);
-        assert.equal(packet.retrieved_memories.length, 2);
-        const visualMemory = packet.retrieved_memories.find((item) => item.source.sense === "visual");
-        const auditoryMemory = packet.retrieved_memories.find((item) => item.source.sense === "auditory");
-        assert.ok(visualMemory);
-        assert.ok(auditoryMemory);
-        assert.equal(
-          visualMemory.source.kind,
-          "direct_perception",
+        // Phase63A owns formation, not retrieval. Phase63C Step2
+        // now prevents these persisted traces from reaching Brain
+        // until a real retrieval process recovers them.
+        assert.deepEqual(
+          packet.recovered_memories,
+          [],
         );
 
-        assert.equal(
-          visualMemory.memory_type,
-          "episodic_direct_perception",
-        );
-
-        assert.equal(
-          Object.hasOwn(
-            visualMemory.source,
-            "event_id",
-          ),
-          false,
+        assert.deepEqual(
+          packet.retrieved_memories,
+          [],
         );
 
         assert.equal(
           Object.hasOwn(
-            visualMemory.source,
-            "scene_id",
+            packet,
+            "projected_memories",
           ),
-          false,
-        );
-
-        assert.equal(
-          Object.hasOwn(
-            visualMemory.source,
-            "turn_id",
-          ),
-          false,
-        );
-
-        assert.equal(
-          Object.hasOwn(
-            visualMemory.source,
-            "observation_hash",
-          ),
-          false,
-        );
-
-        assert.equal(
-          Object.hasOwn(
-            visualMemory.source,
-            "formation_version",
-          ),
-          false,
-        );
-
-        assert.equal(
-          visualMemory.perceptual_certainty_at_encoding,
-          0.92,
-        );
-
-        assert.equal(
-          visualMemory.perceptual_clarity_at_encoding,
-          0.88,
-        );
-
-        assert.equal(
-          visualMemory.perceptual_certainty_origin,
-          "character_memory_encoding_profile",
-        );
-
-        assert.equal(
-          auditoryMemory.perceptual_clarity_origin,
-          "character_memory_encoding_profile",
-        );
-
-        assert.equal(
-          Object.hasOwn(visualMemory, "confidence"),
-          false,
-        );
-
-        assert.equal(
-          Object.hasOwn(visualMemory, "clarity"),
           false,
         );
 
         const brainMemoryText =
-          JSON.stringify(packet.retrieved_memories);
+          JSON.stringify(packet);
 
         assert.equal(
           brainMemoryText.includes(firstEventId),
@@ -1590,7 +1526,8 @@ try {
     persisted_history_turns: history.turns.length,
     first_turn_created_memory_count: firstTurn.subjective_memory_formation.created_memory_count,
     first_turn_memory_mutation_count: firstTurn.subjective_memory_formation.mutation_count,
-    second_turn_retrieved_prior_memory_count: secondBrainInputs[0].retrieved_memories.length,
+    second_turn_unretrieved_prior_memory_exposed:
+      secondBrainInputs[0].retrieved_memories.length > 0,
     final_memory_count: finalState.state.memories[observer].length,
     visual_perceptual_certainty_preserved:
       directVisual.perceptual_certainty_at_encoding === 0.92,
