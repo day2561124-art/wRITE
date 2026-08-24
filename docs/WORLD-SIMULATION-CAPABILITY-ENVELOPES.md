@@ -1,0 +1,134 @@
+# Phase62A-R1 — Least-Privilege Capability Envelopes
+
+## Scope
+
+Step 1 installs the policy registry, envelope compiler, source-ref materialization primitives, neural-extension validator, and tests for least-privilege world-simulation capabilities.
+
+This step **does not yet change the runtime behavior of the seven Phase62A capabilities**. Runtime adoption is intentionally deferred to later R1 steps.
+
+## Core rule
+
+> Neural models may interpret authorized information. Neural models do not decide what information they were authorized to receive.
+
+The trusted programmatic system prepares a bounded capability view before any optional neural adapter can see it.
+
+## Disclosure is not authority
+
+A value may be readable by an adapter without becoming writable by that adapter.
+
+Examples:
+
+- recovered memory content may be readable by character cognition;
+- the adapter cannot rewrite the recovered memory and return the rewrite as authoritative retrieval;
+- programmatic hard consistency findings may be readable by an advisory critic;
+- the critic cannot reduce `hard_conflict_count` or delete a hard finding.
+
+## Claim domain and assurance origin
+
+Step 1 deliberately avoids one universal trust/confidentiality score.
+
+`claim_domain` describes what kind of claim a record represents, such as:
+
+- `world_state`
+- `perception`
+- `character_subjective_state`
+- `memory_recovery`
+- `action_candidate`
+- `diagnostic`
+
+`assurance_origin` describes where the record's authority came from:
+
+- `engine_persisted`
+- `programmatic_derived`
+- `caller_asserted`
+- `neural_derived`
+
+A programmatically verified subjective memory recovery is not thereby objective world truth.
+
+## Native vs direct assurance
+
+Native engine execution and direct compatibility calls are distinct assurance modes:
+
+- `native_engine_verified`
+- `direct_caller_asserted`
+
+A direct caller cannot promote a supplied record into engine verification by labeling it `programmatic_derived`; the effective assurance is downgraded to `caller_asserted`.
+
+The capability payload itself may not self-declare its assurance mode.
+
+## AdapterEnvelope vs TrustedMaterializationContext
+
+The compiler returns two different objects.
+
+### AdapterEnvelope
+
+Safe to pass to an optional neural adapter. It contains:
+
+- capability identity and purpose;
+- explicit character subject when required;
+- intended downstream audience;
+- protected base values that the adapter may read but not rewrite;
+- authorized source content under invocation-scoped opaque refs;
+- the allowed neural-extension schema.
+
+Character-facing envelopes reject raw world state, raw scene state, full character state, exact engine simulation time, and internal scene IDs.
+
+### TrustedMaterializationContext
+
+Engine-only. It contains:
+
+- authoritative ref-to-source mappings;
+- full provenance manifest;
+- effective assurance evidence;
+- the protected base copy;
+- envelope identity/hash binding.
+
+The provenance manifest is intentionally not exposed to the neural adapter.
+
+## Invocation-scoped refs
+
+Neural adapters never materialize authoritative source content by authoring it themselves.
+
+They may select opaque refs supplied in the current envelope. The trusted materializer then resolves those refs against the engine-only source catalog.
+
+Unknown refs fail closed. Refs from another character, turn, or envelope fail closed.
+
+## Neural extension rules
+
+A neural extension:
+
+- may use only fields registered for that capability;
+- may not override protected result fields;
+- may not author audience, assurance, provenance, trust-domain, or policy metadata;
+- may not expand its audience;
+- may not raise its assurance;
+- is always treated as `neural_derived`.
+
+For an optional native helper, an invalid extension can be discarded while the trusted base survives. For an explicitly requested direct adapter, invalid output throws.
+
+## Capability roles in Step 1
+
+| Capability | Trust domain | Step 1 adapter pattern |
+| --- | --- | --- |
+| `world_scene_causal_analyzer` | engine-facing | protected base + advisory extension |
+| `world_perception_filter` | character-facing | authorized observation refs + annotations |
+| `world_memory_retriever` | character-facing compatibility | source-ref selection |
+| `world_character_cognition` | character-facing | protected base + subjective extension |
+| `world_action_proposer` | character-facing | protected action catalog + ref ordering |
+| `world_agency_guard` | diagnostic | programmatic findings + advisory extension |
+| `world_consistency_critic` | engine-facing diagnostic | programmatic hard findings + advisory extension |
+
+## Important non-claims
+
+Step 1 does not claim to:
+
+- sandbox arbitrary malicious JavaScript adapters;
+- prevent a malicious stateful adapter from remembering data across invocations;
+- implement process-level or per-character model isolation;
+- prevent neural hallucination;
+- implement subjective source monitoring or source confusion;
+- implement the future attempt-affordance action engine.
+
+## Runtime adoption
+
+Step 1 is contract-only. Existing Phase62A/62B/62C runtime paths remain unchanged until later R1 adoption steps.
