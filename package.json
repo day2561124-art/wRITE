@@ -49,7 +49,8 @@
     "test:phase62u": "node tests/phase62/phase62u-causal-epoch-freshness.test.mjs",
     "test:phase62v": "node tests/phase62/phase62v-fixed-point-convergence.test.mjs",
     "test:phase62w": "node tests/phase62/phase62w-programmatic-visibility-occlusion.test.mjs",
-    "test:phase62x": "node tests/phase62/phase62x-directional-height-visibility.test.mjs"
+    "test:phase62x": "node tests/phase62/phase62x-directional-height-visibility.test.mjs",
+    "test:phase62y": "node tests/phase62/phase62y-illumination-visibility.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"

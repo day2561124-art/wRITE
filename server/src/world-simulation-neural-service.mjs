@@ -291,6 +291,8 @@ function buildWorldPerceptionPacket(input = {}) {
   const visibilityEnforced = programmaticVisibility.enforced === true;
   const directionalHeightVisibilityEnforced = visibilityEnforced
     && programmaticVisibility.directional_height_visibility_enforced === true;
+  const illuminationVisibilityEnforced = directionalHeightVisibilityEnforced
+    && programmaticVisibility.illumination_visibility_enforced === true;
 
   const observed = [
     ...array(observations.visual),
@@ -332,11 +334,14 @@ function buildWorldPerceptionPacket(input = {}) {
       through_wall_vision: false,
       programmatic_visibility_enforced: visibilityEnforced,
       directional_height_visibility_enforced: directionalHeightVisibilityEnforced,
+      illumination_visibility_enforced: illuminationVisibilityEnforced,
       raw_scene_visual_sources_bypassed_when_visibility_enforced: visibilityEnforced,
       rule: visibilityEnforced
-        ? directionalHeightVisibilityEnforced
-          ? "Visual inputs are supplied by programmatic line-of-sight, directional FOV, and explicit-height occlusion queries. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
-          : "Visual inputs are supplied by the programmatic visibility/occlusion query. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+        ? illuminationVisibilityEnforced
+          ? "Visual inputs are supplied by programmatic line-of-sight, directional FOV, explicit-height occlusion, and explicit illumination-threshold queries. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+          : directionalHeightVisibilityEnforced
+            ? "Visual inputs are supplied by programmatic line-of-sight, directional FOV, and explicit-height occlusion queries. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+            : "Visual inputs are supplied by the programmatic visibility/occlusion query. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
         : "Only explicit observations, sensory inputs, observer-scoped observable_by/perception_by data, and public scene signals may enter this packet.",
     },
   };
