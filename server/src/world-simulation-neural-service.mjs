@@ -110,22 +110,49 @@ export const worldSimulationCapabilityContracts = Object.freeze({
     permissions: permissionsReference,
   }),
   world_memory_retriever: Object.freeze({
-    module: "world_memory_retriever",
-    purpose: "Return character-visible subjective memory features selected by explicit accessibility rules while keeping engine provenance and retrieval diagnostics internal; never convert memory into world truth.",
-    required_inputs: Object.freeze(["character", "memory_records"]),
-    optional_inputs: Object.freeze(["query", "max_items", "programmatic_memory_accessibility"]),
-    returns: Object.freeze([
-      "character",
-      "retrieved_memories",
-      "memory_boundary",
-    ]),
-    permissions: permissionsReference,
+    module:
+      "world_memory_retriever",
+
+    purpose:
+      "Project an authoritative Phase63B memory-candidate set into bounded Character Brain context without asserting successful recall; keep engine provenance and accessibility diagnostics internal.",
+
+    required_inputs:
+      Object.freeze([
+        "character",
+        "memory_records",
+      ]),
+
+    optional_inputs:
+      Object.freeze([
+        "query",
+        "projection_max_items",
+        "projection_policy_origin",
+        "max_items",
+        "programmatic_memory_accessibility",
+      ]),
+
+    returns:
+      Object.freeze([
+        "character",
+        "projected_memories",
+        "retrieved_memories",
+        "projection_max_items",
+        "memory_boundary",
+      ]),
+
+    permissions:
+      permissionsReference,
   }),
   world_character_cognition: Object.freeze({
     module: "world_character_cognition",
     purpose: "Assemble one character's bounded cognition from perception, memory, emotion, needs, values, relations, attention, and current goals without selecting a world result.",
     required_inputs: Object.freeze(["character", "character_state"]),
-    optional_inputs: Object.freeze(["perception", "retrieved_memories", "decision_context"]),
+    optional_inputs: Object.freeze([
+      "perception",
+      "projected_memories",
+      "retrieved_memories",
+      "decision_context",
+    ]),
     returns: Object.freeze([
       "character",
       "known",
@@ -465,55 +492,297 @@ function normalizedMemory(record = {}) {
 }
 
 function buildWorldMemoryRetrieval(input = {}) {
-  const character = suppliedCharacter(input);
-  const requestedMax = Number.isSafeInteger(input.max_items)
-    ? Math.min(32, Math.max(1, input.max_items))
-    : 12;
-  const programmaticAccessibility = object(input.programmatic_memory_accessibility);
-  const programmaticAccessibilityEnforced = programmaticAccessibility.enforced === true;
-  const sourceRecords = programmaticAccessibilityEnforced
-    ? array(programmaticAccessibility.memory_records)
-    : array(input.memory_records);
-  const accessible = sourceRecords
-    .filter((record) => isObject(record) && record.accessible !== false && record.suppressed !== true)
-    .slice(0, requestedMax)
-    .map(normalizedMemory);
+  const character =
+    suppliedCharacter(
+      input,
+    );
+
+  const hasCanonicalProjectionMax =
+    Object.hasOwn(
+      input,
+      "projection_max_items",
+    )
+    && input.projection_max_items
+      !== null
+    && input.projection_max_items
+      !== undefined;
+
+  if (
+    hasCanonicalProjectionMax
+    && (
+      !Number.isSafeInteger(
+        input.projection_max_items,
+      )
+      || input.projection_max_items < 0
+      || input.projection_max_items > 32
+    )
+  ) {
+    const error = new Error(
+      "projection_max_items must be an integer from 0 through 32.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_PROJECTION_MAX_ITEMS_INVALID";
+
+    throw error;
+  }
+
+  const canonicalProjectionMax =
+    hasCanonicalProjectionMax
+      ? input.projection_max_items
+      : null;
+
+  const legacyProjectionMax =
+    Number.isSafeInteger(
+      input.max_items,
+    )
+      ? Math.min(
+        32,
+        Math.max(
+          1,
+          input.max_items,
+        ),
+      )
+      : null;
+
+  const requestedMax =
+    canonicalProjectionMax
+    ?? legacyProjectionMax
+    ?? 12;
+
+  const projectionMaxOrigin =
+    canonicalProjectionMax !== null
+      ? text(
+        input.projection_policy_origin,
+      )
+        ?? "explicit_projection_max_items"
+      : legacyProjectionMax !== null
+        ? "legacy_max_items_alias"
+        : "default_projection_limit";
+
+  const programmaticAccessibility =
+    object(
+      input.programmatic_memory_accessibility,
+    );
+
+  const programmaticAccessibilityEnforced =
+    programmaticAccessibility
+      .accessibility_enforced
+    === true
+    || programmaticAccessibility
+      .enforced
+    === true;
+
+  const candidateSetAuthoritative =
+    programmaticAccessibility
+      .candidate_set_authoritative
+    === true;
+
+  const authoritativeCandidates =
+    array(
+      programmaticAccessibility
+        .candidate_memory_records
+      ?? programmaticAccessibility
+        .memory_records,
+    );
+
+  const legacyProgrammaticRecords =
+    array(
+      programmaticAccessibility
+        .memory_records,
+    );
+
+  const sourceRecords =
+    candidateSetAuthoritative
+      ? authoritativeCandidates
+      : programmaticAccessibilityEnforced
+        ? legacyProgrammaticRecords
+        : array(
+          input.memory_records,
+        );
+
+  const projectionSourceRecords =
+    candidateSetAuthoritative
+      ? sourceRecords.filter(
+        (record) =>
+          isObject(record),
+      )
+      : sourceRecords.filter(
+        (record) =>
+          isObject(record)
+          && record.accessible !== false
+          && record.suppressed !== true,
+      );
+
+  const projected =
+    projectionSourceRecords
+      .slice(
+        0,
+        requestedMax,
+      )
+      .map(
+        normalizedMemory,
+      );
+
   return {
-    result_type: capabilitySpecs.world_memory_retriever.result_type,
-    retrieval_status: character
-      ? "accessible_memories_only"
-      : "missing_character",
+    result_type:
+      capabilitySpecs
+        .world_memory_retriever
+        .result_type,
+
+    retrieval_status:
+      character
+        ? "accessible_memories_only"
+        : "missing_character",
+
+    projection_status:
+      character
+        ? "memory_context_projected"
+        : "missing_character",
+
     character,
-    query: cloneJson(input.query ?? null),
-    retrieved_memories: accessible,
+
+    query:
+      cloneJson(
+        input.query
+        ?? null,
+      ),
+
+    candidate_input_count:
+      projectionSourceRecords.length,
+
+    projection_max_items:
+      requestedMax,
+
+    projection_max_items_origin:
+      projectionMaxOrigin,
+
+    projected_memory_count:
+      projected.length,
+
+    projected_memories:
+      projected,
+
+    // Deprecated compatibility alias.
+    // These records are projected context, not proof of
+    // successful human-like retrieval.
+    retrieved_memories:
+      cloneJson(
+        projected,
+      ),
+
     memory_boundary: {
-      memory_is_not_world_truth: true,
+      memory_is_not_world_truth:
+        true,
 
-      subjective_source_features_preserved: true,
+      output_is_character_brain_memory_context_projection:
+        true,
 
-      internal_engine_provenance_exposed_to_character_brain: false,
+      actual_retrieval_success_asserted:
+        false,
 
-      exact_encoding_timestamp_exposed_to_character_brain: false,
-      exact_recall_timestamp_exposed_to_character_brain: false,
+      projection_appends_retrieval_history:
+        false,
 
-      legacy_confidence_preserved_for_legacy_records: true,
-      legacy_clarity_preserved_for_legacy_records: true,
+      projection_updates_recall_count:
+        false,
 
-      perceptual_certainty_at_encoding_preserved: true,
-      perceptual_clarity_at_encoding_preserved: true,
+      projection_updates_last_recalled_at:
+        false,
 
-      error_and_source_confusion_allowed: true,
+      projection_creates_retrieval_event:
+        false,
 
-      direct_perception_subjective_source_features_preserved: true,
+      retrieval_event_owner:
+        "Phase63C",
 
-      memory_type_preserved: true,
+      projection_budget_is_cognitive_capacity:
+        false,
 
-      encoding_metric_origins_preserved: true,
-      inaccessible_records_excluded: true,
-      programmatic_memory_accessibility_enforced: programmaticAccessibilityEnforced,
-      programmatic_memory_accessibility_version: programmaticAccessibility.version ?? null,
-      retrieval_strength_scores_exposed_to_character_brain: false,
-      storage_strength_is_not_rewritten_as_retrieval_strength: true,
+      projection_budget_zero_allowed:
+        true,
+
+      authoritative_candidate_set_consumed:
+        candidateSetAuthoritative,
+
+      candidate_authority_requires_explicit_flag:
+        true,
+
+      enforced_flag_alone_implies_candidate_authority:
+        false,
+
+      authoritative_candidate_set_revalidated_by_legacy_accessible_flag:
+        false,
+
+      legacy_enforced_programmatic_records_revalidated_by_legacy_accessibility:
+        (
+          programmaticAccessibilityEnforced
+          && !candidateSetAuthoritative
+        ),
+
+      raw_memory_records_use_legacy_accessibility_filter_only_without_authoritative_candidates:
+        true,
+
+      canonical_projection_limit_invalid_values_rejected:
+        true,
+
+      subjective_source_features_preserved:
+        true,
+
+      internal_engine_provenance_exposed_to_character_brain:
+        false,
+
+      exact_encoding_timestamp_exposed_to_character_brain:
+        false,
+
+      exact_recall_timestamp_exposed_to_character_brain:
+        false,
+
+      legacy_confidence_preserved_for_legacy_records:
+        true,
+
+      legacy_clarity_preserved_for_legacy_records:
+        true,
+
+      perceptual_certainty_at_encoding_preserved:
+        true,
+
+      perceptual_clarity_at_encoding_preserved:
+        true,
+
+      error_and_source_confusion_allowed:
+        true,
+
+      direct_perception_subjective_source_features_preserved:
+        true,
+
+      memory_type_preserved:
+        true,
+
+      encoding_metric_origins_preserved:
+        true,
+
+      inaccessible_records_excluded:
+        true,
+
+      inaccessible_records_excluded_by_phase63b_when_candidate_set_authoritative:
+        candidateSetAuthoritative,
+
+      programmatic_memory_accessibility_enforced:
+        programmaticAccessibilityEnforced,
+
+      programmatic_memory_accessibility_version:
+        programmaticAccessibility.version
+        ?? null,
+
+      retrieval_strength_scores_exposed_to_character_brain:
+        false,
+
+      storage_strength_is_not_rewritten_as_retrieval_strength:
+        true,
+
+      free_text_query_asserts_retrieval_success:
+        false,
     },
   };
 }
@@ -527,8 +796,12 @@ function buildWorldCharacterCognition(input = {}) {
   const character = suppliedCharacter(input);
   const perception = object(input.perception);
   const memories = array(
-    input.retrieved_memories
-      ?? input.memory_retrieval?.retrieved_memories,
+    input.projected_memories
+      ?? input.retrieved_memories
+      ?? input.memory_retrieval
+        ?.projected_memories
+      ?? input.memory_retrieval
+        ?.retrieved_memories,
   ).map(cloneJson);
   const known = uniqueStrings([
     stateList(state, "known", "known_facts", "observed_facts"),
@@ -573,7 +846,15 @@ function buildWorldCharacterCognition(input = {}) {
       audible: perception.audible ?? [],
       other_senses: perception.other_senses ?? [],
     }),
-    retrieved_memories: memories,
+    projected_memories:
+      memories,
+
+    // Deprecated compatibility alias.
+    retrieved_memories:
+      cloneJson(
+        memories,
+      ),
+
     known,
     uncertain,
     needs,
@@ -593,8 +874,17 @@ function buildWorldCharacterCognition(input = {}) {
       world_truth_not_injected: true,
       other_character_internal_state_not_injected: true,
       uncertain_not_promoted_to_known: true,
-      no_action_outcome_selected: true,
-      rule: "This packet is evidence for ChatGPT's character brain; it is not a command and cannot mutate the world.",
+      no_action_outcome_selected:
+        true,
+
+      projected_memory_context_is_not_successful_retrieval:
+        true,
+
+      memory_projection_budget_is_not_cognitive_capacity:
+        true,
+
+      rule:
+        "This packet is evidence for ChatGPT's character brain; projected memory context is not proof of successful recall, and the packet cannot mutate the world.",
     },
   };
 }

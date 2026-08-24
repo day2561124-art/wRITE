@@ -2,7 +2,7 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 
-export const worldSimulationMemoryAccessibilityVersion = "phase63b-memory-accessibility-retrieval-v1";
+export const worldSimulationMemoryAccessibilityVersion = "phase63b-cue-dependent-memory-accessibility-v2";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -85,6 +85,132 @@ function profileFor(context) {
   );
 }
 
+const memoryAccessibilityModelModes =
+  Object.freeze({
+    LEGACY_UNFILTERED:
+      "legacy_unfiltered_eligibility",
+
+    LEGACY_V1_WEIGHTED:
+      "legacy_v1_weighted_compatibility",
+
+    NATIVE_V2:
+      "cue_dependent_v2",
+  });
+
+function profileModelMode(profile) {
+  const source =
+    object(profile);
+
+  if (source.enabled !== true) {
+    return memoryAccessibilityModelModes
+      .LEGACY_UNFILTERED;
+  }
+
+  const explicitMode =
+    nonEmptyString(
+      source.model_mode
+      ?? object(source.accessibility_model).mode,
+    )?.toLowerCase()
+    ?? null;
+
+  if (
+    explicitMode === "cue_dependent_v2"
+    || explicitMode === "cue-dependent-v2"
+    || explicitMode === "phase63b_v2"
+  ) {
+    return memoryAccessibilityModelModes
+      .NATIVE_V2;
+  }
+
+  if (
+    explicitMode === "legacy_v1_weighted_compatibility"
+    || explicitMode === "legacy_v1_weighted"
+    || explicitMode === "phase63b_v1"
+  ) {
+    return memoryAccessibilityModelModes
+      .LEGACY_V1_WEIGHTED;
+  }
+
+  if (explicitMode !== null) {
+    const error = new Error(
+      `Unsupported Phase63B memory accessibility model_mode: ${explicitMode}`,
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_MODEL_MODE_UNSUPPORTED";
+
+    error.model_mode =
+      explicitMode;
+
+    throw error;
+  }
+
+  // Existing pre-v2 profiles did not declare model_mode.
+  // Preserve those profiles as legacy v1 compatibility.
+  //
+  // Any newly declared explicit mode must be recognized above;
+  // unknown explicit modes fail closed rather than silently
+  // inheriting the legacy weighted formula.
+  return memoryAccessibilityModelModes
+    .LEGACY_V1_WEIGHTED;
+}
+
+function engineRetrievalEligibility(record) {
+  if (!isObject(record)) {
+    return {
+      eligible:
+        false,
+
+      policy_eligible:
+        false,
+
+      suppressed:
+        false,
+
+      source:
+        "invalid_record",
+    };
+  }
+
+  const hasNativeEligibility =
+    Object.hasOwn(
+      record,
+      "retrieval_eligible",
+    );
+
+  const hasLegacyAccessibility =
+    Object.hasOwn(
+      record,
+      "accessible",
+    );
+
+  const policyEligible =
+    hasNativeEligibility
+      ? record.retrieval_eligible !== false
+      : record.accessible !== false;
+
+  const suppressed =
+    record.suppressed === true;
+
+  return {
+    eligible:
+      policyEligible
+      && !suppressed,
+
+    policy_eligible:
+      policyEligible,
+
+    suppressed,
+
+    source:
+      hasNativeEligibility
+        ? "retrieval_eligible"
+        : hasLegacyAccessibility
+          ? "legacy_accessible"
+          : "default_eligible",
+  };
+}
+
 function timestampMs(value) {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -119,12 +245,154 @@ function decayAccessibility(ageHours, config) {
   return null;
 }
 
+function explicitSuccessfulRetrievalHistoryEntry(
+  entry,
+) {
+  if (!isObject(entry)) {
+    return false;
+  }
+
+  if (entry.success === true) {
+    return true;
+  }
+
+  const outcome =
+    nonEmptyString(
+      entry.outcome
+      ?? entry.result
+      ?? entry.status,
+    )
+      ?.toLowerCase()
+    ?? null;
+
+  return [
+    "success",
+    "successful",
+    "successful_recall",
+    "successful_retrieval",
+  ].includes(
+    outcome,
+  );
+}
+
+function retrievalHistoryEntries(
+  record,
+) {
+  return array(
+    record?.retrieval_history,
+  );
+}
+
+function successfulRetrievalHistoryEntries(
+  record,
+) {
+  return retrievalHistoryEntries(
+    record,
+  ).filter(
+    explicitSuccessfulRetrievalHistoryEntry,
+  );
+}
+
+function legacyRecallHistorySource(
+  record,
+) {
+  if (
+    retrievalHistoryEntries(
+      record,
+    ).length
+  ) {
+    return "retrieval_history";
+  }
+
+  if (
+    nonNegativeInteger(
+      record?.recall_count,
+    ) !== null
+    || timestampMs(
+      record?.last_recalled_at,
+    ) !== null
+  ) {
+    return "legacy_summary_fallback";
+  }
+
+  return "unspecified";
+}
+
 function recallCount(record) {
-  const explicit = nonNegativeInteger(record?.recall_count);
-  if (explicit !== null) return explicit;
-  const history = array(record?.retrieval_history);
-  if (!history.length) return null;
-  return history.filter((entry) => !isObject(entry) || entry.success !== false).length;
+  const history =
+    retrievalHistoryEntries(
+      record,
+    );
+
+  if (history.length) {
+    return successfulRetrievalHistoryEntries(
+      record,
+    ).length;
+  }
+
+  return nonNegativeInteger(
+    record?.recall_count,
+  );
+}
+
+function successfulRetrievalHistoryTimestamp(
+  entry,
+) {
+  if (
+    !explicitSuccessfulRetrievalHistoryEntry(
+      entry,
+    )
+  ) {
+    return null;
+  }
+
+  return timestampMs(
+    entry.occurred_at
+    ?? entry.recalled_at
+    ?? entry.retrieved_at
+    ?? entry.timestamp
+    ?? entry.at,
+  );
+}
+
+function lastSuccessfulRecallAt(
+  record,
+) {
+  const history =
+    retrievalHistoryEntries(
+      record,
+    );
+
+  if (history.length) {
+    let latest =
+      null;
+
+    for (
+      const entry
+      of history
+    ) {
+      const timestamp =
+        successfulRetrievalHistoryTimestamp(
+          entry,
+        );
+
+      if (
+        timestamp !== null
+        && (
+          latest === null
+          || timestamp > latest
+        )
+      ) {
+        latest =
+          timestamp;
+      }
+    }
+
+    return latest;
+  }
+
+  return record?.last_recalled_at
+    ?? null;
 }
 
 function recallFrequencyAccessibility(record, config) {
@@ -140,6 +408,1107 @@ function primitiveCueValues(value) {
     .filter((item) => ["string", "number", "boolean"].includes(typeof item))
     .map((item) => typeof item === "string" ? item.trim().toLocaleLowerCase("zh-Hant-TW") : item)
     .filter((item) => item !== "");
+}
+
+const nativeRetrievalCueKinds =
+  new Set([
+    "spatial_context",
+    "perceptual_modality",
+    "observation_kind",
+    "memory_type",
+    "subjective_episode",
+    "entity",
+    "semantic",
+    "source",
+    "temporal",
+    "task",
+    "goal",
+    "internally_reinstated",
+  ]);
+
+function normalizeNativeCueKind(
+  value,
+  options = {},
+) {
+  const raw =
+    nonEmptyString(value)
+      ?.toLowerCase()
+    ?? null;
+
+  if (!raw) return null;
+
+  const aliases = {
+    scene:
+      "spatial_context",
+
+    scene_id:
+      "spatial_context",
+
+    location:
+      "spatial_context",
+
+    location_id:
+      "spatial_context",
+
+    sense:
+      "perceptual_modality",
+
+    sensory_modality:
+      "perceptual_modality",
+
+    subjective_episode_id:
+      "subjective_episode",
+  };
+
+  const normalized =
+    aliases[raw]
+    ?? raw;
+
+  if (
+    nativeRetrievalCueKinds
+      .has(normalized)
+  ) {
+    return normalized;
+  }
+
+  if (
+    options.fail_on_unknown
+    === true
+  ) {
+    const error = new Error(
+      `Unsupported Phase63B v2 retrieval cue kind: ${raw}`,
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_CUE_KIND_UNSUPPORTED";
+
+    error.cue_kind =
+      raw;
+
+    throw error;
+  }
+
+  return null;
+}
+
+function normalizeNativeCueValue(
+  value,
+) {
+  if (
+    ![
+      "string",
+      "number",
+      "boolean",
+    ].includes(typeof value)
+  ) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const normalized =
+      value
+        .trim()
+        .toLocaleLowerCase(
+          "zh-Hant-TW",
+        );
+
+    return normalized || null;
+  }
+
+  return value;
+}
+
+function nativeCueIdentity(
+  cue,
+) {
+  return JSON.stringify([
+    cue.kind,
+    cue.value,
+  ]);
+}
+
+function nativeCue(
+  kind,
+  value,
+  source,
+  extra = {},
+  options = {},
+) {
+  const normalizedKind =
+    normalizeNativeCueKind(
+      kind,
+      options,
+    );
+
+  const normalizedValue =
+    normalizeNativeCueValue(
+      value,
+    );
+
+  if (
+    !normalizedKind
+    || normalizedValue === null
+  ) {
+    return null;
+  }
+
+  return {
+    kind:
+      normalizedKind,
+
+    value:
+      normalizedValue,
+
+    source:
+      nonEmptyString(source)
+      ?? null,
+
+    ...cloneJson(
+      object(extra),
+    ),
+  };
+}
+
+function pushUniqueNativeCue(
+  target,
+  seen,
+  cue,
+) {
+  if (!cue) return;
+
+  const identity =
+    nativeCueIdentity(cue);
+
+  const cueSources =
+    [
+      ...array(
+        cue.sources,
+      ),
+
+      cue.source,
+    ]
+      .filter(
+        (value) =>
+          nonEmptyString(value),
+      )
+      .map(
+        (value) =>
+          nonEmptyString(value),
+      );
+
+  if (seen.has(identity)) {
+    const existing =
+      target[
+        seen.get(identity)
+      ];
+
+    const mergedSources =
+      [
+        ...new Set([
+          ...array(
+            existing.sources,
+          ),
+
+          existing.source,
+
+          ...cueSources,
+        ].filter(Boolean)),
+      ];
+
+    existing.sources =
+      mergedSources;
+
+    if (
+      !existing.source
+      && mergedSources.length
+    ) {
+      existing.source =
+        mergedSources[0];
+    }
+
+    return;
+  }
+
+  const normalizedCue = {
+    ...cue,
+
+    sources:
+      [
+        ...new Set(
+          cueSources,
+        ),
+      ],
+  };
+
+  seen.set(
+    identity,
+    target.length,
+  );
+
+  target.push(
+    normalizedCue,
+  );
+}
+
+function appendExplicitNativeCues(
+  target,
+  seen,
+  values,
+  defaultSource,
+) {
+  if (
+    values !== null
+    && values !== undefined
+    && !Array.isArray(values)
+  ) {
+    const error = new Error(
+      "Phase63B v2 explicit retrieval cue collections must be arrays.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_CUE_LIST_INVALID";
+
+    throw error;
+  }
+
+  for (
+    const raw
+    of array(values)
+  ) {
+    if (!isObject(raw)) {
+      const error = new Error(
+        "Phase63B v2 active retrieval cues must be structured objects.",
+      );
+
+      error.code =
+        "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_CUE_INVALID";
+
+      throw error;
+    }
+
+    const cue =
+      nativeCue(
+        raw.kind,
+        raw.value,
+        raw.source
+          ?? defaultSource,
+        {},
+        {
+          fail_on_unknown:
+            true,
+        },
+      );
+
+    if (!cue) {
+      const error = new Error(
+        "Phase63B v2 retrieval cue requires a supported kind and primitive value.",
+      );
+
+      error.code =
+        "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_CUE_INVALID";
+
+      throw error;
+    }
+
+    pushUniqueNativeCue(
+      target,
+      seen,
+      cue,
+    );
+  }
+}
+
+function nativeActiveRetrievalCues(
+  context,
+  currentContext,
+) {
+  const result = [];
+  const seen = new Map();
+
+  pushUniqueNativeCue(
+    result,
+    seen,
+    nativeCue(
+      "spatial_context",
+      currentContext.scene_id,
+      "current_environment",
+    ),
+  );
+
+  for (
+    const sense
+    of array(currentContext.senses)
+  ) {
+    pushUniqueNativeCue(
+      result,
+      seen,
+      nativeCue(
+        "perceptual_modality",
+        sense,
+        "bounded_perception",
+      ),
+    );
+  }
+
+  for (
+    const kind
+    of array(
+      currentContext
+        .observation_kinds,
+    )
+  ) {
+    pushUniqueNativeCue(
+      result,
+      seen,
+      nativeCue(
+        "observation_kind",
+        kind,
+        "bounded_perception",
+      ),
+    );
+  }
+
+  for (
+    const [
+      rawKey,
+      rawValue,
+    ]
+    of Object.entries(
+      object(
+        context.context_cues,
+      ),
+    )
+  ) {
+    const kind =
+      normalizeNativeCueKind(
+        rawKey,
+      );
+
+    if (!kind) continue;
+
+    for (
+      const value
+      of primitiveCueValues(
+        rawValue,
+      )
+    ) {
+      pushUniqueNativeCue(
+        result,
+        seen,
+        nativeCue(
+          kind,
+          value,
+          "explicit_context_cue",
+        ),
+      );
+    }
+  }
+
+  const retrievalContext =
+    object(
+      context.retrieval_context,
+    );
+
+  appendExplicitNativeCues(
+    result,
+    seen,
+    retrievalContext.active_cues,
+    "explicit_retrieval_context",
+  );
+
+  appendExplicitNativeCues(
+    result,
+    seen,
+    retrievalContext
+      .recent_retrieved_cues,
+    "prior_retrieval_context",
+  );
+
+  const retrievalGoal =
+    retrievalContext
+      .retrieval_goal;
+
+  if (
+    [
+      "string",
+      "number",
+      "boolean",
+    ].includes(
+      typeof retrievalGoal,
+    )
+  ) {
+    pushUniqueNativeCue(
+      result,
+      seen,
+      nativeCue(
+        "goal",
+        retrievalGoal,
+        "explicit_retrieval_goal",
+      ),
+    );
+  } else if (
+    isObject(retrievalGoal)
+    && Object.hasOwn(
+      retrievalGoal,
+      "value",
+    )
+  ) {
+    const goalCue =
+      nativeCue(
+        "goal",
+        retrievalGoal.value,
+        retrievalGoal.source
+          ?? "explicit_retrieval_goal",
+      );
+
+    if (!goalCue) {
+      const error = new Error(
+        "Phase63B v2 retrieval_goal requires a primitive non-empty value.",
+      );
+
+      error.code =
+        "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_RETRIEVAL_GOAL_INVALID";
+
+      throw error;
+    }
+
+    pushUniqueNativeCue(
+      result,
+      seen,
+      goalCue,
+    );
+  } else if (
+    retrievalGoal !== null
+    && retrievalGoal !== undefined
+  ) {
+    const error = new Error(
+      "Phase63B v2 retrieval_goal must be a primitive value or an object with value.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_RETRIEVAL_GOAL_INVALID";
+
+    throw error;
+  }
+
+  return result;
+}
+
+function nativeMemoryCueLinks(
+  record,
+) {
+  const result = [];
+
+  const explicitLinks =
+    record
+      ?.retrieval_cue_links;
+
+  if (
+    explicitLinks !== null
+    && explicitLinks !== undefined
+    && !Array.isArray(
+      explicitLinks,
+    )
+  ) {
+    const error = new Error(
+      "Phase63B v2 retrieval_cue_links must be an array when present.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_MEMORY_CUE_LINKS_INVALID";
+
+    throw error;
+  }
+
+  for (
+    const raw
+    of array(
+      explicitLinks,
+    )
+  ) {
+    if (!isObject(raw)) continue;
+
+    const cue =
+      nativeCue(
+        raw.kind,
+        raw.value,
+        raw.source
+          ?? "explicit_memory_cue_link",
+        {
+          association_evidence:
+            cloneJson(
+              raw.association_evidence
+              ?? null,
+            ),
+
+          association_strength:
+            unitNumber(
+              raw.association_strength,
+            ),
+        },
+      );
+
+    if (cue) {
+      // Memory-side cue associations are intentionally NOT
+      // deduplicated by kind/value.
+      //
+      // Several independent encoding/binding relations may point
+      // to the same retrieval cue, and later phases must retain
+      // their distinct provenance/evidence.
+      result.push(
+        cue,
+      );
+    }
+  }
+
+  const retrievalCues =
+    object(
+      record?.retrieval_cues,
+    );
+
+  const machineCueMappings = [
+    [
+      "scene_id",
+      "spatial_context",
+    ],
+    [
+      "sense",
+      "perceptual_modality",
+    ],
+    [
+      "observation_kind",
+      "observation_kind",
+    ],
+    [
+      "memory_type",
+      "memory_type",
+    ],
+    [
+      "subjective_episode_id",
+      "subjective_episode",
+    ],
+  ];
+
+  for (
+    const [
+      field,
+      kind,
+    ]
+    of machineCueMappings
+  ) {
+    for (
+      const value
+      of primitiveCueValues(
+        retrievalCues[field],
+      )
+    ) {
+      const cue =
+        nativeCue(
+          kind,
+          value,
+          "encoded_retrieval_cue",
+        );
+
+      if (cue) {
+        result.push(
+          cue,
+        );
+      }
+    }
+  }
+
+  const episodeId =
+    nonEmptyString(
+      record
+        ?.episodic_binding
+        ?.subjective_episode_id,
+    );
+
+  const episodeCue =
+    nativeCue(
+      "subjective_episode",
+      episodeId,
+      "explicit_subjective_episode_binding",
+    );
+
+  if (episodeCue) {
+    result.push(
+      episodeCue,
+    );
+  }
+
+  return result;
+}
+
+function nativeCueRelations(
+  record,
+  activeCues,
+) {
+  const memoryCues =
+    nativeMemoryCueLinks(
+      record,
+    );
+
+  const byKind =
+    new Map();
+
+  for (
+    const cue
+    of memoryCues
+  ) {
+    if (!byKind.has(cue.kind)) {
+      byKind.set(
+        cue.kind,
+        [],
+      );
+    }
+
+    byKind
+      .get(cue.kind)
+      .push(cue);
+  }
+
+  const matches = [];
+  const mismatches = [];
+  const unmatchedActiveCues = [];
+
+  for (
+    const activeCue
+    of activeCues
+  ) {
+    const sameKind =
+      byKind.get(
+        activeCue.kind,
+      )
+      ?? [];
+
+    const exact =
+      sameKind.filter(
+        (memoryCue) =>
+          nativeCueIdentity(
+            memoryCue,
+          )
+          === nativeCueIdentity(
+            activeCue,
+          ),
+      );
+
+    if (exact.length) {
+      matches.push({
+        cue_identity:
+          nativeCueIdentity(
+            activeCue,
+          ),
+
+        kind:
+          activeCue.kind,
+
+        value:
+          activeCue.value,
+
+        active_source:
+          activeCue.source,
+
+        active_sources:
+          cloneJson(
+            array(
+              activeCue.sources,
+            ),
+          ),
+
+        memory_sources:
+          [
+            ...new Set(
+              exact
+                .map(
+                  (item) =>
+                    item.source,
+                )
+                .filter(Boolean),
+            ),
+          ],
+
+        association_strengths:
+          exact
+            .map(
+              (item) =>
+                item
+                  .association_strength
+                ?? null,
+            ),
+      });
+
+      continue;
+    }
+
+    if (sameKind.length) {
+      mismatches.push({
+        kind:
+          activeCue.kind,
+
+        active_value:
+          activeCue.value,
+
+        active_source:
+          activeCue.source,
+
+        memory_values:
+          sameKind.map(
+            (item) =>
+              item.value,
+          ),
+      });
+
+      continue;
+    }
+
+    unmatchedActiveCues.push({
+      kind:
+        activeCue.kind,
+
+      value:
+        activeCue.value,
+
+      source:
+        activeCue.source,
+    });
+  }
+
+  return {
+    memory_cue_links:
+      memoryCues,
+
+    cue_matches:
+      matches,
+
+    cue_mismatches:
+      mismatches,
+
+    unmatched_active_cues:
+      unmatchedActiveCues,
+
+    active_cue_count:
+      activeCues.length,
+
+    cue_match_count:
+      matches.length,
+
+    cue_evidence_required:
+      activeCues.length > 0,
+
+    has_candidate_cue_evidence:
+      activeCues.length === 0
+      || matches.length > 0,
+  };
+}
+
+function evaluateNativeCueMemory(
+  record,
+  originalIndex,
+  context,
+  activeCues,
+) {
+  const eligibility =
+    engineRetrievalEligibility(
+      record,
+    );
+
+  const cueRelations =
+    nativeCueRelations(
+      record,
+      activeCues,
+    );
+
+  const candidateEligible =
+    eligibility.eligible
+    && cueRelations
+      .has_candidate_cue_evidence;
+
+  const exclusionReasons = [];
+
+  if (!eligibility.policy_eligible) {
+    exclusionReasons.push(
+      "engine_retrieval_ineligible",
+    );
+  }
+
+  if (eligibility.suppressed) {
+    exclusionReasons.push(
+      "memory_suppressed",
+    );
+  }
+
+  if (
+    eligibility.eligible
+    && !cueRelations
+      .has_candidate_cue_evidence
+  ) {
+    exclusionReasons.push(
+      "no_active_cue_match",
+    );
+  }
+
+  return {
+    memory_id:
+      record?.memory_id
+      ?? record?.id
+      ?? null,
+
+    original_index:
+      originalIndex,
+
+    engine_retrieval_eligible:
+      eligibility.eligible,
+
+    engine_retrieval_eligibility_source:
+      eligibility.source,
+
+    candidate_selection_threshold:
+      null,
+
+    candidate_selection_threshold_passed:
+      true,
+
+    candidate_eligible:
+      candidateEligible,
+
+    exclusion_reasons:
+      exclusionReasons,
+
+    active_cue_count:
+      cueRelations
+        .active_cue_count,
+
+    memory_cue_links:
+      cueRelations
+        .memory_cue_links,
+
+    cue_matches:
+      cueRelations
+        .cue_matches,
+
+    cue_mismatches:
+      cueRelations
+        .cue_mismatches,
+
+    unmatched_active_cues:
+      cueRelations
+        .unmatched_active_cues,
+
+    cue_match_count:
+      cueRelations
+        .cue_match_count,
+
+    cue_competition: [],
+
+    storage_strength:
+      unitNumber(
+        record?.storage_strength,
+      ),
+
+    storage_strength_used_as_native_accessibility_bonus:
+      false,
+
+    retrieval_history_entry_count:
+      retrievalHistoryEntries(
+        record,
+      ).length,
+
+    retrieval_history_effects_modeled:
+      false,
+
+    retrieval_history_effect_owner:
+      "Phase63C",
+
+    legacy_recall_summary_used_in_native_v2:
+      false,
+
+    same_cycle_retrieval_history_effect_used:
+      false,
+
+    accessibility_score:
+      null,
+
+    accessibility_score_origin:
+      "native_v2_no_scalar_model",
+
+    age_hours:
+      elapsedHours(
+        context.simulation_time
+        ?? context.world_state
+          ?.simulation_time
+        ?? null,
+
+        record?.encoded_at
+        ?? record?.remembered_at,
+      ),
+
+    // Deprecated v1 diagnostics remain shape-compatible.
+    accessible_by_record:
+      eligibility.eligible,
+
+    threshold_passed:
+      true,
+
+    retrievable:
+      candidateEligible,
+
+    retrieval_strength:
+      null,
+
+    retrieval_threshold:
+      null,
+
+    context_match:
+      null,
+
+    context_match_details: {},
+
+    interference_competitor_count:
+      null,
+
+    interference_penalty:
+      null,
+
+    components: {},
+  };
+}
+
+function attachNativeCueCompetition(
+  evaluations,
+) {
+  const fanOut =
+    new Map();
+
+  for (
+    const evaluation
+    of evaluations
+  ) {
+    if (
+      !evaluation
+        .engine_retrieval_eligible
+    ) {
+      continue;
+    }
+
+    for (
+      const match
+      of array(
+        evaluation.cue_matches,
+      )
+    ) {
+      const identity =
+        match.cue_identity;
+
+      if (!fanOut.has(identity)) {
+        fanOut.set(
+          identity,
+          [],
+        );
+      }
+
+      fanOut
+        .get(identity)
+        .push(
+          evaluation.memory_id,
+        );
+    }
+  }
+
+  for (
+    const evaluation
+    of evaluations
+  ) {
+    evaluation.cue_competition =
+      array(
+        evaluation.cue_matches,
+      )
+        .map((match) => {
+          const candidateIds =
+            fanOut.get(
+              match.cue_identity,
+            )
+            ?? [];
+
+          const competingIds =
+            candidateIds.filter(
+              (memoryId) =>
+                String(memoryId)
+                !== String(
+                  evaluation.memory_id,
+                ),
+            );
+
+          return {
+            cue_identity:
+              match.cue_identity,
+
+            kind:
+              match.kind,
+
+            value:
+              match.value,
+
+            candidate_fan_out:
+              candidateIds.length,
+
+            competing_candidate_count:
+              competingIds.length,
+
+            competing_memory_ids:
+              cloneJson(
+                competingIds,
+              ),
+
+            diagnosticity:
+              candidateIds.length <= 1
+                ? "unique_within_current_query"
+                : "shared_within_current_query",
+
+            numeric_penalty_applied:
+              false,
+          };
+        });
+  }
+
+  return evaluations;
+}
+
+function assertNativeV2ProfileBoundary(
+  profile,
+) {
+  const forbiddenLegacyFields = [
+    "component_weights",
+    "context_cue_weights",
+    "interference",
+    "retrieval_threshold",
+    "age_accessibility",
+    "recall_recency",
+    "recall_frequency",
+  ];
+
+  const present =
+    forbiddenLegacyFields.filter(
+      (field) =>
+        Object.hasOwn(
+          profile,
+          field,
+        ),
+    );
+
+  if (present.length) {
+    const error = new Error(
+      "Phase63B native v2 cue accessibility cannot mix legacy weighted-model components.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ACCESSIBILITY_NATIVE_V2_LEGACY_COMPONENTS_UNSUPPORTED";
+
+    error.legacy_fields =
+      present;
+
+    throw error;
+  }
 }
 
 function cuesOverlap(left, right) {
@@ -264,8 +1633,20 @@ function componentValue(record, component, context, profile, currentContext) {
     return decayAccessibility(ageHours, object(profile.age_accessibility));
   }
   if (component === "recall_recency") {
-    const recallAgeHours = elapsedHours(now, record?.last_recalled_at);
-    return decayAccessibility(recallAgeHours, object(profile.recall_recency));
+    const recallAgeHours =
+      elapsedHours(
+        now,
+        lastSuccessfulRecallAt(
+          record,
+        ),
+      );
+
+    return decayAccessibility(
+      recallAgeHours,
+      object(
+        profile.recall_recency,
+      ),
+    );
   }
   if (component === "recall_frequency") {
     return recallFrequencyAccessibility(record, object(profile.recall_frequency));
@@ -301,29 +1682,157 @@ function evaluateMemory(record, originalIndex, candidates, context, profile, cur
   const retrievalStrength = baseScore === null
     ? null
     : Math.max(0, Math.min(1, baseScore - interference.penalty));
-  const threshold = unitNumber(profile.retrieval_threshold);
-  const accessibleByRecord = isObject(record) && record.accessible !== false && record.suppressed !== true;
-  const thresholdPassed = retrievalStrength === null || threshold === null || retrievalStrength >= threshold;
-  const currentContextMatch = contextMatch(record, currentContext, object(profile.context_cue_weights));
+
+  const threshold =
+    unitNumber(
+      profile.retrieval_threshold,
+    );
+
+  const eligibility =
+    engineRetrievalEligibility(
+      record,
+    );
+
+  const thresholdPassed =
+    retrievalStrength === null
+    || threshold === null
+    || retrievalStrength >= threshold;
+
+  const candidateEligible =
+    eligibility.eligible
+    && thresholdPassed;
+
+  const exclusionReasons = [];
+
+  if (!eligibility.policy_eligible) {
+    exclusionReasons.push(
+      "engine_retrieval_ineligible",
+    );
+  }
+
+  if (eligibility.suppressed) {
+    exclusionReasons.push(
+      "memory_suppressed",
+    );
+  }
+
+  if (!thresholdPassed) {
+    exclusionReasons.push(
+      "legacy_selection_threshold_not_passed",
+    );
+  }
+
+  const currentContextMatch =
+    contextMatch(
+      record,
+      currentContext,
+      object(profile.context_cue_weights),
+    );
 
   return {
-    memory_id: record?.memory_id ?? record?.id ?? null,
-    original_index: originalIndex,
-    accessible_by_record: accessibleByRecord,
-    threshold_passed: thresholdPassed,
-    retrievable: accessibleByRecord && thresholdPassed,
-    storage_strength: unitNumber(record?.storage_strength),
-    retrieval_strength: retrievalStrength,
-    retrieval_threshold: threshold,
+    memory_id:
+      record?.memory_id
+      ?? record?.id
+      ?? null,
+
+    original_index:
+      originalIndex,
+
+    engine_retrieval_eligible:
+      eligibility.eligible,
+
+    engine_retrieval_eligibility_source:
+      eligibility.source,
+
+    candidate_selection_threshold:
+      threshold,
+
+    candidate_selection_threshold_passed:
+      thresholdPassed,
+
+    candidate_eligible:
+      candidateEligible,
+
+    exclusion_reasons:
+      exclusionReasons,
+
+    // Deprecated Phase63B-v1 diagnostic aliases.
+    accessible_by_record:
+      eligibility.eligible,
+
+    threshold_passed:
+      thresholdPassed,
+
+    retrievable:
+      candidateEligible,
+
+    storage_strength:
+      unitNumber(
+        record?.storage_strength,
+      ),
+
+    // During Step 1, enabled legacy v1 profiles still use their
+    // old weighted scalar. The v2 name deliberately describes
+    // this as a simulator accessibility score rather than a
+    // literal human Retrieval Strength measurement.
+    accessibility_score:
+      retrievalStrength,
+
+    accessibility_score_origin:
+      profile.enabled === true
+        ? "legacy_v1_weighted_compatibility"
+        : "unspecified",
+
+    // Deprecated v1 diagnostic aliases.
+    retrieval_strength:
+      retrievalStrength,
+
+    retrieval_threshold:
+      threshold,
     age_hours: elapsedHours(
       context.simulation_time ?? context.world_state?.simulation_time ?? null,
       record?.encoded_at ?? record?.remembered_at,
     ),
-    recall_age_hours: elapsedHours(
-      context.simulation_time ?? context.world_state?.simulation_time ?? null,
-      record?.last_recalled_at,
-    ),
-    recall_count: recallCount(record),
+    recall_age_hours:
+      elapsedHours(
+        context.simulation_time
+        ?? context.world_state
+          ?.simulation_time
+        ?? null,
+
+        lastSuccessfulRecallAt(
+          record,
+        ),
+      ),
+
+    recall_count:
+      recallCount(
+        record,
+      ),
+
+    recall_history_source:
+      legacyRecallHistorySource(
+        record,
+      ),
+
+    retrieval_history_entry_count:
+      retrievalHistoryEntries(
+        record,
+      ).length,
+
+    explicit_successful_retrieval_history_count:
+      successfulRetrievalHistoryEntries(
+        record,
+      ).length,
+
+    legacy_recall_count_summary:
+      nonNegativeInteger(
+        record?.recall_count,
+      ),
+
+    legacy_last_recalled_at_summary:
+      record?.last_recalled_at
+      ?? null,
     context_match: currentContextMatch.value,
     context_match_details: currentContextMatch.details,
     interference_competitor_count: interference.competitor_count,
@@ -347,18 +1856,82 @@ function stableRank(evaluations) {
 
 function solveMemoryAccessibility(context) {
   const records = array(context.memory_records);
-  const profile = profileFor(context);
-  const configured = profile.enabled === true;
-  const currentContext = perceptionContext(context);
-  const candidates = records.filter((record) => isObject(record));
-  const evaluations = candidates.map((record, index) => evaluateMemory(
-    record,
-    records.indexOf(record) >= 0 ? records.indexOf(record) : index,
-    candidates,
-    context,
-    profile,
-    currentContext,
-  ));
+  const profile =
+    profileFor(context);
+
+  const modelMode =
+    profileModelMode(profile);
+
+  const nativeV2 =
+    modelMode
+    === memoryAccessibilityModelModes
+      .NATIVE_V2;
+
+  if (nativeV2) {
+    assertNativeV2ProfileBoundary(
+      profile,
+    );
+  }
+
+  const configured =
+    profile.enabled === true;
+
+  const currentContext =
+    perceptionContext(context);
+
+  const activeRetrievalCues =
+    nativeV2
+      ? nativeActiveRetrievalCues(
+        context,
+        currentContext,
+      )
+      : [];
+
+  const candidates =
+    records.filter(
+      (record) =>
+        isObject(record),
+    );
+
+  const evaluations =
+    nativeV2
+      ? attachNativeCueCompetition(
+        candidates.map(
+          (
+            record,
+            index,
+          ) =>
+            evaluateNativeCueMemory(
+              record,
+
+              records.indexOf(record) >= 0
+                ? records.indexOf(record)
+                : index,
+
+              context,
+
+              activeRetrievalCues,
+            ),
+        ),
+      )
+      : candidates.map(
+        (
+          record,
+          index,
+        ) =>
+          evaluateMemory(
+            record,
+
+            records.indexOf(record) >= 0
+              ? records.indexOf(record)
+              : index,
+
+            candidates,
+            context,
+            profile,
+            currentContext,
+          ),
+      );
 
   const byId = new Map();
   const byIndex = new Map();
@@ -369,36 +1942,294 @@ function solveMemoryAccessibility(context) {
     byIndex.set(evaluation.original_index, evaluation);
   }
 
-  const rankedEvaluations = configured
-    ? stableRank(evaluations.filter((item) => item.retrievable))
-    : evaluations.filter((item) => item.accessible_by_record);
+  const rankedEvaluations =
+    configured
+      ? stableRank(
+        evaluations.filter(
+          (item) =>
+            item.candidate_eligible,
+        ),
+      )
+      : evaluations.filter(
+        (item) =>
+          item.engine_retrieval_eligible,
+      );
+
   const rankedRecords = [];
+
   for (const evaluation of rankedEvaluations) {
-    const record = records[evaluation.original_index];
-    if (isObject(record)) rankedRecords.push(cloneJson(record));
+    const record =
+      records[
+        evaluation.original_index
+      ];
+
+    if (isObject(record)) {
+      rankedRecords.push(
+        cloneJson(record),
+      );
+    }
   }
-  const maxItems = positiveInteger(profile.max_items);
-  const retrievableRecords = maxItems === null ? rankedRecords : rankedRecords.slice(0, Math.min(32, maxItems));
+
+  // Step 1 separates the semantic candidate set from the old
+  // max_items projection behavior without changing the current
+  // world-loop behavior yet.
+  const candidateRecords =
+    rankedRecords
+      .map(cloneJson);
+
+  const maxItems =
+    positiveInteger(
+      profile.max_items,
+    );
+
+  const legacyProjectedRecords =
+    maxItems === null
+      ? rankedRecords
+      : rankedRecords.slice(
+        0,
+        Math.min(32, maxItems),
+      );
 
   return {
-    status: configured ? "programmatic_memory_accessibility_applied" : "legacy_memory_accessibility_preserved",
-    version: worldSimulationMemoryAccessibilityVersion,
-    character: nonEmptyString(context.character),
-    accessibility_enforced: configured,
-    current_context: currentContext,
-    retrieval_threshold: unitNumber(profile.retrieval_threshold),
-    configured_max_items: maxItems === null ? null : Math.min(32, maxItems),
-    evaluated_memory_count: evaluations.length,
-    retrievable_memory_count: retrievableRecords.length,
-    retrievable_memory_records: retrievableRecords,
-    evaluations: evaluations.map((evaluation) => cloneJson(evaluation)),
-    ranking: rankedEvaluations.map((evaluation, rankIndex) => ({
-      rank: rankIndex + 1,
-      memory_id: evaluation.memory_id,
-      retrieval_strength: evaluation.retrieval_strength,
-      original_index: evaluation.original_index,
-    })),
+    status:
+      configured
+        ? "programmatic_memory_accessibility_applied"
+        : "legacy_memory_accessibility_preserved",
+
+    version:
+      worldSimulationMemoryAccessibilityVersion,
+
+    character:
+      nonEmptyString(
+        context.character,
+      ),
+
+    model_mode:
+      modelMode,
+
+    accessibility_enforced:
+      configured,
+
+    current_context:
+      currentContext,
+
+    active_retrieval_cues:
+      nativeV2
+        ? cloneJson(
+          activeRetrievalCues,
+        )
+        : [],
+
+    candidate_selection_threshold:
+      nativeV2
+        ? null
+        : unitNumber(
+          profile.retrieval_threshold,
+        ),
+
+    evaluated_memory_count:
+      evaluations.length,
+
+    candidate_memory_count:
+      candidateRecords.length,
+
+    candidate_memory_records:
+      candidateRecords,
+
+    candidate_evaluations:
+      evaluations.map(
+        (evaluation) =>
+          cloneJson(evaluation),
+      ),
+
+    candidate_ranking:
+      rankedEvaluations.map(
+        (
+          evaluation,
+          rankIndex,
+        ) => ({
+          rank:
+            rankIndex + 1,
+
+          memory_id:
+            evaluation.memory_id,
+
+          accessibility_score:
+            evaluation
+              .accessibility_score,
+
+          original_index:
+            evaluation
+              .original_index,
+        }),
+      ),
+
+    // Deprecated Phase63B-v1 compatibility aliases.
+    //
+    // The world loop still consumes these during Step 1.
+    retrieval_threshold:
+      nativeV2
+        ? null
+        : unitNumber(
+          profile.retrieval_threshold,
+        ),
+
+    configured_max_items:
+      maxItems === null
+        ? null
+        : Math.min(32, maxItems),
+
+    legacy_projection_max_items:
+      maxItems === null
+        ? null
+        : Math.min(32, maxItems),
+
+    retrievable_memory_count:
+      legacyProjectedRecords.length,
+
+    retrievable_memory_records:
+      legacyProjectedRecords
+        .map(cloneJson),
+
+    evaluations:
+      evaluations.map(
+        (evaluation) =>
+          cloneJson(evaluation),
+      ),
+
+    ranking:
+      rankedEvaluations.map(
+        (
+          evaluation,
+          rankIndex,
+        ) => ({
+          rank:
+            rankIndex + 1,
+
+          memory_id:
+            evaluation.memory_id,
+
+          retrieval_strength:
+            evaluation
+              .retrieval_strength,
+
+          original_index:
+            evaluation
+              .original_index,
+        }),
+      ),
     accessibility_boundary: {
+      current_accessibility_is_not_successful_retrieval:
+        true,
+
+      candidate_terminology_is_canonical:
+        true,
+
+      legacy_retrievable_records_compatibility_output_emitted:
+        true,
+
+      native_v2_cue_schema_reserved:
+        false,
+
+      native_v2_cue_algorithm_modeled:
+        true,
+
+      native_v2_cue_algorithm_owner:
+        "phase63b_cue_dependent_evaluator",
+
+      typed_active_retrieval_cues_supported:
+        true,
+
+      duplicate_active_cue_sources_preserved:
+        true,
+
+      independent_memory_cue_associations_preserved:
+        true,
+
+      malformed_explicit_cue_structures_rejected:
+        true,
+
+      encoding_linked_memory_cues_supported:
+        true,
+
+      subjective_episode_cues_supported:
+        true,
+
+      query_relative_cue_competition_modeled:
+        true,
+
+      fixed_per_competitor_penalty_in_native_v2:
+        false,
+
+      native_accessibility_score_defaults_to_null:
+        true,
+
+      native_storage_strength_direct_bonus:
+        false,
+
+      native_legacy_component_mixing_rejected:
+        true,
+
+      hidden_temporal_context_vector_modeled:
+        false,
+
+      universal_context_drift_assumed:
+        false,
+
+      random_retrieval_sampling_used:
+        false,
+
+      native_v2_retrieval_history_effects_modeled:
+        false,
+
+      retrieval_event_schema_installed:
+        false,
+
+      retrieval_event_schema_owner:
+        "Phase63C",
+
+      retrieval_history_mutation_owner:
+        "Phase63C",
+
+      same_cycle_retrieval_history_feedback_allowed:
+        false,
+
+      projected_memory_context_counts_as_successful_retrieval:
+        false,
+
+      legacy_retrieval_history_precedes_summary_fields:
+        true,
+
+      legacy_retrieval_history_requires_explicit_success:
+        true,
+
+      failed_or_ambiguous_history_entries_count_as_successful_recall:
+        false,
+
+      unknown_explicit_model_mode_rejected:
+        true,
+
+      legacy_v1_weighted_model_still_available:
+        true,
+
+      scalar_accessibility_score_is_simulator_diagnostic:
+        true,
+
+      scalar_accessibility_score_is_literal_human_psychometric_measurement:
+        false,
+
+      engine_retrieval_eligibility_is_not_psychological_retrievability:
+        true,
+
+      projection_budget_is_not_cognitive_capacity:
+        true,
+
+      legacy_max_items_still_applied_to_legacy_projection_alias:
+        true,
+
+      actual_retrieval_outcome_owned_by_phase63c:
+        true,
+
       storage_strength_and_retrieval_strength_are_separate: true,
       time_passage_does_not_rewrite_persistent_memory_records: true,
       forgetting_does_not_delete_memory_records: true,
@@ -429,7 +2260,15 @@ export function queryWorldSimulationMemoryAccessibility(input = {}) {
     simulation_time: input.simulation_time ?? input.world_state?.simulation_time ?? null,
     scene_id: input.scene_id ?? input.perception?.scene_id ?? null,
     perception: object(input.perception),
-    context_cues: object(input.context_cues),
+    context_cues:
+      object(
+        input.context_cues,
+      ),
+
+    retrieval_context:
+      object(
+        input.retrieval_context,
+      ),
   });
   const inputHashBefore = hashAgentRunValue(context);
   const runOnce = () => solveMemoryAccessibility(deepFreeze(cloneJson(context)));
@@ -477,6 +2316,123 @@ export function buildWorldSimulationMemoryAccessibilityContract() {
     read_only: true,
     immutable_input_context: true,
     deterministic_replay_required: true,
+    current_accessibility_is_not_successful_retrieval:
+      true,
+
+    candidate_terminology_supported:
+      true,
+
+    candidate_memory_records_are_not_asserted_successfully_retrieved:
+      true,
+
+    native_v2_cue_schema_reserved:
+      false,
+
+    native_v2_cue_algorithm_modeled:
+      true,
+
+    native_v2_cue_algorithm_owner:
+      "phase63b_cue_dependent_evaluator",
+
+    typed_active_retrieval_cues_supported:
+      true,
+
+    duplicate_active_cue_sources_preserved:
+      true,
+
+    independent_memory_cue_associations_preserved:
+      true,
+
+    malformed_explicit_cue_structures_rejected:
+      true,
+
+    encoding_linked_memory_cues_supported:
+      true,
+
+    subjective_episode_cues_supported:
+      true,
+
+    query_relative_cue_competition_modeled:
+      true,
+
+    fixed_per_competitor_penalty_in_native_v2:
+      false,
+
+    native_accessibility_score_defaults_to_null:
+      true,
+
+    native_storage_strength_direct_bonus:
+      false,
+
+    native_legacy_component_mixing_rejected:
+      true,
+
+    hidden_temporal_context_vector_modeled:
+      false,
+
+    universal_context_drift_assumed:
+      false,
+
+    random_retrieval_sampling_used:
+      false,
+
+    native_v2_retrieval_history_effects_modeled:
+      false,
+
+    retrieval_event_schema_installed:
+      false,
+
+    retrieval_event_schema_owner:
+      "Phase63C",
+
+    retrieval_history_mutation_owner:
+      "Phase63C",
+
+    same_cycle_retrieval_history_feedback_allowed:
+      false,
+
+    projected_memory_context_counts_as_successful_retrieval:
+      false,
+
+    legacy_retrieval_history_precedes_summary_fields:
+      true,
+
+    legacy_retrieval_history_requires_explicit_success:
+      true,
+
+    failed_or_ambiguous_history_entries_count_as_successful_recall:
+      false,
+
+    unknown_explicit_model_mode_rejected:
+      true,
+
+    legacy_v1_weighted_compatibility_supported:
+      true,
+
+    scalar_accessibility_score_is_simulator_decision_variable:
+      true,
+
+    scalar_accessibility_score_is_literal_human_psychometric_measurement:
+      false,
+
+    native_scalar_accessibility_requires_explicit_model:
+      true,
+
+    engine_retrieval_eligibility_supported:
+      true,
+
+    legacy_accessible_field_supported_as_eligibility_alias:
+      true,
+
+    engine_retrieval_eligibility_is_not_psychological_retrievability:
+      true,
+
+    projection_budget_is_not_cognitive_capacity:
+      true,
+
+    actual_retrieval_outcome_owned_by_phase63c:
+      true,
+
     storage_strength_and_retrieval_strength_separate: true,
     persistent_memory_decay_writes_allowed: false,
     forgetting_deletes_memory_records: false,

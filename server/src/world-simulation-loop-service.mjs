@@ -141,6 +141,129 @@ function runOptions(options, sessionId, source) {
   };
 }
 
+function boundedMemoryProjectionMaxItems(
+  value,
+) {
+  if (
+    value === null
+    || value === undefined
+    || value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  if (
+    !Number.isSafeInteger(number)
+    || number < 0
+  ) {
+    return null;
+  }
+
+  return Math.min(
+    32,
+    number,
+  );
+}
+
+function memoryProjectionPolicyFor(
+  event,
+  character,
+  accessibilityResult,
+) {
+  const eventPolicy =
+    object(
+      event?.memory_projection_policy,
+    );
+
+  const byCharacter =
+    object(
+      eventPolicy.by_character,
+    );
+
+  const characterPolicy =
+    object(
+      characterMapValue(
+        byCharacter,
+        character,
+      ),
+    );
+
+  const hasCharacterLimit =
+    Object.hasOwn(
+      characterPolicy,
+      "max_items",
+    );
+
+  const hasEventLimit =
+    Object.hasOwn(
+      eventPolicy,
+      "max_items",
+    );
+
+  if (
+    hasCharacterLimit
+    || hasEventLimit
+  ) {
+    const raw =
+      hasCharacterLimit
+        ? characterPolicy.max_items
+        : eventPolicy.max_items;
+
+    const maxItems =
+      boundedMemoryProjectionMaxItems(
+        raw,
+      );
+
+    if (maxItems === null) {
+      const error = new Error(
+        "memory_projection_policy.max_items must be an integer from 0 through 32.",
+      );
+
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PROJECTION_MAX_ITEMS_INVALID";
+
+      throw error;
+    }
+
+    return {
+      max_items:
+        maxItems,
+
+      origin:
+        hasCharacterLimit
+          ? "event_character_projection_policy"
+          : "event_projection_policy",
+    };
+  }
+
+  const legacyMax =
+    boundedMemoryProjectionMaxItems(
+      accessibilityResult
+        ?.legacy_projection_max_items,
+    );
+
+  if (legacyMax !== null) {
+    return {
+      max_items:
+        legacyMax,
+
+      origin:
+        "legacy_phase63b_profile_compatibility",
+    };
+  }
+
+  return {
+    max_items:
+      null,
+
+    origin:
+      "default_memory_context_projection_policy",
+  };
+}
+
 async function capability(sessionId, name, input, options, traceIds) {
   const result = await runWorldSimulationCapability(
     name,
@@ -224,6 +347,53 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
+
+    memory_context_projection: {
+      owner:
+        "engine_memory_context_projector",
+
+      accessibility_candidate_set_is_authoritative_input:
+        true,
+
+      projection_budget_is_separate_from_memory_accessibility:
+        true,
+
+      projection_budget_is_cognitive_capacity:
+        false,
+
+      projection_budget_zero_allowed:
+        true,
+
+      legacy_phase63b_max_items_fallback_supported:
+        true,
+
+      actual_retrieval_success_asserted:
+        false,
+
+      output_is_character_brain_memory_context_projection:
+        true,
+
+      engine_retrieval_context_exposed_to_character_brain:
+        false,
+
+      engine_projection_policy_exposed_to_character_brain:
+        false,
+
+      projection_appends_retrieval_history:
+        false,
+
+      projection_updates_recall_count:
+        false,
+
+      projection_updates_last_recalled_at:
+        false,
+
+      same_cycle_projection_feeds_memory_accessibility:
+        false,
+
+      actual_retrieval_event_owner:
+        "Phase63C",
+    },
 
     subjective_memory_encoding_decision_hook: {
       owner:
@@ -413,7 +583,16 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       simulation_time: worldState.simulation_time ?? event.simulation_time ?? null,
       scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
       perception,
-      context_cues: object(event.memory_context_cues),
+
+      context_cues:
+        object(
+          event.memory_context_cues,
+        ),
+
+      retrieval_context:
+        object(
+          event.memory_retrieval_context,
+        ),
     });
     memoryAccessibilityQueries.push({
       observer: character,
@@ -421,18 +600,74 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       result: cloneJson(memoryAccessibilityQuery.result),
       audit: cloneJson(memoryAccessibilityQuery.audit),
     });
+    const memoryProjectionPolicy =
+      memoryProjectionPolicyFor(
+        event,
+        character,
+        memoryAccessibilityQuery.result,
+      );
+
+    const authoritativeCandidateRecords =
+      cloneJson(
+        memoryAccessibilityQuery
+          .result
+          .candidate_memory_records,
+      );
+
     const memoryRetrieval = await capability(
       sessionId,
       "world_memory_retriever",
       {
         character,
-        memory_records: memories,
-        query: event.memory_query ?? event.summary ?? event.type ?? null,
-        max_items: memoryAccessibilityQuery.result.configured_max_items ?? undefined,
+
+        memory_records:
+          memories,
+
+        query:
+          event.memory_query
+          ?? event.summary
+          ?? event.type
+          ?? null,
+
+        projection_max_items:
+          memoryProjectionPolicy
+            .max_items
+          ?? undefined,
+
+        projection_policy_origin:
+          memoryProjectionPolicy
+            .origin,
+
         programmatic_memory_accessibility: {
-          enforced: memoryAccessibilityQuery.result.accessibility_enforced === true,
-          version: memoryAccessibilityQuery.memory_accessibility_version,
-          memory_records: cloneJson(memoryAccessibilityQuery.result.retrievable_memory_records),
+          candidate_set_authoritative:
+            true,
+
+          accessibility_enforced:
+            memoryAccessibilityQuery
+              .result
+              .accessibility_enforced
+            === true,
+
+          // Deprecated compatibility field retained for
+          // capability consumers that still inspect it.
+          enforced:
+            memoryAccessibilityQuery
+              .result
+              .accessibility_enforced
+            === true,
+
+          version:
+            memoryAccessibilityQuery
+              .memory_accessibility_version,
+
+          candidate_memory_records:
+            authoritativeCandidateRecords,
+
+          // Deprecated compatibility alias.
+          memory_records:
+            cloneJson(
+              authoritativeCandidateRecords,
+            ),
         },
       },
       options,
@@ -445,8 +680,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         character,
         character_state: characterState,
         perception,
-        retrieved_memories: memoryRetrieval.retrieved_memories,
-        current_action: characterState.current_action ?? null,
+
+        projected_memories:
+          memoryRetrieval
+            .projected_memories,
+
+        // Deprecated compatibility alias.
+        retrieved_memories:
+          memoryRetrieval
+            .retrieved_memories,
+
+        current_action:
+          characterState.current_action
+          ?? null,
       },
       options,
       traceIds,
@@ -465,9 +711,30 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     );
     decisionPackets.push({
       character,
-      perception: cloneJson(perception),
-      retrieved_memories: cloneJson(memoryRetrieval.retrieved_memories),
-      cognition: cloneJson(cognition),
+
+      perception:
+        cloneJson(
+          perception,
+        ),
+
+      projected_memories:
+        cloneJson(
+          memoryRetrieval
+            .projected_memories,
+        ),
+
+      // Deprecated compatibility alias until Phase63C
+      // installs actual retrieval outcomes.
+      retrieved_memories:
+        cloneJson(
+          memoryRetrieval
+            .retrieved_memories,
+        ),
+
+      cognition:
+        cloneJson(
+          cognition,
+        ),
       candidate_action_intents: cloneJson(actionCandidates.candidate_action_intents),
       boundaries: {
         world_truth_exposed: false,
@@ -477,8 +744,27 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         directional_height_visibility_enforced: true,
         illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
         programmatic_audibility_enforced: audibilityQuery.result.audibility_enforced === true,
-        programmatic_memory_accessibility_enforced: memoryAccessibilityQuery.result.accessibility_enforced === true,
-        memory_retrieval_strength_scores_exposed: false,
+        programmatic_memory_accessibility_enforced:
+          memoryAccessibilityQuery
+            .result
+            .accessibility_enforced
+          === true,
+
+        memory_accessibility_candidate_set_authoritative:
+          true,
+
+        memory_context_is_projection_not_successful_retrieval:
+          true,
+
+        memory_projection_max_items:
+          memoryRetrieval
+            .projection_max_items,
+
+        memory_projection_budget_is_cognitive_capacity:
+          false,
+
+        memory_retrieval_strength_scores_exposed:
+          false,
         engine_visibility_target_ids_exposed: false,
         engine_sound_source_ids_exposed: false,
       },
@@ -518,8 +804,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audibility_query_version: worldSimulationAudibilityQueryVersion,
       subjective_memory_formation_version: worldSimulationSubjectiveMemoryFormationVersion,
       subjective_memory_accessibility_version: worldSimulationMemoryAccessibilityVersion,
-      subjective_memory_uses_bounded_perception_only: true,
-      memory_accessibility_scores_not_forwarded_to_character_brain: true,
+
+      subjective_memory_uses_bounded_perception_only:
+        true,
+
+      memory_accessibility_candidate_set_is_projection_input:
+        true,
+
+      memory_projection_budget_separate_from_accessibility:
+        true,
+
+      memory_projection_asserts_successful_retrieval:
+        false,
+
+      memory_accessibility_scores_not_forwarded_to_character_brain:
+        true,
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
       sound_engine_source_ids_not_forwarded_to_character_brain: true,
     },
@@ -993,13 +1292,41 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const prepared = await prepareWorldSimulationTurn(input, options);
   const selections = {};
   for (const packet of prepared.decision_packets) {
+    const brainVisibleEvent =
+      cloneJson(
+        prepared.event,
+      );
+
+    if (
+      brainVisibleEvent
+      && typeof brainVisibleEvent === "object"
+      && !Array.isArray(
+        brainVisibleEvent,
+      )
+    ) {
+      delete brainVisibleEvent
+        .memory_retrieval_context;
+
+      delete brainVisibleEvent
+        .memory_projection_policy;
+    }
+
     const brainInput = cloneJson({
       world_simulation_session_id: prepared.world_simulation_session_id,
       turn_id: prepared.turn_id,
-      event: prepared.event,
+      event: brainVisibleEvent,
       character: packet.character,
       perception: packet.perception,
-      retrieved_memories: packet.retrieved_memories,
+      projected_memories:
+        packet.projected_memories
+        ?? packet.retrieved_memories
+        ?? [],
+
+      // Deprecated compatibility alias until Phase63C.
+      retrieved_memories:
+        packet.retrieved_memories
+        ?? packet.projected_memories
+        ?? [],
       cognition: packet.cognition,
       candidate_action_intents: packet.candidate_action_intents,
       boundaries: packet.boundaries,
