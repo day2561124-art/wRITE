@@ -29,6 +29,15 @@ import {
   worldSimulationAudibilityQueryVersion,
 } from "./world-simulation-audibility-query-service.mjs";
 import {
+  buildWorldSimulationChronologicalMutationQueue,
+  executeWorldSimulationChronologicalMutationQueue,
+} from "./world-simulation-chronological-mutation-queue-service.mjs";
+import {
+  buildWorldSimulationSubjectiveMemoryFormationContract,
+  formWorldSimulationSubjectiveMemories,
+  worldSimulationSubjectiveMemoryFormationVersion,
+} from "./world-simulation-subjective-memory-formation-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -181,6 +190,18 @@ function assertCausalResolution(value) {
   return value;
 }
 
+function applySubjectiveMemoryPreview(worldState, formationResult) {
+  const preview = cloneJson(worldState);
+  preview.memories = object(preview.memories);
+  for (const update of array(formationResult?.character_updates)) {
+    const character = String(update?.character ?? "").trim();
+    if (!character || !Array.isArray(update?.memory_records) || update.memory_records.length === 0) continue;
+    const current = array(characterMapValue(preview.memories, character)).map(cloneJson);
+    preview.memories[character] = [...current, ...update.memory_records.map(cloneJson)];
+  }
+  return preview;
+}
+
 export function buildWorldSimulationLoopContract() {
   return {
     version: worldSimulationLoopVersion,
@@ -196,6 +217,7 @@ export function buildWorldSimulationLoopContract() {
     directional_height_visibility: buildWorldSimulationDirectionalHeightVisibilityContract(),
     illumination_visibility: buildWorldSimulationIlluminationVisibilityContract(),
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
+    subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     character_perception_visuals_use_programmatic_visibility: true,
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
@@ -406,6 +428,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,
       illumination_visibility_query_version: worldSimulationIlluminationVisibilityVersion,
       audibility_query_version: worldSimulationAudibilityQueryVersion,
+      subjective_memory_formation_version: worldSimulationSubjectiveMemoryFormationVersion,
+      subjective_memory_uses_bounded_perception_only: true,
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
       sound_engine_source_ids_not_forwarded_to_character_brain: true,
     },
@@ -489,13 +513,36 @@ export async function resolveWorldSimulationTurn(
     };
   }
 
+  const subjectiveMemoryFormation = formWorldSimulationSubjectiveMemories({
+    world_state: causalResolution.next_world_state,
+    turn_id: preparedTurn.turn_id,
+    event: preparedTurn.event,
+    decision_packets: preparedTurn.decision_packets,
+  });
+  const subjectiveMemoryPreview = applySubjectiveMemoryPreview(
+    causalResolution.next_world_state,
+    subjectiveMemoryFormation.result,
+  );
+  const subjectiveMemoryMutationQueue = buildWorldSimulationChronologicalMutationQueue({
+    turn_id: `${preparedTurn.turn_id}:subjective_memory`,
+    world_state_hash: hashAgentRunValue(causalResolution.next_world_state),
+    state_transitions: subjectiveMemoryFormation.result.memory_transitions,
+    elapsed_ms: 0,
+  });
+  const subjectiveMemoryMutationExecution = executeWorldSimulationChronologicalMutationQueue({
+    world_state: causalResolution.next_world_state,
+    preview_world_state: subjectiveMemoryPreview,
+    queue: subjectiveMemoryMutationQueue,
+    scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
+  });
+
   const committed = await commitWorldSimulationTurn(
     sessionId,
     {
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: causalResolution.next_world_state,
+      next_world_state: subjectiveMemoryMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -522,6 +569,9 @@ export async function resolveWorldSimulationTurn(
       ),
       illumination_visibility_queries: cloneJson(preparedTurn.illumination_visibility_queries ?? []),
       audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
+      subjective_memory_formation: cloneJson(subjectiveMemoryFormation),
+      subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
+      subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },
@@ -538,6 +588,12 @@ export async function resolveWorldSimulationTurn(
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
     consistency,
+    subjective_memory_formation: {
+      version: worldSimulationSubjectiveMemoryFormationVersion,
+      created_memory_count: subjectiveMemoryFormation.result.created_memory_count,
+      mutation_count: subjectiveMemoryMutationQueue.mutation_count,
+      authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
+    },
     trace_ids: traceIds,
     causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     next_event: array(causalResolution.next_world_state.event_queue)[0] ?? null,

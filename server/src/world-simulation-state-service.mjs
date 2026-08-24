@@ -275,6 +275,9 @@ export async function commitWorldSimulationTurn(
             directional_height_visibility_queries: input.directional_height_visibility_queries ?? [],
             illumination_visibility_queries: input.illumination_visibility_queries ?? [],
             audibility_queries: input.audibility_queries ?? [],
+            subjective_memory_formation: input.subjective_memory_formation ?? null,
+            subjective_memory_mutation_queue: input.subjective_memory_mutation_queue ?? null,
+            subjective_memory_mutation_execution: input.subjective_memory_mutation_execution ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });
