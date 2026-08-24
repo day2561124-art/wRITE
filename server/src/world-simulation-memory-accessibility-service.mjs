@@ -2249,6 +2249,15 @@ function solveMemoryAccessibility(context) {
   };
 }
 
+export function buildWorldSimulationMemoryCueLinks(record = {}) {
+  const snapshot = cloneJson(record);
+  return deepFreeze(
+    cloneJson(
+      nativeMemoryCueLinks(snapshot),
+    ),
+  );
+}
+
 export function queryWorldSimulationMemoryAccessibility(input = {}) {
   const context = cloneJson({
     world_state: object(input.world_state),
@@ -2350,6 +2359,12 @@ export function buildWorldSimulationMemoryAccessibilityContract() {
       true,
 
     subjective_episode_cues_supported:
+      true,
+
+    canonical_memory_cue_links_exported_for_phase63c:
+      true,
+
+    cue_link_export_is_read_only:
       true,
 
     query_relative_cue_competition_modeled:

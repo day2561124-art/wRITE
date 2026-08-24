@@ -49,6 +49,12 @@ import {
   worldSimulationMemoryRetrievalProcessVersion,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
 import {
+  buildWorldSimulationMemoryRetrievalProcessV3Contract,
+  buildWorldSimulationMemoryRetrievalQueryV3,
+  executeWorldSimulationMemoryRetrievalProcessV3,
+  worldSimulationMemoryRetrievalProcessV3Version,
+} from "./world-simulation-memory-retrieval-multistep-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -426,7 +432,9 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
-    subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessContract(),
+    subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
+    subjective_memory_retrieval_process_step3_compatibility:
+      buildWorldSimulationMemoryRetrievalProcessContract(),
 
     memory_context_projection: {
       owner:
@@ -478,6 +486,9 @@ export function buildWorldSimulationLoopContract() {
         true,
 
       phase63c_runtime_version:
+        worldSimulationMemoryRetrievalProcessV3Version,
+
+      phase63c_step3_compatibility_runtime_version:
         worldSimulationMemoryRetrievalProcessVersion,
 
       candidate_content_barrier_enforced:
@@ -508,6 +519,56 @@ export function buildWorldSimulationLoopContract() {
         false,
 
       native_retrieval_process_execution_installed:
+        true,
+    },
+
+    subjective_memory_retrieval_stage_resolution_hook: {
+      owner:
+        "programmatic_memory_retrieval_stage_resolver",
+
+      optional:
+        true,
+
+      option_name:
+        "memoryRetrievalStageResolver",
+
+      staged_lifecycle:
+        true,
+
+      stages: [
+        "initiation",
+        "recovery",
+        "continuation",
+      ],
+
+      technical_step_budget_option:
+        "memoryRetrievalTechnicalStepBudget",
+
+      technical_step_budget_is_cognitive_stopping_rule:
+        false,
+
+      technical_step_budget_exhaustion_fails_closed:
+        true,
+
+      receives_world_state:
+        false,
+
+      receives_full_world_event:
+        false,
+
+      future_frontier_content_visible_to_earlier_stage:
+        false,
+
+      non_frontier_candidate_diagnostics_visible:
+        false,
+
+      resolver_may_author_recovered_memory_content:
+        false,
+
+      resolver_may_author_reinstated_cue_content:
+        false,
+
+      legacy_single_step_hook_preserved:
         true,
     },
 
@@ -735,24 +796,49 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
-    const memoryAccessibilityQuery = queryWorldSimulationMemoryAccessibility({
-      world_state: worldState,
+    const memoryAccessibilityBaseInput = {
+      world_state:
+        cloneJson(
+          worldState,
+        ),
       character,
-      memory_records: memories,
-      simulation_time: worldState.simulation_time ?? event.simulation_time ?? null,
-      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
-      perception,
+      memory_records:
+        cloneJson(
+          memories,
+        ),
+      simulation_time:
+        worldState.simulation_time
+        ?? event.simulation_time
+        ?? null,
+      scene_id:
+        sceneState.scene_id
+        ?? event.scene_id
+        ?? event.location_id
+        ?? null,
+      perception:
+        cloneJson(
+          perception,
+        ),
 
       context_cues:
-        object(
-          event.memory_context_cues,
+        cloneJson(
+          object(
+            event.memory_context_cues,
+          ),
         ),
 
       retrieval_context:
-        object(
-          event.memory_retrieval_context,
+        cloneJson(
+          object(
+            event.memory_retrieval_context,
+          ),
         ),
-    });
+    };
+
+    const memoryAccessibilityQuery =
+      queryWorldSimulationMemoryAccessibility(
+        memoryAccessibilityBaseInput,
+      );
     memoryAccessibilityQueries.push({
       observer: character,
       version: memoryAccessibilityQuery.memory_accessibility_version,
@@ -778,38 +864,146 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         event.memory_retrieval_context,
       );
 
-    const memoryRetrievalQuery =
-      buildWorldSimulationMemoryRetrievalQuery({
-        character,
+    const stagedMemoryRetrievalResolver =
+      typeof options.memoryRetrievalStageResolver === "function"
+        ? options.memoryRetrievalStageResolver
+        : null;
 
-        turn_id:
-          turnId,
+    let memoryRetrievalQuery;
+    let memoryRetrievalProcess;
+    let memoryRetrievalResolutionAudit;
 
-        phase63b_version:
-          memoryAccessibilityQuery
-            .memory_accessibility_version,
-
-        candidate_memory_records:
-          authoritativeCandidateRecords,
-
-        initial_cues:
-          array(
+    if (stagedMemoryRetrievalResolver) {
+      memoryRetrievalQuery =
+        buildWorldSimulationMemoryRetrievalQueryV3({
+          character,
+          turn_id:
+            turnId,
+          phase63b_version:
+            memoryAccessibilityQuery
+              .memory_accessibility_version,
+          memory_records:
+            memories,
+          accessibility_base_input:
+            memoryAccessibilityBaseInput,
+          initial_accessibility_query:
+            memoryAccessibilityQuery,
+          retrieval_goal:
             retrievalContext
-              .active_cues,
-          ),
+              .retrieval_goal
+            ?? null,
+        });
 
-        retrieval_goal:
-          retrievalContext
-            .retrieval_goal
-          ?? null,
-      });
+      memoryRetrievalProcess =
+        await executeWorldSimulationMemoryRetrievalProcessV3({
+          query:
+            memoryRetrievalQuery,
+          memory_records:
+            memories,
+          accessibility_base_input:
+            memoryAccessibilityBaseInput,
+          initial_accessibility_query:
+            memoryAccessibilityQuery,
+          resolver:
+            stagedMemoryRetrievalResolver,
+          technical_step_budget:
+            options.memoryRetrievalTechnicalStepBudget,
+          perception,
+          character_state:
+            characterState,
+        });
+
+      memoryRetrievalResolutionAudit = {
+        resolver_used:
+          true,
+        staged_lifecycle:
+          true,
+        stage_audit:
+          cloneJson(
+            memoryRetrievalProcess
+              .resolver_audit
+            ?? [],
+          ),
+        world_state_exposed_to_resolver:
+          false,
+        full_world_event_exposed_to_resolver:
+          false,
+        future_frontier_content_exposed_to_earlier_stage:
+          false,
+        resolver_may_author_recovered_content:
+          false,
+        resolver_may_author_reinstated_cue_content:
+          false,
+      };
+    } else {
+      memoryRetrievalQuery =
+        buildWorldSimulationMemoryRetrievalQuery({
+          character,
+
+          turn_id:
+            turnId,
+
+          phase63b_version:
+            memoryAccessibilityQuery
+              .memory_accessibility_version,
+
+          candidate_memory_records:
+            authoritativeCandidateRecords,
+
+          initial_cues:
+            array(
+              retrievalContext
+                .active_cues,
+            ),
+
+          retrieval_goal:
+            retrievalContext
+              .retrieval_goal
+            ?? null,
+        });
+
+      const memoryRetrievalResolution =
+        await resolveMemoryRetrievalResolution(
+          {
+            character,
+            query:
+              memoryRetrievalQuery,
+            candidate_memory_records:
+              authoritativeCandidateRecords,
+            candidate_evaluations:
+              memoryAccessibilityQuery
+                .result
+                .candidate_evaluations
+              ?? [],
+            perception,
+            character_state:
+              characterState,
+          },
+          options,
+        );
+
+      memoryRetrievalProcess =
+        executeWorldSimulationMemoryRetrievalProcess({
+          query:
+            memoryRetrievalQuery,
+          candidate_memory_records:
+            authoritativeCandidateRecords,
+          resolution:
+            memoryRetrievalResolution.resolution,
+        });
+
+      memoryRetrievalResolutionAudit =
+        cloneJson(
+          memoryRetrievalResolution.audit,
+        );
+    }
 
     memoryRetrievalQueries.push({
       observer:
         character,
 
       version:
-        worldSimulationMemoryRetrievalProcessVersion,
+        memoryRetrievalProcess.version,
 
       query:
         cloneJson(
@@ -817,45 +1011,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
     });
 
-    const memoryRetrievalResolution =
-      await resolveMemoryRetrievalResolution(
-        {
-          character,
-          query:
-            memoryRetrievalQuery,
-          candidate_memory_records:
-            authoritativeCandidateRecords,
-          candidate_evaluations:
-            memoryAccessibilityQuery
-              .result
-              .candidate_evaluations
-            ?? [],
-          perception,
-          character_state:
-            characterState,
-        },
-        options,
-      );
-
-    const memoryRetrievalProcess =
-      executeWorldSimulationMemoryRetrievalProcess({
-        query:
-          memoryRetrievalQuery,
-        candidate_memory_records:
-          authoritativeCandidateRecords,
-        resolution:
-          memoryRetrievalResolution.resolution,
-      });
-
     memoryRetrievalProcesses.push({
       observer:
         character,
       version:
-        worldSimulationMemoryRetrievalProcessVersion,
+        memoryRetrievalProcess.version,
       resolution_audit:
-        cloneJson(memoryRetrievalResolution.audit),
+        cloneJson(
+          memoryRetrievalResolutionAudit,
+        ),
       result:
-        cloneJson(memoryRetrievalProcess),
+        cloneJson(
+          memoryRetrievalProcess,
+        ),
     });
 
     // Step 2 preserves the legacy projector invocation for

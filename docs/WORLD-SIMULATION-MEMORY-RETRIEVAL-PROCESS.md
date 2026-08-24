@@ -391,3 +391,114 @@ RIF weakening                            false
 source confusion                         false
 reconsolidation                          false
 ```
+
+## Step 4 — Multi-Step Retrieval Search / Internally Reinstated Cues
+
+Step 4 adds a multi-step retrieval-process runtime without changing the Phase63C Step 5 persistence boundary.
+
+The canonical process distinction is now:
+
+```text
+Frozen subjective-memory snapshot
+!= current candidate frontier
+```
+
+One retrieval process freezes the character's subjective-memory records and the Phase63B base evaluation context. Each search step may nevertheless obtain a different current candidate frontier when actually recovered material grounds a selected internally reinstated cue.
+
+### Staged resolver lifecycle
+
+The native multi-step path uses three causally ordered resolver stages:
+
+```text
+initiation
+-> recovery
+-> kernel-grounded materialization
+-> continuation / grounded cue selection
+-> Phase63B re-evaluation
+-> next recovery step
+```
+
+A resolver may not provide an entire future `steps[]` plan. Future-step candidate content must not influence an earlier-step decision.
+
+The existing single-step `memoryRetrievalResolver` remains available as a Step 3 compatibility hook. The Step 4 native path uses `memoryRetrievalStageResolver` plus an explicit `memoryRetrievalTechnicalStepBudget`.
+
+### Dynamic candidate frontiers
+
+Phase63B remains the canonical cue/accessibility authority. Step 4 does not copy its cue matcher. Instead, it re-runs the same deterministic read-only Phase63B evaluator against the same frozen memory/context snapshot while replacing only the process-local selected internal cues.
+
+A grounded retrieval target may be outside the initial frontier, but it must belong to the frozen subjective-memory snapshot. Its content remains hidden from the resolver until it actually enters the current frontier.
+
+### Internally reinstated cues are grounded provenance
+
+`internally_reinstated` is not used as the semantic cue kind in the native Step 4 path. A cue keeps its semantic kind, for example:
+
+```text
+semantic
+spatial_context
+subjective_episode
+temporal
+entity
+```
+
+and receives `source = phase63c_internal_reinstatement` when activated by the retrieval process.
+
+Only cue links already grounded in a memory that actually produced recovered content may become potential reinstatement options. The kernel materializes those options from Phase63B's canonical memory cue links. The continuation resolver may select option references; it may not author a new cue kind or value.
+
+Therefore:
+
+```text
+Recovered memory
+!= all bound cues automatically reinstated
+
+Potential cue option
+!= selected active internal cue
+
+Selected internal cue
+!= guaranteed useful cue
+```
+
+### Recovery occurrences and cumulative target outcome
+
+Repeated recovery of the same grounded content in different steps is retained as separate `RecoveryOccurrence` evidence. Final `recovered_memories` remains a unique grounded-content projection for Character Brain.
+
+Target satisfaction is cumulative across steps and continues to use exact grounded selector membership rather than percentages or thresholds. Target satisfaction does not force process termination; continuation remains an explicit cognitive-control decision.
+
+### Technical execution guard
+
+The explicit technical step budget is an execution safety guard, not a model of human memory capacity or a cognitive stopping rule. If the budget is exhausted while the resolver still requests continuation, execution fails closed rather than inventing a psychological stop.
+
+### Step 4 still does not persist retrieval history
+
+Step 4 does not write `RetrievalEvent`, retrieval-history references, recall summaries, strengthening, weakening, source confusion, gist, semanticization, reconsolidation, or same-cycle Phase63B history feedback. Those ownership boundaries remain unchanged.
+
+### Step 4 core invariant
+
+```text
+Frozen memory snapshot
+!= frozen candidate frontier
+
+Recovered content
+!= automatically active cue
+
+Potential internal cue
+!= selected reinstated cue
+
+Internally reinstated
+= cue provenance
+!= cue semantic kind
+
+Earlier-step resolver
+MUST NOT see later-step candidate content
+
+Repeated recovery occurrence
+!= duplicate content to erase
+
+Step-local failure
+!= process-level failure
+
+Target satisfaction
+!= mandatory termination
+
+Technical execution limit
+!= human cognitive stopping rule
+```

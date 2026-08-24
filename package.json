@@ -54,7 +54,7 @@
     "test:phase62z": "node tests/phase62/phase62z-audibility-propagation.test.mjs",
     "test:phase63a": "node tests/phase63/phase63a-subjective-memory-formation.test.mjs",
     "test:phase63b": "node tests/phase63/phase63b-memory-accessibility-retrieval.test.mjs",
-    "test:phase63c": "node tests/phase63/phase63c-memory-retrieval-process.test.mjs"
+    "test:phase63c": "node tests/phase63/phase63c-memory-retrieval-process.test.mjs && node tests/phase63/phase63c-memory-retrieval-multistep.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"
