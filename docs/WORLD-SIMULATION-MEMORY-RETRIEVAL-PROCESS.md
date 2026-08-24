@@ -1,6 +1,6 @@
 # Phase63C — Actual Memory Retrieval Process / Immutable Retrieval Events
 
-Phase63C models the boundary between a memory being a reasonable retrieval candidate and subjective memory content actually becoming available to the character.
+Phase63C models the boundary between a memory being a reasonable current retrieval candidate and subjective memory content actually becoming available to the character.
 
 Its canonical question is:
 
@@ -9,7 +9,14 @@ What retrieval process actually occurred,
 and what subjective content actually surfaced?
 ```
 
-It does not treat a Phase63B candidate as already recalled.
+The core invariant remains:
+
+```text
+Memory exists
+≠ Current accessibility
+≠ Actual retrieval
+≠ Content reaching Character Brain
+```
 
 ## Research-informed boundary
 
@@ -17,30 +24,29 @@ Phase63C follows several conservative conclusions from retrieval research:
 
 - retrieval effort/search and retrieval success are separable;
 - successful recovery, precision, vividness, and confidence are not one scalar;
-- unsuccessful retrieval attempts are real events rather than no-ops;
-- spontaneous / involuntary retrieval can occur without a deliberate retrieval attempt;
-- retrieval can unfold over multiple search steps;
-- recovered context can supply internally reinstated cues for later steps in the same retrieval process;
-- non-target information may surface during search;
-- retrieval-induced forgetting and reconsolidation do not justify universal fixed simulator rules.
+- unsuccessful deliberate retrieval attempts are real cognitive events rather than no-ops;
+- spontaneous / involuntary retrieval may occur without a preceding deliberate retrieval attempt;
+- retrieval may unfold over multiple search steps;
+- recovered context may later supply internally reinstated cues;
+- non-target information may surface while a target remains unrecovered;
+- partial recovery must be represented by content that actually surfaced, not by an invented percentage;
+- retrieval-induced forgetting, retrieval practice effects, and reconsolidation do not justify universal fixed simulator rules.
 
-The simulator therefore records retrieval structure without inventing a universal success threshold, reinforcement constant, competitor penalty, or retrieval probability.
+The simulator therefore does not invent a universal retrieval probability, success threshold, reinforcement constant, competitor penalty, partial-recall percentage, or automatic reconsolidation rule.
 
 ## Phase ownership
-
-The intended chain is:
 
 ```text
 Phase63A
 subjective memory formation
 
 Phase63B
-current candidate accessibility
+current cue-dependent candidate accessibility
 
 Phase63C
 actual retrieval process
 → recovered subjective content
-→ immutable RetrievalEvent
+→ later immutable RetrievalEvent persistence
 
 Phase63D
 source monitoring / source confusion / distortion
@@ -52,174 +58,164 @@ Phase63F
 conditional reconsolidation / updating
 ```
 
-Phase63C does not perform generic strengthening, forgetting, source confusion, consolidation, or reconsolidation.
+Phase63C does not perform generic strengthening, weakening, source confusion, consolidation, or reconsolidation.
 
-## Step 1 status
-
-Step 1 installs schema and contract foundations only.
-
-It deliberately does not yet activate the native retrieval-process runtime.
-
-Therefore:
+## Native runtime path after Step 3
 
 ```text
-retrieval_process_schema_installed = true
-retrieval_event_schema_installed = true
-
-retrieval_process_execution_installed = false
-retrieval_event_persistence_installed = false
-
-candidate_content_barrier_enforced = false
+Phase63B candidate_memory_records
+→ engine-side frozen candidate set
+→ MemoryRetrievalQuery
+→ engine-side retrieval initiation / resolution policy
+→ Phase63C single-step retrieval kernel
+→ source-grounded materialization
+→ recovered_memories
+→ cognition
+→ Character Brain
 ```
 
-The candidate-content information barrier is owned by Phase63C Step 2.
+The compatibility `world_memory_retriever` may still run engine-side for direct API compatibility and trace continuity. Its `projected_memories` do not enter the native Character Brain path.
 
-Existing `world_memory_retriever` behavior remains available during Step 1 for compatibility.
+## Step 1 — Schema / contract foundation
 
-## Step 2 status
+Step 1 installed canonical schemas for:
 
-Step 2 installs the candidate-content information barrier in the native world-loop path.
+- `MemoryRetrievalQuery`
+- `RetrievalProcess`
+- `RetrievalStep`
+- `RecoveredFragment`
+- `RetrievalEvent`
+- retrieval-history references
 
-The canonical Character Brain memory channel is now:
+No retrieval runtime was activated at that step.
+
+## Step 2 — Candidate-content information barrier
+
+Step 2 established:
+
+```text
+unretrieved candidate memory content
+MUST NOT reach Character Brain
+```
+
+The canonical native Brain memory channel became:
 
 ```text
 recovered_memories
 ```
 
-The actual retrieval kernel is still not active, so:
+Before Step 3 that channel was intentionally always empty.
+
+## Step 3 — Actual Retrieval Process Kernel
+
+Step 3 installs the first actual retrieval runtime.
+
+It is deliberately a **single-step, evidence-grounded kernel**. It does not yet perform generative multi-step search or internally reinstated cue cycles.
+
+### Initiation is separate from candidate accessibility
+
+Candidate presence does not imply a retrieval process occurred.
+
+The runtime distinguishes:
 
 ```text
-recovered_memories = []
+no process
+
+deliberate retrieval process
+
+spontaneous retrieval process
 ```
 
-until Phase63C later installs real recovery behavior.
+A missing retrieval resolver means `no process`; the engine does not silently convert candidate presence into recall.
 
-The Phase63B candidate set and the legacy projector may still exist engine-side for compatibility and audit, but their unretrieved content is not forwarded to native cognition or Character Brain.
+The kernel itself contains no random retrieval lottery. If a future retrieval policy uses stochastic behavior, that policy must own its seed and parameters explicitly.
 
-The deprecated `retrieved_memories` field in the native Brain packet now aliases only `recovered_memories`; it no longer aliases `projected_memories`.
+### Engine-side retrieval resolver
 
-## Canonical objects
+The native loop may receive a programmatic `memoryRetrievalResolver`.
 
-### MemoryRetrievalQuery
+The resolver receives only retrieval-relevant engine-side inputs:
 
-A query freezes the Phase63B candidate environment for one retrieval process.
+- frozen `MemoryRetrievalQuery`;
+- frozen candidate subjective memory records;
+- Phase63B candidate evaluations;
+- bounded current perception;
+- the character's own current state.
 
-Canonical fields include:
+It does not receive World State or the full world event.
 
-```text
-query_id
-character
-turn_id
-phase63b_version
-candidate_set_hash
-candidate_count
-initial_cues
-retrieval_goal
-candidate_refs
-```
-
-The query is engine-side.
-
-The query object itself contains no candidate memory content and is not forwarded to Character Brain.
-
-This query-local property must not be confused with the system-wide candidate-content barrier: during Step 1 the legacy projected-memory path still exists, so the global barrier remains unenforced until Step 2.
-
-Candidate references contain memory identities and candidate order, not duplicated memory content.
-
-The candidate-set hash may be calculated from the complete engine-owned candidate snapshot without exposing that snapshot through the query object.
-
-### RetrievalProcess
-
-A RetrievalProcess is transient runtime state.
-
-It may represent deliberate or spontaneous retrieval.
-
-It may contain zero or more search steps.
-
-It is not itself persistent retrieval history.
-
-Initiation mode:
+The resolver may decide process structure such as:
 
 ```text
-deliberate
-spontaneous
-```
-
-Trigger origin:
-
-```text
-self_generated
-external_prompt
-environmental_cue
-internally_reinstated_cue
-unspecified
-```
-
-Retrieval-task mode:
-
-```text
-free_recall
-cued_recall
-recognition
-source_query
-associative_recall
-unspecified
-```
-
-Initiation mode and retrieval-task mode are deliberately separate dimensions.
-
-### RetrievalStep
-
-A step may contain:
-
-```text
-active_cues
+process_occurred
+initiation
+retrieval_task
+target
 contacted_candidate_refs
-recovered_fragments
-reinstated_cues
-target_relation
-termination_after_step
+recovered_selections
+termination
 ```
 
-Contacted candidate references are engine-internal process evidence.
+The resolver is not allowed to author recovered memory prose/content.
 
-They are not character-visible content.
+### Source-grounded recovered content
 
-### RecoveredFragment
+A `recovered_selection` identifies existing source content rather than supplying new content.
 
-RecoveredFragment represents subjective content that actually surfaced.
-
-Content kinds currently reserved by the schema are:
+Step 3 supports:
 
 ```text
-gist
-detail
-sensory_fragment
-relational_fragment
-identity_fragment
-semantic_fragment
-unspecified
+whole_content
+json_pointer
 ```
 
-The schema does not attach an arbitrary recovery percentage.
-
-A later `partially_satisfied` target outcome must be grounded in actual recovered content and target relation rather than a numeric threshold.
-
-### RetrievalEvent
-
-A RetrievalEvent is required by the Phase63C architecture to become an immutable committed historical representation of a completed retrieval process.
-
-Step 1 installs that requirement but does not yet enforce persistence-time immutability. Runtime enforcement belongs to the later persistence integration step.
-
-Its intended authority is:
+For example:
 
 ```text
-world_state.retrieval_events
+source memory content:
+{
+  "actor": "伊萊亞斯",
+  "action": "伸手摸了摸阿灰背甲",
+  "expression": "皺眉"
+}
+
+recovered selector:
+/content-equivalent JSON pointer: /actor
+
+actually surfaced content:
+"伊萊亞斯"
 ```
 
-The event records process structure, recovered content, target outcome, termination, and engine audit references.
+The value is materialized by the kernel from the frozen candidate record.
 
-Target outcomes are:
+The resolver cannot return:
+
+```text
+content: "some newly generated recollection"
+```
+
+and have it accepted as a memory.
+
+### Partial recovery
+
+Step 3 does not model partial recall as a percentage.
+
+For structured memory content, partial recovery means one or more explicitly grounded source paths surfaced while other source paths did not.
+
+For legacy scalar/string content, Step 3 does not arbitrarily slice characters or percentages. Whole-content recovery is allowed; arbitrary partial string recovery is not.
+
+Reserved `content_kind` values such as `gist` remain schema vocabulary only. Step 3 does not synthesize a new gist unless an actual source representation exists to ground it.
+
+### Target classification
+
+Machine-grounded targets may use forms such as:
+
+```text
+memory_ref
+memory_content + requested_selectors
+```
+
+Target outcomes remain:
 
 ```text
 satisfied
@@ -228,149 +224,170 @@ failed
 not_applicable
 ```
 
-This permits spontaneous recovery without falsely labeling it a deliberate success:
+For `memory_content`, satisfaction is based on requested source selectors actually recovered. No numeric threshold is involved.
+
+Ungrounded natural-language retrieval goals are not silently converted into embedding-based authoritative target identities. If target-related content surfaces but complete satisfaction cannot be established, the result remains conservative.
+
+### Failed retrieval
+
+The runtime distinguishes:
+
+```text
+no retrieval process occurred
+```
+
+from:
+
+```text
+a deliberate retrieval process occurred but the target was not recovered
+```
+
+This distinction is exposed to Character Brain through `retrieval_experience` even when:
+
+```text
+recovered_memories = []
+```
+
+### Non-target recovery
+
+Target outcome and recovered-content relation are separate dimensions.
+
+Therefore this is valid:
+
+```text
+initiation.mode = deliberate
+target_outcome = failed
+recovered_any_content = true
+
+RecoveredFragment.target_relation = non_target
+```
+
+A target may remain unrecovered while another candidate memory surfaces.
+
+### Spontaneous retrieval
+
+Spontaneous retrieval does not imply a preceding deliberate attempt.
+
+A spontaneous process with no explicit target may produce:
 
 ```text
 initiation.mode = spontaneous
-target = null
 target_outcome = not_applicable
 recovered_any_content = true
 ```
 
-### Retrieval-history reference
+The presence of an environmental cue alone does not force spontaneous retrieval; initiation remains an explicit engine-side process decision.
 
-Persistent memory records should eventually reference authoritative RetrievalEvents rather than duplicate complete events.
+## Step 3 Character Brain boundary
 
-Step 1 reserves an append-only retrieval-history contract, but append-only mutation enforcement is not installed yet.
-
-Reserved roles are:
+Character Brain may receive:
 
 ```text
-recovered
-partially_recovered
-non_target_recovered
+recovered_memories
+retrieval_experience
 ```
 
-The schema deliberately does not yet assign `contacted_not_recovered` or `targeted_not_recovered` to a memory record because a failed search does not necessarily justify identifying one specific stored trace as the failed target.
+`recovered_memories` contains only actually materialized subjective content and character-meaningful source features.
 
-## Persistent authority
+It does not contain engine-only grounding data such as:
 
-The intended authority chain is:
+- `source_memory_ref`;
+- JSON-pointer provenance;
+- candidate-set hashes;
+- candidate accessibility diagnostics;
+- contacted-candidate engine refs.
+
+`retrieval_experience` distinguishes process state without exposing engine internals:
 
 ```text
-world_state.retrieval_events
-↓
-memory.retrieval_history references
-↓
-derived compatibility summaries
-↓
-recall_count
-last_recalled_at
+process_occurred
+initiation_mode
+target_outcome
+recovered_any_content
 ```
 
-Therefore `recall_count` and `last_recalled_at` are rebuildable summaries rather than canonical retrieval history.
+## Step 4 boundary
 
-## Mutation ownership
+Step 3 executes at most one retrieval step.
 
-Phase63C must not directly mutate persistent World State.
+The following remain Step 4 responsibilities:
 
-The intended mutation path is:
+```text
+multi-step retrieval search
+internally reinstated cues
+search-step continuation based on recovered context
+```
+
+If Step 3 receives internally reinstated cues or a multi-step resolution, it fails closed rather than silently performing Step 4 behavior.
+
+## Step 5 boundary
+
+Step 3 does not persist retrieval history.
+
+The later intended authority chain remains:
 
 ```text
 Phase63C retrieval result
 → explicit mutation proposal / transition
 → Phase62K authoritative mutation executor
-→ atomic world-state commit
+→ world_state.retrieval_events
+→ memory.retrieval_history references
+→ rebuildable compatibility summaries
 ```
 
-This preserves the existing single authoritative mutation boundary.
+Therefore Step 3 does not update:
 
-## Same-cycle boundary
+- `world_state.retrieval_events`;
+- `memory.retrieval_history`;
+- `recall_count`;
+- `last_recalled_at`;
+- storage strength;
+- accessibility;
+- memory confidence/content.
 
-The intended causal order is:
+A completed retrieval must not retroactively rerun Phase63B in the same retrieval query cycle.
 
-```text
-Phase63B accessibility
-→ freeze candidate set
-→ Phase63C RetrievalProcess
-→ internally reinstated cues may drive later process steps
-→ process terminates
-→ RetrievalEvent prepared
-→ authoritative mutation / commit
-→ next simulation cycle
-→ Phase63B may consume formally supported prior retrieval history
-```
-
-Internally reinstated cues may affect later steps inside the same RetrievalProcess.
-
-A newly committed RetrievalEvent must not retroactively rerun Phase63B for the same query.
-
-## Candidate-content barrier
-
-The final native Phase63C architecture requires:
-
-```text
-unretrieved candidate memory content
-MUST NOT reach Character Brain
-```
-
-Step 2 now enforces this barrier in the native world-loop path.
-
-Phase63B candidate content remains engine-side. The legacy projector may still be invoked for compatibility and trace continuity, but its output is not inserted into native cognition or Character Brain.
-
-Because the actual Phase63C retrieval kernel is not installed yet, the native recovered-memory channel is intentionally empty rather than falling back to candidate content.
-
-## Compatibility projector
-
-The existing:
-
-```text
-world_memory_retriever
-```
-
-remains a compatibility candidate-context projector.
-
-Its direct capability API is preserved, but in the native world-loop path its projected content is engine-only and is not forwarded to Character Brain.
-
-It is not redefined as the native Phase63C retrieval mechanism.
-
-The planned native retrieval-process implementation belongs to the Phase63C retrieval-process service.
-
-## Explicitly not modeled
-
-Phase63C does not introduce:
+## Explicitly not modeled in Step 3
 
 - universal retrieval probability;
 - universal success threshold;
 - arbitrary partial-recall percentage;
-- unseeded random retrieval;
-- fixed recall reinforcement;
-- fixed failed-retrieval weakening;
-- fixed competitor weakening;
+- unseeded kernel randomness;
+- success = fixed strengthening;
+- failure = fixed weakening;
+- generic competitor debuff;
+- retrieval-induced forgetting mutation;
 - automatic confidence increase;
 - automatic memory-content rewriting;
 - source-confusion adjudication;
-- consolidation;
-- automatic reconsolidation.
+- consolidation / semanticization;
+- automatic reconsolidation;
+- multi-step search;
+- internally reinstated cues;
+- RetrievalEvent persistence.
 
-## Current Phase63C Step 2 contract summary
+## Current Phase63C Step 3 contract summary
 
 ```text
-schema installed                       true
-runtime retrieval execution            false
-RetrievalEvent persistence             false
-RetrievalEvent immutability required   true
-RetrievalEvent immutability enforced   false
-retrieval history append-only required true
-retrieval history append-only enforced false
-candidate-content barrier              true
-native Brain memory channel            recovered_memories
-native recovery before kernel          []
-legacy projector API preserved         true
-legacy projection forwarded to Brain   false
-same-cycle Phase63B history feedback   false
-generic reinforcement                  false
-RIF weakening                          false
-source confusion                       false
-reconsolidation                        false
+schema installed                         true
+single-step retrieval runtime            true
+multi-step retrieval runtime             false
+candidate-content barrier                true
+source-grounded fragment materialization true
+resolver-authored memory content         false
+native Brain memory channel              recovered_memories
+retrieval experience channel             true
+missing resolver => no process           true
+candidate presence => automatic recall   false
+failed retrieval supported               true
+partial grounded recovery supported      true
+non-target recovery supported            true
+spontaneous retrieval supported          true
+RetrievalEvent persistence               false
+retrieval history mutation               false
+same-cycle Phase63B history feedback     false
+generic reinforcement                    false
+RIF weakening                            false
+source confusion                         false
+reconsolidation                          false
 ```

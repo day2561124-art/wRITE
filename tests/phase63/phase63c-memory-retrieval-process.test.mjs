@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  readFile,
   rm,
 } from "node:fs/promises";
 import path from "node:path";
@@ -22,9 +21,9 @@ import {
 import {
   buildWorldSimulationMemoryRetrievalProcessContract,
   buildWorldSimulationMemoryRetrievalQuery,
+  executeWorldSimulationMemoryRetrievalProcess,
   worldSimulationMemoryRetrievalProcessVersion,
 } from "../../server/src/world-simulation-memory-retrieval-process-service.mjs";
-
 import {
   beginWorldSimulationSession,
 } from "../../server/src/world-simulation-session-service.mjs";
@@ -34,501 +33,401 @@ const contract =
 
 assert.equal(
   contract.version,
-  "phase63c-memory-retrieval-process-v1",
+  "phase63c-memory-retrieval-process-v2",
 );
-
 assert.equal(
   worldSimulationMemoryRetrievalProcessVersion,
   contract.version,
 );
-
-assert.equal(
-  contract.retrieval_process_schema_installed,
-  true,
-);
-
-assert.equal(
-  contract.retrieval_event_schema_installed,
-  true,
-);
-
-assert.equal(
-  contract.retrieval_process_execution_installed,
-  false,
-);
-
-assert.equal(
-  contract.retrieval_event_persistence_installed,
-  false,
-);
-
-assert.equal(
-  contract.candidate_content_barrier_enforced,
-  true,
-);
-
-assert.equal(
-  contract.native_recovered_memory_channel_installed,
-  true,
-);
-
-assert.equal(
-  contract.native_recovered_memory_channel,
-  "recovered_memories",
-);
-
-assert.equal(
-  contract.native_recovered_memories_without_retrieval_kernel,
-  "empty",
-);
-
-assert.equal(
-  contract.legacy_projector_api_preserved,
-  true,
-);
-
-assert.equal(
-  contract.legacy_projector_native_character_brain_path_active,
-  false,
-);
-
-assert.equal(
-  contract.candidate_content_barrier_owner,
-  "Phase63C Step2",
-);
-
-assert.equal(
-  contract.retrieval_event_store_authority,
-  "world_state.retrieval_events",
-);
-
-assert.equal(
-  contract.retrieval_event_immutability_required,
-  true,
-);
-
-assert.equal(
-  contract.retrieval_event_immutability_enforced,
-  false,
-);
-
-assert.equal(
-  contract.retrieval_history_append_only_required,
-  true,
-);
-
-assert.equal(
-  contract.retrieval_history_append_only_enforced,
-  false,
-);
-
-assert.equal(
-  contract.retrieval_history_authority,
-  "retrieval_event_reference",
-);
-
-assert.equal(
-  contract.recall_summary_is_authoritative,
-  false,
-);
-
-assert.equal(
-  contract.same_cycle_phase63b_feedback_allowed,
-  false,
-);
-
-assert.equal(
-  contract.multi_step_retrieval_schema_supported,
-  true,
-);
-
-assert.equal(
-  contract.spontaneous_retrieval_schema_supported,
-  true,
-);
-
-assert.equal(
-  contract.failed_retrieval_event_supported,
-  true,
-);
-
-assert.equal(
-  contract.partial_outcome_uses_arbitrary_percentage,
-  false,
-);
-
-assert.equal(
-  contract.retrieval_reinforcement_modeled,
-  false,
-);
-
-assert.equal(
-  contract.retrieval_induced_forgetting_modeled,
-  false,
-);
-
-assert.equal(
-  contract.reconsolidation_modeled,
-  false,
-);
-
-assert.equal(
-  contract.source_confusion_modeled,
-  false,
-);
-
-assert.equal(
-  contract.direct_world_state_mutation_allowed,
-  false,
-);
-
+assert.equal(contract.retrieval_process_schema_installed, true);
+assert.equal(contract.retrieval_event_schema_installed, true);
+assert.equal(contract.retrieval_process_execution_installed, true);
+assert.equal(contract.single_step_retrieval_execution_installed, true);
+assert.equal(contract.multi_step_retrieval_execution_installed, false);
+assert.equal(contract.retrieval_event_persistence_installed, false);
+assert.equal(contract.candidate_content_barrier_enforced, true);
+assert.equal(contract.native_recovered_memory_channel, "recovered_memories");
+assert.equal(contract.retrieval_experience_channel_installed, true);
+assert.equal(contract.missing_retrieval_resolver_means_no_process, true);
+assert.equal(contract.candidate_presence_implies_process, false);
+assert.equal(contract.candidate_order_implies_success, false);
+assert.equal(contract.grounded_fragment_materialization_installed, true);
+assert.equal(contract.recovered_content_authored_by_resolver_allowed, false);
+assert.equal(contract.partial_recovery_uses_source_selectors, true);
+assert.equal(contract.string_partial_slicing_allowed, false);
+assert.equal(contract.generated_gist_without_source_trace_allowed, false);
+assert.equal(contract.partial_outcome_uses_arbitrary_percentage, false);
+assert.equal(contract.universal_retrieval_probability_modeled, false);
+assert.equal(contract.universal_success_threshold_modeled, false);
+assert.equal(contract.unseeded_randomness_used_by_kernel, false);
+assert.equal(contract.retrieval_reinforcement_modeled, false);
+assert.equal(contract.retrieval_induced_forgetting_modeled, false);
+assert.equal(contract.reconsolidation_modeled, false);
+assert.equal(contract.direct_world_state_mutation_allowed, false);
 assert.equal(
   contract.authoritative_mutation_owner,
   "phase62k-authoritative-mutation-executor-v1",
 );
 
-const processSchema =
-  contract.schemas.retrieval_process;
-
-assert(
-  processSchema
-    .properties
-    .initiation
-    .properties
-    .mode
-    .enum
-    .includes(
-      "deliberate",
-    ),
-);
-
-assert(
-  processSchema
-    .properties
-    .initiation
-    .properties
-    .mode
-    .enum
-    .includes(
-      "spontaneous",
-    ),
-);
-
-assert(
-  processSchema
-    .properties
-    .retrieval_task
-    .properties
-    .mode
-    .enum
-    .includes(
-      "recognition",
-    ),
-);
-
-const eventSchema =
-  contract.schemas.retrieval_event;
-
-for (
-  const value
-  of [
-    "satisfied",
-    "partially_satisfied",
-    "failed",
-    "not_applicable",
-  ]
-) {
-  assert(
-    eventSchema
-      .properties
-      .target_outcome
-      .enum
-      .includes(value),
-  );
-}
-
-const secretA =
-  "SECRET_CANDIDATE_CONTENT_A";
-
-const secretB =
-  "SECRET_CANDIDATE_CONTENT_B";
-
 const candidateInput = [
   {
-    memory_id:
-      "memory_a",
-
-    content:
-      secretA,
-
-    accessibility_score:
-      null,
+    memory_id: "memory_a",
+    memory_type: "episodic_direct_perception",
+    content: {
+      actor: "伊萊亞斯",
+      action: "伸手摸了摸阿灰背甲",
+      expression: "皺眉",
+    },
+    source: {
+      kind: "direct_perception",
+      sense: "visual",
+    },
   },
-
   {
-    memory_id:
-      "memory_b",
-
-    content:
-      secretB,
-
-    candidate_diagnostics: {
-      engine_only:
-        true,
+    memory_id: "memory_b",
+    content: {
+      sound: "金屬碰撞聲",
+      location: "門邊",
+    },
+    source: {
+      kind: "direct_perception",
+      sense: "auditory",
     },
   },
 ];
 
-const candidateSnapshot =
-  JSON.stringify(
-    candidateInput,
-  );
-
 const query =
   buildWorldSimulationMemoryRetrievalQuery({
-    character:
-      "伊萊亞斯・諾爾",
-
-    turn_id:
-      "turn_phase63c_step1",
-
-    phase63b_version:
-      "phase63b-cue-dependent-memory-accessibility-v2",
-
-    candidate_memory_records:
-      candidateInput,
-
+    character: "伊萊亞斯・諾爾",
+    turn_id: "turn_phase63c_step3",
+    phase63b_version: "phase63b-cue-dependent-memory-accessibility-v2",
+    candidate_memory_records: candidateInput,
     initial_cues: [
       {
-        kind:
-          "spatial_context",
-
-        value:
-          "third-practicum-room",
+        kind: "spatial_context",
+        value: "third-practicum-room",
       },
     ],
-
     retrieval_goal: {
-      kind:
-        "unspecified",
+      kind: "memory_content",
+      memory_id: "memory_a",
+      requested_selectors: [
+        {
+          kind: "json_pointer",
+          path: "/actor",
+        },
+        {
+          kind: "json_pointer",
+          path: "/action",
+        },
+      ],
     },
   });
 
-assert.equal(
-  JSON.stringify(
-    candidateInput,
-  ),
-  candidateSnapshot,
-  "Phase63C query builder mutated candidate input",
-);
+assert.equal(query.candidate_count, 2);
+assert.equal(JSON.stringify(query).includes("伸手摸了摸阿灰背甲"), false);
+assert.equal(query.boundaries.query_embeds_candidate_content, false);
+assert.equal(Object.isFrozen(query), true);
 
-assert.equal(
-  query.candidate_count,
-  2,
-);
+const noProcess =
+  executeWorldSimulationMemoryRetrievalProcess({
+    query,
+    candidate_memory_records: candidateInput,
+  });
 
+assert.equal(noProcess.process_occurred, false);
+assert.deepEqual(noProcess.recovered_memories, []);
+assert.equal(noProcess.target_outcome, null);
 assert.deepEqual(
-  query.candidate_refs,
-  [
-    {
-      memory_id:
-        "memory_a",
-
-      candidate_index:
-        0,
-    },
-
-    {
-      memory_id:
-        "memory_b",
-
-      candidate_index:
-        1,
-    },
-  ],
+  noProcess.retrieval_experience,
+  {
+    process_occurred: false,
+    initiation_mode: null,
+    target_outcome: null,
+    recovered_any_content: false,
+  },
 );
 
-assert.equal(
-  JSON.stringify(
+const partial =
+  executeWorldSimulationMemoryRetrievalProcess({
     query,
-  ).includes(
-    secretA,
-  ),
-  false,
-);
-
-assert.equal(
-  JSON.stringify(
-    query,
-  ).includes(
-    secretB,
-  ),
-  false,
-);
-
-assert.equal(
-  query.boundaries
-    .query_embeds_candidate_content,
-  false,
-);
-
-assert.equal(
-  query.boundaries
-    .query_forwarded_to_character_brain,
-  false,
-);
-
-assert.equal(
-  query.boundaries
-    .query_embeds_candidate_accessibility_diagnostics,
-  false,
-);
-
-assert.equal(
-  query.boundaries
-    .global_candidate_content_barrier_enforced,
-  true,
-);
-
-assert.equal(
-  query.boundaries
-    .global_candidate_content_barrier_owner,
-  "Phase63C Step2",
-);
-
-assert.equal(
-  query.boundaries
-    .candidate_set_frozen_for_process,
-  true,
-);
-
-assert.equal(
-  Object.isFrozen(
-    query,
-  ),
-  true,
-);
-
-assert.equal(
-  Object.isFrozen(
-    query.candidate_refs,
-  ),
-  true,
-);
-
-const queryAgain =
-  buildWorldSimulationMemoryRetrievalQuery({
-    character:
-      "伊萊亞斯・諾爾",
-
-    turn_id:
-      "turn_phase63c_step1",
-
-    phase63b_version:
-      "phase63b-cue-dependent-memory-accessibility-v2",
-
-    candidate_memory_records:
-      candidateInput,
-
-    initial_cues: [
-      {
-        kind:
-          "spatial_context",
-
-        value:
-          "third-practicum-room",
+    candidate_memory_records: candidateInput,
+    resolution: {
+      process_occurred: true,
+      initiation: {
+        mode: "deliberate",
+        trigger_origin: "self_generated",
       },
-    ],
-
-    retrieval_goal: {
-      kind:
-        "unspecified",
+      retrieval_task: {
+        mode: "cued_recall",
+      },
+      contacted_candidate_refs: [
+        "memory_a",
+      ],
+      recovered_selections: [
+        {
+          source_memory_ref: "memory_a",
+          selector: {
+            kind: "json_pointer",
+            path: "/actor",
+          },
+          content_kind: "identity_fragment",
+          target_relation: "target_related",
+        },
+      ],
     },
   });
 
+assert.equal(partial.process_occurred, true);
+assert.equal(partial.target_outcome, "partially_satisfied");
+assert.equal(partial.recovered_any_content, true);
+assert.equal(partial.recovered_fragments.length, 1);
+assert.equal(partial.recovered_fragments[0].content, "伊萊亞斯");
 assert.equal(
-  queryAgain.query_id,
-  query.query_id,
+  partial.recovered_fragments[0]
+    .content_grounding.selector.path,
+  "/actor",
+);
+assert.equal(
+  partial.recovered_fragments[0]
+    .content_grounding.materialized_by_kernel,
+  true,
+);
+assert.equal(
+  Object.hasOwn(partial.recovered_memories[0], "content_grounding"),
+  false,
+);
+assert.equal(
+  Object.hasOwn(partial.recovered_memories[0], "source_memory_ref"),
+  false,
+);
+assert.equal(
+  JSON.stringify(partial.recovered_memories)
+    .includes("伸手摸了摸阿灰背甲"),
+  false,
 );
 
+const satisfied =
+  executeWorldSimulationMemoryRetrievalProcess({
+    query,
+    candidate_memory_records: candidateInput,
+    resolution: {
+      process_occurred: true,
+      initiation: {
+        mode: "deliberate",
+      },
+      retrieval_task: {
+        mode: "cued_recall",
+      },
+      contacted_candidate_refs: ["memory_a"],
+      recovered_selections: [
+        {
+          source_memory_ref: "memory_a",
+          selector: {
+            kind: "json_pointer",
+            path: "/actor",
+          },
+          content_kind: "identity_fragment",
+          target_relation: "target_related",
+        },
+        {
+          source_memory_ref: "memory_a",
+          selector: {
+            kind: "json_pointer",
+            path: "/action",
+          },
+          content_kind: "detail",
+          target_relation: "target_related",
+        },
+      ],
+    },
+  });
+
+assert.equal(satisfied.target_outcome, "satisfied");
+assert.equal(satisfied.recovered_memories.length, 2);
+
+const nonTargetQuery =
+  buildWorldSimulationMemoryRetrievalQuery({
+    character: "夜",
+    turn_id: "turn_non_target",
+    phase63b_version: "phase63b-cue-dependent-memory-accessibility-v2",
+    candidate_memory_records: candidateInput,
+    retrieval_goal: {
+      kind: "memory_ref",
+      memory_id: "memory_a",
+    },
+  });
+
+const failedWithNonTarget =
+  executeWorldSimulationMemoryRetrievalProcess({
+    query: nonTargetQuery,
+    candidate_memory_records: candidateInput,
+    resolution: {
+      process_occurred: true,
+      initiation: {
+        mode: "deliberate",
+        trigger_origin: "self_generated",
+      },
+      retrieval_task: {
+        mode: "associative_recall",
+      },
+      contacted_candidate_refs: [
+        "memory_a",
+        "memory_b",
+      ],
+      recovered_selections: [
+        {
+          source_memory_ref: "memory_b",
+          content_kind: "sensory_fragment",
+          target_relation: "non_target",
+        },
+      ],
+    },
+  });
+
+assert.equal(failedWithNonTarget.target_outcome, "failed");
+assert.equal(failedWithNonTarget.recovered_any_content, true);
 assert.equal(
-  queryAgain.candidate_set_hash,
-  query.candidate_set_hash,
+  failedWithNonTarget.recovered_memories[0].target_relation,
+  "non_target",
+);
+
+const spontaneous =
+  executeWorldSimulationMemoryRetrievalProcess({
+    query:
+      buildWorldSimulationMemoryRetrievalQuery({
+        character: "梅芙・柯林斯",
+        turn_id: "turn_spontaneous",
+        phase63b_version: "phase63b-cue-dependent-memory-accessibility-v2",
+        candidate_memory_records: [candidateInput[1]],
+      }),
+    candidate_memory_records: [candidateInput[1]],
+    resolution: {
+      process_occurred: true,
+      initiation: {
+        mode: "spontaneous",
+        trigger_origin: "environmental_cue",
+      },
+      retrieval_task: {
+        mode: "associative_recall",
+      },
+      contacted_candidate_refs: ["memory_b"],
+      recovered_selections: [
+        {
+          source_memory_ref: "memory_b",
+          content_kind: "sensory_fragment",
+          target_relation: "unresolved",
+        },
+      ],
+    },
+  });
+
+assert.equal(spontaneous.target_outcome, "not_applicable");
+assert.equal(spontaneous.recovered_any_content, true);
+
+assert.throws(
+  () =>
+    executeWorldSimulationMemoryRetrievalProcess({
+      query,
+      candidate_memory_records: candidateInput,
+      resolution: {
+        process_occurred: true,
+        initiation: {
+          mode: "deliberate",
+        },
+        contacted_candidate_refs: ["memory_a"],
+        recovered_selections: [
+          {
+            source_memory_ref: "memory_a",
+            content: "RESOLVER_AUTHORED_FAKE_MEMORY",
+            target_relation: "target_related",
+          },
+        ],
+      },
+    }),
+  (error) =>
+    error?.code
+    === "WORLD_SIMULATION_MEMORY_RETRIEVAL_AUTHORED_CONTENT_FORBIDDEN",
 );
 
 assert.throws(
   () =>
-    buildWorldSimulationMemoryRetrievalQuery({
-      character:
-        "伊萊亞斯・諾爾",
-
-      turn_id:
-        "duplicate-candidate",
-
-      phase63b_version:
-        "phase63b-cue-dependent-memory-accessibility-v2",
-
-      candidate_memory_records: [
-        {
-          memory_id:
-            "duplicate",
+    executeWorldSimulationMemoryRetrievalProcess({
+      query,
+      candidate_memory_records: candidateInput,
+      resolution: {
+        process_occurred: true,
+        initiation: {
+          mode: "deliberate",
         },
-        {
-          memory_id:
-            "duplicate",
-        },
-      ],
+        contacted_candidate_refs: ["memory_a"],
+        recovered_selections: [
+          {
+            source_memory_ref: "memory_a",
+            selector: {
+              kind: "json_pointer",
+              path: "/missing",
+            },
+          },
+        ],
+      },
     }),
   (error) =>
     error?.code
-      === "WORLD_SIMULATION_MEMORY_RETRIEVAL_CANDIDATE_DUPLICATE",
+    === "WORLD_SIMULATION_MEMORY_RETRIEVAL_SELECTOR_NOT_FOUND",
+);
+
+assert.throws(
+  () =>
+    executeWorldSimulationMemoryRetrievalProcess({
+      query,
+      candidate_memory_records: candidateInput,
+      resolution: {
+        process_occurred: true,
+        initiation: {
+          mode: "deliberate",
+        },
+        reinstated_cues: [
+          {
+            kind: "internally_reinstated",
+            value: "later-step-cue",
+          },
+        ],
+      },
+    }),
+  (error) =>
+    error?.code
+    === "WORLD_SIMULATION_MEMORY_RETRIEVAL_MULTI_STEP_NOT_INSTALLED",
+);
+
+const alteredCandidates =
+  structuredClone(candidateInput);
+alteredCandidates[0].content.actor = "被竄改";
+assert.throws(
+  () =>
+    executeWorldSimulationMemoryRetrievalProcess({
+      query,
+      candidate_memory_records: alteredCandidates,
+    }),
+  (error) =>
+    error?.code
+    === "WORLD_SIMULATION_MEMORY_RETRIEVAL_CANDIDATE_SET_MISMATCH",
 );
 
 const loopContract =
   buildWorldSimulationLoopContract();
-
-assert.equal(
-  loopContract
-    .subjective_memory_retrieval_process
-    .version,
-  contract.version,
-);
-
 assert.equal(
   loopContract
     .memory_context_projection
-    .phase63c_schema_contract_installed,
+    .native_retrieval_process_execution_installed,
   true,
 );
-
 assert.equal(
   loopContract
     .memory_context_projection
-    .candidate_content_barrier_enforced,
+    .missing_retrieval_resolver_means_no_process,
   true,
 );
-
-assert.equal(
-  loopContract
-    .memory_context_projection
-    .candidate_content_barrier_owner,
-  "Phase63C Step2",
-);
-
-assert.equal(
-  loopContract
-    .memory_context_projection
-    .native_character_brain_memory_channel,
-  "recovered_memories",
-);
-
-assert.equal(
-  loopContract
-    .memory_context_projection
-    .legacy_projector_output_engine_only_in_native_loop,
-  true,
-);
-
 assert.equal(
   loopContract
     .memory_context_projection
@@ -536,460 +435,290 @@ assert.equal(
   false,
 );
 
-assert.equal(
-  loopContract
-    .memory_context_projection
-    .native_retrieval_process_execution_installed,
-  false,
-);
-
 const legacyProjectorContract =
   buildWorldSimulationCapabilityContract(
     "world_memory_retriever",
   );
-
 assert.equal(
   legacyProjectorContract
     .architecture_role,
   "legacy_candidate_context_projector_preserved_for_direct_compatibility",
 );
-
-assert.equal(
-  legacyProjectorContract
-    .phase63c_schema_contract_installed,
-  true,
-);
-
-assert.equal(
-  legacyProjectorContract
-    .direct_legacy_projector_api_preserved,
-  true,
-);
-
-assert.equal(
-  legacyProjectorContract
-    .candidate_content_barrier_enforced_in_native_world_loop,
-  true,
-);
-
 assert.equal(
   legacyProjectorContract
     .native_world_loop_forwards_projected_content_to_character_brain,
   false,
 );
 
-// Step 1 installs the canonical schema/service contract,
-// but deliberately does not add a new neural capability yet.
-assert.equal(
-  buildWorldSimulationCapabilityContract(
-    "world_memory_retrieval_process",
-  ),
-  null,
-);
-
-const legacyDoc =
-  await readFile(
-    new URL(
-      "../../docs/WORLD-SIMULATION-MEMORY-ACCESSIBILITY-RETRIEVAL.md",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-
-assert.match(
-  legacyDoc,
-  /Legacy Phase63B v1 design note/u,
-);
-
-assert.equal(
-  legacyDoc.includes(
-    "Recall reinforcement/retrieval practice belongs to Phase63C",
-  ),
-  false,
-);
-
-const step2FixtureRoot =
+const fixtureRoot =
   path.join(
     projectRoot,
     "tests",
     ".tmp",
-    `phase63c-step2-barrier-${process.pid}-${Date.now()}`,
+    `phase63c-step3-kernel-${process.pid}-${Date.now()}`,
   );
 
 await rm(
-  step2FixtureRoot,
+  fixtureRoot,
   {
     recursive: true,
     force: true,
   },
 );
 
+const recoveredAction =
+  "阿灰撞過活動擋板";
 const unretrievedSecret =
-  "SECRET_UNRETRIEVED_MEMORY_CONTENT_PHASE63C_STEP2";
+  "SECRET_SAME_MEMORY_UNRETRIEVED_DETAIL";
 
-let step2RuntimeVerified =
-  false;
+let nativeLoopVerified = false;
 
 try {
-  const character =
-    "phase63c-step2-observer";
-
-  const sceneId =
-    "phase63c-step2-room";
-
-  const eventId =
-    "phase63c-step2-event";
+  const character = "phase63c-step3-observer";
+  const sceneId = "phase63c-step3-room";
+  const eventId = "phase63c-step3-event";
 
   const session =
     await beginWorldSimulationSession(
       {
         simulation_label:
-          "Phase63C Step2 candidate-content barrier fixture",
-
+          "Phase63C Step3 actual retrieval kernel fixture",
         seed:
-          "phase63c-step2",
-
+          "phase63c-step3",
         rules: {
-          event_driven:
-            true,
-
-          persistent_causality:
-            true,
+          event_driven: true,
+          persistent_causality: true,
         },
-
         initial_world_state: {
           simulation_time:
-            "2026-08-24T23:55:00+08:00",
-
+            "2026-08-25T01:20:00+08:00",
           event_queue: [
             {
-              event_id:
-                eventId,
-
-              type:
-                "phase63c_step2_memory_barrier",
-
-              scene_id:
-                sceneId,
-
-              participants: [
-                character,
-              ],
-            },
-          ],
-
-          scenes: {
-            [sceneId]: {
-              scene_id:
-                sceneId,
-
-              dimensions: {
-                width_m:
-                  8,
-
-                depth_m:
-                  8,
-              },
-
-              entity_positions: {
-                [character]: {
-                  x:
-                    2,
-
-                  y:
-                    2,
+              event_id: eventId,
+              type: "phase63c_step3_retrieval",
+              scene_id: sceneId,
+              participants: [character],
+              memory_retrieval_context: {
+                retrieval_goal: {
+                  value: "remember recent collision",
                 },
               },
-
+            },
+          ],
+          scenes: {
+            [sceneId]: {
+              scene_id: sceneId,
+              dimensions: {
+                width_m: 8,
+                depth_m: 8,
+              },
+              entity_positions: {
+                [character]: {
+                  x: 2,
+                  y: 2,
+                },
+              },
               obstacles: [],
               structures: [],
               doors: [],
             },
           },
-
           characters: {
             [character]: {
-              known: [
-                "自己正在測試場景中",
-              ],
-
-              current_goal:
-                "留在原地",
-
-              current_action:
-                "等待",
+              known: ["自己正在測試場景中"],
+              current_goal: "回想剛才發生的事",
+              current_action: "思考",
             },
           },
-
           memories: {
             [character]: [
               {
-                memory_id:
-                  "phase63c-step2-secret-memory",
-
-                memory_type:
-                  "episodic_direct_perception",
-
-                content:
-                  unretrievedSecret,
-
-                accessible:
-                  true,
-
-                suppressed:
-                  false,
+                memory_id: "phase63c-step3-source-memory",
+                memory_type: "episodic_direct_perception",
+                content: {
+                  action: recoveredAction,
+                  hidden_detail: unretrievedSecret,
+                },
+                source: {
+                  kind: "direct_perception",
+                  sense: "visual",
+                },
+                accessible: true,
+                suppressed: false,
               },
             ],
           },
-
           objects: {},
-
           available_actions: {
             [character]: [
               {
-                action_id:
-                  "remain-still",
-
-                intent:
-                  "留在原地",
+                action_id: "remain-still",
+                intent: "留在原地",
               },
             ],
           },
         },
       },
       {
-        fixtureRoot:
-          step2FixtureRoot,
+        fixtureRoot,
       },
     );
+
+  const resolverInputs = [];
+  const memoryRetrievalResolver =
+    async (input) => {
+      resolverInputs.push(structuredClone(input));
+      assert.equal(
+        JSON.stringify(input).includes(unretrievedSecret),
+        true,
+        "engine-side resolver must receive the frozen subjective candidate content",
+      );
+      return {
+        process_occurred: true,
+        initiation: {
+          mode: "deliberate",
+          trigger_origin: "self_generated",
+        },
+        retrieval_task: {
+          mode: "cued_recall",
+        },
+        target: {
+          kind: "memory_content",
+          memory_id: "phase63c-step3-source-memory",
+          requested_selectors: [
+            {
+              kind: "json_pointer",
+              path: "/action",
+            },
+          ],
+        },
+        contacted_candidate_refs: [
+          "phase63c-step3-source-memory",
+        ],
+        recovered_selections: [
+          {
+            source_memory_ref:
+              "phase63c-step3-source-memory",
+            selector: {
+              kind: "json_pointer",
+              path: "/action",
+            },
+            content_kind: "detail",
+            target_relation: "target_related",
+          },
+        ],
+      };
+    };
 
   const prepared =
     await prepareWorldSimulationTurn(
       {
         world_simulation_session_id:
           session.world_simulation_session_id,
-
-        event_id:
-          eventId,
+        event_id: eventId,
       },
       {
-        fixtureRoot:
-          step2FixtureRoot,
+        fixtureRoot,
+        memoryRetrievalResolver,
       },
     );
 
-  // The Phase63B engine-side audit still owns the actual
-  // candidate record and therefore proves the candidate was
-  // not merely removed to make the leakage assertion pass.
+  assert.equal(prepared.memory_retrieval_processes.length, 1);
   assert.equal(
-    JSON.stringify(
-      prepared.memory_accessibility_queries,
-    ).includes(
-      unretrievedSecret,
-    ),
+    prepared.memory_retrieval_processes[0]
+      .result.target_outcome,
+    "satisfied",
+  );
+  assert.equal(
+    JSON.stringify(prepared.memory_accessibility_queries)
+      .includes(unretrievedSecret),
     true,
   );
-
-  // The frozen 63C query contains refs/hash only.
   assert.equal(
-    prepared.memory_retrieval_queries.length,
-    1,
-  );
-
-  assert.equal(
-    JSON.stringify(
-      prepared.memory_retrieval_queries,
-    ).includes(
-      unretrievedSecret,
-    ),
+    JSON.stringify(prepared.decision_packets)
+      .includes(unretrievedSecret),
     false,
   );
-
   assert.equal(
-    prepared
-      .memory_retrieval_queries[0]
-      .query
-      .candidate_refs[0]
-      .memory_id,
-    "phase63c-step2-secret-memory",
+    JSON.stringify(prepared.decision_packets)
+      .includes(recoveredAction),
+    true,
   );
-
-  const preparedPacket =
-    prepared.decision_packets[0];
-
-  assert.equal(
-    JSON.stringify(
-      preparedPacket,
-    ).includes(
-      unretrievedSecret,
-    ),
-    false,
-  );
-
-  assert.equal(
-    Object.hasOwn(
-      preparedPacket,
-      "projected_memories",
-    ),
-    false,
-  );
-
   assert.deepEqual(
-    preparedPacket
-      .recovered_memories,
-    [],
-  );
-
-  assert.deepEqual(
-    preparedPacket
-      .retrieved_memories,
-    [],
-  );
-
-  assert.equal(
-    Object.hasOwn(
-      preparedPacket.cognition,
-      "projected_memories",
-    ),
-    false,
-  );
-
-  assert.equal(
-    Object.hasOwn(
-      preparedPacket.cognition,
-      "retrieved_memories",
-    ),
-    false,
-  );
-
-  assert.deepEqual(
-    preparedPacket
-      .cognition
-      .recovered_memories,
-    [],
+    prepared.decision_packets[0]
+      .retrieval_experience,
+    {
+      process_occurred: true,
+      initiation_mode: "deliberate",
+      target_outcome: "satisfied",
+      recovered_any_content: true,
+    },
   );
 
   const brainInputs = [];
-
   const turn =
     await runWorldSimulationTurn(
       {
         world_simulation_session_id:
           session.world_simulation_session_id,
-
-        event_id:
-          eventId,
+        event_id: eventId,
       },
       {
-        fixtureRoot:
-          step2FixtureRoot,
-
+        fixtureRoot,
+        memoryRetrievalResolver,
         characterBrain:
           async (packet) => {
-            brainInputs.push(
-              packet,
-            );
-
+            brainInputs.push(structuredClone(packet));
             assert.equal(
-              JSON.stringify(
-                packet,
-              ).includes(
-                unretrievedSecret,
-              ),
+              JSON.stringify(packet).includes(unretrievedSecret),
               false,
             );
-
             assert.equal(
-              Object.hasOwn(
-                packet,
-                "projected_memories",
-              ),
+              JSON.stringify(packet).includes(recoveredAction),
+              true,
+            );
+            assert.equal(
+              packet.retrieval_experience.target_outcome,
+              "satisfied",
+            );
+            assert.equal(
+              Object.hasOwn(packet, "projected_memories"),
               false,
             );
-
-            assert.deepEqual(
-              packet.recovered_memories,
-              [],
-            );
-
-            assert.deepEqual(
-              packet.retrieved_memories,
-              [],
-            );
-
-            assert.equal(
-              JSON.stringify(
-                packet.cognition,
-              ).includes(
-                unretrievedSecret,
-              ),
-              false,
-            );
-
             return {
-              action_id:
-                "remain-still",
+              action_id: "remain-still",
             };
           },
-
         causalAdjudicator:
           async (input) => ({
             causal_resolution_id:
-              "phase63c-step2-noop",
-
+              "phase63c-step3-noop",
             next_world_state:
-              structuredClone(
-                input.world_state,
-              ),
-
-            state_transitions:
-              [],
-
+              structuredClone(input.world_state),
+            state_transitions: [],
             action_outcomes: [
               {
-                actor:
-                  character,
-
-                action_id:
-                  "remain-still",
-
-                result:
-                  "remained_still",
-
+                actor: character,
+                action_id: "remain-still",
+                result: "remained_still",
                 causal_evidence:
                   "fixture intentionally performs no hard-state movement",
               },
             ],
-
-            knowledge_transitions:
-              [],
-
-            scheduled_events:
-              [],
+            knowledge_transitions: [],
+            scheduled_events: [],
           }),
       },
     );
 
-  assert.equal(
-    turn.ok,
-    true,
-  );
-
-  assert.equal(
-    turn.committed,
-    true,
-  );
-
-  assert.equal(
-    brainInputs.length,
-    1,
-  );
-
-  step2RuntimeVerified =
-    true;
+  assert.equal(turn.ok, true);
+  assert.equal(turn.committed, true);
+  assert.equal(brainInputs.length, 1);
+  assert.equal(resolverInputs.length >= 2, true);
+  nativeLoopVerified = true;
 } finally {
   await rm(
-    step2FixtureRoot,
+    fixtureRoot,
     {
       recursive: true,
       force: true,
@@ -998,93 +727,20 @@ try {
 }
 
 const report = {
-  memory_retrieval_process_version:
-    contract.version,
-
-  retrieval_process_schema_installed:
-    contract.retrieval_process_schema_installed,
-
-  retrieval_event_schema_installed:
-    contract.retrieval_event_schema_installed,
-
-  retrieval_event_store_authority:
-    contract.retrieval_event_store_authority,
-
-  retrieval_event_immutability_required:
-    contract.retrieval_event_immutability_required,
-
-  retrieval_event_immutability_enforced:
-    contract.retrieval_event_immutability_enforced,
-
-  retrieval_history_append_only_required:
-    contract.retrieval_history_append_only_required,
-
-  retrieval_history_append_only_enforced:
-    contract.retrieval_history_append_only_enforced,
-
-  retrieval_history_authority:
-    contract.retrieval_history_authority,
-
-  recall_summary_is_authoritative:
-    contract.recall_summary_is_authoritative,
-
-  retrieval_reinforcement_modeled:
-    contract.retrieval_reinforcement_modeled,
-
-  retrieval_induced_forgetting_modeled:
-    contract.retrieval_induced_forgetting_modeled,
-
-  reconsolidation_modeled:
-    contract.reconsolidation_modeled,
-
-  source_confusion_modeled:
-    contract.source_confusion_modeled,
-
-  same_cycle_phase63b_feedback_allowed:
-    contract.same_cycle_phase63b_feedback_allowed,
-
-  multi_step_retrieval_schema_supported:
-    contract.multi_step_retrieval_schema_supported,
-
-  spontaneous_retrieval_schema_supported:
-    contract.spontaneous_retrieval_schema_supported,
-
-  failed_retrieval_event_supported:
-    contract.failed_retrieval_event_supported,
-
-  partial_outcome_uses_arbitrary_percentage:
-    contract.partial_outcome_uses_arbitrary_percentage,
-
-  candidate_content_barrier_enforced:
-    contract.candidate_content_barrier_enforced,
-
-  native_recovered_memory_channel:
-    contract.native_recovered_memory_channel,
-
-  unretrieved_candidate_content_reaches_character_brain:
-    false,
-
-  step2_runtime_information_barrier_verified:
-    step2RuntimeVerified,
-
-  native_retrieval_process_capability_activated:
-    buildWorldSimulationCapabilityContract(
-      "world_memory_retrieval_process",
-    ) !== null,
-
-  legacy_projector_api_preserved:
-    contract.legacy_projector_api_preserved,
-
-  legacy_projector_native_character_brain_path_active:
-    contract.legacy_projector_native_character_brain_path_active,
+  ok: true,
+  phase: "Phase63C Step 3",
+  retrieval_process_version:
+    worldSimulationMemoryRetrievalProcessVersion,
+  kernel: "single_step_evidence_grounded",
+  deliberate_retrieval_supported: true,
+  spontaneous_retrieval_supported: true,
+  failed_retrieval_supported: true,
+  partial_grounded_fragments_supported: true,
+  non_target_recovery_supported: true,
+  candidate_content_barrier_preserved: true,
+  native_loop_verified: nativeLoopVerified,
+  retrieval_event_persistence_installed: false,
+  multi_step_search_installed: false,
 };
 
-console.log(
-  JSON.stringify(
-    report,
-  ),
-);
-
-console.log(
-  "Phase63C memory retrieval process Step 2 candidate-content barrier test passed.",
-);
+console.log(JSON.stringify(report, null, 2));

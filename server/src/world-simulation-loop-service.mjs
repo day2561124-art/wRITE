@@ -45,6 +45,7 @@ import {
 import {
   buildWorldSimulationMemoryRetrievalProcessContract,
   buildWorldSimulationMemoryRetrievalQuery,
+  executeWorldSimulationMemoryRetrievalProcess,
   worldSimulationMemoryRetrievalProcessVersion,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
 import {
@@ -279,6 +280,79 @@ async function capability(sessionId, name, input, options, traceIds) {
   return result.output;
 }
 
+async function resolveMemoryRetrievalResolution(
+  context,
+  options,
+) {
+  const resolver =
+    typeof options.memoryRetrievalResolver === "function"
+      ? options.memoryRetrievalResolver
+      : null;
+
+  if (!resolver) {
+    return {
+      resolution: {
+        process_occurred: false,
+      },
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_process: true,
+        candidate_presence_implies_process: false,
+        world_state_exposed_to_resolver: false,
+        full_world_event_exposed_to_resolver: false,
+        candidate_content_engine_side_only: true,
+      },
+    };
+  }
+
+  const input = {
+    character:
+      context.character,
+    query:
+      cloneJson(context.query),
+    candidate_memory_records:
+      cloneJson(context.candidate_memory_records),
+    candidate_evaluations:
+      cloneJson(context.candidate_evaluations),
+    perception:
+      cloneJson(context.perception),
+    character_state:
+      cloneJson(context.character_state),
+  };
+
+  const inputSnapshot =
+    cloneJson(input);
+
+  const raw =
+    await resolver(
+      cloneJson(inputSnapshot),
+    );
+
+  if (!isObject(raw)) {
+    const error = new Error(
+      "memoryRetrievalResolver must return one explicit retrieval-process resolution object.",
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_RETRIEVAL_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+
+  return {
+    resolution:
+      cloneJson(raw),
+    audit: {
+      resolver_used: true,
+      input_context_hash:
+        hashAgentRunValue(inputSnapshot),
+      world_state_exposed_to_resolver: false,
+      full_world_event_exposed_to_resolver: false,
+      candidate_content_engine_side_only: true,
+      resolver_may_author_recovered_content: false,
+      resolver_selects_source_grounding_only: true,
+    },
+  };
+}
+
 function candidateSelection(candidateOutput, selection, character) {
   const candidates = array(candidateOutput.candidate_action_intents);
   if (selection === null || selection === undefined || selection === "reject_all") {
@@ -416,7 +490,13 @@ export function buildWorldSimulationLoopContract() {
         "recovered_memories",
 
       native_recovered_memories_default_empty_until_retrieval_kernel:
+        false,
+
+      missing_retrieval_resolver_means_no_process:
         true,
+
+      retrieval_experience_channel:
+        "retrieval_experience",
 
       legacy_projector_api_preserved:
         true,
@@ -428,7 +508,41 @@ export function buildWorldSimulationLoopContract() {
         false,
 
       native_retrieval_process_execution_installed:
+        true,
+    },
+
+    subjective_memory_retrieval_resolution_hook: {
+      owner:
+        "programmatic_memory_retrieval_resolver",
+
+      optional: true,
+
+      missing_hook_means_no_retrieval_process:
+        true,
+
+      receives_world_state:
         false,
+
+      receives_full_world_event:
+        false,
+
+      receives_frozen_candidate_content_engine_side:
+        true,
+
+      receives_phase63b_candidate_evaluations:
+        true,
+
+      receives_bounded_perception:
+        true,
+
+      receives_character_own_state:
+        true,
+
+      may_author_recovered_memory_content:
+        false,
+
+      selects_source_grounding_only:
+        true,
     },
 
     subjective_memory_encoding_decision_hook: {
@@ -516,6 +630,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const audibilityQueries = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
+  const memoryRetrievalProcesses = [];
 
   const turnId = `world_turn_${hashAgentRunValue({
     world_simulation_session_id: sessionId,
@@ -702,6 +817,47 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
     });
 
+    const memoryRetrievalResolution =
+      await resolveMemoryRetrievalResolution(
+        {
+          character,
+          query:
+            memoryRetrievalQuery,
+          candidate_memory_records:
+            authoritativeCandidateRecords,
+          candidate_evaluations:
+            memoryAccessibilityQuery
+              .result
+              .candidate_evaluations
+            ?? [],
+          perception,
+          character_state:
+            characterState,
+        },
+        options,
+      );
+
+    const memoryRetrievalProcess =
+      executeWorldSimulationMemoryRetrievalProcess({
+        query:
+          memoryRetrievalQuery,
+        candidate_memory_records:
+          authoritativeCandidateRecords,
+        resolution:
+          memoryRetrievalResolution.resolution,
+      });
+
+    memoryRetrievalProcesses.push({
+      observer:
+        character,
+      version:
+        worldSimulationMemoryRetrievalProcessVersion,
+      resolution_audit:
+        cloneJson(memoryRetrievalResolution.audit),
+      result:
+        cloneJson(memoryRetrievalProcess),
+    });
+
     // Step 2 preserves the legacy projector invocation for
     // compatibility and neural trace continuity, but its output
     // is engine-only in the native world-loop path.
@@ -764,10 +920,26 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
-    // Phase63C Step 2 installs the information barrier before
-    // the retrieval kernel itself exists. Therefore no candidate
-    // memory content is considered recovered yet.
-    const recoveredMemories = [];
+    // Phase63C Step 3 accepts only content that the actual
+    // retrieval kernel materialized from the frozen candidate set.
+    const recoveredMemories =
+      cloneJson(
+        memoryRetrievalProcess
+          .recovered_memories
+        ?? [],
+      );
+
+    const retrievalExperience =
+      cloneJson(
+        memoryRetrievalProcess
+          .retrieval_experience
+        ?? {
+          process_occurred: false,
+          initiation_mode: null,
+          target_outcome: null,
+          recovered_any_content: false,
+        },
+      );
 
     const cognition = await capability(
       sessionId,
@@ -779,6 +951,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
         recovered_memories:
           recoveredMemories,
+
+        retrieval_experience:
+          retrievalExperience,
 
         current_action:
           characterState.current_action
@@ -820,6 +995,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           recoveredMemories,
         ),
 
+      retrieval_experience:
+        cloneJson(
+          retrievalExperience,
+        ),
+
       cognition:
         cloneJson(
           cognition,
@@ -857,6 +1037,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         recovered_memory_count:
           recoveredMemories.length,
 
+        native_retrieval_process_execution_installed:
+          true,
+
+        retrieval_process_occurred:
+          retrievalExperience
+            .process_occurred
+          === true,
+
+        retrieval_target_outcome:
+          retrievalExperience
+            .target_outcome
+          ?? null,
+
         legacy_memory_projection_engine_only:
           true,
 
@@ -891,6 +1084,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     audibility_queries: audibilityQueries,
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
+    memory_retrieval_processes: memoryRetrievalProcesses,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
@@ -918,7 +1112,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       native_character_brain_memory_channel:
         "recovered_memories",
 
-      native_recovered_memories_default_empty_until_retrieval_kernel:
+      native_retrieval_process_execution_installed:
+        true,
+
+      missing_retrieval_resolver_means_no_process:
         true,
 
       legacy_projected_memory_content_forwarded_to_character_brain:
@@ -1440,6 +1637,15 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       retrieved_memories:
         packet.recovered_memories
         ?? [],
+
+      retrieval_experience:
+        packet.retrieval_experience
+        ?? {
+          process_occurred: false,
+          initiation_mode: null,
+          target_outcome: null,
+          recovered_any_content: false,
+        },
 
       cognition: packet.cognition,
       candidate_action_intents: packet.candidate_action_intents,
