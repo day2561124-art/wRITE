@@ -53,6 +53,7 @@ export const memoryRetrievalHistoryRoles =
     "recovered",
     "partially_recovered",
     "non_target_recovered",
+    "target_attempt_failed",
   ]);
 
 const initiationModeSet = new Set(memoryRetrievalInitiationModes);

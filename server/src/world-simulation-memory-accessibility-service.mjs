@@ -402,6 +402,186 @@ function recallFrequencyAccessibility(record, config) {
   return Math.min(1, count / saturationCount);
 }
 
+const phase63cCanonicalHistoryReferenceSchema =
+  "phase63c-retrieval-history-ref-v1";
+
+const phase63cLegacyBaselineSchema =
+  "phase63c-retrieval-history-legacy-baseline-v1";
+
+const phase63cSuccessfulHistoryRoles =
+  new Set([
+    "recovered",
+    "partially_recovered",
+    "non_target_recovered",
+  ]);
+
+function phase63cCanonicalHistoryReference(entry) {
+  return isObject(entry)
+    && entry.schema_version
+      === phase63cCanonicalHistoryReferenceSchema
+    && Boolean(nonEmptyString(entry.retrieval_event_id));
+}
+
+function phase63cLegacyBaseline(record) {
+  const baseline =
+    object(record?.retrieval_history_legacy_baseline);
+
+  return baseline.schema_version
+    === phase63cLegacyBaselineSchema
+      ? baseline
+      : null;
+}
+
+function phase63cCanonicalSuccessfulReferences(record) {
+  const seen = new Set();
+  const result = [];
+
+  for (const entry of retrievalHistoryEntries(record)) {
+    if (
+      !phase63cCanonicalHistoryReference(entry)
+      || !phase63cSuccessfulHistoryRoles.has(
+        nonEmptyString(entry.role),
+      )
+      || seen.has(entry.retrieval_event_id)
+    ) {
+      continue;
+    }
+
+    seen.add(entry.retrieval_event_id);
+    result.push(entry);
+  }
+
+  return result;
+}
+
+function phase63cResolveRetrievalEvent(reference, context) {
+  const eventId =
+    nonEmptyString(reference?.retrieval_event_id);
+
+  if (!eventId) return null;
+
+  const events =
+    object(context?.world_state?.retrieval_events);
+
+  const event =
+    events[eventId];
+
+  if (!isObject(event)) {
+    const error = new Error(
+      `Phase63B cannot resolve canonical RetrievalEvent ${eventId}.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_RETRIEVAL_HISTORY_REFERENCE_UNRESOLVED";
+    throw error;
+  }
+
+  if (
+    nonEmptyString(reference?.retrieval_event_hash)
+    !== nonEmptyString(event.retrieval_event_hash)
+  ) {
+    const error = new Error(
+      `Phase63B RetrievalEvent hash mismatch for ${eventId}.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_RETRIEVAL_HISTORY_REFERENCE_HASH_MISMATCH";
+    throw error;
+  }
+
+  return event;
+}
+
+function phase63cRecallCount(record) {
+  const baseline =
+    phase63cLegacyBaseline(record);
+
+  if (!baseline) {
+    return recallCount(record);
+  }
+
+  const baselineCount =
+    nonNegativeInteger(
+      baseline.successful_recall_count,
+      0,
+    )
+    ?? 0;
+
+  return baselineCount
+    + phase63cCanonicalSuccessfulReferences(record).length;
+}
+
+function phase63cLastSuccessfulRecallAt(record, context) {
+  const baseline =
+    phase63cLegacyBaseline(record);
+
+  if (!baseline) {
+    return lastSuccessfulRecallAt(record);
+  }
+
+  let latestValue =
+    baseline.last_successful_recall_at
+    ?? null;
+
+  let latestMs =
+    timestampMs(latestValue);
+
+  for (
+    const reference
+    of phase63cCanonicalSuccessfulReferences(record)
+  ) {
+    const event =
+      phase63cResolveRetrievalEvent(
+        reference,
+        context,
+      );
+
+    const candidate =
+      event?.occurred_at
+      ?? null;
+
+    const candidateMs =
+      timestampMs(candidate);
+
+    if (
+      candidateMs !== null
+      && (
+        latestMs === null
+        || candidateMs > latestMs
+      )
+    ) {
+      latestMs = candidateMs;
+      latestValue = candidate;
+    }
+  }
+
+  return latestValue;
+}
+
+function phase63cRecallFrequencyAccessibility(
+  record,
+  config,
+) {
+  const count =
+    phase63cRecallCount(record);
+
+  const saturationCount =
+    positiveInteger(config?.saturation_count);
+
+  if (
+    count === null
+    || saturationCount === null
+  ) {
+    return null;
+  }
+
+  return Math.min(1, count / saturationCount);
+}
+
+function phase63cRecallHistorySource(record) {
+  return phase63cLegacyBaseline(record)
+    ? "phase63c_canonical_history_with_legacy_baseline"
+    : legacyRecallHistorySource(record);
+}
+
 function primitiveCueValues(value) {
   const values = Array.isArray(value) ? value : [value];
   return values
@@ -1636,8 +1816,9 @@ function componentValue(record, component, context, profile, currentContext) {
     const recallAgeHours =
       elapsedHours(
         now,
-        lastSuccessfulRecallAt(
+        phase63cLastSuccessfulRecallAt(
           record,
+          context,
         ),
       );
 
@@ -1649,7 +1830,10 @@ function componentValue(record, component, context, profile, currentContext) {
     );
   }
   if (component === "recall_frequency") {
-    return recallFrequencyAccessibility(record, object(profile.recall_frequency));
+    return phase63cRecallFrequencyAccessibility(
+      record,
+      object(profile.recall_frequency),
+    );
   }
   if (component === "context_match") {
     return contextMatch(record, currentContext, object(profile.context_cue_weights)).value;
@@ -1800,18 +1984,19 @@ function evaluateMemory(record, originalIndex, candidates, context, profile, cur
           ?.simulation_time
         ?? null,
 
-        lastSuccessfulRecallAt(
+        phase63cLastSuccessfulRecallAt(
           record,
+          context,
         ),
       ),
 
     recall_count:
-      recallCount(
+      phase63cRecallCount(
         record,
       ),
 
     recall_history_source:
-      legacyRecallHistorySource(
+      phase63cRecallHistorySource(
         record,
       ),
 

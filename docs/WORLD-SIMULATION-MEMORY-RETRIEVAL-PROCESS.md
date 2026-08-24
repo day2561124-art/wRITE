@@ -502,3 +502,92 @@ Target satisfaction
 Technical execution limit
 != human cognitive stopping rule
 ```
+
+
+## Step 5 — Immutable RetrievalEvent Persistence
+
+Step 5 makes a completed retrieval process a persistent historical fact without inventing a universal psychological effect from retrieval.
+
+The authority chain is:
+
+```text
+completed RetrievalProcess
+→ canonical RetrievalEvent
+→ per-memory MemoryRecovery
+→ append-only retrieval-history references
+→ Phase62K authoritative mutation
+→ future turns may read history
+```
+
+Persistence itself does not strengthen or weaken memory, rewrite content or confidence, trigger retrieval-induced forgetting, or perform reconsolidation.
+
+### Actual search path only
+
+Canonical RetrievalEvent.search_steps stores only what actually happened:
+
+- frontier identity/hash/count evidence;
+- contacted memory refs;
+- recovered fragment and recovery-occurrence refs;
+- actually selected internally reinstated cues with source grounding;
+- cumulative target outcome;
+- actual continue/stop control action.
+
+The full candidate frontier and unselected reinstatement cue options are not persisted as if they were subjective history.
+
+### Per-memory recovery
+
+Global target outcome is not used as a substitute for per-memory recovery truth. A target can fail while non-target content is actually recovered.
+
+Each RetrievalEvent therefore stores MemoryRecovery records grouped by source memory. Failed grounded target attempts that produced no target content are indexed with the role `target_attempt_failed`.
+
+### Append-only references and legacy baseline
+
+Memory records keep lightweight retrieval-history references. Existing references are append-only and the pre-canonical legacy baseline is immutable.
+
+Compatibility summaries are rebuildable:
+
+```text
+recall_count
+= legacy baseline successful count
++ distinct canonical RetrievalEvents in which this memory produced content
+```
+
+RecoveryOccurrence count is not recall_count.
+
+### Phase62K enforcement
+
+`retrieval_events.<event_id>` is write-once. Existing events cannot be overwritten, edited through nested fields, or deleted.
+
+Existing memory retrieval-history entries cannot be removed, reordered, or rewritten. Direct nested writes to retrieval-history fields are rejected. These invariants are enforced by Phase62K rather than by an `immutable: true` label alone.
+
+### Turn ordering
+
+The native turn order becomes:
+
+```text
+Phase63B accessibility
+→ Phase63C retrieval
+→ Character Brain / action
+→ causal outcome
+→ RetrievalEvent/history persistence through Phase62K
+→ Phase63A current-turn memory formation
+→ Phase62K
+→ commit
+```
+
+Current-turn persisted retrieval history never reruns current-turn Phase63B. History becomes available only to future turns.
+
+### Step 5 invariant
+
+```text
+RetrievalEvent = immutable historical fact
+search_steps = actual path, not counterfactual options
+MemoryRecovery = per-memory recovery authority
+failed target attempt != no historical event
+RetrievalHistoryReference = append-only index
+legacy baseline = immutable pre-canonical summary
+recall_count = rebuildable compatibility cache
+RecoveryOccurrence != recall-count increment
+history exists != automatic accessibility effect
+retrieval != automatic strengthening / weakening / reconsolidation
+```

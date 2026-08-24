@@ -55,6 +55,11 @@ import {
   worldSimulationMemoryRetrievalProcessV3Version,
 } from "./world-simulation-memory-retrieval-multistep-service.mjs";
 import {
+  buildWorldSimulationMemoryRetrievalPersistence,
+  buildWorldSimulationMemoryRetrievalPersistenceContract,
+  worldSimulationMemoryRetrievalPersistenceVersion,
+} from "./world-simulation-memory-retrieval-persistence-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -435,6 +440,8 @@ export function buildWorldSimulationLoopContract() {
     subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
     subjective_memory_retrieval_process_step3_compatibility:
       buildWorldSimulationMemoryRetrievalProcessContract(),
+    subjective_memory_retrieval_persistence:
+      buildWorldSimulationMemoryRetrievalPersistenceContract(),
 
     memory_context_projection: {
       owner:
@@ -520,6 +527,15 @@ export function buildWorldSimulationLoopContract() {
 
       native_retrieval_process_execution_installed:
         true,
+
+      retrieval_event_persistence_installed:
+        true,
+
+      retrieval_event_persistence_version:
+        worldSimulationMemoryRetrievalPersistenceVersion,
+
+      same_cycle_retrieval_history_feedback_allowed:
+        false,
     },
 
     subjective_memory_retrieval_stage_resolution_hook: {
@@ -1621,6 +1637,68 @@ export async function resolveWorldSimulationTurn(
     };
   }
 
+  const retrievalOccurredAt =
+    array(preparedTurn.decision_packets)
+      .map((packet) =>
+        packet?.perception?.simulation_time
+        ?? null
+      )
+      .find((value) =>
+        value !== null
+        && value !== undefined
+      )
+    ?? preparedTurn.event?.simulation_time
+    ?? snapshot.state?.simulation_time
+    ?? null;
+
+  const subjectiveMemoryRetrievalPersistence =
+    buildWorldSimulationMemoryRetrievalPersistence({
+      world_state:
+        causalResolution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      occurred_at:
+        retrievalOccurredAt,
+      retrieval_processes:
+        preparedTurn.memory_retrieval_processes
+        ?? [],
+    });
+
+  const subjectiveMemoryRetrievalMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:retrieval_history`,
+      world_state_hash:
+        hashAgentRunValue(
+          causalResolution.next_world_state,
+        ),
+      state_transitions:
+        subjectiveMemoryRetrievalPersistence
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const subjectiveMemoryRetrievalMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        causalResolution.next_world_state,
+      preview_world_state:
+        subjectiveMemoryRetrievalPersistence
+          .result
+          .preview_world_state,
+      queue:
+        subjectiveMemoryRetrievalMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const retrievalPersistedWorldState =
+    subjectiveMemoryRetrievalMutationExecution
+      .next_world_state;
+
   const subjectiveMemoryEncodingDecisions =
     await resolveMemoryEncodingDecisions(
       preparedTurn,
@@ -1637,7 +1715,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveMemoryFormation =
     formWorldSimulationSubjectiveMemories({
       world_state:
-        causalResolution.next_world_state,
+        retrievalPersistedWorldState,
 
       turn_id:
         preparedTurn.turn_id,
@@ -1655,17 +1733,17 @@ export async function resolveWorldSimulationTurn(
         subjectiveMemoryEpisodeBindings.bindings,
     });
   const subjectiveMemoryPreview = applySubjectiveMemoryPreview(
-    causalResolution.next_world_state,
+    retrievalPersistedWorldState,
     subjectiveMemoryFormation.result,
   );
   const subjectiveMemoryMutationQueue = buildWorldSimulationChronologicalMutationQueue({
     turn_id: `${preparedTurn.turn_id}:subjective_memory`,
-    world_state_hash: hashAgentRunValue(causalResolution.next_world_state),
+    world_state_hash: hashAgentRunValue(retrievalPersistedWorldState),
     state_transitions: subjectiveMemoryFormation.result.memory_transitions,
     elapsed_ms: 0,
   });
   const subjectiveMemoryMutationExecution = executeWorldSimulationChronologicalMutationQueue({
-    world_state: causalResolution.next_world_state,
+    world_state: retrievalPersistedWorldState,
     preview_world_state: subjectiveMemoryPreview,
     queue: subjectiveMemoryMutationQueue,
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
@@ -1716,6 +1794,19 @@ export async function resolveWorldSimulationTurn(
           subjectiveMemoryEpisodeBindings,
         ),
 
+      subjective_memory_retrieval_persistence:
+        cloneJson(
+          subjectiveMemoryRetrievalPersistence,
+        ),
+      subjective_memory_retrieval_mutation_queue:
+        cloneJson(
+          subjectiveMemoryRetrievalMutationQueue,
+        ),
+      subjective_memory_retrieval_mutation_execution:
+        cloneJson(
+          subjectiveMemoryRetrievalMutationExecution.execution,
+        ),
+
       subjective_memory_formation:
         cloneJson(
           subjectiveMemoryFormation,
@@ -1748,6 +1839,28 @@ export async function resolveWorldSimulationTurn(
       cloneJson(
         subjectiveMemoryEpisodeBindings,
       ),
+
+    subjective_memory_retrieval_persistence: {
+      version:
+        worldSimulationMemoryRetrievalPersistenceVersion,
+      created_retrieval_event_count:
+        subjectiveMemoryRetrievalPersistence
+          .result
+          .retrieval_events_created
+          .length,
+      history_update_count:
+        subjectiveMemoryRetrievalPersistence
+          .result
+          .history_updates
+          .length,
+      mutation_count:
+        subjectiveMemoryRetrievalMutationQueue
+          .mutation_count,
+      authoritative_executor:
+        subjectiveMemoryRetrievalMutationExecution
+          .execution
+          .version,
+    },
 
     subjective_memory_formation: {
       version: worldSimulationSubjectiveMemoryFormationVersion,

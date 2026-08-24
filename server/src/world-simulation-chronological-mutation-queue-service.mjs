@@ -289,6 +289,161 @@ function getAtPath(root, pathParts) {
   return value;
 }
 
+const phase63cRetrievalHistoryProtectedFields = new Set([
+  "retrieval_history",
+  "retrieval_history_legacy_baseline",
+]);
+
+function phase63cMemoryId(record) {
+  return String(record?.memory_id ?? record?.id ?? "").trim();
+}
+
+function assertRetrievalHistoryPrefix(oldHistory, newHistory, memoryId) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      `Retrieval history for ${memoryId} is append-only.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        `Retrieval history for ${memoryId} changed an existing entry or order.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_RETRIEVAL_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function assertPhase63CRetrievalPersistenceMutation(
+  worldState,
+  worldPath,
+  mutation,
+) {
+  if (worldPath[0] === "retrieval_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "RetrievalEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_RETRIEVAL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId = String(worldPath[1] ?? "");
+    const existing = getAtPath(worldState, worldPath);
+
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `RetrievalEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_RETRIEVAL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next = mutation?.to;
+
+    if (
+      !isObject(next)
+      || next.immutable !== true
+      || String(next.retrieval_event_id ?? "") !== eventId
+      || !String(next.retrieval_event_hash ?? "").trim()
+    ) {
+      const error = new Error(
+        `RetrievalEvent ${eventId} creation payload is not a valid immutable event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_RETRIEVAL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    return;
+  }
+
+  if (worldPath[0] !== "memories") return;
+
+  if (
+    worldPath.length > 2
+    && worldPath.some((part) =>
+      phase63cRetrievalHistoryProtectedFields.has(String(part))
+    )
+  ) {
+    const error = new Error(
+      "Retrieval history and legacy baselines may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  if (worldPath.length !== 2) return;
+
+  const beforeRecords = array(getAtPath(worldState, worldPath));
+  const afterRecords = array(mutation?.to);
+  const afterById = new Map(
+    afterRecords
+      .map((record) => [phase63cMemoryId(record), record])
+      .filter(([memoryId]) => memoryId),
+  );
+
+  for (const beforeRecord of beforeRecords) {
+    const memoryId = phase63cMemoryId(beforeRecord);
+    if (!memoryId) continue;
+
+    const oldHistory = array(beforeRecord?.retrieval_history);
+    const oldBaseline =
+      beforeRecord?.retrieval_history_legacy_baseline;
+
+    const hasProtectedHistory =
+      oldHistory.length > 0
+      || oldBaseline !== undefined;
+
+    const afterRecord = afterById.get(memoryId);
+
+    if (!afterRecord) {
+      if (hasProtectedHistory) {
+        const error = new Error(
+          `Memory ${memoryId} with persisted retrieval history cannot be removed by a generic memory-array mutation.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_RETRIEVAL_HISTORY_APPEND_ONLY_VIOLATION";
+        throw error;
+      }
+      continue;
+    }
+
+    assertRetrievalHistoryPrefix(
+      oldHistory,
+      afterRecord?.retrieval_history,
+      memoryId,
+    );
+
+    if (
+      oldBaseline !== undefined
+      && !sameValue(
+        oldBaseline,
+        afterRecord?.retrieval_history_legacy_baseline,
+      )
+    ) {
+      const error = new Error(
+        `Retrieval legacy baseline for ${memoryId} is immutable.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_RETRIEVAL_HISTORY_LEGACY_BASELINE_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -359,6 +514,11 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         error.actual_from = cloneJson(before);
         throw error;
       }
+      assertPhase63CRetrievalPersistenceMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -409,6 +569,11 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         error.actual_from = cloneJson(before);
         throw error;
       }
+      assertPhase63CRetrievalPersistenceMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -486,6 +651,10 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       subsystem_mutations_are_ephemeral_preview_only: true,
       unqueued_preview_state_changes_rejected: true,
       mutation_preconditions_checked_at_apply_time: true,
+      phase63c_retrieval_event_write_once_enforced: true,
+      phase63c_retrieval_history_append_only_enforced: true,
+      phase63c_retrieval_history_legacy_baseline_immutable: true,
+      direct_nested_retrieval_history_mutation_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
