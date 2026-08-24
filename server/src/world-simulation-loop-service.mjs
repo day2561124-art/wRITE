@@ -24,6 +24,11 @@ import {
   worldSimulationIlluminationVisibilityVersion,
 } from "./world-simulation-illumination-visibility-service.mjs";
 import {
+  buildWorldSimulationAudibilityQueryContract,
+  queryWorldSimulationObserverAudibility,
+  worldSimulationAudibilityQueryVersion,
+} from "./world-simulation-audibility-query-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -190,9 +195,11 @@ export function buildWorldSimulationLoopContract() {
     visibility_and_occlusion: buildWorldSimulationVisibilityQueryContract(),
     directional_height_visibility: buildWorldSimulationDirectionalHeightVisibilityContract(),
     illumination_visibility: buildWorldSimulationIlluminationVisibilityContract(),
+    audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     character_perception_visuals_use_programmatic_visibility: true,
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
+    character_perception_audio_uses_programmatic_audibility: true,
     built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
     custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
@@ -215,6 +222,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const visibilityQueries = [];
   const directionalHeightVisibilityQueries = [];
   const illuminationVisibilityQueries = [];
+  const audibilityQueries = [];
 
   const sceneAnalysis = await capability(
     sessionId,
@@ -271,6 +279,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       result: cloneJson(illuminationVisibilityQuery.result),
       audit: cloneJson(illuminationVisibilityQuery.audit),
     });
+    const audibilityQuery = queryWorldSimulationObserverAudibility({
+      world_state: worldState,
+      scene_state: sceneState,
+      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
+      observer: character,
+    });
+    audibilityQueries.push({
+      observer: character,
+      version: audibilityQuery.audibility_query_version,
+      result: cloneJson(audibilityQuery.result),
+      audit: cloneJson(audibilityQuery.audit),
+    });
     const perception = await capability(
       sessionId,
       "world_perception_filter",
@@ -287,6 +307,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
           visual_observations: cloneJson(
             illuminationVisibilityQuery.result.perception_visual_observations,
+          ),
+        },
+        programmatic_audibility: {
+          enforced: audibilityQuery.result.audibility_enforced === true,
+          version: audibilityQuery.audibility_query_version,
+          auditory_observations: cloneJson(
+            audibilityQuery.result.perception_auditory_observations,
           ),
         },
       },
@@ -342,7 +369,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         programmatic_visibility_enforced: true,
         directional_height_visibility_enforced: true,
         illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
+        programmatic_audibility_enforced: audibilityQuery.result.audibility_enforced === true,
         engine_visibility_target_ids_exposed: false,
+        engine_sound_source_ids_exposed: false,
       },
     });
   }
@@ -367,6 +396,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
+    audibility_queries: audibilityQueries,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
@@ -375,7 +405,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       programmatic_visibility_query_version: worldSimulationVisibilityQueryVersion,
       directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,
       illumination_visibility_query_version: worldSimulationIlluminationVisibilityVersion,
+      audibility_query_version: worldSimulationAudibilityQueryVersion,
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
+      sound_engine_source_ids_not_forwarded_to_character_brain: true,
     },
   };
 }
@@ -489,6 +521,7 @@ export async function resolveWorldSimulationTurn(
         preparedTurn.directional_height_visibility_queries ?? [],
       ),
       illumination_visibility_queries: cloneJson(preparedTurn.illumination_visibility_queries ?? []),
+      audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },
