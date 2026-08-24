@@ -14,6 +14,11 @@ import {
   worldSimulationVisibilityQueryVersion,
 } from "./world-simulation-visibility-query-service.mjs";
 import {
+  buildWorldSimulationDirectionalHeightVisibilityContract,
+  queryWorldSimulationObserverDirectionalHeightVisibility,
+  worldSimulationDirectionalHeightVisibilityVersion,
+} from "./world-simulation-directional-height-visibility-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -178,7 +183,9 @@ export function buildWorldSimulationLoopContract() {
     neural_capabilities_may_mutate_world_state: false,
     causal_adjudicator_required: true,
     visibility_and_occlusion: buildWorldSimulationVisibilityQueryContract(),
+    directional_height_visibility: buildWorldSimulationDirectionalHeightVisibilityContract(),
     character_perception_visuals_use_programmatic_visibility: true,
+    character_perception_visuals_use_directional_height_visibility: true,
     built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
     custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
@@ -199,6 +206,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const participants = participantsForEvent(worldState, event);
   const traceIds = [];
   const visibilityQueries = [];
+  const directionalHeightVisibilityQueries = [];
 
   const sceneAnalysis = await capability(
     sessionId,
@@ -231,6 +239,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       result: cloneJson(visibilityQuery.result),
       audit: cloneJson(visibilityQuery.audit),
     });
+    const directionalHeightVisibilityQuery = queryWorldSimulationObserverDirectionalHeightVisibility({
+      world_state: worldState,
+      scene_state: sceneState,
+      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
+      observer: character,
+    });
+    directionalHeightVisibilityQueries.push({
+      observer: character,
+      version: directionalHeightVisibilityQuery.directional_height_visibility_version,
+      result: cloneJson(directionalHeightVisibilityQuery.result),
+      audit: cloneJson(directionalHeightVisibilityQuery.audit),
+    });
     const perception = await capability(
       sessionId,
       "world_perception_filter",
@@ -240,8 +260,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         simulation_time: worldState.simulation_time ?? event.simulation_time ?? null,
         programmatic_visibility: {
           enforced: true,
-          version: visibilityQuery.visibility_query_version,
-          visual_observations: cloneJson(visibilityQuery.result.perception_visual_observations),
+          version: directionalHeightVisibilityQuery.directional_height_visibility_version,
+          base_visibility_version: visibilityQuery.visibility_query_version,
+          directional_height_visibility_enforced: true,
+          visual_observations: cloneJson(
+            directionalHeightVisibilityQuery.result.perception_visual_observations,
+          ),
         },
       },
       options,
@@ -294,6 +318,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         may_choose_action_intent_only: true,
         may_decide_outcome: false,
         programmatic_visibility_enforced: true,
+        directional_height_visibility_enforced: true,
         engine_visibility_target_ids_exposed: false,
       },
     });
@@ -317,12 +342,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     scene_analysis: cloneJson(sceneAnalysis),
     decision_packets: decisionPackets,
     visibility_queries: visibilityQueries,
+    directional_height_visibility_queries: directionalHeightVisibilityQueries,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
       character_brain_selects_intent_only: true,
       causal_adjudicator_has_exclusive_outcome_authority: true,
       programmatic_visibility_query_version: worldSimulationVisibilityQueryVersion,
+      directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
     },
   };
@@ -433,6 +460,9 @@ export async function resolveWorldSimulationTurn(
       causal_epochs: cloneJson(causalResolution.causal_epochs ?? null),
       fixed_point_convergence: cloneJson(causalResolution.fixed_point_convergence ?? null),
       visibility_queries: cloneJson(preparedTurn.visibility_queries ?? []),
+      directional_height_visibility_queries: cloneJson(
+        preparedTurn.directional_height_visibility_queries ?? [],
+      ),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },

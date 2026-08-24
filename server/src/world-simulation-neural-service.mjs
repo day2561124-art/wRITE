@@ -289,6 +289,8 @@ function buildWorldPerceptionPacket(input = {}) {
   const sensory = object(input.sensory_inputs);
   const programmaticVisibility = object(input.programmatic_visibility);
   const visibilityEnforced = programmaticVisibility.enforced === true;
+  const directionalHeightVisibilityEnforced = visibilityEnforced
+    && programmaticVisibility.directional_height_visibility_enforced === true;
 
   const observed = [
     ...array(observations.visual),
@@ -329,9 +331,12 @@ function buildWorldPerceptionPacket(input = {}) {
       private_device_contents_read: false,
       through_wall_vision: false,
       programmatic_visibility_enforced: visibilityEnforced,
+      directional_height_visibility_enforced: directionalHeightVisibilityEnforced,
       raw_scene_visual_sources_bypassed_when_visibility_enforced: visibilityEnforced,
       rule: visibilityEnforced
-        ? "Visual inputs are supplied by the programmatic visibility/occlusion query. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+        ? directionalHeightVisibilityEnforced
+          ? "Visual inputs are supplied by programmatic line-of-sight, directional FOV, and explicit-height occlusion queries. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
+          : "Visual inputs are supplied by the programmatic visibility/occlusion query. Raw scene visual sources are bypassed; audio and other senses remain observer-scoped inputs."
         : "Only explicit observations, sensory inputs, observer-scoped observable_by/perception_by data, and public scene signals may enter this packet.",
     },
   };

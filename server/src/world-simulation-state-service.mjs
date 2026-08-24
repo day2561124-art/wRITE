@@ -272,6 +272,7 @@ export async function commitWorldSimulationTurn(
             causal_epochs: input.causal_epochs ?? null,
             fixed_point_convergence: input.fixed_point_convergence ?? null,
             visibility_queries: input.visibility_queries ?? [],
+            directional_height_visibility_queries: input.directional_height_visibility_queries ?? [],
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });
