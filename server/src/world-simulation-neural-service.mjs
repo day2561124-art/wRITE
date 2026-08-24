@@ -111,9 +111,9 @@ export const worldSimulationCapabilityContracts = Object.freeze({
   }),
   world_memory_retriever: Object.freeze({
     module: "world_memory_retriever",
-    purpose: "Return accessible character memories with provenance, confidence, clarity, and age preserved; never convert memory into world truth.",
+    purpose: "Return character memories selected by explicit accessibility rules while preserving provenance, confidence, and clarity; never convert memory into world truth or expose hidden retrieval-strength diagnostics.",
     required_inputs: Object.freeze(["character", "memory_records"]),
-    optional_inputs: Object.freeze(["query", "max_items"]),
+    optional_inputs: Object.freeze(["query", "max_items", "programmatic_memory_accessibility"]),
     returns: Object.freeze([
       "character",
       "retrieved_memories",
@@ -391,7 +391,12 @@ function buildWorldMemoryRetrieval(input = {}) {
   const requestedMax = Number.isSafeInteger(input.max_items)
     ? Math.min(32, Math.max(1, input.max_items))
     : 12;
-  const accessible = array(input.memory_records)
+  const programmaticAccessibility = object(input.programmatic_memory_accessibility);
+  const programmaticAccessibilityEnforced = programmaticAccessibility.enforced === true;
+  const sourceRecords = programmaticAccessibilityEnforced
+    ? array(programmaticAccessibility.memory_records)
+    : array(input.memory_records);
+  const accessible = sourceRecords
     .filter((record) => isObject(record) && record.accessible !== false && record.suppressed !== true)
     .slice(0, requestedMax)
     .map(normalizedMemory);
@@ -413,6 +418,10 @@ function buildWorldMemoryRetrieval(input = {}) {
       memory_type_preserved: true,
       confidence_and_clarity_origin_preserved: true,
       inaccessible_records_excluded: true,
+      programmatic_memory_accessibility_enforced: programmaticAccessibilityEnforced,
+      programmatic_memory_accessibility_version: programmaticAccessibility.version ?? null,
+      retrieval_strength_scores_exposed_to_character_brain: false,
+      storage_strength_is_not_rewritten_as_retrieval_strength: true,
     },
   };
 }

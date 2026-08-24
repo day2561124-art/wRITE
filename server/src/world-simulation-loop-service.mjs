@@ -38,6 +38,11 @@ import {
   worldSimulationSubjectiveMemoryFormationVersion,
 } from "./world-simulation-subjective-memory-formation-service.mjs";
 import {
+  buildWorldSimulationMemoryAccessibilityContract,
+  queryWorldSimulationMemoryAccessibility,
+  worldSimulationMemoryAccessibilityVersion,
+} from "./world-simulation-memory-accessibility-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -218,6 +223,7 @@ export function buildWorldSimulationLoopContract() {
     illumination_visibility: buildWorldSimulationIlluminationVisibilityContract(),
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
+    subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     character_perception_visuals_use_programmatic_visibility: true,
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
@@ -245,6 +251,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const directionalHeightVisibilityQueries = [];
   const illuminationVisibilityQueries = [];
   const audibilityQueries = [];
+  const memoryAccessibilityQueries = [];
 
   const sceneAnalysis = await capability(
     sessionId,
@@ -342,6 +349,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
+    const memoryAccessibilityQuery = queryWorldSimulationMemoryAccessibility({
+      world_state: worldState,
+      character,
+      memory_records: memories,
+      simulation_time: worldState.simulation_time ?? event.simulation_time ?? null,
+      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
+      perception,
+      context_cues: object(event.memory_context_cues),
+    });
+    memoryAccessibilityQueries.push({
+      observer: character,
+      version: memoryAccessibilityQuery.memory_accessibility_version,
+      result: cloneJson(memoryAccessibilityQuery.result),
+      audit: cloneJson(memoryAccessibilityQuery.audit),
+    });
     const memoryRetrieval = await capability(
       sessionId,
       "world_memory_retriever",
@@ -349,6 +371,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         character,
         memory_records: memories,
         query: event.memory_query ?? event.summary ?? event.type ?? null,
+        max_items: memoryAccessibilityQuery.result.configured_max_items ?? undefined,
+        programmatic_memory_accessibility: {
+          enforced: memoryAccessibilityQuery.result.accessibility_enforced === true,
+          version: memoryAccessibilityQuery.memory_accessibility_version,
+          memory_records: cloneJson(memoryAccessibilityQuery.result.retrievable_memory_records),
+        },
       },
       options,
       traceIds,
@@ -392,6 +420,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         directional_height_visibility_enforced: true,
         illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
         programmatic_audibility_enforced: audibilityQuery.result.audibility_enforced === true,
+        programmatic_memory_accessibility_enforced: memoryAccessibilityQuery.result.accessibility_enforced === true,
+        memory_retrieval_strength_scores_exposed: false,
         engine_visibility_target_ids_exposed: false,
         engine_sound_source_ids_exposed: false,
       },
@@ -419,6 +449,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
     audibility_queries: audibilityQueries,
+    memory_accessibility_queries: memoryAccessibilityQueries,
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
@@ -429,7 +460,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       illumination_visibility_query_version: worldSimulationIlluminationVisibilityVersion,
       audibility_query_version: worldSimulationAudibilityQueryVersion,
       subjective_memory_formation_version: worldSimulationSubjectiveMemoryFormationVersion,
+      subjective_memory_accessibility_version: worldSimulationMemoryAccessibilityVersion,
       subjective_memory_uses_bounded_perception_only: true,
+      memory_accessibility_scores_not_forwarded_to_character_brain: true,
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
       sound_engine_source_ids_not_forwarded_to_character_brain: true,
     },
@@ -569,6 +602,7 @@ export async function resolveWorldSimulationTurn(
       ),
       illumination_visibility_queries: cloneJson(preparedTurn.illumination_visibility_queries ?? []),
       audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
+      memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
       subjective_memory_formation: cloneJson(subjectiveMemoryFormation),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
