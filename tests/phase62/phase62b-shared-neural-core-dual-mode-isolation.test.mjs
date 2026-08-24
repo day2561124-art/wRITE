@@ -157,6 +157,7 @@ try {
   assert.equal(worldRun.mode, "chatgpt_owned_world_simulation");
 
   let worldAdapterContext = null;
+  let worldAdapterEnvelope = null;
   const worldCharacter = await useWorldSimulationCapability(
     "world_character_cognition",
     {
@@ -175,18 +176,12 @@ try {
     },
     {
       ...options,
-      adapter: async (_input, context) => {
+      adapter: async (envelope, context) => {
         worldAdapterContext = context;
+        worldAdapterEnvelope = envelope;
         return {
-          result_type: "world_character_cognition",
-          character: "伊萊亞斯・諾爾",
-          known: ["現在人在第三實習室"],
-          uncertain: ["下一項測試可能延後"],
-          goals: ["完成當前測試"],
-          decision_pressures: ["時間"],
-          cognition_boundary: {
-            no_outcome_selection: true,
-          },
+          subjective_inferences: ["下一項測試可能延後"],
+          deliberative_pressures: ["時間"],
         };
       },
     },
@@ -211,6 +206,29 @@ try {
   assert.equal(
     worldAdapterContext.shared_capability_family,
     "character_cognition",
+  );
+  assert.equal(
+    worldAdapterContext.adapter_contract,
+    "neural_extension_only",
+  );
+  assert.equal(
+    worldAdapterEnvelope.capability_name,
+    "world_character_cognition",
+  );
+  assert.equal(
+    Object.hasOwn(
+      worldAdapterEnvelope.authorized_inputs.protected_base,
+      "character_state",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    worldCharacter.output.known,
+    ["現在人在第三實習室"],
+  );
+  assert.deepEqual(
+    worldCharacter.output.neural_extension.subjective_inferences,
+    ["下一項測試可能延後"],
   );
 
   const worldTrace = await getNeuralTrace(

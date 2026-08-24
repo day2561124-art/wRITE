@@ -6,7 +6,7 @@ import {
   buildWorldSimulationCausalRuleContract,
 } from "./world-simulation-causal-rule-engine.mjs";
 import {
-  runWorldSimulationCapability,
+  runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
   buildWorldSimulationVisibilityQueryContract,
@@ -282,7 +282,7 @@ function memoryProjectionPolicyFor(
 }
 
 async function capability(sessionId, name, input, options, traceIds) {
-  const result = await runWorldSimulationCapability(
+  const result = await runWorldSimulationNativeCapability(
     name,
     input,
     runOptions(options, sessionId, `world_simulation_loop:${name}`),
@@ -429,6 +429,10 @@ export function buildWorldSimulationLoopContract() {
     causal_outcome_owner: "programmatic_causal_adjudicator",
     commit_policy: "consistency_critic_must_report_zero_hard_conflicts",
     character_brain_receives_world_truth: false,
+    character_brain_receives_engine_simulation_time: false,
+    character_brain_receives_engine_scene_id: false,
+    character_brain_receives_capability_runtime_metadata: false,
+    character_facing_capability_envelopes_enforced: true,
     neural_capabilities_may_mutate_world_state: false,
     causal_adjudicator_required: true,
     visibility_and_occlusion: buildWorldSimulationVisibilityQueryContract(),
@@ -812,6 +816,17 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
+    const characterPerception = cloneJson(
+      perception.character_view
+      ?? {
+        character,
+        observed: perception.observed ?? [],
+        audible: perception.audible ?? [],
+        other_senses: perception.other_senses ?? [],
+        information_boundary: perception.information_boundary ?? {},
+      },
+    );
+
     const memoryAccessibilityBaseInput = {
       world_state:
         cloneJson(
@@ -833,7 +848,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ?? null,
       perception:
         cloneJson(
-          perception,
+          characterPerception,
         ),
 
       context_cues:
@@ -924,7 +939,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             stagedMemoryRetrievalResolver,
           technical_step_budget:
             options.memoryRetrievalTechnicalStepBudget,
-          perception,
+          perception:
+            characterPerception,
           character_state:
             characterState,
         });
@@ -991,7 +1007,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
                 .result
                 .candidate_evaluations
               ?? [],
-            perception,
+            perception:
+              characterPerception,
             character_state:
               characterState,
           },
@@ -1131,7 +1148,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       {
         character,
         character_state: characterState,
-        perception,
+        perception: characterPerception,
 
         recovered_memories:
           recoveredMemories,
@@ -1146,24 +1163,32 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
+    const characterCognition = cloneJson(
+      cognition.character_view
+      ?? cognition,
+    );
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
       {
         character,
         available_actions: availableActions,
-        cognition,
+        cognition: characterCognition,
         current_action: characterState.current_action ?? null,
       },
       options,
       traceIds,
+    );
+    const characterActionCandidates = cloneJson(
+      actionCandidates.character_view
+      ?? actionCandidates,
     );
     decisionPackets.push({
       character,
 
       perception:
         cloneJson(
-          perception,
+          characterPerception,
         ),
 
       recovered_memories:
@@ -1186,11 +1211,24 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
       cognition:
         cloneJson(
-          cognition,
+          characterCognition,
         ),
-      candidate_action_intents: cloneJson(actionCandidates.candidate_action_intents),
+      candidate_action_intents:
+        cloneJson(
+          characterActionCandidates.candidate_action_intents,
+        ),
+      action_consideration:
+        cloneJson(
+          characterActionCandidates.neural_consideration
+          ?? null,
+        ),
       boundaries: {
         world_truth_exposed: false,
+        r1_character_facing_envelopes_enforced: true,
+        engine_simulation_time_exposed: false,
+        engine_scene_id_exposed: false,
+        capability_contract_metadata_exposed: false,
+        capability_runtime_metadata_exposed: false,
         may_choose_action_intent_only: true,
         may_decide_outcome: false,
         programmatic_visibility_enforced: true,
@@ -1273,6 +1311,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
       character_brain_selects_intent_only: true,
+      character_brain_receives_engine_simulation_time: false,
+      character_brain_receives_engine_scene_id: false,
+      character_brain_receives_capability_runtime_metadata: false,
+      character_facing_capability_envelopes_enforced: true,
       causal_adjudicator_has_exclusive_outcome_authority: true,
       programmatic_visibility_query_version: worldSimulationVisibilityQueryVersion,
       directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,

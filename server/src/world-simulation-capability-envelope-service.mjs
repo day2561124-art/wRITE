@@ -19,6 +19,7 @@ export const worldSimulationCapabilityClaimDomains = Object.freeze([
   "perception",
   "character_subjective_state",
   "memory_recovery",
+  "memory_projection",
   "action_candidate",
   "narrative_control",
   "diagnostic",
@@ -130,7 +131,7 @@ const policies = Object.freeze({
     purpose: "legacy_memory_projection_compatibility",
     output_pattern: "authorized_source_ref_selection",
     allowed_claim_domains: Object.freeze([
-      "memory_recovery",
+      "memory_projection",
       "character_subjective_state",
     ]),
     protected_result_channels: Object.freeze([

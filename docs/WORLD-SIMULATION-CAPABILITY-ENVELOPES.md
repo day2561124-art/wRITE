@@ -132,3 +132,22 @@ Step 1 does not claim to:
 ## Runtime adoption
 
 Step 1 is contract-only. Existing Phase62A/62B/62C runtime paths remain unchanged until later R1 adoption steps.
+
+
+## Step 2 — Character-facing runtime adoption
+
+Step 2 moves the Step 1 envelope contract into the live character-facing capability path. The trusted deterministic builder now executes before any optional neural adapter for perception, legacy memory projection, character cognition, and action proposal. The neural adapter receives only an AdapterEnvelope and returns an extension; it no longer authors the full trusted capability result.
+
+Native world-loop calls use `native_engine_verified`; direct/session compatibility calls use `direct_caller_asserted`. Capability payloads cannot self-promote assurance. Invalid optional native neural extensions are discarded while the trusted base survives; explicitly requested direct adapters fail closed.
+
+### Character views
+
+Perception and cognition now expose dedicated character views. Exact engine `simulation_time`, internal `scene_id`, capability contracts, R1 runtime metadata, raw scene state, and full character state are not forwarded into the Character Brain packet. A character can know time or location only through subjective evidence such as a visible clock, an announcement, memory, or other authorized cognition.
+
+### Memory terminology
+
+Legacy `world_memory_retriever` output is `memory_projection`, not `memory_recovery`. Actual recovery remains owned by Phase63C. Neural selection/order in the compatibility projector cannot change Phase63B candidates, Phase63C recovered memories, or retrieval history.
+
+### Action authority
+
+Neural action consideration may rank or deprioritize refs from the trusted candidate catalog. It does not add candidates, delete candidates, choose the final action, or decide outcomes. The complete trusted `candidate_action_intents` set remains available to the Character Brain until the future attempt-affordance phase replaces the static catalog.
