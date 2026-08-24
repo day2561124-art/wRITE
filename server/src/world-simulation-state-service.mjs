@@ -276,6 +276,8 @@ export async function commitWorldSimulationTurn(
             illumination_visibility_queries: input.illumination_visibility_queries ?? [],
             audibility_queries: input.audibility_queries ?? [],
             memory_accessibility_queries: input.memory_accessibility_queries ?? [],
+            subjective_memory_encoding_decisions: input.subjective_memory_encoding_decisions ?? null,
+            subjective_memory_episode_bindings: input.subjective_memory_episode_bindings ?? null,
             subjective_memory_formation: input.subjective_memory_formation ?? null,
             subjective_memory_mutation_queue: input.subjective_memory_mutation_queue ?? null,
             subjective_memory_mutation_execution: input.subjective_memory_mutation_execution ?? null,

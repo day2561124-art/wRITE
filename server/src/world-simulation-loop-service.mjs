@@ -224,6 +224,63 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
+
+    subjective_memory_encoding_decision_hook: {
+      owner:
+        "programmatic_memory_encoding_decider",
+
+      optional: true,
+
+      receives_world_state:
+        false,
+
+      receives_full_world_event:
+        false,
+
+      receives_bounded_perception:
+        true,
+
+      receives_bounded_cognition:
+        true,
+
+      character_brain_direct_encoding_control_allowed:
+        false,
+
+      missing_hook_preserves_legacy_encoding:
+        true,
+    },
+
+    subjective_memory_episode_binding_hook: {
+      owner:
+        "programmatic_subjective_episode_binder",
+
+      optional:
+        true,
+
+      receives_world_state:
+        false,
+
+      receives_full_world_event:
+        false,
+
+      receives_bounded_perception:
+        true,
+
+      receives_bounded_cognition:
+        true,
+
+      receives_encoding_decisions:
+        true,
+
+      automatic_event_segmentation:
+        false,
+
+      world_event_id_auto_used_as_episode_id:
+        false,
+
+      character_brain_direct_episode_binding_allowed:
+        false,
+    },
     character_perception_visuals_use_programmatic_visibility: true,
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
@@ -469,6 +526,247 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   };
 }
 
+async function resolveMemoryEncodingDecisions(
+  preparedTurn,
+  options,
+) {
+  const decider =
+    typeof options.memoryEncodingDecider === "function"
+      ? options.memoryEncodingDecider
+      : null;
+
+  if (!decider) {
+    return {
+      decisions: [],
+      audit: {
+        decider_used: false,
+
+        missing_decider_preserved_legacy_encoding:
+          true,
+
+        bounded_character_information_only:
+          true,
+
+        world_state_exposed_to_decider:
+          false,
+
+        full_world_event_exposed_to_decider:
+          false,
+
+        character_brain_direct_memory_mutation_allowed:
+          false,
+      },
+    };
+  }
+
+  // The encoding decider receives only already-bounded
+  // per-character information.
+  //
+  // It does NOT receive:
+  // - World State
+  // - scene state
+  // - raw event payload
+  // - hidden causal data
+  const input = {
+    turn_id:
+      preparedTurn.turn_id,
+
+    character_packets:
+      array(preparedTurn.decision_packets)
+        .map((packet) => ({
+          character:
+            packet.character
+            ?? null,
+
+          perception:
+            cloneJson(
+              packet.perception
+              ?? {},
+            ),
+
+          cognition:
+            cloneJson(
+              packet.cognition
+              ?? {},
+            ),
+        })),
+  };
+
+  const inputSnapshot =
+    cloneJson(input);
+
+  const inputHash =
+    hashAgentRunValue(inputSnapshot);
+
+  // The decider receives a detached clone. Any mutation
+  // performed by the callee cannot mutate engine-owned input.
+  const raw =
+    await decider(
+      cloneJson(inputSnapshot),
+    );
+
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "memoryEncodingDecider must return an array of explicit encoding decisions.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_ENCODING_DECIDER_INVALID_OUTPUT";
+
+    throw error;
+  }
+
+  return {
+    decisions:
+      cloneJson(raw),
+
+    audit: {
+      decider_used: true,
+
+      input_context_hash:
+        inputHash,
+
+      decision_count:
+        raw.length,
+
+      bounded_character_information_only:
+        true,
+
+      world_state_exposed_to_decider:
+        false,
+
+      full_world_event_exposed_to_decider:
+        false,
+
+      character_brain_direct_memory_mutation_allowed:
+        false,
+    },
+  };
+}
+
+async function resolveMemoryEpisodeBindings(
+  preparedTurn,
+  encodingDecisions,
+  options,
+) {
+  const binder =
+    typeof options.memoryEpisodeBinder === "function"
+      ? options.memoryEpisodeBinder
+      : null;
+
+  if (!binder) {
+    return {
+      bindings: [],
+
+      audit: {
+        binder_used:
+          false,
+
+        automatic_segmentation_used:
+          false,
+
+        world_state_exposed_to_binder:
+          false,
+
+        full_world_event_exposed_to_binder:
+          false,
+
+        world_event_identity_auto_used:
+          false,
+
+        missing_binder_preserves_unbound_atomic_traces:
+          true,
+      },
+    };
+  }
+
+  const input = {
+    turn_id:
+      preparedTurn.turn_id,
+
+    character_packets:
+      array(preparedTurn.decision_packets)
+        .map((packet) => ({
+          character:
+            packet.character
+            ?? null,
+
+          perception:
+            cloneJson(
+              packet.perception
+              ?? {},
+            ),
+
+          cognition:
+            cloneJson(
+              packet.cognition
+              ?? {},
+            ),
+        })),
+
+    encoding_decisions:
+      cloneJson(
+        encodingDecisions.decisions
+        ?? [],
+      ),
+  };
+
+  const inputSnapshot =
+    cloneJson(input);
+
+  const inputHash =
+    hashAgentRunValue(inputSnapshot);
+
+  // The binder receives a detached clone. Any mutation
+  // performed by the callee cannot mutate engine-owned input.
+  const raw =
+    await binder(
+      cloneJson(inputSnapshot),
+    );
+
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "memoryEpisodeBinder must return an array of explicit subjective episode bindings.",
+    );
+
+    error.code =
+      "WORLD_SIMULATION_MEMORY_EPISODE_BINDER_INVALID_OUTPUT";
+
+    throw error;
+  }
+
+  return {
+    bindings:
+      cloneJson(raw),
+
+    audit: {
+      binder_used:
+        true,
+
+      input_context_hash:
+        inputHash,
+
+      binding_count:
+        raw.length,
+
+      automatic_segmentation_used:
+        false,
+
+      world_state_exposed_to_binder:
+        false,
+
+      full_world_event_exposed_to_binder:
+        false,
+
+      world_event_identity_auto_used:
+        false,
+
+      character_brain_direct_episode_binding_allowed:
+        false,
+    },
+  };
+}
+
 export async function resolveWorldSimulationTurn(
   preparedTurn,
   selectedActions,
@@ -546,12 +844,39 @@ export async function resolveWorldSimulationTurn(
     };
   }
 
-  const subjectiveMemoryFormation = formWorldSimulationSubjectiveMemories({
-    world_state: causalResolution.next_world_state,
-    turn_id: preparedTurn.turn_id,
-    event: preparedTurn.event,
-    decision_packets: preparedTurn.decision_packets,
-  });
+  const subjectiveMemoryEncodingDecisions =
+    await resolveMemoryEncodingDecisions(
+      preparedTurn,
+      options,
+    );
+
+  const subjectiveMemoryEpisodeBindings =
+    await resolveMemoryEpisodeBindings(
+      preparedTurn,
+      subjectiveMemoryEncodingDecisions,
+      options,
+    );
+
+  const subjectiveMemoryFormation =
+    formWorldSimulationSubjectiveMemories({
+      world_state:
+        causalResolution.next_world_state,
+
+      turn_id:
+        preparedTurn.turn_id,
+
+      event:
+        preparedTurn.event,
+
+      decision_packets:
+        preparedTurn.decision_packets,
+
+      encoding_decisions:
+        subjectiveMemoryEncodingDecisions.decisions,
+
+      episode_bindings:
+        subjectiveMemoryEpisodeBindings.bindings,
+    });
   const subjectiveMemoryPreview = applySubjectiveMemoryPreview(
     causalResolution.next_world_state,
     subjectiveMemoryFormation.result,
@@ -603,7 +928,21 @@ export async function resolveWorldSimulationTurn(
       illumination_visibility_queries: cloneJson(preparedTurn.illumination_visibility_queries ?? []),
       audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
-      subjective_memory_formation: cloneJson(subjectiveMemoryFormation),
+
+      subjective_memory_encoding_decisions:
+        cloneJson(
+          subjectiveMemoryEncodingDecisions,
+        ),
+
+      subjective_memory_episode_bindings:
+        cloneJson(
+          subjectiveMemoryEpisodeBindings,
+        ),
+
+      subjective_memory_formation:
+        cloneJson(
+          subjectiveMemoryFormation,
+        ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
       trace_ids: traceIds,
@@ -622,6 +961,17 @@ export async function resolveWorldSimulationTurn(
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
     consistency,
+
+    subjective_memory_encoding_decisions:
+      cloneJson(
+        subjectiveMemoryEncodingDecisions,
+      ),
+
+    subjective_memory_episode_bindings:
+      cloneJson(
+        subjectiveMemoryEpisodeBindings,
+      ),
+
     subjective_memory_formation: {
       version: worldSimulationSubjectiveMemoryFormationVersion,
       created_memory_count: subjectiveMemoryFormation.result.created_memory_count,

@@ -111,7 +111,7 @@ export const worldSimulationCapabilityContracts = Object.freeze({
   }),
   world_memory_retriever: Object.freeze({
     module: "world_memory_retriever",
-    purpose: "Return character memories selected by explicit accessibility rules while preserving provenance, confidence, and clarity; never convert memory into world truth or expose hidden retrieval-strength diagnostics.",
+    purpose: "Return character-visible subjective memory features selected by explicit accessibility rules while keeping engine provenance and retrieval diagnostics internal; never convert memory into world truth.",
     required_inputs: Object.freeze(["character", "memory_records"]),
     optional_inputs: Object.freeze(["query", "max_items", "programmatic_memory_accessibility"]),
     returns: Object.freeze([
@@ -360,30 +360,108 @@ function buildWorldPerceptionPacket(input = {}) {
 
 function normalizedMemory(record = {}) {
   const source = object(record.source);
-  return {
-    memory_id: record.memory_id ?? record.id ?? null,
-    content: cloneJson(record.content ?? record.memory ?? record.summary ?? null),
+
+  const hasEncodingCertainty =
+    Object.hasOwn(
+      record,
+      "perceptual_certainty_at_encoding",
+    );
+
+  const hasEncodingClarity =
+    Object.hasOwn(
+      record,
+      "perceptual_clarity_at_encoding",
+    );
+
+  const normalized = {
+    memory_id:
+      record.memory_id
+      ?? record.id
+      ?? null,
+
+    content:
+      cloneJson(
+        record.content
+        ?? record.memory
+        ?? record.summary
+        ?? null,
+      ),
+
+    // Character-visible subjective source features only.
     source: {
-      kind: source.kind ?? record.source_kind ?? null,
-      actor: source.actor ?? record.source_actor ?? null,
-      event_id: source.event_id ?? record.source_event_id ?? null,
-      scene_id: source.scene_id ?? null,
-      turn_id: source.turn_id ?? null,
-      sense: source.sense ?? null,
-      observation_hash: source.observation_hash ?? null,
-      formation_version: source.formation_version ?? null,
+      kind:
+        source.kind
+        ?? record.source_kind
+        ?? null,
+
+      actor:
+        source.actor
+        ?? record.source_actor
+        ?? null,
+
+      sense:
+        source.sense
+        ?? null,
     },
-    memory_type: record.memory_type ?? null,
-    confidence: record.confidence ?? record.certainty ?? null,
-    confidence_origin: record.confidence_origin ?? null,
-    clarity: record.clarity ?? record.memory_clarity ?? null,
-    clarity_origin: record.clarity_origin ?? null,
-    encoded_at: record.encoded_at ?? record.remembered_at ?? null,
-    last_recalled_at: record.last_recalled_at ?? null,
-    relevance: record.relevance ?? null,
-    possibly_incorrect: record.possibly_incorrect === true,
-    source_confused: record.source_confused === true,
+
+    memory_type:
+      record.memory_type
+      ?? null,
+
+    perceptual_certainty_at_encoding:
+      record.perceptual_certainty_at_encoding
+      ?? null,
+
+    perceptual_certainty_origin:
+      record.perceptual_certainty_origin
+      ?? null,
+
+    perceptual_clarity_at_encoding:
+      record.perceptual_clarity_at_encoding
+      ?? null,
+
+    perceptual_clarity_origin:
+      record.perceptual_clarity_origin
+      ?? null,
+
+    relevance:
+      record.relevance
+      ?? null,
+
+    possibly_incorrect:
+      record.possibly_incorrect === true,
+
+    source_confused:
+      record.source_confused === true,
   };
+
+  // Backward compatibility:
+  // legacy/non-Phase63A-v2 memory records may still use the
+  // old confidence/clarity schema. Preserve those fields only
+  // when the new encoding-time fields are absent.
+  if (!hasEncodingCertainty) {
+    normalized.confidence =
+      record.confidence
+      ?? record.certainty
+      ?? null;
+
+    normalized.confidence_origin =
+      record.confidence_origin
+      ?? null;
+  }
+
+  if (!hasEncodingClarity) {
+    normalized.clarity =
+      record.clarity
+      ?? record.memory_clarity
+      ?? null;
+
+    normalized.clarity_origin =
+      record.clarity_origin
+      ?? null;
+  }
+
+  return normalized;
 }
 
 function buildWorldMemoryRetrieval(input = {}) {
@@ -410,13 +488,27 @@ function buildWorldMemoryRetrieval(input = {}) {
     retrieved_memories: accessible,
     memory_boundary: {
       memory_is_not_world_truth: true,
-      provenance_preserved: true,
-      confidence_preserved: true,
-      clarity_preserved: true,
+
+      subjective_source_features_preserved: true,
+
+      internal_engine_provenance_exposed_to_character_brain: false,
+
+      exact_encoding_timestamp_exposed_to_character_brain: false,
+      exact_recall_timestamp_exposed_to_character_brain: false,
+
+      legacy_confidence_preserved_for_legacy_records: true,
+      legacy_clarity_preserved_for_legacy_records: true,
+
+      perceptual_certainty_at_encoding_preserved: true,
+      perceptual_clarity_at_encoding_preserved: true,
+
       error_and_source_confusion_allowed: true,
-      direct_perception_source_metadata_preserved: true,
+
+      direct_perception_subjective_source_features_preserved: true,
+
       memory_type_preserved: true,
-      confidence_and_clarity_origin_preserved: true,
+
+      encoding_metric_origins_preserved: true,
       inaccessible_records_excluded: true,
       programmatic_memory_accessibility_enforced: programmaticAccessibilityEnforced,
       programmatic_memory_accessibility_version: programmaticAccessibility.version ?? null,
