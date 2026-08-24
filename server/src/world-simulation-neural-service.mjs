@@ -9,6 +9,7 @@ import {
   assertNeuralSessionRunShape,
   assertWorldSimulationInputBoundary,
   buildSharedNeuralCoreDescriptor,
+  createWorldSimulationCapabilityMediationAttestation,
   invokeSharedNeuralCoreAdapter,
   neuralSessionModes,
 } from "./shared-neural-core-service.mjs";
@@ -19,6 +20,15 @@ import {
   worldSimulationCharacterFacingAssuranceModes,
   worldSimulationCharacterFacingRuntimeVersion,
 } from "./world-simulation-character-facing-capability-runtime-service.mjs";
+import {
+  verifyWorldSimulationCapabilityAdapterEnvelope,
+} from "./world-simulation-capability-envelope-service.mjs";
+import {
+  finalizeWorldSimulationEngineIntegrityCapabilityRuntime,
+  isWorldSimulationEngineIntegrityCapability,
+  prepareWorldSimulationEngineIntegrityCapabilityRuntime,
+  worldSimulationEngineIntegrityRuntimeVersion,
+} from "./world-simulation-engine-integrity-capability-runtime-service.mjs";
 
 export const worldSimulationCapabilityNames = Object.freeze([
   "world_scene_causal_analyzer",
@@ -1240,17 +1250,25 @@ async function executeWorldSimulationCapability(
   let capabilityEnvelopeHash = null;
   const characterFacing =
     isWorldSimulationCharacterFacingCapability(capabilityName);
+  const engineIntegrity =
+    isWorldSimulationEngineIntegrityCapability(capabilityName);
+  const r1Mediated = characterFacing || engineIntegrity;
   const hasNeuralAdapter = typeof options.adapter === "function";
+  const runtimeVersion = characterFacing
+    ? worldSimulationCharacterFacingRuntimeVersion
+    : engineIntegrity
+      ? worldSimulationEngineIntegrityRuntimeVersion
+      : null;
   const modelName = options.model_name
     ?? (
-      characterFacing && !hasNeuralAdapter
+      r1Mediated && !hasNeuralAdapter
         ? "trusted-programmatic-world-capability"
         : spec.model_name
     );
   const modelVersion = options.model_version
     ?? (
-      characterFacing && !hasNeuralAdapter
-        ? worldSimulationCharacterFacingRuntimeVersion
+      r1Mediated && !hasNeuralAdapter
+        ? runtimeVersion
         : spec.model_version
     );
   let output = null;
@@ -1259,138 +1277,159 @@ async function executeWorldSimulationCapability(
   let errorMessage = null;
   let errorCode = null;
   let warnings = [];
-  let characterFacingAudit = null;
+  let r1Audit = null;
 
   try {
-    if (characterFacing) {
-      // Preserve the Phase62B raw-input policy boundary before the R1
-      // trusted preparer strips unauthorized fields from the adapter view.
-      // Narrative/control signals must fail closed rather than disappear
-      // silently during envelope compilation.
-      assertWorldSimulationInputBoundary(capabilityName, input);
-
-      const trustedBase = builder(input);
-      if (!isObject(trustedBase)) {
-        throw new Error(
-          "Trusted world-simulation capability builder must return an object.",
-        );
-      }
-      const invocationId = `worldcap_${hashNeuralValue(JSON.stringify({
-        run_id: runId,
-        capability_name: capabilityName,
-        assurance_mode: assuranceMode,
-        raw_input_hash: rawInputHash,
-      })).slice(0, 24)}`;
-      const prepared =
-        prepareWorldSimulationCharacterFacingCapabilityRuntime({
-          capability_name: capabilityName,
-          input,
-          trusted_base: trustedBase,
-          assurance_mode: assuranceMode,
-          invocation_id: invocationId,
-        });
-      capabilityEnvelopeId = prepared.adapter_envelope.envelope_id;
-      capabilityEnvelopeHash = prepared.adapter_envelope.envelope_hash;
-      traceInputText = JSON.stringify(prepared.adapter_envelope);
-      if (hasNeuralAdapter) {
-        adapterInputHash = hashNeuralValue(traceInputText);
-      }
-
-      sharedNeuralCore = buildSharedNeuralCoreDescriptor(
-        neuralSessionModes.WORLD_SIMULATION,
-        capabilityName,
-        run,
+    if (!r1Mediated) {
+      const error = new Error(
+        `World capability ${capabilityName} has no registered Phase62A-R1 runtime.`,
       );
+      error.code = "WORLD_SIMULATION_CAPABILITY_R1_RUNTIME_NOT_REGISTERED";
+      throw error;
+    }
 
-      let neuralExtension = null;
-      let adapterFailure = null;
-      if (hasNeuralAdapter) {
-        try {
-          const invocation = await invokeSharedNeuralCoreAdapter({
-            run,
-            session_mode: neuralSessionModes.WORLD_SIMULATION,
-            capability_name: capabilityName,
-            input: prepared.adapter_envelope,
-            adapter: options.adapter,
-            adapter_context: {
-              run_id: runId,
-              task_type: "world_simulation",
-              capability_name: capabilityName,
-              model_name: modelName,
-              model_version: modelVersion,
-              permissions: worldSimulationCommonPermissions,
-              capability_envelope_id: capabilityEnvelopeId,
-              capability_envelope_hash: capabilityEnvelopeHash,
-              capability_policy_version:
-                prepared.adapter_envelope.policy_version,
-              capability_assurance_mode: assuranceMode,
-              adapter_contract: "neural_extension_only",
-            },
-          });
-          neuralExtension = invocation.output;
-          sharedNeuralCore = invocation.descriptor;
-        } catch (error) {
-          if (
-            assuranceMode
-            !== worldSimulationCharacterFacingAssuranceModes
-              .NATIVE_ENGINE_VERIFIED
-          ) {
-            throw error;
-          }
-          adapterFailure = {
-            code:
-              error?.code
-              ?? "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
-            message: error instanceof Error ? error.message : String(error),
-          };
-          warnings.push("native_optional_neural_adapter_failed");
-        }
-      }
+    // Phase62B remains the raw-input policy boundary. Unauthorized
+    // narrative/control fields fail closed before trusted preparation.
+    assertWorldSimulationInputBoundary(capabilityName, input);
 
-      const finalized =
-        finalizeWorldSimulationCharacterFacingCapabilityRuntime({
-          prepared,
-          neural_extension: neuralExtension,
-          adapter_invoked: hasNeuralAdapter,
-          adapter_failure: adapterFailure,
-          failure_mode:
-            assuranceMode
-            === worldSimulationCharacterFacingAssuranceModes
-              .NATIVE_ENGINE_VERIFIED
-              ? "native_optional"
-              : "direct_explicit",
-        });
-      output = finalized.output;
-      characterFacingAudit = finalized.audit;
-      if (!hasNeuralAdapter) {
-        warnings.push("trusted_programmatic_base_only");
-      } else if (finalized.audit.fallback_to_trusted_base) {
-        warnings.push("neural_extension_rejected_trusted_base_preserved");
-      }
-    } else {
-      const adapter = hasNeuralAdapter
-        ? options.adapter
-        : async (value) => builder(value);
-      const invocation = await invokeSharedNeuralCoreAdapter({
-        run,
-        session_mode: neuralSessionModes.WORLD_SIMULATION,
+    const trustedBase = builder(input);
+    if (!isObject(trustedBase)) {
+      throw new Error(
+        "Trusted world-simulation capability builder must return an object.",
+      );
+    }
+
+    const invocationId = `worldcap_${hashNeuralValue(JSON.stringify({
+      run_id: runId,
+      capability_name: capabilityName,
+      assurance_mode: assuranceMode,
+      raw_input_hash: rawInputHash,
+    })).slice(0, 24)}`;
+
+    const prepared = characterFacing
+      ? prepareWorldSimulationCharacterFacingCapabilityRuntime({
         capability_name: capabilityName,
         input,
-        adapter,
-        adapter_context: {
-          run_id: runId,
-          task_type: "world_simulation",
-          capability_name: capabilityName,
-          model_name: modelName,
-          model_version: modelVersion,
-          permissions: worldSimulationCommonPermissions,
-        },
+        trusted_base: trustedBase,
+        assurance_mode: assuranceMode,
+        invocation_id: invocationId,
+      })
+      : prepareWorldSimulationEngineIntegrityCapabilityRuntime({
+        capability_name: capabilityName,
+        input,
+        trusted_base: trustedBase,
+        assurance_mode: assuranceMode,
+        invocation_id: invocationId,
       });
-      output = invocation.output;
-      sharedNeuralCore = invocation.descriptor;
-      if (!hasNeuralAdapter) {
-        warnings.push("structural_default_adapter_used");
+
+    verifyWorldSimulationCapabilityAdapterEnvelope(
+      prepared.adapter_envelope,
+      {
+        capability_name: capabilityName,
+        require_compiler_attestation: true,
+      },
+    );
+    const mediationAttestation =
+      createWorldSimulationCapabilityMediationAttestation({
+        capability_name: capabilityName,
+        envelope_id: prepared.adapter_envelope.envelope_id,
+        envelope_hash: prepared.adapter_envelope.envelope_hash,
+      });
+
+    capabilityEnvelopeId = prepared.adapter_envelope.envelope_id;
+    capabilityEnvelopeHash = prepared.adapter_envelope.envelope_hash;
+    traceInputText = JSON.stringify(prepared.adapter_envelope);
+    if (hasNeuralAdapter) {
+      adapterInputHash = hashNeuralValue(traceInputText);
+    }
+
+    sharedNeuralCore = buildSharedNeuralCoreDescriptor(
+      neuralSessionModes.WORLD_SIMULATION,
+      capabilityName,
+      run,
+    );
+
+    let neuralExtension = null;
+    let adapterFailure = null;
+    if (hasNeuralAdapter) {
+      try {
+        const detachedAdapterEnvelope =
+          cloneJson(prepared.adapter_envelope);
+        const invocation = await invokeSharedNeuralCoreAdapter({
+          run,
+          session_mode: neuralSessionModes.WORLD_SIMULATION,
+          capability_name: capabilityName,
+          input: detachedAdapterEnvelope,
+          world_capability_mediation_attestation:
+            mediationAttestation,
+          adapter: options.adapter,
+          adapter_context: {
+            run_id: runId,
+            task_type: "world_simulation",
+            capability_name: capabilityName,
+            model_name: modelName,
+            model_version: modelVersion,
+            permissions: worldSimulationCommonPermissions,
+            capability_envelope_id: capabilityEnvelopeId,
+            capability_envelope_hash: capabilityEnvelopeHash,
+            capability_policy_version:
+              prepared.adapter_envelope.policy_version,
+            capability_assurance_mode: assuranceMode,
+            adapter_contract: characterFacing
+              ? "neural_extension_only"
+              : "neural_advisory_extension_only",
+          },
+        });
+        neuralExtension = invocation.output;
+        sharedNeuralCore = invocation.descriptor;
+      } catch (error) {
+        if (
+          assuranceMode
+          !== worldSimulationCharacterFacingAssuranceModes
+            .NATIVE_ENGINE_VERIFIED
+        ) {
+          throw error;
+        }
+        adapterFailure = {
+          code:
+            error?.code
+            ?? "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+          message: error instanceof Error ? error.message : String(error),
+        };
+        warnings.push("native_optional_neural_adapter_failed");
       }
+    }
+
+    const failureMode =
+      assuranceMode
+      === worldSimulationCharacterFacingAssuranceModes
+        .NATIVE_ENGINE_VERIFIED
+        ? "native_optional"
+        : "direct_explicit";
+
+    const finalized = characterFacing
+      ? finalizeWorldSimulationCharacterFacingCapabilityRuntime({
+        prepared,
+        neural_extension: neuralExtension,
+        adapter_invoked: hasNeuralAdapter,
+        adapter_failure: adapterFailure,
+        failure_mode: failureMode,
+      })
+      : finalizeWorldSimulationEngineIntegrityCapabilityRuntime({
+        prepared,
+        neural_extension: neuralExtension,
+        adapter_invoked: hasNeuralAdapter,
+        adapter_failure: adapterFailure,
+        failure_mode: failureMode,
+      });
+
+    output = finalized.output;
+    r1Audit = finalized.audit;
+
+    if (!hasNeuralAdapter) {
+      warnings.push("trusted_programmatic_base_only");
+    } else if (finalized.audit.fallback_to_trusted_base) {
+      warnings.push("neural_extension_rejected_trusted_base_preserved");
     }
 
     if (!isObject(output)) {
@@ -1432,14 +1471,16 @@ async function executeWorldSimulationCapability(
       session_mode: neuralSessionModes.WORLD_SIMULATION,
       shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
       shared_capability_family: sharedNeuralCore?.capability_family ?? null,
+      r1_capability_runtime: r1Mediated,
       character_facing_r1_runtime: characterFacing,
-      trusted_programmatic_base_used: characterFacing,
-      adapter_invoked: characterFacing ? hasNeuralAdapter : true,
+      engine_integrity_r1_runtime: engineIntegrity,
+      trusted_programmatic_base_used: r1Mediated,
+      adapter_invoked: hasNeuralAdapter,
       adapter_input_hash: adapterInputHash,
       capability_envelope_id: capabilityEnvelopeId,
       capability_envelope_hash: capabilityEnvelopeHash,
-      capability_assurance_mode: characterFacing ? assuranceMode : null,
-      raw_input_hash_engine_only: characterFacing ? rawInputHash : null,
+      capability_assurance_mode: r1Mediated ? assuranceMode : null,
+      raw_input_hash_engine_only: r1Mediated ? rawInputHash : null,
     },
     output_summary: {
       chars: serializedOutput.length,
@@ -1448,11 +1489,13 @@ async function executeWorldSimulationCapability(
       mutates_world_state: false,
       shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
       shared_capability_family: sharedNeuralCore?.capability_family ?? null,
+      r1_capability_runtime: r1Mediated,
       character_facing_r1_runtime: characterFacing,
+      engine_integrity_r1_runtime: engineIntegrity,
       neural_extension_accepted:
-        characterFacingAudit?.neural_extension_accepted ?? false,
+        r1Audit?.neural_extension_accepted ?? false,
       trusted_base_fallback_used:
-        characterFacingAudit?.fallback_to_trusted_base ?? false,
+        r1Audit?.fallback_to_trusted_base ?? false,
     },
   }, runOptions);
 

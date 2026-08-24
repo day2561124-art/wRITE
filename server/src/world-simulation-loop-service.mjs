@@ -433,6 +433,10 @@ export function buildWorldSimulationLoopContract() {
     character_brain_receives_engine_scene_id: false,
     character_brain_receives_capability_runtime_metadata: false,
     character_facing_capability_envelopes_enforced: true,
+    engine_integrity_capability_envelopes_enforced: true,
+    scene_neural_advisory_is_causal_input: false,
+    consistency_neural_advisory_is_commit_gate: false,
+    agency_neural_advisory_is_security_policy: false,
     neural_capabilities_may_mutate_world_state: false,
     causal_adjudicator_required: true,
     visibility_and_occlusion: buildWorldSimulationVisibilityQueryContract(),
@@ -1316,6 +1320,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       character_brain_receives_capability_runtime_metadata: false,
       character_facing_capability_envelopes_enforced: true,
       causal_adjudicator_has_exclusive_outcome_authority: true,
+      scene_neural_advisory_forwarded_to_causal_adjudicator: false,
+      consistency_neural_advisory_controls_commit_gate: false,
       programmatic_visibility_query_version: worldSimulationVisibilityQueryVersion,
       directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,
       illumination_visibility_query_version: worldSimulationIlluminationVisibilityVersion,
@@ -1642,7 +1648,10 @@ export async function resolveWorldSimulationTurn(
     world_state_revision: snapshot.revision,
     world_state_hash: snapshot.state_hash,
     event: cloneJson(preparedTurn.event),
-    scene_analysis: cloneJson(preparedTurn.scene_analysis),
+    scene_analysis: cloneJson(
+      preparedTurn.scene_analysis?.trusted_execution_view
+      ?? preparedTurn.scene_analysis,
+    ),
     selected_action_intents: cloneJson(selected),
   }));
   if (hashAgentRunValue(snapshot.state) !== preAdjudicationHash) {
@@ -1663,7 +1672,11 @@ export async function resolveWorldSimulationTurn(
     traceIds,
   );
 
-  if ((consistency.hard_conflict_count ?? 0) > 0) {
+  const consistencyCommitGate =
+    consistency.commit_gate_view
+    ?? consistency;
+
+  if ((consistencyCommitGate.hard_conflict_count ?? 0) > 0) {
     return {
       ok: false,
       committed: false,

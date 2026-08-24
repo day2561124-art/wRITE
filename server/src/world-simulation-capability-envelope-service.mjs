@@ -41,6 +41,49 @@ const assuranceModeValues = Object.freeze(
 const claimDomainValues = new Set(worldSimulationCapabilityClaimDomains);
 const assuranceOriginValues = new Set(worldSimulationCapabilityAssuranceOrigins);
 
+// Canonical adapter envelopes minted by the trusted compiler are kept
+// engine-side. Detached adapter copies intentionally do not retain this
+// in-process attestation.
+const compiledAdapterEnvelopes = new WeakSet();
+
+const neuralAdvisoryAuthorityForbiddenKeys = new Set([
+  "must_fix",
+  "hard_conflict",
+  "hard_conflicts",
+  "hard_conflict_count",
+  "commit_allowed",
+  "commit_blocked",
+  "blocks_commit",
+  "must_ignore_for_character_choice",
+  "selected_action",
+  "selected_action_id",
+  "chosen_action",
+  "final_action",
+  "action_result",
+  "outcome",
+  "causal_outcome",
+  "adjudicated_outcome",
+  "winner",
+  "world_state_update",
+  "character_state_update",
+  "state_mutation",
+]);
+
+const advisoryFindingAllowedKeys = new Set([
+  "advisory_type",
+  "message",
+  "related_entities",
+  "related_fields",
+  "review_recommended",
+]);
+
+const interpretiveAnnotationAllowedKeys = new Set([
+  "annotation",
+  "related_entities",
+  "related_fields",
+  "uncertainty_note",
+]);
+
 const characterFacingForbiddenInputKeys = new Set([
   "world_state",
   "raw_world_state",
@@ -347,7 +390,7 @@ function collectForbiddenKeys(
     return output;
   }
   for (const [key, item] of Object.entries(value)) {
-    const normalized = String(key).trim();
+    const normalized = String(key).trim().toLocaleLowerCase("en-US");
     if (forbidden.has(normalized)) output.push([...path, key].join("."));
     collectForbiddenKeys(item, forbidden, [...path, key], output, seen);
   }
@@ -552,6 +595,9 @@ export function buildWorldSimulationCapabilityPolicyRegistry() {
       neural_may_modify_protected_base: false,
       engine_provenance_exposed_to_adapter: false,
       source_refs_are_invocation_scoped: true,
+      canonical_envelope_hash_reverified: true,
+      world_neural_invocation_requires_compiler_attestation: true,
+      neural_advisory_may_impersonate_authority: false,
     },
   });
 }
@@ -571,6 +617,9 @@ export function buildWorldSimulationCapabilityEnvelopeContract() {
     direct_caller_assertion_is_not_engine_verification: true,
     engine_provenance_is_not_subjective_source_attribution: true,
     source_grounded_materialization_requires_envelope_scoped_ref: true,
+    canonical_envelope_hash_reverified: true,
+    adapter_receives_detached_copy_of_canonical_envelope: true,
+    compiler_attestation_required_for_world_neural_invocation: true,
   };
 }
 
@@ -644,6 +693,7 @@ export function compileWorldSimulationCapabilityEnvelope(
     ...adapterEnvelopeBase,
     envelope_hash: envelopeHash,
   };
+  compiledAdapterEnvelopes.add(adapterEnvelope);
 
   const provenanceManifest = sources.map((source) => {
     const adapterRef = scopedAdapterRef(envelopeId, source.source_ref);
@@ -681,7 +731,13 @@ export function compileWorldSimulationCapabilityEnvelope(
 function assertEnvelopeShape(envelope) {
   if (!isObject(envelope)
     || envelope.schema_version !== worldSimulationCapabilityEnvelopeVersion
-    || envelope.policy_version !== worldSimulationCapabilityPolicyVersion
+  ) {
+    throw errorWithCode(
+      "A valid Phase62A-R1 AdapterEnvelope is required.",
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_REQUIRED",
+    );
+  }
+  if (envelope.policy_version !== worldSimulationCapabilityPolicyVersion
     || !nonEmptyString(envelope.envelope_id)
     || !nonEmptyString(envelope.envelope_hash)
   ) {
@@ -692,6 +748,71 @@ function assertEnvelopeShape(envelope) {
   }
   const { policy } = assertPolicy(envelope.capability_name);
   return policy;
+}
+
+function recomputeAdapterEnvelopeHash(envelope) {
+  const base = cloneJson(envelope);
+  delete base.envelope_hash;
+  return hashAgentRunValue(base);
+}
+
+export function verifyWorldSimulationCapabilityAdapterEnvelope(
+  envelope,
+  {
+    capability_name: expectedCapabilityName = null,
+    require_compiler_attestation: requireCompilerAttestation = false,
+  } = {},
+) {
+  const policy = assertEnvelopeShape(envelope);
+  const expected = nonEmptyString(expectedCapabilityName);
+  if (expected && envelope.capability_name !== expected) {
+    throw errorWithCode(
+      `Capability envelope is bound to ${envelope.capability_name}, not ${expected}.`,
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_BINDING_INVALID",
+      {
+        envelope_capability_name: envelope.capability_name,
+        expected_capability_name: expected,
+      },
+    );
+  }
+  const recomputedHash = recomputeAdapterEnvelopeHash(envelope);
+  if (recomputedHash !== envelope.envelope_hash) {
+    throw errorWithCode(
+      "Capability envelope canonical hash verification failed.",
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_INTEGRITY_INVALID",
+      {
+        envelope_id: envelope.envelope_id,
+        expected_hash: envelope.envelope_hash,
+        recomputed_hash: recomputedHash,
+      },
+    );
+  }
+  const declaredRefs = array(envelope.authorized_source_refs);
+  const embeddedRefs = array(envelope.authorized_inputs?.sources)
+    .map((source) => source?.source_ref ?? null);
+  if (JSON.stringify(declaredRefs) !== JSON.stringify(embeddedRefs)) {
+    throw errorWithCode(
+      "Capability envelope source-ref catalog is internally inconsistent.",
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_INTEGRITY_INVALID",
+      { envelope_id: envelope.envelope_id },
+    );
+  }
+  if (requireCompilerAttestation
+    && !compiledAdapterEnvelopes.has(envelope)) {
+    throw errorWithCode(
+      "World neural invocation requires the canonical envelope object minted by the trusted compiler.",
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_ATTESTATION_REQUIRED",
+      { envelope_id: envelope.envelope_id },
+    );
+  }
+  return {
+    ok: true,
+    policy,
+    capability_name: envelope.capability_name,
+    envelope_id: envelope.envelope_id,
+    envelope_hash: envelope.envelope_hash,
+    compiler_attested: compiledAdapterEnvelopes.has(envelope),
+  };
 }
 
 function assertNoNeuralGovernanceFields(extension) {
@@ -729,6 +850,72 @@ function assertAllowedExtensionFields(policy, extension) {
       "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
       { unknown_fields: unknown },
     );
+  }
+}
+
+function assertNeuralAdvisoryVocabulary(policy, extension) {
+  if (policy.trust_domain === "character_facing") return;
+  const authorityMatches = collectForbiddenKeys(
+    extension,
+    neuralAdvisoryAuthorityForbiddenKeys,
+  );
+  if (authorityMatches.length) {
+    throw errorWithCode(
+      `Neural advisory attempted to impersonate authoritative output: ${authorityMatches.slice(0, 8).join(", ")}.`,
+      "WORLD_SIMULATION_CAPABILITY_NEURAL_ADVISORY_AUTHORITY_FORBIDDEN",
+      { forbidden_paths: authorityMatches },
+    );
+  }
+  if (Object.hasOwn(extension, "advisory_findings")) {
+    if (!Array.isArray(extension.advisory_findings)) {
+      throw errorWithCode(
+        "advisory_findings must be an array.",
+        "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+      );
+    }
+    extension.advisory_findings.forEach((item, index) => {
+      if (!isObject(item)) {
+        throw errorWithCode(
+          `advisory_findings[${index}] must be an object.`,
+          "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+        );
+      }
+      const unknown = Object.keys(item)
+        .filter((key) => !advisoryFindingAllowedKeys.has(key));
+      if (unknown.length) {
+        throw errorWithCode(
+          `advisory_findings[${index}] contains authority-like or unregistered fields: ${unknown.join(", ")}.`,
+          "WORLD_SIMULATION_CAPABILITY_NEURAL_ADVISORY_AUTHORITY_FORBIDDEN",
+          { unknown_fields: unknown },
+        );
+      }
+    });
+  }
+  if (Object.hasOwn(extension, "interpretive_annotations")) {
+    if (!Array.isArray(extension.interpretive_annotations)) {
+      throw errorWithCode(
+        "interpretive_annotations must be an array.",
+        "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+      );
+    }
+    extension.interpretive_annotations.forEach((item, index) => {
+      if (typeof item === "string") return;
+      if (!isObject(item)) {
+        throw errorWithCode(
+          `interpretive_annotations[${index}] must be text or an object.`,
+          "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+        );
+      }
+      const unknown = Object.keys(item)
+        .filter((key) => !interpretiveAnnotationAllowedKeys.has(key));
+      if (unknown.length) {
+        throw errorWithCode(
+          `interpretive_annotations[${index}] contains authority-like or unregistered fields: ${unknown.join(", ")}.`,
+          "WORLD_SIMULATION_CAPABILITY_NEURAL_ADVISORY_AUTHORITY_FORBIDDEN",
+          { unknown_fields: unknown },
+        );
+      }
+    });
   }
 }
 
@@ -772,7 +959,9 @@ export function validateWorldSimulationCapabilityNeuralExtension(
   envelope,
   extension,
 ) {
-  const policy = assertEnvelopeShape(envelope);
+  const { policy } = verifyWorldSimulationCapabilityAdapterEnvelope(
+    envelope,
+  );
   if (!isObject(extension)) {
     throw errorWithCode(
       "Neural capability extension must be an object.",
@@ -782,6 +971,7 @@ export function validateWorldSimulationCapabilityNeuralExtension(
   assertNoNeuralGovernanceFields(extension);
   assertProtectedFieldsNotOverridden(policy, extension);
   assertAllowedExtensionFields(policy, extension);
+  assertNeuralAdvisoryVocabulary(policy, extension);
   assertReferenceFields(policy, envelope, extension);
   const normalized = cloneJson(extension);
   return {
@@ -832,7 +1022,7 @@ export function materializeWorldSimulationCapabilitySourceRefs({
   trusted_materialization_context: context,
   source_refs: requestedRefs,
 } = {}) {
-  assertEnvelopeShape(envelope);
+  verifyWorldSimulationCapabilityAdapterEnvelope(envelope);
   if (!isObject(context)
     || context.engine_only !== true
     || context.policy_version !== worldSimulationCapabilityPolicyVersion

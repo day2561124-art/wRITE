@@ -151,3 +151,20 @@ Legacy `world_memory_retriever` output is `memory_projection`, not `memory_recov
 ### Action authority
 
 Neural action consideration may rank or deprioritize refs from the trusted candidate catalog. It does not add candidates, delete candidates, choose the final action, or decide outcomes. The complete trusted `candidate_action_intents` set remains available to the Character Brain until the future attempt-affordance phase replaces the static catalog.
+
+
+## Step 3 — Engine-facing integrity sealing
+
+Step 3 completes R1 runtime adoption for `world_scene_causal_analyzer`, `world_agency_guard`, and `world_consistency_critic`. All seven world capabilities now execute their trusted deterministic builder before any optional neural adapter. Neural adapters receive detached AdapterEnvelope copies and return extension-only output.
+
+### Authority separation
+
+- Scene analysis remains a trusted normalized helper. Neural scene interpretation is advisory and is never forwarded into causal adjudication.
+- Programmatic consistency findings and `hard_conflict_count` exclusively control the commit gate. Neural consistency advisory can neither unblock a hard conflict nor create a hard block.
+- Phase62B remains the hard narrative-control input boundary. `world_agency_guard` is diagnostic; neural agency advisory is not security policy.
+
+### Reference-monitor hardening
+
+Every actual world-simulation neural invocation must pass through a compiler-attested canonical R1 envelope. Shared Neural Core rejects raw world neural calls. Canonical envelope hashes are recomputed before validation/materialization, capability binding is checked, and the adapter receives a detached clone rather than the engine-owned canonical object.
+
+Neural advisory uses a sealed non-authoritative vocabulary. Authority-like fields such as `must_fix`, `hard_conflict_count`, `commit_allowed`, `winner`, outcome fields, selected-action fields, and mutation fields are rejected recursively inside advisory output.

@@ -23,6 +23,31 @@ const modeRunContracts = Object.freeze({
   }),
 });
 
+const worldSimulationMediationAttestations = new WeakMap();
+
+export function createWorldSimulationCapabilityMediationAttestation({
+  capability_name: capabilityName,
+  envelope_id: envelopeId,
+  envelope_hash: envelopeHash,
+} = {}) {
+  const capability = String(capabilityName ?? "").trim();
+  const id = String(envelopeId ?? "").trim();
+  const hash = String(envelopeHash ?? "").trim();
+  if (!capability || !id || !hash) {
+    throw errorWithCode(
+      "World capability mediation attestation requires capability, envelope id, and envelope hash.",
+      "WORLD_SIMULATION_CAPABILITY_ENVELOPE_REQUIRED",
+    );
+  }
+  const token = Object.freeze({});
+  worldSimulationMediationAttestations.set(token, {
+    capability_name: capability,
+    envelope_id: id,
+    envelope_hash: hash,
+  });
+  return token;
+}
+
 const capabilityFamilies = Object.freeze({
   [neuralSessionModes.WRITING]: Object.freeze({
     scene_planner: "scene_analysis",
@@ -282,6 +307,7 @@ export async function invokeSharedNeuralCoreAdapter({
   input,
   adapter,
   adapter_context = {},
+  world_capability_mediation_attestation = null,
 } = {}) {
   if (typeof adapter !== "function") {
     throw new TypeError("shared neural core adapter must be a function.");
@@ -293,6 +319,25 @@ export async function invokeSharedNeuralCoreAdapter({
   );
   if (descriptor.session_mode === neuralSessionModes.WORLD_SIMULATION) {
     assertWorldSimulationInputBoundary(descriptor.capability_name, input);
+    const attestation = worldSimulationMediationAttestations.get(
+      world_capability_mediation_attestation,
+    );
+    if (!attestation) {
+      throw errorWithCode(
+        "World-simulation neural invocation requires trusted Phase62A-R1 mediation.",
+        "WORLD_SIMULATION_CAPABILITY_ENVELOPE_REQUIRED",
+      );
+    }
+    if (attestation.capability_name !== descriptor.capability_name
+      || String(input?.capability_name ?? "") !== descriptor.capability_name
+      || String(input?.envelope_id ?? "") !== attestation.envelope_id
+      || String(input?.envelope_hash ?? "") !== attestation.envelope_hash
+    ) {
+      throw errorWithCode(
+        "World capability mediation attestation does not match the detached adapter envelope.",
+        "WORLD_SIMULATION_CAPABILITY_ENVELOPE_BINDING_INVALID",
+      );
+    }
   }
   const output = await adapter(input, {
     ...adapter_context,
