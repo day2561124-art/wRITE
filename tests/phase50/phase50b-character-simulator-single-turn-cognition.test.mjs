@@ -316,7 +316,7 @@ try {
     "Phase50B character simulator substantive single-turn cognition passed.",
   );
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, baselines.get(root));
   }
 }

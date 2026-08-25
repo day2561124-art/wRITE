@@ -353,7 +353,7 @@ try {
   assert.deepEqual(await currentProtectedHashes(), hashesBefore);
   console.log(`Phase46A existing-neural human-prose cognition upgrade PASS: final_polisher_mcp_bytes=${finalPolisherMcpBytes}`);
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

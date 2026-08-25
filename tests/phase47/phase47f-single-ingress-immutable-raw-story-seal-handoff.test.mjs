@@ -414,7 +414,7 @@ try {
   assert.deepEqual(await readFile(immutableEvidencePath), evidenceBefore);
   console.log("Phase47F single-ingress immutable raw-story seal handoff PASS.");
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

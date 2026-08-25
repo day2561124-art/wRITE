@@ -535,6 +535,7 @@ const steps = [
   ["Phase 43J production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation final acceptance closure", ["tests/phase43/phase43j-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-final-acceptance-closure.test.mjs"]],
   ["Maintenance MCP tool inventory baseline reconciliation", ["tests/maintenance/mcp-tool-inventory-baseline-reconciliation.test.mjs"]],
   ["Maintenance run-all script argv integrity", ["tests/maintenance/run-all-script-argv-integrity.test.mjs"]],
+  ["Maintenance CI baseline portability/bootstrap", ["tests/maintenance/ci-baseline-portability-bootstrap.test.mjs"]],
   ["Maintenance self-use metadata inspection entry integration", ["tests/maintenance/self-use-metadata-inspection-entry-integration.test.mjs"]],
 
 

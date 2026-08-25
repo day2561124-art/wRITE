@@ -268,7 +268,7 @@ try {
     "Phase50D final-polisher minimal-intervention regression hardening passed.",
   );
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, baselines.get(root));
   }
 }

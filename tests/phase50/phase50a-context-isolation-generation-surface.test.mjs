@@ -451,7 +451,7 @@ try {
   );
 } finally {
   await rm(currentInputsFixtureRoot, { recursive: true, force: true });
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, baselines.get(root));
   }
 }

@@ -435,7 +435,7 @@ try {
   assert.deepEqual(await readFile(immutableEvidencePath), immutableEvidenceBefore);
   console.log(`Phase47B writing-card-director integrated authorship cognition synthesis PASS: director_bytes=${directorBytes}`);
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

@@ -358,7 +358,7 @@ try {
   assert.deepEqual(await readFile(immutableEvidencePath), evidenceBefore);
   console.log("Phase47D exact raw-story handoff mismatch forensics PASS.");
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

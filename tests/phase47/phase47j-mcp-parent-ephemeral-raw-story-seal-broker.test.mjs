@@ -344,5 +344,5 @@ try {
   if (childBClient) await Promise.race([childBClient.close().catch(() => {}), delay(5_000)]);
   await stopChild(httpParent);
   await rm(temporaryDirectory, { recursive: true, force: true });
-  for (const root of cleanupRoots.toReversed()) await removeNewEntries(root, cleanupBaselines.get(root));
+  for (const root of [...cleanupRoots].reverse()) await removeNewEntries(root, cleanupBaselines.get(root));
 }

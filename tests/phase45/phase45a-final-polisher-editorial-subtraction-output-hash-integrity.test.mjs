@@ -254,7 +254,7 @@ try {
 
   console.log("Phase45A final-polisher editorial subtraction and output-hash integrity PASS.");
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

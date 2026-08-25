@@ -545,7 +545,7 @@ try {
     `Phase50E external-brain writing-chain final acceptance seal PASS: ${acceptance.deterministic_digest}`,
   );
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

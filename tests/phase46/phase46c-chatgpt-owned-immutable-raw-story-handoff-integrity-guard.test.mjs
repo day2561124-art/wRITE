@@ -240,7 +240,7 @@ try {
   assert.deepEqual(await currentProtectedHashes(), protectedBefore);
   console.log("Phase46C immutable raw-story handoff integrity guard PASS.");
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }

@@ -243,7 +243,7 @@ try {
 
   console.log("Phase47H raw-story seal session authority reconciliation PASS.");
 } finally {
-  for (const root of cleanupRoots.toReversed()) {
+  for (const root of [...cleanupRoots].reverse()) {
     await removeNewEntries(root, cleanupBaselines.get(root));
   }
 }
