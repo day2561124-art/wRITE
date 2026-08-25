@@ -1449,6 +1449,8 @@ async function executeWorldSimulationCapability(
   if (status === "failed") {
     warnings.push(`failure_code:${errorCode ?? "UNCLASSIFIED"}`);
   }
+  const worldCapabilityRole =
+    sharedNeuralCore?.world_capability_role ?? null;
   const trace = await recordNeuralWrapperTrace({
     run_id: runId,
     task_type: "world_simulation",
@@ -1469,6 +1471,44 @@ async function executeWorldSimulationCapability(
       session_mode: neuralSessionModes.WORLD_SIMULATION,
       shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
       shared_capability_family: sharedNeuralCore?.capability_family ?? null,
+      world_capability_role_registry_version:
+        sharedNeuralCore?.world_capability_role_registry_version ?? null,
+      world_capability_semantic_family:
+        worldCapabilityRole?.semantic_family ?? null,
+      world_trusted_runtime_role:
+        worldCapabilityRole?.trusted_runtime_role ?? null,
+      world_neural_extension_role:
+        worldCapabilityRole?.neural_extension_role ?? null,
+      world_adapter_audience_class:
+        worldCapabilityRole?.adapter_audience_class ?? null,
+      world_native_loop_stage:
+        worldCapabilityRole?.native_loop?.stage ?? null,
+      world_native_loop_scope:
+        worldCapabilityRole?.native_loop?.scope ?? null,
+      world_trusted_output_effect:
+        worldCapabilityRole?.native_loop?.trusted_output_effect ?? null,
+      world_formal_mainline_neural_extension_effect:
+        worldCapabilityRole
+          ?.native_loop
+          ?.formal_mainline_neural_extension_effect
+        ?? null,
+      world_capability_compatibility_status:
+        worldCapabilityRole?.compatibility_status ?? null,
+      world_trusted_output_enters_causal_adjudication:
+        worldCapabilityRole
+          ?.authority
+          ?.trusted_output_enters_causal_adjudication
+        ?? null,
+      world_trusted_output_enters_character_brain:
+        worldCapabilityRole
+          ?.authority
+          ?.trusted_output_enters_character_brain
+        ?? null,
+      world_trusted_output_controls_commit_gate:
+        worldCapabilityRole
+          ?.authority
+          ?.trusted_output_controls_commit_gate
+        ?? null,
       r1_capability_runtime: r1Mediated,
       character_facing_r1_runtime: characterFacing,
       engine_integrity_r1_runtime: engineIntegrity,
@@ -1487,6 +1527,24 @@ async function executeWorldSimulationCapability(
       mutates_world_state: false,
       shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
       shared_capability_family: sharedNeuralCore?.capability_family ?? null,
+      world_capability_role_registry_version:
+        sharedNeuralCore?.world_capability_role_registry_version ?? null,
+      world_trusted_runtime_role:
+        worldCapabilityRole?.trusted_runtime_role ?? null,
+      world_neural_extension_role:
+        worldCapabilityRole?.neural_extension_role ?? null,
+      world_trusted_output_effect:
+        worldCapabilityRole?.native_loop?.trusted_output_effect ?? null,
+      world_formal_mainline_neural_extension_effect:
+        worldCapabilityRole
+          ?.native_loop
+          ?.formal_mainline_neural_extension_effect
+        ?? null,
+      world_trusted_output_controls_commit_gate:
+        worldCapabilityRole
+          ?.authority
+          ?.trusted_output_controls_commit_gate
+        ?? null,
       r1_capability_runtime: r1Mediated,
       character_facing_r1_runtime: characterFacing,
       engine_integrity_r1_runtime: engineIntegrity,

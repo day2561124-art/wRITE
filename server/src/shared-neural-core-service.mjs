@@ -1,6 +1,10 @@
 import {
   verifyWorldSimulationCapabilityAdapterEnvelope,
 } from "./world-simulation-capability-envelope-service.mjs";
+import {
+  getWorldSimulationCapabilityRole,
+  worldSimulationCapabilityRoleRegistryVersion,
+} from "./world-simulation-capability-role-service.mjs";
 
 export const sharedNeuralCoreVersion = "phase62b-shared-neural-core-v1";
 
@@ -183,6 +187,23 @@ export function assertSharedNeuralCapabilityForMode(sessionMode, capabilityName)
   };
 }
 
+function worldCapabilityRoleMetadata(sessionMode, capability) {
+  if (sessionMode !== neuralSessionModes.WORLD_SIMULATION) return null;
+  const role = getWorldSimulationCapabilityRole(capability.capability_name);
+  if (role.shared_neural_routing_family !== capability.capability_family) {
+    throw errorWithCode(
+      `World capability role routing mismatch for ${capability.capability_name}: `
+        + `${role.shared_neural_routing_family} !== ${capability.capability_family}.`,
+      "WORLD_SIMULATION_CAPABILITY_ROLE_ROUTING_MISMATCH",
+    );
+  }
+  return {
+    world_capability_role_registry_version:
+      worldSimulationCapabilityRoleRegistryVersion,
+    world_capability_role: role,
+  };
+}
+
 function collectForbiddenKeys(value, forbidden, path = [], matches = [], seen = new Set()) {
   if (!value || typeof value !== "object") return matches;
   if (seen.has(value)) return matches;
@@ -268,6 +289,7 @@ export function buildSharedNeuralCoreDescriptor(sessionMode, capabilityName, run
   const mode = assertNeuralSessionMode(sessionMode);
   const capability = assertSharedNeuralCapabilityForMode(mode, capabilityName);
   const lineage = assertNeuralSessionRunShape(run, mode);
+  const worldRoleMetadata = worldCapabilityRoleMetadata(mode, capability);
   return {
     core_version: sharedNeuralCoreVersion,
     session_mode: mode,
@@ -276,6 +298,7 @@ export function buildSharedNeuralCoreDescriptor(sessionMode, capabilityName, run
     entry: lineage.entry,
     mode_locked: true,
     cross_mode_capability_use_allowed: false,
+    ...(worldRoleMetadata ?? {}),
   };
 }
 
@@ -333,11 +356,29 @@ export async function invokeSharedNeuralCoreAdapter({
       );
     }
   }
+  const worldRole = descriptor.world_capability_role ?? null;
   const output = await adapter(input, {
     ...adapter_context,
     shared_neural_core_version: sharedNeuralCoreVersion,
     neural_session_mode: descriptor.session_mode,
     shared_capability_family: descriptor.capability_family,
+    ...(worldRole ? {
+      world_capability_role_registry_version:
+        descriptor.world_capability_role_registry_version,
+      world_capability_semantic_family: worldRole.semantic_family,
+      world_trusted_runtime_role: worldRole.trusted_runtime_role,
+      world_neural_extension_role: worldRole.neural_extension_role,
+      world_adapter_audience_class: worldRole.adapter_audience_class,
+      world_native_loop_stage: worldRole.native_loop.stage,
+      world_native_loop_scope: worldRole.native_loop.scope,
+      world_trusted_output_effect:
+        worldRole.native_loop.trusted_output_effect,
+      world_formal_mainline_neural_extension_effect:
+        worldRole.native_loop.formal_mainline_neural_extension_effect,
+      world_capability_compatibility_status:
+        worldRole.compatibility_status,
+      world_role_registry_grants_runtime_permission: false,
+    } : {}),
   });
   if (descriptor.session_mode === neuralSessionModes.WORLD_SIMULATION) {
     assertWorldSimulationOutputBoundary(descriptor.capability_name, output);
@@ -353,6 +394,21 @@ export function buildSharedNeuralCoreRegistry() {
       {
         ...modeRunContracts[mode],
         capabilities: { ...capabilityFamilies[mode] },
+        ...(mode === neuralSessionModes.WORLD_SIMULATION ? {
+          world_capability_role_registry_version:
+            worldSimulationCapabilityRoleRegistryVersion,
+          world_capability_roles: Object.fromEntries(
+            Object.entries(capabilityFamilies[mode]).map(
+              ([capabilityName, capabilityFamily]) => [
+                capabilityName,
+                worldCapabilityRoleMetadata(mode, {
+                  capability_name: capabilityName,
+                  capability_family: capabilityFamily,
+                }).world_capability_role,
+              ],
+            ),
+          ),
+        } : {}),
       },
     ])),
     shared_families: [
