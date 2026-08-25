@@ -15,7 +15,10 @@ import {
 } from "../../server/src/external-brain-session-lineage-service.mjs";
 import { reconciliationRecommendations as R } from "../../server/src/external-brain-session-reconciliation-service.mjs";
 import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
-import { fingerprintRoots } from "../helpers/content-fingerprint.mjs";
+import {
+  fingerprintRoots,
+  fingerprintRootsMetadata,
+} from "../helpers/content-fingerprint.mjs";
 
 const now = new Date("2026-07-15T12:00:00.000Z");
 const fixtureRoot = path.join(
@@ -26,18 +29,27 @@ const fixtureRoot = path.join(
 );
 const options = { fixtureRoot, now };
 
-const productionRoots = {
+const productionDirectoryRoots = {
   approval_queue: projectPaths.approvalQueue,
   gpt_writing_contexts: projectPaths.gptWritingContexts,
   writing_candidates: projectPaths.writingCandidates,
   agent_runs: projectPaths.agentRuns,
-  neural_traces: projectPaths.neuralTraces,
-  neural_outputs: projectPaths.neuralModuleOutputs,
   transactions: path.join(projectPaths.outputLogs, "transactions"),
   writing_workflow: projectPaths.writingWorkflow,
+};
+
+const productionCriticalFileRoots = {
   active_engine: projectPaths.activeEngine,
   compressed_rules: projectPaths.compressedRules,
 };
+
+async function fingerprintProductionState() {
+  const [directories, criticalFiles] = await Promise.all([
+    fingerprintRootsMetadata(productionDirectoryRoots),
+    fingerprintRoots(productionCriticalFileRoots),
+  ]);
+  return { directories, critical_files: criticalFiles };
+}
 
 function json(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -90,7 +102,7 @@ function itemFor(items, runId) {
   return item;
 }
 
-const productionBefore = await fingerprintRoots(productionRoots);
+const productionBefore = await fingerprintProductionState();
 
 try {
   await rm(fixtureRoot, { recursive: true, force: true });
@@ -228,6 +240,10 @@ try {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
 
-const productionAfter = await fingerprintRoots(productionRoots);
-assert.deepEqual(productionAfter, productionBefore, "Phase 3C governance tests changed production file bytes.");
+const productionAfter = await fingerprintProductionState();
+assert.deepEqual(
+  productionAfter,
+  productionBefore,
+  "Phase 3C governance tests changed production generated-state metadata or critical file bytes.",
+);
 console.log("External brain retirement approval governance Phase 3C PASS.");

@@ -48,3 +48,25 @@ export async function fingerprintRoots(roots) {
     Object.entries(roots).map(async ([name, root]) => [name, await recursiveContentFingerprint(root)]),
   ));
 }
+
+export async function recursiveMetadataFingerprint(root) {
+  const hash = createHash("sha256");
+  const files = await filesUnder(root);
+  let bytes = 0;
+  for (const filePath of files) {
+    const fileStat = await stat(filePath, { bigint: true });
+    const relativePath = path.relative(root, filePath).split(path.sep).join("/") || path.basename(filePath);
+    hash.update(Buffer.from(
+      `${relativePath}\0${fileStat.size}\0${fileStat.mtimeNs}\0${fileStat.ctimeNs}\n`,
+      "utf8",
+    ));
+    bytes += Number(fileStat.size);
+  }
+  return { sha256: hash.digest("hex"), file_count: files.length, logical_bytes: bytes };
+}
+
+export async function fingerprintRootsMetadata(roots) {
+  return Object.fromEntries(await Promise.all(
+    Object.entries(roots).map(async ([name, root]) => [name, await recursiveMetadataFingerprint(root)]),
+  ));
+}

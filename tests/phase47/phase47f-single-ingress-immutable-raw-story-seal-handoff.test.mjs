@@ -311,7 +311,10 @@ try {
     raw_story_handoff_id: sealed.raw_story_handoff_id,
   });
   assert.equal(crossBundle.ok, false);
-  assert.match(crossBundle.blocked_reason, /different writing_context_bundle_id/u);
+  assert.equal(
+    crossBundle.blocked_reason,
+    "writing_context_bundle_id does not belong to the supplied writing session.",
+  );
   assert.equal(
     (await listNeuralTraces({ run_id: session.external_brain_session_id })).length,
     traceCountBeforeBlocks,

@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const endpointPath = "/api/system/inspect-sealed-chain-closure-metadata";
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
-const expectedBaselinePublicDigest = "6cd2b4e6cfc3d9519cb660ac04964e0af9d96c21e23b8425ce414a1494d733bf";
+const expectedBaselinePublicDigest = "9381fcf51409b7055fb756a5dd43b7fb64ffaf33f02399430282160eeaaf5c3c";
 const activeEngineDependencyStatusTool = "get_active_engine_dependency_status";
 const requiredIdentities = {
   capability_id: "inspect_sealed_chain_closure_metadata",

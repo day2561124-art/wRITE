@@ -82,12 +82,15 @@ const steps = [
 
   ["Phase 21 entity registry contracts", ["tests/phase21/phase21-entity-registry-contract.test.mjs"]],
 
-  ["Phase 22 writing card director", ["tests/phase22/phase22a-writing-card-director-service.test.mjs", "tests/phase22/phase22a-writing-card-director-context.test.mjs"]],
+  ["Phase 22 writing card director service", ["tests/phase22/phase22a-writing-card-director-service.test.mjs"]],
+  ["Phase 22 writing card director context", ["tests/phase22/phase22a-writing-card-director-context.test.mjs"]],
 
-  ["Phase 22 neural trace materialization", ["tests/phase22/phase22g-writing-context-trace.test.mjs", "tests/phase22/phase22h-neural-trace-option-exposure.test.mjs"]],
+  ["Phase 22 neural trace materialization writing context", ["tests/phase22/phase22g-writing-context-trace.test.mjs"]],
+  ["Phase 22 neural trace option exposure", ["tests/phase22/phase22h-neural-trace-option-exposure.test.mjs"]],
   ["Phase 22G production residue regression", ["tests/phase22/phase22g-production-residue-regression.test.mjs"]],
 
-  ["Phase 22 guard report explainability", ["tests/phase22/phase22o-guard-report-explainability.test.mjs", "tests/phase22/phase22p-guard-report-display-polish.test.mjs"]],
+  ["Phase 22 guard report explainability", ["tests/phase22/phase22o-guard-report-explainability.test.mjs"]],
+  ["Phase 22 guard report display polish", ["tests/phase22/phase22p-guard-report-display-polish.test.mjs"]],
 
   ["Phase 22 final polisher editorial brain", ["tests/phase22/phase22t-final-polisher-editorial-brain.test.mjs"]],
 
@@ -285,25 +288,16 @@ const steps = [
 
   ["Phase 32F aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge final closure guard", ["tests/phase32/phase32f-aesthetic-memory-context-builder-operator-review-packet-bridge-evidence-packet-final-acceptance-settlement-handoff-checklist-bridge-final-closure-guard.test.mjs"]],
 
-  ["Phase 33A aesthetic memory context builder final closure index", ["tests/phase33/phase33a-aesthetic-memory-context-builder-final-closure-index.test.mjs",
-
-  "tests/phase33/phase33b-aesthetic-memory-context-builder-final-closure-index-bridge-preview.test.mjs",
-
-  "tests/phase33/phase33c-aesthetic-memory-context-builder-final-closure-index-bridge-final-smoke.test.mjs",
-
-  "tests/phase33/phase33d-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness.test.mjs",
-
-  "tests/phase33/phase33e-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-smoke.test.mjs",
-
-  "tests/phase33/phase33f-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure.test.mjs",
-
-  "tests/phase33/phase33g-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist.test.mjs",
-
-  "tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs",
-
-  "tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs",
-
-  "tests/phase33/phase33j-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure-readiness.test.mjs"]],
+  ["Phase 33A aesthetic memory context builder final closure index", ["tests/phase33/phase33a-aesthetic-memory-context-builder-final-closure-index.test.mjs"]],
+  ["Phase 33B aesthetic memory context builder final closure index bridge preview", ["tests/phase33/phase33b-aesthetic-memory-context-builder-final-closure-index-bridge-preview.test.mjs"]],
+  ["Phase 33C aesthetic memory context builder final closure index bridge final smoke", ["tests/phase33/phase33c-aesthetic-memory-context-builder-final-closure-index-bridge-final-smoke.test.mjs"]],
+  ["Phase 33D aesthetic memory context builder final closure index bridge acceptance readiness", ["tests/phase33/phase33d-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness.test.mjs"]],
+  ["Phase 33E aesthetic memory context builder final closure index bridge acceptance readiness final smoke", ["tests/phase33/phase33e-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-smoke.test.mjs"]],
+  ["Phase 33F aesthetic memory context builder final closure index bridge acceptance readiness final closure", ["tests/phase33/phase33f-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure.test.mjs"]],
+  ["Phase 33G aesthetic memory context builder final closure index bridge acceptance readiness final closure operator checklist", ["tests/phase33/phase33g-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist.test.mjs"]],
+  ["Phase 33H aesthetic memory context builder final closure index bridge acceptance readiness final closure operator checklist final smoke", ["tests/phase33/phase33h-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-smoke.test.mjs"]],
+  ["Phase 33I aesthetic memory context builder final closure index bridge acceptance readiness final closure operator checklist final closure", ["tests/phase33/phase33i-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure.test.mjs"]],
+  ["Phase 33J aesthetic memory context builder final closure index bridge acceptance readiness final closure operator checklist final closure readiness", ["tests/phase33/phase33j-aesthetic-memory-context-builder-final-closure-index-bridge-acceptance-readiness-final-closure-operator-checklist-final-closure-readiness.test.mjs"]],
 
   ["Phase 34A full neural writing pipeline single entry bridge", ["tests/phase34/phase34a-full-neural-writing-pipeline-single-entry-bridge.test.mjs"]],
 
@@ -540,6 +534,7 @@ const steps = [
   ["Phase 43I production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation execution smoke", ["tests/phase43/phase43i-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-execution-smoke.test.mjs"]],
   ["Phase 43J production candidate store promotion gate sealed chain metadata-only read-only status inspection capability runtime invocation final acceptance closure", ["tests/phase43/phase43j-production-candidate-store-promotion-gate-sealed-chain-metadata-only-read-only-status-inspection-capability-runtime-invocation-final-acceptance-closure.test.mjs"]],
   ["Maintenance MCP tool inventory baseline reconciliation", ["tests/maintenance/mcp-tool-inventory-baseline-reconciliation.test.mjs"]],
+  ["Maintenance run-all script argv integrity", ["tests/maintenance/run-all-script-argv-integrity.test.mjs"]],
   ["Maintenance self-use metadata inspection entry integration", ["tests/maintenance/self-use-metadata-inspection-entry-integration.test.mjs"]],
 
 

@@ -14,7 +14,7 @@ import {
 } from "../../server/src/approval-queue-service.mjs";
 import { createAgentRun } from "../../server/src/agent-run-service.mjs";
 import { importSettlementResult } from "../../server/src/engine-candidate-service.mjs";
-import { projectPaths } from "../../server/src/project-paths.mjs";
+import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
 import {
   adoptCandidateDraft,
   saveCandidateDraft,
@@ -22,7 +22,8 @@ import {
 } from "../../server/src/writing-workflow-service.mjs";
 import { createEngineComponentRegistryFixture } from "../helpers/engine-component-registry-fixture.mjs";
 
-const fixtureApproval = path.join(projectPaths.approvalQueue, ".approval-queue-test");
+const fixtureRoot = path.join(projectRoot, "tests", ".tmp", "approval-queue-service");
+const fixtureApproval = path.join(fixtureRoot, "data", "approval_queue");
 const fixtureWriting = path.join(projectPaths.writingWorkflow, ".approval-queue-test");
 const fixtureCanon = path.join(projectPaths.canonDb, ".approval-queue-test");
 const fixtureActive = path.join(fixtureCanon, "active_engine.md");
@@ -73,12 +74,12 @@ async function expectReject(action, message) {
 async function main() {
   const productionHash = hash(await readFile(projectPaths.activeEngine));
   const transactionsBefore = await names(transactionDir);
-  const agentRunsBefore = await names(projectPaths.agentRuns);
   const activeText = [
     "# 完整創作引擎 approval-queue-test",
     ...Array.from({ length: 40 }, (_, index) => `規則 ${index + 1}：維持既有設定。`),
   ].join("\n");
   const options = {
+    fixtureRoot,
     approvalQueue: fixtureApproval,
     writingWorkflow: fixtureWriting,
     activeEnginePath: fixtureActive,
@@ -89,7 +90,7 @@ async function main() {
     rollbackIndex: fixtureRollbackIndex,
     registryPath: fixtureRegistry,
   };
-  await rm(fixtureApproval, { recursive: true, force: true });
+  await rm(fixtureRoot, { recursive: true, force: true });
   await rm(fixtureWriting, { recursive: true, force: true });
   await rm(fixtureCanon, { recursive: true, force: true });
   await mkdir(fixtureCanon, { recursive: true });
@@ -115,13 +116,12 @@ async function main() {
       requires_neural_modules: true,
       required_neural_modules: ["scene_planner"],
       input: "Only a textual claim; no success trace.",
-    });
+    }, options);
     const neuralCandidate = await importSettlementResult({
       rawText: settlement(`${activeText}\n新增規則：需要神經證據。`),
       sourceChapter: "Neural 候選章",
       runId: run.run_id,
       requiresNeuralModules: true,
-      neuralModulesUsedPath: `data/agent_runs/${run.run_id}/neural_modules_used.json`,
     }, options);
 
     const criticalCandidate = await importSettlementResult({
@@ -300,10 +300,9 @@ async function main() {
     assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Production active changed.");
     console.log("Approval queue service test passed.");
   } finally {
-    await rm(fixtureApproval, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
     await rm(fixtureWriting, { recursive: true, force: true });
     await rm(fixtureCanon, { recursive: true, force: true });
-    await removeNew(projectPaths.agentRuns, agentRunsBefore);
     await removeNew(transactionDir, transactionsBefore);
     assert(hash(await readFile(projectPaths.activeEngine)) === productionHash, "Cleanup changed active.");
   }

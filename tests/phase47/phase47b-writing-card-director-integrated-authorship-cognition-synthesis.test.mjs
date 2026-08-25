@@ -381,7 +381,16 @@ try {
     writing_context_bundle_id: otherBundleSession.writing_context_bundle_id,
   });
   assert.equal(crossBundleDirector.ok, false);
-  assert.deepEqual(crossBundleDirector.missing_prior_cognition_modules, priorAuthorshipCognitionModules);
+  assert.equal(crossBundleDirector.blocked, true);
+  assert.equal(
+    crossBundleDirector.blocked_reason,
+    "writing_context_bundle_id does not belong to the supplied writing session.",
+  );
+  assert.equal(
+    crossBundleDirector.missing_prior_cognition_modules,
+    undefined,
+    "Cross-bundle ownership rejection must not be mislabeled as missing prior cognition.",
+  );
 
   await assertIntegrityBlock("record run_id mismatch", async (caseSession, caseResults) => {
     const traceId = caseResults.get("scene_planner").response.trace.trace_id;
