@@ -5,6 +5,9 @@ import {
   recordNeuralWrapperTrace,
 } from "./neural-trace-service.mjs";
 import {
+  buildNeuralAdapterExecutionEvidence,
+} from "./neural-adapter-provenance-service.mjs";
+import {
   persistExternalBrainCognitionOutput,
   priorAuthorshipCognitionModules,
   serializeCognitionCapabilityOutput,
@@ -485,6 +488,18 @@ async function runModule(moduleName, input, options = {}) {
   let generationSurfaceCompacted = false;
   let errorMessage = null;
   let warnings = [];
+  const neuralAdapter =
+    typeof options.adapter === "function" ? options.adapter : null;
+  let adapterInvoked = false;
+  let adapterCompleted = false;
+  const trackedAdapter = neuralAdapter
+    ? async (...args) => {
+      adapterInvoked = true;
+      const value = await neuralAdapter(...args);
+      adapterCompleted = true;
+      return value;
+    }
+    : null;
 
   const phaseBoundaryOutput =
     preAdapterPhaseBoundaryOutput(moduleName, input);
@@ -503,7 +518,7 @@ async function runModule(moduleName, input, options = {}) {
     }
     generationSurfaceHash = hashNeuralValue(outputText(output));
     status = "success";
-  } else if (typeof options.adapter !== "function") {
+  } else if (!trackedAdapter) {
     warnings = ["Local neural model adapter is not configured."];
   } else {
     try {
@@ -520,12 +535,12 @@ async function runModule(moduleName, input, options = {}) {
           session_mode: sharedNeuralCore.session_mode,
           capability_name: moduleName,
           input,
-          adapter: options.adapter,
+          adapter: trackedAdapter,
           adapter_context: adapterContext,
         });
         output = invocation.output;
       } else {
-        output = await options.adapter(input, adapterContext);
+        output = await trackedAdapter(input, adapterContext);
       }
       persistedOutput = attachModuleContract(
         moduleName,
@@ -554,6 +569,11 @@ async function runModule(moduleName, input, options = {}) {
     }
   }
 
+  const adapterExecutionEvidence =
+    buildNeuralAdapterExecutionEvidence(neuralAdapter, {
+      invoked: adapterInvoked,
+      completed: adapterCompleted,
+    });
   const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
   const trace = await recordNeuralWrapperTrace({
     run_id: runId,
@@ -577,6 +597,7 @@ async function runModule(moduleName, input, options = {}) {
     input_summary: {
       chars: inputValue.length,
       source,
+      ...adapterExecutionEvidence,
       ...(sharedNeuralCore ? {
         session_mode: sharedNeuralCore.session_mode,
         shared_neural_core_version: sharedNeuralCore.core_version,
@@ -589,6 +610,10 @@ async function runModule(moduleName, input, options = {}) {
       generation_surface_hash: generationSurfaceHash,
       generation_surface_compacted: generationSurfaceCompacted,
       result_type: spec.result_type,
+      adapter_output_accepted:
+        status === "success" && adapterExecutionEvidence.adapter_completed,
+      model_backed_execution_evidenced:
+        adapterExecutionEvidence.model_backed_execution_evidenced,
       ...(sharedNeuralCore ? {
         session_mode: sharedNeuralCore.session_mode,
         shared_neural_core_version: sharedNeuralCore.core_version,

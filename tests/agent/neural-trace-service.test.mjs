@@ -14,6 +14,9 @@ import {
   run_character_simulator,
   run_scene_planner,
 } from "../../server/src/neural-module-service.mjs";
+import {
+  attestModelBackedNeuralAdapter,
+} from "../../server/src/neural-adapter-provenance-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
 const transactionDir = path.join(projectPaths.outputLogs, "transactions");
@@ -80,7 +83,15 @@ async function main() {
     const success = await run_scene_planner("scene input", {
       run_id: runId,
       task_type: "test",
-      adapter: async () => ({ beats: ["arrival", "choice"] }),
+      adapter: attestModelBackedNeuralAdapter(
+        async () => ({ beats: ["arrival", "choice"] }),
+        {
+          source: "neural-trace-service-test-fixture",
+          provider_id: "neural-trace-test",
+          model_name: "scene-planner-fixture",
+          model_version: "v1",
+        },
+      ),
     });
     assert(success.trace.status === "success", "Successful adapter did not produce success.");
     assert(success.trace.input_hash?.length === 64, "Success trace input_hash is invalid.");

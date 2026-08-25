@@ -247,7 +247,8 @@ const diagnostics = handoff?.neural_modules_diagnostics;
 const summary = handoff?.neural_trace_summary;
 
 assert.equal(diagnostics?.required_modules_executed, true);
-assert.equal(diagnostics?.chatgpt_native_neural_modules_executed, true);
+assert.equal(diagnostics?.chatgpt_native_neural_modules_executed, false);
+assert.equal(diagnostics?.model_backed_execution_evidenced, false);
 assert.equal(diagnostics?.module_results_attached_to_handoff, true);
 assert.equal(diagnostics?.neural_trace_created, true);
 assert.equal(diagnostics?.neural_execution_status, "success");
@@ -256,7 +257,14 @@ assert.equal(summary?.trace_count, 7);
 assert.equal(summary?.success_count, 7);
 assert.equal(summary?.failed_count, 0);
 assert.equal(summary?.skipped_count, 0);
-assert.equal(summary?.used_neural_network, true);
+assert.equal(summary?.used_neural_network, false);
+assert.equal(summary?.model_backed_execution_evidence_count, 0);
+assert.equal(summary?.neural_adapter_invocation_count, 4);
+assert.equal(summary?.deterministic_adapter_invocation_count, 4);
+assert.equal(
+  summary?.success_count - summary?.neural_adapter_invocation_count,
+  3,
+);
 assert.deepEqual(summary?.missing_required_neural_modules, []);
 assert.deepEqual(
   [...(summary?.required_neural_modules ?? [])].sort(),
@@ -280,5 +288,5 @@ for (const moduleName of EXPECTED_MODULES) {
 }
 
 console.log(
-  `Maintenance live tool identity routing guard passed: requested ${HANDOFF_TOOL}, returned ${handoffPayload.tool_name}, neural=${summary.success_count}/${summary.trace_count}, run_id=${summary.run_id}`,
+  `Maintenance live tool identity routing guard passed: requested ${HANDOFF_TOOL}, returned ${handoffPayload.tool_name}, wrapper_success=${summary.success_count}/${summary.trace_count}, model_backed=${summary.model_backed_execution_evidence_count ?? 0}, used_neural_network=${summary.used_neural_network === true}, run_id=${summary.run_id}`,
 );

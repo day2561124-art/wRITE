@@ -14,6 +14,9 @@ import {
   buildStoryMaterialCognitionContract,
 } from "./neural-module-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
+import {
+  attestDeterministicNeuralAdapter,
+} from "./neural-adapter-provenance-service.mjs";
 
 const DEFAULT_MODULE_ORDER = [
   "scene_planner",
@@ -156,7 +159,12 @@ function adapterFor(moduleName, options = {}) {
   if (typeof globalAdapter === "function") return globalAdapter;
 
   if (options.disable_chatgpt_native_default_neural_adapter === true) return null;
-  return defaultModuleAdapter(moduleName);
+  return attestDeterministicNeuralAdapter(
+    defaultModuleAdapter(moduleName),
+    {
+      source: "chatgpt_native_trace_only_builtin_adapter",
+    },
+  );
 }
 
 function summarizeOutput(output) {
@@ -180,6 +188,7 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
       run_id: null,
       required_modules_executed: false,
       chatgpt_native_neural_modules_executed: false,
+      model_backed_execution_evidenced: false,
       module_results_attached_to_handoff: false,
       neural_trace_created: false,
       neural_module_execution_results: [],
@@ -291,16 +300,25 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
     latency_ms: trace.latency_ms,
     warnings: trace.warnings ?? [],
     error_message: trace.error_message ?? null,
+    neural_adapter_execution_kind:
+      trace.input_summary?.neural_adapter_execution_kind ?? null,
+    model_backed_execution_evidenced:
+      trace.input_summary?.model_backed_execution_evidenced === true,
   }));
 
   const allSucceeded = results.length > 0 && results.every((item) => item.status === "success");
   const traceCreated = compactTraces.length >= results.length && compactTraces.length > 0;
+  const allModelBackedModulesExecuted = allSucceeded
+    && usage.model_backed_execution_evidence_count === results.length;
 
   return {
     status: allSucceeded ? "success" : "warning",
     run_id: runId,
     required_modules_executed: allSucceeded,
-    chatgpt_native_neural_modules_executed: allSucceeded,
+    chatgpt_native_neural_modules_executed:
+      allModelBackedModulesExecuted,
+    model_backed_execution_evidenced:
+      usage.used_neural_network === true,
     module_results_attached_to_handoff:
       results.length > 0 && results.every((item) => typeof item.trace_id === "string" && item.trace_id.length > 0),
     neural_trace_created: traceCreated,
@@ -311,7 +329,24 @@ export async function executeChatgptNativeTraceOnlyNeuralModules(rawInput = {}, 
       success_count: usage.success_count ?? results.filter((item) => item.status === "success").length,
       failed_count: usage.failed_count ?? results.filter((item) => item.status === "failed").length,
       skipped_count: usage.skipped_count ?? results.filter((item) => item.status === "skipped").length,
+      neural_usage_evidence_version:
+        usage.neural_usage_evidence_version ?? null,
+      neural_adapter_provenance_version:
+        usage.neural_adapter_provenance_version ?? null,
+      evidence_policy: usage.evidence_policy ?? null,
       used_neural_network: usage.used_neural_network === true,
+      model_backed_execution_evidence_count:
+        usage.model_backed_execution_evidence_count ?? 0,
+      neural_adapter_invocation_count:
+        usage.neural_adapter_invocation_count ?? 0,
+      neural_adapter_completion_count:
+        usage.neural_adapter_completion_count ?? 0,
+      unattested_adapter_invocation_count:
+        usage.unattested_adapter_invocation_count ?? 0,
+      deterministic_adapter_invocation_count:
+        usage.deterministic_adapter_invocation_count ?? 0,
+      model_backed_adapter_invocation_count:
+        usage.model_backed_adapter_invocation_count ?? 0,
       required_neural_modules: modules.map(wrapperName),
       missing_required_neural_modules:
         (usage.missing_required_neural_modules ?? []).map(wrapperName),

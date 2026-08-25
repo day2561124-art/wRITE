@@ -9,6 +9,9 @@ import {
   run_scene_planner,
 } from "../../server/src/neural-module-service.mjs";
 import {
+  attestModelBackedNeuralAdapter,
+} from "../../server/src/neural-adapter-provenance-service.mjs";
+import {
   classifyNeuralUsageEvidence,
   neuralUsageEvidenceVersion,
 } from "../../server/src/neural-usage-evidence-service.mjs";
@@ -156,10 +159,18 @@ try {
     },
     {
       ...options,
-      adapter: async () => ({
-        subjective_inferences: ["下一項測試可能延後"],
-        deliberative_pressures: ["時間"],
-      }),
+      adapter: attestModelBackedNeuralAdapter(
+        async () => ({
+          subjective_inferences: ["下一項測試可能延後"],
+          deliberative_pressures: ["時間"],
+        }),
+        {
+          source: "phase62a-r2-step3-world-fixture",
+          provider_id: "phase62a-r2-step3-fixture",
+          model_name: "world-character-cognition-fixture",
+          model_version: "v1",
+        },
+      ),
     },
   );
 
@@ -276,13 +287,21 @@ try {
       ...options,
       run_id: writingRun.run_id,
       task_type: "draft_generation",
-      adapter: async () => ({
-        current_event: "角色準備離開宿舍。",
-        scene_pressure: [],
-        practical_consequences: [],
-        unresolved_items: [],
-        available_scene_material: [],
-      }),
+      adapter: attestModelBackedNeuralAdapter(
+        async () => ({
+          current_event: "角色準備離開宿舍。",
+          scene_pressure: [],
+          practical_consequences: [],
+          unresolved_items: [],
+          available_scene_material: [],
+        }),
+        {
+          source: "phase62a-r2-step3-writing-fixture",
+          provider_id: "phase62a-r2-step3-fixture",
+          model_name: "scene-planner-fixture",
+          model_version: "v1",
+        },
+      ),
     },
   );
 
@@ -293,15 +312,15 @@ try {
   assert.equal(writingUsage.world_simulation_run, false);
   assert.equal(
     writingUsage.evidence_policy,
-    "legacy_successful_wrapper_trace_compatibility",
+    "strict_server_attested_model_backed_execution",
   );
   assert.equal(writingUsage.used_neural_network, true);
   assert.equal(writingUsage.neural_execution_evidence_count, 1);
-  assert.equal(writingUsage.neural_adapter_metrics_applicable, false);
-  assert.equal(writingUsage.neural_adapter_invocation_count, null);
+  assert.equal(writingUsage.neural_adapter_metrics_applicable, true);
+  assert.equal(writingUsage.neural_adapter_invocation_count, 1);
   assert.equal(
     writingUsage.neural_adapter_success_evidence_count,
-    null,
+    1,
   );
   assert.deepEqual(
     writingUsage.neural_execution_modules,

@@ -38,7 +38,7 @@ Important shared families include:
 | `agency_governance` | `over_governance_detector` | `world_agency_guard` |
 | `consistency_critique` | `neural_critic` | `world_consistency_critic` |
 
-Writing-only capabilities such as `style_drift_detector`, `writing_card_director`, and `final_polisher` remain writing-only. World-only perception, memory retrieval, and action proposal remain world-only.
+Writing-only capabilities such as `style_drift_detector`, `writing_card_director`, and `final_polisher` remain writing-only. World-only perception, legacy memory-context projection, and action-candidate proposal remain world-only.
 
 ## World-mode hard boundary
 
@@ -69,6 +69,22 @@ Architecture-primary writing and world traces record:
 - `shared_capability_family`
 
 This gives testable evidence that both modes use the same core router while preserving separate input/output contracts.
+
+### Phase62A-R2 strict neural execution provenance
+
+Shared Core routing is not proof that a trained model executed. Phase62A-R2 therefore keeps wrapper completion, adapter invocation, model-backed execution, and adapter-output acceptance as separate evidence axes.
+
+`used_neural_network = true` now requires all of the following:
+
+- the adapter function identity was server-attested as `model_backed_attested`;
+- the wrapper actually invoked that function;
+- the adapter returned, establishing model-backed execution evidence.
+
+A deterministic programmatic adapter, an unattested callable, a historical success trace without provenance, or adapter output that merely claims `model_backed: true` does not satisfy this evidence rule. Attestation is stored out-of-band against the server-side function identity and is not accepted from MCP or adapter JSON output.
+
+Adapter-output acceptance is independent. In world mode a server-attested model may execute and return successfully while R1 rejects its output and preserves the trusted base; that run still has model-execution evidence but does not have `neural_extension_accepted` authority.
+
+`neural_modules_used` and required-module completion retain their historical structural wrapper-success semantics. They do not become neural-model evidence. `sharedNeuralCoreVersion` remains `phase62b-shared-neural-core-v1`; provenance and usage evidence are independently versioned.
 
 ## Phase62B acceptance
 

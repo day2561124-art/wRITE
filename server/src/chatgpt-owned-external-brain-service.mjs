@@ -29,6 +29,9 @@ import {
 } from "./neural-module-service.mjs";
 import { summarizeNeuralUsageForRun } from "./neural-trace-service.mjs";
 import {
+  attestDeterministicNeuralAdapter,
+} from "./neural-adapter-provenance-service.mjs";
+import {
   loadVerifiedPriorAuthorshipCognition,
   priorAuthorshipCognitionModules,
 } from "./external-brain-cognition-output-service.mjs";
@@ -1864,9 +1867,14 @@ export async function useChatgptOwnedExternalBrainCapability(capabilityName, inp
         !isFinalPolisher
         && (options.generation_surface_output ?? options.adapter === undefined),
       writing_context_bundle_id: contextBundleId,
-      adapter: options.adapter ?? deterministicAdapter(capabilityName, rawStoryText, {
-        technique_selection: techniqueSelection,
-      }),
+      adapter: options.adapter ?? attestDeterministicNeuralAdapter(
+        deterministicAdapter(capabilityName, rawStoryText, {
+          technique_selection: techniqueSelection,
+        }),
+        {
+          source: "chatgpt_owned_external_brain_deterministic_adapter",
+        },
+      ),
       ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
     });
   } catch (error) {

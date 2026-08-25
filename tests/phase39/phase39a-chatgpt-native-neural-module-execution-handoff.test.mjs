@@ -2,6 +2,9 @@
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { buildChatgptNativeNeuralWritingHandoff } from "../../server/src/chatgpt-native-neural-writing-handoff-service.mjs";
+import {
+  attestModelBackedNeuralAdapter,
+} from "../../server/src/neural-adapter-provenance-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 
 const taskPrompt = "依最新主核對表正式續寫下一章。只輸出正文，從章名開始。";
@@ -114,6 +117,17 @@ const neuralAdapters = {
     guidance: "final polish belongs to ChatGPT-native prose response",
   }),
 };
+for (const [moduleName, adapter] of Object.entries(neuralAdapters)) {
+  neuralAdapters[moduleName] = attestModelBackedNeuralAdapter(
+    adapter,
+    {
+      source: "phase39a-model-backed-fixture",
+      provider_id: "phase39a-fixture-provider",
+      model_name: moduleName,
+      model_version: "v1",
+    },
+  );
+}
 
 const agentRunsBefore = await names(projectPaths.agentRuns);
 const tracesBefore = await names(projectPaths.neuralTraces);
@@ -165,11 +179,19 @@ try {
   const diagnostics = handoff.neural_modules_diagnostics;
   assert.equal(diagnostics.required_modules_checked, true);
   assert.equal(diagnostics.required_modules_executed, true);
-  assert.equal(diagnostics.chatgpt_native_neural_modules_executed, true);
+  assert.equal(
+    diagnostics.chatgpt_native_neural_modules_executed,
+    false,
+  );
+  assert.equal(diagnostics.model_backed_execution_evidenced, true);
   assert.equal(diagnostics.module_results_attached_to_handoff, true);
   assert.equal(diagnostics.neural_trace_created, true);
 
-  assert.equal(handoff.chatgpt_native_neural_modules_executed, true);
+  assert.equal(
+    handoff.chatgpt_native_neural_modules_executed,
+    false,
+  );
+  assert.equal(handoff.model_backed_execution_evidenced, true);
   assert.equal(handoff.module_results_attached_to_handoff, true);
   assert.equal(handoff.neural_trace_created, true);
 
@@ -209,6 +231,9 @@ try {
   assert.equal(traceSummary.failed_count, 0);
   assert.equal(traceSummary.skipped_count, 0);
   assert.equal(traceSummary.used_neural_network, true);
+  assert.equal(traceSummary.model_backed_execution_evidence_count, 4);
+  assert.equal(traceSummary.neural_adapter_invocation_count, 4);
+  assert.equal(traceSummary.model_backed_adapter_invocation_count, 4);
   assert.deepEqual(traceSummary.required_neural_modules, expectedModules);
   assert.deepEqual(traceSummary.missing_required_neural_modules, []);
   assert.equal(traceSummary.traces.length, 7);

@@ -6,6 +6,9 @@ import {
   recordNeuralWrapperTrace,
 } from "./neural-trace-service.mjs";
 import {
+  buildNeuralAdapterExecutionEvidence,
+} from "./neural-adapter-provenance-service.mjs";
+import {
   assertNeuralSessionRunShape,
   assertWorldSimulationInputBoundary,
   buildSharedNeuralCoreDescriptor,
@@ -132,10 +135,13 @@ export const worldSimulationCapabilityContracts = Object.freeze({
       "world_memory_retriever",
 
     purpose:
-      "Project an authoritative Phase63B memory-candidate set into bounded Character Brain context without asserting successful recall; keep engine provenance and accessibility diagnostics internal.",
+      "Project an authoritative Phase63B memory-candidate set as an engine-only compatibility sidecar without asserting successful recall. This direct compatibility output is not the native Character Brain retrieval channel; Phase63C recovered_memories owns that boundary.",
 
     architecture_role:
       "legacy_candidate_context_projector_preserved_for_direct_compatibility",
+
+    native_world_loop_output_role:
+      "engine_only_compatibility_sidecar",
 
     native_phase63c_retrieval_process_owner:
       "world_simulation_memory_retrieval_process_service",
@@ -1256,7 +1262,19 @@ async function executeWorldSimulationCapability(
   const engineIntegrity =
     isWorldSimulationEngineIntegrityCapability(capabilityName);
   const r1Mediated = characterFacing || engineIntegrity;
-  const hasNeuralAdapter = typeof options.adapter === "function";
+  const neuralAdapter =
+    typeof options.adapter === "function" ? options.adapter : null;
+  const hasNeuralAdapter = Boolean(neuralAdapter);
+  let adapterInvoked = false;
+  let adapterCompleted = false;
+  const trackedAdapter = neuralAdapter
+    ? async (...args) => {
+      adapterInvoked = true;
+      const value = await neuralAdapter(...args);
+      adapterCompleted = true;
+      return value;
+    }
+    : null;
   const runtimeVersion = characterFacing
     ? worldSimulationCharacterFacingRuntimeVersion
     : engineIntegrity
@@ -1358,7 +1376,7 @@ async function executeWorldSimulationCapability(
           input: detachedAdapterEnvelope,
           world_capability_canonical_envelope:
             prepared.adapter_envelope,
-          adapter: options.adapter,
+          adapter: trackedAdapter,
           adapter_context: {
             run_id: runId,
             task_type: "world_simulation",
@@ -1441,6 +1459,11 @@ async function executeWorldSimulationCapability(
     errorCode = error?.code ?? null;
   }
 
+  const adapterExecutionEvidence =
+    buildNeuralAdapterExecutionEvidence(neuralAdapter, {
+      invoked: adapterInvoked,
+      completed: adapterCompleted,
+    });
   const inputHash = hashNeuralValue(traceInputText);
   const serializedOutput = output === null ? "" : JSON.stringify(output);
   const outputHash = status === "success"
@@ -1472,6 +1495,7 @@ async function executeWorldSimulationCapability(
       chars: traceInputText.length,
       source: options.source ?? "world_simulation_bridge",
       domain: "world_simulation",
+      ...adapterExecutionEvidence,
       session_mode: neuralSessionModes.WORLD_SIMULATION,
       shared_neural_core_version: sharedNeuralCore?.core_version ?? null,
       shared_capability_family: sharedNeuralCore?.capability_family ?? null,
@@ -1517,7 +1541,6 @@ async function executeWorldSimulationCapability(
       character_facing_r1_runtime: characterFacing,
       engine_integrity_r1_runtime: engineIntegrity,
       trusted_programmatic_base_used: r1Mediated,
-      adapter_invoked: hasNeuralAdapter,
       adapter_input_hash: adapterInputHash,
       capability_envelope_id: capabilityEnvelopeId,
       capability_envelope_hash: capabilityEnvelopeHash,
@@ -1554,6 +1577,10 @@ async function executeWorldSimulationCapability(
       engine_integrity_r1_runtime: engineIntegrity,
       neural_extension_accepted:
         r1Audit?.neural_extension_accepted ?? false,
+      adapter_output_accepted:
+        r1Audit?.neural_extension_accepted ?? false,
+      model_backed_execution_evidenced:
+        adapterExecutionEvidence.model_backed_execution_evidenced,
       trusted_base_fallback_used:
         r1Audit?.fallback_to_trusted_base ?? false,
     },

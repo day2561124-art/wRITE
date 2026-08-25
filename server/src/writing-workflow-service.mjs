@@ -215,7 +215,11 @@ async function neuralUsage(runId, neuralModulesUsedPath = "") {
     used_neural_network: usage.used_neural_network,
     warning: usage.warning,
     missing_required_neural_modules: usage.missing_required_neural_modules,
-    message: usage.used_neural_network ? "已由 success trace 證實" : "未使用 / 缺少 trace",
+    message: usage.used_neural_network
+      ? "已由 server-attested model-backed execution trace 證實"
+      : usage.trace_count > 0
+        ? "已有 wrapper trace，但未證實 model-backed neural execution"
+        : "未使用 / 缺少 trace",
   };
 }
 

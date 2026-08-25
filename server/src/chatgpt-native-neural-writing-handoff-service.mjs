@@ -589,6 +589,8 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
     required_modules_executed: neuralExecution.required_modules_executed,
     chatgpt_native_neural_modules_executed:
       neuralExecution.chatgpt_native_neural_modules_executed,
+    model_backed_execution_evidenced:
+      neuralExecution.model_backed_execution_evidenced === true,
     module_results_attached_to_handoff:
       neuralExecution.module_results_attached_to_handoff,
     neural_trace_created: neuralExecution.neural_trace_created,
@@ -643,6 +645,8 @@ export async function buildChatgptNativeNeuralWritingHandoff(rawInput = {}, opti
       neuralExecution.neural_trace_summary,
     chatgpt_native_neural_modules_executed:
       neuralExecution.chatgpt_native_neural_modules_executed,
+    model_backed_execution_evidenced:
+      neuralExecution.model_backed_execution_evidenced === true,
     module_results_attached_to_handoff:
       neuralExecution.module_results_attached_to_handoff,
     neural_trace_created:

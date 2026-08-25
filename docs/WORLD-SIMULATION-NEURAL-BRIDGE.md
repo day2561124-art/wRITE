@@ -41,7 +41,7 @@ The seven individual capability tools remain available only in the full/debug pr
 
 - `chatgpt_bridge_use_world_scene_causal_analyzer`
 - `chatgpt_bridge_use_world_perception_filter`
-- `chatgpt_bridge_use_world_memory_retriever` — legacy candidate projector, not successful Phase63C retrieval
+- `chatgpt_bridge_use_world_memory_retriever` — legacy engine-only compatibility sidecar; not successful Phase63C retrieval and not the native Character Brain memory channel
 - `chatgpt_bridge_use_world_character_cognition`
 - `chatgpt_bridge_use_world_action_proposer`
 - `chatgpt_bridge_use_world_agency_guard`
@@ -64,7 +64,11 @@ World-simulation cognitive capabilities may not:
 
 Phase62A provides deterministic structural defaults so the bridge is testable and safe even without an external model adapter. These defaults normalize inputs, enforce information boundaries, and produce diagnostic/cognition packets; they are not a claim that a trained neural model executed.
 
-A later phase can inject actual local/remote neural adapters into `runWorldSimulationCapability(...)` without changing the MCP contract. The adapter receives the capability name, world-simulation run identity, and hard permission boundary, and must return a JSON object.
+Actual local/remote neural adapters can be injected into `runWorldSimulationCapability(...)` without changing the MCP contract. The adapter receives the capability name, world-simulation run identity, and hard permission boundary, and must return a JSON object.
+
+Phase62A-R2 does not infer model execution from the presence of a callable adapter. `used_neural_network` is true only when the server has attested that exact function identity as model-backed and the adapter actually returns. Deterministic adapters and ordinary/unattested functions remain valid compatibility or test adapters, but they do not create neural-network evidence. Adapter JSON output cannot self-attest model provenance.
+
+Whether a model executed is also independent from whether its output was accepted. R1 may reject a returned model extension and preserve the trusted deterministic base while telemetry still records that the model-backed adapter executed.
 
 ## Test
 

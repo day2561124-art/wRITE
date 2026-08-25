@@ -1,9 +1,13 @@
 import {
+  neuralAdapterExecutionKinds,
+  neuralAdapterProvenanceVersion,
+} from "./neural-adapter-provenance-service.mjs";
+import {
   normalizeNeuralModuleKey,
 } from "./neural-module-utils.mjs";
 
 export const neuralUsageEvidenceVersion =
-  "phase62a-r2-neural-usage-evidence-v1";
+  "phase62a-r2-neural-usage-evidence-v2";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -29,11 +33,26 @@ export function isWorldSimulationNeuralUsageRun(run = {}) {
     || run.mode === "chatgpt_owned_world_simulation";
 }
 
-function worldAcceptedNeuralTrace(trace) {
+function hasCurrentProvenance(summary) {
+  return summary.neural_adapter_provenance_version
+    === neuralAdapterProvenanceVersion;
+}
+
+function modelBackedExecutionTrace(trace) {
   const inputSummary = object(trace?.input_summary);
+  return hasCurrentProvenance(inputSummary)
+    && inputSummary.neural_adapter_execution_kind
+      === neuralAdapterExecutionKinds.MODEL_BACKED_ATTESTED
+    && inputSummary.neural_adapter_attested === true
+    && inputSummary.neural_adapter_model_backed === true
+    && inputSummary.adapter_invoked === true
+    && inputSummary.adapter_completed === true
+    && inputSummary.model_backed_execution_evidenced === true;
+}
+
+function worldAcceptedExtensionTrace(trace) {
   const outputSummary = object(trace?.output_summary);
   return trace?.status === "success"
-    && inputSummary.adapter_invoked === true
     && outputSummary.neural_extension_accepted === true
     && outputSummary.trusted_base_fallback_used !== true;
 }
@@ -56,6 +75,21 @@ function worldFallbackSuccessTrace(trace) {
     );
 }
 
+function adapterInvocationTrace(trace) {
+  return object(trace?.input_summary).adapter_invoked === true;
+}
+
+function adapterCompletionTrace(trace) {
+  return object(trace?.input_summary).adapter_completed === true;
+}
+
+function adapterKindTrace(trace, executionKind) {
+  const inputSummary = object(trace?.input_summary);
+  return hasCurrentProvenance(inputSummary)
+    && inputSummary.adapter_invoked === true
+    && inputSummary.neural_adapter_execution_kind === executionKind;
+}
+
 export function classifyNeuralUsageEvidence({
   run = {},
   traces = [],
@@ -69,9 +103,11 @@ export function classifyNeuralUsageEvidence({
   const worldSimulation =
     isWorldSimulationNeuralUsageRun(run);
 
-  const neuralEvidenceTraces = worldSimulation
-    ? successTraces.filter(worldAcceptedNeuralTrace)
-    : successTraces;
+  // A wrapper success, an adapter invocation, and accepted adapter output are
+  // not proof that a neural model executed. Only server-side attestation bound
+  // to the function identity plus an adapter return can establish that fact.
+  const neuralEvidenceTraces =
+    traceList.filter(modelBackedExecutionTrace);
   const neuralExecutionModules =
     normalizedModuleNames(neuralEvidenceTraces);
 
@@ -81,25 +117,40 @@ export function classifyNeuralUsageEvidence({
   const fallbackSuccessTraces = worldSimulation
     ? successTraces.filter(worldFallbackSuccessTrace)
     : [];
+  const acceptedWorldExtensionTraces = worldSimulation
+    ? successTraces.filter(worldAcceptedExtensionTrace)
+    : [];
 
-  const classifiedWorldTraceIds = new Set([
-    ...neuralEvidenceTraces,
-    ...trustedProgrammaticSuccessTraces,
-    ...fallbackSuccessTraces,
-  ].map((trace) => trace?.trace_id).filter(Boolean));
+  const provenanceClassifiedSuccessTraces = successTraces.filter(
+    (trace) => hasCurrentProvenance(object(trace?.input_summary)),
+  );
+  const unclassifiedSuccessCount = successTraces.length
+    - provenanceClassifiedSuccessTraces.length;
 
-  const unclassifiedWorldSuccessCount = worldSimulation
-    ? successTraces.filter((trace) => (
-      !trace?.trace_id
-      || !classifiedWorldTraceIds.has(trace.trace_id)
-    )).length
-    : 0;
-
-  const neuralAdapterInvocationCount = worldSimulation
-    ? traceList.filter(
-      (trace) => object(trace?.input_summary).adapter_invoked === true,
-    ).length
-    : null;
+  const adapterInvocationTraces =
+    traceList.filter(adapterInvocationTrace);
+  const adapterCompletionTraces =
+    traceList.filter(adapterCompletionTrace);
+  const unattestedAdapterInvocationTraces = traceList.filter(
+    (trace) => adapterKindTrace(
+      trace,
+      neuralAdapterExecutionKinds.UNATTESTED_CALLABLE,
+    ),
+  );
+  const deterministicAdapterInvocationTraces = traceList.filter(
+    (trace) => adapterKindTrace(
+      trace,
+      neuralAdapterExecutionKinds.DETERMINISTIC_PROGRAMMATIC,
+    ),
+  );
+  const modelBackedAdapterInvocationTraces = traceList.filter(
+    (trace) => adapterKindTrace(
+      trace,
+      neuralAdapterExecutionKinds.MODEL_BACKED_ATTESTED,
+    ),
+  );
+  const modelBackedAdapterCompletionTraces =
+    modelBackedAdapterInvocationTraces.filter(adapterCompletionTrace);
 
   const requiredModules =
     Array.isArray(run.required_neural_modules)
@@ -114,9 +165,12 @@ export function classifyNeuralUsageEvidence({
   return {
     neural_usage_evidence_version:
       neuralUsageEvidenceVersion,
-    evidence_policy: worldSimulation
-      ? "world_adapter_invoked_and_extension_accepted"
-      : "legacy_successful_wrapper_trace_compatibility",
+    neural_adapter_provenance_version:
+      neuralAdapterProvenanceVersion,
+    evidence_policy:
+      "strict_server_attested_model_backed_execution",
+    wrapper_completion_policy:
+      "successful_wrapper_trace_compatibility",
     world_simulation_run: worldSimulation,
     trace_count: traceList.length,
     success_count: successTraces.length,
@@ -136,20 +190,40 @@ export function classifyNeuralUsageEvidence({
       neuralExecutionModules,
     neural_execution_evidence_count:
       neuralEvidenceTraces.length,
+    model_backed_execution_modules:
+      neuralExecutionModules,
+    model_backed_execution_evidence_count:
+      neuralEvidenceTraces.length,
     used_neural_network:
       neuralExecutionModules.length > 0,
     neural_adapter_metrics_applicable:
-      worldSimulation,
+      true,
     neural_adapter_invocation_count:
-      neuralAdapterInvocationCount,
+      adapterInvocationTraces.length,
+    neural_adapter_completion_count:
+      adapterCompletionTraces.length,
     neural_adapter_success_evidence_count:
-      worldSimulation ? neuralEvidenceTraces.length : null,
+      neuralEvidenceTraces.filter(
+        (trace) => trace?.status === "success",
+      ).length,
+    unattested_adapter_invocation_count:
+      unattestedAdapterInvocationTraces.length,
+    deterministic_adapter_invocation_count:
+      deterministicAdapterInvocationTraces.length,
+    model_backed_adapter_invocation_count:
+      modelBackedAdapterInvocationTraces.length,
+    model_backed_adapter_completion_count:
+      modelBackedAdapterCompletionTraces.length,
     trusted_programmatic_success_count:
       trustedProgrammaticSuccessTraces.length,
     neural_fallback_success_count:
       fallbackSuccessTraces.length,
+    accepted_world_neural_extension_count:
+      acceptedWorldExtensionTraces.length,
+    unclassified_success_count:
+      unclassifiedSuccessCount,
     unclassified_world_success_count:
-      unclassifiedWorldSuccessCount,
+      worldSimulation ? unclassifiedSuccessCount : 0,
     required_neural_modules:
       requiredModules,
     missing_required_neural_modules:
