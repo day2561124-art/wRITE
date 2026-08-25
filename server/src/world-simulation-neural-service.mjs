@@ -239,7 +239,11 @@ export const worldSimulationCapabilityContracts = Object.freeze({
     purpose: "Review explicit state transitions for missing causes, impossible continuity changes, duplicate ownership, information leaks, or outcome-first shortcuts.",
     required_inputs: Object.freeze(["state_transitions"]),
     optional_inputs: Object.freeze(["object_holders", "knowledge_transitions", "action_outcomes"]),
-    returns: Object.freeze(["findings", "consistency_boundary"]),
+    returns: Object.freeze([
+      "findings",
+      "hard_conflict_count",
+      "consistency_boundary",
+    ]),
     permissions: permissionsReference,
   }),
 });

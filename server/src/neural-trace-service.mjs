@@ -8,7 +8,9 @@ import {
   getAgentRun,
   verifyRequiredNeuralModules as verifyAgentRunModules,
 } from "./agent-run-service.mjs";
-import { normalizeNeuralModuleKey } from "./neural-module-utils.mjs";
+import {
+  classifyNeuralUsageEvidence,
+} from "./neural-usage-evidence-service.mjs";
 import { atomicWriteFile } from "./file-transactions.mjs";
 import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs";
 
@@ -183,25 +185,19 @@ export async function summarizeNeuralUsageForRun(runId, options = {}) {
   assertAgentRunId(runId);
   const run = await getAgentRun(runId, options);
   const traces = await listNeuralTraces({ ...options, run_id: runId });
-  // Normalize module names from traces: accept either "run_*" or canonical keys.
-  const successfulModules = [...new Set(
-    traces.filter((trace) => trace.status === "success").map((trace) => normalizeNeuralModuleKey(trace.module_name)),
-  )];
-  const missingRequiredModules = run.requires_neural_modules
-    ? run.required_neural_modules.filter((moduleName) => !successfulModules.includes(moduleName))
-    : [];
+  const evidence = classifyNeuralUsageEvidence({
+    run,
+    traces,
+  });
   return {
     run_id: runId,
     traces,
-    trace_count: traces.length,
-    success_count: traces.filter((trace) => trace.status === "success").length,
-    failed_count: traces.filter((trace) => trace.status === "failed").length,
-    skipped_count: traces.filter((trace) => trace.status === "skipped").length,
-    neural_modules_used: successfulModules,
-    used_neural_network: successfulModules.length > 0,
-    required_neural_modules: run.required_neural_modules,
-    missing_required_neural_modules: missingRequiredModules,
-    warning: missingRequiredModules.length > 0,
+    ...evidence,
+    // Compatibility: historically this field meant successful wrapper/module
+    // names. It remains unchanged while neural_execution_modules carries
+    // actual neural-execution evidence.
+    neural_modules_used:
+      evidence.successful_wrapper_modules,
   };
 }
 

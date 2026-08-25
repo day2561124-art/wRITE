@@ -5,6 +5,9 @@ import {
   assertAgentRunId,
 } from "./agent-run-service.mjs";
 import {
+  classifyNeuralUsageEvidence,
+} from "./neural-usage-evidence-service.mjs";
+import {
   getPendingCandidate,
   isSafeCandidateId,
   activeEngineStatus,
@@ -519,28 +522,23 @@ export async function get_neural_usage_for_run(input = {}) {
     const trace = await readJsonIfExists(path.join(projectPaths.neuralTraces, entry.name), null);
     if (trace?.run_id === runId) traces.push(trace);
   }
-  const successfulModules = [...new Set(
-    traces.filter((trace) => trace.status === "success").map((trace) => trace.module_name),
-  )];
-  const missing = run.requires_neural_modules
-    ? run.required_neural_modules.filter((moduleName) => !successfulModules.includes(moduleName))
-    : [];
+  const evidence = classifyNeuralUsageEvidence({
+    run,
+    traces,
+  });
   return baseResult("get_neural_usage_for_run", {
     run,
+    // Persisted compatibility bookkeeping remains byte-for-byte owned by
+    // neural_modules_used.json; evidence classification is additive.
     neural_modules_used: modules.neural_modules_used ?? [],
     traces,
-    trace_count: traces.length,
-    success_count: traces.filter((trace) => trace.status === "success").length,
-    failed_count: traces.filter((trace) => trace.status === "failed").length,
-    skipped_count: traces.filter((trace) => trace.status === "skipped").length,
-    used_neural_network: successfulModules.length > 0,
-    required_neural_modules: run.required_neural_modules,
-    missing_required_neural_modules: missing,
-    warning: missing.length > 0,
+    ...evidence,
   }, [
     await describeSourceFile("agent_run", runPath, "agent_run"),
     await describeSourceFile("neural_modules_used", modulesPath, "neural_usage"),
-  ], missing.length ? ["neural_trace_missing"] : [], "neural_usage");
+  ], evidence.missing_required_neural_modules.length
+    ? ["neural_trace_missing"]
+    : [], "neural_usage");
 }
 
 export async function get_cleanup_proposals(_input = {}, options = {}) {
