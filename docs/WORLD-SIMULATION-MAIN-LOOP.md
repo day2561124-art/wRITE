@@ -53,7 +53,7 @@ The packet passed to `characterBrain(...)` does not include full `world_state` o
 
 ## Causal adjudication boundary
 
-`runWorldSimulationTurn(...)` requires a programmatic `causalAdjudicator(...)` callback. It receives:
+Direct/test callers may inject a programmatic `causalAdjudicator(...)` callback into `runWorldSimulationTurn(...)`; the formal Step4B MCP route does not accept or forward such a callback and always uses the built-in programmatic adjudicator. The adjudicator receives:
 
 - an isolated clone of the persisted world state;
 - current event;
@@ -64,7 +64,7 @@ It must return `next_world_state` and may provide explicit `state_transitions`, 
 
 The consistency critic runs before commit. Any hard conflict discards the proposed resolution and leaves the persisted world state unchanged.
 
-Phase62C deliberately does not expose a new MCP tool yet. It establishes and tests the programmatic loop kernel first, without changing the 92-tool public MCP baseline. A later transport phase can expose preparation/advance operations after the causal rule layer is stable.
+Phase62A-R1 Step4B-2 now exposes the stabilized native loop through the formal MCP sequence `begin_world_simulation_session → prepare_world_turn → submit_world_character_action → resolve_world_turn`. The complete prepared turn remains in the long-lived HTTP parent ephemeral broker. The seven individual world capability tools are full/debug compatibility surfaces only and are not listed in `chatgpt_public`.
 
 ## Acceptance
 

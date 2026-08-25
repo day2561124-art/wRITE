@@ -18,7 +18,7 @@ const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const currentAddedToolName = "get_active_engine_dependency_status";
-const worldSimulationToolNames = [
+const preStep4B2WorldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
   "chatgpt_bridge_use_world_perception_filter",
@@ -28,8 +28,20 @@ const worldSimulationToolNames = [
   "chatgpt_bridge_use_world_agency_guard",
   "chatgpt_bridge_use_world_consistency_critic",
 ];
-const formalPublicWorldSimulationToolNames = worldSimulationToolNames
-  .filter((name) => name !== "chatgpt_bridge_use_world_memory_retriever");
+const step4B2AddedToolNames = [
+  "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_resolve_world_turn",
+];
+const worldSimulationToolNames = [
+  "chatgpt_bridge_begin_world_simulation_session",
+  ...step4B2AddedToolNames,
+  ...preStep4B2WorldSimulationToolNames.slice(1),
+];
+const formalPublicWorldSimulationToolNames = [
+  "chatgpt_bridge_begin_world_simulation_session",
+  ...step4B2AddedToolNames,
+];
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
   "chatgpt_bridge_review_draft_ephemeral",
@@ -46,9 +58,10 @@ const visualBridgeToolNames = [
   "chatgpt_bridge_search_visual_assets",
   "chatgpt_bridge_get_visual_asset",
 ];
-const expectedDirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
-const expectedRuntimeDigest = expectedDirectDigest;
-const expectedPublicDigest = "ab9fbe185a51d670c41cc8ecc1792c48551ffa0c8380a986e4a83570b097d695";
+// Preserve the pre-Step4B-2 direct/runtime digest as a historical anti-drift
+// baseline. Step4B-2 adds exactly three named formal transport tools on top.
+const expectedPreStep4B2DirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
+const expectedPreStep4B2RuntimeDigest = expectedPreStep4B2DirectDigest;
 const expectedPublicNames = [
   "get_engine_components_status",
   currentAddedToolName,
@@ -158,7 +171,10 @@ const historicalNames = extractDirectMcpToolNames(gitShow(
   "server/src/mcp-server.mjs",
 ));
 const directNames = extractDirectMcpToolNames(currentSource);
-const directBaselineNames = directNames.filter((name) => name !== currentAddedToolName);
+const directPreStep4B2Names = directNames.filter((name) => (
+  name !== currentAddedToolName
+  && !step4B2AddedToolNames.includes(name)
+));
 
 assert(historicalNames);
 assert(directNames);
@@ -166,12 +182,19 @@ assert.equal(historicalNames.length, 70);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
 assert.deepEqual(
-  directBaselineNames.filter((name) => !historicalNames.includes(name)),
-  [...worldSimulationToolNames, ...externalBrainToolNames, ...visualBridgeToolNames, addedToolName],
+  directPreStep4B2Names.filter((name) => !historicalNames.includes(name)),
+  [...preStep4B2WorldSimulationToolNames, ...externalBrainToolNames, ...visualBridgeToolNames, addedToolName],
 );
-assert.deepEqual(historicalNames.filter((name) => !directBaselineNames.includes(name)), []);
-assert.equal(digest(directBaselineNames), expectedDirectDigest);
+assert.deepEqual(historicalNames.filter((name) => !directPreStep4B2Names.includes(name)), []);
+assert.equal(digest(directPreStep4B2Names), expectedPreStep4B2DirectDigest);
 assert.equal(directNames.filter((name) => name === currentAddedToolName).length, 1);
+for (const toolName of step4B2AddedToolNames) {
+  assert.equal(directNames.filter((name) => name === toolName).length, 1);
+}
+assert.deepEqual(
+  directNames.filter((name) => worldSimulationToolNames.includes(name)),
+  worldSimulationToolNames,
+);
 
 const parserFixture = `const toolDefinitions = [
   /*
@@ -219,15 +242,15 @@ const publicNames = publicTools.map((tool) => tool.name);
 assert.deepEqual(fullNames, directNames);
 assert.deepEqual(duplicates(fullNames), []);
 assert.equal(
-  digest(fullNames.filter((name) => name !== currentAddedToolName)),
-  expectedRuntimeDigest,
+  digest(fullNames.filter((name) => (
+    name !== currentAddedToolName
+    && !step4B2AddedToolNames.includes(name)
+  ))),
+  expectedPreStep4B2RuntimeDigest,
 );
 assert.deepEqual(publicNames, expectedPublicNames);
 assert.deepEqual(duplicates(publicNames), []);
-assert.equal(
-  digest(publicNames.filter((name) => name !== currentAddedToolName)),
-  expectedPublicDigest,
-);
+assert.equal(digest(publicNames), digest(expectedPublicNames));
 assert.equal(Object.keys(readonlyTools).length, 18);
 assert.equal(typeof readonlyTools[addedToolName], "function");
 

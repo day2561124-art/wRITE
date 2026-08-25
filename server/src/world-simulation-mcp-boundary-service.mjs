@@ -6,16 +6,38 @@ import {
 } from "./canonical-json-hash-service.mjs";
 
 export const worldSimulationMcpBoundaryVersion =
-  "phase62a-r1-step4a-mcp-boundary-v1";
+  "phase62a-r1-step4b2-mcp-boundary-v2";
+
+export const worldSimulationFormalPublicToolNames = Object.freeze([
+  "chatgpt_bridge_begin_world_simulation_session",
+  "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_resolve_world_turn",
+]);
+
+export const worldSimulationLegacyCapabilityToolNames = Object.freeze([
+  "chatgpt_bridge_use_world_scene_causal_analyzer",
+  "chatgpt_bridge_use_world_perception_filter",
+  "chatgpt_bridge_use_world_memory_retriever",
+  "chatgpt_bridge_use_world_character_cognition",
+  "chatgpt_bridge_use_world_action_proposer",
+  "chatgpt_bridge_use_world_agency_guard",
+  "chatgpt_bridge_use_world_consistency_critic",
+]);
 
 export const worldSimulationFormalPublicBlockedTools = Object.freeze([
-  "chatgpt_bridge_use_world_memory_retriever",
+  ...worldSimulationLegacyCapabilityToolNames,
+]);
+
+const worldSimulationMcpToolNames = new Set([
+  ...worldSimulationFormalPublicToolNames,
+  ...worldSimulationLegacyCapabilityToolNames,
 ]);
 
 export function isWorldSimulationMcpToolName(toolName) {
-  const name = String(toolName ?? "").trim();
-  return name === "chatgpt_bridge_begin_world_simulation_session"
-    || name.startsWith("chatgpt_bridge_use_world_");
+  return worldSimulationMcpToolNames.has(
+    String(toolName ?? "").trim(),
+  );
 }
 
 function valueType(value) {

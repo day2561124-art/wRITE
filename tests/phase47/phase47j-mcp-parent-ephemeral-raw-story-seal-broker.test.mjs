@@ -240,7 +240,7 @@ try {
   assert.match(adapterSource, /stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/u);
   assert.match(adapterSource, /spawn\(process\.execPath, \['server\/src\/mcp-server\.mjs'\]/u);
   assert.match(httpSource, /const sessions = new Map\(\)/u);
-  assert.match(httpSource, /createStdioSession\(\{ rawStoryHandoffBroker \}\)/u);
+  assert.match(httpSource, /createStdioSession\(\{\s*rawStoryHandoffBroker,\s*preparedTurnBroker,\s*\}\)/u);
   assert.match(httpSource, /mcp_http_parent_process_ephemeral_memory/u);
   assert.match(brokerSource, new RegExp(rawStoryHandoffBrokerProtocol.replaceAll(".", "\\."), "u"));
   assert.doesNotMatch(ipcSource, /stdout\.write|child\.stdout/u);

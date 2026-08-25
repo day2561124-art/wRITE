@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { attachRawStoryHandoffBrokerIpc } from './raw-story-handoff-broker-ipc.mjs';
+import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
 // and provide helpers to forward JSON-RPC messages via newline framing.
@@ -16,7 +17,7 @@ function encodeMessage(message, framing = 'line') {
 export function createStdioSession(options = {}) {
   const child = spawn(process.execPath, ['server/src/mcp-server.mjs'], {
     // fd 3 is Node's internal IPC channel. stdout remains exclusively MCP
-    // JSON-RPC framing and never carries raw-story broker payloads.
+    // JSON-RPC framing and never carries parent-broker payloads.
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: {
       ...process.env,
@@ -26,6 +27,12 @@ export function createStdioSession(options = {}) {
 
   const detachRawStoryBrokerIpc = options.rawStoryHandoffBroker
     ? attachRawStoryHandoffBrokerIpc(child, options.rawStoryHandoffBroker)
+    : () => {};
+  const detachPreparedTurnBrokerIpc = options.preparedTurnBroker
+    ? attachWorldSimulationPreparedTurnBrokerIpc(
+      child,
+      options.preparedTurnBroker,
+    )
     : () => {};
 
   let stdoutBuffer = '';
@@ -104,6 +111,7 @@ export function createStdioSession(options = {}) {
 
   child.on('exit', (code, signal) => {
     detachRawStoryBrokerIpc();
+    detachPreparedTurnBrokerIpc();
     console.error(`[mcp-server] child exited code=${code} signal=${signal}`);
     for (const [id, cb] of listeners.entries()) {
       try { cb(new Error('child process exited'), null); } catch (e) { console.error('listener threw on child exit', e); }
@@ -140,6 +148,7 @@ export function createStdioSession(options = {}) {
 
   function close() {
     detachRawStoryBrokerIpc();
+    detachPreparedTurnBrokerIpc();
     try { child.kill(); } catch (e) {}
   }
 

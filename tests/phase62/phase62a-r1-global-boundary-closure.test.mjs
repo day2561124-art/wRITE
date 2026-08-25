@@ -35,6 +35,7 @@ import {
   summarizeWorldSimulationMcpAuditArguments,
   summarizeWorldSimulationMcpAuditOutput,
   worldSimulationFormalPublicBlockedTools,
+  worldSimulationLegacyCapabilityToolNames,
   worldSimulationMcpBoundaryVersion,
 } from "../../server/src/world-simulation-mcp-boundary-service.mjs";
 import {
@@ -207,7 +208,7 @@ try {
   );
   assert.deepEqual(
     worldSimulationFormalPublicBlockedTools,
-    ["chatgpt_bridge_use_world_memory_retriever"],
+    worldSimulationLegacyCapabilityToolNames,
   );
 
   const session = await beginWorldSimulationSession({

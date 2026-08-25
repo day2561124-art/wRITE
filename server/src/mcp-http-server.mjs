@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralRawStoryHandoffBroker } from './raw-story-handoff-ephemeral-broker.mjs';
+import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
 import fs from 'fs';
 
 function safeTransportSend(transport, payload, label = 'transport.send') {
@@ -114,9 +115,14 @@ const configPath = process.argv.includes('--config')
 
 const config = readConfig(configPath);
 const sessions = new Map();
-// The long-lived HTTP parent owns only the ephemeral sealed payload broker.
-// Each MCP connection still receives its own isolated mcp-server child.
+// The long-lived HTTP parent owns both ephemeral cross-child brokers. Each MCP
+// connection still receives its own isolated mcp-server child; broker payloads
+// cross that boundary only through Node IPC on fd 3.
 const rawStoryHandoffBroker = createEphemeralRawStoryHandoffBroker({
+  ownership: 'mcp_http_parent',
+  storage_scope: 'mcp_http_parent_process_ephemeral_memory',
+});
+const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
@@ -219,7 +225,10 @@ function bindBridge(entry) {
 }
 
 function createBridgeSession() {
-  const session = createStdioSession({ rawStoryHandoffBroker });
+  const session = createStdioSession({
+    rawStoryHandoffBroker,
+    preparedTurnBroker,
+  });
   let entry;
 
   const transport = new StreamableHTTPServerTransport({

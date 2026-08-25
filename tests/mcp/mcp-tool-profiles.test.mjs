@@ -28,12 +28,9 @@ const publicToolNames = [
   "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_begin_world_simulation_session",
-  "chatgpt_bridge_use_world_scene_causal_analyzer",
-  "chatgpt_bridge_use_world_perception_filter",
-  "chatgpt_bridge_use_world_character_cognition",
-  "chatgpt_bridge_use_world_action_proposer",
-  "chatgpt_bridge_use_world_agency_guard",
-  "chatgpt_bridge_use_world_consistency_critic",
+  "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_resolve_world_turn",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
   "chatgpt_bridge_save_candidate",
@@ -201,6 +198,43 @@ assert.deepEqual(
 );
 
 const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+const formalWorldPublicNames = [
+  "chatgpt_bridge_begin_world_simulation_session",
+  "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_resolve_world_turn",
+];
+const legacyWorldCapabilityNames = [
+  "chatgpt_bridge_use_world_scene_causal_analyzer",
+  "chatgpt_bridge_use_world_perception_filter",
+  "chatgpt_bridge_use_world_memory_retriever",
+  "chatgpt_bridge_use_world_character_cognition",
+  "chatgpt_bridge_use_world_action_proposer",
+  "chatgpt_bridge_use_world_agency_guard",
+  "chatgpt_bridge_use_world_consistency_critic",
+];
+for (const toolName of formalWorldPublicNames) {
+  assert(publicToolMap.has(toolName), `chatgpt_public missing formal world tool ${toolName}`);
+}
+for (const toolName of legacyWorldCapabilityNames) {
+  assert.equal(publicToolMap.has(toolName), false, `legacy world capability leaked into chatgpt_public: ${toolName}`);
+}
+const publicWorldBeginSchema = publicToolMap.get(
+  "chatgpt_bridge_begin_world_simulation_session",
+)?.inputSchema?.properties ?? {};
+assert.equal(publicWorldBeginSchema.initial_world_state?.type, "object");
+assert.deepEqual(
+  Object.keys(publicToolMap.get("chatgpt_bridge_prepare_world_turn")?.inputSchema?.properties ?? {}).sort(),
+  ["world_simulation_session_id"],
+);
+assert.deepEqual(
+  Object.keys(publicToolMap.get("chatgpt_bridge_submit_world_character_action")?.inputSchema?.properties ?? {}).sort(),
+  ["action_id", "decision_handle", "prepared_turn_handle", "reject_all"],
+);
+assert.deepEqual(
+  Object.keys(publicToolMap.get("chatgpt_bridge_resolve_world_turn")?.inputSchema?.properties ?? {}).sort(),
+  ["prepared_turn_handle"],
+);
 const publicNativeHandoffTool = publicToolMap.get(
   "chatgpt_bridge_build_full_neural_writing_handoff",
 );
@@ -341,6 +375,12 @@ for (const field of ["run_neural_traces", "runNeuralTraces"]) {
 }
 
 const fullToolMap = new Map(fullResponses[0].result.tools.map((tool) => [tool.name, tool]));
+for (const toolName of legacyWorldCapabilityNames) {
+  assert(fullToolMap.has(toolName), `full profile lost world debug capability ${toolName}`);
+}
+for (const toolName of formalWorldPublicNames) {
+  assert(fullToolMap.has(toolName), `full profile lost formal world tool ${toolName}`);
+}
 for (const toolName of ["chatgpt_bridge_build_writing_context", "build_gpt_writing_context"]) {
   const schema = fullToolMap.get(toolName)?.inputSchema?.properties;
   for (const field of ["run_neural_traces", "runNeuralTraces"]) {

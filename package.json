@@ -32,6 +32,7 @@
     "test:phase62a-r1-engine": "node tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs",
     "test:phase62a-r1-closure": "node tests/phase62/phase62a-r1-global-boundary-closure.test.mjs",
     "test:phase62a-r1-transport-core": "node tests/phase62/phase62a-r1-prepared-turn-transport-core.test.mjs",
+    "test:phase62a-r1-mcp-public": "node tests/phase62/phase62a-r1-formal-mcp-public-adoption.test.mjs",
     "test:phase62b": "node tests/phase62/phase62b-shared-neural-core-dual-mode-isolation.test.mjs",
     "test:phase62c": "node tests/phase62/phase62c-world-simulation-main-loop-integration.test.mjs",
     "test:phase62d": "node tests/phase62/phase62d-programmatic-spatial-causal-rule-engine.test.mjs",

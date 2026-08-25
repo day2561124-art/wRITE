@@ -31,4 +31,25 @@ Security/authority properties:
 - the formal surface uses `recovered_memories` only; the historical `retrieved_memories` alias remains available only to explicitly compatible direct/native callers;
 - model-context isolation is not claimed: sequential packets in one ChatGPT conversation are not equivalent to isolated per-character neural sessions.
 
-Step 4B-2 will wire the prepared-turn broker into the long-lived HTTP parent, expose the formal prepare/submit/resolve MCP tools, retire individual world capabilities from `chatgpt_public`, and add cross-child end-to-end acceptance tests.
+## Phase62A-R1 Step 4B-2 — Formal MCP Public Adoption
+
+Step 4B-2 installs the public transport without changing the Step4B-1 native authority model.
+
+The formal `chatgpt_public` world surface is now exactly:
+
+- `chatgpt_bridge_begin_world_simulation_session`
+- `chatgpt_bridge_prepare_world_turn`
+- `chatgpt_bridge_submit_world_character_action`
+- `chatgpt_bridge_resolve_world_turn`
+
+The long-lived MCP HTTP parent owns one process-local prepared-turn broker shared by isolated per-connection `mcp-server` children over Node IPC. A prepared handle is application state, not an MCP-session security identity: it is bound by the broker to world session, persisted revision/hash, decision order, and one-shot lifecycle, and it disappears on parent restart.
+
+The seven individual world capability tools remain registered in the `full` profile for diagnostics/compatibility but are removed from `chatgpt_public`. Formal callers therefore cannot bypass the native loop by composing causal analysis, perception, cognition, action proposal, agency, consistency, or legacy memory projection themselves.
+
+The begin tool may optionally carry one `initial_world_state` bootstrap snapshot. The state service writes it only as revision 0 and rejects reinitialization; this does not implement automatic Canon hydration and never grants callers a later next-state write surface.
+
+All formal and legacy world MCP tool calls are classified explicitly by the world MCP boundary service and use opaque hash/size/schema audit summaries with no payload preview. Output-log resources remain unavailable in `chatgpt_public`.
+
+Phase63C recovery-stage candidate content is still not exposed to the same ChatGPT context. Formal MCP preparation intentionally supplies no external memory-retrieval resolver, so missing resolver means no actual retrieval process until an isolated resolver context is implemented.
+
+Server-enforced per-call packet isolation is guaranteed; physical forgetting between sequential character packets in one ChatGPT conversation is not claimed.
