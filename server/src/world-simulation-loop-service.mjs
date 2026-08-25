@@ -2,6 +2,9 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 import {
+  buildWorldSimulationCharacterBrainInput,
+} from "./world-simulation-character-brain-input-service.mjs";
+import {
   adjudicateWorldSimulationCausality,
   buildWorldSimulationCausalRuleContract,
 } from "./world-simulation-causal-rule-engine.mjs";
@@ -1946,35 +1949,14 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const prepared = await prepareWorldSimulationTurn(input, options);
   const selections = {};
   for (const packet of prepared.decision_packets) {
-    // Strict Character Brain ingress allowlist. Engine scheduler/session/turn
-    // identity stays outside the subjective decision channel.
-    const brainInput = cloneJson({
-      character: packet.character,
-      perception: packet.perception,
-
-      recovered_memories:
-        packet.recovered_memories
-        ?? [],
-
-      // Deprecated compatibility alias. This now aliases only
-      // actually recovered Phase63C content.
-      retrieved_memories:
-        packet.recovered_memories
-        ?? [],
-
-      retrieval_experience:
-        packet.retrieval_experience
-        ?? {
-          process_occurred: false,
-          initiation_mode: null,
-          target_outcome: null,
-          recovered_any_content: false,
-        },
-
-      cognition: packet.cognition,
-      candidate_action_intents: packet.candidate_action_intents,
-      boundaries: packet.boundaries,
-    });
+    // Single-source Character Brain ingress projector. Formal transport uses
+    // the same projector without the historical retrieved_memories alias.
+    const brainInput = buildWorldSimulationCharacterBrainInput(
+      packet,
+      {
+        include_legacy_retrieved_memories_alias: true,
+      },
+    );
     selections[packet.character] = await options.characterBrain(brainInput);
   }
   return resolveWorldSimulationTurn(prepared, selections, options);
