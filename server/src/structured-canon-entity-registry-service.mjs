@@ -560,7 +560,9 @@ function uniqueEntities(items) {
       ? current.source_excerpt
       : item.source_excerpt;
   }
-  return [...byId.values()].sort((left, right) => left.entity_id.localeCompare(right.entity_id));
+  return [...byId.values()].sort((left, right) => (
+    left.entity_id.localeCompare(right.entity_id, "zh-Hant")
+  ));
 }
 
 function extractWorldRules(sections, hashes) {

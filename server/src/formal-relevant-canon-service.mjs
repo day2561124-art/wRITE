@@ -76,28 +76,36 @@ function exactCharacterNames(source, registry, generationContext, retrievalConte
       ? retrievalContext.focus_characters
       : []),
   ];
-  const names = [];
-  const records = registryEntities(registry, "character")
-    .filter((record) => {
-      const canonical = String(record.canonical_name ?? "").trim();
-      return canonical && [...canonical].length <= 24;
-    })
-    .sort((left, right) => (
-      [...String(right.canonical_name)].length
-      - [...String(left.canonical_name)].length
-    ));
-  for (const record of records) {
+  const matches = [];
+  for (const record of registryEntities(registry, "character")) {
     const canonical = String(record.canonical_name ?? "").trim();
-    const aliases = Array.isArray(record.aliases) ? record.aliases : [];
-    if (
-      explicit.includes(canonical)
-      || includesMention(source, canonical)
-      || aliases.some((alias) => explicit.includes(alias) || includesMention(source, alias))
-    ) {
-      names.push(canonical);
-    }
+    if (!canonical || [...canonical].length > 24) continue;
+    const aliases = Array.isArray(record.aliases)
+      ? record.aliases.map((alias) => String(alias ?? "").trim()).filter(Boolean)
+      : [];
+    const explicitMatch = explicit.includes(canonical)
+      || aliases.some((alias) => explicit.includes(alias));
+    const mentionPositions = [canonical, ...aliases]
+      .map((value) => source.indexOf(value))
+      .filter((index) => index >= 0);
+    if (!explicitMatch && mentionPositions.length === 0) continue;
+    matches.push({
+      canonical,
+      canonical_length: [...canonical].length,
+      mention_rank: mentionPositions.length
+        ? Math.min(...mentionPositions)
+        : source.length + 1,
+    });
   }
-  return uniqueStrings([...explicit, ...names]);
+  matches.sort((left, right) => (
+    left.mention_rank - right.mention_rank
+    || right.canonical_length - left.canonical_length
+    || left.canonical.localeCompare(right.canonical, "zh-Hant")
+  ));
+  return uniqueStrings([
+    ...explicit,
+    ...matches.map((item) => item.canonical),
+  ]);
 }
 
 export function buildFormalRetrievalPlan({

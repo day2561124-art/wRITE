@@ -132,6 +132,14 @@ async function main() {
       JSON.stringify(first) === JSON.stringify(second),
       "registry build is not deterministic for unchanged sources",
     );
+    const characterEntityIds = first.registry.characters.map((item) => item.entity_id);
+    const zhHantCharacterEntityIds = [...characterEntityIds].sort((left, right) => (
+      left.localeCompare(right, "zh-Hant")
+    ));
+    assert(
+      JSON.stringify(characterEntityIds) === JSON.stringify(zhHantCharacterEntityIds),
+      "character registry ordering must use explicit zh-Hant collation",
+    );
     assert(validateEntityRegistry(first.registry).length === 0, "registry schema validation failed");
     assert(first.buildReport.status === "complete", "registry build did not complete");
     assert(first.conflictReport.conflict_count === 0, "baseline registry has unresolved conflicts");

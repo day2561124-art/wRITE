@@ -18,10 +18,27 @@ import {
 import {
   saveDirectChapterSettlementSummary,
 } from "../../server/src/direct-chapter-settlement-summary-service.mjs";
+import {
+  buildFormalRetrievalPlan,
+} from "../../server/src/formal-relevant-canon-service.mjs";
 import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const prompt = "寫初日、初夢、晴禮在休息間找少掉布丁的日常番外。";
+const hostileRegistryOrderPlan = buildFormalRetrievalPlan({
+  taskPrompt: prompt,
+  registry: {
+    characters: [
+      { canonical_name: "初夢", aliases: [] },
+      { canonical_name: "初日", aliases: [] },
+      { canonical_name: "晴禮", aliases: [] },
+    ],
+  },
+});
+assert.deepEqual(
+  hostileRegistryOrderPlan.characters,
+  ["初日", "初夢", "晴禮"],
+);
 const fixtureRoot = path.join(
   projectRoot,
   "tests",
