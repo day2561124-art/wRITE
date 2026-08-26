@@ -23,6 +23,11 @@ const workflow = await readFile(
   path.join(rootDir, ".github", "workflows", "ci.yml"),
   "utf8",
 );
+const normalizedWorkflow = workflow.replaceAll("\r\n", "\n");
+assert(
+  /- uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth:\s*0\b/u.test(normalizedWorkflow),
+  "CI must fetch full Git history because maintenance baseline reconciliation reads historical commits.",
+);
 const npmCiIndex = workflow.indexOf("- run: npm ci");
 const runAllIndex = workflow.indexOf("- run: node tests/run-all.mjs");
 assert(npmCiIndex >= 0, "CI must install locked dependencies with npm ci.");
@@ -105,6 +110,7 @@ console.log(JSON.stringify({
   phase: "Maintenance Step 2A CI baseline portability/bootstrap",
   node_floor: packageJson.engines.node,
   npm_ci_before_run_all: true,
+  full_git_history_for_historical_baselines: true,
   formal_canon_sources_lf: true,
   incompatible_copying_array_method_count: incompatible.length,
 }));
