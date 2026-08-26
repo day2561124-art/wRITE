@@ -1,6 +1,5 @@
 import path from "node:path";
 import { readFile, readdir, rm } from "node:fs/promises";
-import { hash as nodeHash } from "crypto";
 import { importSettlementResult } from "../../server/src/engine-candidate-service.mjs";
 import { projectPaths } from "../../server/src/project-paths.mjs";
 import { approvalRequestTools, approvalRequestToolMetadata } from "../../server/src/mcp-approval-request-tools.mjs";

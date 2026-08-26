@@ -85,14 +85,68 @@ async function sourceFilesUnder(directory) {
 }
 
 const incompatible = [];
+const node18IncompatibleCryptoHashApis = [];
+
+function relativeSourcePath(filePath) {
+  return path.relative(rootDir, filePath).split(path.sep).join("/");
+}
+
+function cryptoHashImportBindings(source) {
+  const bindings = [];
+  const namedImportPattern =
+    /import\s*\{([^}]*)\}\s*from\s*["'](?:node:)?crypto["']/gu;
+  for (const match of source.matchAll(namedImportPattern)) {
+    for (const rawSpecifier of match[1].split(",")) {
+      const specifier = rawSpecifier.trim();
+      const bindingMatch = /^hash(?:\s+as\s+([A-Za-z_$][\w$]*))?$/u.exec(specifier);
+      if (bindingMatch) {
+        bindings.push({
+          kind: "named_import",
+          binding: bindingMatch[1] || "hash",
+        });
+      }
+    }
+  }
+
+  const objectImportPattern =
+    /import\s+(?:\*\s+as\s+|)([A-Za-z_$][\w$]*)\s+from\s*["'](?:node:)?crypto["']/gu;
+  for (const match of source.matchAll(objectImportPattern)) {
+    bindings.push({
+      kind: "crypto_object",
+      binding: match[1],
+    });
+  }
+
+  return bindings;
+}
+
 for (const root of scanRoots) {
   for (const filePath of await sourceFilesUnder(root)) {
     const source = await readFile(filePath, "utf8");
+    const relativePath = relativeSourcePath(filePath);
+
     for (const methodName of forbiddenMethodNames) {
       const token = `.${methodName}(`;
       if (source.includes(token)) {
-        incompatible.push(
-          `${path.relative(rootDir, filePath).split(path.sep).join("/")}:${methodName}`,
+        incompatible.push(`${relativePath}:${methodName}`);
+      }
+    }
+
+    for (const binding of cryptoHashImportBindings(source)) {
+      if (binding.kind === "named_import") {
+        node18IncompatibleCryptoHashApis.push(
+          `${relativePath}:crypto.hash named import as ${binding.binding}`,
+        );
+        continue;
+      }
+      const escapedBinding = binding.binding.replaceAll("$", "\\$");
+      const usagePattern = new RegExp(
+        `\\b${escapedBinding}\\.hash\\s*\\(`,
+        "u",
+      );
+      if (usagePattern.test(source)) {
+        node18IncompatibleCryptoHashApis.push(
+          `${relativePath}:${binding.binding}.hash()`,
         );
       }
     }
@@ -104,6 +158,15 @@ assert.deepEqual(
   [],
   `Node 18-incompatible copying Array methods found:\n${incompatible.join("\n")}`,
 );
+assert.deepEqual(
+  node18IncompatibleCryptoHashApis,
+  [],
+  [
+    "Node 18-incompatible crypto.hash API usage found.",
+    "crypto.hash was added after the repository's Node 18 floor.",
+    ...node18IncompatibleCryptoHashApis,
+  ].join("\n"),
+);
 
 console.log(JSON.stringify({
   ok: true,
@@ -113,5 +176,7 @@ console.log(JSON.stringify({
   full_git_history_for_historical_baselines: true,
   formal_canon_sources_lf: true,
   incompatible_copying_array_method_count: incompatible.length,
+  node18_incompatible_crypto_hash_api_count:
+    node18IncompatibleCryptoHashApis.length,
 }));
 console.log("Maintenance CI baseline portability/bootstrap guard passed.");
