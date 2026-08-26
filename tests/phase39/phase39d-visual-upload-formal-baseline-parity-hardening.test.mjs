@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -108,7 +108,23 @@ assert.equal(
   "blocked_visual_index_asset_parity_mismatch",
 );
 
-const preview = await runVisualLibraryFinalE2eAcceptancePreview();
+const formalIndexLineCount = (
+  await readFile(
+    new URL("../../data/visual_db/visual_index.jsonl", import.meta.url),
+    "utf8",
+  )
+)
+  .split(/\r?\n/u)
+  .filter((line) => line.trim()).length;
+const portableFormalBaselineFixture = {
+  // data/visual_db/assets is intentionally local/runtime state and is ignored
+  // by Git. Preserve the live index count and active-engine hash while keeping
+  // clean CI independent from the operator's physical local image library.
+  visual_assets_image_count: formalIndexLineCount,
+};
+const preview = await runVisualLibraryFinalE2eAcceptancePreview({
+  formalBaselineFixture: portableFormalBaselineFixture,
+});
 assert.equal(preview.formal_baseline_acceptance.passed, true);
 assert.equal(
   preview.formal_baseline_acceptance.decision,

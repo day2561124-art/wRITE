@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  mkdir,
+  mkdtemp,
   readFile,
   readdir,
+  rm,
 } from "node:fs/promises";
 import path from "node:path";
 
 import {
   buildCharacterCanonGrounding,
 } from "../../server/src/character-canon-grounding-service.mjs";
+import {
+  saveDirectChapterSettlementSummary,
+} from "../../server/src/direct-chapter-settlement-summary-service.mjs";
 import {
   beginChatgptOwnedExternalBrainWritingSession,
 } from "../../server/src/chatgpt-owned-external-brain-service.mjs";
@@ -83,6 +89,46 @@ function records(relevantCanon) {
   ];
 }
 
+await mkdir(projectPaths.outputs, { recursive: true });
+const outputFixture = await mkdtemp(path.join(
+  projectPaths.outputs,
+  "phase58a-formal-relevant-canon-",
+));
+const settlementReports = path.join(
+  outputFixture,
+  "settlement_reports",
+);
+const options = {
+  outputs: outputFixture,
+  settlementReports,
+};
+const settlementSummary = [
+  "# Phase58A 正式連續性測試結算",
+  "",
+  "## 已發生",
+  "前一章正式連續性已完成結算。",
+  "",
+  "## 角色狀態",
+  "本測試不額外覆寫角色目前狀態。",
+  "",
+  "## 關係變化",
+  "本測試不額外覆寫既有關係。",
+  "",
+  "## 待承接",
+  "既有正式 Canon 與當前檢索狀態仍須承接。",
+  "",
+  "## 下一章銜接判斷",
+  "依正式 Canon 與當前檢索結果自然承接。",
+].join("\n");
+
+try {
+  await saveDirectChapterSettlementSummary({
+    settlement_summary_text: settlementSummary,
+    source: "chatgpt",
+    heading: "Phase58A hermetic continuity fixture",
+    create_pending_engine_candidate: false,
+  }, options);
+
 const hashesBefore = await protectedHashes();
 const writingContextsBefore = await directoryCount(
   projectPaths.gptWritingContexts,
@@ -103,7 +149,7 @@ const session = await beginChatgptOwnedExternalBrainWritingSession({
   chapter_mode: "next_chapter",
   max_context_chars: 48_000,
   ephemeral: true,
-});
+}, options);
 
 assert.equal(session.ok, true);
 assert.equal(session.status, "ephemeral_context_ready");
@@ -318,3 +364,6 @@ console.log(JSON.stringify({
 console.log(
   "Phase58A formal relevant Canon and ephemeral context test passed.",
 );
+} finally {
+  await rm(outputFixture, { recursive: true, force: true });
+}

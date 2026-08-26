@@ -1,4 +1,9 @@
+# Integrity-sensitive canonical sources.
 data/canon_db/active_engine.md text eol=lf
 data/canon_db/versions/engine_v5.0.12.md text eol=lf
 data/canon_db/sources/*.md text eol=lf
 data/error_report_db/compressed_rules.md text eol=crlf
+
+# Phase46D's immutable historical evidence digest was recorded from its CRLF
+# representation. Preserve that exact working-tree byte contract on every OS.
+config/phase46d-real-chatgpt-immutable-raw-story-handoff-live-acceptance-evidence.json text eol=crlf

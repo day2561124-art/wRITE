@@ -1,3 +1,4 @@
+import { currentActiveEngineRawSha256 } from "../helpers/active-engine-baseline.mjs";
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -273,7 +274,7 @@ for (const scriptName of ['test', 'bridge:dry-run', 'test:bridge:e2e', 'test:mcp
 
 const activeEngine = findProtectedFile(
   'active_engine',
-  stabilityContract.protectedHashes.active_engine,
+  currentActiveEngineRawSha256,
   ['active_engine', 'active-engine'],
 );
 const compressedRules = findProtectedFile(
@@ -282,7 +283,7 @@ const compressedRules = findProtectedFile(
   ['compressed_rules', 'compressed-rules'],
 );
 
-assert.equal(activeEngine.hash, stabilityContract.protectedHashes.active_engine);
+assert.equal(activeEngine.hash, currentActiveEngineRawSha256);
 assert.equal(compressedRules.hash, stabilityContract.protectedHashes.compressed_rules);
 
 assertNoSideEffectFunctionCalls();

@@ -99,7 +99,18 @@ try {
     /formal_execute_allowed must be false/u,
   );
 
-  const preview = await runVisualLibraryFinalE2eAcceptancePreview();
+  const formalIndexLineCount = before.index.toString("utf8")
+    .split(/\r?\n/u)
+    .filter((line) => line.trim()).length;
+  const portableFormalBaselineFixture = {
+    // Formal visual assets are operator-local runtime state. Dedicated
+    // temporary-asset tests cover physical parity; this E2E route keeps the
+    // real index and active-engine checks portable in clean CI.
+    visual_assets_image_count: formalIndexLineCount,
+  };
+  const preview = await runVisualLibraryFinalE2eAcceptancePreview({
+    formalBaselineFixture: portableFormalBaselineFixture,
+  });
   assert.equal(
     preview.final_acceptance_decision,
     "visual_library_final_e2e_preview_acceptance_passed",
@@ -149,6 +160,7 @@ try {
 
   const sandbox = await runVisualLibraryFinalE2eAcceptancePreview({
     includeSandbox: true,
+    formalBaselineFixture: portableFormalBaselineFixture,
   });
   assert.equal(
     sandbox.final_acceptance_decision,

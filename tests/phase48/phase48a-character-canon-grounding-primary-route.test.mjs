@@ -15,6 +15,9 @@ import {
   buildGptWritingContext,
   getGptWritingContextBundle,
 } from "../../server/src/gpt-writing-context-service.mjs";
+import {
+  saveDirectChapterSettlementSummary,
+} from "../../server/src/direct-chapter-settlement-summary-service.mjs";
 import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -25,7 +28,34 @@ const fixtureRoot = path.join(
   ".tmp",
   `phase48a-character-canon-grounding-${process.pid}-${Date.now()}`,
 );
-const options = { fixtureRoot };
+const outputFixture = path.join(
+  projectPaths.outputs,
+  `.phase48a-character-canon-grounding-${process.pid}-${Date.now()}`,
+);
+const settlementReports = path.join(outputFixture, "settlement_reports");
+const options = {
+  fixtureRoot,
+  outputs: outputFixture,
+  settlementReports,
+};
+const settlementSummary = [
+  "# 第四十八章測試結算",
+  "",
+  "## 已發生",
+  "前一段流程已完成，下一次寫作必須承接最新結算。",
+  "",
+  "## 角色狀態",
+  "本測試不新增角色身體或能力狀態。",
+  "",
+  "## 關係與立場變化",
+  "本測試不新增關係變化。",
+  "",
+  "## 待承接",
+  "維持最新結算作為章節承接來源。",
+  "",
+  "## 下一章銜接判斷",
+  "可進入新的日常場景，但不得回退到最新結算之前。",
+].join("\n");
 const expectedProtectedHashes = {
   active_engine: sha256(await readFile(projectPaths.activeEngine)),
   compressed_rules: sha256(await readFile(projectPaths.compressedRules)),
@@ -75,8 +105,14 @@ const mutationBefore = Object.fromEntries(await Promise.all(
 ));
 
 await mkdir(fixtureRoot, { recursive: true });
+await mkdir(outputFixture, { recursive: true });
 
 try {
+  await saveDirectChapterSettlementSummary({
+    settlement_summary_text: settlementSummary,
+    source: "chatgpt",
+  }, options);
+
   const parsed = parseActiveEngineCharacterRecords(activeEngine, {
     sourceFile: "data/canon_db/active_engine.md",
   });
@@ -416,4 +452,5 @@ try {
   );
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
+  await rm(outputFixture, { recursive: true, force: true });
 }

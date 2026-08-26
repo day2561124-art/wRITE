@@ -280,7 +280,20 @@ assert.equal(
   false,
 );
 
-const preview = await runVisualLibraryFinalE2eAcceptancePreview();
+const formalIndexText = await readFile(
+  path.join(rootDir, "data", "visual_db", "visual_index.jsonl"),
+  "utf8",
+);
+const formalIndexLineCount = formalIndexText
+  .split(/\r?\n/u)
+  .filter((line) => line.trim()).length;
+const preview = await runVisualLibraryFinalE2eAcceptancePreview({
+  // This test owns MCP inventory reconciliation. Physical visual assets are
+  // operator-local runtime state and must not be a clean-CI prerequisite.
+  formalBaselineFixture: {
+    visual_assets_image_count: formalIndexLineCount,
+  },
+});
 assert.equal(preview.bridge_readiness_acceptance.actual_mcp_tool_count, directNames.length);
 assert.equal(preview.bridge_readiness_acceptance.expected_mcp_tool_count, directNames.length);
 assert.equal(preview.bridge_readiness_acceptance.passed, true);
