@@ -444,6 +444,373 @@ function assertPhase63CRetrievalPersistenceMutation(
   }
 }
 
+const phase64aMemoryPlasticityHistoryReferenceSchema =
+  "phase64a-memory-plasticity-history-ref-v1";
+
+function phase64aPlasticityHistoryReferenceIdentity(reference) {
+  return JSON.stringify([
+    reference?.plasticity_event_id
+    ?? null,
+    reference?.plasticity_effect_id
+    ?? null,
+  ]);
+}
+
+function assertPhase64APlasticityHistoryPrefix(
+  oldHistory,
+  newHistory,
+) {
+  const oldValues =
+    array(oldHistory);
+  const newValues =
+    array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      "Memory plasticity history is append-only.",
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (
+    let index = 0;
+    index < oldValues.length;
+    index += 1
+  ) {
+    if (
+      !sameValue(
+        oldValues[index],
+        newValues[index],
+      )
+    ) {
+      const error = new Error(
+        "Memory plasticity history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function assertPhase64AMemoryPlasticityMutation(
+  worldState,
+  worldPath,
+  mutation,
+) {
+  if (
+    worldPath[0]
+      === "memory_plasticity_events"
+  ) {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "MemoryPlasticityEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId =
+      String(worldPath[1] ?? "");
+
+    const existing =
+      getAtPath(
+        worldState,
+        worldPath,
+      );
+
+    if (
+      existing !== undefined
+      && existing !== null
+    ) {
+      const error = new Error(
+        `MemoryPlasticityEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next =
+      mutation?.to;
+
+    if (
+      !isObject(next)
+      || next.immutable !== true
+      || String(
+        next.plasticity_event_id
+        ?? "",
+      ) !== eventId
+      || !String(
+        next.plasticity_event_hash
+        ?? "",
+      ).trim()
+      || !String(
+        next.source_retrieval_event_id
+        ?? "",
+      ).trim()
+      || !String(
+        next.source_retrieval_event_hash
+        ?? "",
+      ).trim()
+    ) {
+      const error = new Error(
+        `MemoryPlasticityEvent ${eventId} creation payload is not a valid immutable event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const hashBody =
+      cloneJson(next);
+    delete hashBody.plasticity_event_hash;
+
+    if (
+      hashAgentRunValue(hashBody)
+      !== next.plasticity_event_hash
+    ) {
+      const error = new Error(
+        `MemoryPlasticityEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const sourceRetrievalEvent =
+      object(
+        object(worldState?.retrieval_events)[
+          next.source_retrieval_event_id
+        ],
+      );
+
+    if (!Object.keys(sourceRetrievalEvent).length) {
+      const error = new Error(
+        `MemoryPlasticityEvent ${eventId} cannot resolve source RetrievalEvent ${next.source_retrieval_event_id}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_SOURCE_RETRIEVAL_EVENT_UNRESOLVED";
+      throw error;
+    }
+
+    if (
+      String(
+        sourceRetrievalEvent.retrieval_event_hash
+        ?? "",
+      )
+      !== next.source_retrieval_event_hash
+    ) {
+      const error = new Error(
+        `MemoryPlasticityEvent ${eventId} source RetrievalEvent hash does not match.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_SOURCE_RETRIEVAL_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const seenEffectIds =
+      new Set();
+
+    for (const effect of array(next.effects)) {
+      const effectId =
+        String(
+          effect?.plasticity_effect_id
+          ?? "",
+        ).trim();
+
+      if (
+        !effectId
+        || seenEffectIds.has(effectId)
+        || !String(
+          effect?.source_memory_ref
+          ?? "",
+        ).trim()
+        || effect?.retrieval_practice_registered
+          !== true
+      ) {
+        const error = new Error(
+          `MemoryPlasticityEvent ${eventId} contains an invalid or duplicate practice effect.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_MEMORY_PLASTICITY_EVENT_EFFECT_INVALID";
+        throw error;
+      }
+
+      seenEffectIds.add(effectId);
+    }
+
+    return;
+  }
+
+  if (
+    worldPath[0]
+      !== "memory_plasticity_history"
+  ) {
+    return;
+  }
+
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Memory plasticity history may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory =
+    array(
+      getAtPath(
+        worldState,
+        worldPath,
+      ),
+    );
+
+  const newHistory =
+    array(mutation?.to);
+
+  assertPhase64APlasticityHistoryPrefix(
+    oldHistory,
+    newHistory,
+  );
+
+  const seen =
+    new Set(
+      oldHistory.map(
+        phase64aPlasticityHistoryReferenceIdentity,
+      ),
+    );
+
+  for (
+    let index = oldHistory.length;
+    index < newHistory.length;
+    index += 1
+  ) {
+    const reference =
+      newHistory[index];
+
+    const identity =
+      phase64aPlasticityHistoryReferenceIdentity(
+        reference,
+      );
+
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase64aMemoryPlasticityHistoryReferenceSchema
+      || reference.derived_index !== true
+      || reference.role
+        !== "retrieval_practice_registered"
+      || !String(
+        reference.plasticity_event_id
+        ?? "",
+      ).trim()
+      || !String(
+        reference.plasticity_event_hash
+        ?? "",
+      ).trim()
+      || !String(
+        reference.plasticity_effect_id
+        ?? "",
+      ).trim()
+      || !String(
+        reference.character
+        ?? "",
+      ).trim()
+      || !String(
+        reference.source_memory_ref
+        ?? "",
+      ).trim()
+    ) {
+      const error = new Error(
+        `Memory plasticity history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+
+    if (seen.has(identity)) {
+      const error = new Error(
+        `Memory plasticity history contains duplicate reference ${identity}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_DUPLICATE_REFERENCE";
+      throw error;
+    }
+
+    seen.add(identity);
+
+    const event =
+      object(
+        object(
+          worldState
+            ?.memory_plasticity_events,
+        )[
+          reference.plasticity_event_id
+        ],
+      );
+
+    if (!Object.keys(event).length) {
+      const error = new Error(
+        `Memory plasticity history cannot resolve MemoryPlasticityEvent ${reference.plasticity_event_id}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+
+    if (
+      String(
+        event.plasticity_event_hash
+        ?? "",
+      )
+      !== reference.plasticity_event_hash
+    ) {
+      const error = new Error(
+        `Memory plasticity history hash mismatch for ${reference.plasticity_event_id}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_REFERENCE_HASH_MISMATCH";
+      throw error;
+    }
+
+    const effect =
+      array(event.effects)
+        .find(
+          (candidate) =>
+            String(
+              candidate?.plasticity_effect_id
+              ?? "",
+            )
+            === reference.plasticity_effect_id,
+        );
+
+    if (
+      !effect
+      || String(
+        event.character
+        ?? "",
+      ) !== reference.character
+      || String(
+        effect.source_memory_ref
+        ?? "",
+      ) !== reference.source_memory_ref
+    ) {
+      const error = new Error(
+        `Memory plasticity history reference ${identity} does not match its canonical effect.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_MEMORY_PLASTICITY_HISTORY_REFERENCE_EFFECT_MISMATCH";
+      throw error;
+    }
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -519,6 +886,11 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         worldPath,
         mutation,
       );
+      assertPhase64AMemoryPlasticityMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -570,6 +942,11 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         throw error;
       }
       assertPhase63CRetrievalPersistenceMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
+      assertPhase64AMemoryPlasticityMutation(
         executed,
         worldPath,
         mutation,

@@ -766,6 +766,7 @@ const steps = [
   ["Phase 63C memory retrieval multistep", ["tests/phase63/phase63c-memory-retrieval-multistep.test.mjs"]],
   ["Phase 63C memory retrieval persistence", ["tests/phase63/phase63c-memory-retrieval-persistence.test.mjs"]],
   ["Phase 63C memory retrieval process", ["tests/phase63/phase63c-memory-retrieval-process.test.mjs"]],
+  ["Phase 64A-R1 retrieval practice consequence", ["tests/phase64/phase64a-retrieval-practice-consequence.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
@@ -782,6 +783,10 @@ function getTimeoutMs(label) {
     label === "Canon golden tests"
 
     || label === "JSON/codeblock validation"
+
+    || label === "Phase 22G production residue regression"
+
+    || label === "Phase47F single-ingress immutable raw-story seal handoff"
 
     || label === "Phase 32C aesthetic memory context builder operator review packet bridge evidence packet final acceptance settlement handoff checklist bridge stability guard"
 
