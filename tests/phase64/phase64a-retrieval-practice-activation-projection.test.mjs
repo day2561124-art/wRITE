@@ -817,7 +817,7 @@ for (
   ]
 ) {
   assert.equal(
-    loopSource.includes(requiredSnippet),
+    loopSource.replace(/\r\n?/g, "\n").includes(requiredSnippet),
     true,
     `world loop is missing Phase64A-R2 production wiring: ${requiredSnippet}`,
   );
