@@ -46,6 +46,10 @@ import {
   worldSimulationMemoryAccessibilityVersion,
 } from "./world-simulation-memory-accessibility-service.mjs";
 import {
+  buildWorldSimulationRetrievalPracticeActivationProjectionContract,
+  projectWorldSimulationRetrievalPracticeActivation,
+} from "./world-simulation-retrieval-practice-activation-projection-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalProcessContract,
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
@@ -450,6 +454,8 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
+    retrieval_practice_activation_projection:
+      buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
     subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
     subjective_memory_retrieval_process_step3_compatibility:
       buildWorldSimulationMemoryRetrievalProcessContract(),
@@ -745,6 +751,23 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
+    const retrievalPracticeActivationProjection =
+      projectWorldSimulationRetrievalPracticeActivation({
+        world_state:
+          worldState,
+        character,
+        current_turn_id:
+          turnId,
+        as_of:
+          worldState.simulation_time
+          ?? event.simulation_time
+          ?? null,
+        memory_records:
+          memories,
+      });
+    const retrievalMemoryRecords =
+      retrievalPracticeActivationProjection
+        .projected_memory_records;
     const availableActions = array(
       characterMapValue(worldState.available_actions, character),
     );
@@ -844,7 +867,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       character,
       memory_records:
         cloneJson(
-          memories,
+          retrievalMemoryRecords,
         ),
       simulation_time:
         worldState.simulation_time
@@ -884,6 +907,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       version: memoryAccessibilityQuery.memory_accessibility_version,
       result: cloneJson(memoryAccessibilityQuery.result),
       audit: cloneJson(memoryAccessibilityQuery.audit),
+      retrieval_practice_activation_projection:
+        cloneJson(
+          retrievalPracticeActivationProjection.audit,
+        ),
     });
     const memoryProjectionPolicy =
       memoryProjectionPolicyFor(
@@ -923,7 +950,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityQuery
               .memory_accessibility_version,
           memory_records:
-            memories,
+            retrievalMemoryRecords,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
@@ -939,7 +966,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           query:
             memoryRetrievalQuery,
           memory_records:
-            memories,
+            retrievalMemoryRecords,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:

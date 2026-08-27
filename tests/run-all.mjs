@@ -767,6 +767,7 @@ const steps = [
   ["Phase 63C memory retrieval persistence", ["tests/phase63/phase63c-memory-retrieval-persistence.test.mjs"]],
   ["Phase 63C memory retrieval process", ["tests/phase63/phase63c-memory-retrieval-process.test.mjs"]],
   ["Phase 64A-R1 retrieval practice consequence", ["tests/phase64/phase64a-retrieval-practice-consequence.test.mjs"]],
+  ["Phase 64A-R2 retrieval-practice activation projection", ["tests/phase64/phase64a-retrieval-practice-activation-projection.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
