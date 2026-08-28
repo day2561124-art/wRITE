@@ -769,6 +769,7 @@ const steps = [
   ["Phase 64A-R1 retrieval practice consequence", ["tests/phase64/phase64a-retrieval-practice-consequence.test.mjs"]],
   ["Phase 64A-R2 retrieval-practice activation projection", ["tests/phase64/phase64a-retrieval-practice-activation-projection.test.mjs"]],
   ["Phase 64A-R3 base-level activation composition projection", ["tests/phase64/phase64a-base-level-activation-composition-projection.test.mjs"]],
+  ["Phase 64A-R4A query-relative cue diagnostic evidence projection", ["tests/phase64/phase64a-query-relative-cue-diagnostic-evidence-projection.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {

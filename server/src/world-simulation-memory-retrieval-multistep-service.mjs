@@ -6,6 +6,9 @@ import {
   queryWorldSimulationMemoryAccessibility,
 } from "./world-simulation-memory-accessibility-service.mjs";
 import {
+  projectWorldSimulationCueDiagnosticEvidence,
+} from "./world-simulation-cue-diagnostic-evidence-projection-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -660,10 +663,16 @@ function normalizeControl(
 
 function canonicalFrontier(
   accessibilityResult,
+  cueDiagnosticEvidenceProjection = null,
 ) {
   const result =
     object(
       accessibilityResult,
+    );
+
+  const cueDiagnosticProjection =
+    object(
+      cueDiagnosticEvidenceProjection,
     );
 
   const records =
@@ -726,6 +735,15 @@ function canonicalFrontier(
         candidateSetHash,
       candidate_refs:
         refs,
+      cue_diagnostic_projection_id:
+        cueDiagnosticProjection.projection_id
+        ?? null,
+      cue_diagnostic_evidence_hash:
+        cueDiagnosticProjection.evidence_hash
+        ?? null,
+      cue_diagnostic_applicable:
+        cueDiagnosticProjection.applicable
+        === true,
     }).slice(0, 24)}`;
 
   return {
@@ -750,6 +768,20 @@ function canonicalFrontier(
       cloneJson(
         evaluations,
       ),
+    cue_diagnostic_projection: {
+      version:
+        cueDiagnosticProjection.version
+        ?? null,
+      projection_id:
+        cueDiagnosticProjection.projection_id
+        ?? null,
+      evidence_hash:
+        cueDiagnosticProjection.evidence_hash
+        ?? null,
+      applicable:
+        cueDiagnosticProjection.applicable
+        === true,
+    },
   };
 }
 
@@ -772,6 +804,16 @@ function publicFrontier(
     candidate_refs:
       cloneJson(
         frontier.candidate_refs,
+      ),
+    cue_diagnostic_projection:
+      cloneJson(
+        frontier.cue_diagnostic_projection
+        ?? {
+          version: null,
+          projection_id: null,
+          evidence_hash: null,
+          applicable: false,
+        },
       ),
   };
 }
@@ -930,10 +972,12 @@ function assertMemorySnapshot(
 function assertInitialFrontier(
   query,
   initialAccessibilityResult,
+  initialCueDiagnosticProjection = null,
 ) {
   const frontier =
     canonicalFrontier(
       initialAccessibilityResult,
+      initialCueDiagnosticProjection,
     );
 
   const expected =
@@ -1718,6 +1762,12 @@ function reevaluateFrontier({
       nextInput,
     );
 
+  const cueDiagnosticEvidenceProjection =
+    projectWorldSimulationCueDiagnosticEvidence({
+      memory_accessibility_query:
+        result,
+    });
+
   if (
     result.memory_accessibility_version
     !== query.phase63b_version
@@ -1735,6 +1785,7 @@ function reevaluateFrontier({
 
   return canonicalFrontier(
     result.result,
+    cueDiagnosticEvidenceProjection,
   );
 }
 
@@ -1891,6 +1942,16 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       true,
     phase63b_read_only_reevaluation_reused:
       true,
+    phase64a_r4a_frontier_evidence_bound:
+      true,
+    phase64a_r4a_dynamic_frontier_evidence_recomputed:
+      true,
+    phase64a_r4a_selectivity_scalar_exposed_to_resolver:
+      false,
+    phase64a_r4a_candidate_membership_authority:
+      false,
+    phase64a_r4a_candidate_order_authority:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2039,6 +2100,7 @@ export function buildWorldSimulationMemoryRetrievalQueryV3(
   const initialFrontier =
     canonicalFrontier(
       initialAccessibilityResult,
+      input.initial_cue_diagnostic_projection,
     );
 
   for (
@@ -2126,6 +2188,10 @@ export function buildWorldSimulationMemoryRetrievalQueryV3(
         false,
       initial_frontier_is_not_process_wide_candidate_set:
         true,
+      cue_diagnostic_evidence_bound_to_frontier_identity:
+        true,
+      cue_diagnostic_selectivity_scalar_embedded:
+        false,
       future_frontier_content_hidden:
         true,
       same_process_memory_snapshot_frozen:
@@ -2187,6 +2253,7 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     assertInitialFrontier(
       query,
       initialAccessibilityResult,
+      input.initial_cue_diagnostic_projection,
     );
 
   const accessibilityBaseInput =
@@ -2938,6 +3005,16 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         true,
       initial_frontier_verified:
         true,
+      cue_diagnostic_frontier_evidence_bound:
+        Boolean(
+          query.initial_frontier
+            ?.cue_diagnostic_projection
+            ?.projection_id,
+        ),
+      cue_diagnostic_dynamic_frontier_recomputation_enabled:
+        true,
+      cue_diagnostic_selectivity_scalar_exposed_to_resolver:
+        false,
       retrieval_step_count:
         steps.length,
       recovery_occurrence_count:

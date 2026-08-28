@@ -54,6 +54,10 @@ import {
   projectWorldSimulationBaseLevelActivation,
 } from "./world-simulation-base-level-activation-projection-service.mjs";
 import {
+  buildWorldSimulationCueDiagnosticEvidenceProjectionContract,
+  projectWorldSimulationCueDiagnosticEvidence,
+} from "./world-simulation-cue-diagnostic-evidence-projection-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalProcessContract,
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
@@ -462,6 +466,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
     base_level_activation_projection:
       buildWorldSimulationBaseLevelActivationProjectionContract(),
+    query_relative_cue_diagnostic_evidence_projection:
+      buildWorldSimulationCueDiagnosticEvidenceProjectionContract(),
     subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
     subjective_memory_retrieval_process_step3_compatibility:
       buildWorldSimulationMemoryRetrievalProcessContract(),
@@ -915,6 +921,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       queryWorldSimulationMemoryAccessibility(
         memoryAccessibilityBaseInput,
       );
+    const cueDiagnosticEvidenceProjection =
+      projectWorldSimulationCueDiagnosticEvidence({
+        memory_accessibility_query:
+          memoryAccessibilityQuery,
+      });
     memoryAccessibilityQueries.push({
       observer: character,
       version: memoryAccessibilityQuery.memory_accessibility_version,
@@ -927,6 +938,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       base_level_activation_projection:
         cloneJson(
           baseLevelActivationProjection.audit,
+        ),
+      query_relative_cue_diagnostic_evidence_projection:
+        cloneJson(
+          cueDiagnosticEvidenceProjection.audit,
         ),
     });
     const memoryProjectionPolicy =
@@ -972,6 +987,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
             memoryAccessibilityQuery,
+          initial_cue_diagnostic_projection:
+            cueDiagnosticEvidenceProjection,
           retrieval_goal:
             retrievalContext
               .retrieval_goal
@@ -988,6 +1005,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
             memoryAccessibilityQuery,
+          initial_cue_diagnostic_projection:
+            cueDiagnosticEvidenceProjection,
           resolver:
             stagedMemoryRetrievalResolver,
           technical_step_budget:
