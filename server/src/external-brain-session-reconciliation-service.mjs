@@ -86,6 +86,22 @@ async function directoryEntries(root) {
   }
 }
 
+async function activeExternalBrainSessionIds(roots) {
+  const ids = [];
+  for (const entry of await directoryEntries(roots.agentRuns)) {
+    if (!entry.isDirectory() || !runIdPattern.test(entry.name)) continue;
+    try {
+      const run = await readJson(path.join(roots.agentRuns, entry.name, "run.json"));
+      const lifecycle = String(run.session_lifecycle_status ?? "").toUpperCase();
+      if (terminalLifecycleStatuses.has(lifecycle)) continue;
+      if (run.status === "running" || lifecycle === "ACTIVE") ids.push(entry.name);
+    } catch {
+      // Unreadable sessions cannot be positively identified as active here.
+    }
+  }
+  return ids.sort();
+}
+
 async function tracesForSession(session, roots) {
   const traces = [];
   for (const traceId of session.neural_trace_ids) {
@@ -132,7 +148,11 @@ function compactReferenceSources(session) {
 export async function auditActiveExternalBrainSessions(input = {}, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
   const roots = externalBrainSessionRoots(options);
-  const scan = await scanExternalBrainSessions(input, options);
+  const activeSessionIds = await activeExternalBrainSessionIds(roots);
+  const scan = await scanExternalBrainSessions({
+    ...input,
+    session_ids: activeSessionIds,
+  }, options);
   const transactionLineage = await collectDeterministicTransactionLineage(options);
   const records = [];
   for (const session of scan.sessions) {

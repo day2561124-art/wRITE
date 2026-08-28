@@ -239,13 +239,55 @@ try {
   assert.equal(completeLineage.final_polisher_trace_ids.length, 1);
   assert.equal(completeLineage.neural_output_references.length, 5);
   assert.equal(completeLineage.ownership_proof_complete, true);
+  assert.equal(
+    Array.isArray(completeLineage.edges),
+    true,
+    "Full lineage scan must preserve diagnostic edges.",
+  );
 
   const proposal = await createCleanupProposal({
     title: "Synthetic external brain session cleanup",
   }, options);
   const sessionItems = proposal.eligible_items.filter((item) => item.item_type === "external_brain_session");
   assert.equal(sessionItems.filter((item) => item.session_id === completed.runId).length, 1);
-  assert.equal(sessionItems.find((item) => item.session_id === completed.runId).neural_trace_ids.length, 7);
+  const compactSessionItem =
+    sessionItems.find((item) => item.session_id === completed.runId);
+  assert.equal(compactSessionItem.neural_trace_ids.length, 7);
+  assert.equal(
+    Object.hasOwn(compactSessionItem, "edges"),
+    false,
+    "Cleanup proposal must not embed the full lineage edge graph.",
+  );
+  assert.equal(
+    Object.hasOwn(compactSessionItem, "approval_references"),
+    false,
+    "Cleanup proposal must not embed full approval reference arrays.",
+  );
+  assert.equal(
+    Object.hasOwn(compactSessionItem, "candidate_references"),
+    false,
+    "Cleanup proposal must not embed full candidate reference arrays.",
+  );
+  assert.equal(
+    Object.hasOwn(compactSessionItem, "acceptance_evidence_references"),
+    false,
+    "Cleanup proposal must not embed full acceptance-evidence arrays.",
+  );
+  assert.equal(
+    typeof compactSessionItem.lineage_summary?.edge_count,
+    "number",
+    "Cleanup proposal must preserve compact lineage counts.",
+  );
+  assert.equal(
+    compactSessionItem.ownership_proof_complete,
+    true,
+    "Cleanup compact projection must preserve ownership proof.",
+  );
+  assert.equal(
+    Array.isArray(compactSessionItem.cleanup_paths),
+    true,
+    "Cleanup compact projection must preserve executable cleanup paths.",
+  );
   await approveCleanupProposal(proposal.cleanup_proposal_id, { confirm: true, approvedBy: "phase3a_test" }, options);
 
   const lateCandidateId = "writing_candidate_20260715-000001-00000004";

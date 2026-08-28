@@ -797,6 +797,20 @@ export async function enumerateExternalBrainCognitiveSessions(input = {}, option
   const roots = externalBrainSessionRoots(options);
   const policy = normalizePolicy(input.retentionPolicy ?? input.retention_policy ?? {});
   const now = options.now instanceof Date ? options.now : new Date();
+  const requestedSessionIds = input.sessionIds ?? input.session_ids ?? null;
+  let requestedSessionIdSet = null;
+  if (requestedSessionIds !== null && requestedSessionIds !== undefined) {
+    if (!Array.isArray(requestedSessionIds)) {
+      throw new Error("session_ids must be an array of external brain session ids.");
+    }
+    requestedSessionIdSet = new Set();
+    for (const sessionId of requestedSessionIds) {
+      if (!runIdPattern.test(String(sessionId ?? ""))) {
+        throw new Error(`Invalid external brain session id in session_ids: ${sessionId}`);
+      }
+      requestedSessionIdSet.add(sessionId);
+    }
+  }
   const state = {
     adjacency: new Map(),
     bundleOwners: new Map(),
@@ -868,9 +882,16 @@ export async function enumerateExternalBrainCognitiveSessions(input = {}, option
       );
     }
   }
+  const runsToBuild = requestedSessionIdSet
+    ? runs.filter((run) => requestedSessionIdSet.has(run.run_id))
+    : runs;
   const sessions = [];
-  for (const run of runs) sessions.push(await buildSession(state, run, roots, policy, now));
-  return sessions.sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")));
+  for (const run of runsToBuild) {
+    sessions.push(await buildSession(state, run, roots, policy, now));
+  }
+  return sessions.sort((left, right) =>
+    String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")),
+  );
 }
 
 export async function scanExternalBrainSessions(input = {}, options = {}) {

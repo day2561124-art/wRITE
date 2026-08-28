@@ -583,7 +583,10 @@ async function createApprovalItemUnlocked(input = {}, options = {}) {
     action_type: actionType,
     target_id: targetId,
   });
-  const matching = (await listApprovalItems(options))
+  const approvalItemsSnapshot = Array.isArray(options.approvalItemsSnapshot)
+    ? options.approvalItemsSnapshot
+    : null;
+  const matching = (approvalItemsSnapshot ?? await listApprovalItems(options))
     .filter((item) => {
       const existingIdentity = item.dedupe_key
         ? { dedupe_key: item.dedupe_key }
@@ -757,21 +760,46 @@ async function createApprovalItemUnlocked(input = {}, options = {}) {
     phase: "phase_5a_approval_queue",
     ...fixtureTransactionMetadata(options),
   });
-  return getApprovalItem(approvalItemId, options);
+  const created = await getApprovalItem(approvalItemId, options);
+  if (approvalItemsSnapshot) approvalItemsSnapshot.push(created);
+  return created;
 }
 
 let approvalCreationTail = Promise.resolve();
 
-export async function createApprovalItem(input = {}, options = {}) {
+async function withApprovalCreationLock(work) {
   const previous = approvalCreationTail;
   let release;
   approvalCreationTail = new Promise((resolve) => { release = resolve; });
   await previous;
   try {
-    return await createApprovalItemUnlocked(input, options);
+    return await work();
   } finally {
     release();
   }
+}
+
+export async function createApprovalItem(input = {}, options = {}) {
+  return withApprovalCreationLock(
+    () => createApprovalItemUnlocked(input, options),
+  );
+}
+
+async function createApprovalItemsBatch(inputs = [], options = {}) {
+  if (!Array.isArray(inputs)) throw errorWithStatus("Approval batch input must be an array.");
+  if (!inputs.length) return [];
+  return withApprovalCreationLock(async () => {
+    const approvalItemsSnapshot = await listApprovalItems(options);
+    const batchOptions = {
+      ...options,
+      approvalItemsSnapshot,
+    };
+    const results = [];
+    for (const input of inputs) {
+      results.push(await createApprovalItemUnlocked(input, batchOptions));
+    }
+    return results;
+  });
 }
 
 export async function listApprovalItems(options = {}) {
@@ -1277,9 +1305,8 @@ export async function scanApprovalQueue(options = {}) {
 export async function scanExternalBrainRetirementApprovals(options = {}) {
   await ensureApprovalQueueDirectories(options);
   const liveness = await auditActiveExternalBrainSessions({}, options);
-  const items = [];
   const diagnostics = [];
-  let suppressedCount = 0;
+  const approvalInputs = [];
   for (const session of liveness.sessions) {
     if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) continue;
     if (!session.session_id || session.ownership_proof_complete !== true
@@ -1293,19 +1320,20 @@ export async function scanExternalBrainRetirementApprovals(options = {}) {
       });
       continue;
     }
-    const item = await createExternalBrainSessionRetirementApprovalItem(session, options);
-    if (item.suppressed) suppressedCount += 1;
-    items.push(item);
+    approvalInputs.push(
+      await buildExternalBrainSessionRetirementApprovalInput(session, options),
+    );
   }
+  const items = await createApprovalItemsBatch(approvalInputs, options);
   return {
     live_retire_recommended_count: items.length,
-    suppressed_count: suppressedCount,
+    suppressed_count: items.filter((item) => item.suppressed).length,
     diagnostics,
     items,
   };
 }
 
-export async function createExternalBrainSessionRetirementApprovalItem(session, options = {}) {
+async function buildExternalBrainSessionRetirementApprovalInput(session, options = {}) {
   assertAgentRunId(session?.session_id);
   if (session.recommendation !== reconciliationRecommendations.RETIRE_RECOMMENDED) {
     throw errorWithStatus("Session does not have a live RETIRE_RECOMMENDED recommendation.", 409);
@@ -1323,7 +1351,7 @@ export async function createExternalBrainSessionRetirementApprovalItem(session, 
   );
   const sessionRoots = externalBrainSessionRoots(options);
   const reason = "Session exceeded the stale activity threshold, has complete cognition lineage, and has no live governance or acceptance-evidence pin.";
-  return createApprovalItem({
+  return {
     actionType: "retire_external_brain_session",
     requestKind: "retire_external_brain_session",
     targetType: "external_brain_session",
@@ -1384,9 +1412,15 @@ export async function createExternalBrainSessionRetirementApprovalItem(session, 
     },
     createdBy: "external_brain_session_liveness_scan",
     sourcePhase: "external_brain_session_lifecycle_phase_3c",
-  }, options);
+  };
 }
 
+export async function createExternalBrainSessionRetirementApprovalItem(session, options = {}) {
+  return createApprovalItem(
+    await buildExternalBrainSessionRetirementApprovalInput(session, options),
+    options,
+  );
+}
 export async function createRollbackApprovalItem(snapshotId, options = {}) {
   assertSnapshotId(snapshotId);
   const snapshot = (await listSnapshots(targetOptions(options)))

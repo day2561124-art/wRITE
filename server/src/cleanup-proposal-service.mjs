@@ -281,6 +281,76 @@ function statusRecord(status, reason, riskLevel = "low", retention = "normal") {
   return { status, reason, risk_level: riskLevel, retention };
 }
 
+function compactExternalBrainSessionCleanupItem(session = {}) {
+  const compactReferences = Array.isArray(session.referenced_by)
+    ? session.referenced_by.map((record) => ({
+        category: record?.category ?? null,
+        source_path: record?.source_path ?? null,
+        status: record?.status ?? null,
+      }))
+    : [];
+
+  return {
+    item_id: session.item_id,
+    item_type: session.item_type,
+    source_path: session.source_path,
+    session_id: session.session_id,
+    authority_root: session.authority_root,
+    classification: session.classification,
+    status: session.status,
+    reason: session.reason,
+    retention: session.retention,
+    risk_level: session.risk_level,
+    created_at: session.created_at ?? null,
+    updated_at: session.updated_at ?? null,
+    last_activity_at: session.last_activity_at ?? null,
+    completed_at: session.completed_at ?? null,
+    age_days: session.age_days ?? null,
+    session_lifecycle_status: session.session_lifecycle_status ?? null,
+    retired_at: session.retired_at ?? null,
+    agent_run_ids: [...(session.agent_run_ids ?? [])],
+    writing_context_bundle_ids: [...(session.writing_context_bundle_ids ?? [])],
+    neural_trace_ids: [...(session.neural_trace_ids ?? [])],
+    raw_story_handoff_ids: [...(session.raw_story_handoff_ids ?? [])],
+    estimated_logical_bytes: session.estimated_logical_bytes ?? 0,
+    estimated_file_count: session.estimated_file_count ?? 0,
+    cleanup_paths: [...(session.cleanup_paths ?? [])],
+    referenced_by: compactReferences,
+    ownership_proof_complete: session.ownership_proof_complete === true,
+    hash: session.hash,
+    lineage_summary: {
+      inferred_writing_context_bundle_count:
+        session.inferred_writing_context_bundle_ids?.length ?? 0,
+      neural_output_reference_count:
+        session.neural_output_references?.length ?? 0,
+      final_polisher_trace_count:
+        session.final_polisher_trace_ids?.length ?? 0,
+      candidate_reference_count:
+        session.candidate_references?.length ?? 0,
+      proof_reference_count:
+        session.proof_references?.length ?? 0,
+      approval_reference_count:
+        session.approval_references?.length ?? 0,
+      settlement_reference_count:
+        session.settlement_references?.length ?? 0,
+      adoption_reference_count:
+        session.adoption_references?.length ?? 0,
+      acceptance_evidence_reference_count:
+        session.acceptance_evidence_references?.length ?? 0,
+      referenced_by_count:
+        session.referenced_by?.length ?? 0,
+      explicit_reference_count:
+        session.explicit_reference_count ?? 0,
+      inferred_reference_count:
+        session.inferred_reference_count ?? 0,
+      edge_count:
+        session.edges?.length ?? 0,
+      edge_summary:
+        session.edge_summary ?? {},
+    },
+  };
+}
+
 function protectedSourcePath(sourcePath) {
   const normalized = normalizeProjectPath(sourcePath);
   return [...protectedExactPaths].some(
@@ -647,7 +717,11 @@ export async function scanCleanupCandidates(input = {}, options = {}) {
       ...(options.externalBrainSessionOptions ?? {}),
     };
     const externalScan = await scanExternalBrainSessions({ retentionPolicy: policy }, externalOptions);
-    items.push(...externalScan.sessions);
+    items.push(
+      ...externalScan.sessions.map(
+        compactExternalBrainSessionCleanupItem,
+      ),
+    );
   }
   const groups = {
     eligible_items: items.filter((item) => item.status === "eligible_for_cleanup"),

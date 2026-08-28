@@ -90,6 +90,11 @@ try {
 
   await Promise.all(Array.from({ length: 10 }, () => scanApprovalQueue(options)));
   let items = await listApprovalItems(options);
+  assert.equal(
+    items.filter((item) => item.action_type === "activate_engine_candidate").length,
+    1,
+    "Concurrent scan-local batching must preserve approval dedupe.",
+  );
   let candidateItems = items.filter((item) => (
     item.target_id === candidate.metadata.candidate_id
       && item.action_type === "activate_engine_candidate"
@@ -258,6 +263,15 @@ try {
     options,
   );
   assert.notEqual(retirementTwo.approval_item_id, retirementOne.approval_item_id);
+  const retirementTwoRepeat = await createExternalBrainSessionRetirementApprovalItem(
+    sessionProposal(2),
+    options,
+  );
+  assert.equal(
+    retirementTwoRepeat.approval_item_id,
+    retirementTwo.approval_item_id,
+    "Batch-support refactor must preserve direct retirement approval dedupe.",
+  );
 
   const isolatedTestItem = await createApprovalItem({
     actionType: "activate_engine_candidate",

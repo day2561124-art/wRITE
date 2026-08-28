@@ -249,6 +249,21 @@ try {
   assert.equal(byId(scan, abandonedOld.runId).status, "eligible_for_cleanup");
   assert.notEqual(byId(scan, failedFinal.runId).classification, C.COMPLETED_UNADOPTED_SESSION);
 
+  const filteredScan = await scanExternalBrainSessions({
+    session_ids: [recent.runId, stale.runId],
+  }, options);
+  assert.deepEqual(
+    filteredScan.sessions.map((session) => session.session_id).sort(),
+    [recent.runId, stale.runId].sort(),
+    "Engine-side session filter must restrict expensive session materialization.",
+  );
+  assert.equal(byId(filteredScan, recent.runId).classification, C.ACTIVE_SESSION);
+  assert.equal(byId(filteredScan, stale.runId).classification, C.STALE_ACTIVE_SESSION);
+  await assert.rejects(
+    () => scanExternalBrainSessions({ session_ids: ["invalid-session-id"] }, options),
+    /session_ids|external brain session id/iu,
+  );
+
   const protectedSentinel = path.join(fixtureRoot, "data", "canon_db", "active_engine.md");
   const candidateSentinel = path.join(fixtureRoot, "data", "writing_workflow", "candidate_drafts", "sentinel.json");
   const settlementSentinel = path.join(fixtureRoot, "data", "writing_workflow", "settlements", "contexts", "sentinel.json");
@@ -291,6 +306,16 @@ try {
   );
 
   const liveness = await auditActiveExternalBrainSessions({}, options);
+  assert.equal(
+    liveness.sessions.some((item) => item.session_id === abandonedOld.runId),
+    false,
+    "Active-session audit must not materialize terminal abandoned sessions.",
+  );
+  assert.equal(
+    liveness.sessions.some((item) => item.session_id === recoverable.runId),
+    false,
+    "Active-session audit must not materialize completed sessions.",
+  );
   const exactLiveness = liveness.sessions.find((item) => item.session_id === exactCompletion.runId);
   assert.equal(exactLiveness.diagnostic, D.FINAL_POLISHER_COMPLETED_BUT_RUN_STILL_RUNNING);
   assert.equal(exactLiveness.recommendation, R.DETERMINISTIC_COMPLETION_RECONCILIATION);
