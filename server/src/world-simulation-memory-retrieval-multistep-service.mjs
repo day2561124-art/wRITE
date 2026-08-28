@@ -9,6 +9,14 @@ import {
   projectWorldSimulationCueDiagnosticEvidence,
 } from "./world-simulation-cue-diagnostic-evidence-projection-service.mjs";
 import {
+  assertWorldSimulationRetrievalCueOrientationStageBoundary,
+  buildWorldSimulationRetrievalCueOrientationCharacterView,
+  buildWorldSimulationRetrievalCueOrientationContract,
+  buildWorldSimulationRetrievalCueOrientationOptions,
+  buildWorldSimulationRetrievalCueOrientationResolverOptions,
+  materializeWorldSimulationRetrievalCueOrientationEvidence,
+} from "./world-simulation-retrieval-cue-orientation-evidence-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -927,6 +935,54 @@ function resolverFrontierView(
           safeMemoryView,
         );
   }
+
+  return result;
+}
+
+function resolverInitiationFrontierView(
+  frontier,
+) {
+  return {
+    frontier_id:
+      frontier.frontier_id,
+    active_cue_hash:
+      frontier.active_cue_hash,
+    candidate_set_hash:
+      frontier.candidate_set_hash,
+    candidate_count:
+      frontier.candidate_count,
+    candidate_refs:
+      cloneJson(
+        frontier.candidate_refs,
+      ),
+  };
+}
+
+function resolverInitiationQueryView(
+  query,
+  frontier,
+) {
+  const result =
+    cloneJson(
+      query,
+    );
+
+  result.initial_frontier =
+    resolverInitiationFrontierView(
+      frontier,
+    );
+
+  result.boundaries = {
+    ...object(
+      result.boundaries,
+    ),
+    initiation_raw_active_cues_visible:
+      false,
+    initiation_candidate_competition_visible:
+      false,
+    initiation_r4a_projection_metadata_visible:
+      false,
+  };
 
   return result;
 }
@@ -1952,6 +2008,22 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4a_candidate_order_authority:
       false,
+    phase64a_r4b1_retrieval_cue_orientation_evidence:
+      buildWorldSimulationRetrievalCueOrientationContract(),
+    phase64a_r4b1_new_resolver_stage_added:
+      false,
+    phase64a_r4b1_orientation_is_process_wide_baseline:
+      true,
+    phase64a_r4b1_attention_weight_modeled:
+      false,
+    phase64a_r4b1_candidate_membership_authority:
+      false,
+    phase64a_r4b1_candidate_order_authority:
+      false,
+    phase64a_r4b1_raw_engine_cues_exposed_at_initiation:
+      false,
+    phase64a_r4b1_candidate_competition_exposed_at_initiation:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2310,6 +2382,21 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
 
   const resolverAudit = [];
 
+  const cueOrientationOptionSet =
+    buildWorldSimulationRetrievalCueOrientationOptions({
+      query_id:
+        query.query_id,
+      source_frontier_id:
+        currentFrontier.frontier_id,
+      active_cues:
+        currentFrontier.active_cues,
+    });
+
+  const cueOrientationResolverOptions =
+    buildWorldSimulationRetrievalCueOrientationResolverOptions(
+      cueOrientationOptionSet,
+    );
+
   const initiationResolution =
     await callResolver(
       resolver,
@@ -2321,13 +2408,17 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         character:
           query.character,
         query:
-          cloneJson(
+          resolverInitiationQueryView(
             query,
+            currentFrontier,
           ),
         initial_frontier:
-          resolverFrontierView(
+          resolverInitiationFrontierView(
             currentFrontier,
-            false,
+          ),
+        available_cue_orientation_options:
+          cloneJson(
+            cueOrientationResolverOptions,
           ),
         perception:
           cloneJson(
@@ -2348,6 +2439,16 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
             false,
           full_world_event_visible:
             false,
+          raw_active_cues_visible:
+            false,
+          candidate_competition_visible:
+            false,
+          r4a_diagnosticity_visible:
+            false,
+          engine_cue_identity_visible:
+            false,
+          cue_orientation_options_are_kernel_grounded:
+            true,
         },
       },
       resolverAudit,
@@ -2408,6 +2509,26 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
   const initiation =
     normalizeInitiation(
       initiationResolution.initiation,
+    );
+
+  const cueOrientationEvidence =
+    materializeWorldSimulationRetrievalCueOrientationEvidence({
+      query_id:
+        query.query_id,
+      source_frontier_id:
+        currentFrontier.frontier_id,
+      initiation,
+      resolution:
+        initiationResolution
+          .cue_orientation_resolution
+        ?? null,
+      option_set:
+        cueOrientationOptionSet,
+    });
+
+  const cueOrientationCharacterView =
+    buildWorldSimulationRetrievalCueOrientationCharacterView(
+      cueOrientationEvidence,
     );
 
   const retrievalTask =
@@ -2501,6 +2622,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
               cloneJson(
                 target.value,
               ),
+            cue_orientation:
+              cloneJson(
+                cueOrientationCharacterView,
+              ),
             step_index:
               stepIndex,
             target_outcome_so_far:
@@ -2545,6 +2670,11 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         },
         resolverAudit,
       );
+
+    assertWorldSimulationRetrievalCueOrientationStageBoundary(
+      "recovery",
+      recoveryResolution,
+    );
 
     const stepMaterialization =
       materializeStepRecovery({
@@ -2655,6 +2785,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
               cloneJson(
                 target.value,
               ),
+            cue_orientation:
+              cloneJson(
+                cueOrientationCharacterView,
+              ),
             step_index:
               stepIndex,
             target_outcome_so_far:
@@ -2705,6 +2839,11 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         },
         resolverAudit,
       );
+
+    assertWorldSimulationRetrievalCueOrientationStageBoundary(
+      "continuation",
+      continuationResolution,
+    );
 
     const control =
       normalizeControl(
@@ -2905,6 +3044,8 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         retrievalTask,
       target:
         target.value,
+      cue_orientation_evidence_hash:
+        cueOrientationEvidence.evidence_hash,
       step_hashes:
         steps.map(
           (step) =>
@@ -2930,6 +3071,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     target:
       cloneJson(
         target.value,
+      ),
+    search_orientation:
+      cloneJson(
+        cueOrientationEvidence,
       ),
     frozen_memory_snapshot: {
       phase63b_version:
@@ -3014,6 +3159,22 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       cue_diagnostic_dynamic_frontier_recomputation_enabled:
         true,
       cue_diagnostic_selectivity_scalar_exposed_to_resolver:
+        false,
+      retrieval_cue_orientation_evidence_materialized:
+        true,
+      retrieval_cue_orientation_is_process_wide_baseline:
+        true,
+      retrieval_cue_orientation_attention_weight_modeled:
+        false,
+      retrieval_cue_orientation_changed_candidate_membership:
+        false,
+      retrieval_cue_orientation_changed_candidate_order:
+        false,
+      retrieval_cue_orientation_changed_retrieval_contact:
+        false,
+      retrieval_cue_orientation_raw_engine_cues_exposed_at_initiation:
+        false,
+      retrieval_cue_orientation_candidate_competition_exposed_at_initiation:
         false,
       retrieval_step_count:
         steps.length,

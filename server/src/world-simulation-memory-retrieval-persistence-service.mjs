@@ -1169,6 +1169,11 @@ function eventForProcess(
         process.target
         ?? null,
       ),
+    search_orientation:
+      cloneJson(
+        process.search_orientation
+        ?? null,
+      ),
     search_steps:
       searchSteps,
     recovered_content:
@@ -1203,6 +1208,12 @@ function eventForProcess(
       control_reason_is_subjective_character_thought:
         false,
       counterfactual_reinstatement_options_persisted:
+        false,
+      retrieval_cue_orientation_evidence_persisted:
+        Boolean(
+          process.search_orientation,
+        ),
+      retrieval_cue_orientation_counterfactual_options_persisted:
         false,
       non_contacted_candidate_refs_persisted:
         false,
@@ -1267,6 +1278,10 @@ export function buildWorldSimulationMemoryRetrievalPersistenceContract() {
     failed_target_attempt_history_installed:
       true,
     search_steps_persist_actual_path_only:
+      true,
+    retrieval_cue_orientation_evidence_persisted:
+      true,
+    retrieval_cue_orientation_persists_actual_selection_only:
       true,
     counterfactual_cue_options_persisted:
       false,
