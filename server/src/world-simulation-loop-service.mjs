@@ -50,6 +50,10 @@ import {
   projectWorldSimulationRetrievalPracticeActivation,
 } from "./world-simulation-retrieval-practice-activation-projection-service.mjs";
 import {
+  buildWorldSimulationBaseLevelActivationProjectionContract,
+  projectWorldSimulationBaseLevelActivation,
+} from "./world-simulation-base-level-activation-projection-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalProcessContract,
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
@@ -456,6 +460,8 @@ export function buildWorldSimulationLoopContract() {
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
+    base_level_activation_projection:
+      buildWorldSimulationBaseLevelActivationProjectionContract(),
     subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
     subjective_memory_retrieval_process_step3_compatibility:
       buildWorldSimulationMemoryRetrievalProcessContract(),
@@ -765,8 +771,15 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         memory_records:
           memories,
       });
+    const baseLevelActivationProjection =
+      projectWorldSimulationBaseLevelActivation({
+        memory_records:
+          memories,
+        retrieval_practice_projection:
+          retrievalPracticeActivationProjection,
+      });
     const retrievalMemoryRecords =
-      retrievalPracticeActivationProjection
+      baseLevelActivationProjection
         .projected_memory_records;
     const availableActions = array(
       characterMapValue(worldState.available_actions, character),
@@ -910,6 +923,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       retrieval_practice_activation_projection:
         cloneJson(
           retrievalPracticeActivationProjection.audit,
+        ),
+      base_level_activation_projection:
+        cloneJson(
+          baseLevelActivationProjection.audit,
         ),
     });
     const memoryProjectionPolicy =
