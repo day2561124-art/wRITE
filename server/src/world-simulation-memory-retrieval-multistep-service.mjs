@@ -33,6 +33,10 @@ import {
   projectWorldSimulationRetrievalSearchControlReadinessEvidence,
 } from "./world-simulation-retrieval-search-control-readiness-evidence-service.mjs";
 import {
+  buildWorldSimulationRetrievalCueConditionedEpisodeEvidenceContract,
+  projectWorldSimulationRetrievalCueConditionedEpisodeEvidence,
+} from "./world-simulation-retrieval-cue-conditioned-episode-evidence-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2150,6 +2154,40 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4d_full_evidence_persisted:
       false,
+    phase64a_r4e1_retrieval_cue_conditioned_episode_evidence:
+      buildWorldSimulationRetrievalCueConditionedEpisodeEvidenceContract(),
+    phase64a_r4e1_source_completed_step_prefix_required:
+      true,
+    phase64a_r4e1_explicit_process_termination_required:
+      false,
+    phase64a_r4e1_cue_conditioned_episode_basis:
+      "contiguous_canonical_active_cue_hash",
+    phase64a_r4e1_same_cue_hash_after_intervening_episode_opens_new_episode:
+      true,
+    phase64a_r4e1_retrieval_attempt_ontology_claimed:
+      false,
+    phase64a_r4e1_cue_hash_change_claimed_as_new_retrieval_attempt:
+      false,
+    phase64a_r4e1_new_resolver_stage_added:
+      false,
+    phase64a_r4e1_retrieval_resolver_evidence_exposed:
+      false,
+    phase64a_r4e1_cue_selection_authority:
+      false,
+    phase64a_r4e1_continuation_decision_authority:
+      false,
+    phase64a_r4e1_stop_decision_authority:
+      false,
+    phase64a_r4e1_new_attempt_creation_authority:
+      false,
+    phase64a_r4e1_retrieval_contact_authority:
+      false,
+    phase64a_r4e1_retrieval_recovery_authority:
+      false,
+    phase64a_r4e1_character_subjective_awareness_modeled:
+      false,
+    phase64a_r4e1_full_evidence_persisted:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -3194,6 +3232,17 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     throw error;
   }
 
+  const retrievalCueConditionedEpisodeEvidence =
+    projectWorldSimulationRetrievalCueConditionedEpisodeEvidence({
+      query_id:
+        query.query_id,
+      source_initial_frontier:
+        query.initial_frontier,
+      initiation,
+      search_steps:
+        steps,
+    });
+
   const retrievalSearchControlReadinessEvidence =
     projectWorldSimulationRetrievalSearchControlReadinessEvidence({
       query_id:
@@ -3244,6 +3293,9 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         retrievalCompetitionMonitoringEvidence
           ?.evidence_hash
         ?? null,
+      retrieval_cue_conditioned_episode_evidence_hash:
+        retrievalCueConditionedEpisodeEvidence
+          .evidence_hash,
       retrieval_search_control_readiness_evidence_hash:
         retrievalSearchControlReadinessEvidence
           .evidence_hash,
@@ -3289,6 +3341,9 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrievalCompetitionMonitoringEvidence
         ?.evidence_hash
       ?? null,
+    retrieval_cue_conditioned_episode_evidence_hash:
+      retrievalCueConditionedEpisodeEvidence
+        .evidence_hash,
     retrieval_search_control_readiness_evidence_hash:
       retrievalSearchControlReadinessEvidence
         .evidence_hash,
@@ -3338,6 +3393,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrievalCompetitionMonitoringEvidence
         ? cloneJson(retrievalCompetitionMonitoringEvidence)
         : null,
+    retrieval_cue_conditioned_episode_evidence:
+      cloneJson(
+        retrievalCueConditionedEpisodeEvidence,
+      ),
     retrieval_search_control_readiness_evidence:
       cloneJson(
         retrievalSearchControlReadinessEvidence,
@@ -3479,6 +3538,40 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_competition_monitoring_search_control_authority:
         false,
       retrieval_competition_monitoring_full_evidence_persisted:
+        false,
+      retrieval_cue_conditioned_episode_evidence_materialized:
+        true,
+      retrieval_cue_conditioned_episode_runtime_materialization_post_hoc_after_termination:
+        true,
+      retrieval_cue_conditioned_episode_count:
+        retrievalCueConditionedEpisodeEvidence
+          .observation
+          .cue_conditioned_episode_count,
+      retrieval_cue_conditioned_episode_transition_count:
+        retrievalCueConditionedEpisodeEvidence
+          .observation
+          .cue_transition_count,
+      retrieval_cue_conditioned_episode_evidence_exposed_to_resolver:
+        false,
+      retrieval_cue_conditioned_episode_retrieval_attempt_ontology_claimed:
+        false,
+      retrieval_cue_conditioned_episode_cue_hash_change_claimed_as_new_retrieval_attempt:
+        false,
+      retrieval_cue_conditioned_episode_cue_selection_authority:
+        false,
+      retrieval_cue_conditioned_episode_continuation_decision_authority:
+        false,
+      retrieval_cue_conditioned_episode_stop_decision_authority:
+        false,
+      retrieval_cue_conditioned_episode_new_attempt_creation_authority:
+        false,
+      retrieval_cue_conditioned_episode_retrieval_contact_authority:
+        false,
+      retrieval_cue_conditioned_episode_retrieval_recovery_authority:
+        false,
+      retrieval_cue_conditioned_episode_character_subjective_awareness_modeled:
+        false,
+      retrieval_cue_conditioned_episode_full_evidence_persisted:
         false,
       retrieval_search_control_readiness_evidence_materialized:
         true,

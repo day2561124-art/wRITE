@@ -775,6 +775,7 @@ const steps = [
   ["Phase 64A-R4B3 associative activation composition evidence", ["tests/phase64/phase64a-associative-activation-composition-evidence.test.mjs"]],
   ["Phase 64A-R4C retrieval competition monitoring evidence", ["tests/phase64/phase64a-retrieval-competition-monitoring-evidence.test.mjs"]],
   ["Phase 64A-R4D retrieval search-control readiness evidence", ["tests/phase64/phase64a-retrieval-search-control-readiness-evidence.test.mjs"]],
+  ["Phase 64A-R4E1 cue-conditioned retrieval episode semantics and transition provenance", ["tests/phase64/phase64a-retrieval-cue-conditioned-episode-evidence.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
