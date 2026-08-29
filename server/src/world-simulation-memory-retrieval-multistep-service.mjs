@@ -25,6 +25,10 @@ import {
   projectWorldSimulationAssociativeActivationCompositionEvidence,
 } from "./world-simulation-associative-activation-composition-evidence-service.mjs";
 import {
+  buildWorldSimulationRetrievalCompetitionMonitoringEvidenceContract,
+  projectWorldSimulationRetrievalCompetitionMonitoringEvidence,
+} from "./world-simulation-retrieval-competition-monitoring-evidence-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2080,6 +2084,36 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4b3_full_evidence_persisted:
       false,
+    phase64a_r4c_retrieval_competition_monitoring_evidence:
+      buildWorldSimulationRetrievalCompetitionMonitoringEvidenceContract(),
+    phase64a_r4c_new_resolver_stage_added:
+      false,
+    phase64a_r4c_initial_frontier_bound:
+      true,
+    phase64a_r4c_dynamic_recomputation:
+      false,
+    phase64a_r4c_phase63c_reinstated_cues_included:
+      false,
+    phase64a_r4c_retrieval_resolver_evidence_exposed:
+      false,
+    phase64a_r4c_candidate_membership_authority:
+      false,
+    phase64a_r4c_candidate_order_authority:
+      false,
+    phase64a_r4c_activation_rank_authority:
+      false,
+    phase64a_r4c_competition_winner_modeled:
+      false,
+    phase64a_r4c_retrieval_probability_modeled:
+      false,
+    phase64a_r4c_retrieval_contact_authority:
+      false,
+    phase64a_r4c_retrieval_recovery_authority:
+      false,
+    phase64a_r4c_search_control_authority:
+      false,
+    phase64a_r4c_full_probe_reports_persisted:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2624,6 +2658,16 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       })
       : null;
 
+  const retrievalCompetitionMonitoringEvidence =
+    associativeActivationCompositionEvidence
+      ? projectWorldSimulationRetrievalCompetitionMonitoringEvidence({
+        query_id:
+          query.query_id,
+        associative_activation_composition_evidence:
+          associativeActivationCompositionEvidence,
+      })
+      : null;
+
   const retrievalTask =
     normalizeRetrievalTask(
       initiationResolution.retrieval_task,
@@ -3147,6 +3191,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         associativeActivationCompositionEvidence
           ?.evidence_hash
         ?? null,
+      retrieval_competition_monitoring_evidence_hash:
+        retrievalCompetitionMonitoringEvidence
+          ?.evidence_hash
+        ?? null,
       step_hashes:
         steps.map(
           (step) =>
@@ -3183,6 +3231,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       ?? null,
     initial_associative_activation_composition_evidence_hash:
       associativeActivationCompositionEvidence
+        ?.evidence_hash
+      ?? null,
+    initial_retrieval_competition_monitoring_evidence_hash:
+      retrievalCompetitionMonitoringEvidence
         ?.evidence_hash
       ?? null,
     frozen_memory_snapshot: {
@@ -3226,6 +3278,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     initial_associative_activation_composition_evidence:
       associativeActivationCompositionEvidence
         ? cloneJson(associativeActivationCompositionEvidence)
+        : null,
+    initial_retrieval_competition_monitoring_evidence:
+      retrievalCompetitionMonitoringEvidence
+        ? cloneJson(retrievalCompetitionMonitoringEvidence)
         : null,
     recovered_fragments:
       recoveredUnique.map(
@@ -3330,6 +3386,40 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       associative_activation_composition_scalar_activation_modeled:
         false,
       associative_activation_composition_full_evidence_persisted:
+        false,
+      retrieval_competition_monitoring_evidence_materialized:
+        Boolean(
+          retrievalCompetitionMonitoringEvidence,
+        ),
+      retrieval_competition_monitoring_source_r4b3_evidence_supplied:
+        Boolean(
+          associativeActivationCompositionEvidence,
+        ),
+      retrieval_competition_monitoring_initial_frontier_bound:
+        Boolean(
+          retrievalCompetitionMonitoringEvidence,
+        ),
+      retrieval_competition_monitoring_evidence_exposed_to_resolver:
+        false,
+      retrieval_competition_monitoring_candidate_probe_reports_materialized:
+        false,
+      retrieval_competition_monitoring_exhaustive_pairwise_matrix_materialized:
+        false,
+      retrieval_competition_monitoring_dynamic_recomputation_used:
+        false,
+      retrieval_competition_monitoring_reinstated_cues_included:
+        false,
+      retrieval_competition_monitoring_competition_winner_modeled:
+        false,
+      retrieval_competition_monitoring_retrieval_probability_modeled:
+        false,
+      retrieval_competition_monitoring_retrieval_contact_authority:
+        false,
+      retrieval_competition_monitoring_retrieval_recovery_authority:
+        false,
+      retrieval_competition_monitoring_search_control_authority:
+        false,
+      retrieval_competition_monitoring_full_evidence_persisted:
         false,
       retrieval_step_count:
         steps.length,

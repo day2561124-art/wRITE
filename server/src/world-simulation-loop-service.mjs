@@ -1038,6 +1038,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           false,
         associative_activation_composition_evidence_exposed_to_resolver:
           false,
+        retrieval_competition_monitoring_evidence_exposed_to_resolver:
+          false,
         resolver_may_author_recovered_content:
           false,
         resolver_may_author_reinstated_cue_content:

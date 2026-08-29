@@ -1233,6 +1233,19 @@ function eventForProcess(
               .initial_associative_activation_composition_evidence_hash,
           ),
         ),
+      retrieval_competition_monitor_full_evidence_persisted:
+        false,
+      retrieval_competition_probe_reports_persisted:
+        false,
+      non_contacted_competition_witness_persisted:
+        false,
+      retrieval_competition_monitor_hash_committed_via_retrieval_process_hash:
+        Boolean(
+          optionalString(
+            process
+              .initial_retrieval_competition_monitoring_evidence_hash,
+          ),
+        ),
       non_contacted_candidate_refs_persisted:
         false,
       same_cycle_phase63b_feedback_used:
@@ -1308,6 +1321,14 @@ export function buildWorldSimulationMemoryRetrievalPersistenceContract() {
     associative_activation_composition_full_evidence_persisted:
       false,
     associative_activation_composition_hash_committed_via_retrieval_process_hash:
+      true,
+    retrieval_competition_monitor_full_evidence_persisted:
+      false,
+    retrieval_competition_probe_reports_persisted:
+      false,
+    non_contacted_competition_witness_persisted:
+      false,
+    retrieval_competition_monitor_hash_committed_via_retrieval_process_hash:
       true,
     counterfactual_cue_options_persisted:
       false,
