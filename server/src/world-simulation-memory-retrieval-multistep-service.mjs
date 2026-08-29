@@ -37,6 +37,14 @@ import {
   projectWorldSimulationRetrievalCueConditionedEpisodeEvidence,
 } from "./world-simulation-retrieval-cue-conditioned-episode-evidence-service.mjs";
 import {
+  buildWorldSimulationGroundedRetrievalCueConstructionContract,
+  buildWorldSimulationGroundedRetrievalCueConstructionPriorPropositions,
+  buildWorldSimulationGroundedRetrievalCueConstructionResolverView,
+  buildWorldSimulationGroundedRetrievalCueConstructionSourceSet,
+  materializeWorldSimulationGroundedRetrievalCueConstructionEvidence,
+  worldSimulationGroundedRetrievalCueConstructionCueSource,
+} from "./world-simulation-grounded-retrieval-cue-construction-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -1783,7 +1791,12 @@ function selectReinstatedCues(
               option.cue.value,
             ),
           source:
-            "phase63c_internal_reinstatement",
+            option
+              ?.construction
+              ?.controlled_cue_construction
+            === true
+              ? worldSimulationGroundedRetrievalCueConstructionCueSource
+              : "phase63c_internal_reinstatement",
         }),
       ),
   };
@@ -2187,6 +2200,56 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
     phase64a_r4e1_character_subjective_awareness_modeled:
       false,
     phase64a_r4e1_full_evidence_persisted:
+      false,
+    phase64a_r4e2_grounded_retrieval_cue_construction:
+      buildWorldSimulationGroundedRetrievalCueConstructionContract(),
+    phase64a_r4e2_new_resolver_stage_added:
+      true,
+    phase64a_r4e2_cue_construction_stage_conditionally_invoked:
+      true,
+    phase64a_r4e2_recovery_stage_request_field:
+      "cue_construction_requested",
+    phase64a_r4e2_source_material_requires_current_character_access:
+      true,
+    phase64a_r4e2_character_state_exposed_to_cue_construction:
+      false,
+    phase64a_r4e2_full_memory_record_exposed_to_cue_construction:
+      false,
+    phase64a_r4e2_unrecovered_memory_content_exposed_to_cue_construction:
+      false,
+    phase64a_r4e2_world_state_exposed_to_cue_construction:
+      false,
+    phase64a_r4e2_future_event_queue_exposed_to_cue_construction:
+      false,
+    phase64a_r4e2_hidden_semantic_graph_traversal_allowed:
+      false,
+    phase64a_r4e2_free_semantic_association_without_materialized_semantic_access:
+      false,
+    phase64a_r4e2_immediate_parent_provenance_required:
+      true,
+    phase64a_r4e2_fixed_derivation_depth:
+      false,
+    phase64a_r4e2_cue_proposition_truth_verified:
+      false,
+    phase64a_r4e2_cue_proposition_is_recovered_fact:
+      false,
+    phase64a_r4e2_legacy_full_memory_cue_link_generation_used_when_requested:
+      false,
+    phase64a_r4e2_cue_selection_authority:
+      false,
+    phase64a_r4e2_continuation_decision_authority:
+      false,
+    phase64a_r4e2_stop_decision_authority:
+      false,
+    phase64a_r4e2_new_attempt_creation_authority:
+      false,
+    phase64a_r4e2_retrieval_contact_authority:
+      false,
+    phase64a_r4e2_retrieval_recovery_authority:
+      false,
+    phase64a_r4e2_persistent_memory_mutation_authority:
+      false,
+    phase64a_r4e2_full_evidence_persisted:
       false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
@@ -2788,6 +2851,11 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
   const availableCueOptionsById =
     new Map();
 
+  const cueConstructionEvidenceByStep = [];
+  const constructionEvidenceHashByCueOptionId =
+    new Map();
+  let priorSelectedCuePropositions = [];
+
   let termination =
     null;
 
@@ -2943,15 +3011,144 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         cumulativeRecovered,
       );
 
-    const newCueOptions =
-      cueOptionsForStep({
-        query,
-        stepIndex,
-        recovered:
-          recoveredThisStep,
-        occurrences,
-        memoryIndex,
-      });
+    const cueConstructionRequested =
+      recoveryResolution
+        .cue_construction_requested
+      === true;
+
+    let cueConstructionEvidence =
+      null;
+
+    let newCueOptions;
+
+    if (cueConstructionRequested) {
+      const cueConstructionSourceSet =
+        buildWorldSimulationGroundedRetrievalCueConstructionSourceSet({
+          query_id:
+            query.query_id,
+          step_index:
+            stepIndex,
+          recovered_fragments:
+            cumulativeRecovered.map(
+              (item) =>
+                cloneJson(
+                  item.fragment,
+                ),
+            ),
+          perception:
+            cloneJson(
+              input.perception
+              ?? {},
+            ),
+          retrieval_goal:
+            cloneJson(
+              target.value,
+            ),
+          prior_selected_cue_propositions:
+            cloneJson(
+              priorSelectedCuePropositions,
+            ),
+        });
+
+      const cueConstructionResolution =
+        await callResolver(
+          resolver,
+          "cue_construction",
+          stepIndex,
+          {
+            stage:
+              "cue_construction",
+            character:
+              query.character,
+            query_id:
+              query.query_id,
+            process: {
+              initiation:
+                cloneJson(
+                  initiation,
+                ),
+              retrieval_task:
+                cloneJson(
+                  retrievalTask,
+                ),
+              step_index:
+                stepIndex,
+              target_outcome_so_far:
+                cumulativeTargetOutcome,
+            },
+            ...buildWorldSimulationGroundedRetrievalCueConstructionResolverView(
+              cueConstructionSourceSet,
+            ),
+            boundaries: {
+              actual_materialized_sources_only:
+                true,
+              character_state_visible:
+                false,
+              full_memory_records_visible:
+                false,
+              unrecovered_memory_content_visible:
+                false,
+              world_state_visible:
+                false,
+              future_event_queue_visible:
+                false,
+              all_character_knowledge_visible:
+                false,
+              semantic_graph_visible:
+                false,
+              resolver_may_construct_cue_propositions:
+                true,
+              resolver_may_select_active_cue:
+                false,
+              resolver_may_decide_continuation:
+                false,
+              resolver_may_decide_stop:
+                false,
+            },
+          },
+          resolverAudit,
+        );
+
+      cueConstructionEvidence =
+        materializeWorldSimulationGroundedRetrievalCueConstructionEvidence({
+          source_set:
+            cueConstructionSourceSet,
+          resolution:
+            cueConstructionResolution,
+        });
+
+      cueConstructionEvidenceByStep.push(
+        cueConstructionEvidence,
+      );
+
+      for (
+        const option
+        of cueConstructionEvidence
+          .cue_options
+      ) {
+        constructionEvidenceHashByCueOptionId.set(
+          option.cue_option_id,
+          cueConstructionEvidence
+            .evidence_hash,
+        );
+      }
+
+      newCueOptions =
+        cloneJson(
+          cueConstructionEvidence
+            .cue_options,
+        );
+    } else {
+      newCueOptions =
+        cueOptionsForStep({
+          query,
+          stepIndex,
+          recovered:
+            recoveredThisStep,
+          occurrences,
+          memoryIndex,
+        });
+    }
 
     for (const option of newCueOptions) {
       if (
@@ -3085,6 +3282,98 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         availableCueOptions,
       );
 
+    if (
+      selected.selected_options.length
+    ) {
+      const selectedConstructedByEvidenceHash =
+        new Map();
+
+      for (
+        const option
+        of selected.selected_options
+      ) {
+        if (
+          option
+            ?.construction
+            ?.controlled_cue_construction
+          !== true
+        ) {
+          continue;
+        }
+
+        const evidenceHash =
+          constructionEvidenceHashByCueOptionId
+            .get(
+              option.cue_option_id,
+            );
+
+        if (!evidenceHash) {
+          const error =
+            new Error(
+              "Selected R4E2 cue "
+              + option.cue_option_id
+              + " has no bound construction evidence hash.",
+            );
+
+          error.code =
+            "WORLD_SIMULATION_MEMORY_RETRIEVAL_R4E2_CONSTRUCTION_EVIDENCE_BINDING_MISSING";
+
+          throw error;
+        }
+
+        if (
+          !selectedConstructedByEvidenceHash
+            .has(evidenceHash)
+        ) {
+          selectedConstructedByEvidenceHash.set(
+            evidenceHash,
+            [],
+          );
+        }
+
+        selectedConstructedByEvidenceHash
+          .get(evidenceHash)
+          .push(option);
+      }
+
+      const newPriorPropositions = [];
+
+      for (
+        const [
+          evidenceHash,
+          options,
+        ]
+        of selectedConstructedByEvidenceHash
+          .entries()
+      ) {
+        newPriorPropositions.push(
+          ...buildWorldSimulationGroundedRetrievalCueConstructionPriorPropositions(
+            options,
+            evidenceHash,
+          ),
+        );
+      }
+
+      const byPropositionId =
+        new Map(
+          [
+            ...priorSelectedCuePropositions,
+            ...newPriorPropositions,
+          ].map(
+            (proposition) => [
+              proposition
+                .cue_proposition_id,
+              proposition,
+            ],
+          ),
+        );
+
+      priorSelectedCuePropositions =
+        [
+          ...byPropositionId.values(),
+        ];
+    }
+
     const stepRecord = {
       step_index:
         stepIndex,
@@ -3108,6 +3397,14 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         cloneJson(
           occurrences,
         ),
+      cue_option_generation_mode:
+        cueConstructionRequested
+          ? "phase64a_r4e2_grounded_construction"
+          : "phase63c_legacy_recovered_memory_cue_links",
+      cue_construction_evidence_hash:
+        cueConstructionEvidence
+          ?.evidence_hash
+        ?? null,
       new_reinstatement_cue_options:
         cloneJson(
           newCueOptions,
@@ -3296,6 +3593,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_cue_conditioned_episode_evidence_hash:
         retrievalCueConditionedEpisodeEvidence
           .evidence_hash,
+      grounded_retrieval_cue_construction_evidence_hashes:
+        cueConstructionEvidenceByStep
+          .map(
+            (evidence) =>
+              evidence.evidence_hash,
+          ),
       retrieval_search_control_readiness_evidence_hash:
         retrievalSearchControlReadinessEvidence
           .evidence_hash,
@@ -3344,6 +3647,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     retrieval_cue_conditioned_episode_evidence_hash:
       retrievalCueConditionedEpisodeEvidence
         .evidence_hash,
+    grounded_retrieval_cue_construction_evidence_hashes:
+      cueConstructionEvidenceByStep
+        .map(
+          (evidence) =>
+            evidence.evidence_hash,
+        ),
     retrieval_search_control_readiness_evidence_hash:
       retrievalSearchControlReadinessEvidence
         .evidence_hash,
@@ -3396,6 +3705,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     retrieval_cue_conditioned_episode_evidence:
       cloneJson(
         retrievalCueConditionedEpisodeEvidence,
+      ),
+    grounded_retrieval_cue_construction_evidence:
+      cloneJson(
+        cueConstructionEvidenceByStep,
       ),
     retrieval_search_control_readiness_evidence:
       cloneJson(
@@ -3572,6 +3885,42 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_cue_conditioned_episode_character_subjective_awareness_modeled:
         false,
       retrieval_cue_conditioned_episode_full_evidence_persisted:
+        false,
+      grounded_retrieval_cue_construction_stage_count:
+        cueConstructionEvidenceByStep.length,
+      grounded_retrieval_cue_construction_evidence_hash_count:
+        cueConstructionEvidenceByStep.length,
+      grounded_retrieval_cue_construction_actual_materialized_sources_only:
+        true,
+      grounded_retrieval_cue_construction_character_state_exposed:
+        false,
+      grounded_retrieval_cue_construction_full_memory_records_exposed:
+        false,
+      grounded_retrieval_cue_construction_unrecovered_memory_content_exposed:
+        false,
+      grounded_retrieval_cue_construction_world_state_exposed:
+        false,
+      grounded_retrieval_cue_construction_future_event_queue_exposed:
+        false,
+      grounded_retrieval_cue_construction_hidden_semantic_graph_traversal_used:
+        false,
+      grounded_retrieval_cue_construction_free_semantic_association_without_materialized_semantic_access:
+        false,
+      grounded_retrieval_cue_construction_cue_proposition_truth_verified:
+        false,
+      grounded_retrieval_cue_construction_cue_selection_authority:
+        false,
+      grounded_retrieval_cue_construction_continuation_decision_authority:
+        false,
+      grounded_retrieval_cue_construction_stop_decision_authority:
+        false,
+      grounded_retrieval_cue_construction_retrieval_contact_authority:
+        false,
+      grounded_retrieval_cue_construction_retrieval_recovery_authority:
+        false,
+      grounded_retrieval_cue_construction_persistent_memory_mutated:
+        false,
+      grounded_retrieval_cue_construction_full_evidence_persisted:
         false,
       retrieval_search_control_readiness_evidence_materialized:
         true,

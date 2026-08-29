@@ -588,6 +588,31 @@ export function buildWorldSimulationLoopContract() {
         "continuation",
       ],
 
+      conditional_stages: [
+        "cue_construction",
+      ],
+
+      cue_construction_request_field:
+        "cue_construction_requested",
+
+      cue_construction_actual_materialized_sources_only:
+        true,
+
+      cue_construction_character_state_exposed:
+        false,
+
+      cue_construction_full_memory_records_exposed:
+        false,
+
+      cue_construction_unrecovered_memory_content_exposed:
+        false,
+
+      cue_construction_world_state_exposed:
+        false,
+
+      cue_construction_future_event_queue_exposed:
+        false,
+
       technical_step_budget_option:
         "memoryRetrievalTechnicalStepBudget",
 
@@ -1041,6 +1066,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         retrieval_competition_monitoring_evidence_exposed_to_resolver:
           false,
         retrieval_search_control_readiness_evidence_exposed_to_resolver:
+          false,
+        grounded_retrieval_cue_construction_evidence_exposed_to_resolver:
+          false,
+        cue_construction_character_state_exposed:
+          false,
+        cue_construction_full_memory_records_exposed:
+          false,
+        cue_construction_unrecovered_memory_content_exposed:
+          false,
+        cue_construction_world_state_exposed:
+          false,
+        cue_construction_future_event_queue_exposed:
           false,
         resolver_may_author_recovered_content:
           false,
