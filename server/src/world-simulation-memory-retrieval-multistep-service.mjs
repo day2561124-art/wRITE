@@ -21,6 +21,10 @@ import {
   projectWorldSimulationRetrievalCueSupportTopologyEvidence,
 } from "./world-simulation-retrieval-cue-support-topology-evidence-service.mjs";
 import {
+  buildWorldSimulationAssociativeActivationCompositionEvidenceContract,
+  projectWorldSimulationAssociativeActivationCompositionEvidence,
+} from "./world-simulation-associative-activation-composition-evidence-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2050,6 +2054,32 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4b2_full_support_topology_persisted:
       false,
+    phase64a_r4b3_associative_activation_composition_evidence:
+      buildWorldSimulationAssociativeActivationCompositionEvidenceContract(),
+    phase64a_r4b3_new_resolver_stage_added:
+      false,
+    phase64a_r4b3_requires_explicit_r3_projection_input:
+      true,
+    phase64a_r4b3_initial_frontier_bound:
+      true,
+    phase64a_r4b3_dynamic_recomputation:
+      false,
+    phase64a_r4b3_phase63c_reinstated_cues_included:
+      false,
+    phase64a_r4b3_retrieval_resolver_evidence_exposed:
+      false,
+    phase64a_r4b3_candidate_membership_authority:
+      false,
+    phase64a_r4b3_candidate_order_authority:
+      false,
+    phase64a_r4b3_retrieval_contact_authority:
+      false,
+    phase64a_r4b3_retrieval_recovery_authority:
+      false,
+    phase64a_r4b3_scalar_associative_activation_modeled:
+      false,
+    phase64a_r4b3_full_evidence_persisted:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2575,6 +2605,25 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       })
       : null;
 
+  const associativeActivationCompositionEvidence =
+    cueSupportTopologyEvidence
+    && input.initial_base_level_activation_projection
+      ? projectWorldSimulationAssociativeActivationCompositionEvidence({
+        query_id:
+          query.query_id,
+        character:
+          query.character,
+        turn_id:
+          query.turn_id,
+        base_level_activation_projection:
+          input.initial_base_level_activation_projection,
+        cue_diagnostic_projection:
+          input.initial_cue_diagnostic_projection,
+        cue_support_topology_evidence:
+          cueSupportTopologyEvidence,
+      })
+      : null;
+
   const retrievalTask =
     normalizeRetrievalTask(
       initiationResolution.retrieval_task,
@@ -3094,6 +3143,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         cueSupportTopologyEvidence
           ?.evidence_hash
         ?? null,
+      associative_activation_composition_evidence_hash:
+        associativeActivationCompositionEvidence
+          ?.evidence_hash
+        ?? null,
       step_hashes:
         steps.map(
           (step) =>
@@ -3126,6 +3179,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       ),
     initial_cue_support_topology_evidence_hash:
       cueSupportTopologyEvidence
+        ?.evidence_hash
+      ?? null,
+    initial_associative_activation_composition_evidence_hash:
+      associativeActivationCompositionEvidence
         ?.evidence_hash
       ?? null,
     frozen_memory_snapshot: {
@@ -3165,6 +3222,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     initial_cue_support_topology_evidence:
       cueSupportTopologyEvidence
         ? cloneJson(cueSupportTopologyEvidence)
+        : null,
+    initial_associative_activation_composition_evidence:
+      associativeActivationCompositionEvidence
+        ? cloneJson(associativeActivationCompositionEvidence)
         : null,
     recovered_fragments:
       recoveredUnique.map(
@@ -3247,6 +3308,28 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_cue_support_topology_reinstated_cues_included:
         false,
       retrieval_cue_support_topology_full_evidence_persisted:
+        false,
+      associative_activation_composition_evidence_materialized:
+        Boolean(
+          associativeActivationCompositionEvidence,
+        ),
+      associative_activation_composition_source_r3_projection_supplied:
+        Boolean(
+          input.initial_base_level_activation_projection,
+        ),
+      associative_activation_composition_initial_frontier_bound:
+        Boolean(
+          associativeActivationCompositionEvidence,
+        ),
+      associative_activation_composition_exposed_to_resolver:
+        false,
+      associative_activation_composition_dynamic_recomputation_used:
+        false,
+      associative_activation_composition_reinstated_cues_included:
+        false,
+      associative_activation_composition_scalar_activation_modeled:
+        false,
+      associative_activation_composition_full_evidence_persisted:
         false,
       retrieval_step_count:
         steps.length,

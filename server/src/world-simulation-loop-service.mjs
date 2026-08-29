@@ -1005,6 +1005,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
             memoryAccessibilityQuery,
+          initial_base_level_activation_projection:
+            baseLevelActivationProjection,
           initial_cue_diagnostic_projection:
             cueDiagnosticEvidenceProjection,
           resolver:
@@ -1033,6 +1035,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         full_world_event_exposed_to_resolver:
           false,
         future_frontier_content_exposed_to_earlier_stage:
+          false,
+        associative_activation_composition_evidence_exposed_to_resolver:
           false,
         resolver_may_author_recovered_content:
           false,

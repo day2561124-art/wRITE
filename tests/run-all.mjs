@@ -772,6 +772,7 @@ const steps = [
   ["Phase 64A-R4A query-relative cue diagnostic evidence projection", ["tests/phase64/phase64a-query-relative-cue-diagnostic-evidence-projection.test.mjs"]],
   ["Phase 64A-R4B1 retrieval cue orientation evidence", ["tests/phase64/phase64a-retrieval-cue-orientation-evidence.test.mjs"]],
   ["Phase 64A-R4B2 retrieval cue support topology evidence", ["tests/phase64/phase64a-retrieval-cue-support-topology-evidence.test.mjs"]],
+  ["Phase 64A-R4B3 associative activation composition evidence", ["tests/phase64/phase64a-associative-activation-composition-evidence.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
