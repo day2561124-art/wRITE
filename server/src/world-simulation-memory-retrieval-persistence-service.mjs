@@ -1215,6 +1215,15 @@ function eventForProcess(
         ),
       retrieval_cue_orientation_counterfactual_options_persisted:
         false,
+      retrieval_cue_support_topology_full_evidence_persisted:
+        false,
+      retrieval_cue_support_topology_hash_committed_via_retrieval_process_hash:
+        Boolean(
+          optionalString(
+            process
+              .initial_cue_support_topology_evidence_hash,
+          ),
+        ),
       non_contacted_candidate_refs_persisted:
         false,
       same_cycle_phase63b_feedback_used:
@@ -1282,6 +1291,10 @@ export function buildWorldSimulationMemoryRetrievalPersistenceContract() {
     retrieval_cue_orientation_evidence_persisted:
       true,
     retrieval_cue_orientation_persists_actual_selection_only:
+      true,
+    retrieval_cue_support_topology_full_evidence_persisted:
+      false,
+    retrieval_cue_support_topology_hash_committed_via_retrieval_process_hash:
       true,
     counterfactual_cue_options_persisted:
       false,

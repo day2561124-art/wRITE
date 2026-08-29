@@ -17,6 +17,10 @@ import {
   materializeWorldSimulationRetrievalCueOrientationEvidence,
 } from "./world-simulation-retrieval-cue-orientation-evidence-service.mjs";
 import {
+  buildWorldSimulationRetrievalCueSupportTopologyContract,
+  projectWorldSimulationRetrievalCueSupportTopologyEvidence,
+} from "./world-simulation-retrieval-cue-support-topology-evidence-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2024,6 +2028,28 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4b1_candidate_competition_exposed_at_initiation:
       false,
+    phase64a_r4b2_retrieval_cue_support_topology_evidence:
+      buildWorldSimulationRetrievalCueSupportTopologyContract(),
+    phase64a_r4b2_new_resolver_stage_added:
+      false,
+    phase64a_r4b2_initial_frontier_bound:
+      true,
+    phase64a_r4b2_dynamic_support_topology_recomputation:
+      false,
+    phase64a_r4b2_phase63c_reinstated_cues_included:
+      false,
+    phase64a_r4b2_retrieval_resolver_support_topology_exposed:
+      false,
+    phase64a_r4b2_candidate_membership_authority:
+      false,
+    phase64a_r4b2_candidate_order_authority:
+      false,
+    phase64a_r4b2_retrieval_contact_authority:
+      false,
+    phase64a_r4b2_retrieval_recovery_authority:
+      false,
+    phase64a_r4b2_full_support_topology_persisted:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2530,6 +2556,24 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     buildWorldSimulationRetrievalCueOrientationCharacterView(
       cueOrientationEvidence,
     );
+
+  const cueSupportTopologyEvidence =
+    input.initial_cue_diagnostic_projection
+      ?.applicable
+    === true
+      ? projectWorldSimulationRetrievalCueSupportTopologyEvidence({
+        query_id:
+          query.query_id,
+        source_initial_frontier:
+          publicFrontier(
+            currentFrontier,
+          ),
+        cue_orientation_evidence:
+          cueOrientationEvidence,
+        cue_diagnostic_projection:
+          input.initial_cue_diagnostic_projection,
+      })
+      : null;
 
   const retrievalTask =
     normalizeRetrievalTask(
@@ -3046,6 +3090,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         target.value,
       cue_orientation_evidence_hash:
         cueOrientationEvidence.evidence_hash,
+      cue_support_topology_evidence_hash:
+        cueSupportTopologyEvidence
+          ?.evidence_hash
+        ?? null,
       step_hashes:
         steps.map(
           (step) =>
@@ -3076,6 +3124,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       cloneJson(
         cueOrientationEvidence,
       ),
+    initial_cue_support_topology_evidence_hash:
+      cueSupportTopologyEvidence
+        ?.evidence_hash
+      ?? null,
     frozen_memory_snapshot: {
       phase63b_version:
         query.phase63b_version,
@@ -3110,6 +3162,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       true,
     retrieval_process:
       retrievalProcess,
+    initial_cue_support_topology_evidence:
+      cueSupportTopologyEvidence
+        ? cloneJson(cueSupportTopologyEvidence)
+        : null,
     recovered_fragments:
       recoveredUnique.map(
         (item) =>
@@ -3175,6 +3231,22 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_cue_orientation_raw_engine_cues_exposed_at_initiation:
         false,
       retrieval_cue_orientation_candidate_competition_exposed_at_initiation:
+        false,
+      retrieval_cue_support_topology_evidence_materialized:
+        Boolean(
+          cueSupportTopologyEvidence,
+        ),
+      retrieval_cue_support_topology_initial_frontier_bound:
+        Boolean(
+          cueSupportTopologyEvidence,
+        ),
+      retrieval_cue_support_topology_exposed_to_resolver:
+        false,
+      retrieval_cue_support_topology_dynamic_recomputation_used:
+        false,
+      retrieval_cue_support_topology_reinstated_cues_included:
+        false,
+      retrieval_cue_support_topology_full_evidence_persisted:
         false,
       retrieval_step_count:
         steps.length,
