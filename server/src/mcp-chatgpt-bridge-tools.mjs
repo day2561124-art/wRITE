@@ -64,19 +64,6 @@ import {
   ephemeralDraftReviewMutationGuards,
   reviewDraftEphemeral,
 } from "./ephemeral-draft-review-service.mjs";
-import { createRawStoryHandoffBrokerIpcClient } from "./raw-story-handoff-broker-ipc.mjs";
-
-// An HTTP-spawned mcp-server has a dedicated Node IPC channel. Capture that
-// transport once for the child lifetime so a later parent disconnect blocks
-// instead of silently falling back to child-local memory.
-const parentRawStoryBrokerIpcClient = typeof process.send === "function"
-  ? createRawStoryHandoffBrokerIpcClient()
-  : null;
-
-function rawStoryBrokerOptions(options = {}) {
-  if (options.rawStoryHandoffBroker || !parentRawStoryBrokerIpcClient) return options;
-  return { ...options, rawStoryHandoffBroker: parentRawStoryBrokerIpcClient };
-}
 
 function summarizeFullNeuralSurface(result = {}) {
   const existingSummary = result?.full_neural_orchestration_summary ?? null;
@@ -11991,7 +11978,7 @@ export async function chatgpt_bridge_review_draft_ephemeral(input = {}, options 
 
 export async function chatgpt_bridge_seal_raw_story_handoff(input = {}, options = {}) {
   try {
-    return await sealChatgptOwnedRawStoryHandoff(input, rawStoryBrokerOptions(options));
+    return await sealChatgptOwnedRawStoryHandoff(input, options);
   } catch (error) {
     return {
       ok: false,
@@ -12016,7 +12003,7 @@ function externalBrainCapabilityTool(name, capabilityName) {
     try {
       // GPT-owned individual capabilities have their own compact semantic handoff.
       // They are not full-neural final-output tools and must never enter response().
-      return await useChatgptOwnedExternalBrainCapability(capabilityName, input, rawStoryBrokerOptions(options));
+      return await useChatgptOwnedExternalBrainCapability(capabilityName, input, options);
     } catch (error) {
       return {
         ok: false,

@@ -67,8 +67,6 @@ const steps = [
   ["Phase47D exact raw-story handoff mismatch forensics", ["tests/phase47/phase47d-exact-raw-story-handoff-mismatch-forensics.test.mjs"]],
   ["Phase47F single-ingress immutable raw-story seal handoff", ["tests/phase47/phase47f-single-ingress-immutable-raw-story-seal-handoff.test.mjs"]],
   ["Phase47H raw-story seal session authority reconciliation", ["tests/phase47/phase47h-raw-story-seal-session-authority-reconciliation.test.mjs"]],
-  ["Phase47J MCP parent ephemeral raw-story seal broker", ["tests/phase47/phase47j-mcp-parent-ephemeral-raw-story-seal-broker.test.mjs"]],
-  ["Phase47L MCP parent ephemeral raw-story seal live acceptance closure", ["tests/phase47/phase47l-mcp-parent-ephemeral-raw-story-seal-live-acceptance-closure.test.mjs"]],
   ["Phase48A primary external brain character Canon grounding", ["tests/phase48/phase48a-character-canon-grounding-primary-route.test.mjs"]],
   ["Phase48B generated cast grounding and original entity freedom", ["tests/phase48/phase48b-generated-cast-grounding-original-entity-freedom.test.mjs"]],
   ["Phase48C existing Canon world entity grounding", ["tests/phase48/phase48c-existing-canon-world-entity-grounding.test.mjs"]],

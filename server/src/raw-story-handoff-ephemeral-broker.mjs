@@ -3,7 +3,6 @@ import {
   buildRawStoryIntegrityManifest,
 } from "./raw-story-handoff-integrity-service.mjs";
 
-export const rawStoryHandoffBrokerProtocol = "writer_workbench.raw_story_handoff_broker.v1";
 export const rawStoryHandoffBrokerStorageScope = "mcp_http_parent_process_ephemeral_memory";
 export const rawStoryHandoffIdPattern = /^raw_story_handoff_\d{8}-\d{6}-[a-f0-9]{12}$/u;
 

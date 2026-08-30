@@ -2314,7 +2314,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_seal_raw_story_handoff",
-    description: "[low-risk-write] Single-ingress immutable raw-story seal. After all six pre-generation capabilities succeed, accept the exact ChatGPT-authored raw_story_text once, hash it, and store it only in the long-lived MCP HTTP parent process ephemeral-memory broker behind an opaque run/bundle-scoped raw_story_handoff_id. Per-connection children use internal Node IPC; the response never returns prose, nothing is persisted, and the ID does not survive parent restart.",
+    description: "[legacy low-risk-write] Connection-local immutable raw-story seal retained only for the legacy writing route. The exact raw_story_text is stored in the current MCP child process ephemeral memory behind a run/bundle-scoped raw_story_handoff_id. A later final-polisher sealed handoff must occur on the same MCP connection/child. Cross-child parent-broker IPC is retired; nothing is persisted across process restart.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },
@@ -2325,7 +2325,7 @@ const toolDefinitions = [
   },
   {
     name: "chatgpt_bridge_use_final_polisher",
-    description: "[low-risk-write] ChatGPT-owned post-generation external brain capability with exactly one mutually exclusive handoff route. Preferred sealed route: submit only raw_story_handoff_id; the requesting child atomically acquires the same-run/same-bundle exact string from the MCP HTTP parent ephemeral broker over internal Node IPC, verifies the full ingress-parent-final SHA chain, executes once, then consumes the lease and releases the payload reference. Compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged. Phase50D enforces exact release identity when no hard conflict exists and blocks any changed prose payload, including added dialogue, psychology, causal explanation, or explanation of silence; the tool may return evidence and minimal direction only. No fallback, retry, normalization, prose resubmission, or authorship transfer occurs.",
+    description: "[legacy low-risk-write] ChatGPT-owned post-generation external-brain final polisher retained temporarily during writing-module retirement. Sealed handoff is connection-local: raw_story_handoff_id must resolve in the same MCP child that created it. Cross-child parent-broker IPC is retired. The compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged until the final-polisher subtree is retired.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },
