@@ -45,6 +45,12 @@ import {
   worldSimulationGroundedRetrievalCueConstructionCueSource,
 } from "./world-simulation-grounded-retrieval-cue-construction-service.mjs";
 import {
+  assertWorldSimulationRetrievalEpisodeLocalReprojectionsAgainstR4E1,
+  buildWorldSimulationRetrievalEpisodeLocalEvidenceReprojectionContract,
+  buildWorldSimulationRetrievalEpisodeLocalInitialContext,
+  projectWorldSimulationRetrievalEpisodeLocalEvidenceReprojection,
+} from "./world-simulation-retrieval-episode-local-evidence-reprojection-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -1872,10 +1878,15 @@ function reevaluateFrontier({
     throw error;
   }
 
-  return canonicalFrontier(
-    result.result,
-    cueDiagnosticEvidenceProjection,
-  );
+  return {
+    frontier:
+      canonicalFrontier(
+        result.result,
+        cueDiagnosticEvidenceProjection,
+      ),
+    cue_diagnostic_projection:
+      cueDiagnosticEvidenceProjection,
+  };
 }
 
 function resolverAuditEntry(
@@ -2250,6 +2261,36 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
     phase64a_r4e2_persistent_memory_mutation_authority:
       false,
     phase64a_r4e2_full_evidence_persisted:
+      false,
+    phase64a_r4e3_episode_local_evidence_reprojection:
+      buildWorldSimulationRetrievalEpisodeLocalEvidenceReprojectionContract(),
+    phase64a_r4e3_material_cue_hash_change_required:
+      true,
+    phase64a_r4e3_r4b1_process_wide_baseline_reused:
+      true,
+    phase64a_r4e3_r4b1_recomputed_per_episode:
+      false,
+    phase64a_r4e3_r4b2_reinstatement_channel_included:
+      true,
+    phase64a_r4e3_r4d_consulted_online:
+      false,
+    phase64a_r4e3_r4d_remains_post_hoc:
+      true,
+    phase64a_r4e3_resolver_evidence_exposed:
+      false,
+    phase64a_r4e3_cue_selection_authority:
+      false,
+    phase64a_r4e3_continuation_decision_authority:
+      false,
+    phase64a_r4e3_stop_decision_authority:
+      false,
+    phase64a_r4e3_retrieval_contact_authority:
+      false,
+    phase64a_r4e3_retrieval_recovery_authority:
+      false,
+    phase64a_r4e3_persistent_memory_mutation_authority:
+      false,
+    phase64a_r4e3_full_evidence_persisted:
       false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
@@ -2856,6 +2897,24 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     new Map();
   let priorSelectedCuePropositions = [];
 
+  const episodeLocalReprojectionEnabled =
+    Boolean(
+      cueSupportTopologyEvidence
+      && associativeActivationCompositionEvidence
+      && retrievalCompetitionMonitoringEvidence
+      && input.initial_base_level_activation_projection,
+    );
+
+  const episodeLocalReprojections = [];
+
+  let currentEpisodeContext =
+    buildWorldSimulationRetrievalEpisodeLocalInitialContext({
+      query_id:
+        query.query_id,
+      source_initial_frontier:
+        query.initial_frontier,
+    });
+
   let termination =
     null;
 
@@ -3405,6 +3464,8 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         cueConstructionEvidence
           ?.evidence_hash
         ?? null,
+      episode_local_reprojection_evidence_hash_after_step:
+        null,
       new_reinstatement_cue_options:
         cloneJson(
           newCueOptions,
@@ -3507,7 +3568,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     selectedInternalCueCount +=
       selectedInternalCues.length;
 
-    currentFrontier =
+    const priorFrontier =
+      currentFrontier;
+
+    const reevaluatedFrontier =
       reevaluateFrontier({
         query,
         accessibilityBaseInput,
@@ -3515,6 +3579,75 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         internalCues:
           selectedInternalCues,
       });
+
+    currentFrontier =
+      reevaluatedFrontier.frontier;
+
+    if (
+      episodeLocalReprojectionEnabled
+      && priorFrontier.active_cue_hash
+        !== currentFrontier.active_cue_hash
+    ) {
+      const episodeLocalReprojection =
+        projectWorldSimulationRetrievalEpisodeLocalEvidenceReprojection({
+          query_id:
+            query.query_id,
+          character:
+            query.character,
+          turn_id:
+            query.turn_id,
+          source_process_initial_frontier:
+            query.initial_frontier,
+          source_previous_episode:
+            currentEpisodeContext,
+          source_prior_frontier:
+            publicFrontier(
+              priorFrontier,
+            ),
+          source_episode_frontier:
+            publicFrontier(
+              currentFrontier,
+            ),
+          source_episode_cue_diagnostic_projection:
+            reevaluatedFrontier
+              .cue_diagnostic_projection,
+          process_wide_cue_orientation_evidence:
+            cueOrientationEvidence,
+          base_level_activation_projection:
+            input.initial_base_level_activation_projection,
+          source_step_index:
+            stepIndex,
+          selected_reinstatement_cues:
+            selected.selected_options.map(
+              (option) => ({
+                cue_option_id:
+                  option.cue_option_id,
+                canonical_cue_identity:
+                  JSON.stringify([
+                    option.cue.kind
+                    ?? null,
+                    option.cue.value
+                    ?? null,
+                  ]),
+              }),
+            ),
+        });
+
+      episodeLocalReprojections.push(
+        episodeLocalReprojection,
+      );
+
+      currentEpisodeContext =
+        cloneJson(
+          episodeLocalReprojection
+            .episode,
+        );
+
+      stepRecord
+        .episode_local_reprojection_evidence_hash_after_step =
+        episodeLocalReprojection
+          .evidence_hash;
+    }
   }
 
   if (!termination) {
@@ -3539,6 +3672,27 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       search_steps:
         steps,
     });
+
+  const episodeLocalReprojectionConsistency =
+    episodeLocalReprojectionEnabled
+      ? assertWorldSimulationRetrievalEpisodeLocalReprojectionsAgainstR4E1({
+        reprojections:
+          episodeLocalReprojections,
+        retrieval_cue_conditioned_episode_evidence:
+          retrievalCueConditionedEpisodeEvidence,
+      })
+      : {
+        verified:
+          true,
+        reprojection_count:
+          0,
+        r4e1_transition_count:
+          retrievalCueConditionedEpisodeEvidence
+            .observation
+            .cue_transition_count,
+        chain_not_applicable:
+          true,
+      };
 
   const retrievalSearchControlReadinessEvidence =
     projectWorldSimulationRetrievalSearchControlReadinessEvidence({
@@ -3599,6 +3753,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
             (evidence) =>
               evidence.evidence_hash,
           ),
+      retrieval_episode_local_reprojection_evidence_hashes:
+        episodeLocalReprojections
+          .map(
+            (evidence) =>
+              evidence.evidence_hash,
+          ),
       retrieval_search_control_readiness_evidence_hash:
         retrievalSearchControlReadinessEvidence
           .evidence_hash,
@@ -3649,6 +3809,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         .evidence_hash,
     grounded_retrieval_cue_construction_evidence_hashes:
       cueConstructionEvidenceByStep
+        .map(
+          (evidence) =>
+            evidence.evidence_hash,
+        ),
+    retrieval_episode_local_reprojection_evidence_hashes:
+      episodeLocalReprojections
         .map(
           (evidence) =>
             evidence.evidence_hash,
@@ -3709,6 +3875,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     grounded_retrieval_cue_construction_evidence:
       cloneJson(
         cueConstructionEvidenceByStep,
+      ),
+    retrieval_episode_local_reprojection_evidence:
+      cloneJson(
+        episodeLocalReprojections,
       ),
     retrieval_search_control_readiness_evidence:
       cloneJson(
@@ -3921,6 +4091,38 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       grounded_retrieval_cue_construction_persistent_memory_mutated:
         false,
       grounded_retrieval_cue_construction_full_evidence_persisted:
+        false,
+      retrieval_episode_local_reprojection_enabled:
+        episodeLocalReprojectionEnabled,
+      retrieval_episode_local_reprojection_count:
+        episodeLocalReprojections.length,
+      retrieval_episode_local_reprojection_r4e1_consistency_verified:
+        episodeLocalReprojectionConsistency
+          .verified
+        === true,
+      retrieval_episode_local_reprojection_r4b1_process_wide_baseline_reused:
+        true,
+      retrieval_episode_local_reprojection_r4b1_recomputed_per_episode:
+        false,
+      retrieval_episode_local_reprojection_reinstatement_channel_included:
+        true,
+      retrieval_episode_local_reprojection_evidence_exposed_to_resolver:
+        false,
+      retrieval_episode_local_reprojection_r4d_consulted_online:
+        false,
+      retrieval_episode_local_reprojection_cue_selection_authority:
+        false,
+      retrieval_episode_local_reprojection_continuation_decision_authority:
+        false,
+      retrieval_episode_local_reprojection_stop_decision_authority:
+        false,
+      retrieval_episode_local_reprojection_retrieval_contact_authority:
+        false,
+      retrieval_episode_local_reprojection_retrieval_recovery_authority:
+        false,
+      retrieval_episode_local_reprojection_persistent_memory_mutated:
+        false,
+      retrieval_episode_local_reprojection_full_evidence_persisted:
         false,
       retrieval_search_control_readiness_evidence_materialized:
         true,

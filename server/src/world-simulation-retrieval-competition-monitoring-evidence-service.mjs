@@ -530,6 +530,8 @@ export function buildWorldSimulationRetrievalCompetitionMonitoringEvidenceContra
       false,
     phase63c_reinstated_cues_included:
       false,
+    episode_local_dynamic_reprojection_supported:
+      true,
   });
 }
 
@@ -549,6 +551,12 @@ export function projectWorldSimulationRetrievalCompetitionMonitoringEvidence(
       input.associative_activation_composition_evidence,
       queryId,
     );
+
+  const episodeLocal =
+    r4b3.evidence
+      .boundaries
+      ?.evidence_is_episode_frontier_bound
+    === true;
 
   const body = {
     schema_version:
@@ -597,7 +605,29 @@ export function projectWorldSimulationRetrievalCompetitionMonitoringEvidence(
       evidence_is_query_conditioned:
         true,
       evidence_is_initial_frontier_bound:
-        true,
+        episodeLocal
+          ? false
+          : true,
+      ...(
+        episodeLocal
+          ? {
+            evidence_is_episode_frontier_bound:
+              true,
+            source_process_initial_frontier_id:
+              r4b3.evidence
+                .boundaries
+                .source_process_initial_frontier_id,
+            source_transition_id:
+              r4b3.evidence
+                .boundaries
+                .source_transition_id,
+            episode_index:
+              r4b3.evidence
+                .boundaries
+                .episode_index,
+          }
+          : {}
+      ),
       source_r4b3_candidate_set_preserved:
         true,
       candidate_membership_changed:
@@ -631,9 +661,9 @@ export function projectWorldSimulationRetrievalCompetitionMonitoringEvidence(
       non_contacted_competition_witness_persistence_allowed:
         false,
       dynamic_frontier_recomputation_used:
-        false,
+        episodeLocal,
       phase63c_reinstated_cues_included:
-        false,
+        episodeLocal,
     },
     immutable:
       true,

@@ -1037,6 +1037,10 @@ export function buildWorldSimulationRetrievalCueSupportTopologyContract() {
       false,
     phase63c_reinstated_cues_included:
       false,
+    episode_local_dynamic_reprojection_supported:
+      true,
+    episode_local_reinstatement_channel_supported:
+      true,
     retrieval_resolver_support_topology_exposed:
       false,
     full_support_topology_persisted:
@@ -1158,6 +1162,211 @@ export function projectWorldSimulationRetrievalCueSupportTopologyEvidence(
         false,
       phase63c_reinstated_cues_included:
         false,
+      resolver_exposure_allowed:
+        false,
+      full_topology_persistence_allowed:
+        false,
+    },
+    immutable:
+      true,
+  };
+
+  const evidenceHash =
+    hashAgentRunValue(
+      body,
+    );
+
+  return deepFreeze({
+    ...body,
+    topology_evidence_id:
+      `memory_retrieval_cue_support_topology_${evidenceHash.slice(0, 24)}`,
+    evidence_hash:
+      evidenceHash,
+  });
+}
+
+
+export function projectWorldSimulationRetrievalCueSupportTopologyEvidenceForEpisode(
+  input = {},
+) {
+  const queryId =
+    requiredString(
+      input.query_id,
+      "query_id",
+    );
+
+  const processInitialFrontierId =
+    requiredString(
+      input.source_process_initial_frontier_id,
+      "source_process_initial_frontier_id",
+    );
+
+  const episodeFrontier =
+    assertFrontier(
+      input.source_episode_frontier,
+      queryId,
+    );
+
+  const r4a =
+    assertR4AProjection(
+      input.cue_diagnostic_projection,
+      episodeFrontier,
+    );
+
+  const r4b1 =
+    assertR4B1Evidence(
+      input.cue_orientation_evidence,
+      queryId,
+      {
+        frontier_id:
+          processInitialFrontierId,
+      },
+    );
+
+  const episodeIndex =
+    Number(
+      input.episode_index,
+    );
+
+  if (
+    !Number.isSafeInteger(
+      episodeIndex,
+    )
+    || episodeIndex <= 0
+  ) {
+    const error =
+      new Error(
+        "episode_index must be a positive safe integer for episode-local R4B2.",
+      );
+
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_CUE_SUPPORT_TOPOLOGY_EPISODE_INDEX_INVALID";
+
+    throw error;
+  }
+
+  const sourceTransitionId =
+    requiredString(
+      input.source_transition_id,
+      "source_transition_id",
+    );
+
+  const reinstatementSelections =
+    assertSelectedCueEntries(
+      input.episode_transition_cue_selections,
+      "episode_transition_cue_selections",
+    );
+
+  const channels = {
+    trigger:
+      buildChannel({
+        applicable:
+          true,
+        basisStatus:
+          r4b1.trigger.basis_status,
+        selections:
+          r4b1.trigger.selected_cues,
+        r4a,
+      }),
+    orientation:
+      buildChannel({
+        applicable:
+          r4b1.orientation.applicable,
+        basisStatus:
+          r4b1.orientation.basis_status,
+        selections:
+          r4b1.orientation.selected_cues,
+        r4a,
+      }),
+    reinstatement:
+      buildChannel({
+        applicable:
+          true,
+        basisStatus:
+          "actual_selected_reinstatement_transition",
+        selections:
+          reinstatementSelections,
+        r4a,
+      }),
+  };
+
+  const body = {
+    schema_version:
+      retrievalCueSupportTopologyEvidenceSchemaVersion,
+    version:
+      worldSimulationRetrievalCueSupportTopologyEvidenceVersion,
+    query_id:
+      queryId,
+    source_initial_frontier_id:
+      episodeFrontier.frontier_id,
+    source_r4a_projection_id:
+      r4a.projection_id,
+    source_r4a_evidence_hash:
+      r4a.evidence_hash,
+    source_r4b1_orientation_evidence_id:
+      r4b1.orientation_evidence_id,
+    source_r4b1_evidence_hash:
+      r4b1.evidence_hash,
+    channels,
+    boundaries: {
+      evidence_is_query_conditioned:
+        true,
+      evidence_is_initial_frontier_bound:
+        false,
+      evidence_is_episode_frontier_bound:
+        true,
+      source_process_initial_frontier_id:
+        processInitialFrontierId,
+      source_transition_id:
+        sourceTransitionId,
+      episode_index:
+        episodeIndex,
+      process_wide_r4b1_baseline_reused:
+        true,
+      r4b1_recomputed_for_episode:
+        false,
+      trigger_orientation_merged:
+        false,
+      reinstatement_channel_included:
+        true,
+      all_subset_enumeration_used:
+        false,
+      statistical_dependency_inferred:
+        false,
+      encoded_compound_binding_inferred:
+        false,
+      configural_binding_inferred:
+        false,
+      attention_weight_modeled:
+        false,
+      association_strength_aggregate_inferred:
+        false,
+      scalar_activation_modeled:
+        false,
+      retrieval_probability_modeled:
+        false,
+      candidate_membership_changed:
+        false,
+      candidate_order_changed:
+        false,
+      retrieval_contact_changed:
+        false,
+      retrieval_recovery_changed:
+        false,
+      inhibition_inferred:
+        false,
+      plasticity_applied:
+        false,
+      persistent_memory_mutated:
+        false,
+      source_attribution_performed:
+        false,
+      world_truth_claimed:
+        false,
+      dynamic_frontier_recomputation_used:
+        true,
+      phase63c_reinstated_cues_included:
+        true,
       resolver_exposure_allowed:
         false,
       full_topology_persistence_allowed:

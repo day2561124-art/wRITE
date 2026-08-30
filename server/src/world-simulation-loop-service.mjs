@@ -613,6 +613,15 @@ export function buildWorldSimulationLoopContract() {
       cue_construction_future_event_queue_exposed:
         false,
 
+      episode_local_evidence_reprojection_is_engine_side:
+        true,
+
+      episode_local_evidence_reprojection_r4b1_process_wide_baseline_reused:
+        true,
+
+      r4d_used_during_episode_local_reprojection:
+        false,
+
       technical_step_budget_option:
         "memoryRetrievalTechnicalStepBudget",
 
@@ -1068,6 +1077,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         retrieval_search_control_readiness_evidence_exposed_to_resolver:
           false,
         grounded_retrieval_cue_construction_evidence_exposed_to_resolver:
+          false,
+        retrieval_episode_local_reprojection_evidence_exposed_to_resolver:
+          false,
+        r4d_used_during_episode_local_reprojection:
           false,
         cue_construction_character_state_exposed:
           false,

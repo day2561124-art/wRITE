@@ -931,6 +931,18 @@ function assertR4B2Evidence(
         "cue_support_topology_evidence.channels.orientation",
         r4a.candidate_ids,
       ),
+    ...(
+      evidence.channels?.reinstatement
+        ? {
+          reinstatement:
+            assertR4B2Channel(
+              evidence.channels.reinstatement,
+              "cue_support_topology_evidence.channels.reinstatement",
+              r4a.candidate_ids,
+            ),
+        }
+        : {}
+    ),
   };
 
   return {
@@ -1258,6 +1270,19 @@ function candidateEvidenceFor({
           r4a,
           memoryId,
         ),
+      ...(
+        selectedCueProfiles.reinstatement
+          ? {
+            reinstatement:
+              candidateCueSupport(
+                selectedCueProfiles.reinstatement,
+                r4b2.channels.reinstatement,
+                r4a,
+                memoryId,
+              ),
+          }
+          : {}
+      ),
     },
     composition: {
       attention_weights_available:
@@ -1415,6 +1440,10 @@ export function buildWorldSimulationAssociativeActivationCompositionEvidenceCont
       false,
     phase63c_reinstated_cues_included:
       false,
+    episode_local_dynamic_reprojection_supported:
+      true,
+    episode_local_reinstatement_channel_supported:
+      true,
   });
 }
 
@@ -1483,6 +1512,18 @@ export function projectWorldSimulationAssociativeActivationCompositionEvidence(
         r4a,
         "selected_cue_profiles.orientation",
       ),
+    ...(
+      r4b2.channels.reinstatement
+        ? {
+          reinstatement:
+            buildCueChannelProfiles(
+              r4b2.channels.reinstatement,
+              r4a,
+              "selected_cue_profiles.reinstatement",
+            ),
+        }
+        : {}
+    ),
   };
 
   const candidateEvidence =
@@ -1553,7 +1594,37 @@ export function projectWorldSimulationAssociativeActivationCompositionEvidence(
       evidence_is_query_conditioned:
         true,
       evidence_is_initial_frontier_bound:
-        true,
+        r4b2.evidence
+          .boundaries
+          ?.evidence_is_episode_frontier_bound
+        === true
+          ? false
+          : true,
+      ...(
+        r4b2.evidence
+          .boundaries
+          ?.evidence_is_episode_frontier_bound
+        === true
+          ? {
+            evidence_is_episode_frontier_bound:
+              true,
+            source_process_initial_frontier_id:
+              r4b2.evidence
+                .boundaries
+                .source_process_initial_frontier_id,
+            source_transition_id:
+              r4b2.evidence
+                .boundaries
+                .source_transition_id,
+            episode_index:
+              r4b2.evidence
+                .boundaries
+                .episode_index,
+            process_wide_r4b1_baseline_reused:
+              true,
+          }
+          : {}
+      ),
       candidate_membership_changed:
         false,
       candidate_order_changed:
@@ -1595,9 +1666,15 @@ export function projectWorldSimulationAssociativeActivationCompositionEvidence(
       full_evidence_persistence_allowed:
         false,
       dynamic_frontier_recomputation_used:
-        false,
+        r4b2.evidence
+          .boundaries
+          ?.evidence_is_episode_frontier_bound
+        === true,
       phase63c_reinstated_cues_included:
-        false,
+        r4b2.evidence
+          .boundaries
+          ?.evidence_is_episode_frontier_bound
+        === true,
     },
     immutable:
       true,
@@ -1738,6 +1815,9 @@ function supportBits(candidate) {
     ),
     ...array(
       candidate.cue_support?.orientation,
+    ),
+    ...array(
+      candidate.cue_support?.reinstatement,
     ),
   ].map(
     (entry) =>

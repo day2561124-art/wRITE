@@ -777,6 +777,7 @@ const steps = [
   ["Phase 64A-R4D retrieval search-control readiness evidence", ["tests/phase64/phase64a-retrieval-search-control-readiness-evidence.test.mjs"]],
   ["Phase 64A-R4E1 cue-conditioned retrieval episode semantics and transition provenance", ["tests/phase64/phase64a-retrieval-cue-conditioned-episode-evidence.test.mjs"]],
   ["Phase 64A-R4E2 grounded retrieval cue construction and controlled transition", ["tests/phase64/phase64a-grounded-retrieval-cue-construction.test.mjs"]],
+  ["Phase 64A-R4E3 episode-local evidence reprojection", ["tests/phase64/phase64a-retrieval-episode-local-evidence-reprojection.test.mjs"]],
 ];
 
 function getTimeoutMs(label) {
