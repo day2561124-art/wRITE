@@ -10,7 +10,7 @@ export const phase62WorldSimulationSteps = Object.freeze([
   Object.freeze(["Phase 62A-R2 neural execution provenance closure", Object.freeze(["tests/phase62/phase62a-r2-neural-execution-provenance-closure.test.mjs"])]),
   Object.freeze(["Phase 62A-R2 role-aware descriptor trace adoption", Object.freeze(["tests/phase62/phase62a-r2-role-aware-descriptor-trace-adoption.test.mjs"])]),
   Object.freeze(["Phase 62A world simulation neural bridge", Object.freeze(["tests/phase62/phase62a-world-simulation-neural-bridge.test.mjs"])]),
-  Object.freeze(["Phase 62B shared neural core dual-mode isolation", Object.freeze(["tests/phase62/phase62b-shared-neural-core-dual-mode-isolation.test.mjs"])]),
+  Object.freeze(["Phase 62B shared neural core world-session isolation", Object.freeze(["tests/phase62/phase62b-shared-neural-core-world-session-isolation.test.mjs"])]),
   Object.freeze(["Phase 62C world simulation main-loop integration", Object.freeze(["tests/phase62/phase62c-world-simulation-main-loop-integration.test.mjs"])]),
   Object.freeze(["Phase 62D programmatic spatial causal rule engine", Object.freeze(["tests/phase62/phase62d-programmatic-spatial-causal-rule-engine.test.mjs"])]),
   Object.freeze(["Phase 62E programmatic combat causal layer", Object.freeze(["tests/phase62/phase62e-programmatic-combat-causal-layer.test.mjs"])]),

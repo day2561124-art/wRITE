@@ -734,7 +734,7 @@ const steps = [
   ["Phase 62A-R2 neural execution provenance closure", ["tests/phase62/phase62a-r2-neural-execution-provenance-closure.test.mjs"]],
   ["Phase 62A-R2 role-aware descriptor trace adoption", ["tests/phase62/phase62a-r2-role-aware-descriptor-trace-adoption.test.mjs"]],
   ["Phase 62A world simulation neural bridge", ["tests/phase62/phase62a-world-simulation-neural-bridge.test.mjs"]],
-  ["Phase 62B shared neural core dual-mode isolation", ["tests/phase62/phase62b-shared-neural-core-dual-mode-isolation.test.mjs"]],
+  ["Phase 62B shared neural core world-session isolation", ["tests/phase62/phase62b-shared-neural-core-world-session-isolation.test.mjs"]],
   ["Phase 62C world simulation main-loop integration", ["tests/phase62/phase62c-world-simulation-main-loop-integration.test.mjs"]],
   ["Phase 62D programmatic spatial causal rule engine", ["tests/phase62/phase62d-programmatic-spatial-causal-rule-engine.test.mjs"]],
   ["Phase 62E programmatic combat causal layer", ["tests/phase62/phase62e-programmatic-combat-causal-layer.test.mjs"]],

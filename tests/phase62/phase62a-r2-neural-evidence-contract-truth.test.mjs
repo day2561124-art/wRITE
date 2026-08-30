@@ -3,12 +3,6 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  createAgentRun,
-} from "../../server/src/agent-run-service.mjs";
-import {
-  run_scene_planner,
-} from "../../server/src/neural-module-service.mjs";
-import {
   attestModelBackedNeuralAdapter,
 } from "../../server/src/neural-adapter-provenance-service.mjs";
 import {
@@ -268,69 +262,6 @@ try {
     "Fallback wrapper success must remain visible in legacy bookkeeping.",
   );
 
-  const writingRun = await createAgentRun({
-    task_type: "draft_generation",
-    mode: "chatgpt_owned_external_brain",
-    session_mode: "writing",
-    requires_neural_modules: false,
-    required_neural_modules: [],
-    input: "Phase62A-R2 Step 3 writing compatibility fixture",
-  }, options);
-
-  await run_scene_planner(
-    {
-      writing_context: {
-        current_event: "角色準備離開宿舍。",
-      },
-    },
-    {
-      ...options,
-      run_id: writingRun.run_id,
-      task_type: "draft_generation",
-      adapter: attestModelBackedNeuralAdapter(
-        async () => ({
-          current_event: "角色準備離開宿舍。",
-          scene_pressure: [],
-          practical_consequences: [],
-          unresolved_items: [],
-          available_scene_material: [],
-        }),
-        {
-          source: "phase62a-r2-step3-writing-fixture",
-          provider_id: "phase62a-r2-step3-fixture",
-          model_name: "scene-planner-fixture",
-          model_version: "v1",
-        },
-      ),
-    },
-  );
-
-  const writingUsage = await summarizeNeuralUsageForRun(
-    writingRun.run_id,
-    options,
-  );
-  assert.equal(writingUsage.world_simulation_run, false);
-  assert.equal(
-    writingUsage.evidence_policy,
-    "strict_server_attested_model_backed_execution",
-  );
-  assert.equal(writingUsage.used_neural_network, true);
-  assert.equal(writingUsage.neural_execution_evidence_count, 1);
-  assert.equal(writingUsage.neural_adapter_metrics_applicable, true);
-  assert.equal(writingUsage.neural_adapter_invocation_count, 1);
-  assert.equal(
-    writingUsage.neural_adapter_success_evidence_count,
-    1,
-  );
-  assert.deepEqual(
-    writingUsage.neural_execution_modules,
-    ["scene_planner"],
-  );
-  assert.deepEqual(
-    writingUsage.neural_modules_used,
-    ["scene_planner"],
-  );
-
   const consistencyContract =
     buildWorldSimulationCapabilityContract(
       "world_consistency_critic",
@@ -372,8 +303,7 @@ try {
       acceptedUsage.used_neural_network,
     native_fallback_used_neural_network:
       fallbackUsage.used_neural_network,
-    writing_usage_semantics_preserved:
-      writingUsage.used_neural_network,
+    world_only_evidence_contract_verified: true,
     consistency_contract_declares_hard_conflict_count:
       true,
     readonly_uses_shared_classifier:

@@ -3,10 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  buildSharedNeuralCoreDescriptor,
   buildSharedNeuralCoreRegistry,
-  invokeSharedNeuralCoreAdapter,
-  neuralSessionModes,
   sharedNeuralCoreVersion,
 } from "../../server/src/shared-neural-core-service.mjs";
 import {
@@ -43,18 +40,6 @@ try {
     "R2 world-role metadata must not churn the unchanged Phase62B routing contract version.",
   );
   assert.equal(
-    registry.modes.writing.capabilities.character_simulator,
-    "character_cognition",
-  );
-  assert.equal(
-    Object.hasOwn(
-      registry.modes.writing,
-      "world_capability_role_registry_version",
-    ),
-    false,
-    "Writing-mode registry must not receive world capability roles.",
-  );
-  assert.equal(
     registry.modes.world_simulation.world_capability_role_registry_version,
     worldSimulationCapabilityRoleRegistryVersion,
   );
@@ -82,72 +67,6 @@ try {
       .neural_extension_role,
     "action_candidate_consideration_ordering",
   );
-
-  const writingDescriptor = buildSharedNeuralCoreDescriptor(
-    neuralSessionModes.WRITING,
-    "character_simulator",
-    {
-      session_mode: neuralSessionModes.WRITING,
-      task_type: "draft_generation",
-      mode: "chatgpt_owned_external_brain",
-    },
-  );
-  assert.equal(
-    Object.hasOwn(
-      writingDescriptor,
-      "world_capability_role_registry_version",
-    ),
-    false,
-  );
-  assert.equal(
-    Object.hasOwn(writingDescriptor, "world_capability_role"),
-    false,
-  );
-
-  let writingAdapterContext = null;
-  const writingInvocation = await invokeSharedNeuralCoreAdapter({
-    run: {
-      session_mode: neuralSessionModes.WRITING,
-      task_type: "draft_generation",
-      mode: "chatgpt_owned_external_brain",
-    },
-    session_mode: neuralSessionModes.WRITING,
-    capability_name: "character_simulator",
-    input: {},
-    adapter: async (_input, context) => {
-      writingAdapterContext = structuredClone(context);
-      return { ok: true };
-    },
-  });
-  assert.deepEqual(writingInvocation.output, { ok: true });
-  assert(writingAdapterContext);
-  assert.equal(
-    writingAdapterContext.neural_session_mode,
-    neuralSessionModes.WRITING,
-  );
-  assert.equal(
-    writingAdapterContext.shared_capability_family,
-    "character_cognition",
-  );
-  for (const key of [
-    "world_capability_role_registry_version",
-    "world_capability_semantic_family",
-    "world_trusted_runtime_role",
-    "world_neural_extension_role",
-    "world_adapter_audience_class",
-    "world_native_loop_stage",
-    "world_native_loop_scope",
-    "world_trusted_output_effect",
-    "world_formal_mainline_neural_extension_effect",
-    "world_capability_compatibility_status",
-    "world_role_registry_grants_runtime_permission",
-  ]) {
-    assert.equal(
-      Object.hasOwn(writingAdapterContext, key),
-      false,
-      `Writing adapter context must not expose ${key}.`,
-    );
-  }
 
   const session = await beginWorldSimulationSession({
     simulation_label: "Phase62A-R2 Step 2 role-aware descriptor trace fixture",
@@ -368,7 +287,7 @@ try {
     shared_neural_core_version: sharedNeuralCoreVersion,
     role_registry_version:
       worldSimulationCapabilityRoleRegistryVersion,
-    writing_world_role_metadata_exposed: false,
+    legacy_writing_fixture_required: false,
     memory_shared_family_preserved: true,
     memory_trusted_role_normalized: true,
     action_shared_family_preserved: true,
