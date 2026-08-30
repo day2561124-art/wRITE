@@ -622,6 +622,18 @@ export function buildWorldSimulationLoopContract() {
       r4d_used_during_episode_local_reprojection:
         false,
 
+      global_termination_decision_semantics_engine_side:
+        true,
+
+      global_termination_new_resolver_stage_added:
+        false,
+
+      global_termination_stopping_rule_modeled:
+        false,
+
+      global_termination_r4d_consumed_online:
+        false,
+
       technical_step_budget_option:
         "memoryRetrievalTechnicalStepBudget",
 
@@ -1079,6 +1091,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         grounded_retrieval_cue_construction_evidence_exposed_to_resolver:
           false,
         retrieval_episode_local_reprojection_evidence_exposed_to_resolver:
+          false,
+        retrieval_global_termination_decision_evidence_exposed_to_resolver:
+          false,
+        global_termination_r4d_consumed_online:
           false,
         r4d_used_during_episode_local_reprojection:
           false,

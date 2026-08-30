@@ -830,3 +830,254 @@ export function validateWorldSimulationRetrievalCueConditionedEpisodeEvidence(
     ),
   );
 }
+
+
+export function advanceWorldSimulationRetrievalCueConditionedEpisodeContext(
+  input = {},
+) {
+  assertNoUnsupportedOverrides(
+    input,
+  );
+
+  const queryId =
+    requiredString(
+      input.query_id,
+      "query_id",
+    );
+
+  const previous =
+    object(
+      input.source_previous_episode,
+    );
+
+  const previousEpisodeIndex =
+    nonNegativeInteger(
+      previous.episode_index,
+      "source_previous_episode.episode_index",
+    );
+
+  const previousFirstStepIndex =
+    nonNegativeInteger(
+      previous.first_step_index,
+      "source_previous_episode.first_step_index",
+    );
+
+  const previousCueSetHash =
+    requiredString(
+      previous.cue_set_hash,
+      "source_previous_episode.cue_set_hash",
+    );
+
+  const previousEpisodeId =
+    requiredString(
+      previous.episode_id,
+      "source_previous_episode.episode_id",
+    );
+
+  const expectedPreviousEpisodeId =
+    `memory_retrieval_cue_conditioned_episode_${hashAgentRunValue({
+      version:
+        worldSimulationRetrievalCueConditionedEpisodeEvidenceVersion,
+      query_id:
+        queryId,
+      episode_index:
+        previousEpisodeIndex,
+      first_step_index:
+        previousFirstStepIndex,
+      cue_set_hash:
+        previousCueSetHash,
+    }).slice(0, 24)}`;
+
+  if (
+    previousEpisodeId
+    !== expectedPreviousEpisodeId
+  ) {
+    const error =
+      new Error(
+        "Previous online episode context does not match canonical R4E1 identity semantics.",
+      );
+
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_CUE_CONDITIONED_EPISODE_ONLINE_PREVIOUS_ID_MISMATCH";
+
+    throw error;
+  }
+
+  const sourceStepIndex =
+    nonNegativeInteger(
+      input.source_step_index,
+      "source_step_index",
+    );
+
+  if (
+    sourceStepIndex
+    < previousFirstStepIndex
+  ) {
+    const error =
+      new Error(
+        "source_step_index cannot precede the current episode.",
+      );
+
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_CUE_CONDITIONED_EPISODE_ONLINE_STEP_ORDER_MISMATCH";
+
+    throw error;
+  }
+
+  const nextFrontier =
+    object(
+      input.source_next_frontier,
+    );
+
+  const nextFrontierId =
+    requiredString(
+      nextFrontier.frontier_id,
+      "source_next_frontier.frontier_id",
+    );
+
+  const nextCueSetHash =
+    requiredString(
+      nextFrontier.active_cue_hash,
+      "source_next_frontier.active_cue_hash",
+    );
+
+  if (
+    nextCueSetHash
+    === previousCueSetHash
+  ) {
+    const error =
+      new Error(
+        "Online R4E1 episode advancement requires a material canonical cue-hash change.",
+      );
+
+    error.code =
+      "WORLD_SIMULATION_RETRIEVAL_CUE_CONDITIONED_EPISODE_ONLINE_CUE_HASH_UNCHANGED";
+
+    throw error;
+  }
+
+  const selectedRefs =
+    array(
+      input.selected_reinstatement_cue_refs,
+    ).map(
+      (value, index) =>
+        requiredString(
+          value,
+          `selected_reinstatement_cue_refs[${index}]`,
+        ),
+    );
+
+  const nextStepIndex =
+    sourceStepIndex + 1;
+
+  const nextEpisodeIndex =
+    previousEpisodeIndex + 1;
+
+  const nextEpisodeId =
+    `memory_retrieval_cue_conditioned_episode_${hashAgentRunValue({
+      version:
+        worldSimulationRetrievalCueConditionedEpisodeEvidenceVersion,
+      query_id:
+        queryId,
+      episode_index:
+        nextEpisodeIndex,
+      first_step_index:
+        nextStepIndex,
+      cue_set_hash:
+        nextCueSetHash,
+    }).slice(0, 24)}`;
+
+  const provenanceKind =
+    selectedRefs.length
+      ? "grounded_internal_reinstatement_selection"
+      : "observed_cue_set_change_unattributed";
+
+  const transitionBody = {
+    version:
+      worldSimulationRetrievalCueConditionedEpisodeEvidenceVersion,
+    query_id:
+      queryId,
+    transition_index:
+      nextEpisodeIndex - 1,
+    from_episode_id:
+      previousEpisodeId,
+    to_episode_id:
+      nextEpisodeId,
+    source_step_index:
+      sourceStepIndex,
+    next_step_index:
+      nextStepIndex,
+    prior_cue_set_hash:
+      previousCueSetHash,
+    next_cue_set_hash:
+      nextCueSetHash,
+    provenance_kind:
+      provenanceKind,
+    selected_reinstatement_cue_refs:
+      selectedRefs,
+  };
+
+  const transitionHash =
+    hashAgentRunValue(
+      transitionBody,
+    );
+
+  const transitionId =
+    `memory_retrieval_cue_episode_transition_${transitionHash.slice(0, 24)}`;
+
+  return deepFreeze({
+    episode: {
+      episode_id:
+        nextEpisodeId,
+      episode_index:
+        nextEpisodeIndex,
+      cue_set_hash:
+        nextCueSetHash,
+      first_step_index:
+        nextStepIndex,
+      last_step_index:
+        nextStepIndex,
+      step_count:
+        1,
+      source_frontier_ids: [
+        nextFrontierId,
+      ],
+      initial_process_episode:
+        false,
+      initial_trigger_origin:
+        null,
+      transition_in_id:
+        transitionId,
+    },
+    transition: {
+      transition_id:
+        transitionId,
+      transition_index:
+        nextEpisodeIndex - 1,
+      from_episode_id:
+        previousEpisodeId,
+      to_episode_id:
+        nextEpisodeId,
+      source_step_index:
+        sourceStepIndex,
+      next_step_index:
+        nextStepIndex,
+      prior_cue_set_hash:
+        previousCueSetHash,
+      next_cue_set_hash:
+        nextCueSetHash,
+      cue_set_changed:
+        true,
+      provenance_kind:
+        provenanceKind,
+      selected_reinstatement_cue_refs:
+        cloneJson(
+          selectedRefs,
+        ),
+      grounded_internal_selection_observed:
+        selectedRefs.length > 0,
+      retrieval_attempt_created:
+        false,
+    },
+  });
+}
