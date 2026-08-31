@@ -20,7 +20,7 @@ export function createStdioSession(options = {}) {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: {
       ...process.env,
-      MCP_TOOL_PROFILE: 'chatgpt_public',
+      MCP_TOOL_PROFILE: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public',
     },
   });
 

@@ -161,6 +161,7 @@ const expectedTools = [
   "dev_list_directory",
   "dev_read_file",
   "dev_search_files",
+  "dev_apply_patch",
   "get_current_project_state",
   "get_active_engine",
   "get_engine_components_status",
@@ -595,6 +596,19 @@ const enumConstraintFixtures = [
 ];
 
 const schemaTypeFixtures = [
+  {
+    label: "dev_apply_patch non-string expectedSha256",
+    name: "dev_apply_patch",
+    field: "expectedSha256",
+    expectedType: "string",
+    arguments: {
+      path: "package.json",
+      oldText: "fixture",
+      newText: "replacement",
+      expectedSha256: 123,
+    },
+    expectedMessage: "expectedSha256 must be a string.",
+  },
   {
     label: "dev_list_directory non-integer maxEntries",
     name: "dev_list_directory",
@@ -1056,6 +1070,33 @@ const integerMaximumFixtures = [
 
 const sizeConstraintFixtures = [
   {
+    label: "dev_apply_patch expectedSha256 over maxLength",
+    name: "dev_apply_patch",
+    field: "expectedSha256",
+    constraint: "maxLength",
+    expectedLimit: 64,
+    arguments: {
+      path: "package.json",
+      oldText: "fixture",
+      newText: "replacement",
+      expectedSha256: "a".repeat(65),
+    },
+    expectedMessage: "expectedSha256 must be at most 64 characters.",
+  },
+  {
+    label: "dev_apply_patch newText over maxLength",
+    name: "dev_apply_patch",
+    field: "newText",
+    constraint: "maxLength",
+    expectedLimit: 262144,
+    arguments: {
+      path: "package.json",
+      oldText: "fixture",
+      newText: "x".repeat(262145),
+    },
+    expectedMessage: "newText must be at most 262144 characters.",
+  },
+  {
     label: "dev_read_file path over maxLength",
     name: "dev_read_file",
     field: "path",
@@ -1244,6 +1285,27 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "dev_apply_patch missing path",
+    name: "dev_apply_patch",
+    field: "path",
+    arguments: { oldText: "fixture", newText: "replacement" },
+    expectedMessage: "path is required.",
+  },
+  {
+    label: "dev_apply_patch blank oldText",
+    name: "dev_apply_patch",
+    field: "oldText",
+    arguments: { path: "package.json", oldText: "", newText: "replacement" },
+    expectedMessage: "oldText is required.",
+  },
+  {
+    label: "dev_apply_patch null newText",
+    name: "dev_apply_patch",
+    field: "newText",
+    arguments: { path: "package.json", oldText: "fixture", newText: null },
+    expectedMessage: "newText is required.",
+  },
   {
     label: "dev_read_file null path",
     name: "dev_read_file",
@@ -2009,6 +2071,12 @@ const expectedContentStringFields = new Set([
 ]);
 
 function expectedStringMaxLength(field) {
+  if (field === "expectedSha256") {
+    return 64;
+  }
+  if (field === "oldText" || field === "newText") {
+    return 256 * 1024;
+  }
   if (field === "q" || field === "entityQuery") {
     return 120;
   }
@@ -5260,9 +5328,11 @@ async function runSmokeTest(options) {
     coveredSizePolicies.add(`${fixture.constraint}:${fixture.expectedLimit}`);
   }
   const expectedSizePolicies = new Set([
+    "maxLength:64",
     "maxLength:4096",
     "maxLength:8192",
     "maxLength:65536",
+    "maxLength:262144",
     "maxLength:1000000",
     "maxItems:100",
     "maxItems:256",

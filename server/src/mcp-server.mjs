@@ -131,6 +131,10 @@ import {
   dev_read_file,
   dev_search_files,
 } from "./mcp-development-readonly-tools.mjs";
+import {
+  DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
+  dev_apply_patch,
+} from "./mcp-development-write-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
   get_active_engine_dependency_status,
@@ -675,11 +679,12 @@ function truncateText(value, limit = 160) {
 
 function summarizeInputValue(value, key = "") {
   if (typeof value === "string") {
+    const omitPreview = ["newText", "oldText", "raw_story_text"].includes(key);
     return {
       type: "string",
       length: value.length,
       sha256: hashText(value),
-      ...(key === "raw_story_text" ? { sensitive_payload_preview_omitted: true } : { preview: truncateText(value) }),
+      ...(omitPreview ? { sensitive_payload_preview_omitted: true } : { preview: truncateText(value) }),
     };
   }
 
@@ -751,6 +756,34 @@ function auditOutputSummary(result, toolName = "") {
   };
 }
 
+function devApplyPatchAuditChange(tool, result) {
+  if (tool.name !== "dev_apply_patch" || result?.isError === true) return null;
+  try {
+    const payload = JSON.parse(result?.content?.[0]?.text ?? "{}");
+    if (
+      payload.changed !== true
+      || typeof payload.path !== "string"
+      || typeof payload.before_sha256 !== "string"
+      || typeof payload.after_sha256 !== "string"
+    ) return null;
+    return {
+      path: payload.path,
+      previous: {
+        exists: true,
+        bytes: payload.before_bytes,
+        sha256: payload.before_sha256,
+      },
+      current: {
+        exists: true,
+        bytes: payload.after_bytes,
+        sha256: payload.after_sha256,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function auditedToolCall(tool, args, actor) {
   const before = await auditSnapshotMap();
   const calledAt = new Date();
@@ -793,6 +826,10 @@ async function auditedToolCall(tool, args, actor) {
 
   const after = await auditSnapshotMap();
   const changed = diffAuditSnapshots(before, after);
+  const patchChange = devApplyPatchAuditChange(tool, result);
+  if (patchChange && !changed.some((item) => item.path === patchChange.path)) {
+    changed.push(patchChange);
+  }
   const auditRecord = {
     audit_id: auditId,
     created_at: calledAt.toISOString(),
@@ -905,6 +942,12 @@ const contentStringFields = new Set([
 ]);
 
 function stringMaxLengthFor(field) {
+  if (field === "expectedSha256") {
+    return 64;
+  }
+  if (field === "oldText" || field === "newText") {
+    return DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS;
+  }
   if (field === "chatOutputText") {
     return defaultInputLimits.chatOutputMaxLength;
   }
@@ -1050,6 +1093,7 @@ function validateCrossFieldArguments(tool, args) {
 
 function validateToolArguments(tool, args) {
   const properties = tool.inputSchema?.properties ?? {};
+  const requiredFields = new Set(tool.inputSchema?.required ?? []);
   const nullNormalization = getNullNormalization(tool);
   const emptyStringNormalization = getEmptyStringNormalization(tool);
   const stringArrayNormalization = getStringArrayNormalization(tool);
@@ -1065,12 +1109,14 @@ function validateToolArguments(tool, args) {
 
   for (const field of tool.inputSchema?.required ?? []) {
     const value = args[field];
+    const allowEmpty = properties[field]?.["x-allow-empty"] === true;
     if (
       value === undefined
       || (
         typeof value === "string"
         && value.trim() === ""
         && emptyStringNormalization.required === "rejectBlank"
+        && !allowEmpty
       )
       || (value === null && nullNormalization.required === "reject")
     ) {
@@ -1094,6 +1140,26 @@ function validateToolArguments(tool, args) {
       && Array.from(value).length > schema.maxLength
     ) {
       throw new Error(`${field} must be at most ${schema.maxLength} characters.`);
+    }
+
+    if (
+      schema.type === "string"
+      && typeof value === "string"
+      && schema.minLength !== undefined
+      && Array.from(value).length < schema.minLength
+      && !(value.trim() === "" && !requiredFields.has(field))
+    ) {
+      throw new Error(`${field} must be at least ${schema.minLength} characters.`);
+    }
+
+    if (
+      schema.type === "string"
+      && typeof value === "string"
+      && schema.pattern !== undefined
+      && !new RegExp(schema.pattern, "u").test(value)
+      && !(value.trim() === "" && !requiredFields.has(field))
+    ) {
+      throw new Error(`${field} must match ${schema.pattern}.`);
     }
 
     if (schema.type === "boolean" && typeof value !== "boolean") {
@@ -1382,6 +1448,32 @@ const toolDefinitions = [
       },
     }, ["query"]),
     handler: async (args) => jsonContent(await dev_search_files(args)),
+  },
+  {
+    name: "dev_apply_patch",
+    description: "Atomically replace one uniquely matching text span in one existing approved repository development file, with optional SHA-256 concurrency protection; protected content/state, secrets, binaries, generated paths, and symlink escapes are blocked.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+      oldText: {
+        type: "string",
+        minLength: 1,
+        maxLength: DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
+      },
+      newText: {
+        type: "string",
+        maxLength: DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
+        "x-allow-empty": true,
+      },
+      expectedSha256: {
+        type: "string",
+        minLength: 64,
+        maxLength: 64,
+        pattern: "^[A-Fa-f0-9]{64}$",
+      },
+    }, ["path", "oldText", "newText"]),
+    handler: async (args) => jsonContent(await dev_apply_patch(args)),
   },
   {
     name: "get_current_project_state",
@@ -3217,9 +3309,15 @@ const chatgptPublicToolNames = new Set([
   "preview_visual_reference_consumer_output_guard",
 ]);
 
+const chatgptDeveloperToolNames = new Set([
+  ...chatgptPublicToolNames,
+  "dev_apply_patch",
+]);
+
 const toolProfiles = new Map([
   ["full", null],
   ["chatgpt_public", chatgptPublicToolNames],
+  ["chatgpt_developer", chatgptDeveloperToolNames],
 ]);
 
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || "full";
@@ -3237,6 +3335,7 @@ const permissionSources = {
   dev_list_directory: ["repository_directory"],
   dev_read_file: ["repository_text_file"],
   dev_search_files: ["repository_text_files"],
+  dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
   get_engine_components_status: ["engine_component_registry", "registered_engine_components"],

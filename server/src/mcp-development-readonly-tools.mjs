@@ -105,7 +105,7 @@ function pathSegments(filePath) {
   return relative ? relative.split(/[\\/]+/u) : [];
 }
 
-function isSecretName(name) {
+export function isSecretName(name) {
   const lower = name.toLowerCase();
   return lower === ".env"
     || lower.startsWith(".env.")
@@ -124,10 +124,10 @@ function isSecretName(name) {
     ].includes(lower)
     || /^(?:secret|secrets|credentials)(?:\.|$)/iu.test(name)
     || /^service[-_]account(?:\.|$)/iu.test(name)
-    || /\.(?:key|p12|pem|pfx)$/iu.test(name);
+    || /\.(?:cer|cert|crt|der|jks|key|keystore|p12|p7b|p7c|pem|pfx)$/iu.test(name);
 }
 
-function assertAllowedPathPolicy(resolved, label) {
+export function assertAllowedPathPolicy(resolved, label) {
   const segments = pathSegments(resolved);
   if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     throw new Error(`${label} cannot access .git internals.`);
@@ -152,7 +152,7 @@ function positiveIntegerWithin(value, fallback, maximum, field) {
   return normalized;
 }
 
-async function assertExistingSafePath(resolved, label) {
+export async function assertExistingSafePath(resolved, label) {
   const info = await lstat(resolved);
   if (info.isSymbolicLink()) {
     throw new Error(`${label} cannot access symbolic links.`);
@@ -168,13 +168,13 @@ async function assertExistingSafePath(resolved, label) {
   return info;
 }
 
-function isSupportedTextPath(filePath) {
+export function isSupportedTextPath(filePath) {
   const name = path.basename(filePath).toLowerCase();
   const extension = path.extname(name);
   return textExtensions.has(extension) || (!extension && extensionlessTextNames.has(name));
 }
 
-function decodeText(buffer, label) {
+export function decodeText(buffer, label) {
   if (buffer.includes(0)) {
     throw new Error(`${label} must reference a UTF-8 text file.`);
   }

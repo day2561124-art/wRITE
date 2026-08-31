@@ -24,6 +24,9 @@ const publicReadPaths = [...new Set([
 ])];
 
 const publicToolNames = [
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
   "get_engine_components_status",
   "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
@@ -64,6 +67,7 @@ const publicToolNames = [
 ];
 
 const blockedToolNames = [
+  "dev_apply_patch",
   "activate_engine_version",
   "compress_error_rules",
   "import_policy_file",
@@ -198,6 +202,61 @@ assert.deepEqual(
 );
 
 const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+assert.equal(
+  publicToolMap.has("dev_apply_patch"),
+  false,
+  "dev_apply_patch leaked into chatgpt_public",
+);
+
+const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
+const developerList = developerResponses[0];
+const developerNames = developerList.result.tools.map((tool) => tool.name);
+assert.deepEqual(
+  [...developerNames].sort(),
+  [...publicToolNames, "dev_apply_patch"].sort(),
+  "chatgpt_developer must equal chatgpt_public plus dev_apply_patch",
+);
+const developerPatchTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_apply_patch",
+);
+assert(developerPatchTool, "chatgpt_developer is missing dev_apply_patch");
+assert.equal(developerPatchTool.annotations?.readOnlyHint, false);
+const developerPatchSchema = developerPatchTool.inputSchema;
+assert.equal(developerPatchSchema?.type, "object");
+assert.equal(developerPatchSchema?.additionalProperties, false);
+assert.deepEqual(developerPatchSchema?.required, ["path", "oldText", "newText"]);
+assert.deepEqual(
+  Object.keys(developerPatchSchema?.properties ?? {}).sort(),
+  ["expectedSha256", "newText", "oldText", "path"].sort(),
+);
+assert.equal(developerPatchSchema.properties.path.type, "string");
+assert.equal(developerPatchSchema.properties.path.maxLength, 4096);
+assert.equal(developerPatchSchema.properties.oldText.type, "string");
+assert.equal(developerPatchSchema.properties.oldText.minLength, 1);
+assert.equal(developerPatchSchema.properties.oldText.maxLength, 262144);
+assert.equal(developerPatchSchema.properties.newText.type, "string");
+assert.equal(developerPatchSchema.properties.newText.maxLength, 262144);
+assert.equal(developerPatchSchema.properties.newText["x-allow-empty"], true);
+assert.equal(developerPatchSchema.properties.expectedSha256.type, "string");
+assert.equal(developerPatchSchema.properties.expectedSha256.minLength, 64);
+assert.equal(developerPatchSchema.properties.expectedSha256.maxLength, 64);
+assert.equal(developerPatchSchema.properties.expectedSha256.pattern, "^[A-Fa-f0-9]{64}$");
+assert.equal(Object.hasOwn(developerPatchSchema.properties.expectedSha256, "default"), false);
+const developerPatchPermission = developerPatchTool._meta?.["armed-academy/permission"];
+assert.equal(developerPatchPermission?.permission_level, "write_low_risk");
+assert.equal(developerPatchPermission?.read_or_write, "write");
+assert.equal(developerPatchPermission?.risk_level, "low-risk-write");
+assert.equal(developerPatchPermission?.log_required, true);
+assert.equal(developerPatchPermission?.can_modify_canon, false);
+assert.equal(developerPatchPermission?.can_modify_active_engine, false);
+assert.equal(developerPatchPermission?.can_modify_story_graph, false);
+assert.equal(developerPatchPermission?.can_modify_memory, false);
+assert.deepEqual(
+  developerPatchPermission?.allowed_sources,
+  ["repository_development_text_file", "mcp_client_exact_patch"],
+);
+assert(developerPatchPermission?.forbidden_sources?.includes("unregistered_external_source"));
+
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_prepare_world_turn",
@@ -432,6 +491,8 @@ for (const filePath of publicReadPaths) {
   );
 }
 
+const originalAdapterProfile = process.env.MCP_TOOL_PROFILE;
+delete process.env.MCP_TOOL_PROFILE;
 const adapterSession = createStdioSession();
 try {
   const adapterList = await adapterCall(adapterSession, {
@@ -449,4 +510,29 @@ try {
   adapterSession.close();
 }
 
-console.log("MCP tool profile tests passed.");
+process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
+const developerAdapterSession = createStdioSession();
+try {
+  const adapterList = await adapterCall(developerAdapterSession, {
+    jsonrpc: "2.0",
+    id: "developer-adapter-list",
+    method: "tools/list",
+    params: {},
+  });
+  assert.deepEqual(
+    adapterList.result.tools.map((tool) => tool.name).sort(),
+    [...publicToolNames, "dev_apply_patch"].sort(),
+    "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
+  );
+} finally {
+  developerAdapterSession.close();
+  if (originalAdapterProfile === undefined) {
+    delete process.env.MCP_TOOL_PROFILE;
+  } else {
+    process.env.MCP_TOOL_PROFILE = originalAdapterProfile;
+  }
+}
+
+console.log(
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 1}).`,
+);

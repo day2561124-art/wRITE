@@ -151,6 +151,10 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       && typeof operation.contentFactory !== "function") {
       throw new Error(`${name} contentFactory must be a function.`);
     }
+    if (operation.beforeRead !== undefined
+      && typeof operation.beforeRead !== "function") {
+      throw new Error(`${name} beforeRead must be a function.`);
+    }
     if (operation.afterCommit !== undefined
       && typeof operation.afterCommit !== "function") {
       throw new Error(`${name} afterCommit must be a function.`);
@@ -163,6 +167,13 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
   const committed = [];
   try {
     for (const [index, operation] of normalizedOperations.entries()) {
+      if (operation.beforeRead) {
+        await operation.beforeRead({
+          transactionId,
+          operationIndex: index,
+          filePath: operation.filePath,
+        });
+      }
       const previous = await readOptionalBuffer(operation.filePath);
       const nextContent = operation.contentFactory
         ? undefined
@@ -185,6 +196,8 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
           transactionId,
           operationIndex: index,
           committedPaths: committed.map((entry) => entry.filePath),
+          previousExists: item.previous.exists,
+          previousContent: Buffer.from(item.previous.content),
         });
         item.nextContent = operationContent(item, item.previous, suppliedContent);
         if (item.nextContent !== null) {
