@@ -378,6 +378,7 @@ export async function dev_search_files(input = {}) {
 
 export const DEV_GIT_DIFF_MODES = Object.freeze(["working", "staged"]);
 export const DEV_GIT_OUTPUT_MAX_CHARACTERS = 128 * 1024;
+export const DEV_GIT_WHITESPACE_POLICY = "blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol";
 
 const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
 const fixedGitPrefixArgv = Object.freeze([
@@ -404,6 +405,7 @@ function fixedGitEnvironment() {
 function diffArgv(mode, check = false) {
   const argv = [
     ...fixedGitPrefixArgv,
+    ...(check ? ["-c", `core.whitespace=${DEV_GIT_WHITESPACE_POLICY}`] : []),
     "diff",
     "--no-ext-diff",
     "--no-textconv",

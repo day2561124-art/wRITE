@@ -72,6 +72,7 @@ const blockedToolNames = [
   "dev_git_diff_check",
   "dev_apply_patch",
   "dev_run_tests",
+  "dev_git_commit",
   "activate_engine_version",
   "compress_error_rules",
   "import_policy_file",
@@ -223,8 +224,8 @@ const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_apply_patch", "dev_run_tests"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the five development write/test/Git tools",
+  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit"].sort(),
+  "chatgpt_developer must equal chatgpt_public plus the six development write/test/Git tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -427,6 +428,51 @@ assert.equal(developerTestPermission?.can_modify_memory, false);
 assert.deepEqual(
   developerTestPermission?.allowed_sources,
   ["repository_test_entrypoints", "server_owned_test_allowlist"],
+);
+
+const developerCommitTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_git_commit",
+);
+assert(developerCommitTool, "chatgpt_developer is missing dev_git_commit");
+assert.equal(developerCommitTool.annotations?.readOnlyHint, false);
+const developerCommitSchema = developerCommitTool.inputSchema;
+assert.equal(developerCommitSchema?.type, "object");
+assert.equal(developerCommitSchema?.additionalProperties, false);
+assert.deepEqual(developerCommitSchema?.required, ["paths", "message"]);
+assert.deepEqual(
+  Object.keys(developerCommitSchema?.properties ?? {}).sort(),
+  ["message", "paths"],
+);
+assert.equal(developerCommitSchema.properties.paths.type, "array");
+assert.equal(developerCommitSchema.properties.paths.minItems, 1);
+assert.equal(developerCommitSchema.properties.paths.maxItems, 100);
+assert.equal(developerCommitSchema.properties.paths.items.type, "string");
+assert.equal(developerCommitSchema.properties.paths.items.maxLength, 4096);
+assert.equal(developerCommitSchema.properties.message.type, "string");
+assert.equal(developerCommitSchema.properties.message.minLength, 1);
+assert.equal(developerCommitSchema.properties.message.maxLength, 500);
+for (const forbiddenField of [
+  "command", "args", "cwd", "env", "shell", "executable", "author", "date",
+  "gpgSign", "noVerify", "amend", "all", "interactive", "pathspec",
+]) {
+  assert.equal(
+    Object.hasOwn(developerCommitSchema.properties, forbiddenField),
+    false,
+    `dev_git_commit exposed forbidden field ${forbiddenField}`,
+  );
+}
+const developerCommitPermission = developerCommitTool._meta?.["armed-academy/permission"];
+assert.equal(developerCommitPermission?.permission_level, "write_low_risk");
+assert.equal(developerCommitPermission?.read_or_write, "write");
+assert.equal(developerCommitPermission?.risk_level, "low-risk-write");
+assert.equal(developerCommitPermission?.log_required, true);
+assert.equal(developerCommitPermission?.can_modify_canon, false);
+assert.equal(developerCommitPermission?.can_modify_active_engine, false);
+assert.equal(developerCommitPermission?.can_modify_story_graph, false);
+assert.equal(developerCommitPermission?.can_modify_memory, false);
+assert.deepEqual(
+  developerCommitPermission?.allowed_sources,
+  ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
 publicToolNames.splice(-3, 3);
@@ -696,7 +742,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...publicToolNames, "dev_apply_patch", "dev_run_tests"].sort(),
+    [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit"].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
@@ -710,5 +756,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 5}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 6}).`,
 );

@@ -139,12 +139,16 @@ import {
 } from "./mcp-development-readonly-tools.mjs";
 import {
   DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
+  DEV_GIT_COMMIT_MAX_PATHS,
+  DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
   dev_apply_patch,
+  dev_git_commit,
 } from "./mcp-development-write-tools.mjs";
 import {
   DEV_TEST_SUITES,
   dev_run_tests,
 } from "./mcp-development-test-tools.mjs";
+import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
   get_active_engine_dependency_status,
@@ -694,7 +698,9 @@ function summarizeInputValue(value, key = "") {
       type: "string",
       length: value.length,
       sha256: hashText(value),
-      ...(omitPreview ? { sensitive_payload_preview_omitted: true } : { preview: truncateText(value) }),
+      ...(omitPreview
+        ? { sensitive_payload_preview_omitted: true }
+        : { preview: truncateText(key === "message" ? redactProcessOutput(value) : value) }),
     };
   }
 
@@ -759,6 +765,43 @@ function auditOutputSummary(result, toolName = "") {
   const text = Array.isArray(result?.content)
     ? result.content.map((item) => item?.text ?? "").join("\n")
     : "";
+  if (toolName === "dev_git_commit") {
+    try {
+      const payload = JSON.parse(text);
+      return {
+        is_error: result?.isError === true,
+        execution_ok: payload.execution_ok === true,
+        committed: payload.committed === true,
+        commit: typeof payload.commit === "string" ? redactProcessOutput(payload.commit) : null,
+        stage_completed: payload.stage_completed === true,
+        requested_paths: Array.isArray(payload.paths)
+          ? payload.paths.slice(0, DEV_GIT_COMMIT_MAX_PATHS).map((item) => redactProcessOutput(item))
+          : [],
+        staged_paths: Array.isArray(payload.staged_paths)
+          ? payload.staged_paths.slice(0, DEV_GIT_COMMIT_MAX_PATHS).map((item) => redactProcessOutput(item))
+          : [],
+        files_changed: Number.isInteger(payload.files_changed) ? payload.files_changed : null,
+        insertions: Number.isInteger(payload.insertions) ? payload.insertions : null,
+        deletions: Number.isInteger(payload.deletions) ? payload.deletions : null,
+        branch: typeof payload.branch === "string" ? redactProcessOutput(payload.branch) : null,
+        working_tree_clean: payload.working_tree_clean === true,
+        reason: typeof payload.reason === "string"
+          ? truncateText(redactProcessOutput(payload.reason), 400)
+          : "",
+        exit_code: Number.isInteger(payload.exit_code) ? payload.exit_code : null,
+        timed_out: payload.timed_out === true,
+        duration_ms: Number.isInteger(payload.duration_ms) ? payload.duration_ms : null,
+        stderr_truncated: payload.stderr_truncated === true,
+      };
+    } catch {
+      return {
+        is_error: result?.isError === true,
+        execution_ok: false,
+        committed: false,
+        summary_error: "Could not parse bounded dev_git_commit result metadata.",
+      };
+    }
+  }
   if (toolName === "dev_run_tests") {
     try {
       const payload = JSON.parse(text);
@@ -1507,6 +1550,26 @@ const toolDefinitions = [
       },
     }, ["path", "oldText", "newText"]),
     handler: async (args) => jsonContent(await dev_apply_patch(args)),
+  },
+  {
+    name: "dev_git_commit",
+    description: "Controlled stage-and-commit for explicitly requested approved development paths only. Uses fixed Git argv, literal pathspecs, staged-set isolation, staged diff --check, disabled hooks, controlled environment, and never resets or unstages on failure.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      paths: {
+        type: "array",
+        minItems: 1,
+        maxItems: DEV_GIT_COMMIT_MAX_PATHS,
+        items: { type: "string", maxLength: 4096 },
+      },
+      message: {
+        type: "string",
+        minLength: 1,
+        maxLength: DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
+      },
+    }, ["paths", "message"]),
+    handler: async (args) => jsonContent(await dev_git_commit(args)),
   },
   {
     name: "dev_run_tests",
@@ -3389,6 +3452,7 @@ const chatgptDeveloperToolNames = new Set([
   "dev_git_diff_check",
   "dev_apply_patch",
   "dev_run_tests",
+  "dev_git_commit",
 ]);
 
 const toolProfiles = new Map([
@@ -3414,6 +3478,7 @@ const permissionSources = {
   dev_search_files: ["repository_text_files"],
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
   dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],
+  dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
   dev_git_status: ["repository_git_worktree_status"],
   dev_git_diff: ["repository_git_worktree_diff", "repository_git_index_diff"],
   dev_git_diff_check: ["repository_git_worktree_diff_check", "repository_git_index_diff_check"],
