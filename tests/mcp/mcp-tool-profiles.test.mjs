@@ -73,6 +73,7 @@ const blockedToolNames = [
   "dev_apply_patch",
   "dev_run_tests",
   "dev_git_commit",
+  "dev_git_push",
   "activate_engine_version",
   "compress_error_rules",
   "import_policy_file",
@@ -224,8 +225,8 @@ const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the six development write/test/Git tools",
+  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
+  "chatgpt_developer must equal chatgpt_public plus the seven development write/test/Git tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -476,6 +477,51 @@ assert.deepEqual(
 );
 
 publicToolNames.splice(-3, 3);
+
+const developerPushTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_git_push",
+);
+assert(developerPushTool, "chatgpt_developer is missing dev_git_push");
+assert.equal(developerPushTool.annotations?.readOnlyHint, false);
+const developerPushSchema = developerPushTool.inputSchema;
+assert.equal(developerPushSchema?.type, "object");
+assert.equal(developerPushSchema?.additionalProperties, false);
+assert.deepEqual(developerPushSchema?.required, ["expectedHead"]);
+assert.deepEqual(Object.keys(developerPushSchema?.properties ?? {}), ["expectedHead"]);
+assert.equal(developerPushSchema.properties.expectedHead.type, "string");
+assert.equal(developerPushSchema.properties.expectedHead.minLength, 40);
+assert.equal(developerPushSchema.properties.expectedHead.maxLength, 40);
+assert.equal(developerPushSchema.properties.expectedHead.pattern, "^[A-Fa-f0-9]{40}$");
+for (const forbiddenField of [
+  "remote", "branch", "refspec", "url", "force", "forceWithLease", "tags", "delete",
+  "setUpstream", "mirror", "atomic", "args", "command", "cwd", "env", "shell",
+  "executable", "username", "password", "token", "credential", "confirm",
+]) {
+  assert.equal(
+    Object.hasOwn(developerPushSchema.properties, forbiddenField),
+    false,
+    `dev_git_push exposed forbidden field ${forbiddenField}`,
+  );
+}
+const developerPushPermission = developerPushTool._meta?.["armed-academy/permission"];
+assert.equal(developerPushPermission?.permission_level, "write_high_risk");
+assert.equal(developerPushPermission?.read_or_write, "write");
+assert.equal(developerPushPermission?.risk_level, "high-risk-write");
+assert.equal(developerPushPermission?.requires_user_confirmation, true);
+assert.equal(developerPushPermission?.log_required, true);
+assert.equal(developerPushPermission?.can_modify_canon, false);
+assert.equal(developerPushPermission?.can_modify_active_engine, false);
+assert.equal(developerPushPermission?.can_modify_story_graph, false);
+assert.equal(developerPushPermission?.can_modify_memory, false);
+assert.deepEqual(
+  developerPushPermission?.allowed_sources,
+  ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],
+);
+assert.equal(listedPublicNames.includes("dev_git_push"), false);
+assert.equal(publicToolMap.has("dev_git_push"), false);
+assert.equal(publicToolNames.length, 40);
+assert.equal(developerNames.length, 47);
+assert.equal(fullNames.length, 105);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -742,7 +788,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit"].sort(),
+    [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
@@ -756,5 +802,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 6}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 7}).`,
 );

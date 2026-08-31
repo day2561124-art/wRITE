@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createDevTestRunner,
   getDevTestSuiteMapping,
@@ -16,7 +16,9 @@ import {
 } from "../../server/src/mcp-development-readonly-tools.mjs";
 import {
   createDevGitCommitTool,
+  createDevGitPushTool,
   getDevGitCommitCommandMapping,
+  getDevGitPushCommandMapping,
 } from "../../server/src/mcp-development-write-tools.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -136,6 +138,89 @@ async function createCommitFixture(parent, name) {
   ]);
   runFixtureGit(repositoryRoot, ["commit", "-m", "test: base fixture"]);
   return repositoryRoot;
+}
+
+async function createPushFixture(parent, name) {
+  const repositoryRoot = await createCommitFixture(parent, `${name}-repo`);
+  const gitDir = path.join(repositoryRoot, ".git");
+  const baseHead = fixtureHead(repositoryRoot);
+  await mkdir(path.join(gitDir, "refs", "heads"), { recursive: true });
+  await writeFile(path.join(gitDir, "refs", "heads", "main"), `${baseHead}\n`, "utf8");
+  await writeFile(path.join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf8");
+
+  const bareRoot = path.join(parent, `${name}-remote.git`);
+  await mkdir(bareRoot, { recursive: true });
+  runFixtureGit(bareRoot, ["init", "--bare"]);
+  await cp(path.join(gitDir, "objects"), path.join(bareRoot, "objects"), {
+    recursive: true,
+    force: true,
+  });
+  await mkdir(path.join(bareRoot, "refs", "heads"), { recursive: true });
+  await writeFile(path.join(bareRoot, "refs", "heads", "main"), `${baseHead}\n`, "utf8");
+  await writeFile(path.join(bareRoot, "HEAD"), "ref: refs/heads/main\n", "utf8");
+
+  const remoteUrl = pathToFileURL(bareRoot).href;
+  runFixtureGit(repositoryRoot, ["config", "remote.origin.url", remoteUrl]);
+  runFixtureGit(repositoryRoot, ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+  runFixtureGit(repositoryRoot, ["config", "branch.main.remote", "origin"]);
+  runFixtureGit(repositoryRoot, ["config", "branch.main.merge", "refs/heads/main"]);
+  await mkdir(path.join(gitDir, "refs", "remotes", "origin"), { recursive: true });
+  await writeFile(
+    path.join(gitDir, "refs", "remotes", "origin", "main"),
+    `${baseHead}\n`,
+    "utf8",
+  );
+
+  await writeFile(
+    path.join(repositoryRoot, "server", "src", "requested.mjs"),
+    "export const requested = 42;\n",
+    "utf8",
+  );
+  runFixtureGit(repositoryRoot, ["add", "--", "server/src/requested.mjs"]);
+  runFixtureGit(repositoryRoot, ["commit", "-m", "test: local push fixture ahead"]);
+  return {
+    repositoryRoot,
+    bareRoot,
+    remoteUrl,
+    baseHead,
+    head: fixtureHead(repositoryRoot),
+  };
+}
+
+function pushTestPolicy(remoteUrl) {
+  return {
+    remote: "origin",
+    branch: "main",
+    upstream: "origin/main",
+    canonicalUrl: remoteUrl,
+    allowedProtocols: ["file"],
+    allowedCredentialHelpers: ["manager", "manager-core", "wincred"],
+  };
+}
+
+function fixtureBareHead(bareRoot) {
+  return runFixtureGit(bareRoot, ["rev-parse", "refs/heads/main"]).stdout.trim();
+}
+
+async function advanceBareRemoteFromLocal(fixture, message = "test: remote advance") {
+  const { repositoryRoot, bareRoot, head } = fixture;
+  const gitDir = path.join(repositoryRoot, ".git");
+  const indexPath = path.join(gitDir, "index");
+  const indexBefore = await readFile(indexPath);
+  const unrelatedPath = path.join(repositoryRoot, "server", "src", "unrelated.mjs");
+  await writeFile(unrelatedPath, "export const unrelated = 99;\n", "utf8");
+  runFixtureGit(repositoryRoot, ["add", "--", "server/src/unrelated.mjs"]);
+  runFixtureGit(repositoryRoot, ["commit", "-m", message]);
+  const remoteHead = fixtureHead(repositoryRoot);
+  await cp(path.join(gitDir, "objects"), path.join(bareRoot, "objects"), {
+    recursive: true,
+    force: true,
+  });
+  await writeFile(path.join(bareRoot, "refs", "heads", "main"), `${remoteHead}\n`, "utf8");
+  await writeFile(path.join(gitDir, "refs", "heads", "main"), `${head}\n`, "utf8");
+  await writeFile(indexPath, indexBefore);
+  await writeFile(unrelatedPath, "export const unrelated = 1;\n", "utf8");
+  return remoteHead;
 }
 
 function fixtureHead(repositoryRoot) {
@@ -325,6 +410,40 @@ try {
       commitArgvTokens.includes(forbiddenToken),
       false,
       `commit mapping exposed forbidden argv token ${forbiddenToken}`,
+    );
+  }
+
+  const pushMapping = getDevGitPushCommandMapping();
+  assert.equal(pushMapping.executable, process.platform === "win32" ? "git.exe" : "git");
+  assert.equal(pushMapping.cwd, ".");
+  assert.equal(pushMapping.shell, false);
+  assert.equal(pushMapping.timeout_ms, 120_000);
+  assert.equal(pushMapping.remote, "origin");
+  assert.equal(pushMapping.branch, "main");
+  assert.equal(pushMapping.upstream, "origin/main");
+  assert.equal(pushMapping.canonical_url, "https://github.com/day2561124-art/wRITE.git");
+  assert.deepEqual(pushMapping.allowed_protocols, ["https"]);
+  assert(pushMapping.push.includes("protocol.allow=never"));
+  assert(pushMapping.push.includes("protocol.https.allow=always"));
+  assert(pushMapping.push.includes("protocol.ext.allow=never"));
+  assert(pushMapping.push.includes("protocol.file.allow=never"));
+  assert(pushMapping.push.includes("protocol.git.allow=never"));
+  assert(pushMapping.push.includes("protocol.ssh.allow=never"));
+  assert(pushMapping.push.includes("--no-verify"));
+  assert.equal(
+    pushMapping.push.at(-2),
+    "https://github.com/day2561124-art/wRITE.git",
+  );
+  assert.equal(pushMapping.push.at(-1), "HEAD:refs/heads/main");
+  for (const forbiddenToken of [
+    "--force", "--force-with-lease", "--mirror", "--delete", "--tags", "--follow-tags",
+    "--set-upstream", "--prune", "fetch", "pull", "reset", "restore", "checkout",
+    "rebase", "merge",
+  ]) {
+    assert.equal(
+      pushMapping.push.includes(forbiddenToken),
+      false,
+      `push mapping exposed forbidden argv token ${forbiddenToken}`,
     );
   }
 
@@ -805,6 +924,389 @@ try {
     /server\/src\/requested\.mjs/u,
   );
 
+  const pushSuccessFixture = await createPushFixture(tempRoot, "push-success");
+  const pushSuccessTool = createDevGitPushTool({
+    repositoryRoot: pushSuccessFixture.repositoryRoot,
+    policy: pushTestPolicy(pushSuccessFixture.remoteUrl),
+  });
+  const pushSuccessLocalBefore = fixtureHead(pushSuccessFixture.repositoryRoot);
+  const pushSuccessRemoteBefore = fixtureBareHead(pushSuccessFixture.bareRoot);
+  assert.equal(pushSuccessRemoteBefore, pushSuccessFixture.baseHead);
+  const pushSuccess = await pushSuccessTool({ expectedHead: pushSuccessFixture.head });
+  assert.equal(pushSuccess.execution_ok, true);
+  assert.equal(pushSuccess.pushed, true, JSON.stringify(pushSuccess));
+  assert.equal(pushSuccess.remote, "origin");
+  assert.equal(pushSuccess.branch, "main");
+  assert.equal(pushSuccess.head, pushSuccessFixture.head);
+  assert.equal(pushSuccess.upstream, "origin/main");
+  assert.equal(pushSuccess.ahead_before, 1);
+  assert.equal(pushSuccess.behind_before, 0);
+  assert.equal(pushSuccess.exit_code, 0);
+  assert.equal(pushSuccess.timed_out, false);
+  assert.equal(fixtureBareHead(pushSuccessFixture.bareRoot), pushSuccessFixture.head);
+  assert.equal(fixtureHead(pushSuccessFixture.repositoryRoot), pushSuccessLocalBefore);
+
+  const stalePushFixture = await createPushFixture(tempRoot, "push-stale-head");
+  const stalePushTool = createDevGitPushTool({
+    repositoryRoot: stalePushFixture.repositoryRoot,
+    policy: pushTestPolicy(stalePushFixture.remoteUrl),
+  });
+  const staleRemoteBefore = fixtureBareHead(stalePushFixture.bareRoot);
+  const stalePush = await stalePushTool({ expectedHead: stalePushFixture.baseHead });
+  assert.equal(stalePush.execution_ok, true);
+  assert.equal(stalePush.pushed, false);
+  assert.equal(stalePush.reason, "STALE_HEAD");
+  assert.equal(fixtureBareHead(stalePushFixture.bareRoot), staleRemoteBefore);
+
+  const modifiedPushFixture = await createPushFixture(tempRoot, "push-working-modified");
+  const modifiedPushTool = createDevGitPushTool({
+    repositoryRoot: modifiedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(modifiedPushFixture.remoteUrl),
+  });
+  await writeFile(
+    path.join(modifiedPushFixture.repositoryRoot, "server", "src", "requested.mjs"),
+    "export const requested = 43;\n",
+    "utf8",
+  );
+  const modifiedPush = await modifiedPushTool({ expectedHead: modifiedPushFixture.head });
+  assert.equal(modifiedPush.pushed, false);
+  assert.equal(modifiedPush.reason, "WORKTREE_DIRTY");
+
+  const stagedPushFixture = await createPushFixture(tempRoot, "push-staged");
+  const stagedPushTool = createDevGitPushTool({
+    repositoryRoot: stagedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(stagedPushFixture.remoteUrl),
+  });
+  await writeFile(
+    path.join(stagedPushFixture.repositoryRoot, "server", "src", "requested.mjs"),
+    "export const requested = 44;\n",
+    "utf8",
+  );
+  runFixtureGit(stagedPushFixture.repositoryRoot, ["add", "--", "server/src/requested.mjs"]);
+  const stagedPush = await stagedPushTool({ expectedHead: stagedPushFixture.head });
+  assert.equal(stagedPush.pushed, false);
+  assert.equal(stagedPush.reason, "STAGED_CHANGES");
+
+  const untrackedPushFixture = await createPushFixture(tempRoot, "push-untracked");
+  const untrackedPushTool = createDevGitPushTool({
+    repositoryRoot: untrackedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(untrackedPushFixture.remoteUrl),
+  });
+  await writeFile(path.join(untrackedPushFixture.repositoryRoot, "untracked.txt"), "nope\n", "utf8");
+  const untrackedPush = await untrackedPushTool({ expectedHead: untrackedPushFixture.head });
+  assert.equal(untrackedPush.pushed, false);
+  assert.equal(untrackedPush.reason, "UNTRACKED_FILES");
+
+  const detachedPushFixture = await createPushFixture(tempRoot, "push-detached");
+  const detachedPushTool = createDevGitPushTool({
+    repositoryRoot: detachedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(detachedPushFixture.remoteUrl),
+  });
+  await writeFile(
+    path.join(detachedPushFixture.repositoryRoot, ".git", "HEAD"),
+    `${detachedPushFixture.head}\n`,
+    "utf8",
+  );
+  const detachedPush = await detachedPushTool({ expectedHead: detachedPushFixture.head });
+  assert.equal(detachedPush.pushed, false);
+  assert.equal(detachedPush.reason, "DETACHED_HEAD");
+
+  const wrongBranchFixture = await createPushFixture(tempRoot, "push-wrong-branch");
+  const wrongBranchTool = createDevGitPushTool({
+    repositoryRoot: wrongBranchFixture.repositoryRoot,
+    policy: pushTestPolicy(wrongBranchFixture.remoteUrl),
+  });
+  await writeFile(
+    path.join(wrongBranchFixture.repositoryRoot, ".git", "refs", "heads", "feature"),
+    `${wrongBranchFixture.head}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(wrongBranchFixture.repositoryRoot, ".git", "HEAD"),
+    "ref: refs/heads/feature\n",
+    "utf8",
+  );
+  const wrongBranch = await wrongBranchTool({ expectedHead: wrongBranchFixture.head });
+  assert.equal(wrongBranch.pushed, false);
+  assert.equal(wrongBranch.reason, "WRONG_BRANCH");
+
+  const wrongUpstreamFixture = await createPushFixture(tempRoot, "push-wrong-upstream");
+  const wrongUpstreamTool = createDevGitPushTool({
+    repositoryRoot: wrongUpstreamFixture.repositoryRoot,
+    policy: pushTestPolicy(wrongUpstreamFixture.remoteUrl),
+  });
+  await mkdir(
+    path.join(wrongUpstreamFixture.repositoryRoot, ".git", "refs", "remotes", "wrong"),
+    { recursive: true },
+  );
+  await writeFile(
+    path.join(wrongUpstreamFixture.repositoryRoot, ".git", "refs", "remotes", "wrong", "main"),
+    `${wrongUpstreamFixture.baseHead}\n`,
+    "utf8",
+  );
+  runFixtureGit(wrongUpstreamFixture.repositoryRoot, ["config", "remote.wrong.url", wrongUpstreamFixture.remoteUrl]);
+  runFixtureGit(wrongUpstreamFixture.repositoryRoot, ["config", "remote.wrong.fetch", "+refs/heads/*:refs/remotes/wrong/*"]);
+  runFixtureGit(wrongUpstreamFixture.repositoryRoot, ["config", "branch.main.remote", "wrong"]);
+  const wrongUpstream = await wrongUpstreamTool({ expectedHead: wrongUpstreamFixture.head });
+  assert.equal(wrongUpstream.pushed, false);
+  assert.equal(wrongUpstream.reason, "WRONG_UPSTREAM");
+
+  const remoteMismatchFixture = await createPushFixture(tempRoot, "push-remote-mismatch");
+  const remoteMismatchTool = createDevGitPushTool({
+    repositoryRoot: remoteMismatchFixture.repositoryRoot,
+    policy: pushTestPolicy(remoteMismatchFixture.remoteUrl),
+  });
+  runFixtureGit(remoteMismatchFixture.repositoryRoot, [
+    "config", "remote.origin.url", pathToFileURL(path.join(tempRoot, "not-the-remote.git")).href,
+  ]);
+  const remoteMismatch = await remoteMismatchTool({ expectedHead: remoteMismatchFixture.head });
+  assert.equal(remoteMismatch.pushed, false);
+  assert.equal(remoteMismatch.reason, "REMOTE_URL_MISMATCH");
+
+  const pushurlFixture = await createPushFixture(tempRoot, "push-pushurl");
+  const pushurlTool = createDevGitPushTool({
+    repositoryRoot: pushurlFixture.repositoryRoot,
+    policy: pushTestPolicy(pushurlFixture.remoteUrl),
+  });
+  runFixtureGit(pushurlFixture.repositoryRoot, [
+    "config", "remote.origin.pushurl", pathToFileURL(path.join(tempRoot, "evil-pushurl.git")).href,
+  ]);
+  const pushurlReject = await pushurlTool({ expectedHead: pushurlFixture.head });
+  assert.equal(pushurlReject.pushed, false);
+  assert.equal(pushurlReject.reason, "PUSHURL_CONFIGURED");
+
+  const receivepackFixture = await createPushFixture(tempRoot, "push-receivepack");
+  const receivepackTool = createDevGitPushTool({
+    repositoryRoot: receivepackFixture.repositoryRoot,
+    policy: pushTestPolicy(receivepackFixture.remoteUrl),
+  });
+  runFixtureGit(receivepackFixture.repositoryRoot, ["config", "remote.origin.receivepack", "evil-receive-pack"]);
+  const receivepackReject = await receivepackTool({ expectedHead: receivepackFixture.head });
+  assert.equal(receivepackReject.pushed, false);
+  assert.equal(receivepackReject.reason, "RECEIVEPACK_CONFIGURED");
+
+  for (const rewriteKey of ["insteadOf", "pushInsteadOf"]) {
+    const rewriteFixture = await createPushFixture(tempRoot, `push-url-rewrite-${rewriteKey.toLowerCase()}`);
+    const rewriteTool = createDevGitPushTool({
+      repositoryRoot: rewriteFixture.repositoryRoot,
+      policy: pushTestPolicy(rewriteFixture.remoteUrl),
+    });
+    runFixtureGit(rewriteFixture.repositoryRoot, [
+      "config",
+      `url.https://rewrite.invalid/.${rewriteKey}`,
+      rewriteFixture.remoteUrl,
+    ]);
+    const rewriteReject = await rewriteTool({ expectedHead: rewriteFixture.head });
+    assert.equal(rewriteReject.pushed, false);
+    assert.equal(rewriteReject.reason, "URL_REWRITE_CONFIGURED");
+  }
+
+  const behindFixture = await createPushFixture(tempRoot, "push-behind");
+  const behindRemoteHead = await advanceBareRemoteFromLocal(behindFixture, "test: make upstream ahead");
+  await writeFile(
+    path.join(behindFixture.repositoryRoot, ".git", "refs", "remotes", "origin", "main"),
+    `${behindRemoteHead}\n`,
+    "utf8",
+  );
+  const behindTool = createDevGitPushTool({
+    repositoryRoot: behindFixture.repositoryRoot,
+    policy: pushTestPolicy(behindFixture.remoteUrl),
+  });
+  const behindReject = await behindTool({ expectedHead: behindFixture.head });
+  assert.equal(behindReject.pushed, false);
+  assert.equal(behindReject.reason, "BEHIND_UPSTREAM");
+  assert.equal(behindReject.behind_before > 0, true);
+
+  const notAheadFixture = await createPushFixture(tempRoot, "push-not-ahead");
+  await writeFile(
+    path.join(notAheadFixture.repositoryRoot, ".git", "refs", "remotes", "origin", "main"),
+    `${notAheadFixture.head}\n`,
+    "utf8",
+  );
+  const notAheadTool = createDevGitPushTool({
+    repositoryRoot: notAheadFixture.repositoryRoot,
+    policy: pushTestPolicy(notAheadFixture.remoteUrl),
+  });
+  const notAheadReject = await notAheadTool({ expectedHead: notAheadFixture.head });
+  assert.equal(notAheadReject.pushed, false);
+  assert.equal(notAheadReject.reason, "NOT_AHEAD");
+  assert.equal(notAheadReject.ahead_before, 0);
+
+  const nffFixture = await createPushFixture(tempRoot, "push-non-fast-forward");
+  const nffLocalHeadBefore = fixtureHead(nffFixture.repositoryRoot);
+  const nffRemoteHead = await advanceBareRemoteFromLocal(nffFixture, "test: hidden remote advance");
+  const nffTool = createDevGitPushTool({
+    repositoryRoot: nffFixture.repositoryRoot,
+    policy: pushTestPolicy(nffFixture.remoteUrl),
+  });
+  const nffReject = await nffTool({ expectedHead: nffFixture.head });
+  assert.equal(nffReject.execution_ok, true);
+  assert.equal(nffReject.pushed, false);
+  assert.equal(nffReject.reason, "GIT_PUSH_REJECTED");
+  assert.notEqual(nffReject.exit_code, 0);
+  assert.equal(fixtureHead(nffFixture.repositoryRoot), nffLocalHeadBefore);
+  assert.equal(fixtureBareHead(nffFixture.bareRoot), nffRemoteHead);
+
+  const hookPushFixture = await createPushFixture(tempRoot, "push-hook-disabled");
+  const hookPushTool = createDevGitPushTool({
+    repositoryRoot: hookPushFixture.repositoryRoot,
+    policy: pushTestPolicy(hookPushFixture.remoteUrl),
+  });
+  const pushHookMarker = path.join(hookPushFixture.repositoryRoot, "push-hook-marker.txt");
+  const pushHookMarkerForShell = pushHookMarker.replaceAll("\\", "/").replaceAll('"', '\\"');
+  const prePushHook = path.join(hookPushFixture.repositoryRoot, ".git", "hooks", "pre-push");
+  await writeFile(
+    prePushHook,
+    `#!/bin/sh\nprintf hook > "${pushHookMarkerForShell}"\nexit 1\n`,
+    "utf8",
+  );
+  await chmod(prePushHook, 0o755);
+  const hookPush = await hookPushTool({ expectedHead: hookPushFixture.head });
+  assert.equal(hookPush.pushed, true);
+  assert.equal(await pathExists(pushHookMarker), false, "malicious pre-push hook executed");
+  assert.equal(fixtureBareHead(hookPushFixture.bareRoot), hookPushFixture.head);
+
+  const filterPushFixture = await createPushFixture(tempRoot, "push-filter-blocked");
+  const pushFilterMarker = path.join(filterPushFixture.repositoryRoot, "push-filter-marker.txt");
+  await writeFile(
+    path.join(filterPushFixture.repositoryRoot, ".gitattributes"),
+    "server/src/requested.mjs filter=evilpush\n",
+    "utf8",
+  );
+  runFixtureGit(filterPushFixture.repositoryRoot, ["add", "--", ".gitattributes"]);
+  runFixtureGit(filterPushFixture.repositoryRoot, ["commit", "-m", "test: tracked malicious filter attributes"]);
+  runFixtureGit(filterPushFixture.repositoryRoot, [
+    "config",
+    "filter.evilpush.clean",
+    `node -e "require('node:fs').writeFileSync('${pushFilterMarker.replaceAll("\\", "/")}', 'ran')"`,
+  ]);
+  const filterPushTool = createDevGitPushTool({
+    repositoryRoot: filterPushFixture.repositoryRoot,
+    policy: pushTestPolicy(filterPushFixture.remoteUrl),
+  });
+  const filterPushReject = await filterPushTool({
+    expectedHead: fixtureHead(filterPushFixture.repositoryRoot),
+  });
+  assert.equal(filterPushReject.pushed, false);
+  assert.equal(filterPushReject.reason, "GIT_FILTER_ACTIVE");
+  assert.equal(await pathExists(pushFilterMarker), false, "malicious push clean filter executed");
+
+  const credentialFixture = await createPushFixture(tempRoot, "push-credential-helper-blocked");
+  const credentialMarker = path.join(credentialFixture.repositoryRoot, "credential-marker.txt");
+  runFixtureGit(credentialFixture.repositoryRoot, [
+    "config",
+    "credential.helper",
+    `!node -e "require('node:fs').writeFileSync('${credentialMarker.replaceAll("\\", "/")}', 'ran')"`,
+  ]);
+  const credentialTool = createDevGitPushTool({
+    repositoryRoot: credentialFixture.repositoryRoot,
+    policy: pushTestPolicy(credentialFixture.remoteUrl),
+  });
+  const credentialReject = await credentialTool({ expectedHead: credentialFixture.head });
+  assert.equal(credentialReject.pushed, false);
+  assert.equal(credentialReject.reason, "UNSAFE_CREDENTIAL_HELPER");
+  assert.equal(await pathExists(credentialMarker), false, "malicious credential helper executed");
+
+  const askpassFixture = await createPushFixture(tempRoot, "push-askpass-blocked");
+  const askpassMarker = path.join(askpassFixture.repositoryRoot, "askpass-marker.txt");
+  const askpassScript = path.join(askpassFixture.repositoryRoot, "askpass-malicious.sh");
+  await writeFile(
+    askpassScript,
+    `#!/bin/sh\nprintf askpass > "${askpassMarker.replaceAll("\\", "/")}"\nexit 1\n`,
+    "utf8",
+  );
+  await chmod(askpassScript, 0o755);
+  runFixtureGit(askpassFixture.repositoryRoot, ["config", "core.askPass", askpassScript]);
+  const askpassTool = createDevGitPushTool({
+    repositoryRoot: askpassFixture.repositoryRoot,
+    policy: pushTestPolicy(askpassFixture.remoteUrl),
+  });
+  const askpassReject = await askpassTool({ expectedHead: askpassFixture.head });
+  assert.equal(askpassReject.pushed, false);
+  assert.equal(askpassReject.reason, "ASKPASS_CONFIGURED");
+  assert.equal(await pathExists(askpassMarker), false, "malicious askpass executed");
+
+  for (const marker of [
+    "MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer",
+  ]) {
+    const operationFixture = await createPushFixture(tempRoot, `push-operation-${marker.toLowerCase()}`);
+    const operationMarker = path.join(operationFixture.repositoryRoot, ".git", marker);
+    await writeFile(operationMarker, "operation\n", "utf8");
+    const operationTool = createDevGitPushTool({
+      repositoryRoot: operationFixture.repositoryRoot,
+      policy: pushTestPolicy(operationFixture.remoteUrl),
+    });
+    const operationReject = await operationTool({ expectedHead: operationFixture.head });
+    assert.equal(operationReject.pushed, false);
+    assert.equal(operationReject.reason, "OPERATION_IN_PROGRESS");
+  }
+
+  const invalidPushFixture = await createPushFixture(tempRoot, "push-invalid-input");
+  const invalidPushTool = createDevGitPushTool({
+    repositoryRoot: invalidPushFixture.repositoryRoot,
+    policy: pushTestPolicy(invalidPushFixture.remoteUrl),
+  });
+  for (const invalidInput of [
+    { expectedHead: "not-a-sha" },
+    { expectedHead: invalidPushFixture.head, remote: "evil" },
+    { expectedHead: invalidPushFixture.head, args: ["--force"] },
+    { expectedHead: invalidPushFixture.head, force: true },
+  ]) {
+    const invalidPush = await invalidPushTool(invalidInput);
+    assert.equal(invalidPush.execution_ok, false);
+    assert.equal(invalidPush.pushed, false);
+    assert.equal(invalidPush.reason, "INVALID_INPUT");
+  }
+
+  const timeoutPushFixture = await createPushFixture(tempRoot, "push-timeout-cleanup");
+  const timeoutPushPort = await freePort();
+  const timeoutNetworkScript = path.join(tempRoot, "push-timeout-network.mjs");
+  const timeoutDescendant = `require("node:net").createServer(() => {}).listen(${timeoutPushPort}, "127.0.0.1"); setInterval(() => {}, 1000);`;
+  await writeFile(
+    timeoutNetworkScript,
+    `import { spawn } from "node:child_process";\nspawn(process.execPath, ["-e", ${JSON.stringify(timeoutDescendant)}], { stdio: "ignore", windowsHide: true });\nsetInterval(() => {}, 1000);\n`,
+    "utf8",
+  );
+  const timeoutPushTool = createDevGitPushTool({
+    repositoryRoot: timeoutPushFixture.repositoryRoot,
+    policy: pushTestPolicy(timeoutPushFixture.remoteUrl),
+    timeoutMs: 1_500,
+    networkExecutable: process.execPath,
+    networkExecutablePrefix: [timeoutNetworkScript],
+  });
+  const timeoutPush = await timeoutPushTool({ expectedHead: timeoutPushFixture.head });
+  assert.equal(timeoutPush.execution_ok, false);
+  assert.equal(timeoutPush.pushed, false);
+  assert.equal(timeoutPush.reason, "PUSH_TIMEOUT");
+  assert.equal(timeoutPush.timed_out, true);
+  assert.equal(await isPortAvailable(timeoutPushPort), true, "push timeout left descendant process alive");
+
+  const outputPushFixture = await createPushFixture(tempRoot, "push-output-redaction");
+  const outputNetworkScript = path.join(tempRoot, "push-output-network.mjs");
+  await writeFile(
+    outputNetworkScript,
+    `process.stdout.write("\\u001b[31mhead\\u001b[0m\\nBearer abcdefghijklmnop\\nsk-proj-1234567890abcdef\\n" + "x".repeat(12000) + "\\nUSEFUL_PUSH_TAIL\\n");\nprocess.stderr.write("password=hunter2\\nUSEFUL_PUSH_STDERR_TAIL\\n");\nprocess.exit(1);\n`,
+    "utf8",
+  );
+  const outputPushTool = createDevGitPushTool({
+    repositoryRoot: outputPushFixture.repositoryRoot,
+    policy: pushTestPolicy(outputPushFixture.remoteUrl),
+    outputMaxCharacters: 2_048,
+    networkExecutable: process.execPath,
+    networkExecutablePrefix: [outputNetworkScript],
+  });
+  const outputPush = await outputPushTool({ expectedHead: outputPushFixture.head });
+  assert.equal(outputPush.execution_ok, true);
+  assert.equal(outputPush.pushed, false);
+  assert.equal(outputPush.reason, "GIT_PUSH_REJECTED");
+  assert.equal(outputPush.stdout_truncated, true);
+  assert(outputPush.output.includes("USEFUL_PUSH_TAIL"));
+  assert(outputPush.stderr.includes("USEFUL_PUSH_STDERR_TAIL"));
+  assert(!outputPush.output.includes("abcdefghijklmnop"));
+  assert(!outputPush.output.includes("sk-proj-1234567890abcdef"));
+  assert(!outputPush.output.includes("\u001b[31m"));
+  assert(!outputPush.stderr.includes("hunter2"));
+
   try {
     auditBefore = await readFile(auditLogPath);
     auditExisted = true;
@@ -850,6 +1352,7 @@ try {
     { name: "dev_git_status", arguments: { command: "status" }, expected: "Unknown argument for dev_git_status: command." },
     { name: "dev_git_diff", arguments: { mode: "working", args: ["--name-only"] }, expected: "Unknown argument for dev_git_diff: args." },
     { name: "dev_git_diff_check", arguments: { mode: "working; whoami" }, expected: "mode must be one of: working, staged." },
+    { name: "dev_git_push", arguments: { expectedHead: "0000000000000000000000000000000000000000", remote: "evil" }, expected: "Unknown argument for dev_git_push: remote." },
   ]) {
     const response = await runMcp({
       jsonrpc: "2.0",
@@ -885,6 +1388,23 @@ try {
   assert.equal(commitAuditPayload.execution_ok, false);
   assert.match(commitAuditPayload.reason, /path traversal/u);
 
+  const pushAuditResponse = await runMcp({
+    jsonrpc: "2.0",
+    id: "dev-git-push-audit-bounded",
+    method: "tools/call",
+    params: {
+      name: "dev_git_push",
+      arguments: { expectedHead: "0000000000000000000000000000000000000000" },
+      _meta: { actor: "dev-git-push-audit-fixture" },
+    },
+  });
+  assert.equal(pushAuditResponse.error, undefined);
+  assert.equal(pushAuditResponse.result?.isError, undefined);
+  const pushAuditPayload = JSON.parse(pushAuditResponse.result.content[0].text);
+  assert.equal(pushAuditPayload.execution_ok, true);
+  assert.equal(pushAuditPayload.pushed, false);
+  assert.equal(pushAuditPayload.reason, "STALE_HEAD");
+
   const auditLines = (await readFile(auditLogPath, "utf8"))
     .split(/\r?\n/u)
     .filter(Boolean)
@@ -918,6 +1438,24 @@ try {
   assert.equal(commitAuditRecord.result?.committed, false);
   assert.equal(Object.hasOwn(commitAuditRecord.result ?? {}, "stdout"), false);
   assert.equal(Object.hasOwn(commitAuditRecord.result ?? {}, "stderr"), false);
+
+  const pushAuditRecords = auditLines.filter(
+    (record) => record.actor === "dev-git-push-audit-fixture",
+  );
+  assert.equal(pushAuditRecords.length, 1);
+  const [pushAuditRecord] = pushAuditRecords;
+  assert.equal(pushAuditRecord.tool_name, "dev_git_push");
+  assert.equal(pushAuditRecord.risk, "high-risk-write");
+  assert.equal(pushAuditRecord.status, "completed");
+  assert.deepEqual(pushAuditRecord.affected_paths, []);
+  assert.equal(pushAuditRecord.input_summary?.expectedHead?.type, "string");
+  assert.equal(pushAuditRecord.input_summary?.expectedHead?.length, 40);
+  assert.equal(pushAuditRecord.result?.execution_ok, true);
+  assert.equal(pushAuditRecord.result?.pushed, false);
+  assert.equal(pushAuditRecord.result?.reason, "STALE_HEAD");
+  assert.equal(Object.hasOwn(pushAuditRecord.result ?? {}, "stdout"), false);
+  assert.equal(Object.hasOwn(pushAuditRecord.result ?? {}, "stderr"), false);
+  assert.equal(Object.hasOwn(pushAuditRecord.result ?? {}, "output"), false);
 
   console.log("MCP development Git commit security tests passed.");
   console.log("- isolated success, multiple paths, untracked, and unrelated unstaged fixtures: passed");

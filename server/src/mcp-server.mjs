@@ -143,6 +143,7 @@ import {
   DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
   dev_apply_patch,
   dev_git_commit,
+  dev_git_push,
 } from "./mcp-development-write-tools.mjs";
 import {
   DEV_TEST_SUITES,
@@ -765,6 +766,38 @@ function auditOutputSummary(result, toolName = "") {
   const text = Array.isArray(result?.content)
     ? result.content.map((item) => item?.text ?? "").join("\n")
     : "";
+  if (toolName === "dev_git_push") {
+    try {
+      const payload = JSON.parse(text);
+      return {
+        is_error: result?.isError === true,
+        execution_ok: payload.execution_ok === true,
+        pushed: payload.pushed === true,
+        remote: typeof payload.remote === "string" ? redactProcessOutput(payload.remote) : null,
+        branch: typeof payload.branch === "string" ? redactProcessOutput(payload.branch) : null,
+        expected_head: typeof payload.expected_head === "string" ? redactProcessOutput(payload.expected_head) : null,
+        actual_head: typeof payload.head === "string" ? redactProcessOutput(payload.head) : null,
+        upstream: typeof payload.upstream === "string" ? redactProcessOutput(payload.upstream) : null,
+        ahead_before: Number.isInteger(payload.ahead_before) ? payload.ahead_before : null,
+        behind_before: Number.isInteger(payload.behind_before) ? payload.behind_before : null,
+        reason: typeof payload.reason === "string"
+          ? truncateText(redactProcessOutput(payload.reason), 160)
+          : "",
+        exit_code: Number.isInteger(payload.exit_code) ? payload.exit_code : null,
+        timed_out: payload.timed_out === true,
+        duration_ms: Number.isInteger(payload.duration_ms) ? payload.duration_ms : null,
+        stdout_truncated: payload.stdout_truncated === true,
+        stderr_truncated: payload.stderr_truncated === true,
+      };
+    } catch {
+      return {
+        is_error: result?.isError === true,
+        execution_ok: false,
+        pushed: false,
+        summary_error: "Could not parse bounded dev_git_push result metadata.",
+      };
+    }
+  }
   if (toolName === "dev_git_commit") {
     try {
       const payload = JSON.parse(text);
@@ -1570,6 +1603,21 @@ const toolDefinitions = [
       },
     }, ["paths", "message"]),
     handler: async (args) => jsonContent(await dev_git_commit(args)),
+  },
+  {
+    name: "dev_git_push",
+    description: "High-risk controlled push of the current clean main HEAD to the canonical origin/main only. Requires an exact expectedHead guard, fixed HTTPS destination/refspec, transport/config/filter safety gates, disabled hooks, and never fetches, pulls, rebases, resets, or force-pushes.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      expectedHead: {
+        type: "string",
+        minLength: 40,
+        maxLength: 40,
+        pattern: "^[A-Fa-f0-9]{40}$",
+      },
+    }, ["expectedHead"]),
+    handler: async (args) => jsonContent(await dev_git_push(args)),
   },
   {
     name: "dev_run_tests",
@@ -3453,6 +3501,7 @@ const chatgptDeveloperToolNames = new Set([
   "dev_apply_patch",
   "dev_run_tests",
   "dev_git_commit",
+  "dev_git_push",
 ]);
 
 const toolProfiles = new Map([
@@ -3479,6 +3528,7 @@ const permissionSources = {
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
   dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],
   dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
+  dev_git_push: ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],
   dev_git_status: ["repository_git_worktree_status"],
   dev_git_diff: ["repository_git_worktree_diff", "repository_git_index_diff"],
   dev_git_diff_check: ["repository_git_worktree_diff_check", "repository_git_index_diff_check"],
