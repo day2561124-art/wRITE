@@ -369,15 +369,31 @@ try {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $mcpOut = Join-Path $LogDir "mcp-http.$stamp.stdout.log"
     $mcpErr = Join-Path $LogDir "mcp-http.$stamp.stderr.log"
+    $mcpToolProfileWasSet = Test-Path Env:\MCP_TOOL_PROFILE
+    $originalMcpToolProfile = $env:MCP_TOOL_PROFILE
+    $effectiveMcpToolProfile = if ($mcpToolProfileWasSet) {
+      $originalMcpToolProfile
+    } else {
+      "chatgpt_developer"
+    }
     Write-Host "Starting MCP HTTP server..." -ForegroundColor Cyan
-    $mcpProcess = Start-Process `
-      -FilePath $npm.Source `
-      -ArgumentList @("run", "mcp:http") `
-      -WorkingDirectory $Root `
-      -WindowStyle Hidden `
-      -RedirectStandardOutput $mcpOut `
-      -RedirectStandardError $mcpErr `
-      -PassThru
+    try {
+      $env:MCP_TOOL_PROFILE = $effectiveMcpToolProfile
+      $mcpProcess = Start-Process `
+        -FilePath $npm.Source `
+        -ArgumentList @("run", "mcp:http") `
+        -WorkingDirectory $Root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $mcpOut `
+        -RedirectStandardError $mcpErr `
+        -PassThru
+    } finally {
+      if ($mcpToolProfileWasSet) {
+        $env:MCP_TOOL_PROFILE = $originalMcpToolProfile
+      } else {
+        Remove-Item Env:\MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
+      }
+    }
 
     $mcpDeadline = (Get-Date).AddSeconds(12)
     do {
@@ -395,6 +411,7 @@ try {
     }
 
     Write-Host "MCP HTTP server started." -ForegroundColor Green
+    Write-Host "MCP_TOOL_PROFILE=$effectiveMcpToolProfile"
     Write-Host "MCP_HTTP_PID=$($mcpProcess.Id)"
     Write-Host "MCP_HTTP_OUT_LOG=$mcpOut"
     Write-Host "MCP_HTTP_ERR_LOG=$mcpErr"

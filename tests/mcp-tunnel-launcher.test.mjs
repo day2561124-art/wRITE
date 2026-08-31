@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,13 +23,21 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function childEnvironment(overrides = {}) {
+  const environment = { ...process.env, ...overrides };
+  for (const [key, value] of Object.entries(environment)) {
+    if (value === undefined) delete environment[key];
+  }
+  return environment;
+}
+
 function runTunnel(args, expectedStatus, env = {}) {
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tunnelScript, ...args],
     {
       cwd: rootDir,
-      env: { ...process.env, ...env },
+      env: childEnvironment(env),
       encoding: "utf8",
       timeout: 20_000,
       windowsHide: true,
@@ -48,7 +58,7 @@ function runTunnelStart(args, expectedStatus, env = {}) {
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tunnelScript, ...args],
       {
         cwd: rootDir,
-        env: { ...process.env, ...env },
+        env: childEnvironment(env),
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -154,6 +164,109 @@ async function listenOnFreePort() {
   return server;
 }
 
+async function isPortAvailable(port) {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", (error) => {
+      if (error.code === "EADDRINUSE") {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    });
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function waitForPortAvailable(port, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isPortAvailable(port)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Port ${port} did not become available after MCP cleanup.`);
+}
+
+function externalProcessHandle(pid) {
+  return {
+    pid,
+    exitCode: null,
+    killed: false,
+    kill() {
+      try {
+        process.kill(pid);
+      } catch {
+        // The process may already have exited.
+      }
+    },
+  };
+}
+
+async function verifyLauncherMcpProfile({
+  fixtureDir,
+  fakeScript,
+  argsLog,
+  profile,
+  expectedCount,
+  expectPatch,
+  label,
+}) {
+  const port = 8787;
+  assert(
+    await isPortAvailable(port),
+    `Cannot verify ${label}: MCP port ${port} is already occupied.`,
+  );
+  const logDir = path.join(fixtureDir, `${label}-profile-logs`);
+  let mcpProcess;
+  let tunnelStarted = false;
+  let client;
+  try {
+    const result = await runTunnelStart(
+      commonArgs(port, logDir, fakeScript),
+      0,
+      {
+        FAKE_CLOUDFLARED_MODE: "quic-success",
+        FAKE_ARGS_LOG: argsLog,
+        MCP_TOOL_PROFILE: profile,
+      },
+    );
+    tunnelStarted = true;
+    const pidMatch = result.stdout.match(/MCP_HTTP_PID=(\d+)/u);
+    assert(pidMatch, `Launcher did not report its MCP PID. stdout=${result.stdout}`);
+    mcpProcess = externalProcessHandle(Number(pidMatch[1]));
+    const expectedProfile = profile ?? "chatgpt_developer";
+    assert(
+      result.stdout.includes(`MCP_TOOL_PROFILE=${expectedProfile}`),
+      `Launcher did not report MCP_TOOL_PROFILE=${expectedProfile}. stdout=${result.stdout}`,
+    );
+
+    client = new Client(
+      { name: `mcp-tunnel-${label}-profile-test`, version: "1.0.0" },
+      { capabilities: {} },
+    );
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)),
+    );
+    const listed = await client.listTools();
+    const names = listed.tools.map((tool) => tool.name);
+    assert(
+      names.length === expectedCount,
+      `${label} launcher profile exposed ${names.length} tools; expected ${expectedCount}.`,
+    );
+    assert(
+      names.includes("dev_apply_patch") === expectPatch,
+      `${label} launcher profile dev_apply_patch exposure was ${names.includes("dev_apply_patch")}.`,
+    );
+  } finally {
+    if (client) await client.close().catch(() => {});
+    if (tunnelStarted) await stopManagedTunnel(logDir).catch(() => {});
+    if (mcpProcess) terminateProcessTree(mcpProcess);
+    await waitForPortAvailable(port);
+  }
+}
+
 async function main() {
   if (process.platform !== "win32") {
     console.log("MCP tunnel launcher integration test skipped (Windows only).");
@@ -166,6 +279,7 @@ async function main() {
   const { fakeScript } = await createFakeCloudflared(fixtureDir);
   const argsLog = path.join(fixtureDir, "fake-args.log");
   const server = await listenOnFreePort();
+  let serverClosed = false;
   const port = server.address().port;
 
   try {
@@ -306,9 +420,33 @@ async function main() {
       terminateProcessTree(connectingProcess);
     }
 
-    console.log("MCP tunnel launcher integration tests passed.");
-  } finally {
     await new Promise((resolve) => server.close(resolve));
+    serverClosed = true;
+
+    await verifyLauncherMcpProfile({
+      fixtureDir,
+      fakeScript,
+      argsLog,
+      profile: undefined,
+      expectedCount: 41,
+      expectPatch: true,
+      label: "default-developer",
+    });
+    await verifyLauncherMcpProfile({
+      fixtureDir,
+      fakeScript,
+      argsLog,
+      profile: "chatgpt_public",
+      expectedCount: 40,
+      expectPatch: false,
+      label: "external-public-override",
+    });
+
+    console.log("MCP tunnel launcher integration tests passed.");
+    console.log("- Launcher default MCP profile: chatgpt_developer (41 tools, dev_apply_patch present)");
+    console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, dev_apply_patch absent)");
+  } finally {
+    if (!serverClosed) await new Promise((resolve) => server.close(resolve));
     try {
       await rm(fixtureDir, { recursive: true, force: true });
     } catch (error) {
