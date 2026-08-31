@@ -162,6 +162,7 @@ const expectedTools = [
   "dev_read_file",
   "dev_search_files",
   "dev_apply_patch",
+  "dev_run_tests",
   "get_current_project_state",
   "get_active_engine",
   "get_engine_components_status",
@@ -327,6 +328,13 @@ const unknownArgumentFixtures = expectedTools.map((name) => ({
 }));
 
 const enumConstraintFixtures = [
+  {
+    label: "dev_run_tests shell-injection suite",
+    name: "dev_run_tests",
+    field: "suite",
+    arguments: { suite: "mcp; whoami" },
+    expectedMessage: "suite must be one of: mcp, mcp_tunnel, all.",
+  },
   {
     label: "run_creative_task invalid source",
     name: "run_creative_task",
@@ -1285,6 +1293,13 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "dev_run_tests missing suite",
+    name: "dev_run_tests",
+    field: "suite",
+    arguments: {},
+    expectedMessage: "suite is required.",
+  },
   {
     label: "dev_apply_patch missing path",
     name: "dev_apply_patch",

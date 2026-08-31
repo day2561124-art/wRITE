@@ -381,7 +381,7 @@ try {
       $env:MCP_TOOL_PROFILE = $effectiveMcpToolProfile
       $mcpProcess = Start-Process `
         -FilePath $npm.Source `
-        -ArgumentList @("run", "mcp:http") `
+        -ArgumentList @("run", "mcp:http", "--", "--port", [string]$McpPort) `
         -WorkingDirectory $Root `
         -WindowStyle Hidden `
         -RedirectStandardOutput $mcpOut `

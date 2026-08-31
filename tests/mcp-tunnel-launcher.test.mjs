@@ -164,6 +164,13 @@ async function listenOnFreePort() {
   return server;
 }
 
+async function freePort() {
+  const server = await listenOnFreePort();
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
 async function isPortAvailable(port) {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -211,13 +218,11 @@ async function verifyLauncherMcpProfile({
   profile,
   expectedCount,
   expectPatch,
+  expectRunTests,
   label,
 }) {
-  const port = 8787;
-  assert(
-    await isPortAvailable(port),
-    `Cannot verify ${label}: MCP port ${port} is already occupied.`,
-  );
+  const preferredPort = 8787;
+  const port = await isPortAvailable(preferredPort) ? preferredPort : await freePort();
   const logDir = path.join(fixtureDir, `${label}-profile-logs`);
   let mcpProcess;
   let tunnelStarted = false;
@@ -258,6 +263,10 @@ async function verifyLauncherMcpProfile({
     assert(
       names.includes("dev_apply_patch") === expectPatch,
       `${label} launcher profile dev_apply_patch exposure was ${names.includes("dev_apply_patch")}.`,
+    );
+    assert(
+      names.includes("dev_run_tests") === expectRunTests,
+      `${label} launcher profile dev_run_tests exposure was ${names.includes("dev_run_tests")}.`,
     );
   } finally {
     if (client) await client.close().catch(() => {});
@@ -428,8 +437,9 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 41,
+      expectedCount: 45,
       expectPatch: true,
+      expectRunTests: true,
       label: "default-developer",
     });
     await verifyLauncherMcpProfile({
@@ -439,12 +449,13 @@ async function main() {
       profile: "chatgpt_public",
       expectedCount: 40,
       expectPatch: false,
+      expectRunTests: false,
       label: "external-public-override",
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP profile: chatgpt_developer (41 tools, dev_apply_patch present)");
-    console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, dev_apply_patch absent)");
+    console.log("- Launcher default MCP profile: chatgpt_developer (45 tools, dev_apply_patch/dev_run_tests/dev_git_* present)");
+    console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));
     try {

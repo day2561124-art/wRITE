@@ -67,7 +67,11 @@ const publicToolNames = [
 ];
 
 const blockedToolNames = [
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
   "dev_apply_patch",
+  "dev_run_tests",
   "activate_engine_version",
   "compress_error_rules",
   "import_policy_file",
@@ -207,15 +211,148 @@ assert.equal(
   false,
   "dev_apply_patch leaked into chatgpt_public",
 );
+assert.equal(
+  publicToolMap.has("dev_run_tests"),
+  false,
+  "dev_run_tests leaked into chatgpt_public",
+);
 
+publicToolNames.push("dev_git_status", "dev_git_diff", "dev_git_diff_check");
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_apply_patch"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus dev_apply_patch",
+  [...publicToolNames, "dev_apply_patch", "dev_run_tests"].sort(),
+  "chatgpt_developer must equal chatgpt_public plus the five development write/test/Git tools",
 );
+for (const [toolName, expectedProperties, expectedSources] of [
+  ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
+  ["dev_git_diff", ["mode"], ["repository_git_worktree_diff", "repository_git_index_diff"]],
+  ["dev_git_diff_check", ["mode"], ["repository_git_worktree_diff_check", "repository_git_index_diff_check"]],
+]) {
+  const gitTool = developerList.result.tools.find((tool) => tool.name === toolName);
+  assert(gitTool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(gitTool.annotations?.readOnlyHint, true);
+  assert.equal(gitTool.inputSchema?.type, "object");
+  assert.equal(gitTool.inputSchema?.additionalProperties, false);
+  assert.deepEqual(Object.keys(gitTool.inputSchema?.properties ?? {}), expectedProperties);
+  for (const forbiddenField of [
+    "command", "args", "executable", "cwd", "env", "shell", "path", "pathspec",
+  ]) {
+    assert.equal(
+      Object.hasOwn(gitTool.inputSchema?.properties ?? {}, forbiddenField),
+      false,
+      `${toolName} exposed forbidden field ${forbiddenField}`,
+    );
+  }
+  if (toolName === "dev_git_status") {
+    assert.equal(gitTool.inputSchema.properties.includeUntracked.type, "boolean");
+    assert.equal(gitTool.inputSchema.properties.includeUntracked.default, true);
+  } else {
+    assert.equal(gitTool.inputSchema.properties.mode.type, "string");
+    assert.deepEqual(gitTool.inputSchema.properties.mode.enum, ["working", "staged"]);
+    assert.equal(gitTool.inputSchema.properties.mode.default, "working");
+  }
+  const permission = gitTool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, "read_only");
+  assert.equal(permission?.read_or_write, "read");
+  assert.equal(permission?.risk_level, "read");
+  assert.equal(permission?.log_required, false);
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+  assert.deepEqual(permission?.allowed_sources, expectedSources);
+}
+
+const liveGitResponses = await runStdioSession("chatgpt_developer", [
+  {
+    jsonrpc: "2.0",
+    id: "live-git-status",
+    method: "tools/call",
+    params: { name: "dev_git_status", arguments: { includeUntracked: true } },
+  },
+  {
+    jsonrpc: "2.0",
+    id: "live-git-diff-working",
+    method: "tools/call",
+    params: { name: "dev_git_diff", arguments: { mode: "working" } },
+  },
+  {
+    jsonrpc: "2.0",
+    id: "live-git-diff-check-working",
+    method: "tools/call",
+    params: { name: "dev_git_diff_check", arguments: { mode: "working" } },
+  },
+  {
+    jsonrpc: "2.0",
+    id: "live-git-diff-staged",
+    method: "tools/call",
+    params: { name: "dev_git_diff", arguments: { mode: "staged" } },
+  },
+  {
+    jsonrpc: "2.0",
+    id: "live-git-diff-check-staged",
+    method: "tools/call",
+    params: { name: "dev_git_diff_check", arguments: { mode: "staged" } },
+  },
+]);
+function liveGitResult(id) {
+  const response = liveGitResponses.find((item) => item.id === id);
+  assert.equal(response?.error, undefined, `${id} returned JSON-RPC error`);
+  assert.equal(response?.result?.isError, undefined, `${id} returned tool error`);
+  return JSON.parse(response.result.content[0].text);
+}
+const liveGitStatus = liveGitResult("live-git-status");
+const liveWorkingDiff = liveGitResult("live-git-diff-working");
+const liveWorkingCheck = liveGitResult("live-git-diff-check-working");
+const liveStagedDiff = liveGitResult("live-git-diff-staged");
+const liveStagedCheck = liveGitResult("live-git-diff-check-staged");
+assert.equal(liveGitStatus.execution_ok, true);
+assert.equal(liveGitStatus.exit_code, 0);
+assert.equal(liveWorkingDiff.execution_ok, true);
+assert.equal(liveWorkingDiff.exit_code, 0);
+assert.equal(liveWorkingCheck.execution_ok, true);
+assert.equal(liveStagedDiff.execution_ok, true);
+assert.equal(liveStagedDiff.exit_code, 0);
+assert.equal(liveStagedCheck.execution_ok, true);
+console.log(`DEV-GIT-RO live status: ${JSON.stringify({
+  branch: liveGitStatus.branch,
+  head: liveGitStatus.head,
+  clean: liveGitStatus.clean,
+  staged: liveGitStatus.staged,
+  modified: liveGitStatus.modified,
+  deleted: liveGitStatus.deleted,
+  renamed: liveGitStatus.renamed,
+  untracked: liveGitStatus.untracked,
+  conflicted: liveGitStatus.conflicted,
+  raw_truncated: liveGitStatus.raw_truncated,
+  raw_characters: liveGitStatus.raw_characters,
+  raw_bytes: liveGitStatus.raw_bytes,
+})}`);
+console.log(`DEV-GIT-RO live working diff: ${JSON.stringify({
+  exit_code: liveWorkingDiff.exit_code,
+  truncated: liveWorkingDiff.truncated,
+  characters: liveWorkingDiff.characters,
+  bytes: liveWorkingDiff.bytes,
+})}`);
+console.log(`DEV-GIT-RO live working diff-check: ${JSON.stringify({
+  passed: liveWorkingCheck.passed,
+  exit_code: liveWorkingCheck.exit_code,
+  output: liveWorkingCheck.output,
+})}`);
+if (liveGitStatus.staged.length > 0) {
+  console.log(`DEV-GIT-RO live staged diff: ${JSON.stringify({
+    exit_code: liveStagedDiff.exit_code,
+    truncated: liveStagedDiff.truncated,
+    characters: liveStagedDiff.characters,
+    bytes: liveStagedDiff.bytes,
+    check_passed: liveStagedCheck.passed,
+    check_exit_code: liveStagedCheck.exit_code,
+  })}`);
+}
+
 const developerPatchTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_apply_patch",
 );
@@ -256,6 +393,43 @@ assert.deepEqual(
   ["repository_development_text_file", "mcp_client_exact_patch"],
 );
 assert(developerPatchPermission?.forbidden_sources?.includes("unregistered_external_source"));
+
+const developerTestTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_run_tests",
+);
+assert(developerTestTool, "chatgpt_developer is missing dev_run_tests");
+assert.equal(developerTestTool.annotations?.readOnlyHint, false);
+const developerTestSchema = developerTestTool.inputSchema;
+assert.equal(developerTestSchema?.type, "object");
+assert.equal(developerTestSchema?.additionalProperties, false);
+assert.deepEqual(developerTestSchema?.required, ["suite"]);
+assert.deepEqual(Object.keys(developerTestSchema?.properties ?? {}), ["suite"]);
+assert.equal(developerTestSchema.properties.suite.type, "string");
+assert.deepEqual(developerTestSchema.properties.suite.enum, ["mcp", "mcp_tunnel", "all"]);
+for (const forbiddenField of [
+  "command", "args", "cwd", "env", "program", "shell", "script", "path",
+]) {
+  assert.equal(
+    Object.hasOwn(developerTestSchema.properties, forbiddenField),
+    false,
+    `dev_run_tests exposed forbidden field ${forbiddenField}`,
+  );
+}
+const developerTestPermission = developerTestTool._meta?.["armed-academy/permission"];
+assert.equal(developerTestPermission?.permission_level, "write_low_risk");
+assert.equal(developerTestPermission?.read_or_write, "write");
+assert.equal(developerTestPermission?.risk_level, "low-risk-write");
+assert.equal(developerTestPermission?.log_required, true);
+assert.equal(developerTestPermission?.can_modify_canon, false);
+assert.equal(developerTestPermission?.can_modify_active_engine, false);
+assert.equal(developerTestPermission?.can_modify_story_graph, false);
+assert.equal(developerTestPermission?.can_modify_memory, false);
+assert.deepEqual(
+  developerTestPermission?.allowed_sources,
+  ["repository_test_entrypoints", "server_owned_test_allowlist"],
+);
+
+publicToolNames.splice(-3, 3);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -510,6 +684,7 @@ try {
   adapterSession.close();
 }
 
+publicToolNames.push("dev_git_status", "dev_git_diff", "dev_git_diff_check");
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -521,11 +696,12 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...publicToolNames, "dev_apply_patch"].sort(),
+    [...publicToolNames, "dev_apply_patch", "dev_run_tests"].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
   developerAdapterSession.close();
+  publicToolNames.splice(-3, 3);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -534,5 +710,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 1}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 5}).`,
 );

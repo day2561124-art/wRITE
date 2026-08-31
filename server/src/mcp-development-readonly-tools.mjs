@@ -1,5 +1,12 @@
+import { spawn } from "node:child_process";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import {
+  controlledProcessEnvironment,
+  createBoundedOutputCollector,
+  redactProcessOutput,
+  terminateProcessTree,
+} from "./process-control.mjs";
 import {
   normalizeProjectPath,
   projectRoot,
@@ -366,5 +373,330 @@ export async function dev_search_files(input = {}) {
     scanned_files: scannedFiles,
     skipped_files: skippedFiles,
     truncated,
+  };
+}
+
+export const DEV_GIT_DIFF_MODES = Object.freeze(["working", "staged"]);
+export const DEV_GIT_OUTPUT_MAX_CHARACTERS = 128 * 1024;
+
+const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
+const fixedGitPrefixArgv = Object.freeze([
+  "--no-pager",
+  "-c",
+  "core.fsmonitor=false",
+]);
+const gitTimeoutMs = 30_000;
+const activeGitChildren = new Set();
+
+process.once("exit", () => {
+  for (const child of activeGitChildren) terminateProcessTree(child);
+});
+
+function fixedGitEnvironment() {
+  return controlledProcessEnvironment({
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_PAGER: "cat",
+    PAGER: "cat",
+    GIT_TERMINAL_PROMPT: "0",
+  });
+}
+
+function diffArgv(mode, check = false) {
+  const argv = [
+    ...fixedGitPrefixArgv,
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+  ];
+  if (mode === "staged") argv.push("--cached");
+  if (check) argv.push("--check");
+  return argv;
+}
+
+function statusArgv(includeUntracked) {
+  return [
+    ...fixedGitPrefixArgv,
+    "status",
+    "--porcelain=v1",
+    "--branch",
+    includeUntracked ? "--untracked-files=all" : "--untracked-files=no",
+  ];
+}
+
+function assertGitMode(mode) {
+  if (!DEV_GIT_DIFF_MODES.includes(mode)) {
+    throw new Error(`mode must be one of: ${DEV_GIT_DIFF_MODES.join(", ")}.`);
+  }
+}
+
+async function runFixedGit({
+  repositoryRoot,
+  executable,
+  argv,
+  outputMaxCharacters,
+  timeoutMs,
+}) {
+  const stdout = createBoundedOutputCollector(outputMaxCharacters);
+  const stderr = createBoundedOutputCollector(outputMaxCharacters);
+  let child;
+  let spawnError = null;
+  let exitCode = null;
+  let signal = null;
+  let timedOut = false;
+
+  try {
+    child = spawn(executable, argv, {
+      cwd: repositoryRoot,
+      env: fixedGitEnvironment(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: false,
+      detached: false,
+    });
+    activeGitChildren.add(child);
+  } catch (error) {
+    spawnError = error;
+  }
+
+  if (child) {
+    child.stdout.on("data", (chunk) => stdout.append(chunk));
+    child.stderr.on("data", (chunk) => stderr.append(chunk));
+    await new Promise((resolve) => {
+      let settled = false;
+      let forceSettleTimer;
+      const finish = (code, childSignal) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutTimer);
+        clearTimeout(forceSettleTimer);
+        exitCode = Number.isInteger(code) ? code : null;
+        signal = typeof childSignal === "string" ? childSignal : null;
+        resolve();
+      };
+      const timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        terminateProcessTree(child);
+        forceSettleTimer = setTimeout(() => finish(null, null), 5_000);
+        forceSettleTimer.unref?.();
+      }, timeoutMs);
+      timeoutTimer.unref?.();
+      child.once("error", (error) => {
+        spawnError = error;
+        finish(null, null);
+      });
+      child.once("close", finish);
+    });
+    activeGitChildren.delete(child);
+  }
+
+  const stdoutResult = stdout.finish();
+  const stderrResult = stderr.finish();
+  return {
+    execution_ok: !spawnError && !timedOut,
+    exit_code: exitCode,
+    signal,
+    timed_out: timedOut,
+    stdout: stdoutResult.text,
+    stderr: [
+      stderrResult.text,
+      spawnError ? redactProcessOutput(`Git process failed to start: ${spawnError.message}`) : "",
+    ].filter(Boolean).join("\n"),
+    stdout_truncated: stdoutResult.truncated,
+    stderr_truncated: stderrResult.truncated,
+    stdout_characters: stdoutResult.characters,
+    stdout_bytes: stdoutResult.bytes,
+    stderr_characters: stderrResult.characters,
+    stderr_bytes: stderrResult.bytes,
+  };
+}
+
+function normalizeStatusPath(rawPath) {
+  const renameMarker = " -> ";
+  const pathValue = rawPath.includes(renameMarker)
+    ? rawPath.slice(rawPath.lastIndexOf(renameMarker) + renameMarker.length)
+    : rawPath;
+  return redactProcessOutput(pathValue);
+}
+
+function parseBranchLine(line) {
+  if (!line.startsWith("## ")) return { branch: null, head: null };
+  const value = line.slice(3).trim();
+  if (value.startsWith("No commits yet on ")) {
+    const branch = value.slice("No commits yet on ".length).trim();
+    return { branch, head: branch };
+  }
+  if (value.startsWith("Initial commit on ")) {
+    const branch = value.slice("Initial commit on ".length).trim();
+    return { branch, head: branch };
+  }
+  if (value.startsWith("HEAD (no branch)")) {
+    return { branch: null, head: "HEAD" };
+  }
+  const branch = value.split("...")[0].trim().split(/\s/u)[0] || null;
+  return { branch: branch ? redactProcessOutput(branch) : null, head: branch ? redactProcessOutput(branch) : null };
+}
+
+function unique(values) {
+  return [...new Set(values)];
+}
+
+function parseGitStatus(raw) {
+  const lines = raw.split(/\r?\n/u).filter(Boolean);
+  const branchInfo = parseBranchLine(lines[0] ?? "");
+  const statusLines = lines.filter((line) => !line.startsWith("## "));
+  const staged = [];
+  const modified = [];
+  const deleted = [];
+  const renamed = [];
+  const untracked = [];
+  const conflicted = [];
+
+  for (const line of statusLines) {
+    if (line.startsWith("?? ")) {
+      untracked.push(normalizeStatusPath(line.slice(3)));
+      continue;
+    }
+    if (line.length < 3) continue;
+    const indexCode = line[0];
+    const worktreeCode = line[1];
+    const filePath = normalizeStatusPath(line.slice(3));
+    if (indexCode !== " " && indexCode !== "?") {
+      staged.push({ code: indexCode, path: filePath });
+    }
+    if (indexCode === "M" || worktreeCode === "M") modified.push(filePath);
+    if (indexCode === "D" || worktreeCode === "D") deleted.push(filePath);
+    if (indexCode === "R" || worktreeCode === "R") renamed.push(filePath);
+    if (indexCode === "U" || worktreeCode === "U" || indexCode === "A" && worktreeCode === "A") {
+      conflicted.push(filePath);
+    }
+  }
+
+  return {
+    ...branchInfo,
+    staged,
+    modified: unique(modified),
+    deleted: unique(deleted),
+    renamed: unique(renamed),
+    untracked: unique(untracked),
+    conflicted: unique(conflicted),
+    clean: statusLines.length === 0,
+  };
+}
+
+export function createDevGitTools({
+  repositoryRoot = projectRoot,
+  executable = fixedGitExecutable,
+  outputMaxCharacters = DEV_GIT_OUTPUT_MAX_CHARACTERS,
+  timeoutMs = gitTimeoutMs,
+} = {}) {
+  async function run(argv) {
+    return runFixedGit({
+      repositoryRoot,
+      executable,
+      argv,
+      outputMaxCharacters,
+      timeoutMs,
+    });
+  }
+
+  return {
+    async status(input = {}) {
+      const includeUntracked = input.includeUntracked ?? true;
+      if (typeof includeUntracked !== "boolean") {
+        throw new Error("includeUntracked must be a boolean.");
+      }
+      const result = await run(statusArgv(includeUntracked));
+      const parsed = result.execution_ok && result.exit_code === 0
+        ? parseGitStatus(result.stdout)
+        : {
+          branch: null,
+          head: null,
+          staged: [],
+          modified: [],
+          deleted: [],
+          renamed: [],
+          untracked: [],
+          conflicted: [],
+          clean: false,
+        };
+      return {
+        ...parsed,
+        execution_ok: result.execution_ok,
+        exit_code: result.exit_code,
+        signal: result.signal,
+        timed_out: result.timed_out,
+        raw: result.stdout,
+        raw_truncated: result.stdout_truncated,
+        raw_characters: result.stdout_characters,
+        raw_bytes: result.stdout_bytes,
+        stderr: result.stderr,
+        stderr_truncated: result.stderr_truncated,
+      };
+    },
+
+    async diff(input = {}) {
+      const mode = input.mode ?? "working";
+      assertGitMode(mode);
+      const result = await run(diffArgv(mode, false));
+      return {
+        mode,
+        execution_ok: result.execution_ok,
+        exit_code: result.exit_code,
+        signal: result.signal,
+        timed_out: result.timed_out,
+        diff: result.stdout,
+        truncated: result.stdout_truncated,
+        characters: result.stdout_characters,
+        bytes: result.stdout_bytes,
+        stderr: result.stderr,
+        stderr_truncated: result.stderr_truncated,
+      };
+    },
+
+    async diffCheck(input = {}) {
+      const mode = input.mode ?? "working";
+      assertGitMode(mode);
+      const result = await run(diffArgv(mode, true));
+      return {
+        mode,
+        execution_ok: result.execution_ok,
+        passed: result.execution_ok && result.exit_code === 0,
+        exit_code: result.exit_code,
+        signal: result.signal,
+        timed_out: result.timed_out,
+        output: result.stdout,
+        truncated: result.stdout_truncated,
+        characters: result.stdout_characters,
+        bytes: result.stdout_bytes,
+        stderr: result.stderr,
+        stderr_truncated: result.stderr_truncated,
+      };
+    },
+  };
+}
+
+const productionGitTools = createDevGitTools();
+export const dev_git_status = productionGitTools.status;
+export const dev_git_diff = productionGitTools.diff;
+export const dev_git_diff_check = productionGitTools.diffCheck;
+
+export function getDevGitCommandMapping() {
+  return {
+    executable: fixedGitExecutable,
+    cwd: ".",
+    shell: false,
+    status: {
+      include_untracked_true: statusArgv(true),
+      include_untracked_false: statusArgv(false),
+    },
+    diff: {
+      working: diffArgv("working", false),
+      staged: diffArgv("staged", false),
+    },
+    diff_check: {
+      working: diffArgv("working", true),
+      staged: diffArgv("staged", true),
+    },
   };
 }

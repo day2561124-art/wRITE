@@ -111,8 +111,18 @@ function readPostBody(req) {
 const configPath = process.argv.includes('--config')
   ? process.argv[process.argv.indexOf('--config') + 1]
   : 'config/mcp-http.example.json';
+const portArgumentIndex = process.argv.indexOf('--port');
+const portOverride = portArgumentIndex >= 0
+  ? Number.parseInt(process.argv[portArgumentIndex + 1], 10)
+  : null;
+if (portArgumentIndex >= 0 && (!Number.isInteger(portOverride) || portOverride < 1 || portOverride > 65535)) {
+  throw new Error('--port must be an integer between 1 and 65535.');
+}
 
-const config = readConfig(configPath);
+const config = {
+  ...readConfig(configPath),
+  ...(portOverride === null ? {} : { port: portOverride }),
+};
 const sessions = new Map();
 // The long-lived HTTP parent owns only the world-simulation prepared-turn broker.
 // Legacy raw-story payloads no longer cross MCP child boundaries.

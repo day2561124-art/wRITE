@@ -132,9 +132,19 @@ import {
   dev_search_files,
 } from "./mcp-development-readonly-tools.mjs";
 import {
+  DEV_GIT_DIFF_MODES,
+  dev_git_diff,
+  dev_git_diff_check,
+  dev_git_status,
+} from "./mcp-development-readonly-tools.mjs";
+import {
   DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
   dev_apply_patch,
 } from "./mcp-development-write-tools.mjs";
+import {
+  DEV_TEST_SUITES,
+  dev_run_tests,
+} from "./mcp-development-test-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
   get_active_engine_dependency_status,
@@ -749,6 +759,29 @@ function auditOutputSummary(result, toolName = "") {
   const text = Array.isArray(result?.content)
     ? result.content.map((item) => item?.text ?? "").join("\n")
     : "";
+  if (toolName === "dev_run_tests") {
+    try {
+      const payload = JSON.parse(text);
+      return {
+        is_error: result?.isError === true,
+        suite: payload.suite ?? null,
+        execution_ok: payload.execution_ok === true,
+        passed: payload.passed === true,
+        exit_code: Number.isInteger(payload.exit_code) ? payload.exit_code : null,
+        signal: typeof payload.signal === "string" ? payload.signal : null,
+        timed_out: payload.timed_out === true,
+        duration_ms: Number.isInteger(payload.duration_ms) ? payload.duration_ms : null,
+        stdout_truncated: payload.stdout_truncated === true,
+        stderr_truncated: payload.stderr_truncated === true,
+      };
+    } catch {
+      return {
+        is_error: result?.isError === true,
+        execution_ok: false,
+        summary_error: "Could not parse bounded dev_run_tests result metadata.",
+      };
+    }
+  }
   return {
     is_error: result?.isError === true,
     text_sha256: text ? hashText(text) : null,
@@ -1474,6 +1507,46 @@ const toolDefinitions = [
       },
     }, ["path", "oldText", "newText"]),
     handler: async (args) => jsonContent(await dev_apply_patch(args)),
+  },
+  {
+    name: "dev_run_tests",
+    description: "Run one server-owned repository test suite through a fixed Node executable/argv allowlist with controlled environment, bounded redacted output, exclusive concurrency, timeout, and process-tree cleanup.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      suite: { type: "string", enum: DEV_TEST_SUITES },
+    }, ["suite"]),
+    handler: async (args) => jsonContent(await dev_run_tests(args)),
+  },
+  {
+    name: "dev_git_status",
+    description: "Read-only bounded Git working-tree status using a server-fixed git status argv; no caller-controlled command, argv, cwd, environment, shell, or pathspec is accepted.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      includeUntracked: { type: "boolean", default: true },
+    }),
+    handler: async (args) => jsonContent(await dev_git_status(args)),
+  },
+  {
+    name: "dev_git_diff",
+    description: "Read-only bounded Git diff using server-fixed working or staged argv with external diff/textconv disabled; no caller-controlled command, argv, cwd, environment, shell, or pathspec is accepted.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      mode: { type: "string", enum: DEV_GIT_DIFF_MODES, default: "working" },
+    }),
+    handler: async (args) => jsonContent(await dev_git_diff(args)),
+  },
+  {
+    name: "dev_git_diff_check",
+    description: "Read-only bounded git diff --check using server-fixed working or staged argv; nonzero Git exit is reported as a failed check, while spawn/timeout failure is reported separately.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      mode: { type: "string", enum: DEV_GIT_DIFF_MODES, default: "working" },
+    }),
+    handler: async (args) => jsonContent(await dev_git_diff_check(args)),
   },
   {
     name: "get_current_project_state",
@@ -3311,7 +3384,11 @@ const chatgptPublicToolNames = new Set([
 
 const chatgptDeveloperToolNames = new Set([
   ...chatgptPublicToolNames,
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
   "dev_apply_patch",
+  "dev_run_tests",
 ]);
 
 const toolProfiles = new Map([
@@ -3336,6 +3413,10 @@ const permissionSources = {
   dev_read_file: ["repository_text_file"],
   dev_search_files: ["repository_text_files"],
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
+  dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],
+  dev_git_status: ["repository_git_worktree_status"],
+  dev_git_diff: ["repository_git_worktree_diff", "repository_git_index_diff"],
+  dev_git_diff_check: ["repository_git_worktree_diff_check", "repository_git_index_diff_check"],
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
   get_engine_components_status: ["engine_component_registry", "registered_engine_components"],
