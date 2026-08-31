@@ -158,6 +158,9 @@ const expectedToolScripts = [
 ];
 
 const expectedTools = [
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
   "get_current_project_state",
   "get_active_engine",
   "get_engine_components_status",
@@ -235,6 +238,9 @@ const expectedTools = [
 ];
 
 const readOnlyTools = new Set([
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
   "get_current_project_state",
   "get_active_engine",
   "get_engine_components_status",
@@ -590,6 +596,30 @@ const enumConstraintFixtures = [
 
 const schemaTypeFixtures = [
   {
+    label: "dev_list_directory non-integer maxEntries",
+    name: "dev_list_directory",
+    field: "maxEntries",
+    expectedType: "integer",
+    arguments: { maxEntries: "10" },
+    expectedMessage: "maxEntries must be a positive integer.",
+  },
+  {
+    label: "dev_read_file non-integer maxBytes",
+    name: "dev_read_file",
+    field: "maxBytes",
+    expectedType: "integer",
+    arguments: { path: "README.md", maxBytes: "1024" },
+    expectedMessage: "maxBytes must be a positive integer.",
+  },
+  {
+    label: "dev_search_files non-boolean caseSensitive",
+    name: "dev_search_files",
+    field: "caseSensitive",
+    expectedType: "boolean",
+    arguments: { query: "MCP", caseSensitive: "yes" },
+    expectedMessage: "caseSensitive must be a boolean.",
+  },
+  {
     label: "get_active_engine non-boolean includeText",
     name: "get_active_engine",
     field: "includeText",
@@ -729,6 +759,30 @@ const schemaTypeFixtures = [
 ];
 
 const integerMaximumFixtures = [
+  {
+    label: "dev_list_directory maxEntries over maximum",
+    name: "dev_list_directory",
+    field: "maxEntries",
+    expectedMaximum: 500,
+    arguments: { maxEntries: 501 },
+    expectedMessage: "maxEntries must be an integer less than or equal to 500.",
+  },
+  {
+    label: "dev_read_file maxBytes over maximum",
+    name: "dev_read_file",
+    field: "maxBytes",
+    expectedMaximum: 262144,
+    arguments: { path: "README.md", maxBytes: 262145 },
+    expectedMessage: "maxBytes must be an integer less than or equal to 262144.",
+  },
+  {
+    label: "dev_search_files maxResults over maximum",
+    name: "dev_search_files",
+    field: "maxResults",
+    expectedMaximum: 200,
+    arguments: { query: "MCP", maxResults: 201 },
+    expectedMessage: "maxResults must be an integer less than or equal to 200.",
+  },
   {
     label: "chatgpt_bridge_build_proofing_context entityLimit over maximum",
     name: "chatgpt_bridge_build_proofing_context",
@@ -1002,6 +1056,24 @@ const integerMaximumFixtures = [
 
 const sizeConstraintFixtures = [
   {
+    label: "dev_read_file path over maxLength",
+    name: "dev_read_file",
+    field: "path",
+    constraint: "maxLength",
+    expectedLimit: 4096,
+    arguments: { path: "p".repeat(4097) },
+    expectedMessage: "path must be at most 4096 characters.",
+  },
+  {
+    label: "dev_search_files query over maxLength",
+    name: "dev_search_files",
+    field: "query",
+    constraint: "maxLength",
+    expectedLimit: 8192,
+    arguments: { query: "q".repeat(8193) },
+    expectedMessage: "query must be at most 8192 characters.",
+  },
+  {
     label: "search_context query over maxLength",
     name: "search_context",
     field: "query",
@@ -1172,6 +1244,20 @@ const stringArrayBlankFixtures = [
 ];
 
 const requiredConstraintFixtures = [
+  {
+    label: "dev_read_file null path",
+    name: "dev_read_file",
+    field: "path",
+    arguments: { path: null },
+    expectedMessage: "path is required.",
+  },
+  {
+    label: "dev_search_files blank query",
+    name: "dev_search_files",
+    field: "query",
+    arguments: { query: "   " },
+    expectedMessage: "query is required.",
+  },
   {
     label: "approval_queue_bridge_readiness_report missing requestId",
     name: "approval_queue_bridge_readiness_report",
@@ -1591,6 +1677,13 @@ const expectedConfirmationMetadata = new Map([
 ]);
 
 const expectedDefaultMetadata = new Map([
+  ["dev_list_directory", { path: ".", maxEntries: 200 }],
+  ["dev_read_file", { maxBytes: 262144 }],
+  ["dev_search_files", {
+    path: ".",
+    caseSensitive: false,
+    maxResults: 50,
+  }],
   ["get_current_project_state", { includeHashes: true }],
   ["get_active_engine", { includeText: false }],
   ["get_active_writing_card", { includeText: false }],
@@ -1826,6 +1919,9 @@ const expectedDefaultMetadata = new Map([
 ]);
 
 const expectedIntegerMaximumMetadata = new Map([
+  ["dev_list_directory:maxEntries", 500],
+  ["dev_read_file:maxBytes", 262144],
+  ["dev_search_files:maxResults", 200],
   ["chatgpt_bridge_build_writing_context:entityLimit", 50],
   ["chatgpt_bridge_build_proofing_context:entityLimit", 50],
   ["query_mcp_audit:limit", 1000],
@@ -1958,6 +2054,54 @@ const invalidToolFixtures = [
 ];
 
 const toolLevelErrorFixtures = [
+  {
+    label: "dev directory traversal",
+    params: {
+      name: "dev_list_directory",
+      arguments: { path: ".." },
+    },
+    expectedMessage: "path must stay inside the project.",
+  },
+  {
+    label: "dev read blocks git internals",
+    params: {
+      name: "dev_read_file",
+      arguments: { path: ".git/config" },
+    },
+    expectedMessage: "path cannot access .git internals.",
+  },
+  {
+    label: "dev read blocks common secret files",
+    params: {
+      name: "dev_read_file",
+      arguments: { path: ".env" },
+    },
+    expectedMessage: "path cannot access secret files.",
+  },
+  {
+    label: "dev read blocks unsupported binary paths",
+    params: {
+      name: "dev_read_file",
+      arguments: { path: "fixture.png" },
+    },
+    expectedMessage: "path must reference a supported UTF-8 text file.",
+  },
+  {
+    label: "dev read enforces byte limit",
+    params: {
+      name: "dev_read_file",
+      arguments: { path: "package.json", maxBytes: 1 },
+    },
+    expectedMessage: "path exceeds the 1-byte read limit.",
+  },
+  {
+    label: "dev search blocks git internals",
+    params: {
+      name: "dev_search_files",
+      arguments: { path: ".git", query: "config" },
+    },
+    expectedMessage: "path cannot access .git internals.",
+  },
   {
     label: "non-positive audit limit",
     params: {
@@ -3900,12 +4044,24 @@ async function runSmokeTest(options) {
       json: true,
     },
   }), options.verbose);
-  sendMessage(child, makeRequest(9, "resources/list", {}), options.verbose);
-  sendMessage(child, makeRequest(10, "resources/read", {
+  sendMessage(child, makeRequest(9, "tools/call", {
+    name: "dev_list_directory",
+    arguments: { maxEntries: 500 },
+  }), options.verbose);
+  sendMessage(child, makeRequest(10, "tools/call", {
+    name: "dev_read_file",
+    arguments: { path: "package.json" },
+  }), options.verbose);
+  sendMessage(child, makeRequest(11, "tools/call", {
+    name: "dev_search_files",
+    arguments: { query: "test:mcp", maxResults: 5 },
+  }), options.verbose);
+  sendMessage(child, makeRequest(12, "resources/list", {}), options.verbose);
+  sendMessage(child, makeRequest(13, "resources/read", {
     uri: "armed-academy://error-report/compressed_rules",
   }), options.verbose);
-  sendMessage(child, makeRequest(11, "prompts/list", {}), options.verbose);
-  const firstPromptRequestId = 12;
+  sendMessage(child, makeRequest(14, "prompts/list", {}), options.verbose);
+  const firstPromptRequestId = 15;
   for (const [index, fixture] of promptFixtures.entries()) {
     sendMessage(child, makeRequest(firstPromptRequestId + index, "prompts/get", {
       name: fixture.name,
@@ -4465,9 +4621,12 @@ async function runSmokeTest(options) {
   const activateEngine = await waitForResponse(responses, 6, 10_000);
   const importPolicy = await waitForResponse(responses, 7, 10_000);
   const queryAudit = await waitForResponse(responses, 8, 10_000);
-  const resourcesList = await waitForResponse(responses, 9, 10_000);
-  const resourceRead = await waitForResponse(responses, 10, 10_000);
-  const promptsList = await waitForResponse(responses, 11, 10_000);
+  const devDirectoryList = await waitForResponse(responses, 9, 10_000);
+  const devFileRead = await waitForResponse(responses, 10, 10_000);
+  const devFileSearch = await waitForResponse(responses, 11, 10_000);
+  const resourcesList = await waitForResponse(responses, 12, 10_000);
+  const resourceRead = await waitForResponse(responses, 13, 10_000);
+  const promptsList = await waitForResponse(responses, 14, 10_000);
   const promptGets = await Promise.all(
     promptFixtures.map((_, index) => waitForResponse(responses, firstPromptRequestId + index, 10_000)),
   );
@@ -5250,6 +5409,28 @@ async function runSmokeTest(options) {
   const queryAuditText = queryAudit.result?.content?.[0]?.text ?? "";
   assert(queryAuditText.includes("\"matched_records\""), "query_mcp_audit did not return JSON summary.");
   assert(queryAuditText.includes("\"import_policy_file\""), "query_mcp_audit did not find import_policy_file audit records.");
+
+  assert(!devDirectoryList.error && devDirectoryList.result?.isError !== true, "dev_list_directory failed.");
+  const devDirectoryData = JSON.parse(devDirectoryList.result?.content?.[0]?.text ?? "{}");
+  assert(devDirectoryData.path === ".", "dev_list_directory did not apply the root path default.");
+  assert(Array.isArray(devDirectoryData.entries), "dev_list_directory did not return entries.");
+  assert(
+    !devDirectoryData.entries.some((entry) => entry.name.toLowerCase() === ".git"),
+    "dev_list_directory exposed .git internals.",
+  );
+
+  assert(!devFileRead.error && devFileRead.result?.isError !== true, "dev_read_file failed.");
+  const devReadData = JSON.parse(devFileRead.result?.content?.[0]?.text ?? "{}");
+  assert(devReadData.path === "package.json", "dev_read_file returned an unexpected path.");
+  assert(devReadData.content.includes("\"test:mcp\""), "dev_read_file returned unexpected content.");
+
+  assert(!devFileSearch.error && devFileSearch.result?.isError !== true, "dev_search_files failed.");
+  const devSearchData = JSON.parse(devFileSearch.result?.content?.[0]?.text ?? "{}");
+  assert(devSearchData.case_sensitive === false, "dev_search_files did not apply caseSensitive=false.");
+  assert(
+    devSearchData.matches.some((match) => match.path === "package.json"),
+    "dev_search_files did not find the package.json fixture.",
+  );
 
   assert(!resourcesList.error, `resources/list failed: ${JSON.stringify(resourcesList.error)}`);
   const resourceUris = new Set((resourcesList.result?.resources ?? []).map((resource) => resource.uri));

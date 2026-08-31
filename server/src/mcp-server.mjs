@@ -123,6 +123,14 @@ import {
   chatgptBridgeSearchVisualAssets,
 } from "./chatgpt-visual-reference-bridge-service.mjs";
 import { readonlyTools } from "./mcp-readonly-tools.mjs";
+import {
+  DEV_LIST_MAX_ENTRIES,
+  DEV_READ_MAX_BYTES,
+  DEV_SEARCH_MAX_RESULTS,
+  dev_list_directory,
+  dev_read_file,
+  dev_search_files,
+} from "./mcp-development-readonly-tools.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
   get_active_engine_dependency_status,
@@ -1325,6 +1333,56 @@ function validateToolPathArguments(toolName, args) {
 }
 
 const toolDefinitions = [
+  {
+    name: "dev_list_directory",
+    description: "List one repository directory without following symbolic links or exposing .git internals and common secret files.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      path: { type: "string", default: "." },
+      maxEntries: {
+        type: "integer",
+        minimum: 1,
+        maximum: DEV_LIST_MAX_ENTRIES,
+        default: 200,
+      },
+    }),
+    handler: async (args) => jsonContent(await dev_list_directory(args)),
+  },
+  {
+    name: "dev_read_file",
+    description: "Read one bounded UTF-8 text file inside the repository; .git internals, common secrets, binary files, and symbolic links are blocked.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+      maxBytes: {
+        type: "integer",
+        minimum: 1,
+        maximum: DEV_READ_MAX_BYTES,
+        default: DEV_READ_MAX_BYTES,
+      },
+    }, ["path"]),
+    handler: async (args) => jsonContent(await dev_read_file(args)),
+  },
+  {
+    name: "dev_search_files",
+    description: "Search UTF-8 repository text files without following symbolic links, while skipping .git, dependencies, generated output, caches, and common secrets.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      query: { type: "string" },
+      path: { type: "string", default: "." },
+      caseSensitive: { type: "boolean", default: false },
+      maxResults: {
+        type: "integer",
+        minimum: 1,
+        maximum: DEV_SEARCH_MAX_RESULTS,
+        default: 50,
+      },
+    }, ["query"]),
+    handler: async (args) => jsonContent(await dev_search_files(args)),
+  },
   {
     name: "get_current_project_state",
     description: "Read-only project state summary: active source files, JSONL counts, output counts, and hashes.",
@@ -3117,6 +3175,9 @@ const toolDefinitions = [
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 
 const chatgptPublicToolNames = new Set([
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
   "get_engine_components_status",
   "get_active_engine_dependency_status",
   "chatgpt_bridge_get_workbench_status",
@@ -3173,6 +3234,9 @@ function isToolAllowed(toolName) {
 }
 
 const permissionSources = {
+  dev_list_directory: ["repository_directory"],
+  dev_read_file: ["repository_text_file"],
+  dev_search_files: ["repository_text_files"],
   get_current_project_state: ["repository"],
   get_active_engine: ["canon_db"],
   get_engine_components_status: ["engine_component_registry", "registered_engine_components"],
