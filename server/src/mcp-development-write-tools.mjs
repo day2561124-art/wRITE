@@ -1,15 +1,25 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  link,
   lstat,
+  mkdir,
   mkdtemp,
+  open,
+  readFile,
   realpath,
   rm,
+  unlink,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { commitFileTransaction } from "./file-transactions.mjs";
+import {
+  acquireProjectLock,
+  commitFileTransaction,
+  createTransactionId,
+  releaseProjectLock,
+} from "./file-transactions.mjs";
 import {
   assertAllowedPathPolicy,
   assertExistingSafePath,
@@ -34,6 +44,9 @@ import {
 export const DEV_APPLY_PATCH_MAX_BYTES = 16 * 1024 * 1024;
 export const DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS = 256 * 1024;
 export const DEV_DELETE_FILE_MAX_BYTES = DEV_APPLY_PATCH_MAX_BYTES;
+export const DEV_CREATE_FILE_MAX_TEXT_CHARACTERS = DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS;
+export const DEV_CREATE_FILE_MAX_BYTES = DEV_CREATE_FILE_MAX_TEXT_CHARACTERS * 4;
+export const DEV_FILE_INFO_MAX_BYTES = DEV_APPLY_PATCH_MAX_BYTES;
 
 export const DEV_WRITE_ALLOWED_TOP_LEVEL_DIRECTORIES = Object.freeze([
   ".github",
@@ -182,6 +195,57 @@ async function assertExistingPatchFile(filePath, label = "path") {
     throw new Error(`${label} exceeds the ${DEV_APPLY_PATCH_MAX_BYTES}-byte patch limit.`);
   }
   return info;
+}
+
+async function assertExistingSafeDevelopmentDirectory(directoryPath, label) {
+  let info;
+  try {
+    info = await assertExistingSafePath(directoryPath, label);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`${label} must reference an existing directory.`);
+    }
+    throw error;
+  }
+  if (!info.isDirectory()) {
+    throw new Error(`${label} must reference an existing directory.`);
+  }
+  return info;
+}
+
+async function assertMissingDevelopmentPath(targetPath, label) {
+  try {
+    await lstat(targetPath);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`${label} already exists; overwrite is not allowed.`);
+}
+
+async function assertSafeDestinationParent(targetPath, label) {
+  const parentPath = path.dirname(targetPath);
+  await assertExistingSafeDevelopmentDirectory(parentPath, `${label} parent`);
+  return parentPath;
+}
+
+async function withDevelopmentWriteLock(toolName, operation) {
+  const transactionId = createTransactionId();
+  const lockHandle = await acquireProjectLock(transactionId);
+  try {
+    return await operation({ transactionId });
+  } finally {
+    await releaseProjectLock(lockHandle);
+  }
+}
+
+function lineCount(buffer) {
+  if (buffer.length === 0) return 0;
+  let newlines = 0;
+  for (const byte of buffer) {
+    if (byte === 0x0a) newlines += 1;
+  }
+  return newlines + (buffer[buffer.length - 1] === 0x0a ? 0 : 1);
 }
 
 function predominantLineEnding(text) {
@@ -391,6 +455,326 @@ export async function dev_delete_file(input = {}, options = {}) {
     throw new Error("dev_delete_file completed without a deletion result.");
   }
   return result;
+}
+
+function validateCreateFileInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_create_file input must be an object.");
+  }
+  if (typeof input.path !== "string" || !input.path.trim()) {
+    throw new Error("path is required and must be a non-blank string.");
+  }
+  if (typeof input.content !== "string") {
+    throw new Error("content is required and must be a string.");
+  }
+  if (Array.from(input.content).length > DEV_CREATE_FILE_MAX_TEXT_CHARACTERS) {
+    throw new Error(
+      `content must be at most ${DEV_CREATE_FILE_MAX_TEXT_CHARACTERS} characters.`,
+    );
+  }
+}
+
+function encodeCreateFileContent(content) {
+  const encoded = Buffer.from(content, "utf8");
+  if (encoded.length > DEV_CREATE_FILE_MAX_BYTES) {
+    throw new Error(`content exceeds the ${DEV_CREATE_FILE_MAX_BYTES}-byte create limit.`);
+  }
+  const decoded = decodeText(encoded, "content");
+  if (decoded !== content) {
+    throw new Error("content must be losslessly encodable as UTF-8 text.");
+  }
+  return encoded;
+}
+
+export async function dev_create_file(input = {}) {
+  validateCreateFileInput(input);
+  const filePath = resolveDevelopmentPatchPath(input.path, "path");
+  if (!isSupportedTextPath(filePath)) {
+    throw new Error("path must reference a supported UTF-8 text file.");
+  }
+  const content = encodeCreateFileContent(input.content);
+
+  return withDevelopmentWriteLock("dev_create_file", async ({ transactionId }) => {
+    await assertSafeDestinationParent(filePath, "path");
+    await assertMissingDevelopmentPath(filePath, "path");
+
+    const tempPath = path.join(
+      path.dirname(filePath),
+      `.${path.basename(filePath)}.${transactionId}.create.tmp`,
+    );
+    let handle = null;
+    let targetLinked = false;
+    try {
+      handle = await open(tempPath, "wx");
+      await handle.writeFile(content);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+
+      await link(tempPath, filePath);
+      targetLinked = true;
+      await unlink(tempPath);
+    } catch (error) {
+      if (handle) await handle.close().catch(() => {});
+      await unlink(tempPath).catch(() => {});
+      if (targetLinked) await unlink(filePath).catch(() => {});
+      if (error.code === "EEXIST") {
+        throw new Error("path already exists; overwrite is not allowed.");
+      }
+      throw error;
+    }
+
+    const info = await assertExistingSafePath(filePath, "path");
+    if (!info.isFile()) {
+      await unlink(filePath).catch(() => {});
+      throw new Error("created path is not a regular file.");
+    }
+    const verified = await readFile(filePath);
+    decodeText(verified, "path");
+    if (!verified.equals(content)) {
+      await unlink(filePath).catch(() => {});
+      throw new Error("created file verification failed.");
+    }
+    return {
+      ok: true,
+      created: true,
+      path: normalizeProjectPath(filePath),
+      bytes: verified.length,
+      sha256: sha256(verified),
+      create_semantics: "exclusive_temp_write_then_no_overwrite_link",
+    };
+  });
+}
+
+function validateCreateDirectoryInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_create_directory input must be an object.");
+  }
+  if (typeof input.path !== "string" || !input.path.trim()) {
+    throw new Error("path is required and must be a non-blank string.");
+  }
+}
+
+export async function dev_create_directory(input = {}) {
+  validateCreateDirectoryInput(input);
+  const directoryPath = resolveDevelopmentPatchPath(input.path, "path");
+
+  return withDevelopmentWriteLock("dev_create_directory", async () => {
+    await assertSafeDestinationParent(directoryPath, "path");
+    await assertMissingDevelopmentPath(directoryPath, "path");
+    try {
+      await mkdir(directoryPath, { recursive: false });
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error("path already exists; overwrite is not allowed.");
+      }
+      throw error;
+    }
+    const info = await assertExistingSafePath(directoryPath, "path");
+    if (!info.isDirectory()) {
+      throw new Error("created path is not a directory.");
+    }
+    return {
+      ok: true,
+      created: true,
+      path: normalizeProjectPath(directoryPath),
+      type: "directory",
+      recursive: false,
+    };
+  });
+}
+
+function validateMovePathInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_move_path input must be an object.");
+  }
+  if (typeof input.sourcePath !== "string" || !input.sourcePath.trim()) {
+    throw new Error("sourcePath is required and must be a non-blank string.");
+  }
+  if (typeof input.destinationPath !== "string" || !input.destinationPath.trim()) {
+    throw new Error("destinationPath is required and must be a non-blank string.");
+  }
+  if (
+    input.expectedSha256 !== undefined
+    && input.expectedSha256 !== null
+    && !sha256Pattern.test(String(input.expectedSha256).toLowerCase())
+  ) {
+    throw new Error("expectedSha256 must be exactly 64 hexadecimal characters.");
+  }
+}
+
+async function assertExistingMoveFile(filePath, label) {
+  let info;
+  try {
+    info = await assertExistingSafePath(filePath, label);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`${label} must reference an existing file.`);
+    }
+    throw error;
+  }
+  if (info.isDirectory()) {
+    throw new Error("dev_move_path v1 supports approved regular files only; directory move is not supported.");
+  }
+  if (!info.isFile()) {
+    throw new Error(`${label} must reference an existing regular file.`);
+  }
+  if (!isSupportedTextPath(filePath)) {
+    throw new Error(`${label} must reference a supported UTF-8 text file.`);
+  }
+  if (info.size > DEV_APPLY_PATCH_MAX_BYTES) {
+    throw new Error(`${label} exceeds the ${DEV_APPLY_PATCH_MAX_BYTES}-byte move limit.`);
+  }
+  return info;
+}
+
+export async function dev_move_path(input = {}) {
+  validateMovePathInput(input);
+  const sourcePath = resolveDevelopmentPatchPath(input.sourcePath, "sourcePath");
+  const destinationPath = resolveDevelopmentPatchPath(input.destinationPath, "destinationPath");
+  if (!isSupportedTextPath(destinationPath)) {
+    throw new Error("destinationPath must reference a supported UTF-8 text file.");
+  }
+  if (sourcePath === destinationPath) {
+    throw new Error("sourcePath and destinationPath must be different.");
+  }
+  const expectedSha256 = input.expectedSha256 === undefined || input.expectedSha256 === null
+    ? null
+    : input.expectedSha256.toLowerCase();
+
+  return withDevelopmentWriteLock("dev_move_path", async () => {
+    const sourceInfo = await assertExistingMoveFile(sourcePath, "sourcePath");
+    await assertSafeDestinationParent(destinationPath, "destinationPath");
+    await assertMissingDevelopmentPath(destinationPath, "destinationPath");
+
+    const sourceContent = await readFile(sourcePath);
+    decodeText(sourceContent, "sourcePath");
+    const beforeSha256 = sha256(sourceContent);
+    if (expectedSha256 && beforeSha256 !== expectedSha256) {
+      throw new Error(`expectedSha256 mismatch: current file sha256 is ${beforeSha256}.`);
+    }
+
+    let destinationLinked = false;
+    try {
+      await link(sourcePath, destinationPath);
+      destinationLinked = true;
+      const destinationInfo = await assertExistingSafePath(destinationPath, "destinationPath");
+      if (!destinationInfo.isFile()) {
+        throw new Error("destinationPath is not a regular file after move preparation.");
+      }
+      const destinationContent = await readFile(destinationPath);
+      decodeText(destinationContent, "destinationPath");
+      if (sha256(destinationContent) !== beforeSha256) {
+        throw new Error("destination verification failed before source removal.");
+      }
+      await unlink(sourcePath);
+      destinationLinked = false;
+    } catch (error) {
+      if (destinationLinked) {
+        try {
+          await unlink(destinationPath);
+        } catch (rollbackError) {
+          throw new Error(
+            `${error.message}; destination rollback failed: ${rollbackError.message}`,
+          );
+        }
+      }
+      if (error.code === "EEXIST") {
+        throw new Error("destinationPath already exists; overwrite is not allowed.");
+      }
+      throw error;
+    }
+
+    return {
+      ok: true,
+      moved: true,
+      source_path: normalizeProjectPath(sourcePath),
+      destination_path: normalizeProjectPath(destinationPath),
+      bytes: sourceInfo.size,
+      sha256: beforeSha256,
+      source_exists: false,
+      destination_exists: true,
+      move_semantics: "file_only_hardlink_then_unlink_no_overwrite",
+    };
+  });
+}
+
+function validateGetFileInfoInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_get_file_info input must be an object.");
+  }
+  if (typeof input.path !== "string" || !input.path.trim()) {
+    throw new Error("path is required and must be a non-blank string.");
+  }
+}
+
+export async function dev_get_file_info(input = {}) {
+  validateGetFileInfoInput(input);
+  const targetPath = resolveDevelopmentPatchPath(input.path, "path");
+  let rawInfo;
+  try {
+    rawInfo = await lstat(targetPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    await assertSafeDestinationParent(targetPath, "path");
+    return {
+      path: normalizeProjectPath(targetPath),
+      exists: false,
+      type: null,
+      size: null,
+      sha256: null,
+      line_count: null,
+      modified_time: null,
+      is_symlink: false,
+      is_junction: false,
+      protected: false,
+      writable: true,
+      classification: "approved_development_path",
+    };
+  }
+
+  const info = await assertExistingSafePath(targetPath, "path");
+  if (info.isDirectory()) {
+    return {
+      path: normalizeProjectPath(targetPath),
+      exists: true,
+      type: "directory",
+      size: info.size,
+      sha256: null,
+      line_count: null,
+      modified_time: info.mtime.toISOString(),
+      is_symlink: false,
+      is_junction: false,
+      protected: false,
+      writable: true,
+      classification: "approved_development_path",
+    };
+  }
+  if (!info.isFile()) {
+    throw new Error("path must reference a regular file or directory.");
+  }
+  if (!isSupportedTextPath(targetPath)) {
+    throw new Error("path must reference a supported UTF-8 text file or directory.");
+  }
+  if (info.size > DEV_FILE_INFO_MAX_BYTES) {
+    throw new Error(`path exceeds the ${DEV_FILE_INFO_MAX_BYTES}-byte file-info limit.`);
+  }
+  const content = await readFile(targetPath);
+  decodeText(content, "path");
+  return {
+    path: normalizeProjectPath(targetPath),
+    exists: true,
+    type: "file",
+    size: info.size,
+    sha256: sha256(content),
+    line_count: lineCount(content),
+    modified_time: info.mtime.toISOString(),
+    is_symlink: rawInfo.isSymbolicLink(),
+    is_junction: false,
+    protected: false,
+    writable: true,
+    classification: "approved_development_path",
+  };
 }
 
 export const DEV_GIT_COMMIT_MAX_PATHS = 100;

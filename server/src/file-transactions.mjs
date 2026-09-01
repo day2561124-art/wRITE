@@ -46,7 +46,7 @@ async function readOptionalBuffer(filePath) {
   }
 }
 
-async function acquireProjectLock(transactionId) {
+export async function acquireProjectLock(transactionId) {
   await mkdir(lockDir, { recursive: true });
   const deadline = Date.now() + lockTimeoutMs;
   while (Date.now() < deadline) {
@@ -75,7 +75,7 @@ async function acquireProjectLock(transactionId) {
   throw new Error("Could not acquire the project write lock within 15 seconds.");
 }
 
-async function releaseProjectLock(handle) {
+export async function releaseProjectLock(handle) {
   try {
     await handle.close();
   } finally {

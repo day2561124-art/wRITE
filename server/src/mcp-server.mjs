@@ -141,12 +141,17 @@ import {
 } from "./mcp-development-readonly-tools.mjs";
 import {
   DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS,
+  DEV_CREATE_FILE_MAX_TEXT_CHARACTERS,
   DEV_GIT_COMMIT_MAX_PATHS,
   DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
   dev_apply_patch,
+  dev_create_directory,
+  dev_create_file,
   dev_delete_file,
+  dev_get_file_info,
   dev_git_commit,
   dev_git_push,
+  dev_move_path,
 } from "./mcp-development-write-tools.mjs";
 import {
   DEV_TEST_SUITES,
@@ -729,6 +734,15 @@ function summarizeToolArguments(args, toolName = "") {
   }
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
+    if (toolName === "dev_create_file" && key === "content" && typeof value === "string") {
+      summary[key] = {
+        type: "string",
+        length: value.length,
+        sha256: hashText(value),
+        sensitive_payload_preview_omitted: true,
+      };
+      continue;
+    }
     summary[key] = summarizeInputValue(value, key);
   }
   return summary;
@@ -916,6 +930,58 @@ function devApplyPatchAuditChange(tool, result) {
   }
 }
 
+function devAdditionalFilesystemAuditChanges(tool, result) {
+  if (result?.isError === true) return [];
+  if (![
+    "dev_create_file",
+    "dev_create_directory",
+    "dev_move_path",
+  ].includes(tool.name)) return [];
+  try {
+    const payload = JSON.parse(result?.content?.[0]?.text ?? "{}");
+    if (tool.name === "dev_create_file") {
+      if (
+        payload.created !== true
+        || typeof payload.path !== "string"
+        || typeof payload.sha256 !== "string"
+      ) return [];
+      return [{
+        path: payload.path,
+        previous: { exists: false, bytes: 0, sha256: null },
+        current: { exists: true, bytes: payload.bytes, sha256: payload.sha256 },
+      }];
+    }
+    if (tool.name === "dev_create_directory") {
+      if (payload.created !== true || typeof payload.path !== "string") return [];
+      return [{
+        path: payload.path,
+        previous: { exists: false, bytes: 0, sha256: null },
+        current: { exists: true, bytes: 0, sha256: null, type: "directory" },
+      }];
+    }
+    if (
+      payload.moved !== true
+      || typeof payload.source_path !== "string"
+      || typeof payload.destination_path !== "string"
+      || typeof payload.sha256 !== "string"
+    ) return [];
+    return [
+      {
+        path: payload.source_path,
+        previous: { exists: true, bytes: payload.bytes, sha256: payload.sha256 },
+        current: { exists: false, bytes: 0, sha256: null },
+      },
+      {
+        path: payload.destination_path,
+        previous: { exists: false, bytes: 0, sha256: null },
+        current: { exists: true, bytes: payload.bytes, sha256: payload.sha256 },
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 async function auditedToolCall(tool, args, actor) {
   const before = await auditSnapshotMap();
   const calledAt = new Date();
@@ -961,6 +1027,11 @@ async function auditedToolCall(tool, args, actor) {
   const patchChange = devApplyPatchAuditChange(tool, result);
   if (patchChange && !changed.some((item) => item.path === patchChange.path)) {
     changed.push(patchChange);
+  }
+  for (const filesystemChange of devAdditionalFilesystemAuditChanges(tool, result)) {
+    if (!changed.some((item) => item.path === filesystemChange.path)) {
+      changed.push(filesystemChange);
+    }
   }
   const auditRecord = {
     audit_id: auditId,
@@ -1602,6 +1673,58 @@ const toolDefinitions = [
       },
     }, ["path"]),
     handler: async (args) => jsonContent(await dev_read_file_range(args)),
+  },
+  {
+    name: "dev_get_file_info",
+    description: "Read bounded metadata for one approved repository development path without exposing .git internals, secrets, protected durable state, or symlink/junction escapes.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+    }, ["path"]),
+    handler: async (args) => jsonContent(await dev_get_file_info(args)),
+  },
+  {
+    name: "dev_create_file",
+    description: "Exclusively create one new approved repository development UTF-8 text file; existing targets are never overwritten and protected, secret, generated, or symlink-escaped paths are blocked.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+      content: {
+        type: "string",
+        maxLength: DEV_CREATE_FILE_MAX_TEXT_CHARACTERS,
+        "x-allow-empty": true,
+      },
+    }, ["path", "content"]),
+    handler: async (args) => jsonContent(await dev_create_file(args)),
+  },
+  {
+    name: "dev_create_directory",
+    description: "Create one new approved repository development directory with a pre-existing safe parent; recursive creation, caller-controlled modes, protected paths, and symlink/junction escapes are blocked.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+    }, ["path"]),
+    handler: async (args) => jsonContent(await dev_create_directory(args)),
+  },
+  {
+    name: "dev_move_path",
+    description: "Move one existing approved repository development UTF-8 text file to a new approved path without overwrite; v1 intentionally rejects directory moves and supports optional SHA-256 concurrency protection.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      sourcePath: { type: "string" },
+      destinationPath: { type: "string" },
+      expectedSha256: {
+        type: "string",
+        minLength: 64,
+        maxLength: 64,
+        pattern: "^[A-Fa-f0-9]{64}$",
+      },
+    }, ["sourcePath", "destinationPath"]),
+    handler: async (args) => jsonContent(await dev_move_path(args)),
   },
   {
     name: "dev_apply_patch",
@@ -3557,9 +3680,13 @@ const chatgptPublicToolNames = new Set([
 const chatgptDeveloperToolNames = new Set([
   ...chatgptPublicToolNames,
   "dev_read_file_range",
+  "dev_get_file_info",
   "dev_git_status",
   "dev_git_diff",
   "dev_git_diff_check",
+  "dev_create_file",
+  "dev_create_directory",
+  "dev_move_path",
   "dev_apply_patch",
   "dev_delete_file",
   "dev_run_tests",
@@ -3588,7 +3715,11 @@ const permissionSources = {
   dev_list_directory: ["repository_directory"],
   dev_read_file: ["repository_text_file"],
   dev_read_file_range: ["repository_large_text_file"],
+  dev_get_file_info: ["repository_development_path_metadata"],
   dev_search_files: ["repository_text_files"],
+  dev_create_file: ["repository_development_text_file", "mcp_client_create_content"],
+  dev_create_directory: ["repository_development_directory", "mcp_client_create_request"],
+  dev_move_path: ["repository_development_text_file", "mcp_client_move_request"],
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
   dev_delete_file: ["repository_development_text_file", "mcp_client_delete_request"],
   dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],

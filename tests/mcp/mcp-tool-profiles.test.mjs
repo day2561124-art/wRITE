@@ -68,6 +68,10 @@ const publicToolNames = [
 
 const blockedToolNames = [
   "dev_read_file_range",
+  "dev_get_file_info",
+  "dev_create_file",
+  "dev_create_directory",
+  "dev_move_path",
   "dev_git_status",
   "dev_git_diff",
   "dev_git_diff_check",
@@ -228,13 +232,19 @@ publicToolNames.push(
   "dev_git_diff_check",
   "dev_delete_file",
 );
+publicToolNames.push(
+  "dev_get_file_info",
+  "dev_create_file",
+  "dev_create_directory",
+  "dev_move_path",
+);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
   [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the nine development range/write/test/Git tools",
+  "chatgpt_developer must equal chatgpt_public plus the thirteen development filesystem/range/write/test/Git tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -298,6 +308,87 @@ assert.deepEqual(
   developerRangePermission?.allowed_sources,
   ["repository_large_text_file"],
 );
+
+const developerFileInfoTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_get_file_info",
+);
+assert(developerFileInfoTool, "chatgpt_developer is missing dev_get_file_info");
+assert.equal(developerFileInfoTool.annotations?.readOnlyHint, true);
+assert.equal(developerFileInfoTool.inputSchema?.additionalProperties, false);
+assert.deepEqual(developerFileInfoTool.inputSchema?.required, ["path"]);
+assert.deepEqual(Object.keys(developerFileInfoTool.inputSchema?.properties ?? {}), ["path"]);
+const developerFileInfoPermission = developerFileInfoTool._meta?.["armed-academy/permission"];
+assert.equal(developerFileInfoPermission?.permission_level, "read_only");
+assert.equal(developerFileInfoPermission?.read_or_write, "read");
+assert.equal(developerFileInfoPermission?.risk_level, "read");
+assert.equal(developerFileInfoPermission?.log_required, false);
+assert.equal(developerFileInfoPermission?.can_modify_canon, false);
+assert.equal(developerFileInfoPermission?.can_modify_active_engine, false);
+assert.deepEqual(
+  developerFileInfoPermission?.allowed_sources,
+  ["repository_development_path_metadata"],
+);
+
+for (const [toolName, expectedRequired, expectedProperties, expectedSources] of [
+  [
+    "dev_create_file",
+    ["path", "content"],
+    ["content", "path"],
+    ["repository_development_text_file", "mcp_client_create_content"],
+  ],
+  [
+    "dev_create_directory",
+    ["path"],
+    ["path"],
+    ["repository_development_directory", "mcp_client_create_request"],
+  ],
+  [
+    "dev_move_path",
+    ["sourcePath", "destinationPath"],
+    ["destinationPath", "expectedSha256", "sourcePath"],
+    ["repository_development_text_file", "mcp_client_move_request"],
+  ],
+]) {
+  const filesystemTool = developerList.result.tools.find((tool) => tool.name === toolName);
+  assert(filesystemTool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(filesystemTool.annotations?.readOnlyHint, false);
+  assert.equal(filesystemTool.inputSchema?.type, "object");
+  assert.equal(filesystemTool.inputSchema?.additionalProperties, false);
+  assert.deepEqual(filesystemTool.inputSchema?.required, expectedRequired);
+  assert.deepEqual(
+    Object.keys(filesystemTool.inputSchema?.properties ?? {}).sort(),
+    expectedProperties,
+  );
+  for (const forbiddenField of [
+    "command", "args", "executable", "cwd", "env", "shell", "flags", "mode",
+    "encoding", "overwrite", "force", "recursive", "permissions",
+  ]) {
+    assert.equal(
+      Object.hasOwn(filesystemTool.inputSchema?.properties ?? {}, forbiddenField),
+      false,
+      `${toolName} exposed forbidden field ${forbiddenField}`,
+    );
+  }
+  const permission = filesystemTool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, "write_low_risk");
+  assert.equal(permission?.read_or_write, "write");
+  assert.equal(permission?.risk_level, "low-risk-write");
+  assert.equal(permission?.log_required, true);
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+  assert.deepEqual(permission?.allowed_sources, expectedSources);
+}
+const developerCreateFileTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_create_file",
+);
+assert.equal(developerCreateFileTool.inputSchema.properties.content.maxLength, 262144);
+assert.equal(developerCreateFileTool.inputSchema.properties.content["x-allow-empty"], true);
+const developerMoveTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_move_path",
+);
+assert.equal(developerMoveTool.inputSchema.properties.expectedSha256.pattern, "^[A-Fa-f0-9]{64}$");
 
 const developerDeleteTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_delete_file",
@@ -529,7 +620,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-5, 5);
+publicToolNames.splice(-9, 9);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -573,8 +664,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 49);
-assert.equal(fullNames.length, 107);
+assert.equal(developerNames.length, 53);
+assert.equal(fullNames.length, 111);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -836,6 +927,12 @@ publicToolNames.push(
   "dev_git_diff_check",
   "dev_delete_file",
 );
+publicToolNames.push(
+  "dev_get_file_info",
+  "dev_create_file",
+  "dev_create_directory",
+  "dev_move_path",
+);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -852,7 +949,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-5, 5);
+  publicToolNames.splice(-9, 9);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -861,5 +958,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 9}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 13}).`,
 );

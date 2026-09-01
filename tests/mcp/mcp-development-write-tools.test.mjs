@@ -15,8 +15,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEV_APPLY_PATCH_MAX_BYTES,
+  DEV_CREATE_FILE_MAX_TEXT_CHARACTERS,
   dev_apply_patch,
+  dev_create_directory,
+  dev_create_file,
   dev_delete_file,
+  dev_get_file_info,
+  dev_move_path,
 } from "../../server/src/mcp-development-write-tools.mjs";
 import {
   DEV_READ_MAX_BYTES,
@@ -132,6 +137,219 @@ const applyPatch = (input, options = transactionOptions) => dev_apply_patch(inpu
 const deleteFile = (input, options = transactionOptions) => dev_delete_file(input, options);
 
 try {
+  const lifecycleDirectory = path.join(fixtureRoot, "filesystem-lifecycle");
+  const createdDirectory = await dev_create_directory({
+    path: projectRelative(lifecycleDirectory),
+  });
+  assert.equal(createdDirectory.ok, true);
+  assert.equal(createdDirectory.created, true);
+  assert.equal(createdDirectory.type, "directory");
+  assert.equal(createdDirectory.recursive, false);
+  assert.equal(createdDirectory.path, projectRelative(lifecycleDirectory));
+  await expectRejected(
+    dev_create_directory({ path: projectRelative(lifecycleDirectory) }),
+    /already exists; overwrite is not allowed/u,
+  );
+
+  const directoryInfo = await dev_get_file_info({ path: projectRelative(lifecycleDirectory) });
+  assert.equal(directoryInfo.exists, true);
+  assert.equal(directoryInfo.type, "directory");
+  assert.equal(directoryInfo.path, projectRelative(lifecycleDirectory));
+  assert.equal(directoryInfo.sha256, null);
+  assert.equal(directoryInfo.line_count, null);
+  assert.equal(directoryInfo.is_symlink, false);
+  assert.equal(directoryInfo.protected, false);
+  assert.equal(directoryInfo.writable, true);
+  assert.equal(directoryInfo.classification, "approved_development_path");
+
+  const createdFilePath = path.join(lifecycleDirectory, "created.txt");
+  const createdFileContent = "alpha\n繁體中文 UTF-8\nomega\n";
+  const createdFile = await dev_create_file({
+    path: projectRelative(createdFilePath),
+    content: createdFileContent,
+  });
+  const createdFileBuffer = await readFile(createdFilePath);
+  assert.equal(createdFile.ok, true);
+  assert.equal(createdFile.created, true);
+  assert.equal(createdFile.path, projectRelative(createdFilePath));
+  assert.equal(createdFile.bytes, createdFileBuffer.length);
+  assert.equal(createdFile.sha256, sha256(createdFileBuffer));
+  assert.equal(createdFileBuffer.toString("utf8"), createdFileContent);
+
+  const createdFileInfo = await dev_get_file_info({ path: projectRelative(createdFilePath) });
+  assert.equal(createdFileInfo.exists, true);
+  assert.equal(createdFileInfo.type, "file");
+  assert.equal(createdFileInfo.size, createdFileBuffer.length);
+  assert.equal(createdFileInfo.sha256, sha256(createdFileBuffer));
+  assert.equal(createdFileInfo.line_count, 3);
+  assert.match(createdFileInfo.modified_time, /^\d{4}-\d{2}-\d{2}T/u);
+  assert.equal(createdFileInfo.is_symlink, false);
+  assert.equal(createdFileInfo.protected, false);
+  assert.equal(createdFileInfo.writable, true);
+
+  const createdFileBeforeOverwriteAttempt = await readFile(createdFilePath);
+  await expectRejected(
+    dev_create_file({
+      path: projectRelative(createdFilePath),
+      content: "overwrite attempt\n",
+    }),
+    /already exists; overwrite is not allowed/u,
+  );
+  assert.deepEqual(await readFile(createdFilePath), createdFileBeforeOverwriteAttempt);
+
+  const missingInfoPath = path.join(lifecycleDirectory, "not-created.txt");
+  const missingInfo = await dev_get_file_info({ path: projectRelative(missingInfoPath) });
+  assert.equal(missingInfo.exists, false);
+  assert.equal(missingInfo.type, null);
+  assert.equal(missingInfo.size, null);
+  assert.equal(missingInfo.sha256, null);
+  assert.equal(missingInfo.line_count, null);
+  assert.equal(missingInfo.writable, true);
+
+  const movedFilePath = path.join(lifecycleDirectory, "moved.txt");
+  const moved = await dev_move_path({
+    sourcePath: projectRelative(createdFilePath),
+    destinationPath: projectRelative(movedFilePath),
+    expectedSha256: createdFile.sha256,
+  });
+  assert.equal(moved.ok, true);
+  assert.equal(moved.moved, true);
+  assert.equal(moved.source_path, projectRelative(createdFilePath));
+  assert.equal(moved.destination_path, projectRelative(movedFilePath));
+  assert.equal(moved.sha256, createdFile.sha256);
+  assert.equal(moved.source_exists, false);
+  assert.equal(moved.destination_exists, true);
+  assert.deepEqual(await readFile(movedFilePath), createdFileBuffer);
+  await assert.rejects(
+    () => readFile(createdFilePath),
+    (error) => error?.code === "ENOENT",
+  );
+
+  const destinationExistsPath = path.join(lifecycleDirectory, "destination-exists.txt");
+  const destinationBefore = Buffer.from("destination stays unchanged\n", "utf8");
+  await writeFile(destinationExistsPath, destinationBefore);
+  const moveSourcePath = path.join(lifecycleDirectory, "move-source.txt");
+  const moveSourceBefore = Buffer.from("source stays unchanged\n", "utf8");
+  await writeFile(moveSourcePath, moveSourceBefore);
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(moveSourcePath),
+      destinationPath: projectRelative(destinationExistsPath),
+    }),
+    /already exists; overwrite is not allowed/u,
+  );
+  assert.deepEqual(await readFile(destinationExistsPath), destinationBefore);
+  assert.deepEqual(await readFile(moveSourcePath), moveSourceBefore);
+
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(path.join(lifecycleDirectory, "missing-source.txt")),
+      destinationPath: projectRelative(path.join(lifecycleDirectory, "missing-source-destination.txt")),
+    }),
+    /sourcePath must reference an existing file/u,
+  );
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(moveSourcePath),
+      destinationPath: projectRelative(path.join(lifecycleDirectory, "stale-sha-destination.txt")),
+      expectedSha256: "0".repeat(64),
+    }),
+    /expectedSha256 mismatch/u,
+  );
+  assert.deepEqual(await readFile(moveSourcePath), moveSourceBefore);
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(lifecycleDirectory),
+      destinationPath: projectRelative(path.join(fixtureRoot, "filesystem-lifecycle-moved.txt")),
+    }),
+    /supports approved regular files only; directory move is not supported/u,
+  );
+
+  await expectRejected(
+    dev_create_file({ path: "../escape.txt", content: "blocked\n" }),
+    /path traversal/u,
+  );
+  await expectRejected(
+    dev_create_directory({ path: "../escape-directory" }),
+    /path traversal/u,
+  );
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(moveSourcePath),
+      destinationPath: "../escape-move.txt",
+    }),
+    /path traversal/u,
+  );
+  await expectRejected(
+    dev_get_file_info({ path: "../package.json" }),
+    /path traversal/u,
+  );
+
+  for (const protectedPath of [
+    "data/canon_db/dev-create-file.txt",
+    ".git/dev-create-file.txt",
+    "tests/build/dev-create-file.txt",
+  ]) {
+    await expectRejected(
+      dev_create_file({ path: protectedPath, content: "blocked\n" }),
+      /protected from development writes|cannot access \.git internals|dependency, build, runtime, generated, or visual asset paths/u,
+    );
+  }
+  await expectRejected(
+    dev_create_directory({ path: "data/dev-create-directory" }),
+    /protected from development writes/u,
+  );
+  await expectRejected(
+    dev_get_file_info({ path: "data/canon_db/active_engine.md" }),
+    /protected from development writes/u,
+  );
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(moveSourcePath),
+      destinationPath: "data/dev-move.txt",
+    }),
+    /protected from development writes/u,
+  );
+  await expectRejected(
+    dev_move_path({
+      sourcePath: "data/canon_db/active_engine.md",
+      destinationPath: projectRelative(path.join(lifecycleDirectory, "protected-source.txt")),
+    }),
+    /protected from development writes/u,
+  );
+
+  const lifecycleSecretPath = path.join(lifecycleDirectory, ".env.local");
+  await expectRejected(
+    dev_create_file({ path: projectRelative(lifecycleSecretPath), content: "TOKEN=blocked\n" }),
+    /cannot access secret files/u,
+  );
+  await expectRejected(
+    dev_create_directory({ path: projectRelative(path.join(lifecycleDirectory, ".env.secret")) }),
+    /cannot access secret files/u,
+  );
+
+  await expectRejected(
+    dev_create_file({
+      path: projectRelative(path.join(lifecycleDirectory, "oversized-create.txt")),
+      content: "x".repeat(DEV_CREATE_FILE_MAX_TEXT_CHARACTERS + 1),
+    }),
+    /content must be at most \d+ characters/u,
+  );
+  await expectRejected(
+    dev_create_file({
+      path: projectRelative(path.join(lifecycleDirectory, "nul-create.txt")),
+      content: "alpha\u0000omega",
+    }),
+    /content must reference a UTF-8 text file/u,
+  );
+  await expectRejected(
+    dev_create_file({
+      path: projectRelative(path.join(lifecycleDirectory, "unsupported.png")),
+      content: "not actually an image",
+    }),
+    /supported UTF-8 text file/u,
+  );
+
   const successPath = path.join(fixtureRoot, "success.txt");
   const successBefore = Buffer.from("alpha\nbeta\ngamma\n", "utf8");
   await writeFile(successPath, successBefore);
@@ -293,6 +511,33 @@ try {
   );
   assert.deepEqual(await readFile(externalFile), externalBefore);
 
+  await expectRejected(
+    dev_create_file({
+      path: projectRelative(path.join(externalLink, "created-through-link.txt")),
+      content: "blocked\n",
+    }),
+    /symbolic links|outside the project/u,
+  );
+  await expectRejected(
+    dev_create_directory({
+      path: projectRelative(path.join(externalLink, "directory-through-link")),
+    }),
+    /symbolic links|outside the project/u,
+  );
+  await expectRejected(
+    dev_move_path({
+      sourcePath: projectRelative(moveSourcePath),
+      destinationPath: projectRelative(path.join(externalLink, "moved-through-link.txt")),
+    }),
+    /symbolic links|outside the project/u,
+  );
+  await expectRejected(
+    dev_get_file_info({ path: projectRelative(externalLink) }),
+    /symbolic links|outside the project/u,
+  );
+  assert.deepEqual(await readFile(externalFile), externalBefore);
+  assert.deepEqual(await readFile(moveSourcePath), moveSourceBefore);
+
   const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
   const activeEngineBefore = await readFile(activeEnginePath);
   await expectRejected(
@@ -447,6 +692,10 @@ try {
   const mcpDeletePath = path.join(fixtureRoot, "mcp-delete.txt");
   const mcpDeleteBefore = Buffer.from("legacy tool deletion audit\n", "utf8");
   await writeFile(mcpDeletePath, mcpDeleteBefore);
+  const mcpCreatePath = path.join(fixtureRoot, "mcp-create.txt");
+  const mcpCreateContent = "created through MCP filesystem lifecycle\n";
+  const mcpMovePath = path.join(fixtureRoot, "mcp-create-moved.txt");
+  const mcpCreateDirectoryPath = path.join(fixtureRoot, "mcp-created-directory");
   const auditLogBefore = await optionalBuffer(auditLogPath);
   const transactionsBefore = await optionalDirectoryEntries(transactionDir);
   const intentsBefore = await optionalDirectoryEntries(auditIntentDir);
@@ -511,6 +760,83 @@ try {
       () => readFile(mcpDeletePath),
       (error) => error?.code === "ENOENT",
     );
+
+    const createResponse = await runMcp("chatgpt_developer", {
+      jsonrpc: "2.0",
+      id: "dev-create-audit",
+      method: "tools/call",
+      params: {
+        name: "dev_create_file",
+        arguments: {
+          path: projectRelative(mcpCreatePath),
+          content: mcpCreateContent,
+        },
+        _meta: { actor: "dev-wr-create-audit-test" },
+      },
+    });
+    assert.equal(createResponse.error, undefined);
+    assert.equal(createResponse.result?.isError, undefined);
+    const createPayload = JSON.parse(createResponse.result.content[0].text);
+    assert.equal(createPayload.created, true);
+    assert.equal(createPayload.sha256, sha256(Buffer.from(mcpCreateContent, "utf8")));
+    assert.equal(await readFile(mcpCreatePath, "utf8"), mcpCreateContent);
+
+    const createDirectoryResponse = await runMcp("chatgpt_developer", {
+      jsonrpc: "2.0",
+      id: "dev-create-directory-audit",
+      method: "tools/call",
+      params: {
+        name: "dev_create_directory",
+        arguments: { path: projectRelative(mcpCreateDirectoryPath) },
+        _meta: { actor: "dev-wr-create-directory-audit-test" },
+      },
+    });
+    assert.equal(createDirectoryResponse.error, undefined);
+    assert.equal(createDirectoryResponse.result?.isError, undefined);
+    const createDirectoryPayload = JSON.parse(createDirectoryResponse.result.content[0].text);
+    assert.equal(createDirectoryPayload.created, true);
+    assert.equal(createDirectoryPayload.type, "directory");
+
+    const moveResponse = await runMcp("chatgpt_developer", {
+      jsonrpc: "2.0",
+      id: "dev-move-audit",
+      method: "tools/call",
+      params: {
+        name: "dev_move_path",
+        arguments: {
+          sourcePath: projectRelative(mcpCreatePath),
+          destinationPath: projectRelative(mcpMovePath),
+          expectedSha256: createPayload.sha256,
+        },
+        _meta: { actor: "dev-wr-move-audit-test" },
+      },
+    });
+    assert.equal(moveResponse.error, undefined);
+    assert.equal(moveResponse.result?.isError, undefined);
+    const movePayload = JSON.parse(moveResponse.result.content[0].text);
+    assert.equal(movePayload.moved, true);
+    assert.equal(movePayload.sha256, createPayload.sha256);
+    assert.equal(await readFile(mcpMovePath, "utf8"), mcpCreateContent);
+    await assert.rejects(
+      () => readFile(mcpCreatePath),
+      (error) => error?.code === "ENOENT",
+    );
+
+    const infoResponse = await runMcp("chatgpt_developer", {
+      jsonrpc: "2.0",
+      id: "dev-info-readonly",
+      method: "tools/call",
+      params: {
+        name: "dev_get_file_info",
+        arguments: { path: projectRelative(mcpMovePath) },
+      },
+    });
+    assert.equal(infoResponse.error, undefined);
+    assert.equal(infoResponse.result?.isError, undefined);
+    const infoPayload = JSON.parse(infoResponse.result.content[0].text);
+    assert.equal(infoPayload.exists, true);
+    assert.equal(infoPayload.type, "file");
+    assert.equal(infoPayload.sha256, createPayload.sha256);
 
     const mcpFailureFixtures = [
       {
@@ -605,6 +931,50 @@ try {
       deleteRecord.new_version?.[projectRelative(mcpDeletePath)]?.exists,
       false,
     );
+
+    const createRecord = records.find((item) => item.actor === "dev-wr-create-audit-test");
+    assert(createRecord, "dev_create_file did not append an MCP audit record");
+    assert.equal(createRecord.tool_name, "dev_create_file");
+    assert.equal(createRecord.risk, "low-risk-write");
+    assert.equal(createRecord.status, "completed");
+    assert(createRecord.affected_paths.includes(projectRelative(mcpCreatePath)));
+    assert.equal(createRecord.input_summary?.content?.sensitive_payload_preview_omitted, true);
+    assert.equal(Object.hasOwn(createRecord.input_summary?.content ?? {}, "preview"), false);
+    assert.equal(
+      createRecord.previous_version?.[projectRelative(mcpCreatePath)]?.exists,
+      false,
+    );
+    assert.equal(
+      createRecord.new_version?.[projectRelative(mcpCreatePath)]?.sha256,
+      createPayload.sha256,
+    );
+
+    const createDirectoryRecord = records.find(
+      (item) => item.actor === "dev-wr-create-directory-audit-test",
+    );
+    assert(createDirectoryRecord, "dev_create_directory did not append an MCP audit record");
+    assert.equal(createDirectoryRecord.tool_name, "dev_create_directory");
+    assert.equal(createDirectoryRecord.status, "completed");
+    assert(createDirectoryRecord.affected_paths.includes(projectRelative(mcpCreateDirectoryPath)));
+    assert.equal(
+      createDirectoryRecord.previous_version?.[projectRelative(mcpCreateDirectoryPath)]?.exists,
+      false,
+    );
+    assert.equal(
+      createDirectoryRecord.new_version?.[projectRelative(mcpCreateDirectoryPath)]?.exists,
+      true,
+    );
+
+    const moveRecord = records.find((item) => item.actor === "dev-wr-move-audit-test");
+    assert(moveRecord, "dev_move_path did not append an MCP audit record");
+    assert.equal(moveRecord.tool_name, "dev_move_path");
+    assert.equal(moveRecord.status, "completed");
+    assert(moveRecord.affected_paths.includes(projectRelative(mcpCreatePath)));
+    assert(moveRecord.affected_paths.includes(projectRelative(mcpMovePath)));
+    assert.equal(moveRecord.previous_version?.[projectRelative(mcpCreatePath)]?.exists, true);
+    assert.equal(moveRecord.new_version?.[projectRelative(mcpCreatePath)]?.exists, false);
+    assert.equal(moveRecord.previous_version?.[projectRelative(mcpMovePath)]?.exists, false);
+    assert.equal(moveRecord.new_version?.[projectRelative(mcpMovePath)]?.sha256, movePayload.sha256);
 
     for (const fixture of mcpFailureFixtures) {
       const failureRecord = records.find((item) => item.actor === fixture.actor);
