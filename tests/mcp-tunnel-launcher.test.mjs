@@ -223,6 +223,7 @@ async function verifyLauncherMcpProfile({
   expectRunTests,
   expectCommit,
   expectPush,
+  expectReload,
   label,
 }) {
   const preferredPort = 8787;
@@ -288,6 +289,71 @@ async function verifyLauncherMcpProfile({
       names.includes("dev_git_push") === expectPush,
       `${label} launcher profile dev_git_push exposure was ${names.includes("dev_git_push")}.`,
     );
+    assert(
+      names.includes("dev_mcp_reload") === expectReload,
+      `${label} launcher profile dev_mcp_reload exposure was ${names.includes("dev_mcp_reload")}.`,
+    );
+
+    if (!expectReload) {
+      let blockedError = null;
+      try {
+        await client.callTool({ name: "dev_mcp_reload", arguments: {} });
+      } catch (error) {
+        blockedError = error;
+      }
+      assert(blockedError, "chatgpt_public crafted dev_mcp_reload call was not blocked.");
+      assert(
+        String(blockedError.message ?? blockedError).includes("Tool not allowed by MCP tool profile chatgpt_public: dev_mcp_reload"),
+        `chatgpt_public dev_mcp_reload rejection drifted: ${blockedError}`,
+      );
+    }
+
+    if (expectReload) {
+      const reloadTool = listed.tools.find((tool) => tool.name === "dev_mcp_reload");
+      assert(reloadTool, `${label} launcher profile is missing dev_mcp_reload metadata.`);
+      assert(reloadTool.annotations?.readOnlyHint === false, "dev_mcp_reload must be a write-like runtime action.");
+      assert(reloadTool.inputSchema?.additionalProperties === false, "dev_mcp_reload schema must reject unknown arguments.");
+      assert(Object.keys(reloadTool.inputSchema?.properties ?? {}).length === 0, "dev_mcp_reload must expose no caller-controlled process arguments.");
+      assert(
+        reloadTool._meta?.["armed-academy/permission"]?.permission_level === "write_low_risk",
+        "dev_mcp_reload permission must be write_low_risk.",
+      );
+
+      let invalidReloadError = null;
+      try {
+        await client.callTool({
+          name: "dev_mcp_reload",
+          arguments: { command: "restart" },
+        });
+      } catch (error) {
+        invalidReloadError = error;
+      }
+      assert(invalidReloadError, "dev_mcp_reload accepted caller-controlled process arguments.");
+      assert(
+        String(invalidReloadError.message ?? invalidReloadError).includes("dev_mcp_reload does not accept arguments."),
+        `dev_mcp_reload invalid-argument rejection drifted: ${invalidReloadError}`,
+      );
+
+      const reloadResponse = await client.callTool({
+        name: "dev_mcp_reload",
+        arguments: {},
+      });
+      assert(reloadResponse.isError !== true, "dev_mcp_reload returned a tool error.");
+      const reloadPayload = JSON.parse(reloadResponse.content?.[0]?.text ?? "{}");
+      assert(reloadPayload.ok === true && reloadPayload.reloaded === true, "dev_mcp_reload did not report a successful reload.");
+      assert(Number.isInteger(reloadPayload.previous_child_pid) && reloadPayload.previous_child_pid > 0, "dev_mcp_reload previous child PID is invalid.");
+      assert(Number.isInteger(reloadPayload.child_pid) && reloadPayload.child_pid > 0, "dev_mcp_reload replacement child PID is invalid.");
+      assert(reloadPayload.child_pid !== reloadPayload.previous_child_pid, "dev_mcp_reload did not replace the MCP child process.");
+      assert(reloadPayload.http_parent_preserved === true, "dev_mcp_reload must preserve the HTTP parent.");
+      assert(reloadPayload.tunnel_preserved === true, "dev_mcp_reload must preserve the tunnel.");
+      assert(reloadPayload.prepared_turn_broker_preserved === true, "dev_mcp_reload must preserve the parent prepared-turn broker.");
+      assert(reloadPayload.child_ephemeral_state_reset === true, "dev_mcp_reload must explicitly report child-local ephemeral state reset.");
+
+      const listedAfterReload = await client.listTools();
+      const namesAfterReload = listedAfterReload.tools.map((tool) => tool.name);
+      assert(namesAfterReload.length === expectedCount, "Tool count drifted after dev_mcp_reload.");
+      assert(namesAfterReload.includes("dev_mcp_reload"), "dev_mcp_reload disappeared after reloading the child.");
+    }
   } finally {
     if (client) await client.close().catch(() => {});
     if (tunnelStarted) await stopManagedTunnel(logDir).catch(() => {});
@@ -457,13 +523,14 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 49,
+      expectedCount: 54,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
       expectRunTests: true,
       expectCommit: true,
       expectPush: true,
+      expectReload: true,
       label: "default-developer",
     });
     await verifyLauncherMcpProfile({
@@ -478,11 +545,12 @@ async function main() {
       expectRunTests: false,
       expectCommit: false,
       expectPush: false,
+      expectReload: false,
       label: "external-public-override",
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP profile: chatgpt_developer (49 tools, dev_read_file_range/dev_apply_patch/dev_delete_file/dev_run_tests/dev_git_*/dev_git_commit/dev_git_push present)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (54 tools, including parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));

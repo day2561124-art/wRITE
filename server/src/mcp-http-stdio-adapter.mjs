@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
+import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
+import { terminateProcessTree } from './process-control.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
 // and provide helpers to forward JSON-RPC messages via newline framing.
@@ -14,113 +16,155 @@ function encodeMessage(message, framing = 'line') {
 }
 
 export function createStdioSession(options = {}) {
-  const child = spawn(process.execPath, ['server/src/mcp-server.mjs'], {
-    // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
-    // broker. stdout remains exclusively MCP JSON-RPC framing.
-    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    env: {
-      ...process.env,
-      MCP_TOOL_PROFILE: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public',
-    },
-  });
-
-  const detachPreparedTurnBrokerIpc = options.preparedTurnBroker
-    ? attachWorldSimulationPreparedTurnBrokerIpc(
-      child,
-      options.preparedTurnBroker,
-    )
-    : () => {};
-
-  let stdoutBuffer = '';
-
   const listeners = new Map();
+  let child = null;
+  let stdoutBuffer = '';
+  let initializeRequest = null;
+  let initializedNotification = null;
+  let generation = 0;
+  let restarting = false;
+  let closed = false;
 
-  child.stdout.on('data', (chunk) => {
-    stdoutBuffer += chunk.toString('utf8');
+  function notifyPendingListeners(error) {
+    for (const [id, cb] of listeners.entries()) {
+      try { cb(error, null); } catch (listenerError) { console.error('listener threw while handling child failure', listenerError); }
+      listeners.delete(id);
+    }
+  }
 
-    // Parse as many complete frames as possible. Support header (Content-Length) framing
-    // and fallback to newline-delimited JSON objects.
-    while (true) {
-      // Header-framed: look for \r\n\r\n separator
-      const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
-      if (headerEnd !== -1) {
-        const header = stdoutBuffer.slice(0, headerEnd);
-        const m = header.match(/Content-Length:\s*(\d+)/i);
-        if (!m) {
-          // malformed header, drop it and continue
-          stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
+  function bindChild(nextChild) {
+    const detachPreparedTurnBrokerIpc = options.preparedTurnBroker
+      ? attachWorldSimulationPreparedTurnBrokerIpc(
+        nextChild,
+        options.preparedTurnBroker,
+      )
+      : () => {};
+
+    nextChild.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString('utf8');
+
+      // Parse as many complete frames as possible. Support header (Content-Length) framing
+      // and fallback to newline-delimited JSON objects.
+      while (true) {
+        const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          const header = stdoutBuffer.slice(0, headerEnd);
+          const m = header.match(/Content-Length:\s*(\d+)/i);
+          if (!m) {
+            stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
+            continue;
+          }
+          const len = parseInt(m[1], 10);
+          const totalNeeded = headerEnd + 4 + len;
+          if (stdoutBuffer.length < totalNeeded) break;
+          const jsonText = stdoutBuffer.slice(headerEnd + 4, totalNeeded);
+          stdoutBuffer = stdoutBuffer.slice(totalNeeded);
+          if (!jsonText) continue;
+          try {
+            const msg = JSON.parse(jsonText);
+            const id = msg.id ?? randomUUID();
+            const cb = listeners.get(id);
+            if (cb) {
+              try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
+            }
+          } catch (e) {
+            console.error('[mcp-server] JSON parse error (header frame):', e);
+          }
           continue;
         }
-        const len = parseInt(m[1], 10);
-        const totalNeeded = headerEnd + 4 + len;
-        if (stdoutBuffer.length < totalNeeded) break; // wait for more
-        const jsonText = stdoutBuffer.slice(headerEnd + 4, totalNeeded);
-        stdoutBuffer = stdoutBuffer.slice(totalNeeded);
-        if (!jsonText) continue;
+
+        const idx = stdoutBuffer.indexOf('\n');
+        if (idx === -1) break;
+        const line = stdoutBuffer.slice(0, idx).trim();
+        stdoutBuffer = stdoutBuffer.slice(idx + 1);
+        if (!line) continue;
         try {
-          const msg = JSON.parse(jsonText);
+          const msg = JSON.parse(line);
           const id = msg.id ?? randomUUID();
           const cb = listeners.get(id);
           if (cb) {
             try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
           }
         } catch (e) {
-          console.error('[mcp-server] JSON parse error (header frame):', e);
-          // continue processing remaining buffered data
+          console.warn('[mcp-server] ignoring non-JSON stdout line:', line.slice(0, 200));
         }
-        continue; // try parse next frame
       }
+    });
 
-      // Fallback to newline-delimited JSON
-      const idx = stdoutBuffer.indexOf('\n');
-      if (idx === -1) break; // incomplete line
-      const line = stdoutBuffer.slice(0, idx).trim();
-      stdoutBuffer = stdoutBuffer.slice(idx + 1);
-      if (!line) continue;
-      try {
-        const msg = JSON.parse(line);
-        const id = msg.id ?? randomUUID();
-        const cb = listeners.get(id);
-        if (cb) {
-          try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
-        }
-      } catch (e) {
-        // likely a log line or partial JSON; don't crash, just log for debugging
-        console.warn('[mcp-server] ignoring non-JSON stdout line:', line.slice(0, 200));
+    nextChild.stderr.on('data', (chunk) => {
+      const s = chunk.toString('utf8');
+      console.error('[mcp-server stderr]', s);
+    });
+
+    nextChild.on('error', (err) => {
+      console.error('[mcp-server child error]', err);
+      if (child === nextChild) notifyPendingListeners(new Error('child process error'));
+    });
+
+    nextChild.on('exit', (code, signal) => {
+      detachPreparedTurnBrokerIpc();
+      console.error(`[mcp-server] child exited code=${code} signal=${signal}`);
+      if (child === nextChild && !restarting && !closed) {
+        notifyPendingListeners(new Error('child process exited'));
       }
-    }
-  });
+    });
+  }
 
-  child.stderr.on('data', (chunk) => {
-    const s = chunk.toString('utf8');
-    console.error('[mcp-server stderr]', s);
-  });
+  function spawnChild() {
+    stdoutBuffer = '';
+    const nextChild = spawn(process.execPath, ['server/src/mcp-server.mjs'], {
+      // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
+      // broker. stdout remains exclusively MCP JSON-RPC framing.
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      env: {
+        ...process.env,
+        MCP_TOOL_PROFILE: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public',
+      },
+    });
+    generation += 1;
+    child = nextChild;
+    bindChild(nextChild);
+    return nextChild;
+  }
 
-  child.on('error', (err) => {
-    console.error('[mcp-server child error]', err);
-    // Notify pending listeners of the failure
-    for (const [id, cb] of listeners.entries()) {
-      try { cb(new Error('child process error'), null); } catch (e) { console.error('listener threw on child error', e); }
-      listeners.delete(id);
+  async function stopChild(nextChild) {
+    if (!nextChild || nextChild.exitCode !== null || nextChild.signalCode !== null) return;
+    const exited = once(nextChild, 'exit');
+    try { nextChild.kill('SIGTERM'); } catch {}
+    let timer;
+    const graceful = await Promise.race([
+      exited.then(() => true),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), 5_000);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!graceful && nextChild.exitCode === null && nextChild.signalCode === null) {
+      terminateProcessTree(nextChild);
+      await Promise.race([
+        exited,
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
     }
-  });
+  }
 
-  child.on('exit', (code, signal) => {
-    detachPreparedTurnBrokerIpc();
-    console.error(`[mcp-server] child exited code=${code} signal=${signal}`);
-    for (const [id, cb] of listeners.entries()) {
-      try { cb(new Error('child process exited'), null); } catch (e) { console.error('listener threw on child exit', e); }
-      listeners.delete(id);
+  function captureLifecycleMessage(message) {
+    if (!initializeRequest && message?.method === 'initialize' && message.id !== undefined) {
+      initializeRequest = structuredClone(message);
     }
-  });
+    if (!initializedNotification && message?.method === 'notifications/initialized') {
+      initializedNotification = structuredClone(message);
+    }
+  }
 
   function send(message) {
+    captureLifecycleMessage(message);
     const frame = encodeMessage(message, 'line');
     try {
       child.stdin.write(frame);
     } catch (e) {
       console.error('failed to write to child.stdin', e);
-      // If writing fails, notify any listener for this id if present
       try {
         const id = message.id ?? null;
         if (id) {
@@ -128,10 +172,11 @@ export function createStdioSession(options = {}) {
           if (cb) { cb(new Error('failed to write to child.stdin'), null); listeners.delete(id); }
         }
       } catch (e2) { console.error('error notifying listener after write failure', e2); }
-      }
+    }
   }
 
   function call(message, cb) {
+    captureLifecycleMessage(message);
     const id = message.id ?? randomUUID();
     message.id = id;
     listeners.set(id, (err, res) => {
@@ -141,10 +186,85 @@ export function createStdioSession(options = {}) {
     send(message);
   }
 
-  function close() {
-    detachPreparedTurnBrokerIpc();
-    try { child.kill(); } catch (e) {}
+  function internalCall(message) {
+    return new Promise((resolve, reject) => {
+      const id = message.id ?? randomUUID();
+      message.id = id;
+      listeners.set(id, (err, res) => {
+        listeners.delete(id);
+        if (err) reject(err);
+        else resolve(res);
+      });
+      const frame = encodeMessage(message, 'line');
+      try {
+        child.stdin.write(frame);
+      } catch (error) {
+        listeners.delete(id);
+        reject(error);
+      }
+    });
   }
 
-  return { child, send, call, close };
+  async function restart() {
+    if (closed) throw new Error('MCP stdio session is closed.');
+    if (restarting) throw new Error('MCP stdio session reload is already in progress.');
+    if (listeners.size > 0) throw new Error('MCP child has active tool calls and cannot be reloaded.');
+    if (!initializeRequest) throw new Error('MCP session has not completed initialize and cannot be reloaded.');
+
+    restarting = true;
+    const previousChild = child;
+    const previousChildPid = previousChild?.pid ?? null;
+    try {
+      await stopChild(previousChild);
+      const nextChild = spawnChild();
+      const replayInitialize = structuredClone(initializeRequest);
+      replayInitialize.id = `reload-${randomUUID()}`;
+      const initializeResponse = await internalCall(replayInitialize);
+      if (initializeResponse?.error) {
+        throw new Error(`Reloaded MCP child initialize failed: ${initializeResponse.error.message ?? 'unknown error'}`);
+      }
+      if (initializedNotification) {
+        const frame = encodeMessage(structuredClone(initializedNotification), 'line');
+        nextChild.stdin.write(frame);
+      }
+      return {
+        previous_child_pid: previousChildPid,
+        child_pid: nextChild.pid,
+        generation,
+      };
+    } finally {
+      restarting = false;
+    }
+  }
+
+  function pendingCallCount() {
+    return listeners.size;
+  }
+
+  function getStatus() {
+    return {
+      child_pid: child?.pid ?? null,
+      generation,
+      pending_calls: listeners.size,
+      restarting,
+      closed,
+      initialized: initializeRequest !== null,
+    };
+  }
+
+  function close() {
+    closed = true;
+    try { child?.kill(); } catch {}
+  }
+
+  spawnChild();
+  return {
+    get child() { return child; },
+    send,
+    call,
+    close,
+    restart,
+    pendingCallCount,
+    getStatus,
+  };
 }

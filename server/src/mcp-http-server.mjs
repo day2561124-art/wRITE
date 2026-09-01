@@ -131,6 +131,183 @@ const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
 
+const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
+const DEV_MCP_RELOAD_TOOL_NAME = 'dev_mcp_reload';
+const devMcpReloadToolDefinition = Object.freeze({
+  name: DEV_MCP_RELOAD_TOOL_NAME,
+  description: '[low-risk-write] Reload only the current ChatGPT MCP stdio child inside the long-lived HTTP parent. The HTTP listener, Cloudflare tunnel, and parent-owned world prepared-turn broker remain running; child-local ephemeral session state is intentionally reset. Reload is rejected while another child tool call is active.',
+  inputSchema: Object.freeze({
+    type: 'object',
+    properties: Object.freeze({}),
+    additionalProperties: false,
+  }),
+  annotations: Object.freeze({ readOnlyHint: false }),
+  _meta: Object.freeze({
+    'armed-academy/permission': Object.freeze({
+      risk_level: 'low-risk-write',
+      permission_level: 'write_low_risk',
+      read_or_write: 'write',
+      requires_user_confirmation: false,
+      log_required: true,
+      can_modify_canon: false,
+      can_modify_active_engine: false,
+      can_modify_story_graph: false,
+      can_modify_memory: false,
+      allowed_sources: Object.freeze([
+        'mcp_http_current_session',
+        'mcp_client_reload_request',
+      ]),
+    }),
+  }),
+});
+
+function isDeveloperReloadAllowed() {
+  return activeToolProfileName === 'chatgpt_developer';
+}
+
+function decorateParentOwnedTools(message, reply) {
+  if (
+    message?.method !== 'tools/list' ||
+    !isDeveloperReloadAllowed() ||
+    !Array.isArray(reply?.result?.tools)
+  ) {
+    return reply;
+  }
+
+  if (reply.result.tools.some((tool) => tool?.name === DEV_MCP_RELOAD_TOOL_NAME)) {
+    return reply;
+  }
+
+  return {
+    ...reply,
+    result: {
+      ...reply.result,
+      tools: [
+        ...reply.result.tools,
+        devMcpReloadToolDefinition,
+      ],
+    },
+  };
+}
+
+function reloadToolResult(id, payload, isError = false) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    result: {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(payload),
+        },
+      ],
+      ...(isError ? { isError: true } : {}),
+    },
+  };
+}
+
+async function handleDevMcpReload(entry, message) {
+  const id = message?.id;
+  if (id === undefined) return;
+
+  if (!isDeveloperReloadAllowed()) {
+    safeTransportSend(
+      entry.transport,
+      {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32602,
+          message: `Tool not allowed by MCP tool profile ${activeToolProfileName}: ${DEV_MCP_RELOAD_TOOL_NAME}`,
+        },
+      },
+      'transport.send(dev_mcp_reload-profile-error)',
+    );
+    return;
+  }
+
+  const args = message?.params?.arguments ?? {};
+  if (
+    args === null ||
+    typeof args !== 'object' ||
+    Array.isArray(args) ||
+    Object.keys(args).length > 0
+  ) {
+    safeTransportSend(
+      entry.transport,
+      {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32602,
+          message: 'dev_mcp_reload does not accept arguments.',
+        },
+      },
+      'transport.send(dev_mcp_reload-argument-error)',
+    );
+    return;
+  }
+
+  const before = entry.session.getStatus();
+  if (before.pending_calls > 0) {
+    safeTransportSend(
+      entry.transport,
+      reloadToolResult(id, {
+        ok: false,
+        reloaded: false,
+        reason: 'active_child_tool_calls',
+        pending_calls: before.pending_calls,
+        child_pid: before.child_pid,
+      }, true),
+      'transport.send(dev_mcp_reload-busy)',
+    );
+    return;
+  }
+
+  try {
+    console.error(
+      `[mcp-http] dev_mcp_reload requested profile=${activeToolProfileName} parent_pid=${process.pid} child_pid=${before.child_pid}`,
+    );
+    const reloaded = await entry.session.restart();
+    const after = entry.session.getStatus();
+    console.error(
+      `[mcp-http] dev_mcp_reload completed profile=${activeToolProfileName} parent_pid=${process.pid} previous_child_pid=${reloaded.previous_child_pid} child_pid=${reloaded.child_pid} generation=${reloaded.generation}`,
+    );
+    safeTransportSend(
+      entry.transport,
+      reloadToolResult(id, {
+        ok: true,
+        reloaded: true,
+        profile: activeToolProfileName,
+        http_parent_pid: process.pid,
+        previous_child_pid: reloaded.previous_child_pid,
+        child_pid: reloaded.child_pid,
+        generation: reloaded.generation,
+        pending_calls: after.pending_calls,
+        http_parent_preserved: true,
+        tunnel_preserved: true,
+        prepared_turn_broker_preserved: true,
+        child_ephemeral_state_reset: true,
+      }),
+      'transport.send(dev_mcp_reload-success)',
+    );
+  } catch (error) {
+    console.error(
+      `[mcp-http] dev_mcp_reload failed profile=${activeToolProfileName} parent_pid=${process.pid} child_pid=${before.child_pid} error=${error?.message ?? String(error)}`,
+    );
+    safeTransportSend(
+      entry.transport,
+      reloadToolResult(id, {
+        ok: false,
+        reloaded: false,
+        reason: 'reload_failed',
+        error: error?.message ?? String(error),
+      }, true),
+      'transport.send(dev_mcp_reload-failure)',
+    );
+  }
+}
+
 function closeBridgeSession(entry) {
   if (!entry || entry.closed) {
     return;
@@ -159,6 +336,14 @@ function bindBridge(entry) {
 
   transport.onmessage = (message) => {
     try {
+      if (
+        message?.method === 'tools/call' &&
+        message?.params?.name === DEV_MCP_RELOAD_TOOL_NAME
+      ) {
+        void handleDevMcpReload(entry, message);
+        return;
+      }
+
       if (message.id === undefined) {
         session.send(message);
         return;
@@ -189,7 +374,7 @@ function bindBridge(entry) {
 
         safeTransportSend(
           transport,
-          reply,
+          decorateParentOwnedTools(message, reply),
           'transport.send(reply)',
         );
       });
