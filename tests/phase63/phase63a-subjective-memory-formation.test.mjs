@@ -306,6 +306,27 @@ try {
   assert.equal(
     loopContract
       .subjective_memory_encoding_decision_hook
+      .receives_runtime_attention_encoding_evidence,
+    true,
+  );
+
+  assert.equal(
+    loopContract
+      .subjective_memory_encoding_decision_hook
+      .focus_directly_controls_encoding,
+    false,
+  );
+
+  assert.equal(
+    loopContract
+      .subjective_memory_encoding_decision_hook
+      .non_focus_observation_may_supply_encoding_evidence,
+    true,
+  );
+
+  assert.equal(
+    loopContract
+      .subjective_memory_encoding_decision_hook
       .character_brain_direct_encoding_control_allowed,
     false,
   );
@@ -1043,6 +1064,41 @@ try {
               input
                 .character_packets[0]
                 .cognition,
+            );
+
+            const attentionEncodingEvidence =
+              input
+                .character_packets[0]
+                .attention_encoding_evidence;
+
+            assert.equal(
+              Array.isArray(attentionEncodingEvidence),
+              true,
+            );
+
+            assert.equal(
+              attentionEncodingEvidence.length,
+              2,
+            );
+
+            assert.equal(
+              attentionEncodingEvidence.every(
+                (item) =>
+                  item.memory_encoding_decision
+                  === "unspecified",
+              ),
+              true,
+              "Runtime Attention provides encoding evidence, not an encode command",
+            );
+
+            assert.equal(
+              attentionEncodingEvidence.some(
+                (item) =>
+                  item.processing_level
+                  !== "focus",
+              ),
+              true,
+              "non-focus perception must remain eligible to supply encoding evidence",
             );
 
             return [

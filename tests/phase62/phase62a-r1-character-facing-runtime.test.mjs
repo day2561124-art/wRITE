@@ -103,6 +103,16 @@ try {
   assert.equal(Object.hasOwn(packet.cognition, "capability_contract"), false);
   assert.equal(Object.hasOwn(packet.cognition, "r1_runtime"), false);
   assert.equal(
+    Object.hasOwn(packet, "current_mind_transition_projection"),
+    false,
+    "Server-owned Current Mind projection must stay outside the character packet.",
+  );
+  assert.equal(
+    Object.hasOwn(packet, "attention_encoding_evidence"),
+    false,
+    "Programmatic Attention encoding evidence must stay outside the character packet.",
+  );
+  assert.equal(
     JSON.stringify(packet).includes("secret-character-state-field"),
     false,
   );

@@ -30,6 +30,13 @@ assert.equal(
   "character_facing",
 );
 assert.equal(
+  registry.capabilities.world_character_cognition.protected_result_channels.includes(
+    "working_context",
+  ),
+  true,
+  "Runtime Current Mind working context must be a protected trusted cognition channel",
+);
+assert.equal(
   registry.capabilities.world_consistency_critic.output_pattern,
   "programmatic_hard_findings_plus_advisory_extension",
 );
@@ -120,6 +127,13 @@ const cognitionInput = {
     needs: { fatigue: 0.5 },
     emotion: "平靜",
     attention: ["水瓶"],
+    working_context: {
+      focus: { source_kind: "perception", content: "桌上的水瓶" },
+      active_context: [],
+      peripheral_context: [],
+      fading_context: [],
+      suspended_context: [],
+    },
     goals: ["準時集合"],
     values: {},
     relationship_cognition: {},
@@ -197,6 +211,18 @@ assert.throws(
   () => validateWorldSimulationCapabilityNeuralExtension(
     compiledA.adapter_envelope,
     { known: ["測試已取消"] },
+  ),
+  (error) => error?.code === "WORLD_SIMULATION_CAPABILITY_PROTECTED_FIELD_OVERRIDE_FORBIDDEN",
+);
+
+assert.throws(
+  () => validateWorldSimulationCapabilityNeuralExtension(
+    compiledA.adapter_envelope,
+    {
+      working_context: {
+        focus: { content: "neural extension must not replace Runtime focus" },
+      },
+    },
   ),
   (error) => error?.code === "WORLD_SIMULATION_CAPABILITY_PROTECTED_FIELD_OVERRIDE_FORBIDDEN",
 );

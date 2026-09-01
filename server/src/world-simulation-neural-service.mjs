@@ -203,6 +203,8 @@ export const worldSimulationCapabilityContracts = Object.freeze({
       "projected_memories",
       "retrieved_memories",
       "decision_context",
+      "attention",
+      "working_context",
     ]),
     returns: Object.freeze([
       "character",
@@ -213,6 +215,7 @@ export const worldSimulationCapabilityContracts = Object.freeze({
       "needs",
       "emotion",
       "attention",
+      "working_context",
       "goals",
       "decision_pressures",
       "cognition_boundary",
@@ -904,8 +907,12 @@ function buildWorldCharacterCognition(input = {}) {
       ?? null,
   );
   const attention = cloneJson(
-    state.attention
-      ?? input.attention
+    input.attention
+      ?? state.attention
+      ?? null,
+  );
+  const workingContext = cloneJson(
+    input.working_context
       ?? null,
   );
   const goals = uniqueStrings([
@@ -965,6 +972,7 @@ function buildWorldCharacterCognition(input = {}) {
     needs,
     emotion,
     attention,
+    working_context: workingContext,
     goals,
     values,
     relationship_cognition: relationships,

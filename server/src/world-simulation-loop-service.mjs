@@ -88,11 +88,17 @@ import {
 } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationLoopVersion = "phase62c-event-loop-v1";
-export const worldSimulationCharacterRuntimeVersion = "character-runtime-v1";
+export const worldSimulationCharacterRuntimeVersion = "character-runtime-v2";
 export const worldSimulationCharacterExperienceContractVersion =
   "committed-character-experience-receipt-v1";
 export const worldSimulationCharacterExperienceProjectionVersion =
   "committed-character-experience-projection-v1";
+export const worldSimulationCharacterCurrentMindContractVersion =
+  "character-current-mind-contract-v1";
+export const worldSimulationCharacterAttentionReducerVersion =
+  "deterministic-attention-reducer-v1";
+export const worldSimulationCharacterCurrentMindProjectionVersion =
+  "committed-character-current-mind-projection-v1";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -120,6 +126,1000 @@ function nonEmptyString(value, label) {
 function sameCharacterName(left, right) {
   return String(left ?? "").trim().toLocaleLowerCase("zh-Hant-TW")
     === String(right ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+}
+
+const currentMindPrivateKeys = new Set([
+  "world_state",
+  "scene_state",
+  "source_position",
+  "target_position",
+  "exact_source_position",
+  "exact_target_position",
+  "relative_position",
+  "distance_m",
+  "target_illumination_lux",
+  "received_level_db",
+  "reference_level_db",
+  "reference_distance_m",
+  "minimum_audible_db",
+  "observer_thresholds_lux",
+  "causal_evidence",
+  "causal_chain",
+  "internal_provenance",
+  "retrieval_cues",
+  "encoded_at",
+  "last_recalled_at",
+]);
+
+function keyIsCurrentMindPrivate(key) {
+  const normalized = String(key ?? "").toLowerCase();
+  return normalized === "id"
+    || normalized.endsWith("_id")
+    || normalized.endsWith("_ids")
+    || normalized.startsWith("engine_")
+    || normalized.startsWith("internal_")
+    || normalized.includes("projection_hash")
+    || normalized.includes("runtime")
+    || currentMindPrivateKeys.has(normalized);
+}
+
+function sanitizeCurrentMindValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeCurrentMindValue);
+  }
+  if (!isObject(value)) return cloneJson(value);
+  const clean = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (keyIsCurrentMindPrivate(key)) continue;
+    clean[key] = sanitizeCurrentMindValue(child);
+  }
+  return clean;
+}
+
+function currentMindText(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function currentMindStableText(value) {
+  if (typeof value === "string") return value.trim().toLocaleLowerCase("zh-Hant-TW");
+  return JSON.stringify(value ?? null).toLocaleLowerCase("zh-Hant-TW");
+}
+
+function currentMindSimulationTimeMs(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function currentMindExplicitRank(value, categories = {}) {
+  if (value === true) return 2;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 0.75) return 3;
+    if (value >= 0.4) return 2;
+    if (value > 0) return 1;
+    return 0;
+  }
+  const normalized = currentMindText(value)?.toLowerCase() ?? null;
+  if (!normalized) return 0;
+  return categories[normalized] ?? 1;
+}
+
+function currentMindGoalTexts(compatibilityState, currentAction) {
+  const state = object(compatibilityState);
+  return [
+    ...array(state.goals),
+    ...array(state.current_goals),
+    state.current_goal,
+    currentAction,
+  ]
+    .map((value) => currentMindText(typeof value === "string" ? value : null))
+    .filter(Boolean);
+}
+
+function currentMindContentMatchesGoal(content, goals) {
+  const contentText = currentMindStableText(content);
+  if (!contentText || contentText === "null") return false;
+  return goals.some((goal) => {
+    const goalText = currentMindStableText(goal);
+    if (!goalText || goalText.length < 2) return false;
+    return contentText.includes(goalText) || goalText.includes(contentText);
+  });
+}
+
+function currentMindExpectationApplies(
+  expectation,
+  selectedIntent = null,
+  experiencedOutcome = null,
+) {
+  const expected = object(expectation);
+  const actual = object(experiencedOutcome);
+  const selected = object(selectedIntent);
+  const expectedActionId = currentMindText(expected.action_id ?? null);
+  const actualActionId = currentMindText(
+    selected.action_id
+    ?? actual.action_id
+    ?? null,
+  );
+  if (expectedActionId) {
+    if (!actualActionId
+      || currentMindStableText(expectedActionId) !== currentMindStableText(actualActionId)) {
+      return false;
+    }
+  }
+  const expectedAction = currentMindText(
+    expected.action
+    ?? expected.intent
+    ?? expected.action_intent
+    ?? null,
+  );
+  const actualAction = currentMindText(
+    selected.intent
+    ?? actual.intent
+    ?? actual.action
+    ?? null,
+  );
+  if (expectedAction) {
+    if (!actualAction
+      || currentMindStableText(expectedAction) !== currentMindStableText(actualAction)) {
+      return false;
+    }
+  }
+  return Boolean(expectedActionId || expectedAction);
+}
+
+function currentMindExpectationMismatch(
+  expectation,
+  experiencedOutcome,
+  selectedIntent = null,
+) {
+  if (!currentMindExpectationApplies(expectation, selectedIntent, experiencedOutcome)) {
+    return false;
+  }
+  const expected = object(expectation);
+  const actual = object(experiencedOutcome);
+  const expectedResult = currentMindText(
+    expected.expected_result
+    ?? expected.expected_outcome
+    ?? expected.expected
+    ?? null,
+  );
+  const actualResult = currentMindText(
+    actual.perceived_result
+    ?? actual.result
+    ?? actual.outcome
+    ?? null,
+  );
+  if (!expectedResult || !actualResult) return false;
+  return currentMindStableText(expectedResult) !== currentMindStableText(actualResult);
+}
+
+function currentMindInitialState() {
+  return {
+    current_mind_sequence: 0,
+    simulation_time: null,
+    focus: null,
+    active_context: [],
+    peripheral_context: [],
+    fading_context: [],
+    suspended_context: [],
+    last_experience_sequence_integrated: 0,
+    temporary_expectation: null,
+  };
+}
+
+const currentMindCharacterHiddenMetadataKeys = new Set([
+  "source_kind",
+  "source_ref",
+  "candidate_id",
+  "attention_bids",
+  "priority_evidence",
+  "internal_priority_strength",
+  "decay_metadata",
+  "activated_at_sequence",
+  "last_seen_sequence",
+  "last_seen_simulation_time",
+  "suspended_at_sequence",
+  "suspension_reason",
+  "salience",
+  "perceptual_salience",
+  "goal_relevance",
+  "intention_relevance",
+  "relevance",
+  "urgency",
+  "urgent",
+  "immediate",
+  "immediate_constraint",
+  "threat_level",
+  "expectation_violation",
+  "unexpected",
+  "expectation_met",
+]);
+
+function stripCurrentMindCharacterMetadata(value) {
+  if (Array.isArray(value)) {
+    return value.map(stripCurrentMindCharacterMetadata);
+  }
+  if (!isObject(value)) return cloneJson(value);
+  const clean = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (currentMindCharacterHiddenMetadataKeys.has(String(key).toLowerCase())) continue;
+    clean[key] = stripCurrentMindCharacterMetadata(child);
+  }
+  return clean;
+}
+
+function sanitizeCurrentMindCharacterValue(value) {
+  return stripCurrentMindCharacterMetadata(
+    sanitizeCurrentMindValue(value),
+  );
+}
+
+function currentMindCharacterItem(candidate) {
+  if (!isObject(candidate)) return null;
+  return {
+    content: sanitizeCurrentMindCharacterValue(candidate.content),
+  };
+}
+
+function currentMindCharacterView(state) {
+  const value = object(state);
+  return {
+    focus: currentMindCharacterItem(value.focus),
+    active_context: array(value.active_context).map(currentMindCharacterItem).filter(Boolean),
+    peripheral_context: array(value.peripheral_context).map(currentMindCharacterItem).filter(Boolean),
+    fading_context: array(value.fading_context).map(currentMindCharacterItem).filter(Boolean),
+    suspended_context: array(value.suspended_context).map(currentMindCharacterItem).filter(Boolean),
+    temporary_expectation: sanitizeCurrentMindCharacterValue(value.temporary_expectation ?? null),
+  };
+}
+
+function currentMindCandidate({
+  sourceKind,
+  content,
+  activationOrder,
+  currentMindSequence,
+  simulationTime,
+  sourceRef,
+  rawEvidence = {},
+  fresh = true,
+  prior = null,
+}) {
+  const boundedContent = sanitizeCurrentMindValue(content);
+  if (boundedContent === null || boundedContent === undefined) return null;
+  if (isObject(boundedContent) && Object.keys(boundedContent).length === 0) return null;
+  const candidateIdentityContent = sanitizeCurrentMindCharacterValue(boundedContent);
+  const candidateId = prior?.candidate_id ?? `mind_candidate_${hashAgentRunValue({
+    source_kind: sourceKind,
+    content: candidateIdentityContent,
+  }).slice(0, 24)}`;
+  return {
+    candidate_id: candidateId,
+    source_kind: sourceKind,
+    content: boundedContent,
+    activation_order: activationOrder,
+    activated_at_sequence: currentMindSequence,
+    last_seen_sequence: fresh
+      ? currentMindSequence
+      : Number(prior?.last_seen_sequence ?? currentMindSequence - 1),
+    last_seen_simulation_time: fresh
+      ? simulationTime
+      : prior?.last_seen_simulation_time ?? null,
+    source_ref: sourceRef ? cloneJson(sourceRef) : cloneJson(prior?.source_ref ?? null),
+    raw_evidence: cloneJson(rawEvidence),
+    fresh: fresh === true,
+  };
+}
+
+function currentMindDecayMetadata(candidate, currentMindSequence, simulationTime) {
+  const sequenceAge = Math.max(
+    0,
+    currentMindSequence - Number(candidate?.last_seen_sequence ?? currentMindSequence),
+  );
+  const currentMs = currentMindSimulationTimeMs(simulationTime);
+  const priorMs = currentMindSimulationTimeMs(candidate?.last_seen_simulation_time);
+  const elapsedMs = currentMs !== null && priorMs !== null
+    ? Math.max(0, currentMs - priorMs)
+    : null;
+  const simulationBands = elapsedMs === null ? 0 : Math.floor(elapsedMs / 300000);
+  return {
+    sequence_age: sequenceAge,
+    simulation_elapsed_ms: elapsedMs,
+    decay_units: Math.min(32, sequenceAge + simulationBands),
+    basis: "committed_cognitive_sequence_plus_simulation_time",
+    wall_clock_used: false,
+  };
+}
+
+function currentMindPriorityEvidence(candidate, context) {
+  const raw = object(candidate.raw_evidence);
+  const sourceKind = candidate.source_kind;
+  const perceptualSalience = sourceKind === "perception"
+    ? Math.max(1, currentMindExplicitRank(
+      raw.salience ?? raw.perceptual_salience,
+      { low: 1, normal: 1, medium: 2, high: 3, critical: 3 },
+    ))
+    : currentMindExplicitRank(raw.salience ?? raw.perceptual_salience);
+  const goalRelevance = sourceKind === "current_action"
+    ? 3
+    : Math.max(
+      currentMindExplicitRank(
+        raw.goal_relevance ?? raw.intention_relevance ?? raw.relevance,
+        { low: 1, medium: 2, high: 3, critical: 3 },
+      ),
+      currentMindContentMatchesGoal(candidate.content, context.goal_texts) ? 2 : 0,
+    );
+  const expectationViolation = raw.expectation_violation === true
+    || raw.unexpected === true
+    || raw.expectation_met === false;
+  const urgency = Math.max(
+    currentMindExplicitRank(
+      raw.urgency ?? raw.immediate_constraint ?? raw.threat_level,
+      { low: 1, medium: 2, high: 3, critical: 4, immediate: 4 },
+    ),
+    raw.urgent === true || raw.immediate === true ? 3 : 0,
+  );
+  const focusContinuity = context.current_focus_id === candidate.candidate_id;
+  const experienceSequence = Number(candidate?.source_ref?.experience_sequence ?? 0);
+  const evidence = {
+    perceptual_salience: perceptualSalience,
+    goal_intention_relevance: goalRelevance,
+    expectation_violation: expectationViolation,
+    immediate_constraint_urgency: urgency,
+    focus_continuity: focusContinuity,
+    activation_order: candidate.activation_order,
+    experience_sequence: Number.isSafeInteger(experienceSequence) ? experienceSequence : 0,
+    stable_candidate_identity: candidate.candidate_id,
+  };
+  const priorityStrength = (
+    urgency * 8
+    + (expectationViolation ? 6 : 0)
+    + goalRelevance * 3
+    + perceptualSalience * 2
+    + (candidate.fresh ? 1 : 0)
+  );
+  return {
+    ...candidate,
+    attention_bids: {
+      perceptual_salience_process: perceptualSalience > 0
+        ? { supported: true, level: perceptualSalience }
+        : { supported: false, level: 0 },
+      goal_intention_relevance_process: goalRelevance > 0
+        ? { supported: true, level: goalRelevance }
+        : { supported: false, level: 0 },
+      expectation_violation_process: {
+        supported: expectationViolation,
+      },
+      immediate_constraint_urgency_process: urgency > 0
+        ? { supported: true, level: urgency }
+        : { supported: false, level: 0 },
+      focus_continuity_process: {
+        supported: focusContinuity,
+      },
+    },
+    priority_evidence: evidence,
+    internal_priority_strength: priorityStrength,
+  };
+}
+
+function currentMindCandidatePrecedes(left, right) {
+  if (!right) return true;
+  const leftEvidence = left.priority_evidence;
+  const rightEvidence = right.priority_evidence;
+  const dimensions = [
+    [leftEvidence.immediate_constraint_urgency, rightEvidence.immediate_constraint_urgency],
+    [Number(leftEvidence.expectation_violation), Number(rightEvidence.expectation_violation)],
+    [leftEvidence.goal_intention_relevance, rightEvidence.goal_intention_relevance],
+    [leftEvidence.perceptual_salience, rightEvidence.perceptual_salience],
+    [Number(leftEvidence.focus_continuity), Number(rightEvidence.focus_continuity)],
+    [leftEvidence.experience_sequence, rightEvidence.experience_sequence],
+  ];
+  for (const [leftValue, rightValue] of dimensions) {
+    if (leftValue !== rightValue) return leftValue > rightValue;
+  }
+  if (leftEvidence.activation_order !== rightEvidence.activation_order) {
+    return leftEvidence.activation_order < rightEvidence.activation_order;
+  }
+  return String(leftEvidence.stable_candidate_identity)
+    < String(rightEvidence.stable_candidate_identity);
+}
+
+function currentMindUniqueCandidates(candidates) {
+  const byId = new Map();
+  for (const candidate of candidates.filter(Boolean)) {
+    const existing = byId.get(candidate.candidate_id);
+    if (!existing) {
+      byId.set(candidate.candidate_id, candidate);
+      continue;
+    }
+    const preferred = existing.fresh === true && candidate.fresh !== true
+      ? existing
+      : candidate;
+    const secondary = preferred === existing ? candidate : existing;
+    byId.set(candidate.candidate_id, {
+      ...secondary,
+      ...preferred,
+      raw_evidence: {
+        ...object(existing.raw_evidence),
+        ...object(candidate.raw_evidence),
+      },
+      fresh: existing.fresh === true || candidate.fresh === true,
+      activation_order: Math.min(existing.activation_order, candidate.activation_order),
+    });
+  }
+  return [...byId.values()];
+}
+
+function currentMindSourceRef(kind, payload, extra = {}) {
+  return {
+    kind,
+    content_hash: hashAgentRunValue(sanitizeCurrentMindValue(payload)),
+    ...cloneJson(extra),
+  };
+}
+
+function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
+  const priorState = isObject(input.prior_current_mind)
+    ? cloneJson(input.prior_current_mind)
+    : currentMindInitialState();
+  const currentMindSequence = Number(priorState.current_mind_sequence ?? 0) + 1;
+  const simulationTime = input.simulation_time ?? null;
+  const perception = object(input.perception);
+  const recoveredMemories = array(input.recovered_memories);
+  const compatibilityState = object(input.compatibility_state);
+  const recentExperienceReceipts = array(input.recent_experience_receipts);
+  const legacyAttentionBootstrap = Number(priorState.current_mind_sequence ?? 0) === 0
+    ? compatibilityState.attention ?? null
+    : null;
+  const legacyExpectationBootstrap = Number(priorState.current_mind_sequence ?? 0) === 0
+    ? compatibilityState.temporary_expectation
+      ?? compatibilityState.expectation
+      ?? null
+    : null;
+  const temporaryExpectation = cloneJson(
+    priorState.temporary_expectation
+    ?? legacyExpectationBootstrap
+    ?? null,
+  );
+  let temporaryExpectationResolved = false;
+  const goalTexts = currentMindGoalTexts(compatibilityState, input.current_action);
+  const candidates = [];
+  let activationOrder = 0;
+
+  const addCandidate = (value) => {
+    if (!value) return;
+    candidates.push(value);
+    activationOrder += 1;
+  };
+
+  for (const [sense, values] of [
+    ["visual", array(perception.observed)],
+    ["auditory", array(perception.audible)],
+    ["other", array(perception.other_senses)],
+  ]) {
+    values.forEach((observation, senseIndex) => addCandidate(currentMindCandidate({
+      sourceKind: "perception",
+      content: observation,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: currentMindSourceRef("perception", observation, {
+        sense,
+        sense_index: senseIndex,
+      }),
+      rawEvidence: isObject(observation) ? observation : {},
+    })));
+  }
+
+  recoveredMemories.forEach((memory, memoryIndex) => {
+    const content = isObject(memory)
+      ? memory.content ?? memory.memory ?? memory.summary ?? memory
+      : memory;
+    addCandidate(currentMindCandidate({
+      sourceKind: "recovered_memory",
+      content,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: currentMindSourceRef("recovered_memory", content, {
+        recovery_index: memoryIndex,
+      }),
+      rawEvidence: isObject(memory) ? memory : {},
+    }));
+  });
+
+  if (input.current_action !== null && input.current_action !== undefined) {
+    addCandidate(currentMindCandidate({
+      sourceKind: "current_action",
+      content: input.current_action,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: currentMindSourceRef("current_action", input.current_action),
+      rawEvidence: { intention_relevance: "high" },
+    }));
+  }
+
+  if (legacyAttentionBootstrap !== null && legacyAttentionBootstrap !== undefined) {
+    addCandidate(currentMindCandidate({
+      sourceKind: "legacy_attention_seed",
+      content: legacyAttentionBootstrap,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: currentMindSourceRef("legacy_attention_seed", legacyAttentionBootstrap),
+      rawEvidence: { goal_relevance: "low" },
+    }));
+  }
+
+  const lastIntegratedExperienceSequence = Number(
+    priorState.last_experience_sequence_integrated ?? 0,
+  );
+  let integratedExperienceSequence = lastIntegratedExperienceSequence;
+  for (const receipt of recentExperienceReceipts) {
+    const experienceSequence = Number(receipt?.experience_sequence ?? 0);
+    if (!Number.isSafeInteger(experienceSequence)
+      || experienceSequence <= lastIntegratedExperienceSequence) {
+      continue;
+    }
+    integratedExperienceSequence = Math.max(integratedExperienceSequence, experienceSequence);
+    const experience = object(receipt.experience);
+    const observation = object(experience.observation);
+    for (const [sense, values] of [
+      ["visual", array(observation.observed)],
+      ["auditory", array(observation.audible)],
+      ["other", array(observation.other_senses)],
+    ]) {
+      values.forEach((value, index) => addCandidate(currentMindCandidate({
+        sourceKind: "committed_experience",
+        content: value,
+        activationOrder,
+        currentMindSequence,
+        simulationTime,
+        sourceRef: currentMindSourceRef("committed_experience", value, {
+          experience_sequence: experienceSequence,
+          sense,
+          sense_index: index,
+        }),
+        rawEvidence: isObject(value) ? value : {},
+      })));
+    }
+    const selectedIntent = object(
+      experience?.participation?.selected_intent,
+    );
+    for (const outcome of array(experience?.participation?.experienced_action_outcomes)) {
+      const expectationMismatch = currentMindExpectationMismatch(
+        temporaryExpectation,
+        outcome,
+        selectedIntent,
+      );
+      if (
+        temporaryExpectation !== null
+        && isObject(outcome)
+        && currentMindExpectationApplies(
+          temporaryExpectation,
+          selectedIntent,
+          outcome,
+        )
+      ) {
+        const actualResult = currentMindText(
+          outcome.perceived_result
+          ?? outcome.result
+          ?? outcome.outcome
+          ?? null,
+        );
+        if (actualResult) temporaryExpectationResolved = true;
+      }
+      addCandidate(currentMindCandidate({
+        sourceKind: "committed_action_experience",
+        content: outcome,
+        activationOrder,
+        currentMindSequence,
+        simulationTime,
+        sourceRef: currentMindSourceRef("committed_action_experience", outcome, {
+          experience_sequence: experienceSequence,
+        }),
+        rawEvidence: {
+          ...(isObject(outcome) ? outcome : {}),
+          expectation_violation: expectationMismatch,
+        },
+      }));
+    }
+  }
+
+  const priorCandidates = [
+    priorState.focus,
+    ...array(priorState.active_context),
+    ...array(priorState.peripheral_context),
+    ...array(priorState.fading_context),
+    ...array(priorState.suspended_context),
+  ].filter(isObject);
+  for (const priorCandidate of priorCandidates) {
+    const decay = currentMindDecayMetadata(
+      priorCandidate,
+      currentMindSequence,
+      simulationTime,
+    );
+    if (decay.decay_units > 8) continue;
+    addCandidate(currentMindCandidate({
+      sourceKind: priorCandidate.source_kind ?? "prior_current_mind",
+      content: priorCandidate.content,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: priorCandidate.source_ref ?? null,
+      rawEvidence: {},
+      fresh: false,
+      prior: priorCandidate,
+    }));
+  }
+
+  const currentFocusId = priorState.focus?.candidate_id ?? null;
+  const prioritized = currentMindUniqueCandidates(candidates).map((candidate) => (
+    currentMindPriorityEvidence(candidate, {
+      current_focus_id: currentFocusId,
+      goal_texts: goalTexts,
+    })
+  ));
+  const currentFocusCandidate = currentFocusId
+    ? prioritized.find((candidate) => candidate.candidate_id === currentFocusId) ?? null
+    : null;
+  let strongestChallenger = null;
+  for (const candidate of prioritized) {
+    if (candidate.candidate_id === currentFocusId) continue;
+    if (currentMindCandidatePrecedes(candidate, strongestChallenger)) {
+      strongestChallenger = candidate;
+    }
+  }
+
+  const focusRetentionBonus = 5;
+  const switchingInterruptionCost = 2;
+  let focus = currentFocusCandidate;
+  let interrupted = false;
+  let switchReason = "focus_continuity_retained";
+  if (!focus) {
+    focus = strongestChallenger;
+    switchReason = focus ? "no_existing_focus" : "no_attention_candidate";
+  } else if (strongestChallenger) {
+    const retainedPriority = focus.internal_priority_strength + focusRetentionBonus;
+    const challengerPriority = strongestChallenger.internal_priority_strength;
+    if (challengerPriority > retainedPriority + switchingInterruptionCost) {
+      focus = strongestChallenger;
+      interrupted = true;
+      switchReason = "challenger_exceeded_relative_retention_and_switching_cost";
+    }
+  }
+
+  const activeContext = [];
+  const peripheralContext = [];
+  const fadingContext = [];
+  const suspendedContext = [];
+  const activeBudget = 8;
+  const peripheralBudget = 12;
+  const fadingBudget = 12;
+  const suspendedBudget = 8;
+
+  if (interrupted && currentFocusCandidate) {
+    suspendedContext.push({
+      ...cloneJson(currentFocusCandidate),
+      suspended_at_sequence: currentMindSequence,
+      suspension_reason: "attention_interruption",
+    });
+  }
+
+  const priorSuspendedIds = new Set(
+    array(priorState.suspended_context)
+      .filter(isObject)
+      .map((item) => item.candidate_id)
+      .filter(Boolean),
+  );
+  for (const candidate of prioritized) {
+    if (candidate.candidate_id === focus?.candidate_id) continue;
+    if (suspendedContext.some((item) => item.candidate_id === candidate.candidate_id)) continue;
+    if (priorSuspendedIds.has(candidate.candidate_id) && candidate.fresh !== true) continue;
+    const evidence = candidate.priority_evidence;
+    const decay = currentMindDecayMetadata(candidate, currentMindSequence, simulationTime);
+    const stronglyActive = evidence.immediate_constraint_urgency > 0
+      || evidence.expectation_violation
+      || evidence.goal_intention_relevance > 0
+      || evidence.perceptual_salience >= 2;
+    if (candidate.fresh && stronglyActive && activeContext.length < activeBudget) {
+      activeContext.push(candidate);
+      continue;
+    }
+    if (candidate.fresh && peripheralContext.length < peripheralBudget) {
+      peripheralContext.push(candidate);
+      continue;
+    }
+    if (decay.decay_units <= 4 && fadingContext.length < fadingBudget) {
+      fadingContext.push({
+        ...candidate,
+        decay_metadata: decay,
+      });
+    }
+  }
+
+  const reactivatedContextIds = new Set([
+    ...activeContext,
+    ...peripheralContext,
+    ...fadingContext,
+  ].map((item) => item.candidate_id).filter(Boolean));
+  for (const priorSuspended of array(priorState.suspended_context)) {
+    if (!isObject(priorSuspended)) continue;
+    if (suspendedContext.some((item) => item.candidate_id === priorSuspended.candidate_id)) continue;
+    if (focus?.candidate_id === priorSuspended.candidate_id) continue;
+    if (reactivatedContextIds.has(priorSuspended.candidate_id)) continue;
+    const decay = currentMindDecayMetadata(priorSuspended, currentMindSequence, simulationTime);
+    if (decay.decay_units > 8 || suspendedContext.length >= suspendedBudget) continue;
+    suspendedContext.push({
+      ...cloneJson(priorSuspended),
+      decay_metadata: decay,
+    });
+  }
+
+  const stripPriorityInternals = (candidate) => {
+    if (!candidate) return null;
+    const detached = cloneJson(candidate);
+    delete detached.attention_bids;
+    delete detached.priority_evidence;
+    delete detached.internal_priority_strength;
+    delete detached.raw_evidence;
+    delete detached.fresh;
+    return detached;
+  };
+  const stateAfter = {
+    current_mind_sequence: currentMindSequence,
+    simulation_time: simulationTime,
+    focus: stripPriorityInternals(focus),
+    active_context: activeContext.map(stripPriorityInternals),
+    peripheral_context: peripheralContext.map(stripPriorityInternals),
+    fading_context: fadingContext.map(stripPriorityInternals),
+    suspended_context: suspendedContext.map(stripPriorityInternals),
+    last_experience_sequence_integrated: integratedExperienceSequence,
+    temporary_expectation: cloneJson(
+      temporaryExpectationResolved
+        ? null
+        : temporaryExpectation,
+    ),
+  };
+  const characterView = currentMindCharacterView(stateAfter);
+  const processingByCandidateId = new Map();
+  if (stateAfter.focus?.candidate_id) processingByCandidateId.set(stateAfter.focus.candidate_id, "focus");
+  for (const item of stateAfter.active_context) processingByCandidateId.set(item.candidate_id, "active");
+  for (const item of stateAfter.peripheral_context) processingByCandidateId.set(item.candidate_id, "peripheral");
+  for (const item of stateAfter.fading_context) processingByCandidateId.set(item.candidate_id, "fading");
+  for (const item of stateAfter.suspended_context) processingByCandidateId.set(item.candidate_id, "suspended");
+  const encodingEvidence = prioritized
+    .filter((candidate) => candidate.source_kind === "perception")
+    .map((candidate) => ({
+      sense: candidate.source_ref?.sense ?? null,
+      sense_index: candidate.source_ref?.sense_index ?? null,
+      processing_level: processingByCandidateId.get(candidate.candidate_id) ?? "peripheral",
+      goal_relevance: candidate.priority_evidence.goal_intention_relevance > 0,
+      expectation_violation: candidate.priority_evidence.expectation_violation === true,
+      immediate_constraint_or_urgency:
+        candidate.priority_evidence.immediate_constraint_urgency > 0,
+      interruption_state: interrupted
+        && focus?.candidate_id === candidate.candidate_id
+          ? "interrupted_previous_focus"
+          : "none",
+      memory_encoding_decision: "unspecified",
+    }));
+
+  const sourceRefs = prioritized
+    .filter((candidate) => candidate.fresh && isObject(candidate.source_ref))
+    .map((candidate) => cloneJson(candidate.source_ref));
+  const sourceSnapshot = {
+    perception: sanitizeCurrentMindValue(perception),
+    recovered_memories: sanitizeCurrentMindValue(recoveredMemories),
+    current_action: sanitizeCurrentMindValue(input.current_action ?? null),
+    compatibility_attention: sanitizeCurrentMindValue(legacyAttentionBootstrap),
+    compatibility_expectation: sanitizeCurrentMindValue(legacyExpectationBootstrap),
+    compatibility_goals: sanitizeCurrentMindValue(goalTexts),
+    prior_current_mind_sequence: Number(priorState.current_mind_sequence ?? 0),
+    recent_experience_sequences: recentExperienceReceipts
+      .map((receipt) => Number(receipt?.experience_sequence ?? 0))
+      .filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0),
+  };
+  const focusTransition = {
+    from: currentMindCharacterItem(priorState.focus),
+    to: currentMindCharacterItem(stateAfter.focus),
+    interrupted,
+    resolution_reason: switchReason,
+  };
+  const focusResolutionEvidence = focus
+    ? {
+        selected_candidate_source_kind: focus.source_kind,
+        support_processes: Object.entries(focus.attention_bids)
+          .filter(([, evidence]) => evidence?.supported === true)
+          .map(([process]) => process),
+        priority_evidence: cloneJson(focus.priority_evidence),
+        interruption_occurred: interrupted,
+        resolution_reason: switchReason,
+      }
+    : null;
+  const projectionBody = {
+    current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+    attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+    projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+    historical_semantics_version: worldSimulationCharacterCurrentMindProjectionVersion,
+    turn_id: nonEmptyString(input.turn_id, "current mind turn_id"),
+    current_mind_sequence: currentMindSequence,
+    world_lineage: nonEmptyString(input.world_lineage, "current mind world lineage"),
+    character_entity_id: nonEmptyString(
+      input.character_entity_id,
+      "current mind character entity_id",
+    ),
+    canonical_name: input.canonical_name ?? input.character ?? null,
+    identity_source: input.identity_source ?? null,
+    formal_identity: input.formal_identity === true,
+    character: input.character ?? input.canonical_name ?? null,
+    simulation_time: simulationTime,
+    source_refs: sourceRefs,
+    source_snapshot_hash: hashAgentRunValue(sourceSnapshot),
+    focus_transition: focusTransition,
+    context_transition: {
+      active_context_count: stateAfter.active_context.length,
+      peripheral_context_count: stateAfter.peripheral_context.length,
+      fading_context_count: stateAfter.fading_context.length,
+      suspended_context_count: stateAfter.suspended_context.length,
+    },
+    reducer_state_after: cloneJson(stateAfter),
+    character_view_after: cloneJson(characterView),
+    encoding_evidence_hash: hashAgentRunValue(encodingEvidence),
+    resolver_audit: {
+      attention_processes: [
+        "perceptual_salience",
+        "goal_intention_relevance",
+        "expectation_violation",
+        "immediate_constraint_urgency",
+        "focus_continuity",
+      ],
+      deterministic_pairwise_resolver: true,
+      focus_resolution_evidence: cloneJson(focusResolutionEvidence),
+      focus_retention_bonus: focusRetentionBonus,
+      switching_interruption_cost: switchingInterruptionCost,
+      simple_sort_score_focus_selection_used: false,
+      asynchronous_codelet_race_used: false,
+      random_tie_break_used: false,
+      deterministic_tie_break_order: [
+        "urgency",
+        "expectation_violation",
+        "goal_intention_relevance",
+        "perceptual_salience",
+        "focus_continuity",
+        "experience_sequence",
+        "activation_order",
+        "stable_candidate_identity",
+      ],
+      decay_basis: "committed_cognitive_sequence_plus_simulation_time",
+      wall_clock_decay_used: false,
+      workspace_budget_is_engineering_bound_not_human_capacity_claim: true,
+    },
+    boundaries: {
+      owner: "character_runtime",
+      speculative_until_world_commit: true,
+      world_truth_is_not_current_mind: true,
+      character_experience_is_not_current_mind: true,
+      current_mind_is_not_memory: true,
+      full_world_state_included: false,
+      hidden_causal_chain_included: false,
+      gpt_hidden_reasoning_included: false,
+      character_brain_authors_projection: false,
+      attention_focus_directly_controls_memory_encoding: false,
+    },
+  };
+  projectionBody.transition_hash = hashAgentRunValue(projectionBody);
+
+  return {
+    projection: cloneJson(projectionBody),
+    character_facing_attention: cloneJson(characterView),
+    working_context: cloneJson({
+      focus: characterView.focus,
+      active_context: characterView.active_context,
+      peripheral_context: characterView.peripheral_context,
+      fading_context: characterView.fading_context,
+      suspended_context: characterView.suspended_context,
+    }),
+    encoding_evidence: cloneJson(encodingEvidence),
+    internal_attention_state: {
+      bids: prioritized.map((candidate) => ({
+        candidate_id: candidate.candidate_id,
+        sources: Object.entries(candidate.attention_bids)
+          .filter(([, evidence]) => evidence?.supported === true)
+          .map(([process]) => process),
+        priority_evidence: cloneJson(candidate.priority_evidence),
+      })),
+      focus_candidate_id: focus?.candidate_id ?? null,
+      focus_transition: cloneJson(focusTransition),
+      resolver_version: worldSimulationCharacterAttentionReducerVersion,
+    },
+  };
+}
+
+function verifyCharacterCurrentMindTransitionProjection(characterProjection) {
+  if (!isObject(characterProjection)) {
+    throw new Error("Committed Character Current Mind transition projection must be an object.");
+  }
+  const transitionHash = nonEmptyString(
+    characterProjection.transition_hash,
+    "committed character current mind transition hash",
+  );
+  const body = cloneJson(characterProjection);
+  delete body.transition_hash;
+  delete body.projection_slot;
+  if (hashAgentRunValue(body) !== transitionHash) {
+    const error = new Error("Committed Character Current Mind transition hash verification failed.");
+    error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_TRANSITION_HASH_MISMATCH";
+    throw error;
+  }
+  return cloneJson(characterProjection);
+}
+
+function verifyCharacterCurrentMindProjectionEnvelope(projection) {
+  if (!isObject(projection)) {
+    throw new Error("Committed Character Current Mind projection must be an object.");
+  }
+  const projectionHash = nonEmptyString(
+    projection.projection_hash,
+    "committed character current mind projection hash",
+  );
+  const body = cloneJson(projection);
+  delete body.projection_hash;
+  if (hashAgentRunValue(body) !== projectionHash) {
+    const error = new Error("Committed Character Current Mind projection hash verification failed.");
+    error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_PROJECTION_HASH_MISMATCH";
+    throw error;
+  }
+  for (const characterProjection of array(projection.character_projections)) {
+    verifyCharacterCurrentMindTransitionProjection(characterProjection);
+  }
+  return cloneJson(projection);
+}
+
+export function projectWorldSimulationCharacterCurrentMindTransitions(input = {}) {
+  const preparedTurn = object(input.prepared_turn);
+  const storedCurrentMindTransitions = array(
+    preparedTurn.current_mind_transition_projections,
+  );
+  const characterProjections = array(preparedTurn.decision_packets).map((packet, projectionSlot) => {
+    const storedTransition = storedCurrentMindTransitions.find(
+      (item) => sameCharacterName(item?.character, packet?.character),
+    );
+    const projection = verifyCharacterCurrentMindTransitionProjection(
+      storedTransition?.projection
+      ?? packet?.current_mind_transition_projection,
+    );
+    if (!sameCharacterName(projection.character, packet?.character)) {
+      const error = new Error("Current Mind transition character does not match decision packet character.");
+      error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_CHARACTER_MISMATCH";
+      throw error;
+    }
+    return {
+      ...projection,
+      projection_slot: projectionSlot,
+    };
+  });
+  const envelope = {
+    current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+    attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+    projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+    historical_semantics_version: worldSimulationCharacterCurrentMindProjectionVersion,
+    turn_id: nonEmptyString(preparedTurn.turn_id, "prepared current mind turn_id"),
+    character_projections: characterProjections,
+    boundaries: {
+      current_mind_owner: "character_runtime",
+      historical_attention_semantics_immutable: true,
+      replay_runs_current_attention_algorithm: false,
+      replay_reasks_character_brain: false,
+      full_world_state_stored_here: false,
+      gpt_hidden_reasoning_stored_here: false,
+    },
+  };
+  envelope.projection_hash = hashAgentRunValue(envelope);
+  return cloneJson(envelope);
 }
 
 const strippedCharacterExperienceObservationKeys = new Set([
@@ -503,10 +1503,16 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
   let activeTurns = 0;
   let pendingTurns = 0;
   let pendingExperienceDeliveries = 0;
+  let pendingCurrentMindCycles = 0;
+  let pendingCurrentMindDeliveries = 0;
   let lastCommittedExperienceRevision = null;
   let lastCommittedExperienceSequence = 0;
+  let lastCommittedCurrentMindRevision = null;
+  let committedCurrentMind = currentMindInitialState();
   const consumedExperienceReceiptIds = new Set();
+  const consumedCurrentMindTransitionIds = new Set();
   const recentExperienceReceipts = [];
+  const recentCurrentMindTransitionIds = [];
   const lifecycle = {
     turns_started: 0,
     turns_completed: 0,
@@ -516,6 +1522,13 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
   const experienceLifecycle = {
     delivery_attempts: 0,
     committed_experience_effect_count: 0,
+    duplicate_delivery_attempts: 0,
+    delivery_failures: 0,
+  };
+  const currentMindLifecycle = {
+    speculative_workspace_count: 0,
+    delivery_attempts: 0,
+    committed_transition_effect_count: 0,
     duplicate_delivery_attempts: 0,
     delivery_failures: 0,
   };
@@ -560,6 +1573,105 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
     pendingTurns += 1;
     return enqueueRuntimeOperation(execute, () => {
       pendingTurns -= 1;
+    });
+  }
+
+  async function prepareSpeculativeCurrentMind(input = {}) {
+    pendingCurrentMindCycles += 1;
+    return enqueueRuntimeOperation(async () => {
+      currentMindLifecycle.speculative_workspace_count += 1;
+      return buildWorldSimulationCharacterCurrentMindTransition({
+        ...cloneJson(input),
+        world_lineage: worldLineage,
+        character_entity_id: identity.entity_id,
+        canonical_name: identity.canonical_name,
+        identity_source: identity.identity_source,
+        formal_identity: identity.formal === true,
+        prior_current_mind: cloneJson(committedCurrentMind),
+        recent_experience_receipts: cloneJson(recentExperienceReceipts),
+      });
+    }, () => {
+      pendingCurrentMindCycles -= 1;
+    });
+  }
+
+  async function consumeCommittedCurrentMind(input = {}) {
+    const characterProjection = verifyCharacterCurrentMindTransitionProjection(
+      input.character_projection,
+    );
+    const committedRevision = Number(input.committed_revision);
+    if (!Number.isSafeInteger(committedRevision) || committedRevision < 1) {
+      const error = new Error("Committed Character Current Mind transition revision is invalid.");
+      error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_REVISION_INVALID";
+      throw error;
+    }
+    pendingCurrentMindDeliveries += 1;
+    return enqueueRuntimeOperation(async () => {
+      currentMindLifecycle.delivery_attempts += 1;
+      try {
+        if (characterProjection.world_lineage !== worldLineage
+          || characterProjection.character_entity_id !== identity.entity_id) {
+          const error = new Error(
+            "Committed Character Current Mind transition identity does not match Runtime identity.",
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_IDENTITY_MISMATCH";
+          throw error;
+        }
+        const transitionId = characterProjection.transition_hash;
+        if (consumedCurrentMindTransitionIds.has(transitionId)) {
+          currentMindLifecycle.duplicate_delivery_attempts += 1;
+          return {
+            consumed: false,
+            duplicate: true,
+            transition_id: transitionId,
+            committed_revision: committedRevision,
+            current_mind_sequence: characterProjection.current_mind_sequence,
+          };
+        }
+        const sequence = Number(characterProjection.current_mind_sequence);
+        const expectedSequence = Number(committedCurrentMind.current_mind_sequence ?? 0) + 1;
+        if (!Number.isSafeInteger(sequence) || sequence !== expectedSequence) {
+          const error = new Error(
+            `Committed Character Current Mind transition is out of order: expected sequence ${expectedSequence}, received ${sequence}.`,
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_OUT_OF_ORDER";
+          throw error;
+        }
+        if (lastCommittedCurrentMindRevision !== null
+          && committedRevision <= lastCommittedCurrentMindRevision) {
+          const error = new Error(
+            `Committed Character Current Mind transition revision is out of order: last ${lastCommittedCurrentMindRevision}, received ${committedRevision}.`,
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_OUT_OF_ORDER";
+          throw error;
+        }
+        const nextState = object(characterProjection.reducer_state_after);
+        if (Number(nextState.current_mind_sequence) !== sequence) {
+          const error = new Error(
+            "Committed Character Current Mind reducer state sequence does not match transition sequence.",
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_STATE_SEQUENCE_MISMATCH";
+          throw error;
+        }
+        committedCurrentMind = cloneJson(nextState);
+        lastCommittedCurrentMindRevision = committedRevision;
+        consumedCurrentMindTransitionIds.add(transitionId);
+        recentCurrentMindTransitionIds.push(transitionId);
+        if (recentCurrentMindTransitionIds.length > 16) recentCurrentMindTransitionIds.shift();
+        currentMindLifecycle.committed_transition_effect_count += 1;
+        return {
+          consumed: true,
+          duplicate: false,
+          transition_id: transitionId,
+          committed_revision: committedRevision,
+          current_mind_sequence: sequence,
+        };
+      } catch (error) {
+        currentMindLifecycle.delivery_failures += 1;
+        throw error;
+      }
+    }, () => {
+      pendingCurrentMindDeliveries -= 1;
     });
   }
 
@@ -646,7 +1758,29 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
       lifecycle: cloneJson(lifecycle),
       active_turns: activeTurns,
       pending_turns: pendingTurns,
-      pending_runtime_operations: pendingTurns + pendingExperienceDeliveries,
+      pending_runtime_operations:
+        pendingTurns
+        + pendingExperienceDeliveries
+        + pendingCurrentMindCycles
+        + pendingCurrentMindDeliveries,
+      current_mind: {
+        owner: "character_runtime",
+        contract_version: worldSimulationCharacterCurrentMindContractVersion,
+        attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+        projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+        ...cloneJson(currentMindLifecycle),
+        last_committed_revision: lastCommittedCurrentMindRevision,
+        committed_sequence: Number(committedCurrentMind.current_mind_sequence ?? 0),
+        pending_speculative_cycles: pendingCurrentMindCycles,
+        pending_deliveries: pendingCurrentMindDeliveries,
+        character_facing_view: currentMindCharacterView(committedCurrentMind),
+        reducer_state: cloneJson(committedCurrentMind),
+        recent_transition_ids: cloneJson(recentCurrentMindTransitionIds),
+        transition_identity_cache_size: consumedCurrentMindTransitionIds.size,
+        historical_transition_persistence: true,
+        process_local_state_rebuildable_from_history: true,
+        persistent_mind_learning_installed: false,
+      },
       committed_experience: {
         ...cloneJson(experienceLifecycle),
         last_committed_revision: lastCommittedExperienceRevision,
@@ -660,7 +1794,13 @@ function createCharacterRuntimeInstance({ worldLineage, identity }) {
     };
   }
 
-  return { runTurn, consumeCommittedExperience, snapshot };
+  return {
+    runTurn,
+    prepareSpeculativeCurrentMind,
+    consumeCommittedCurrentMind,
+    consumeCommittedExperience,
+    snapshot,
+  };
 }
 
 export function createWorldSimulationCharacterRuntimeManager(config = {}) {
@@ -713,6 +1853,118 @@ export function createWorldSimulationCharacterRuntimeManager(config = {}) {
   async function runCharacterTurn(input = {}, options = {}) {
     const runtime = await getRuntime(input, options);
     return runtime.runTurn(input.brain_input, input.characterBrain);
+  }
+
+  async function prepareSpeculativeCurrentMind(input = {}, options = {}) {
+    const runtime = await getRuntime(input, options);
+    return runtime.prepareSpeculativeCurrentMind({
+      turn_id: input.turn_id,
+      character: input.character,
+      simulation_time: input.simulation_time ?? null,
+      perception: cloneJson(input.perception ?? {}),
+      recovered_memories: cloneJson(input.recovered_memories ?? []),
+      current_action: cloneJson(input.current_action ?? null),
+      compatibility_state: cloneJson(input.compatibility_state ?? {}),
+    });
+  }
+
+  async function deliverCommittedCurrentMind(input = {}) {
+    const historyEntry = object(input.history_entry);
+    const projectionEnvelope = verifyCharacterCurrentMindProjectionEnvelope(
+      input.projection_envelope
+      ?? historyEntry.committed_character_current_mind_projection,
+    );
+    const committedTurnId = nonEmptyString(
+      historyEntry.turn_id,
+      "committed current mind history turn_id",
+    );
+    if (projectionEnvelope.turn_id !== committedTurnId) {
+      const error = new Error(
+        "Committed Character Current Mind projection turn_id does not match committed history.",
+      );
+      error.code = "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_TURN_MISMATCH";
+      throw error;
+    }
+    const characterProjection = verifyCharacterCurrentMindTransitionProjection(
+      input.character_projection,
+    );
+    const character = nonEmptyString(
+      characterProjection.character,
+      "current mind projection character",
+    );
+    const runtime = getOrCreateRuntimeByResolvedIdentity({
+      worldLineage: nonEmptyString(
+        characterProjection.world_lineage,
+        "historical committed current mind world lineage",
+      ),
+      identity: {
+        entity_id: nonEmptyString(
+          characterProjection.character_entity_id,
+          "historical committed current mind character entity_id",
+        ),
+        canonical_name: characterProjection.canonical_name ?? character,
+        identity_source:
+          characterProjection.identity_source
+          ?? "historical_committed_character_current_mind_projection",
+        formal: characterProjection.formal_identity === true,
+      },
+    });
+    const result = await runtime.consumeCommittedCurrentMind({
+      character_projection: characterProjection,
+      committed_revision: historyEntry.revision_to,
+    });
+    return {
+      ...result,
+      character,
+      character_entity_id: characterProjection.character_entity_id,
+    };
+  }
+
+  async function deliverCommittedCurrentMindProjection(input = {}, options = {}) {
+    const historyEntry = object(input.history_entry);
+    const projectionEnvelope = verifyCharacterCurrentMindProjectionEnvelope(
+      historyEntry.committed_character_current_mind_projection,
+    );
+    const characterProjections = array(projectionEnvelope.character_projections);
+    const settledDeliveries = await Promise.allSettled(
+      characterProjections.map((characterProjection) => (
+        deliverCommittedCurrentMind({
+          world_simulation_session_id: input.world_simulation_session_id,
+          history_entry: historyEntry,
+          projection_envelope: projectionEnvelope,
+          character_projection: characterProjection,
+        }, options)
+      )),
+    );
+    const deliveries = settledDeliveries
+      .filter((item) => item.status === "fulfilled")
+      .map((item) => item.value);
+    const failures = settledDeliveries
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === "rejected")
+      .map(({ item, index }) => ({
+        projection_slot: characterProjections[index]?.projection_slot ?? index,
+        character: characterProjections[index]?.character ?? null,
+        character_entity_id: characterProjections[index]?.character_entity_id ?? null,
+        error_code:
+          item.reason?.code
+          ?? "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_DELIVERY_FAILED",
+        error_message: item.reason?.message ?? String(item.reason),
+      }));
+    return {
+      projection_version: projectionEnvelope.projection_version,
+      current_mind_contract_version: projectionEnvelope.current_mind_contract_version,
+      attention_reducer_version: projectionEnvelope.attention_reducer_version,
+      projection_hash: projectionEnvelope.projection_hash,
+      delivery_count: characterProjections.length,
+      consumed_count: deliveries.filter((item) => item.consumed === true).length,
+      duplicate_count: deliveries.filter((item) => item.duplicate === true).length,
+      failed_count: failures.length,
+      delivery_failed: failures.length > 0,
+      replay_required: failures.length > 0,
+      deliveries,
+      failures,
+    };
   }
 
   async function deliverCommittedExperience(input = {}, options = {}) {
@@ -828,10 +2080,16 @@ export function createWorldSimulationCharacterRuntimeManager(config = {}) {
 
   return {
     runtime_version: worldSimulationCharacterRuntimeVersion,
+    current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+    attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+    current_mind_projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
     experience_contract_version: worldSimulationCharacterExperienceContractVersion,
     experience_projection_version: worldSimulationCharacterExperienceProjectionVersion,
     getRuntime,
     runCharacterTurn,
+    prepareSpeculativeCurrentMind,
+    deliverCommittedCurrentMind,
+    deliverCommittedCurrentMindProjection,
     deliverCommittedExperience,
     deliverCommittedExperienceProjection,
     inspectRuntime,
@@ -855,37 +2113,112 @@ export async function replayWorldSimulationCommittedCharacterExperiences(
   const history = await getWorldSimulationHistory(sessionId, options);
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
-  if (typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
+  if (typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function"
+    || typeof characterRuntimeManager?.deliverCommittedCurrentMindProjection !== "function") {
     throw new Error(
-      "characterRuntimeManager must provide deliverCommittedExperienceProjection().",
+      "characterRuntimeManager must provide committed Experience and Current Mind projection delivery.",
     );
   }
   const committedTurns = array(history.turns)
-    .filter((turn) => isObject(turn?.committed_character_experience_projection))
+    .filter((turn) => (
+      isObject(turn?.committed_character_experience_projection)
+      || isObject(turn?.committed_character_current_mind_projection)
+    ))
     .sort((left, right) => Number(left.revision_to) - Number(right.revision_to));
   const replayed = [];
   for (const historyEntry of committedTurns) {
-    replayed.push(await characterRuntimeManager.deliverCommittedExperienceProjection(
-      {
-        world_simulation_session_id: sessionId,
-        history_entry: historyEntry,
-      },
-      options,
-    ));
+    let currentMindDelivery = null;
+    if (isObject(historyEntry.committed_character_current_mind_projection)) {
+      currentMindDelivery = await characterRuntimeManager.deliverCommittedCurrentMindProjection(
+        {
+          world_simulation_session_id: sessionId,
+          history_entry: historyEntry,
+        },
+        options,
+      );
+    }
+    let experienceDelivery = {
+      delivery_count: 0,
+      consumed_count: 0,
+      duplicate_count: 0,
+      failed_count: 0,
+      delivery_failed: false,
+      replay_required: false,
+      deliveries: [],
+      failures: [],
+    };
+    if (
+      currentMindDelivery?.replay_required === true
+      && isObject(historyEntry.committed_character_experience_projection)
+    ) {
+      const experienceProjection = verifyCharacterExperienceProjectionEnvelope(
+        historyEntry.committed_character_experience_projection,
+      );
+      experienceDelivery = {
+        projection_version: experienceProjection.projection_version,
+        experience_contract_version: experienceProjection.experience_contract_version,
+        projection_hash: experienceProjection.projection_hash,
+        delivery_count: experienceProjection.character_projections.length,
+        consumed_count: 0,
+        duplicate_count: 0,
+        failed_count: 0,
+        delivery_failed: false,
+        delivery_deferred: true,
+        deferred_reason: "current_mind_replay_still_required",
+        replay_required: true,
+        deliveries: [],
+        failures: [],
+      };
+    } else if (isObject(historyEntry.committed_character_experience_projection)) {
+      experienceDelivery = await characterRuntimeManager.deliverCommittedExperienceProjection(
+        {
+          world_simulation_session_id: sessionId,
+          history_entry: historyEntry,
+        },
+        options,
+      );
+    }
+    replayed.push({
+      ...experienceDelivery,
+      current_mind_delivery: currentMindDelivery,
+    });
   }
   const failedCount = replayed.reduce((sum, item) => sum + (item.failed_count ?? 0), 0);
+  const currentMindFailedCount = replayed.reduce(
+    (sum, item) => sum + (item.current_mind_delivery?.failed_count ?? 0),
+    0,
+  );
+  const experienceCommittedTurnCount = committedTurns.filter(
+    (turn) => isObject(turn?.committed_character_experience_projection),
+  ).length;
+  const currentMindCommittedTurnCount = committedTurns.filter(
+    (turn) => isObject(turn?.committed_character_current_mind_projection),
+  ).length;
   return {
-    ok: failedCount === 0,
+    ok: failedCount === 0 && currentMindFailedCount === 0,
     world_simulation_session_id: sessionId,
     replay_source: "immutable_committed_world_history",
     current_perception_engine_reanalysis_used: false,
+    current_attention_algorithm_reanalysis_used: false,
+    phase63c_memory_retrieval_reexecution_used: false,
+    character_brain_reexecution_used: false,
     historical_projection_semantics_preserved: true,
-    committed_turns_with_projection: committedTurns.length,
+    committed_turns_with_projection: experienceCommittedTurnCount,
+    committed_turns_with_current_mind_projection: currentMindCommittedTurnCount,
     delivery_count: replayed.reduce((sum, item) => sum + item.delivery_count, 0),
     consumed_count: replayed.reduce((sum, item) => sum + item.consumed_count, 0),
     duplicate_count: replayed.reduce((sum, item) => sum + item.duplicate_count, 0),
     failed_count: failedCount,
-    replay_required: failedCount > 0,
+    current_mind_delivery_count: replayed.reduce(
+      (sum, item) => sum + (item.current_mind_delivery?.delivery_count ?? 0),
+      0,
+    ),
+    current_mind_consumed_count: replayed.reduce(
+      (sum, item) => sum + (item.current_mind_delivery?.consumed_count ?? 0),
+      0,
+    ),
+    current_mind_failed_count: currentMindFailedCount,
+    replay_required: failedCount > 0 || currentMindFailedCount > 0,
     replays: replayed,
   };
 }
@@ -1244,6 +2577,67 @@ export function buildWorldSimulationLoopContract() {
       committed_experience_sequence_source: "immutable_committed_world_history",
       committed_experience_global_delivery_lock: false,
       durable_experience_cursor_installed: false,
+      current_mind_owner: "character_runtime",
+      current_mind_state_scope: "process_local_rebuildable_from_committed_history",
+      current_mind_historical_transition_persistence: true,
+      current_mind_commit_boundary: "successful_world_commit_only",
+      post_commit_cognitive_delivery_order:
+        "current_mind_transition_before_experience_receipt",
+      experience_delivery_deferred_when_current_mind_replay_required: true,
+      current_mind_global_attention_lock: false,
+      persistent_mind_learning_installed: false,
+    },
+    character_current_mind: {
+      current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+      attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+      projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+      owner: "character_runtime",
+      source_pipeline: [
+        "bounded_perception",
+        "actual_phase63c_recovered_memories",
+        "prior_committed_current_mind",
+        "current_action_intention",
+        "legacy_compatibility_seed",
+        "prior_committed_character_experience",
+      ],
+      legacy_attention_seed_bootstrap_only: true,
+      legacy_expectation_seed_bootstrap_only: true,
+      speculative_before_world_commit: true,
+      committed_only_after_successful_world_commit: true,
+      blocked_consistency_discards_speculation: true,
+      stale_commit_discards_speculation: true,
+      commit_failure_discards_speculation: true,
+      historical_transition_projection_persisted: true,
+      historical_replay_runs_current_attention_algorithm: false,
+      historical_replay_reasks_character_brain: false,
+      historical_replay_reruns_phase63c_retrieval: false,
+      attention_processes: [
+        "perceptual_salience",
+        "goal_intention_relevance",
+        "expectation_violation",
+        "immediate_constraint_urgency",
+        "focus_continuity",
+      ],
+      common_deterministic_priority_resolver: true,
+      asynchronous_codelet_race_used: false,
+      random_tie_break_used: false,
+      focus_inertia_hysteresis_installed: true,
+      interruption_uses_relative_priority: true,
+      interrupted_focus_erased_immediately: false,
+      suspended_and_fading_context_installed: true,
+      decay_basis: "simulation_time_plus_committed_cognitive_sequence",
+      wall_clock_decay_used: false,
+      fixed_four_item_working_memory_assumed: false,
+      bounded_workspace_budget_is_engineering_bound: true,
+      attention_internal_state_exposed_to_character_brain: false,
+      character_facing_attention_view_exposed_to_character_brain: true,
+      encoding_evidence_view_available_to_programmatic_policy: true,
+      focus_directly_equals_encode: false,
+      non_focus_encoding_evidence_allowed: true,
+      gpt_may_author_historical_attention_projection: false,
+      gpt_hidden_reasoning_persisted: false,
+      experience_receipt_same_turn_retroactive_attention_allowed: false,
+      persistent_mind_database_installed: false,
     },
     committed_character_experience: {
       experience_contract_version: worldSimulationCharacterExperienceContractVersion,
@@ -1546,6 +2940,15 @@ export function buildWorldSimulationLoopContract() {
       receives_bounded_cognition:
         true,
 
+      receives_runtime_attention_encoding_evidence:
+        true,
+
+      focus_directly_controls_encoding:
+        false,
+
+      non_focus_observation_may_supply_encoding_evidence:
+        true,
+
       character_brain_direct_encoding_control_allowed:
         false,
 
@@ -1614,6 +3017,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
+  const characterRuntimeManager = options.characterRuntimeManager
+    ?? defaultWorldSimulationCharacterRuntimeManager;
+  if (typeof characterRuntimeManager?.prepareSpeculativeCurrentMind !== "function") {
+    throw new Error(
+      "characterRuntimeManager must provide prepareSpeculativeCurrentMind().",
+    );
+  }
 
   const turnId = `world_turn_${hashAgentRunValue({
     world_simulation_session_id: sessionId,
@@ -1635,6 +3045,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   );
 
   const decisionPackets = [];
+  const attentionEncodingEvidence = [];
+  const currentMindTransitionProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -2117,6 +3529,55 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         },
       );
 
+    // Character Runtime v2 owns the current situational workspace. This is a
+    // speculative transition only: it cannot mutate committed Current Mind
+    // before the atomic world commit succeeds.
+    const speculativeCurrentMind =
+      await characterRuntimeManager.prepareSpeculativeCurrentMind(
+        {
+          world_simulation_session_id: sessionId,
+          turn_id: turnId,
+          character,
+          simulation_time:
+            worldState.simulation_time
+            ?? event.simulation_time
+            ?? null,
+          perception: characterPerception,
+          recovered_memories: recoveredMemories,
+          current_action:
+            characterState.current_action
+            ?? null,
+          compatibility_state: {
+            attention:
+              characterState.attention
+              ?? null,
+            goals:
+              characterState.goals
+              ?? [],
+            current_goals:
+              characterState.current_goals
+              ?? [],
+            current_goal:
+              characterState.current_goal
+              ?? null,
+            temporary_expectation:
+              characterState.temporary_expectation
+              ?? characterState.expectation
+              ?? null,
+          },
+        },
+        options,
+      );
+
+    attentionEncodingEvidence.push({
+      character,
+      evidence: cloneJson(speculativeCurrentMind.encoding_evidence),
+    });
+    currentMindTransitionProjections.push({
+      character,
+      projection: cloneJson(speculativeCurrentMind.projection),
+    });
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -2130,6 +3591,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
         retrieval_experience:
           retrievalExperience,
+
+        attention:
+          speculativeCurrentMind.character_facing_attention,
+
+        working_context:
+          speculativeCurrentMind.working_context,
 
         current_action:
           characterState.current_action
@@ -2188,6 +3655,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(
           characterCognition,
         ),
+
       candidate_action_intents:
         cloneJson(
           characterActionCandidates.candidate_action_intents,
@@ -2279,6 +3747,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     event,
     scene_analysis: cloneJson(sceneAnalysis),
     decision_packets: decisionPackets,
+    attention_encoding_evidence: cloneJson(attentionEncodingEvidence),
+    current_mind_transition_projections: cloneJson(currentMindTransitionProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -2406,6 +3876,15 @@ async function resolveMemoryEncodingDecisions(
             cloneJson(
               packet.cognition
               ?? {},
+            ),
+
+          attention_encoding_evidence:
+            cloneJson(
+              array(preparedTurn.attention_encoding_evidence).find(
+                (item) => sameCharacterName(item?.character, packet.character),
+              )?.evidence
+              ?? packet.attention_encoding_evidence
+              ?? [],
             ),
         })),
   };
@@ -2784,9 +4263,10 @@ export async function resolveWorldSimulationTurn(
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
+    || typeof characterRuntimeManager?.deliverCommittedCurrentMindProjection !== "function"
     || typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
     throw new Error(
-      "characterRuntimeManager must provide inspectRuntime() and deliverCommittedExperienceProjection().",
+      "characterRuntimeManager must provide inspectRuntime(), deliverCommittedCurrentMindProjection(), and deliverCommittedExperienceProjection().",
     );
   }
   const committedHistoryBeforeTurn = await getWorldSimulationHistory(
@@ -2816,6 +4296,13 @@ export async function resolveWorldSimulationTurn(
       ),
     });
   }
+
+  // This is still speculative cognitive evidence. Runtime committed Current
+  // Mind remains unchanged until the atomic world commit below succeeds.
+  const committedCharacterCurrentMindProjection =
+    projectWorldSimulationCharacterCurrentMindTransitions({
+      prepared_turn: preparedTurn,
+    });
 
   // This projection is only commit evidence at this point. No Character
   // Experience Receipt exists until the atomic world commit below succeeds.
@@ -2891,6 +4378,8 @@ export async function resolveWorldSimulationTurn(
         ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
+      committed_character_current_mind_projection:
+        cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
         cloneJson(committedCharacterExperienceProjection),
       trace_ids: traceIds,
@@ -2899,10 +4388,10 @@ export async function resolveWorldSimulationTurn(
     options,
   );
 
-  let committedExperienceDelivery;
+  let committedCurrentMindDelivery;
   try {
-    committedExperienceDelivery = await characterRuntimeManager
-      .deliverCommittedExperienceProjection(
+    committedCurrentMindDelivery = await characterRuntimeManager
+      .deliverCommittedCurrentMindProjection(
         {
           world_simulation_session_id: sessionId,
           history_entry: committed.history_entry,
@@ -2910,9 +4399,32 @@ export async function resolveWorldSimulationTurn(
         options,
       );
   } catch (error) {
-    // World commit is already authoritative. Preserve the replayable history
-    // projection and surface post-commit delivery failure without pretending
-    // the atomic world commit rolled back.
+    committedCurrentMindDelivery = {
+      projection_version:
+        committedCharacterCurrentMindProjection.projection_version,
+      current_mind_contract_version:
+        committedCharacterCurrentMindProjection.current_mind_contract_version,
+      attention_reducer_version:
+        committedCharacterCurrentMindProjection.attention_reducer_version,
+      projection_hash:
+        committedCharacterCurrentMindProjection.projection_hash,
+      delivery_count:
+        committedCharacterCurrentMindProjection.character_projections.length,
+      consumed_count: 0,
+      duplicate_count: 0,
+      failed_count: 1,
+      delivery_failed: true,
+      replay_required: true,
+      error_code: error?.code ?? "WORLD_SIMULATION_CHARACTER_CURRENT_MIND_DELIVERY_FAILED",
+      error_message: error?.message ?? String(error),
+    };
+  }
+
+  let committedExperienceDelivery;
+  if (committedCurrentMindDelivery.replay_required === true) {
+    // Preserve per-character cognitive ordering. Experience N is durable in
+    // world history, but Runtime delivery waits until the missing Current Mind
+    // transition N can be replayed first.
     committedExperienceDelivery = {
       projection_version:
         committedCharacterExperienceProjection.projection_version,
@@ -2924,11 +4436,45 @@ export async function resolveWorldSimulationTurn(
         committedCharacterExperienceProjection.character_projections.length,
       consumed_count: 0,
       duplicate_count: 0,
-      delivery_failed: true,
+      failed_count: 0,
+      delivery_failed: false,
+      delivery_deferred: true,
+      deferred_reason: "current_mind_delivery_requires_replay",
       replay_required: true,
-      error_code: error?.code ?? "WORLD_SIMULATION_CHARACTER_EXPERIENCE_DELIVERY_FAILED",
-      error_message: error?.message ?? String(error),
     };
+  } else {
+    try {
+      committedExperienceDelivery = await characterRuntimeManager
+        .deliverCommittedExperienceProjection(
+          {
+            world_simulation_session_id: sessionId,
+            history_entry: committed.history_entry,
+          },
+          options,
+        );
+    } catch (error) {
+      // World commit is already authoritative. Preserve the replayable history
+      // projection and surface post-commit delivery failure without pretending
+      // the atomic world commit rolled back.
+      committedExperienceDelivery = {
+        projection_version:
+          committedCharacterExperienceProjection.projection_version,
+        experience_contract_version:
+          committedCharacterExperienceProjection.experience_contract_version,
+        projection_hash:
+          committedCharacterExperienceProjection.projection_hash,
+        delivery_count:
+          committedCharacterExperienceProjection.character_projections.length,
+        consumed_count: 0,
+        duplicate_count: 0,
+        failed_count: 1,
+        delivery_failed: true,
+        delivery_deferred: false,
+        replay_required: true,
+        error_code: error?.code ?? "WORLD_SIMULATION_CHARACTER_EXPERIENCE_DELIVERY_FAILED",
+        error_message: error?.message ?? String(error),
+      };
+    }
   }
 
   return {
@@ -2980,6 +4526,29 @@ export async function resolveWorldSimulationTurn(
       mutation_count: subjectiveMemoryMutationQueue.mutation_count,
       authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
     },
+    committed_character_current_mind: {
+      current_mind_contract_version:
+        committedCharacterCurrentMindProjection.current_mind_contract_version,
+      attention_reducer_version:
+        committedCharacterCurrentMindProjection.attention_reducer_version,
+      projection_version:
+        committedCharacterCurrentMindProjection.projection_version,
+      projection_hash:
+        committedCharacterCurrentMindProjection.projection_hash,
+      transition_count:
+        committedCharacterCurrentMindProjection.character_projections.length,
+      delivered_count:
+        committedCurrentMindDelivery.consumed_count ?? 0,
+      duplicate_delivery_count:
+        committedCurrentMindDelivery.duplicate_count ?? 0,
+      delivery_failed:
+        committedCurrentMindDelivery.delivery_failed === true,
+      replay_required:
+        committedCurrentMindDelivery.replay_required === true,
+      established_after_world_commit: true,
+      persistent_mind_learning_installed: false,
+      durable_mind_mutation_count: 0,
+    },
     committed_character_experience: {
       experience_contract_version:
         committedCharacterExperienceProjection.experience_contract_version,
@@ -2995,6 +4564,11 @@ export async function resolveWorldSimulationTurn(
         committedExperienceDelivery.duplicate_count ?? 0,
       delivery_failed:
         committedExperienceDelivery.delivery_failed === true,
+      delivery_deferred:
+        committedExperienceDelivery.delivery_deferred === true,
+      deferred_reason:
+        committedExperienceDelivery.deferred_reason
+        ?? null,
       replay_required:
         committedExperienceDelivery.replay_required === true,
       established_after_world_commit: true,
@@ -3016,10 +4590,12 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.runCharacterTurn !== "function"
+    || typeof characterRuntimeManager?.prepareSpeculativeCurrentMind !== "function"
     || typeof characterRuntimeManager?.inspectRuntime !== "function"
+    || typeof characterRuntimeManager?.deliverCommittedCurrentMindProjection !== "function"
     || typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
     throw new Error(
-      "characterRuntimeManager must provide runCharacterTurn(), inspectRuntime(), and deliverCommittedExperienceProjection().",
+      "characterRuntimeManager must provide Character Runtime v2 turn, Current Mind, inspection, and committed delivery methods.",
     );
   }
   const selections = {};

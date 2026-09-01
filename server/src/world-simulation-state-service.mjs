@@ -28,17 +28,24 @@ function cloneJson(value) {
 }
 
 function fixtureTransactionMetadata(options = {}) {
-  return options.fixtureRoot
-    ? {
-      test_transaction_dir: path.join(
-        options.fixtureRoot,
-        "data",
-        "outputs",
-        "logs",
-        "transactions",
-      ),
-    }
-    : {};
+  if (!options.fixtureRoot) return {};
+  const metadata = {
+    test_transaction_dir: path.join(
+      options.fixtureRoot,
+      "data",
+      "outputs",
+      "logs",
+      "transactions",
+    ),
+  };
+  if (
+    process.env.FILE_TRANSACTION_TEST_MODE === "1"
+    && Number.isSafeInteger(options.testFailAfterTransactionCommits)
+    && options.testFailAfterTransactionCommits > 0
+  ) {
+    metadata.test_fail_after_commits = options.testFailAfterTransactionCommits;
+  }
+  return metadata;
 }
 
 export function worldSimulationStatePaths(sessionId, options = {}) {
@@ -281,6 +288,8 @@ export async function commitWorldSimulationTurn(
             subjective_memory_formation: input.subjective_memory_formation ?? null,
             subjective_memory_mutation_queue: input.subjective_memory_mutation_queue ?? null,
             subjective_memory_mutation_execution: input.subjective_memory_mutation_execution ?? null,
+            committed_character_current_mind_projection:
+              input.committed_character_current_mind_projection ?? null,
             committed_character_experience_projection:
               input.committed_character_experience_projection ?? null,
             trace_ids: input.trace_ids ?? [],

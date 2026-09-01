@@ -12,11 +12,15 @@ import {
   buildWorldSimulationLoopContract,
   createWorldSimulationCharacterRuntimeManager,
   prepareWorldSimulationTurn,
+  projectWorldSimulationCharacterCurrentMindTransitions,
   projectWorldSimulationCharacterExperienceEvidence,
   replayWorldSimulationCommittedCharacterExperiences,
   resolveWorldSimulationFormalCharacterIdentity,
   resolveWorldSimulationTurn,
   runWorldSimulationTurn,
+  worldSimulationCharacterAttentionReducerVersion,
+  worldSimulationCharacterCurrentMindContractVersion,
+  worldSimulationCharacterCurrentMindProjectionVersion,
   worldSimulationCharacterExperienceContractVersion,
   worldSimulationCharacterExperienceProjectionVersion,
   worldSimulationCharacterRuntimeVersion,
@@ -180,6 +184,51 @@ try {
   );
   assert.equal(contract.character_runtime.committed_experience_global_delivery_lock, false);
   assert.equal(contract.character_runtime.durable_experience_cursor_installed, false);
+  assert.equal(contract.character_runtime.current_mind_owner, "character_runtime");
+  assert.equal(
+    contract.character_runtime.post_commit_cognitive_delivery_order,
+    "current_mind_transition_before_experience_receipt",
+  );
+  assert.equal(
+    contract.character_runtime.experience_delivery_deferred_when_current_mind_replay_required,
+    true,
+  );
+  assert.equal(contract.character_runtime.current_mind_global_attention_lock, false);
+  assert.equal(contract.character_runtime.persistent_mind_learning_installed, false);
+  assert.equal(
+    contract.character_current_mind.current_mind_contract_version,
+    worldSimulationCharacterCurrentMindContractVersion,
+  );
+  assert.equal(
+    contract.character_current_mind.attention_reducer_version,
+    worldSimulationCharacterAttentionReducerVersion,
+  );
+  assert.equal(
+    contract.character_current_mind.projection_version,
+    worldSimulationCharacterCurrentMindProjectionVersion,
+  );
+  assert.equal(contract.character_current_mind.owner, "character_runtime");
+  assert.equal(contract.character_current_mind.legacy_attention_seed_bootstrap_only, true);
+  assert.equal(contract.character_current_mind.legacy_expectation_seed_bootstrap_only, true);
+  assert.equal(contract.character_current_mind.speculative_before_world_commit, true);
+  assert.equal(contract.character_current_mind.committed_only_after_successful_world_commit, true);
+  assert.equal(contract.character_current_mind.common_deterministic_priority_resolver, true);
+  assert.equal(contract.character_current_mind.asynchronous_codelet_race_used, false);
+  assert.equal(contract.character_current_mind.random_tie_break_used, false);
+  assert.equal(contract.character_current_mind.focus_inertia_hysteresis_installed, true);
+  assert.equal(contract.character_current_mind.interrupted_focus_erased_immediately, false);
+  assert.equal(
+    contract.character_current_mind.decay_basis,
+    "simulation_time_plus_committed_cognitive_sequence",
+  );
+  assert.equal(contract.character_current_mind.wall_clock_decay_used, false);
+  assert.equal(contract.character_current_mind.fixed_four_item_working_memory_assumed, false);
+  assert.equal(contract.character_current_mind.attention_internal_state_exposed_to_character_brain, false);
+  assert.equal(contract.character_current_mind.focus_directly_equals_encode, false);
+  assert.equal(contract.character_current_mind.non_focus_encoding_evidence_allowed, true);
+  assert.equal(contract.character_current_mind.historical_replay_runs_current_attention_algorithm, false);
+  assert.equal(contract.character_current_mind.historical_replay_reruns_phase63c_retrieval, false);
+  assert.equal(contract.character_current_mind.experience_receipt_same_turn_retroactive_attention_allowed, false);
   assert.equal(
     contract.committed_character_experience.experience_contract_version,
     worldSimulationCharacterExperienceContractVersion,
@@ -598,6 +647,654 @@ try {
   assert.equal(alphaRuntimeAfterFailure.lifecycle.turns_failed, 1);
   assert.equal(alphaRuntimeAfterFailure.durable_mind_mutation_count, 0);
 
+  const firstMindSpeculationInput = {
+    world_simulation_session_id: "mind-lineage",
+    turn_id: "mind-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T10:00:00+08:00",
+    perception: {
+      observed: [
+        {
+          perceptual_label: "正在閱讀的操作手冊",
+          goal_relevance: "high",
+          salience: "medium",
+          entity_id: "engine-private-book-id",
+          exact_source_position: { x: 1, y: 2 },
+        },
+      ],
+      audible: [
+        {
+          perceptual_label: "遠處風聲",
+          salience: "low",
+        },
+      ],
+      other_senses: [],
+    },
+    recovered_memories: [
+      {
+        memory_id: "engine-private-memory-id",
+        content: "手冊上一頁提到先確認鎖扣",
+        relevance: "medium",
+        retrieval_process_id: "engine-private-retrieval-id",
+      },
+    ],
+    current_action: "閱讀操作手冊",
+    compatibility_state: {
+      attention: "閱讀操作手冊",
+      goals: ["閱讀操作手冊"],
+    },
+  };
+  const firstMindSpeculation = await runtimeManager.prepareSpeculativeCurrentMind(
+    firstMindSpeculationInput,
+  );
+  const repeatedFirstMindSpeculation = await runtimeManager.prepareSpeculativeCurrentMind(
+    firstMindSpeculationInput,
+  );
+  assert.deepEqual(
+    repeatedFirstMindSpeculation,
+    firstMindSpeculation,
+    "same committed Current Mind plus same bounded evidence must resolve deterministically",
+  );
+  assert.equal(
+    firstMindSpeculation.projection.current_mind_contract_version,
+    worldSimulationCharacterCurrentMindContractVersion,
+  );
+  assert.equal(
+    firstMindSpeculation.projection.attention_reducer_version,
+    worldSimulationCharacterAttentionReducerVersion,
+  );
+  assert.equal(
+    firstMindSpeculation.projection.projection_version,
+    worldSimulationCharacterCurrentMindProjectionVersion,
+  );
+  assert.equal(firstMindSpeculation.projection.boundaries.owner, "character_runtime");
+  assert.equal(firstMindSpeculation.projection.boundaries.speculative_until_world_commit, true);
+  assert.equal(firstMindSpeculation.projection.boundaries.character_brain_authors_projection, false);
+  assert.equal(firstMindSpeculation.projection.boundaries.gpt_hidden_reasoning_included, false);
+  assert.equal(
+    firstMindSpeculation.projection.resolver_audit.simple_sort_score_focus_selection_used,
+    false,
+  );
+  assert.equal(firstMindSpeculation.projection.resolver_audit.asynchronous_codelet_race_used, false);
+  assert.equal(firstMindSpeculation.projection.resolver_audit.random_tie_break_used, false);
+  assert.equal(firstMindSpeculation.projection.resolver_audit.wall_clock_decay_used, false);
+  assert.equal(
+    firstMindSpeculation.projection.resolver_audit.focus_resolution_evidence
+      .selected_candidate_source_kind,
+    "perception",
+  );
+  assert.equal(
+    firstMindSpeculation.projection.resolver_audit.focus_resolution_evidence
+      .support_processes.includes("perceptual_salience_process"),
+    true,
+  );
+  assert.equal(
+    firstMindSpeculation.projection.focus_transition.to.content.perceptual_label,
+    "正在閱讀的操作手冊",
+  );
+  assert.equal(
+    firstMindSpeculation.internal_attention_state.bids.some(
+      (bid) => bid.sources.includes("perceptual_salience_process"),
+    ),
+    true,
+  );
+  assert.equal(
+    firstMindSpeculation.internal_attention_state.bids.some(
+      (bid) => bid.sources.includes("goal_intention_relevance_process"),
+    ),
+    true,
+  );
+  assert.equal(
+    firstMindSpeculation.attention_encoding_evidence,
+    undefined,
+    "internal helper field name must not accidentally drift into the public speculative result",
+  );
+  assert.equal(firstMindSpeculation.encoding_evidence.length, 2);
+  assert.equal(
+    firstMindSpeculation.encoding_evidence.some(
+      (evidence) => evidence.processing_level === "focus"
+        && evidence.memory_encoding_decision === "unspecified",
+    ),
+    true,
+  );
+  assert.equal(
+    firstMindSpeculation.encoding_evidence.some(
+      (evidence) => evidence.processing_level !== "focus"
+        && evidence.memory_encoding_decision === "unspecified",
+    ),
+    true,
+    "non-focus observations must still carry encoding evidence without becoming do_not_encode",
+  );
+  const characterFacingMindText = JSON.stringify({
+    attention: firstMindSpeculation.character_facing_attention,
+    working_context: firstMindSpeculation.working_context,
+  });
+  for (const forbidden of [
+    "candidate_id",
+    "attention_bids",
+    "priority_evidence",
+    "internal_priority_strength",
+    "world_lineage",
+    "character_entity_id",
+    "projection_hash",
+    "transition_hash",
+    "engine-private-book-id",
+    "engine-private-memory-id",
+    "engine-private-retrieval-id",
+    "exact_source_position",
+    "source_kind",
+    "salience",
+    "goal_relevance",
+    "urgency",
+    "expectation_violation",
+    "awareness_boundary",
+  ]) {
+    assert.equal(
+      characterFacingMindText.includes(forbidden),
+      false,
+      `character-facing Current Mind must exclude ${forbidden}`,
+    );
+  }
+
+  const firstMindEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "mind-turn-1",
+      decision_packets: [
+        {
+          character: "Alpha",
+          current_mind_transition_projection: firstMindSpeculation.projection,
+        },
+      ],
+    },
+  });
+  const firstMindDelivery = await runtimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "mind-lineage",
+    history_entry: {
+      turn_id: "mind-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_current_mind_projection: firstMindEnvelope,
+    },
+  });
+  assert.equal(firstMindDelivery.consumed_count, 1);
+  assert.equal(firstMindDelivery.duplicate_count, 0);
+  const duplicateFirstMindDelivery = await runtimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "mind-lineage",
+    history_entry: {
+      turn_id: "mind-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_current_mind_projection: firstMindEnvelope,
+    },
+  });
+  assert.equal(duplicateFirstMindDelivery.consumed_count, 0);
+  assert.equal(duplicateFirstMindDelivery.duplicate_count, 1);
+  const mindAfterFirstCommit = await runtimeManager.inspectRuntime({
+    world_simulation_session_id: "mind-lineage",
+    character: "Alpha",
+  });
+  assert.equal(mindAfterFirstCommit.current_mind.owner, "character_runtime");
+  assert.equal(mindAfterFirstCommit.current_mind.committed_sequence, 1);
+  assert.equal(mindAfterFirstCommit.current_mind.committed_transition_effect_count, 1);
+  assert.equal(mindAfterFirstCommit.current_mind.duplicate_delivery_attempts, 1);
+  assert.equal(mindAfterFirstCommit.current_mind.persistent_mind_learning_installed, false);
+  assert.equal(mindAfterFirstCommit.durable_mind_mutation_count, 0);
+
+  const weakChallengerSpeculation = await runtimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "mind-lineage",
+    turn_id: "mind-turn-2",
+    character: "Alpha",
+    simulation_time: "2026-09-01T10:01:00+08:00",
+    perception: {
+      observed: [
+        {
+          perceptual_label: "正在閱讀的操作手冊",
+          goal_relevance: "high",
+          salience: "low",
+        },
+      ],
+      audible: [
+        {
+          perceptual_label: "牆上時鐘滴答",
+          salience: "low",
+        },
+      ],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "閱讀操作手冊",
+    compatibility_state: {
+      attention: "過時的 world-side attention 不應重新注入",
+      goals: ["閱讀操作手冊"],
+    },
+  });
+  assert.equal(
+    weakChallengerSpeculation.projection.source_refs.some(
+      (ref) => ref.kind === "legacy_attention_seed",
+    ),
+    false,
+    "legacy world-side attention may bootstrap Current Mind only before the first committed sequence",
+  );
+  assert.equal(
+    weakChallengerSpeculation.projection.reducer_state_after.focus.candidate_id,
+    firstMindSpeculation.projection.reducer_state_after.focus.candidate_id,
+    "attention metadata changes must not change the stable identity of the same perceived content",
+  );
+  assert.equal(
+    weakChallengerSpeculation.projection.resolver_audit.focus_resolution_evidence
+      .support_processes.includes("perceptual_salience_process"),
+    true,
+    "a refreshed prior focus must merge fresh perceptual evidence instead of surviving only as stale continuity",
+  );
+  assert.equal(weakChallengerSpeculation.projection.focus_transition.interrupted, false);
+  assert.equal(
+    weakChallengerSpeculation.projection.focus_transition.to.content.perceptual_label,
+    "正在閱讀的操作手冊",
+    "a weak challenger must not oscillate focus away from a refreshed current focus",
+  );
+  const secondMindEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "mind-turn-2",
+      decision_packets: [
+        {
+          character: "Alpha",
+          current_mind_transition_projection: weakChallengerSpeculation.projection,
+        },
+      ],
+    },
+  });
+  await runtimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "mind-lineage",
+    history_entry: {
+      turn_id: "mind-turn-2",
+      revision_from: 1,
+      revision_to: 2,
+      committed_character_current_mind_projection: secondMindEnvelope,
+    },
+  });
+
+  const strongInterruptSpeculation = await runtimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "mind-lineage",
+    turn_id: "mind-turn-3",
+    character: "Alpha",
+    simulation_time: "2026-09-01T10:02:00+08:00",
+    perception: {
+      observed: [
+        {
+          perceptual_label: "火警警報燈突然亮起",
+          urgency: "critical",
+          expectation_violation: true,
+          salience: "high",
+        },
+      ],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "閱讀操作手冊",
+    compatibility_state: {
+      goals: ["閱讀操作手冊"],
+    },
+  });
+  assert.equal(strongInterruptSpeculation.projection.focus_transition.interrupted, true);
+  assert.equal(
+    strongInterruptSpeculation.projection.focus_transition.to.content.perceptual_label,
+    "火警警報燈突然亮起",
+  );
+  assert.equal(
+    strongInterruptSpeculation.character_facing_attention.suspended_context.some(
+      (item) => item.content?.perceptual_label === "正在閱讀的操作手冊",
+    ),
+    true,
+    "interrupted work must move to suspended context instead of being erased",
+  );
+  assert.equal(
+    strongInterruptSpeculation.character_facing_attention.fading_context.some(
+      (item) => item.content?.perceptual_label === "正在閱讀的操作手冊",
+    ),
+    false,
+    "one interrupted focus must not be duplicated into both suspended and fading context",
+  );
+  const strongBid = strongInterruptSpeculation.internal_attention_state.bids.find(
+    (bid) => bid.sources.includes("expectation_violation_process"),
+  );
+  assert.ok(strongBid);
+  assert.equal(strongBid.sources.includes("immediate_constraint_urgency_process"), true);
+  const thirdMindEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "mind-turn-3",
+      decision_packets: [
+        {
+          character: "Alpha",
+          current_mind_transition_projection: strongInterruptSpeculation.projection,
+        },
+      ],
+    },
+  });
+  await runtimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "mind-lineage",
+    history_entry: {
+      turn_id: "mind-turn-3",
+      revision_from: 2,
+      revision_to: 3,
+      committed_character_current_mind_projection: thirdMindEnvelope,
+    },
+  });
+
+  const resumedSuspendedSpeculation = await runtimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "mind-lineage",
+    turn_id: "mind-turn-4-reactivation",
+    character: "Alpha",
+    simulation_time: "2026-09-01T10:03:00+08:00",
+    perception: {
+      observed: [{
+        perceptual_label: "正在閱讀的操作手冊",
+        goal_relevance: "high",
+        salience: "medium",
+      }],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "閱讀操作手冊",
+    compatibility_state: { goals: ["閱讀操作手冊"] },
+  });
+  assert.equal(
+    resumedSuspendedSpeculation.character_facing_attention.focus.content.perceptual_label,
+    "正在閱讀的操作手冊",
+    "fresh evidence must be allowed to reactivate a previously suspended focus",
+  );
+  assert.equal(
+    resumedSuspendedSpeculation.character_facing_attention.suspended_context.some(
+      (item) => item.content?.perceptual_label === "正在閱讀的操作手冊",
+    ),
+    false,
+    "a reactivated item must not remain duplicated in suspended context",
+  );
+
+  const deterministicDecayInput = {
+    world_simulation_session_id: "mind-lineage",
+    turn_id: "mind-turn-4",
+    character: "Alpha",
+    simulation_time: "2026-09-01T11:00:00+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: null,
+    compatibility_state: {},
+  };
+  const decayedSpeculation = await runtimeManager.prepareSpeculativeCurrentMind(
+    deterministicDecayInput,
+  );
+  const repeatedDecayedSpeculation = await runtimeManager.prepareSpeculativeCurrentMind(
+    deterministicDecayInput,
+  );
+  assert.deepEqual(decayedSpeculation, repeatedDecayedSpeculation);
+  assert.equal(decayedSpeculation.character_facing_attention.focus, null);
+  assert.equal(decayedSpeculation.projection.resolver_audit.wall_clock_decay_used, false);
+  assert.equal(
+    decayedSpeculation.projection.resolver_audit.decay_basis,
+    "committed_cognitive_sequence_plus_simulation_time",
+  );
+
+  const expectationRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `expectation_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "phase62c_current_mind_expectation_fixture",
+      formal: true,
+    }),
+  });
+  const expectationTurnOne = await expectationRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "expectation-lineage",
+    turn_id: "expectation-world-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T11:10:00+08:00",
+    perception: {
+      observed: [{ perceptual_label: "手已經壓��門把上", goal_relevance: "high" }],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "推門",
+    compatibility_state: {
+      goals: ["推門"],
+      temporary_expectation: {
+        action: "推門",
+        expected_result: "door_opened",
+      },
+    },
+  });
+  assert.equal(
+    expectationTurnOne.character_facing_attention.temporary_expectation.expected_result,
+    "door_opened",
+  );
+  const expectationMindEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "expectation-world-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        current_mind_transition_projection: expectationTurnOne.projection,
+      }],
+    },
+  });
+  await expectationRuntimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "expectation-lineage",
+    history_entry: {
+      turn_id: "expectation-world-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_current_mind_projection: expectationMindEnvelope,
+    },
+  });
+  const expectationExperienceProjection = projectWorldSimulationCharacterExperienceEvidence({
+    runtime_identities: [{
+      character: "Alpha",
+      world_lineage: "expectation-lineage",
+      character_entity_id: "expectation_alpha",
+      canonical_name: "Alpha",
+      identity_source: "phase62c_current_mind_expectation_fixture",
+      formal_identity: true,
+      experience_sequence: 1,
+    }],
+    prepared_turn: {
+      turn_id: "expectation-world-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        perception: { observed: [], audible: [], other_senses: [] },
+      }],
+    },
+    selected_action_intents: [{
+      character: "Alpha",
+      selection: "candidate_action_intent",
+      action_id: "push-door",
+      intent: "推門",
+    }],
+    action_outcomes: [{
+      actor: "Alpha",
+      causal_evidence: "門鎖阻止門扇移動",
+      character_experience: {
+        performed: true,
+        perceived_result: "door_stayed_closed",
+      },
+    }],
+  });
+  await expectationRuntimeManager.deliverCommittedExperienceProjection({
+    world_simulation_session_id: "expectation-lineage",
+    history_entry: {
+      turn_id: "expectation-world-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_experience_projection: expectationExperienceProjection,
+    },
+  });
+  const expectationTurnTwo = await expectationRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "expectation-lineage",
+    turn_id: "expectation-world-turn-2",
+    character: "Alpha",
+    simulation_time: "2026-09-01T11:10:01+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: "推門",
+    compatibility_state: { goals: ["推門"] },
+  });
+  const automaticExpectationMismatchBid =
+    expectationTurnTwo.internal_attention_state.bids.find(
+      (bid) => bid.sources.includes("expectation_violation_process"),
+    );
+  assert.ok(
+    automaticExpectationMismatchBid,
+    "a committed perceived result that contradicts a prior temporary expectation must create expectation-violation attention evidence on the next cycle",
+  );
+  assert.equal(
+    expectationTurnTwo.character_facing_attention.temporary_expectation,
+    null,
+    "a temporary expectation with an explicit perceived result must resolve after the committed Experience is integrated",
+  );
+  assert.equal(
+    expectationTurnTwo.projection.reducer_state_after.last_experience_sequence_integrated,
+    1,
+  );
+  assert.equal(
+    expectationTurnTwo.projection.source_refs.some(
+      (ref) => ref.kind === "committed_action_experience" && ref.experience_sequence === 1,
+    ),
+    true,
+  );
+  const expectationTurnTwoEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "expectation-world-turn-2",
+      decision_packets: [{
+        character: "Alpha",
+        current_mind_transition_projection: expectationTurnTwo.projection,
+      }],
+    },
+  });
+  await expectationRuntimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "expectation-lineage",
+    history_entry: {
+      turn_id: "expectation-world-turn-2",
+      revision_from: 1,
+      revision_to: 2,
+      committed_character_current_mind_projection: expectationTurnTwoEnvelope,
+    },
+  });
+  const expectationTurnThree = await expectationRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "expectation-lineage",
+    turn_id: "expectation-world-turn-3",
+    character: "Alpha",
+    simulation_time: "2026-09-01T11:10:02+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: null,
+    compatibility_state: {
+      temporary_expectation: {
+        action: "推門",
+        expected_result: "door_opened",
+      },
+    },
+  });
+  assert.equal(
+    expectationTurnThree.character_facing_attention.temporary_expectation,
+    null,
+    "a resolved expectation must not be resurrected by stale world-side compatibility state after bootstrap",
+  );
+  assert.equal(
+    expectationTurnThree.projection.source_snapshot_hash
+      === expectationTurnTwo.projection.source_snapshot_hash,
+    false,
+    "the next Current Mind cycle must have its own deterministic source snapshot",
+  );
+
+  const tieRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `tie_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "phase62c_current_mind_tie_fixture",
+      formal: true,
+    }),
+  });
+  const tieInput = {
+    world_simulation_session_id: "tie-lineage",
+    turn_id: "tie-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:00:00+08:00",
+    perception: {
+      observed: [
+        { perceptual_label: "同優先候選 A", salience: "medium" },
+        { perceptual_label: "同優先候選 B", salience: "medium" },
+      ],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: null,
+    compatibility_state: {},
+  };
+  const tieResult = await tieRuntimeManager.prepareSpeculativeCurrentMind(tieInput);
+  const repeatedTieResult = await tieRuntimeManager.prepareSpeculativeCurrentMind(tieInput);
+  assert.deepEqual(tieResult, repeatedTieResult);
+  assert.equal(
+    tieResult.projection.focus_transition.to.content.perceptual_label,
+    "同優先候選 A",
+    "stable activation ordering must deterministically break otherwise equal attention evidence",
+  );
+
+  let releaseAlphaDuringAttention;
+  const alphaAttentionGate = new Promise((resolve) => {
+    releaseAlphaDuringAttention = resolve;
+  });
+  const blockingAlphaForAttention = runtimeManager.runCharacterTurn({
+    world_simulation_session_id: "lineage-a",
+    character: "Alpha",
+    brain_input: {
+      character: "Alpha",
+      candidate_action_intents: [{ action_id: "alpha-attention-block", intent: "wait" }],
+    },
+    characterBrain: async () => {
+      await alphaAttentionGate;
+      return { action_id: "alpha-attention-block" };
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let alphaQueuedAttentionResolved = false;
+  const alphaQueuedAttention = runtimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "lineage-a",
+    turn_id: "alpha-attention-queued",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:10:00+08:00",
+    perception: { observed: ["Alpha cue"], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: null,
+    compatibility_state: {},
+  }).then((value) => {
+    alphaQueuedAttentionResolved = true;
+    return value;
+  });
+  const betaIndependentAttention = await runtimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "lineage-a",
+    turn_id: "beta-attention-independent",
+    character: "Beta",
+    simulation_time: "2026-09-01T12:10:00+08:00",
+    perception: { observed: ["Beta cue"], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: null,
+    compatibility_state: {},
+  });
+  assert.equal(
+    betaIndependentAttention.projection.focus_transition.to.content,
+    "Beta cue",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    alphaQueuedAttentionResolved,
+    false,
+    "same-character Current Mind cycle must serialize behind that Runtime's active turn",
+  );
+  releaseAlphaDuringAttention();
+  await blockingAlphaForAttention;
+  const alphaQueuedAttentionResult = await alphaQueuedAttention;
+  assert.equal(alphaQueuedAttentionResult.projection.focus_transition.to.content, "Alpha cue");
+
   const experienceRuntimeManager = createWorldSimulationCharacterRuntimeManager({
     identityResolver: async (character) => ({
       entity_id: identityByCharacter.get(character),
@@ -880,8 +1577,44 @@ try {
           serializedBrainPacket.includes(worldSimulationCharacterExperienceProjectionVersion),
           false,
         );
+        assert.equal(
+          serializedBrainPacket.includes(worldSimulationCharacterCurrentMindContractVersion),
+          false,
+        );
+        assert.equal(
+          serializedBrainPacket.includes(worldSimulationCharacterAttentionReducerVersion),
+          false,
+        );
+        assert.equal(
+          serializedBrainPacket.includes(worldSimulationCharacterCurrentMindProjectionVersion),
+          false,
+        );
         assert.equal(serializedBrainPacket.includes("projection_hash"), false);
+        assert.equal(serializedBrainPacket.includes("transition_hash"), false);
+        assert.equal(serializedBrainPacket.includes("attention_bids"), false);
+        assert.equal(serializedBrainPacket.includes("priority_evidence"), false);
+        assert.equal(serializedBrainPacket.includes("internal_priority_strength"), false);
+        assert.equal(serializedBrainPacket.includes("attention_encoding_evidence"), false);
+        assert.equal(serializedBrainPacket.includes("current_mind_transition_projection"), false);
         assert.equal(serializedBrainPacket.includes("receipt_id"), false);
+        assert.ok(packet.cognition.attention);
+        assert.ok(packet.cognition.working_context);
+        const characterFacingAttentionText = JSON.stringify(packet.cognition.attention);
+        for (const forbiddenAttentionMetadata of [
+          "source_kind",
+          "salience",
+          "perceptual_salience",
+          "goal_relevance",
+          "urgency",
+          "expectation_violation",
+          "awareness_boundary",
+        ]) {
+          assert.equal(
+            characterFacingAttentionText.includes(forbiddenAttentionMetadata),
+            false,
+            `Character Brain must not receive Runtime attention metadata ${forbiddenAttentionMetadata}`,
+          );
+        }
         assert.equal(packet.boundaries.may_decide_outcome, false);
         return packet.character === "伊萊亞斯・諾爾"
           ? {
@@ -994,6 +1727,26 @@ try {
   assert.equal(firstTurn.committed_character_experience.replay_required, false);
   assert.equal(firstTurn.committed_character_experience.established_after_world_commit, true);
   assert.equal(firstTurn.committed_character_experience.durable_mind_mutation_count, 0);
+  assert.equal(
+    firstTurn.committed_character_current_mind.current_mind_contract_version,
+    worldSimulationCharacterCurrentMindContractVersion,
+  );
+  assert.equal(
+    firstTurn.committed_character_current_mind.attention_reducer_version,
+    worldSimulationCharacterAttentionReducerVersion,
+  );
+  assert.equal(
+    firstTurn.committed_character_current_mind.projection_version,
+    worldSimulationCharacterCurrentMindProjectionVersion,
+  );
+  assert.equal(firstTurn.committed_character_current_mind.transition_count, 2);
+  assert.equal(firstTurn.committed_character_current_mind.delivered_count, 2);
+  assert.equal(firstTurn.committed_character_current_mind.duplicate_delivery_count, 0);
+  assert.equal(firstTurn.committed_character_current_mind.delivery_failed, false);
+  assert.equal(firstTurn.committed_character_current_mind.replay_required, false);
+  assert.equal(firstTurn.committed_character_current_mind.established_after_world_commit, true);
+  assert.equal(firstTurn.committed_character_current_mind.persistent_mind_learning_installed, false);
+  assert.equal(firstTurn.committed_character_current_mind.durable_mind_mutation_count, 0);
 
   const eliasRuntimeAfterCommit = await integrationRuntimeManager.inspectRuntime({
     world_simulation_session_id: session.world_simulation_session_id,
@@ -1018,6 +1771,19 @@ try {
   assert.equal(yoruRuntimeAfterCommit.committed_experience.last_committed_revision, 1);
   assert.equal(eliasRuntimeAfterCommit.committed_experience.last_experience_sequence, 1);
   assert.equal(yoruRuntimeAfterCommit.committed_experience.last_experience_sequence, 1);
+  assert.equal(eliasRuntimeAfterCommit.current_mind.owner, "character_runtime");
+  assert.equal(yoruRuntimeAfterCommit.current_mind.owner, "character_runtime");
+  assert.equal(eliasRuntimeAfterCommit.current_mind.committed_sequence, 1);
+  assert.equal(yoruRuntimeAfterCommit.current_mind.committed_sequence, 1);
+  assert.equal(eliasRuntimeAfterCommit.current_mind.committed_transition_effect_count, 1);
+  assert.equal(yoruRuntimeAfterCommit.current_mind.committed_transition_effect_count, 1);
+  assert.equal(eliasRuntimeAfterCommit.current_mind.last_committed_revision, 1);
+  assert.equal(yoruRuntimeAfterCommit.current_mind.last_committed_revision, 1);
+  assert.equal(
+    eliasRuntimeAfterCommit.current_mind.reducer_state.last_experience_sequence_integrated,
+    0,
+    "Experience Receipt N must not retroactively alter Attention/Current Mind transition N",
+  );
   assert.equal(eliasRuntimeAfterCommit.committed_experience.recent_receipts.length, 1);
   assert.equal(yoruRuntimeAfterCommit.committed_experience.recent_receipts.length, 1);
   const eliasCommittedReceipt = eliasRuntimeAfterCommit.committed_experience.recent_receipts[0];
@@ -1081,6 +1847,50 @@ try {
   assert.equal(history.turns[0].causal_resolution_id, "resolve-evt-001");
   assert.equal(history.turns[0].previous_state_hash, initialStateHash);
   assert.equal(history.turns[0].next_state_hash, stateAfterFirstTurn.state_hash);
+  const persistedCurrentMindProjection =
+    history.turns[0].committed_character_current_mind_projection;
+  assert.equal(
+    persistedCurrentMindProjection.current_mind_contract_version,
+    worldSimulationCharacterCurrentMindContractVersion,
+  );
+  assert.equal(
+    persistedCurrentMindProjection.attention_reducer_version,
+    worldSimulationCharacterAttentionReducerVersion,
+  );
+  assert.equal(
+    persistedCurrentMindProjection.projection_version,
+    worldSimulationCharacterCurrentMindProjectionVersion,
+  );
+  assert.equal(persistedCurrentMindProjection.character_projections.length, 2);
+  assert.equal(
+    persistedCurrentMindProjection.projection_hash,
+    firstTurn.committed_character_current_mind.projection_hash,
+  );
+  assert.equal(
+    persistedCurrentMindProjection.character_projections[0]
+      .reducer_state_after.last_experience_sequence_integrated,
+    0,
+  );
+  assert.equal(
+    persistedCurrentMindProjection.character_projections[0].source_refs.some(
+      (ref) => ref.kind === "committed_experience"
+        || ref.kind === "committed_action_experience",
+    ),
+    false,
+    "Experience Receipt N must not become a source of Current Mind transition N",
+  );
+  const persistedCurrentMindText = JSON.stringify(persistedCurrentMindProjection);
+  assert.equal(persistedCurrentMindText.includes("evaluator_private_note"), false);
+  assert.equal(persistedCurrentMindText.includes("causal_chain"), false);
+  assert.equal(persistedCurrentMindText.includes("gpt_hidden_reasoning"), true);
+  assert.equal(
+    persistedCurrentMindProjection.boundaries.gpt_hidden_reasoning_stored_here,
+    false,
+  );
+  assert.equal(
+    persistedCurrentMindProjection.boundaries.replay_runs_current_attention_algorithm,
+    false,
+  );
   const persistedExperienceProjection =
     history.turns[0].committed_character_experience_projection;
   assert.equal(
@@ -1116,6 +1926,15 @@ try {
     ),
     false,
   );
+
+  const duplicateCurrentMindDelivery = await integrationRuntimeManager
+    .deliverCommittedCurrentMindProjection({
+      world_simulation_session_id: session.world_simulation_session_id,
+      history_entry: history.turns[0],
+    }, options);
+  assert.equal(duplicateCurrentMindDelivery.delivery_count, 2);
+  assert.equal(duplicateCurrentMindDelivery.consumed_count, 0);
+  assert.equal(duplicateCurrentMindDelivery.duplicate_count, 2);
 
   const duplicateCommittedDelivery = await integrationRuntimeManager
     .deliverCommittedExperienceProjection({
@@ -1159,8 +1978,15 @@ try {
   );
   assert.equal(historicalReplay.replay_source, "immutable_committed_world_history");
   assert.equal(historicalReplay.current_perception_engine_reanalysis_used, false);
+  assert.equal(historicalReplay.current_attention_algorithm_reanalysis_used, false);
+  assert.equal(historicalReplay.phase63c_memory_retrieval_reexecution_used, false);
+  assert.equal(historicalReplay.character_brain_reexecution_used, false);
   assert.equal(historicalReplay.historical_projection_semantics_preserved, true);
   assert.equal(historicalReplay.committed_turns_with_projection, 1);
+  assert.equal(historicalReplay.committed_turns_with_current_mind_projection, 1);
+  assert.equal(historicalReplay.current_mind_delivery_count, 2);
+  assert.equal(historicalReplay.current_mind_consumed_count, 2);
+  assert.equal(historicalReplay.current_mind_failed_count, 0);
   assert.equal(historicalReplay.delivery_count, 2);
   assert.equal(historicalReplay.consumed_count, 2);
   assert.equal(historicalReplay.duplicate_count, 0);
@@ -1188,12 +2014,83 @@ try {
     "character_elias_runtime_fixture",
   );
   assert.equal(replayedEliasDelivery.receipt.boundaries.durable_mind_mutation, false);
+  const replayedEliasRuntime = await replayRuntimeManager.inspectRuntime({
+    world_simulation_session_id: session.world_simulation_session_id,
+    character: "伊萊亞斯・諾爾",
+  }, {
+    ...options,
+    characterRuntimeWorldLineageResolver: async () => session.world_simulation_session_id,
+    characterIdentityRegistryOptions: {
+      formalCanonSources: [
+        {
+          source_file: "data/canon_db/sources/entity_current_mind_replay_fixture.md",
+          source_hash: "current-mind-replay-fixture",
+          source_modified_at: "2026-09-01T00:00:00.000Z",
+          content: [
+            "## character｜伊萊亞斯・諾爾｜character_elias_runtime_fixture",
+            "",
+            "| 欄位 | 正式 Canon |",
+            "| --- | --- |",
+            "| 中文名 | 伊萊亞斯・諾爾 |",
+            "| 性別 | 男 |",
+          ].join("\n"),
+        },
+      ],
+    },
+  }).catch(() => null);
+  assert.equal(
+    historicalReplay.replays[0].current_mind_delivery.deliveries.some(
+      (item) => item.character_entity_id === "character_elias_runtime_fixture"
+        && item.current_mind_sequence === 1,
+    ),
+    true,
+  );
+  assert.equal(
+    replayedEliasRuntime,
+    null,
+    "historical replay must not need a fresh identity resolution path to consume stored Current Mind semantics",
+  );
 
   let invalidSelectionAdjudicatorCalled = false;
   const preparedSecondTurn = await prepareWorldSimulationTurn({
     world_simulation_session_id: session.world_simulation_session_id,
     event_id: "evt-002",
-  }, options);
+  }, {
+    ...options,
+    characterRuntimeManager: integrationRuntimeManager,
+  });
+  const preparedSecondEliasPacket = preparedSecondTurn.decision_packets.find(
+    (packet) => packet.character === "伊萊亞斯・諾爾",
+  );
+  const preparedSecondEliasMindProjection =
+    preparedSecondTurn.current_mind_transition_projections.find(
+      (item) => item.character === "伊萊亞斯・諾爾",
+    )?.projection;
+  assert.ok(preparedSecondEliasPacket);
+  assert.ok(preparedSecondEliasMindProjection);
+  assert.equal(
+    Object.hasOwn(preparedSecondEliasPacket, "current_mind_transition_projection"),
+    false,
+    "server-owned Current Mind history projection must stay outside the character decision packet",
+  );
+  assert.equal(
+    Object.hasOwn(preparedSecondEliasPacket, "attention_encoding_evidence"),
+    false,
+    "programmatic memory-encoding evidence must stay outside the character decision packet",
+  );
+  assert.equal(
+    preparedSecondEliasMindProjection
+      .reducer_state_after.last_experience_sequence_integrated,
+    1,
+    "Experience Receipt N becomes eligible only for the next speculative Current Mind cycle",
+  );
+  assert.equal(
+    preparedSecondEliasMindProjection.source_refs.some(
+      (ref) => ref.kind === "committed_experience"
+        || ref.kind === "committed_action_experience",
+    ),
+    true,
+  );
   await assert.rejects(
     () => resolveWorldSimulationTurn(
       preparedSecondTurn,
@@ -1228,8 +2125,19 @@ try {
           serializedBrainPacket.includes(worldSimulationCharacterExperienceProjectionVersion),
           false,
         );
+        assert.equal(
+          serializedBrainPacket.includes(worldSimulationCharacterCurrentMindProjectionVersion),
+          false,
+        );
         assert.equal(serializedBrainPacket.includes("projection_hash"), false);
+        assert.equal(serializedBrainPacket.includes("transition_hash"), false);
+        assert.equal(serializedBrainPacket.includes("attention_bids"), false);
         assert.equal(serializedBrainPacket.includes("receipt_id"), false);
+        assert.equal(
+          serializedBrainPacket.includes("committed_experience"),
+          true,
+          "Receipt N may enter bounded working context on Attention cycle N+1",
+        );
         return { action_id: "elias-wait" };
       },
       causalAdjudicator: async (input) => {
@@ -1260,6 +2168,7 @@ try {
   assert.equal(blockedTurn.causal_resolution_discarded, true);
   assert.equal(blockedTurn.consistency.hard_conflict_count, 1);
   assert.equal(Object.hasOwn(blockedTurn, "committed_character_experience"), false);
+  assert.equal(Object.hasOwn(blockedTurn, "committed_character_current_mind"), false);
   const eliasRuntimeAfterBlockedTurn = await integrationRuntimeManager.inspectRuntime({
     world_simulation_session_id: session.world_simulation_session_id,
     character: "伊萊亞斯・諾爾",
@@ -1270,6 +2179,18 @@ try {
     "blocked consistency turns must not create committed experience",
   );
   assert.equal(eliasRuntimeAfterBlockedTurn.committed_experience.last_committed_revision, 1);
+  assert.equal(eliasRuntimeAfterBlockedTurn.current_mind.committed_sequence, 1);
+  assert.equal(eliasRuntimeAfterBlockedTurn.current_mind.last_committed_revision, 1);
+  assert.equal(
+    eliasRuntimeAfterBlockedTurn.current_mind.committed_transition_effect_count,
+    1,
+    "blocked consistency must discard speculative Current Mind",
+  );
+  assert.equal(
+    eliasRuntimeAfterBlockedTurn.current_mind.reducer_state.last_experience_sequence_integrated,
+    0,
+    "a blocked next-cycle workspace must not advance committed Current Mind",
+  );
   assert.equal(eliasRuntimeAfterBlockedTurn.durable_mind_mutation_count, 0);
 
   const stateAfterBlockedTurn = await getWorldSimulationState(
@@ -1309,6 +2230,12 @@ try {
     eliasRuntimeAfterResolveAndCommitFailures.committed_experience.last_committed_revision,
     1,
   );
+  assert.equal(eliasRuntimeAfterResolveAndCommitFailures.current_mind.committed_sequence, 1);
+  assert.equal(
+    eliasRuntimeAfterResolveAndCommitFailures.current_mind.committed_transition_effect_count,
+    1,
+  );
+  assert.equal(eliasRuntimeAfterResolveAndCommitFailures.current_mind.last_committed_revision, 1);
   assert.equal(eliasRuntimeAfterResolveAndCommitFailures.durable_mind_persistence, false);
   assert.equal(eliasRuntimeAfterResolveAndCommitFailures.durable_mind_mutation_count, 0);
   const historyAfterBlockedAndStaleCommit = await getWorldSimulationHistory(
@@ -1319,6 +2246,11 @@ try {
   assert.equal(
     historyAfterBlockedAndStaleCommit.turns[0].committed_character_experience_projection.projection_hash,
     persistedExperienceProjection.projection_hash,
+  );
+  assert.equal(
+    historyAfterBlockedAndStaleCommit.turns[0]
+      .committed_character_current_mind_projection.projection_hash,
+    persistedCurrentMindProjection.projection_hash,
   );
 
   const staleRaceSession = await beginWorldSimulationSession({
@@ -1405,6 +2337,10 @@ try {
     staleRaceYoruRuntime.committed_experience.committed_experience_effect_count,
     0,
   );
+  assert.equal(staleRaceEliasRuntime.current_mind.committed_sequence, 0);
+  assert.equal(staleRaceYoruRuntime.current_mind.committed_sequence, 0);
+  assert.equal(staleRaceEliasRuntime.current_mind.committed_transition_effect_count, 0);
+  assert.equal(staleRaceYoruRuntime.current_mind.committed_transition_effect_count, 0);
   assert.equal(staleRaceEliasRuntime.durable_mind_mutation_count, 0);
   assert.equal(staleRaceYoruRuntime.durable_mind_mutation_count, 0);
   const staleRaceHistory = await getWorldSimulationHistory(
@@ -1415,6 +2351,265 @@ try {
   assert.equal(
     staleRaceHistory.turns[0].committed_character_experience_projection,
     null,
+  );
+  assert.equal(
+    staleRaceHistory.turns[0].committed_character_current_mind_projection,
+    null,
+  );
+
+  const commitFailureSession = await beginWorldSimulationSession({
+    simulation_label: "Phase62C Current Mind atomic commit failure fixture",
+    seed: "phase62c-current-mind-commit-failure",
+    rules: {
+      event_driven: true,
+      persistent_causality: true,
+    },
+    initial_world_state: initialWorldState,
+  }, options);
+  const commitFailureRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: character === "伊萊亞斯・諾爾"
+        ? "character_elias_commit_failure_fixture"
+        : "character_yoru_commit_failure_fixture",
+      canonical_name: character,
+      identity_source: "phase62c_commit_failure_identity_resolver",
+      formal: true,
+    }),
+  });
+  process.env.FILE_TRANSACTION_TEST_MODE = "1";
+  try {
+    await assert.rejects(
+      () => runWorldSimulationTurn(
+        {
+          world_simulation_session_id: commitFailureSession.world_simulation_session_id,
+          event_id: "evt-001",
+        },
+        {
+          ...options,
+          testFailAfterTransactionCommits: 1,
+          characterRuntimeManager: commitFailureRuntimeManager,
+          characterBrain: async (packet) => ({
+            action_id: packet.character === "伊萊亞斯・諾爾"
+              ? "elias-wait"
+              : "yoru-watch",
+          }),
+          causalAdjudicator: async (input) => {
+            const next = structuredClone(input.world_state);
+            next.event_queue = [];
+            return {
+              causal_resolution_id: "phase62c-current-mind-commit-failure",
+              next_world_state: next,
+              state_transitions: [],
+              action_outcomes: [],
+              knowledge_transitions: [],
+              scheduled_events: [],
+            };
+          },
+        },
+      ),
+      /Injected transaction failure after 1 commit\(s\)\./u,
+    );
+  } finally {
+    delete process.env.FILE_TRANSACTION_TEST_MODE;
+  }
+  const commitFailureEliasRuntime = await commitFailureRuntimeManager.inspectRuntime({
+    world_simulation_session_id: commitFailureSession.world_simulation_session_id,
+    character: "伊萊亞斯・諾爾",
+  });
+  const commitFailureYoruRuntime = await commitFailureRuntimeManager.inspectRuntime({
+    world_simulation_session_id: commitFailureSession.world_simulation_session_id,
+    character: "夜",
+  });
+  for (const runtimeSnapshot of [commitFailureEliasRuntime, commitFailureYoruRuntime]) {
+    assert.equal(runtimeSnapshot.current_mind.committed_sequence, 0);
+    assert.equal(runtimeSnapshot.current_mind.committed_transition_effect_count, 0);
+    assert.equal(runtimeSnapshot.current_mind.last_committed_revision, null);
+    assert.equal(runtimeSnapshot.committed_experience.committed_experience_effect_count, 0);
+    assert.equal(runtimeSnapshot.committed_experience.last_committed_revision, null);
+    assert.equal(runtimeSnapshot.durable_mind_mutation_count, 0);
+  }
+  const stateAfterInjectedCommitFailure = await getWorldSimulationState(
+    commitFailureSession.world_simulation_session_id,
+    options,
+  );
+  assert.equal(stateAfterInjectedCommitFailure.revision, 0);
+  assert.equal(stateAfterInjectedCommitFailure.state_hash, commitFailureSession.world_state_hash);
+  const historyAfterInjectedCommitFailure = await getWorldSimulationHistory(
+    commitFailureSession.world_simulation_session_id,
+    options,
+  );
+  assert.equal(
+    historyAfterInjectedCommitFailure.turns.length,
+    0,
+    "an atomic commit transaction failure must rollback both world history and speculative Current Mind eligibility",
+  );
+
+  const deliveryFailureSession = await beginWorldSimulationSession({
+    simulation_label: "Phase62C Current Mind post-commit delivery recovery fixture",
+    seed: "phase62c-current-mind-delivery-recovery",
+    rules: {
+      event_driven: true,
+      persistent_causality: true,
+    },
+    initial_world_state: initialWorldState,
+  }, options);
+  const deliveryFailureBaseManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: character === "伊萊亞斯・諾爾"
+        ? "character_elias_delivery_recovery_fixture"
+        : "character_yoru_delivery_recovery_fixture",
+      canonical_name: character,
+      identity_source: "phase62c_delivery_recovery_identity_resolver",
+      formal: true,
+    }),
+  });
+  let experienceDeliveryAttemptCount = 0;
+  const deliveryFailureRuntimeManager = {
+    ...deliveryFailureBaseManager,
+    deliverCommittedCurrentMindProjection: async ({ history_entry: historyEntry }) => ({
+      projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+      current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+      attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+      projection_hash:
+        historyEntry.committed_character_current_mind_projection.projection_hash,
+      delivery_count:
+        historyEntry.committed_character_current_mind_projection.character_projections.length,
+      consumed_count: 0,
+      duplicate_count: 0,
+      failed_count: 1,
+      delivery_failed: true,
+      replay_required: true,
+      deliveries: [],
+      failures: [{
+        error_code: "SYNTHETIC_CURRENT_MIND_DELIVERY_FAILURE",
+      }],
+    }),
+    deliverCommittedExperienceProjection: async (...args) => {
+      experienceDeliveryAttemptCount += 1;
+      return deliveryFailureBaseManager.deliverCommittedExperienceProjection(...args);
+    },
+  };
+  const deliveryFailureTurn = await runWorldSimulationTurn(
+    {
+      world_simulation_session_id: deliveryFailureSession.world_simulation_session_id,
+      event_id: "evt-001",
+    },
+    {
+      ...options,
+      characterRuntimeManager: deliveryFailureRuntimeManager,
+      characterBrain: async (packet) => ({
+        action_id: packet.character === "伊萊亞斯・諾爾"
+          ? "elias-wait"
+          : "yoru-watch",
+      }),
+      causalAdjudicator: async (input) => {
+        const next = structuredClone(input.world_state);
+        next.event_queue = [];
+        return {
+          causal_resolution_id: "phase62c-current-mind-delivery-recovery",
+          next_world_state: next,
+          state_transitions: [],
+          action_outcomes: [],
+          knowledge_transitions: [],
+          scheduled_events: [],
+        };
+      },
+    },
+  );
+  assert.equal(deliveryFailureTurn.committed, true);
+  assert.equal(deliveryFailureTurn.committed_character_current_mind.delivery_failed, true);
+  assert.equal(deliveryFailureTurn.committed_character_current_mind.replay_required, true);
+  assert.equal(deliveryFailureTurn.committed_character_current_mind.delivered_count, 0);
+  assert.equal(deliveryFailureTurn.committed_character_experience.delivery_deferred, true);
+  assert.equal(
+    deliveryFailureTurn.committed_character_experience.deferred_reason,
+    "current_mind_delivery_requires_replay",
+  );
+  assert.equal(deliveryFailureTurn.committed_character_experience.delivery_failed, false);
+  assert.equal(deliveryFailureTurn.committed_character_experience.replay_required, true);
+  assert.equal(deliveryFailureTurn.committed_character_experience.delivered_count, 0);
+  assert.equal(
+    experienceDeliveryAttemptCount,
+    0,
+    "Experience delivery must be deferred when committed Current Mind delivery requires replay",
+  );
+  const deliveryFailureEliasBeforeReplay = await deliveryFailureBaseManager.inspectRuntime({
+    world_simulation_session_id: deliveryFailureSession.world_simulation_session_id,
+    character: "伊萊亞斯・諾爾",
+  });
+  assert.equal(deliveryFailureEliasBeforeReplay.current_mind.committed_sequence, 0);
+  assert.equal(
+    deliveryFailureEliasBeforeReplay.committed_experience.committed_experience_effect_count,
+    0,
+  );
+  const deliveryFailureHistory = await getWorldSimulationHistory(
+    deliveryFailureSession.world_simulation_session_id,
+    options,
+  );
+  assert.equal(deliveryFailureHistory.turns.length, 1);
+  assert.ok(deliveryFailureHistory.turns[0].committed_character_current_mind_projection);
+  assert.ok(deliveryFailureHistory.turns[0].committed_character_experience_projection);
+  let replayExperienceDeliveryAttemptCount = 0;
+  const stillFailingReplayManager = {
+    ...deliveryFailureBaseManager,
+    deliverCommittedCurrentMindProjection: async ({ history_entry: historyEntry }) => ({
+      projection_version: worldSimulationCharacterCurrentMindProjectionVersion,
+      current_mind_contract_version: worldSimulationCharacterCurrentMindContractVersion,
+      attention_reducer_version: worldSimulationCharacterAttentionReducerVersion,
+      projection_hash:
+        historyEntry.committed_character_current_mind_projection.projection_hash,
+      delivery_count:
+        historyEntry.committed_character_current_mind_projection.character_projections.length,
+      consumed_count: 0,
+      duplicate_count: 0,
+      failed_count: 1,
+      delivery_failed: true,
+      replay_required: true,
+      deliveries: [],
+      failures: [{ error_code: "SYNTHETIC_REPLAY_CURRENT_MIND_FAILURE" }],
+    }),
+    deliverCommittedExperienceProjection: async (...args) => {
+      replayExperienceDeliveryAttemptCount += 1;
+      return deliveryFailureBaseManager.deliverCommittedExperienceProjection(...args);
+    },
+  };
+  const stillBlockedReplay = await replayWorldSimulationCommittedCharacterExperiences(
+    deliveryFailureSession.world_simulation_session_id,
+    {
+      ...options,
+      characterRuntimeManager: stillFailingReplayManager,
+    },
+  );
+  assert.equal(stillBlockedReplay.ok, false);
+  assert.equal(stillBlockedReplay.current_mind_failed_count, 1);
+  assert.equal(stillBlockedReplay.replays[0].delivery_deferred, true);
+  assert.equal(
+    stillBlockedReplay.replays[0].deferred_reason,
+    "current_mind_replay_still_required",
+  );
+  assert.equal(
+    replayExperienceDeliveryAttemptCount,
+    0,
+    "historical replay must not deliver Experience while the earlier Current Mind transition still requires replay",
+  );
+  const recoveredDeliveryReplay = await replayWorldSimulationCommittedCharacterExperiences(
+    deliveryFailureSession.world_simulation_session_id,
+    {
+      ...options,
+      characterRuntimeManager: deliveryFailureBaseManager,
+    },
+  );
+  assert.equal(recoveredDeliveryReplay.ok, true);
+  assert.equal(recoveredDeliveryReplay.current_mind_consumed_count, 2);
+  assert.equal(recoveredDeliveryReplay.consumed_count, 2);
+  const deliveryFailureEliasAfterReplay = await deliveryFailureBaseManager.inspectRuntime({
+    world_simulation_session_id: deliveryFailureSession.world_simulation_session_id,
+    character: "伊萊亞斯・諾爾",
+  });
+  assert.equal(deliveryFailureEliasAfterReplay.current_mind.committed_sequence, 1);
+  assert.equal(
+    deliveryFailureEliasAfterReplay.committed_experience.committed_experience_effect_count,
+    1,
   );
 
   console.log(JSON.stringify({
