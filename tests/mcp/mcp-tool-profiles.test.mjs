@@ -67,10 +67,12 @@ const publicToolNames = [
 ];
 
 const blockedToolNames = [
+  "dev_read_file_range",
   "dev_git_status",
   "dev_git_diff",
   "dev_git_diff_check",
   "dev_apply_patch",
+  "dev_delete_file",
   "dev_run_tests",
   "dev_git_commit",
   "dev_git_push",
@@ -219,14 +221,20 @@ assert.equal(
   "dev_run_tests leaked into chatgpt_public",
 );
 
-publicToolNames.push("dev_git_status", "dev_git_diff", "dev_git_diff_check");
+publicToolNames.push(
+  "dev_read_file_range",
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
+  "dev_delete_file",
+);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
   [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the seven development write/test/Git tools",
+  "chatgpt_developer must equal chatgpt_public plus the nine development range/write/test/Git tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -267,6 +275,51 @@ for (const [toolName, expectedProperties, expectedSources] of [
   assert.equal(permission?.can_modify_memory, false);
   assert.deepEqual(permission?.allowed_sources, expectedSources);
 }
+
+const developerRangeReadTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_read_file_range",
+);
+assert(developerRangeReadTool, "chatgpt_developer is missing dev_read_file_range");
+assert.equal(developerRangeReadTool.annotations?.readOnlyHint, true);
+assert.deepEqual(
+  Object.keys(developerRangeReadTool.inputSchema?.properties ?? {}).sort(),
+  ["maxBytes", "path", "startLine"],
+);
+assert.deepEqual(developerRangeReadTool.inputSchema?.required, ["path"]);
+assert.equal(developerRangeReadTool.inputSchema.properties.startLine.minimum, 1);
+assert.equal(developerRangeReadTool.inputSchema.properties.startLine.default, 1);
+assert.equal(developerRangeReadTool.inputSchema.properties.maxBytes.maximum, 262144);
+assert.equal(developerRangeReadTool.inputSchema.properties.maxBytes.default, 262144);
+const developerRangePermission = developerRangeReadTool._meta?.["armed-academy/permission"];
+assert.equal(developerRangePermission?.permission_level, "read_only");
+assert.equal(developerRangePermission?.read_or_write, "read");
+assert.equal(developerRangePermission?.log_required, false);
+assert.deepEqual(
+  developerRangePermission?.allowed_sources,
+  ["repository_large_text_file"],
+);
+
+const developerDeleteTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_delete_file",
+);
+assert(developerDeleteTool, "chatgpt_developer is missing dev_delete_file");
+assert.equal(developerDeleteTool.annotations?.readOnlyHint, false);
+assert.deepEqual(developerDeleteTool.inputSchema?.required, ["path"]);
+assert.deepEqual(
+  Object.keys(developerDeleteTool.inputSchema?.properties ?? {}).sort(),
+  ["expectedSha256", "path"],
+);
+assert.equal(developerDeleteTool.inputSchema.properties.expectedSha256.pattern, "^[A-Fa-f0-9]{64}$");
+const developerDeletePermission = developerDeleteTool._meta?.["armed-academy/permission"];
+assert.equal(developerDeletePermission?.permission_level, "write_low_risk");
+assert.equal(developerDeletePermission?.read_or_write, "write");
+assert.equal(developerDeletePermission?.log_required, true);
+assert.equal(developerDeletePermission?.can_modify_canon, false);
+assert.equal(developerDeletePermission?.can_modify_active_engine, false);
+assert.deepEqual(
+  developerDeletePermission?.allowed_sources,
+  ["repository_development_text_file", "mcp_client_delete_request"],
+);
 
 const liveGitResponses = await runStdioSession("chatgpt_developer", [
   {
@@ -476,7 +529,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-3, 3);
+publicToolNames.splice(-5, 5);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -520,8 +573,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 47);
-assert.equal(fullNames.length, 105);
+assert.equal(developerNames.length, 49);
+assert.equal(fullNames.length, 107);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -776,7 +829,13 @@ try {
   adapterSession.close();
 }
 
-publicToolNames.push("dev_git_status", "dev_git_diff", "dev_git_diff_check");
+publicToolNames.push(
+  "dev_read_file_range",
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
+  "dev_delete_file",
+);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -793,7 +852,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-3, 3);
+  publicToolNames.splice(-5, 5);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -802,5 +861,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 7}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 9}).`,
 );

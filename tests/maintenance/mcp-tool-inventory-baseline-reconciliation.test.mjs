@@ -18,6 +18,20 @@ const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const currentAddedToolName = "get_active_engine_dependency_status";
+const developmentToolNames = [
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
+  "dev_read_file_range",
+  "dev_apply_patch",
+  "dev_delete_file",
+  "dev_run_tests",
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
+  "dev_git_commit",
+  "dev_git_push",
+];
 const preStep4B2WorldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
@@ -63,6 +77,9 @@ const visualBridgeToolNames = [
 const expectedPreStep4B2DirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
 const expectedPreStep4B2RuntimeDigest = expectedPreStep4B2DirectDigest;
 const expectedPublicNames = [
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_search_files",
   "get_engine_components_status",
   currentAddedToolName,
   "chatgpt_bridge_get_workbench_status",
@@ -173,6 +190,7 @@ const historicalNames = extractDirectMcpToolNames(gitShow(
 const directNames = extractDirectMcpToolNames(currentSource);
 const directPreStep4B2Names = directNames.filter((name) => (
   name !== currentAddedToolName
+  && !developmentToolNames.includes(name)
   && !step4B2AddedToolNames.includes(name)
 ));
 
@@ -244,6 +262,7 @@ assert.deepEqual(duplicates(fullNames), []);
 assert.equal(
   digest(fullNames.filter((name) => (
     name !== currentAddedToolName
+    && !developmentToolNames.includes(name)
     && !step4B2AddedToolNames.includes(name)
   ))),
   expectedPreStep4B2RuntimeDigest,

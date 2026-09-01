@@ -17,7 +17,7 @@
   "visual_index_path": "data/visual_db/visual_index.jsonl",
   "active_engine_path": "data/canon_db/active_engine.md",
   "expected_engine_sha256_lf": "C46DFBCBEFBBBBEDD09ABDDE143EAB69BB9096656106BA4EB3144FF5901317F9",
-  "expected_mcp_tool_count": 95,
+  "expected_mcp_tool_count": 107,
   "expected_formal_visual_index_non_empty_lines": 10,
   "expected_formal_assets_image_count": 10,
   "formal_baseline_count_policy": "visual_index_asset_parity",

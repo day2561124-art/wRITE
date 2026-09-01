@@ -70,7 +70,7 @@ function assertMcpSmokeTimeoutHardening(mcpSmokeText, mcpContractText) {
   }
 
   for (const token of [
-    "MCP contract test timed out after 300 seconds.",
+    "timed out after 300 seconds.",
     "}, 300_000);",
   ]) {
     assert(
@@ -80,7 +80,7 @@ function assertMcpSmokeTimeoutHardening(mcpSmokeText, mcpContractText) {
   }
 
   assert.equal(
-    mcpContractText.includes("MCP contract test timed out after 180 seconds."),
+    mcpContractText.includes("timed out after 180 seconds."),
     false,
     "MCP contract timeout message regressed to 180 seconds.",
   );

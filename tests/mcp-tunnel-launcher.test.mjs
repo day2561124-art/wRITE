@@ -217,7 +217,9 @@ async function verifyLauncherMcpProfile({
   argsLog,
   profile,
   expectedCount,
+  expectRangeRead,
   expectPatch,
+  expectDelete,
   expectRunTests,
   expectCommit,
   expectPush,
@@ -263,8 +265,16 @@ async function verifyLauncherMcpProfile({
       `${label} launcher profile exposed ${names.length} tools; expected ${expectedCount}.`,
     );
     assert(
+      names.includes("dev_read_file_range") === expectRangeRead,
+      `${label} launcher profile dev_read_file_range exposure was ${names.includes("dev_read_file_range")}.`,
+    );
+    assert(
       names.includes("dev_apply_patch") === expectPatch,
       `${label} launcher profile dev_apply_patch exposure was ${names.includes("dev_apply_patch")}.`,
+    );
+    assert(
+      names.includes("dev_delete_file") === expectDelete,
+      `${label} launcher profile dev_delete_file exposure was ${names.includes("dev_delete_file")}.`,
     );
     assert(
       names.includes("dev_run_tests") === expectRunTests,
@@ -447,8 +457,10 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 47,
+      expectedCount: 49,
+      expectRangeRead: true,
       expectPatch: true,
+      expectDelete: true,
       expectRunTests: true,
       expectCommit: true,
       expectPush: true,
@@ -460,7 +472,9 @@ async function main() {
       argsLog,
       profile: "chatgpt_public",
       expectedCount: 40,
+      expectRangeRead: false,
       expectPatch: false,
+      expectDelete: false,
       expectRunTests: false,
       expectCommit: false,
       expectPush: false,
@@ -468,7 +482,7 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP profile: chatgpt_developer (47 tools, dev_apply_patch/dev_run_tests/dev_git_*/dev_git_commit/dev_git_push present)");
+    console.log("- Launcher default MCP profile: chatgpt_developer (49 tools, dev_read_file_range/dev_apply_patch/dev_delete_file/dev_run_tests/dev_git_*/dev_git_commit/dev_git_push present)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));

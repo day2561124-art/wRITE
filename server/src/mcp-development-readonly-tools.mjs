@@ -15,6 +15,8 @@ import {
 
 export const DEV_LIST_MAX_ENTRIES = 500;
 export const DEV_READ_MAX_BYTES = 256 * 1024;
+export const DEV_READ_RANGE_MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const DEV_READ_RANGE_MAX_START_LINE = 10_000_000;
 export const DEV_SEARCH_MAX_RESULTS = 200;
 
 const searchMaxFiles = 10_000;
@@ -256,6 +258,97 @@ export async function dev_read_file(input = {}) {
   return {
     path: normalizeProjectPath(filePath),
     bytes: info.size,
+    content,
+  };
+}
+
+export async function dev_read_file_range(input = {}) {
+  const filePath = resolveAllowedPath(input.path, "path");
+  const startLine = positiveIntegerWithin(
+    input.startLine,
+    1,
+    DEV_READ_RANGE_MAX_START_LINE,
+    "startLine",
+  );
+  const maxBytes = positiveIntegerWithin(
+    input.maxBytes,
+    DEV_READ_MAX_BYTES,
+    DEV_READ_MAX_BYTES,
+    "maxBytes",
+  );
+  if (!isSupportedTextPath(filePath)) {
+    throw new Error("path must reference a supported UTF-8 text file.");
+  }
+  const info = await assertExistingSafePath(filePath, "path");
+  if (!info.isFile()) {
+    throw new Error("path must reference a file.");
+  }
+  if (info.size > DEV_READ_RANGE_MAX_FILE_BYTES) {
+    throw new Error(
+      `path exceeds the ${DEV_READ_RANGE_MAX_FILE_BYTES}-byte ranged-read file limit.`,
+    );
+  }
+
+  const buffer = await readFile(filePath);
+  decodeText(buffer, "path");
+  const lineStarts = [0];
+  for (let index = 0; index < buffer.length; index += 1) {
+    if (buffer[index] === 0x0a && index + 1 < buffer.length) {
+      lineStarts.push(index + 1);
+    }
+  }
+  const totalLines = buffer.length === 0 ? 0 : lineStarts.length;
+  if (totalLines === 0) {
+    if (startLine !== 1) {
+      throw new Error("startLine exceeds the file line count (0).");
+    }
+    return {
+      path: normalizeProjectPath(filePath),
+      bytes: info.size,
+      total_lines: 0,
+      start_line: 1,
+      end_line: 0,
+      next_start_line: null,
+      returned_bytes: 0,
+      truncated: false,
+      content: "",
+    };
+  }
+  if (startLine > totalLines) {
+    throw new Error(`startLine exceeds the file line count (${totalLines}).`);
+  }
+
+  const startOffset = lineStarts[startLine - 1];
+  let endOffset = Math.min(startOffset + maxBytes, buffer.length);
+  if (endOffset < buffer.length) {
+    const lastNewline = buffer.lastIndexOf(0x0a, endOffset - 1);
+    if (lastNewline < startOffset) {
+      throw new Error(`The requested line exceeds the ${maxBytes}-byte ranged-read limit.`);
+    }
+    endOffset = lastNewline + 1;
+  }
+
+  const slice = buffer.subarray(startOffset, endOffset);
+  const content = decodeText(slice, "path");
+  let newlineCount = 0;
+  for (const byte of slice) {
+    if (byte === 0x0a) newlineCount += 1;
+  }
+  const returnedLineCount = newlineCount + (
+    slice.length > 0 && slice[slice.length - 1] !== 0x0a ? 1 : 0
+  );
+  const endLine = startLine + returnedLineCount - 1;
+  const truncated = endOffset < buffer.length;
+
+  return {
+    path: normalizeProjectPath(filePath),
+    bytes: info.size,
+    total_lines: totalLines,
+    start_line: startLine,
+    end_line: endLine,
+    next_start_line: truncated ? endLine + 1 : null,
+    returned_bytes: slice.length,
+    truncated,
     content,
   };
 }

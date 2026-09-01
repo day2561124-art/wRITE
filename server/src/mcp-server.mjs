@@ -126,9 +126,11 @@ import { readonlyTools } from "./mcp-readonly-tools.mjs";
 import {
   DEV_LIST_MAX_ENTRIES,
   DEV_READ_MAX_BYTES,
+  DEV_READ_RANGE_MAX_START_LINE,
   DEV_SEARCH_MAX_RESULTS,
   dev_list_directory,
   dev_read_file,
+  dev_read_file_range,
   dev_search_files,
 } from "./mcp-development-readonly-tools.mjs";
 import {
@@ -142,6 +144,7 @@ import {
   DEV_GIT_COMMIT_MAX_PATHS,
   DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
   dev_apply_patch,
+  dev_delete_file,
   dev_git_commit,
   dev_git_push,
 } from "./mcp-development-write-tools.mjs";
@@ -866,9 +869,29 @@ function auditOutputSummary(result, toolName = "") {
 }
 
 function devApplyPatchAuditChange(tool, result) {
-  if (tool.name !== "dev_apply_patch" || result?.isError === true) return null;
+  if (!["dev_apply_patch", "dev_delete_file"].includes(tool.name) || result?.isError === true) return null;
   try {
     const payload = JSON.parse(result?.content?.[0]?.text ?? "{}");
+    if (tool.name === "dev_delete_file") {
+      if (
+        payload.deleted !== true
+        || typeof payload.path !== "string"
+        || typeof payload.before_sha256 !== "string"
+      ) return null;
+      return {
+        path: payload.path,
+        previous: {
+          exists: true,
+          bytes: payload.before_bytes,
+          sha256: payload.before_sha256,
+        },
+        current: {
+          exists: false,
+          bytes: 0,
+          sha256: null,
+        },
+      };
+    }
     if (
       payload.changed !== true
       || typeof payload.path !== "string"
@@ -1559,6 +1582,28 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await dev_search_files(args)),
   },
   {
+    name: "dev_read_file_range",
+    description: "Read one bounded line range from a larger UTF-8 repository text file without following symbolic links or exposing .git internals and common secret files.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+      startLine: {
+        type: "integer",
+        minimum: 1,
+        maximum: DEV_READ_RANGE_MAX_START_LINE,
+        default: 1,
+      },
+      maxBytes: {
+        type: "integer",
+        minimum: 1,
+        maximum: DEV_READ_MAX_BYTES,
+        default: DEV_READ_MAX_BYTES,
+      },
+    }, ["path"]),
+    handler: async (args) => jsonContent(await dev_read_file_range(args)),
+  },
+  {
     name: "dev_apply_patch",
     description: "Atomically replace one uniquely matching text span in one existing approved repository development file, with optional SHA-256 concurrency protection; protected content/state, secrets, binaries, generated paths, and symlink escapes are blocked.",
     risk: "low-risk-write",
@@ -1583,6 +1628,22 @@ const toolDefinitions = [
       },
     }, ["path", "oldText", "newText"]),
     handler: async (args) => jsonContent(await dev_apply_patch(args)),
+  },
+  {
+    name: "dev_delete_file",
+    description: "Atomically delete one existing approved repository development text file with optional SHA-256 concurrency protection; protected content/state, secrets, generated paths, and symlink escapes are blocked.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      path: { type: "string" },
+      expectedSha256: {
+        type: "string",
+        minLength: 64,
+        maxLength: 64,
+        pattern: "^[A-Fa-f0-9]{64}$",
+      },
+    }, ["path"]),
+    handler: async (args) => jsonContent(await dev_delete_file(args)),
   },
   {
     name: "dev_git_commit",
@@ -3495,10 +3556,12 @@ const chatgptPublicToolNames = new Set([
 
 const chatgptDeveloperToolNames = new Set([
   ...chatgptPublicToolNames,
+  "dev_read_file_range",
   "dev_git_status",
   "dev_git_diff",
   "dev_git_diff_check",
   "dev_apply_patch",
+  "dev_delete_file",
   "dev_run_tests",
   "dev_git_commit",
   "dev_git_push",
@@ -3524,8 +3587,10 @@ function isToolAllowed(toolName) {
 const permissionSources = {
   dev_list_directory: ["repository_directory"],
   dev_read_file: ["repository_text_file"],
+  dev_read_file_range: ["repository_large_text_file"],
   dev_search_files: ["repository_text_files"],
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
+  dev_delete_file: ["repository_development_text_file", "mcp_client_delete_request"],
   dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],
   dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
   dev_git_push: ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],

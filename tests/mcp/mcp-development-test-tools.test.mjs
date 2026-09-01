@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createDevTestRunner,
+  DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS,
   getDevTestSuiteMapping,
 } from "../../server/src/mcp-development-test-tools.mjs";
 import {
@@ -289,6 +290,29 @@ try {
   assert(!failed.stderr.includes("private-material"));
   assert(!failed.stdout.includes("\u001b[31m"));
 
+  const persistedFailure = JSON.parse(
+    await readFile(path.join(tempRoot, "dev-run-tests.last.json"), "utf8"),
+  );
+  assert.equal(persistedFailure.suite, "mcp");
+  assert.equal(persistedFailure.execution_ok, true);
+  assert.equal(persistedFailure.passed, false);
+  assert.equal(persistedFailure.exit_code, 1);
+  assert.equal(persistedFailure.timed_out, false);
+  assert.match(persistedFailure.stdout_tail, /USEFUL_STDOUT_TAIL/u);
+  assert.match(persistedFailure.stderr_tail, /USEFUL_STDERR_TAIL/u);
+  assert.equal(
+    persistedFailure.stdout_tail.length <= DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS,
+    true,
+  );
+  assert.equal(
+    persistedFailure.stderr_tail.length <= DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS,
+    true,
+  );
+  assert(!persistedFailure.stdout_tail.includes("abcdefghijklmnop"));
+  assert(!persistedFailure.stdout_tail.includes("sk-proj-1234567890abcdef"));
+  assert(!persistedFailure.stderr_tail.includes("hunter2"));
+  assert.match(persistedFailure.completed_at, /^\d{4}-\d{2}-\d{2}T/u);
+
   const timeoutPort = await freePort();
   const descendantCode = `require("node:net").createServer(() => {}).listen(${timeoutPort}, "127.0.0.1"); setInterval(() => {}, 1000);`;
   const parentCode = `const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", ${JSON.stringify(descendantCode)}], { stdio: "ignore", windowsHide: true }); setInterval(() => {}, 1000);`;
@@ -315,12 +339,70 @@ try {
   });
   const firstRun = concurrentRunner({ suite: "mcp" });
   await new Promise((resolve) => setTimeout(resolve, 100));
+  const activeLock = JSON.parse(await readFile(path.join(tempRoot, "concurrent.lock"), "utf8"));
+  assert.equal(activeLock.owner_pid, process.pid);
+  assert.equal(Number.isInteger(activeLock.child_pid), true);
+  assert.equal(activeLock.child_pid > 0, true);
+  assert.notEqual(activeLock.child_pid, process.pid);
   const busy = await concurrentRunner({ suite: "mcp" });
   const completed = await firstRun;
   assert.equal(completed.passed, true);
   assert.equal(busy.execution_ok, false);
   assert.equal(busy.passed, false);
   assert.match(busy.stderr, /already running/u);
+  const persistedConcurrent = JSON.parse(
+    await readFile(path.join(tempRoot, "dev-run-tests.last.json"), "utf8"),
+  );
+  assert.equal(persistedConcurrent.suite, "mcp");
+  assert.equal(persistedConcurrent.execution_ok, true);
+  assert.equal(persistedConcurrent.passed, true);
+  assert.equal(persistedConcurrent.exit_code, 0);
+  assert.equal(persistedConcurrent.timed_out, false);
+
+  const legacySelfLockPath = path.join(tempRoot, "legacy-self.lock");
+  await writeFile(
+    legacySelfLockPath,
+    `${JSON.stringify({
+      pid: process.pid,
+      hostname: os.hostname(),
+      suite: "all",
+      started_at: new Date().toISOString(),
+    })}\n`,
+    "utf8",
+  );
+  const legacySelfRunner = createDevTestRunner({
+    suiteDefinitions: {
+      all: testDefinition(["-e", "process.exit(0);"]),
+    },
+    lockPath: legacySelfLockPath,
+  });
+  const reclaimedLegacySelf = await legacySelfRunner({ suite: "all" });
+  assert.equal(reclaimedLegacySelf.passed, true);
+  assert.equal(await pathExists(legacySelfLockPath), false);
+
+  const launchingLockPath = path.join(tempRoot, "launching-owner.lock");
+  await writeFile(
+    launchingLockPath,
+    `${JSON.stringify({
+      owner_pid: process.pid,
+      child_pid: null,
+      hostname: os.hostname(),
+      suite: "all",
+      started_at: new Date().toISOString(),
+    })}\n`,
+    "utf8",
+  );
+  const launchingRunner = createDevTestRunner({
+    suiteDefinitions: {
+      all: testDefinition(["-e", "process.exit(0);"]),
+    },
+    lockPath: launchingLockPath,
+  });
+  const launchingBusy = await launchingRunner({ suite: "all" });
+  assert.equal(launchingBusy.execution_ok, false);
+  assert.equal(launchingBusy.passed, false);
+  assert.match(launchingBusy.stderr, /already running/u);
+  await rm(launchingLockPath, { force: true });
 
   const spawnFailureRunner = createDevTestRunner({
     suiteDefinitions: {
@@ -1349,6 +1431,8 @@ try {
   }
 
   for (const fixture of [
+    { name: "dev_read_file_range", arguments: { path: "server/src/mcp-server.mjs", startLine: 1, command: "cat" }, expected: "Unknown argument for dev_read_file_range: command." },
+    { name: "dev_delete_file", arguments: { path: "server/src/mcp-server.mjs", command: "rm" }, expected: "Unknown argument for dev_delete_file: command." },
     { name: "dev_git_status", arguments: { command: "status" }, expected: "Unknown argument for dev_git_status: command." },
     { name: "dev_git_diff", arguments: { mode: "working", args: ["--name-only"] }, expected: "Unknown argument for dev_git_diff: args." },
     { name: "dev_git_diff_check", arguments: { mode: "working; whoami" }, expected: "mode must be one of: working, staged." },

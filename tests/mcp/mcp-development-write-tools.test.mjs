@@ -16,7 +16,12 @@ import { fileURLToPath } from "node:url";
 import {
   DEV_APPLY_PATCH_MAX_BYTES,
   dev_apply_patch,
+  dev_delete_file,
 } from "../../server/src/mcp-development-write-tools.mjs";
+import {
+  DEV_READ_MAX_BYTES,
+  dev_read_file_range,
+} from "../../server/src/mcp-development-readonly-tools.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -124,6 +129,7 @@ const transactionOptions = {
   },
 };
 const applyPatch = (input, options = transactionOptions) => dev_apply_patch(input, options);
+const deleteFile = (input, options = transactionOptions) => dev_delete_file(input, options);
 
 try {
   const successPath = path.join(fixtureRoot, "success.txt");
@@ -146,6 +152,88 @@ try {
   assert.equal(success.before_bytes, successBefore.length);
   assert.equal(success.after_bytes, successAfter.length);
   assert.equal(Object.hasOwn(success, "content"), false);
+
+  const rangedPath = path.join(fixtureRoot, "ranged-large.txt");
+  const rangedLines = Array.from(
+    { length: 12_000 },
+    (_value, index) => `line-${String(index + 1).padStart(5, "0")} ${"x".repeat(24)}\n`,
+  );
+  const rangedContent = rangedLines.join("");
+  assert(Buffer.byteLength(rangedContent, "utf8") > DEV_READ_MAX_BYTES);
+  await writeFile(rangedPath, rangedContent, "utf8");
+  const firstRange = await dev_read_file_range({
+    path: projectRelative(rangedPath),
+    startLine: 1,
+    maxBytes: 4096,
+  });
+  assert.equal(firstRange.start_line, 1);
+  assert.equal(firstRange.truncated, true);
+  assert.equal(firstRange.returned_bytes <= 4096, true);
+  assert.equal(firstRange.total_lines, rangedLines.length);
+  assert.equal(firstRange.content.startsWith("line-00001 "), true);
+  assert.equal(Number.isInteger(firstRange.next_start_line), true);
+  const secondRange = await dev_read_file_range({
+    path: projectRelative(rangedPath),
+    startLine: firstRange.next_start_line,
+    maxBytes: 4096,
+  });
+  assert.equal(secondRange.start_line, firstRange.next_start_line);
+  assert.equal(
+    secondRange.content.startsWith(
+      `line-${String(firstRange.next_start_line).padStart(5, "0")} `,
+    ),
+    true,
+  );
+  const tailRange = await dev_read_file_range({
+    path: projectRelative(rangedPath),
+    startLine: rangedLines.length,
+    maxBytes: 4096,
+  });
+  assert.equal(tailRange.end_line, rangedLines.length);
+  assert.equal(tailRange.next_start_line, null);
+  assert.equal(tailRange.truncated, false);
+  assert.match(tailRange.content, /^line-12000 /u);
+  await expectRejected(
+    dev_read_file_range({
+      path: projectRelative(rangedPath),
+      startLine: rangedLines.length + 1,
+      maxBytes: 4096,
+    }),
+    /startLine exceeds the file line count/u,
+  );
+
+  const deletePath = path.join(fixtureRoot, "delete-success.txt");
+  const deleteBefore = Buffer.from("retire this legacy file\n", "utf8");
+  await writeFile(deletePath, deleteBefore);
+  const deleted = await deleteFile({
+    path: projectRelative(deletePath),
+    expectedSha256: sha256(deleteBefore),
+  });
+  assert.equal(deleted.ok, true);
+  assert.equal(deleted.deleted, true);
+  assert.equal(deleted.path, projectRelative(deletePath));
+  assert.equal(deleted.before_sha256, sha256(deleteBefore));
+  assert.equal(deleted.before_bytes, deleteBefore.length);
+  assert.equal(deleted.after_exists, false);
+  await assert.rejects(
+    () => readFile(deletePath),
+    (error) => error?.code === "ENOENT",
+  );
+
+  const deleteStalePath = path.join(fixtureRoot, "delete-stale.txt");
+  const deleteStaleBefore = Buffer.from("legacy v1\n", "utf8");
+  await writeFile(deleteStalePath, deleteStaleBefore);
+  const deleteStaleSha = sha256(deleteStaleBefore);
+  const deleteStaleCurrent = Buffer.from("legacy v2\n", "utf8");
+  await writeFile(deleteStalePath, deleteStaleCurrent);
+  await expectRejected(
+    deleteFile({
+      path: projectRelative(deleteStalePath),
+      expectedSha256: deleteStaleSha,
+    }),
+    /expectedSha256 mismatch/u,
+  );
+  assert.deepEqual(await readFile(deleteStalePath), deleteStaleCurrent);
 
   const zeroPath = path.join(fixtureRoot, "zero.txt");
   await writeFile(zeroPath, "alpha\nbeta\ngamma\n");
@@ -216,6 +304,15 @@ try {
     /protected from development writes/u,
   );
   assert.deepEqual(await readFile(activeEnginePath), activeEngineBefore);
+  await expectRejected(
+    deleteFile({ path: "data/canon_db/active_engine.md" }),
+    /protected from development writes/u,
+  );
+  assert.deepEqual(await readFile(activeEnginePath), activeEngineBefore);
+  await expectRejected(
+    deleteFile({ path: "../package.json" }),
+    /path traversal/u,
+  );
 
   await expectRejected(
     applyPatch({ path: ".git/config", oldText: "repositoryformatversion", newText: "version" }),
@@ -276,7 +373,7 @@ try {
   await writeFile(oversizedPath, oversizedBefore);
   await expectRejected(
     applyPatch({ path: projectRelative(oversizedPath), oldText: "a", newText: "A" }),
-    /exceeds the 262144-byte patch limit/u,
+    /exceeds the \d+-byte patch limit/u,
   );
   assert.equal((await readFile(oversizedPath)).length, oversizedBefore.length);
 
@@ -347,6 +444,9 @@ try {
   await writeFile(auditFixturePath, auditFixtureBefore);
   const mcpEmptyPath = path.join(fixtureRoot, "mcp-empty-new-text.txt");
   await writeFile(mcpEmptyPath, "alpha\nremove\nomega\n");
+  const mcpDeletePath = path.join(fixtureRoot, "mcp-delete.txt");
+  const mcpDeleteBefore = Buffer.from("legacy tool deletion audit\n", "utf8");
+  await writeFile(mcpDeletePath, mcpDeleteBefore);
   const auditLogBefore = await optionalBuffer(auditLogPath);
   const transactionsBefore = await optionalDirectoryEntries(transactionDir);
   const intentsBefore = await optionalDirectoryEntries(auditIntentDir);
@@ -388,6 +488,29 @@ try {
     assert.equal(emptyNewTextResponse.error, undefined);
     assert.equal(emptyNewTextResponse.result?.isError, undefined);
     assert.equal(await readFile(mcpEmptyPath, "utf8"), "alpha\nomega\n");
+
+    const deleteResponse = await runMcp("chatgpt_developer", {
+      jsonrpc: "2.0",
+      id: "dev-delete-audit",
+      method: "tools/call",
+      params: {
+        name: "dev_delete_file",
+        arguments: {
+          path: projectRelative(mcpDeletePath),
+          expectedSha256: sha256(mcpDeleteBefore),
+        },
+        _meta: { actor: "dev-wr-delete-audit-test" },
+      },
+    });
+    assert.equal(deleteResponse.error, undefined);
+    assert.equal(deleteResponse.result?.isError, undefined);
+    const deletePayload = JSON.parse(deleteResponse.result.content[0].text);
+    assert.equal(deletePayload.deleted, true);
+    assert.equal(deletePayload.before_sha256, sha256(mcpDeleteBefore));
+    await assert.rejects(
+      () => readFile(mcpDeletePath),
+      (error) => error?.code === "ENOENT",
+    );
 
     const mcpFailureFixtures = [
       {
@@ -466,6 +589,23 @@ try {
       record.new_version?.[projectRelative(auditFixturePath)]?.sha256,
       payload.after_sha256,
     );
+
+    const deleteRecord = records.find((item) => item.actor === "dev-wr-delete-audit-test");
+    assert(deleteRecord, "dev_delete_file did not append an MCP audit record");
+    assert.equal(deleteRecord.tool_name, "dev_delete_file");
+    assert.equal(deleteRecord.risk, "low-risk-write");
+    assert.equal(deleteRecord.status, "completed");
+    assert.equal(deleteRecord.result?.is_error, false);
+    assert(deleteRecord.affected_paths.includes(projectRelative(mcpDeletePath)));
+    assert.equal(
+      deleteRecord.previous_version?.[projectRelative(mcpDeletePath)]?.sha256,
+      deletePayload.before_sha256,
+    );
+    assert.equal(
+      deleteRecord.new_version?.[projectRelative(mcpDeletePath)]?.exists,
+      false,
+    );
+
     for (const fixture of mcpFailureFixtures) {
       const failureRecord = records.find((item) => item.actor === fixture.actor);
       assert(failureRecord, `missing failed audit record for ${fixture.actor}`);

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -34,6 +34,7 @@ const productionSuiteDefinitions = Object.freeze({
 });
 
 const productionLockPath = path.join(projectRoot, "tests", ".tmp", "dev-run-tests.lock");
+export const DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS = 12 * 1024;
 
 let activeChild = null;
 
@@ -116,7 +117,31 @@ function isProcessRunning(pid) {
 async function removeStaleLock(lockPath) {
   try {
     const record = JSON.parse(await readFile(lockPath, "utf8"));
-    if (record.hostname === os.hostname() && !isProcessRunning(record.pid)) {
+    if (record.hostname !== os.hostname()) return false;
+
+    const childPid = Number.isInteger(record.child_pid) ? record.child_pid : null;
+    if (childPid) {
+      if (isProcessRunning(childPid)) return false;
+      await rm(lockPath, { force: true });
+      return true;
+    }
+
+    const ownerPid = Number.isInteger(record.owner_pid)
+      ? record.owner_pid
+      : (Number.isInteger(record.pid) ? record.pid : null);
+    if (!ownerPid || !isProcessRunning(ownerPid)) {
+      await rm(lockPath, { force: true });
+      return true;
+    }
+
+    // Legacy locks recorded only the long-lived MCP server PID. If this is
+    // our own server process and no test child is active, the lock is orphaned.
+    if (
+      Number.isInteger(record.pid)
+      && !Number.isInteger(record.owner_pid)
+      && ownerPid === process.pid
+      && activeChild === null
+    ) {
       await rm(lockPath, { force: true });
       return true;
     }
@@ -132,7 +157,8 @@ async function acquireRunLock(lockPath, suite) {
     try {
       const handle = await open(lockPath, "wx");
       await handle.writeFile(`${JSON.stringify({
-        pid: process.pid,
+        owner_pid: process.pid,
+        child_pid: null,
         hostname: os.hostname(),
         suite,
         started_at: new Date().toISOString(),
@@ -147,10 +173,57 @@ async function acquireRunLock(lockPath, suite) {
   return null;
 }
 
+async function bindRunLockToChild(handle, suite, childPid) {
+  if (!handle || !Number.isInteger(childPid) || childPid <= 0) return;
+  const record = `${JSON.stringify({
+    owner_pid: process.pid,
+    child_pid: childPid,
+    hostname: os.hostname(),
+    suite,
+    started_at: new Date().toISOString(),
+  })}\n`;
+  await handle.truncate(0);
+  await handle.write(record, 0, "utf8");
+}
+
 async function releaseRunLock(handle, lockPath) {
   if (!handle) return;
   await handle.close().catch(() => {});
   await rm(lockPath, { force: true }).catch(() => {});
+}
+
+function lastResultPathForLock(lockPath) {
+  return path.join(path.dirname(lockPath), "dev-run-tests.last.json");
+}
+
+function tailText(value, maxCharacters = DEV_TEST_LAST_RESULT_TEXT_MAX_CHARACTERS) {
+  const text = typeof value === "string" ? value : "";
+  return text.length > maxCharacters ? text.slice(-maxCharacters) : text;
+}
+
+async function persistLastRunResult(resultPath, result) {
+  await mkdir(path.dirname(resultPath), { recursive: true });
+  const record = {
+    suite: result.suite,
+    execution_ok: result.execution_ok === true,
+    passed: result.passed === true,
+    exit_code: Number.isInteger(result.exit_code) ? result.exit_code : null,
+    signal: typeof result.signal === "string" ? result.signal : null,
+    timed_out: result.timed_out === true,
+    duration_ms: Number.isFinite(result.duration_ms) ? Math.max(0, result.duration_ms) : null,
+    stdout_truncated: result.stdout_truncated === true,
+    stderr_truncated: result.stderr_truncated === true,
+    stdout_tail: tailText(result.stdout),
+    stderr_tail: tailText(result.stderr),
+    completed_at: new Date().toISOString(),
+  };
+  const temporaryPath = `${resultPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(record)}\n`, "utf8");
+  try {
+    await rename(temporaryPath, resultPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 function baseResult(suite, startedAt) {
@@ -169,7 +242,7 @@ function baseResult(suite, startedAt) {
   };
 }
 
-async function runDefinition(suite, definition, outputMaxCharacters) {
+async function runDefinition(suite, definition, outputMaxCharacters, lockHandle) {
   const startedAt = Date.now();
   const stdout = createBoundedCollector(outputMaxCharacters);
   const stderr = createBoundedCollector(outputMaxCharacters);
@@ -190,6 +263,7 @@ async function runDefinition(suite, definition, outputMaxCharacters) {
       detached: false,
     });
     activeChild = child;
+    await bindRunLockToChild(lockHandle, suite, child.pid);
   } catch (error) {
     spawnError = error;
   }
@@ -256,6 +330,7 @@ async function runDefinition(suite, definition, outputMaxCharacters) {
 export function createDevTestRunner({
   suiteDefinitions = productionSuiteDefinitions,
   lockPath = productionLockPath,
+  resultPath = lastResultPathForLock(lockPath),
   outputMaxCharacters = DEV_TEST_OUTPUT_MAX_CHARACTERS,
 } = {}) {
   return async function runTests(input = {}) {
@@ -282,16 +357,32 @@ export function createDevTestRunner({
       };
     }
 
+    let result;
     try {
-      return await runDefinition(suite, definition, outputMaxCharacters);
+      result = await runDefinition(suite, definition, outputMaxCharacters, lockHandle);
     } catch (error) {
-      return {
+      result = {
         ...baseResult(suite, startedAt),
         stderr: redactTestOutput(`Internal test runner failure: ${error.message}`),
+      };
+    }
+
+    try {
+      await persistLastRunResult(resultPath, result);
+    } catch (error) {
+      result = {
+        ...result,
+        execution_ok: false,
+        passed: false,
+        stderr: [
+          result.stderr,
+          redactTestOutput(`Could not persist test-run result: ${error.message}`),
+        ].filter(Boolean).join("\n"),
       };
     } finally {
       await releaseRunLock(lockHandle, lockPath);
     }
+    return result;
   };
 }
 

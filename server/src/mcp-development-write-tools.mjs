@@ -31,8 +31,9 @@ import {
   resolveProjectPath,
 } from "./project-paths.mjs";
 
-export const DEV_APPLY_PATCH_MAX_BYTES = 256 * 1024;
+export const DEV_APPLY_PATCH_MAX_BYTES = 16 * 1024 * 1024;
 export const DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS = 256 * 1024;
+export const DEV_DELETE_FILE_MAX_BYTES = DEV_APPLY_PATCH_MAX_BYTES;
 
 export const DEV_WRITE_ALLOWED_TOP_LEVEL_DIRECTORIES = Object.freeze([
   ".github",
@@ -312,6 +313,82 @@ export async function dev_apply_patch(input = {}, options = {}) {
 
   if (!result) {
     throw new Error("dev_apply_patch completed without a patch result.");
+  }
+  return result;
+}
+
+function validateDeleteInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_delete_file input must be an object.");
+  }
+  if (typeof input.path !== "string" || !input.path.trim()) {
+    throw new Error("path is required and must be a non-blank string.");
+  }
+  if (
+    input.expectedSha256 !== undefined
+    && input.expectedSha256 !== null
+    && !sha256Pattern.test(String(input.expectedSha256).toLowerCase())
+  ) {
+    throw new Error("expectedSha256 must be exactly 64 hexadecimal characters.");
+  }
+}
+
+export async function dev_delete_file(input = {}, options = {}) {
+  validateDeleteInput(input);
+  const filePath = resolveDevelopmentPatchPath(input.path, "path");
+  const info = await assertExistingPatchFile(filePath, "path");
+  if (info.size > DEV_DELETE_FILE_MAX_BYTES) {
+    throw new Error(`path exceeds the ${DEV_DELETE_FILE_MAX_BYTES}-byte delete limit.`);
+  }
+
+  const expectedSha256 = input.expectedSha256 === undefined || input.expectedSha256 === null
+    ? null
+    : input.expectedSha256.toLowerCase();
+  let result;
+
+  await commitFileTransaction("dev-delete-file", [
+    {
+      type: "delete",
+      filePath,
+      beforeRead: async () => {
+        const currentInfo = await assertExistingPatchFile(filePath, "path");
+        if (currentInfo.size > DEV_DELETE_FILE_MAX_BYTES) {
+          throw new Error(`path exceeds the ${DEV_DELETE_FILE_MAX_BYTES}-byte delete limit.`);
+        }
+      },
+      contentFactory: async ({ previousExists, previousContent }) => {
+        if (!previousExists) {
+          throw new Error("path must reference an existing file.");
+        }
+        if (previousContent.length > DEV_DELETE_FILE_MAX_BYTES) {
+          throw new Error(`path exceeds the ${DEV_DELETE_FILE_MAX_BYTES}-byte delete limit.`);
+        }
+        decodeText(previousContent, "path");
+        const beforeSha256 = sha256(previousContent);
+        if (expectedSha256 && beforeSha256 !== expectedSha256) {
+          throw new Error(
+            `expectedSha256 mismatch: current file sha256 is ${beforeSha256}.`,
+          );
+        }
+        result = {
+          ok: true,
+          path: normalizeProjectPath(filePath),
+          deleted: true,
+          before_sha256: beforeSha256,
+          before_bytes: previousContent.length,
+          after_exists: false,
+        };
+        return null;
+      },
+    },
+  ], {
+    ...(options.transactionMetadata ?? {}),
+    tool: "dev_delete_file",
+    path: normalizeProjectPath(filePath),
+  });
+
+  if (!result) {
+    throw new Error("dev_delete_file completed without a deletion result.");
   }
   return result;
 }
