@@ -121,6 +121,25 @@ function runFixtureGit(cwd, args) {
   return result;
 }
 
+function runFixtureGitWithInput(cwd, args, input) {
+  const executable = process.platform === "win32" ? "git.exe" : "git";
+  const result = spawnSync(executable, args, {
+    cwd,
+    input,
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+    env: {
+      ...process.env,
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, `fixture git ${args.join(" ")} failed: ${result.stderr}`);
+  return result;
+}
+
 async function createCommitFixture(parent, name) {
   const repositoryRoot = path.join(parent, name);
   await mkdir(path.join(repositoryRoot, "server", "src"), { recursive: true });
@@ -1172,14 +1191,26 @@ try {
     repositoryRoot: modifiedPushFixture.repositoryRoot,
     policy: pushTestPolicy(modifiedPushFixture.remoteUrl),
   });
-  await writeFile(
-    path.join(modifiedPushFixture.repositoryRoot, "server", "src", "requested.mjs"),
-    "export const requested = 43;\n",
-    "utf8",
-  );
+  const modifiedPushPath = path.join(modifiedPushFixture.repositoryRoot, "server", "src", "requested.mjs");
+  await writeFile(modifiedPushPath, "export const requested = 43;\n", "utf8");
+  const modifiedPushWorkingBefore = await readFile(modifiedPushPath, "utf8");
+  const modifiedPushIndexPath = path.join(modifiedPushFixture.repositoryRoot, ".git", "index");
+  const modifiedPushIndexBefore = await readFile(modifiedPushIndexPath);
+  const modifiedPushTrackingPath = path.join(modifiedPushFixture.repositoryRoot, ".git", "refs", "remotes", "origin", "main");
+  const modifiedPushTrackingBefore = await readFile(modifiedPushTrackingPath, "utf8");
   const modifiedPush = await modifiedPushTool({ expectedHead: modifiedPushFixture.head });
-  assert.equal(modifiedPush.pushed, false);
-  assert.equal(modifiedPush.reason, "WORKTREE_DIRTY");
+  assert.equal(modifiedPush.pushed, true, JSON.stringify(modifiedPush));
+  assert.equal(modifiedPush.authoritative_remote_verified, true);
+  assert.equal(modifiedPush.working_tree_dirty, true);
+  assert.equal(modifiedPush.modified_count > 0, true);
+  assert.equal(modifiedPush.untracked_count, 0);
+  assert.equal(modifiedPush.staged_count, 0);
+  assert.equal(modifiedPush.conflicted_count, 0);
+  assert.equal(modifiedPush.remote_head_before, modifiedPushFixture.baseHead);
+  assert.equal(modifiedPush.remote_head_after, modifiedPushFixture.head);
+  assert.equal(await readFile(modifiedPushPath, "utf8"), modifiedPushWorkingBefore);
+  assert.deepEqual(await readFile(modifiedPushIndexPath), modifiedPushIndexBefore);
+  assert.equal(await readFile(modifiedPushTrackingPath, "utf8"), modifiedPushTrackingBefore);
 
   const stagedPushFixture = await createPushFixture(tempRoot, "push-staged");
   const stagedPushTool = createDevGitPushTool({
@@ -1196,15 +1227,76 @@ try {
   assert.equal(stagedPush.pushed, false);
   assert.equal(stagedPush.reason, "STAGED_CHANGES");
 
+  const conflictedPushFixture = await createPushFixture(tempRoot, "push-conflicted");
+  const conflictedPushTool = createDevGitPushTool({
+    repositoryRoot: conflictedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(conflictedPushFixture.remoteUrl),
+  });
+  const conflictPath = "server/src/requested.mjs";
+  const conflictBaseBlob = runFixtureGit(conflictedPushFixture.repositoryRoot, [
+    "rev-parse", `${conflictedPushFixture.baseHead}:${conflictPath}`,
+  ]).stdout.trim();
+  const conflictOursBlob = runFixtureGit(conflictedPushFixture.repositoryRoot, [
+    "rev-parse", `${conflictedPushFixture.head}:${conflictPath}`,
+  ]).stdout.trim();
+  const conflictTheirsPath = path.join(conflictedPushFixture.repositoryRoot, "conflict-theirs.txt");
+  await writeFile(conflictTheirsPath, "export const requested = 999;\n", "utf8");
+  const conflictTheirsBlob = runFixtureGit(conflictedPushFixture.repositoryRoot, [
+    "hash-object", "-w", "--", conflictTheirsPath,
+  ]).stdout.trim();
+  runFixtureGitWithInput(
+    conflictedPushFixture.repositoryRoot,
+    ["update-index", "--index-info"],
+    [
+      `0 ${"0".repeat(40)}\t${conflictPath}`,
+      `100644 ${conflictBaseBlob} 1\t${conflictPath}`,
+      `100644 ${conflictOursBlob} 2\t${conflictPath}`,
+      `100644 ${conflictTheirsBlob} 3\t${conflictPath}`,
+      "",
+    ].join("\n"),
+  );
+  const conflictedPush = await conflictedPushTool({ expectedHead: conflictedPushFixture.head });
+  assert.equal(conflictedPush.pushed, false);
+  assert.equal(conflictedPush.reason, "CONFLICTED");
+  assert.equal(conflictedPush.conflicted_count > 0, true);
+
   const untrackedPushFixture = await createPushFixture(tempRoot, "push-untracked");
   const untrackedPushTool = createDevGitPushTool({
     repositoryRoot: untrackedPushFixture.repositoryRoot,
     policy: pushTestPolicy(untrackedPushFixture.remoteUrl),
   });
-  await writeFile(path.join(untrackedPushFixture.repositoryRoot, "untracked.txt"), "nope\n", "utf8");
+  const untrackedPushPath = path.join(untrackedPushFixture.repositoryRoot, "untracked.txt");
+  await writeFile(untrackedPushPath, "nope\n", "utf8");
+  const untrackedPushBefore = await readFile(untrackedPushPath, "utf8");
   const untrackedPush = await untrackedPushTool({ expectedHead: untrackedPushFixture.head });
-  assert.equal(untrackedPush.pushed, false);
-  assert.equal(untrackedPush.reason, "UNTRACKED_FILES");
+  assert.equal(untrackedPush.pushed, true, JSON.stringify(untrackedPush));
+  assert.equal(untrackedPush.working_tree_dirty, true);
+  assert.equal(untrackedPush.modified_count, 0);
+  assert.equal(untrackedPush.untracked_count, 1);
+  assert.equal(untrackedPush.staged_count, 0);
+  assert.equal(untrackedPush.conflicted_count, 0);
+  assert.equal(await readFile(untrackedPushPath, "utf8"), untrackedPushBefore);
+
+  const combinedDirtyPushFixture = await createPushFixture(tempRoot, "push-combined-dirty");
+  const combinedDirtyPushTool = createDevGitPushTool({
+    repositoryRoot: combinedDirtyPushFixture.repositoryRoot,
+    policy: pushTestPolicy(combinedDirtyPushFixture.remoteUrl),
+  });
+  const combinedModifiedPath = path.join(combinedDirtyPushFixture.repositoryRoot, "server", "src", "requested.mjs");
+  const combinedUntrackedPath = path.join(combinedDirtyPushFixture.repositoryRoot, "untracked.txt");
+  await writeFile(combinedModifiedPath, "export const requested = 45;\n", "utf8");
+  await writeFile(combinedUntrackedPath, "preserve me\n", "utf8");
+  const combinedModifiedBefore = await readFile(combinedModifiedPath, "utf8");
+  const combinedUntrackedBefore = await readFile(combinedUntrackedPath, "utf8");
+  const combinedDirtyPush = await combinedDirtyPushTool({ expectedHead: combinedDirtyPushFixture.head });
+  assert.equal(combinedDirtyPush.pushed, true, JSON.stringify(combinedDirtyPush));
+  assert.equal(combinedDirtyPush.working_tree_dirty, true);
+  assert.equal(combinedDirtyPush.modified_count > 0, true);
+  assert.equal(combinedDirtyPush.untracked_count, 1);
+  assert.equal(combinedDirtyPush.staged_count, 0);
+  assert.equal(combinedDirtyPush.conflicted_count, 0);
+  assert.equal(await readFile(combinedModifiedPath, "utf8"), combinedModifiedBefore);
+  assert.equal(await readFile(combinedUntrackedPath, "utf8"), combinedUntrackedBefore);
 
   const detachedPushFixture = await createPushFixture(tempRoot, "push-detached");
   const detachedPushTool = createDevGitPushTool({
@@ -1323,23 +1415,50 @@ try {
   });
   const behindReject = await behindTool({ expectedHead: behindFixture.head });
   assert.equal(behindReject.pushed, false);
-  assert.equal(behindReject.reason, "BEHIND_UPSTREAM");
+  assert.equal(behindReject.reason, "REMOTE_AHEAD");
+  assert.equal(behindReject.ahead_before, 0);
   assert.equal(behindReject.behind_before > 0, true);
 
-  const notAheadFixture = await createPushFixture(tempRoot, "push-not-ahead");
-  await writeFile(
-    path.join(notAheadFixture.repositoryRoot, ".git", "refs", "remotes", "origin", "main"),
-    `${notAheadFixture.head}\n`,
-    "utf8",
+  const divergedFixture = await createPushFixture(tempRoot, "push-diverged");
+  const divergedBaseTree = runFixtureGit(divergedFixture.repositoryRoot, [
+    "rev-parse", `${divergedFixture.baseHead}^{tree}`,
+  ]).stdout.trim();
+  const divergedRemoteHead = runFixtureGit(divergedFixture.repositoryRoot, [
+    "commit-tree", divergedBaseTree, "-p", divergedFixture.baseHead, "-m", "test: divergent remote",
+  ]).stdout.trim();
+  await cp(
+    path.join(divergedFixture.repositoryRoot, ".git", "objects"),
+    path.join(divergedFixture.bareRoot, "objects"),
+    { recursive: true, force: true },
   );
+  await writeFile(path.join(divergedFixture.bareRoot, "refs", "heads", "main"), `${divergedRemoteHead}\n`, "utf8");
+  const divergedTool = createDevGitPushTool({
+    repositoryRoot: divergedFixture.repositoryRoot,
+    policy: pushTestPolicy(divergedFixture.remoteUrl),
+  });
+  const divergedReject = await divergedTool({ expectedHead: divergedFixture.head });
+  assert.equal(divergedReject.pushed, false);
+  assert.equal(divergedReject.reason, "REMOTE_DIVERGED");
+  assert.equal(divergedReject.ahead_before > 0, true);
+  assert.equal(divergedReject.behind_before > 0, true);
+
+  const notAheadFixture = await createPushFixture(tempRoot, "push-not-ahead");
+  runFixtureGit(notAheadFixture.repositoryRoot, [
+    "push",
+    notAheadFixture.remoteUrl,
+    "HEAD:refs/heads/main",
+  ]);
   const notAheadTool = createDevGitPushTool({
     repositoryRoot: notAheadFixture.repositoryRoot,
     policy: pushTestPolicy(notAheadFixture.remoteUrl),
   });
   const notAheadReject = await notAheadTool({ expectedHead: notAheadFixture.head });
   assert.equal(notAheadReject.pushed, false);
-  assert.equal(notAheadReject.reason, "NOT_AHEAD");
+  assert.equal(notAheadReject.reason, "ALREADY_UP_TO_DATE");
+  assert.equal(notAheadReject.authoritative_remote_verified, true);
+  assert.equal(notAheadReject.remote_head_before, notAheadFixture.head);
   assert.equal(notAheadReject.ahead_before, 0);
+  assert.equal(notAheadReject.behind_before, 0);
 
   const nffFixture = await createPushFixture(tempRoot, "push-non-fast-forward");
   const nffLocalHeadBefore = fixtureHead(nffFixture.repositoryRoot);
@@ -1351,8 +1470,7 @@ try {
   const nffReject = await nffTool({ expectedHead: nffFixture.head });
   assert.equal(nffReject.execution_ok, true);
   assert.equal(nffReject.pushed, false);
-  assert.equal(nffReject.reason, "GIT_PUSH_REJECTED");
-  assert.notEqual(nffReject.exit_code, 0);
+  assert.equal(nffReject.reason, "REMOTE_AHEAD");
   assert.equal(fixtureHead(nffFixture.repositoryRoot), nffLocalHeadBefore);
   assert.equal(fixtureBareHead(nffFixture.bareRoot), nffRemoteHead);
 
@@ -1467,13 +1585,72 @@ try {
     assert.equal(invalidPush.reason, "INVALID_INPUT");
   }
 
+  const remoteReadFailureFixture = await createPushFixture(tempRoot, "push-remote-read-failure");
+  const remoteReadFailureScript = path.join(tempRoot, "push-remote-read-failure.mjs");
+  await writeFile(remoteReadFailureScript, "process.stderr.write('remote unavailable\\n'); process.exit(1);\n", "utf8");
+  const remoteReadFailureTool = createDevGitPushTool({
+    repositoryRoot: remoteReadFailureFixture.repositoryRoot,
+    policy: pushTestPolicy(remoteReadFailureFixture.remoteUrl),
+    networkExecutable: process.execPath,
+    networkExecutablePrefix: [remoteReadFailureScript],
+  });
+  const remoteReadFailure = await remoteReadFailureTool({ expectedHead: remoteReadFailureFixture.head });
+  assert.equal(remoteReadFailure.pushed, false);
+  assert.equal(remoteReadFailure.reason, "REMOTE_READ_FAILED");
+
+  const raceFixture = await createPushFixture(tempRoot, "push-remote-race");
+  await cp(
+    path.join(raceFixture.repositoryRoot, ".git", "objects"),
+    path.join(raceFixture.bareRoot, "objects"),
+    { recursive: true, force: true },
+  );
+  const raceScript = path.join(tempRoot, "push-remote-race.mjs");
+  const raceCounterPath = path.join(tempRoot, "push-remote-race.count");
+  const raceRemoteRefPath = path.join(raceFixture.bareRoot, "refs", "heads", "main");
+  await writeFile(
+    raceScript,
+    `import { spawnSync } from "node:child_process";\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nconst args = process.argv.slice(2);\nconst git = process.platform === "win32" ? "git.exe" : "git";\nif (args.includes("ls-remote")) {\n  const result = spawnSync(git, args, { encoding: "utf8", windowsHide: true, shell: false });\n  process.stdout.write(result.stdout ?? "");\n  process.stderr.write(result.stderr ?? "");\n  const count = existsSync(${JSON.stringify(raceCounterPath)}) ? Number(readFileSync(${JSON.stringify(raceCounterPath)}, "utf8")) : 0;\n  writeFileSync(${JSON.stringify(raceCounterPath)}, String(count + 1));\n  if (count === 0) writeFileSync(${JSON.stringify(raceRemoteRefPath)}, ${JSON.stringify(`${raceFixture.head}\n`)});\n  process.exit(result.status ?? 1);\n}\nprocess.exit(99);\n`,
+    "utf8",
+  );
+  const raceTool = createDevGitPushTool({
+    repositoryRoot: raceFixture.repositoryRoot,
+    policy: pushTestPolicy(raceFixture.remoteUrl),
+    networkExecutable: process.execPath,
+    networkExecutablePrefix: [raceScript],
+  });
+  const raceReject = await raceTool({ expectedHead: raceFixture.head });
+  assert.equal(raceReject.pushed, false);
+  assert.equal(raceReject.reason, "REMOTE_CHANGED_DURING_GATE");
+  assert.equal(raceReject.remote_head_before, raceFixture.baseHead);
+  assert.equal(raceReject.remote_head_after, raceFixture.head);
+
+  const postMismatchFixture = await createPushFixture(tempRoot, "push-post-mismatch");
+  const postMismatchScript = path.join(tempRoot, "push-post-mismatch.mjs");
+  await writeFile(
+    postMismatchScript,
+    `import { spawnSync } from "node:child_process";\nconst args = process.argv.slice(2);\nif (args.includes("ls-remote")) {\n  const git = process.platform === "win32" ? "git.exe" : "git";\n  const result = spawnSync(git, args, { stdio: "inherit", windowsHide: true, shell: false });\n  process.exit(result.status ?? 1);\n}\nif (args.includes("push")) process.exit(0);\nprocess.exit(98);\n`,
+    "utf8",
+  );
+  const postMismatchTool = createDevGitPushTool({
+    repositoryRoot: postMismatchFixture.repositoryRoot,
+    policy: pushTestPolicy(postMismatchFixture.remoteUrl),
+    networkExecutable: process.execPath,
+    networkExecutablePrefix: [postMismatchScript],
+  });
+  const postMismatch = await postMismatchTool({ expectedHead: postMismatchFixture.head });
+  assert.equal(postMismatch.execution_ok, true);
+  assert.equal(postMismatch.pushed, false);
+  assert.equal(postMismatch.reason, "POST_PUSH_REMOTE_MISMATCH");
+  assert.equal(postMismatch.remote_head_before, postMismatchFixture.baseHead);
+  assert.equal(postMismatch.remote_head_after, postMismatchFixture.baseHead);
+
   const timeoutPushFixture = await createPushFixture(tempRoot, "push-timeout-cleanup");
   const timeoutPushPort = await freePort();
   const timeoutNetworkScript = path.join(tempRoot, "push-timeout-network.mjs");
   const timeoutDescendant = `require("node:net").createServer(() => {}).listen(${timeoutPushPort}, "127.0.0.1"); setInterval(() => {}, 1000);`;
   await writeFile(
     timeoutNetworkScript,
-    `import { spawn } from "node:child_process";\nspawn(process.execPath, ["-e", ${JSON.stringify(timeoutDescendant)}], { stdio: "ignore", windowsHide: true });\nsetInterval(() => {}, 1000);\n`,
+    `import { spawn, spawnSync } from "node:child_process";\nconst args = process.argv.slice(2);\nif (args.includes("ls-remote")) {\n  const git = process.platform === "win32" ? "git.exe" : "git";\n  const result = spawnSync(git, args, { stdio: "inherit", windowsHide: true, shell: false });\n  process.exit(result.status ?? 1);\n}\nspawn(process.execPath, ["-e", ${JSON.stringify(timeoutDescendant)}], { stdio: "ignore", windowsHide: true });\nsetInterval(() => {}, 1000);\n`,
     "utf8",
   );
   const timeoutPushTool = createDevGitPushTool({
@@ -1494,7 +1671,7 @@ try {
   const outputNetworkScript = path.join(tempRoot, "push-output-network.mjs");
   await writeFile(
     outputNetworkScript,
-    `process.stdout.write("\\u001b[31mhead\\u001b[0m\\nBearer abcdefghijklmnop\\nsk-proj-1234567890abcdef\\n" + "x".repeat(12000) + "\\nUSEFUL_PUSH_TAIL\\n");\nprocess.stderr.write("password=hunter2\\nUSEFUL_PUSH_STDERR_TAIL\\n");\nprocess.exit(1);\n`,
+    `import { spawnSync } from "node:child_process";\nconst args = process.argv.slice(2);\nif (args.includes("ls-remote")) {\n  const git = process.platform === "win32" ? "git.exe" : "git";\n  const result = spawnSync(git, args, { stdio: "inherit", windowsHide: true, shell: false });\n  process.exit(result.status ?? 1);\n}\nprocess.stdout.write("\\u001b[31mhead\\u001b[0m\\nBearer abcdefghijklmnop\\nsk-proj-1234567890abcdef\\n" + "x".repeat(12000) + "\\nUSEFUL_PUSH_TAIL\\n");\nprocess.stderr.write("password=hunter2\\nUSEFUL_PUSH_STDERR_TAIL\\n");\nprocess.exit(1);\n`,
     "utf8",
   );
   const outputPushTool = createDevGitPushTool({

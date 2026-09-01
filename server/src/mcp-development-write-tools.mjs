@@ -2010,8 +2010,16 @@ function pushFailureResult({
   head = null,
   expectedHead = null,
   upstream = null,
+  remoteHeadBefore = null,
+  remoteHeadAfter = null,
+  authoritativeRemoteVerified = false,
   aheadBefore = null,
   behindBefore = null,
+  workingTreeDirty = null,
+  modifiedCount = null,
+  untrackedCount = null,
+  stagedCount = null,
+  conflictedCount = null,
   exitCode = null,
   signal = null,
   timedOut = false,
@@ -2031,8 +2039,16 @@ function pushFailureResult({
     head,
     expected_head: expectedHead,
     upstream,
+    remote_head_before: remoteHeadBefore,
+    remote_head_after: remoteHeadAfter,
+    authoritative_remote_verified: authoritativeRemoteVerified,
     ahead_before: aheadBefore,
     behind_before: behindBefore,
+    working_tree_dirty: workingTreeDirty,
+    modified_count: modifiedCount,
+    untracked_count: untrackedCount,
+    staged_count: stagedCount,
+    conflicted_count: conflictedCount,
     exit_code: exitCode,
     signal,
     timed_out: timedOut,
@@ -2548,8 +2564,15 @@ export function createDevGitPushTool({
     let hooksPath = null;
     let actualHead = null;
     let upstream = null;
+    let remoteHeadBefore = null;
+    let remoteHeadAfter = null;
     let aheadBefore = null;
     let behindBefore = null;
+    let workingTreeDirty = null;
+    let modifiedCount = null;
+    let untrackedCount = null;
+    let stagedCount = null;
+    let conflictedCount = null;
     try {
       hooksPath = await mkdtemp(path.join(os.tmpdir(), "writer-workbench-empty-push-hooks-"));
       const runAudit = (args) => runPushGit({
@@ -2560,6 +2583,36 @@ export function createDevGitPushTool({
         timeoutMs,
         policy,
       });
+      const readAuthoritativeRemoteHead = async (credentialHelpers) => {
+        const remoteRef = `refs/heads/${policy.branch}`;
+        const remoteResult = await runPushGit({
+          repositoryRoot,
+          executable: networkExecutable,
+          executablePrefix: networkExecutablePrefix,
+          argv: [
+            ...pushNetworkGitPrefix(hooksPath, policy, credentialHelpers),
+            "ls-remote",
+            "--refs",
+            policy.canonicalUrl,
+            remoteRef,
+          ],
+          outputMaxCharacters,
+          timeoutMs,
+          policy,
+        });
+        if (!remoteResult.execution_ok || remoteResult.exit_code !== 0) {
+          return {
+            ok: false,
+            reason: remoteResult.timed_out ? "REMOTE_READ_TIMEOUT" : "REMOTE_READ_FAILED",
+            result: remoteResult,
+          };
+        }
+        const remoteHead = parseLsRemoteHead(remoteResult.stdout, remoteRef);
+        if (!remoteHead) {
+          return { ok: false, reason: "REMOTE_HEAD_PARSE_FAILED", result: remoteResult };
+        }
+        return { ok: true, remoteHead, result: remoteResult };
+      };
 
       const configAudit = await auditPushConfiguration({ runAudit, policy });
       if (!configAudit.ok) {
@@ -2697,51 +2750,127 @@ export function createDevGitPushTool({
         });
       }
 
-      const relationResult = await runAudit(["rev-list", "--left-right", "--count", `HEAD...${policy.upstream}`]);
-      const relation = relationResult.execution_ok && relationResult.exit_code === 0
-        ? parseAheadBehind(relationResult.stdout)
-        : null;
-      if (!relation) {
+      const authoritativeBefore = await readAuthoritativeRemoteHead(configAudit.credential_helpers);
+      if (!authoritativeBefore.ok) {
+        const result = authoritativeBefore.result ?? {};
         return pushFailureResult({
-          reason: "AHEAD_BEHIND_READ_FAILED",
-          details: "Could not read local/upstream ahead-behind relation.",
-          executionOk: false,
+          reason: authoritativeBefore.reason,
+          details: "Could not read authoritative origin/main before push.",
+          executionOk: result.execution_ok === true,
           head: actualHead,
           expectedHead: normalized.expectedHead,
           upstream,
-          exitCode: relationResult.exit_code,
-          signal: relationResult.signal,
-          timedOut: relationResult.timed_out,
-          stderr: relationResult.stderr,
-          stderrTruncated: relationResult.stderr_truncated,
+          exitCode: result.exit_code ?? null,
+          signal: result.signal ?? null,
+          timedOut: result.timed_out === true,
+          stderr: result.stderr ?? "",
+          stderrTruncated: result.stderr_truncated === true,
           durationMs: Date.now() - startedAt,
         });
       }
-      aheadBefore = relation.ahead;
-      behindBefore = relation.behind;
+      remoteHeadBefore = authoritativeBefore.remoteHead;
+      if (remoteHeadBefore === actualHead) {
+        aheadBefore = 0;
+        behindBefore = 0;
+      } else {
+        const remoteObjectResult = await runAudit(["cat-file", "-e", `${remoteHeadBefore}^{commit}`]);
+        if (!remoteObjectResult.execution_ok || remoteObjectResult.exit_code !== 0) {
+          return pushFailureResult({
+            reason: "AUTHORITATIVE_REMOTE_OBJECT_UNAVAILABLE",
+            details: "Authoritative remote HEAD is not available in the local object database; safe ancestry cannot be proven without fetch.",
+            executionOk: remoteObjectResult.execution_ok,
+            head: actualHead,
+            expectedHead: normalized.expectedHead,
+            upstream,
+            remoteHeadBefore,
+            exitCode: remoteObjectResult.exit_code,
+            signal: remoteObjectResult.signal,
+            timedOut: remoteObjectResult.timed_out,
+            stderr: remoteObjectResult.stderr,
+            stderrTruncated: remoteObjectResult.stderr_truncated,
+            durationMs: Date.now() - startedAt,
+          });
+        }
+        const relationResult = await runAudit(["rev-list", "--left-right", "--count", `HEAD...${remoteHeadBefore}`]);
+        const relation = relationResult.execution_ok && relationResult.exit_code === 0
+          ? parseAheadBehind(relationResult.stdout)
+          : null;
+        if (!relation) {
+          return pushFailureResult({
+            reason: "AUTHORITATIVE_RELATION_FAILED",
+            details: "Could not compute local HEAD versus authoritative remote HEAD relation.",
+            executionOk: false,
+            head: actualHead,
+            expectedHead: normalized.expectedHead,
+            upstream,
+            remoteHeadBefore,
+            exitCode: relationResult.exit_code,
+            signal: relationResult.signal,
+            timedOut: relationResult.timed_out,
+            stderr: relationResult.stderr,
+            stderrTruncated: relationResult.stderr_truncated,
+            durationMs: Date.now() - startedAt,
+          });
+        }
+        aheadBefore = relation.ahead;
+        behindBefore = relation.behind;
+      }
+      if (behindBefore > 0 && aheadBefore > 0) {
+        return pushFailureResult({
+          reason: "REMOTE_DIVERGED",
+          details: "Local main and authoritative origin/main have diverged; force and automatic reconciliation are forbidden.",
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       if (behindBefore > 0) {
         return pushFailureResult({
-          reason: "BEHIND_UPSTREAM",
-          details: "Local main is behind origin/main; automatic fetch/pull/rebase/force is forbidden.",
+          reason: "REMOTE_AHEAD",
+          details: "Local main is behind authoritative origin/main; automatic fetch/pull/rebase/force is forbidden.",
           head: actualHead,
           expectedHead: normalized.expectedHead,
           upstream,
+          remoteHeadBefore,
           aheadBefore,
           behindBefore,
           durationMs: Date.now() - startedAt,
         });
       }
-      if (aheadBefore === 0) {
-        return pushFailureResult({
-          reason: "NOT_AHEAD",
-          details: "Local main is not ahead of origin/main; no-op push was not attempted.",
+      if (aheadBefore === 0 && behindBefore === 0) {
+        return {
+          execution_ok: true,
+          pushed: false,
+          reason: "ALREADY_UP_TO_DATE",
+          details: "Authoritative origin/main already equals expectedHead; no push was necessary.",
+          remote: policy.remote,
+          branch: policy.branch,
           head: actualHead,
-          expectedHead: normalized.expectedHead,
+          expected_head: normalized.expectedHead,
           upstream,
-          aheadBefore,
-          behindBefore,
-          durationMs: Date.now() - startedAt,
-        });
+          remote_head_before: remoteHeadBefore,
+          remote_head_after: remoteHeadBefore,
+          authoritative_remote_verified: true,
+          ahead_before: 0,
+          behind_before: 0,
+          working_tree_dirty: null,
+          modified_count: null,
+          untracked_count: null,
+          staged_count: null,
+          conflicted_count: null,
+          exit_code: 0,
+          signal: null,
+          timed_out: false,
+          output: "",
+          stderr: "",
+          stdout_truncated: false,
+          stderr_truncated: false,
+          duration_ms: Date.now() - startedAt,
+        };
       }
 
       const trackedFilterAudit = await scanTrackedGitFilters({
@@ -2800,17 +2929,46 @@ export function createDevGitPushTool({
           durationMs: Date.now() - startedAt,
         });
       }
-      if (status.conflicted.length > 0) {
-        return pushFailureResult({ reason: "CONFLICTED", details: "Conflicted paths are present.", head: actualHead, expectedHead: normalized.expectedHead, upstream, aheadBefore, behindBefore, durationMs: Date.now() - startedAt });
+      modifiedCount = status.modified.length + status.deleted.length + status.renamed.length;
+      untrackedCount = status.untracked.length;
+      stagedCount = status.staged.length;
+      conflictedCount = status.conflicted.length;
+      workingTreeDirty = !status.clean;
+      if (conflictedCount > 0) {
+        return pushFailureResult({
+          reason: "CONFLICTED",
+          details: "Conflicted paths are present.",
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          durationMs: Date.now() - startedAt,
+        });
       }
-      if (status.staged.length > 0) {
-        return pushFailureResult({ reason: "STAGED_CHANGES", details: "The Git index is not empty.", head: actualHead, expectedHead: normalized.expectedHead, upstream, aheadBefore, behindBefore, durationMs: Date.now() - startedAt });
-      }
-      if (status.untracked.length > 0) {
-        return pushFailureResult({ reason: "UNTRACKED_FILES", details: "Untracked files are present.", head: actualHead, expectedHead: normalized.expectedHead, upstream, aheadBefore, behindBefore, durationMs: Date.now() - startedAt });
-      }
-      if (!status.clean || status.modified.length > 0 || status.deleted.length > 0 || status.renamed.length > 0) {
-        return pushFailureResult({ reason: "WORKTREE_DIRTY", details: "Working tree must be clean before push.", head: actualHead, expectedHead: normalized.expectedHead, upstream, aheadBefore, behindBefore, durationMs: Date.now() - startedAt });
+      if (stagedCount > 0) {
+        return pushFailureResult({
+          reason: "STAGED_CHANGES",
+          details: "The Git index is not empty.",
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          durationMs: Date.now() - startedAt,
+        });
       }
 
       const finalHeadResult = await runAudit(["rev-parse", "--verify", "HEAD"]);
@@ -2837,6 +2995,50 @@ export function createDevGitPushTool({
       }
       actualHead = finalHead;
 
+      const finalStatus = await gitTools.status({ includeUntracked: true });
+      if (!finalStatus.execution_ok || finalStatus.exit_code !== 0) {
+        return pushFailureResult({
+          reason: "STATUS_READ_FAILED",
+          details: "Could not re-read repository status at the final push race gate.",
+          executionOk: false,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          exitCode: finalStatus.exit_code,
+          signal: finalStatus.signal,
+          timedOut: finalStatus.timed_out,
+          stderr: finalStatus.stderr,
+          stderrTruncated: finalStatus.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      modifiedCount = finalStatus.modified.length + finalStatus.deleted.length + finalStatus.renamed.length;
+      untrackedCount = finalStatus.untracked.length;
+      stagedCount = finalStatus.staged.length;
+      conflictedCount = finalStatus.conflicted.length;
+      workingTreeDirty = !finalStatus.clean;
+      if (conflictedCount > 0) {
+        return pushFailureResult({ reason: "CONFLICTED", details: "Conflicted paths appeared during the final push race gate.", head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
+      }
+      if (stagedCount > 0) {
+        return pushFailureResult({ reason: "STAGED_CHANGES", details: "The Git index changed during the final push race gate.", head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
+      }
+      const finalOperationState = await gitOperationState(runAudit, repositoryRoot);
+      if (!finalOperationState.ok) {
+        return pushFailureResult({ reason: "OPERATION_STATE_READ_FAILED", details: "Could not re-verify repository operation state at the final push race gate.", executionOk: false, head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
+      }
+      if (finalOperationState.active.length > 0) {
+        return pushFailureResult({ reason: "OPERATION_IN_PROGRESS", details: `Repository operation state became active during the final push race gate: ${finalOperationState.active.join(", ")}.`, head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
+      }
+
       const finalConfigAudit = await auditPushConfiguration({ runAudit, policy });
       if (!finalConfigAudit.ok) {
         const result = finalConfigAudit.result ?? {};
@@ -2853,6 +3055,52 @@ export function createDevGitPushTool({
           timedOut: result.timed_out === true,
           stderr: result.stderr ?? "",
           stderrTruncated: result.stderr_truncated === true,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const authoritativeRace = await readAuthoritativeRemoteHead(finalConfigAudit.credential_helpers);
+      if (!authoritativeRace.ok) {
+        const result = authoritativeRace.result ?? {};
+        return pushFailureResult({
+          reason: authoritativeRace.reason,
+          details: "Could not re-read authoritative origin/main at the final push race gate.",
+          executionOk: result.execution_ok === true,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          exitCode: result.exit_code ?? null,
+          signal: result.signal ?? null,
+          timedOut: result.timed_out === true,
+          stderr: result.stderr ?? "",
+          stderrTruncated: result.stderr_truncated === true,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      if (authoritativeRace.remoteHead !== remoteHeadBefore) {
+        return pushFailureResult({
+          reason: "REMOTE_CHANGED_DURING_GATE",
+          details: "Authoritative origin/main changed during the pre-push gate; push was not attempted.",
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          remoteHeadAfter: authoritativeRace.remoteHead,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
           durationMs: Date.now() - startedAt,
         });
       }
@@ -2921,6 +3169,62 @@ export function createDevGitPushTool({
         });
       }
 
+      const authoritativeAfter = await readAuthoritativeRemoteHead(finalConfigAudit.credential_helpers);
+      if (!authoritativeAfter.ok) {
+        const result = authoritativeAfter.result ?? {};
+        return pushFailureResult({
+          reason: "POST_PUSH_REMOTE_READ_FAILED",
+          details: "Git push exited successfully, but authoritative origin/main could not be verified afterward.",
+          executionOk: result.execution_ok === true,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          exitCode: pushResult.exit_code,
+          signal: pushResult.signal,
+          timedOut: result.timed_out === true,
+          stdout: pushResult.stdout,
+          stderr: result.stderr ?? pushResult.stderr,
+          stdoutTruncated: pushResult.stdout_truncated,
+          stderrTruncated: result.stderr_truncated === true || pushResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      remoteHeadAfter = authoritativeAfter.remoteHead;
+      if (remoteHeadAfter !== normalized.expectedHead) {
+        return pushFailureResult({
+          reason: "POST_PUSH_REMOTE_MISMATCH",
+          details: "Git push exited successfully, but authoritative origin/main does not equal expectedHead.",
+          executionOk: true,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          remoteHeadAfter,
+          aheadBefore,
+          behindBefore,
+          workingTreeDirty,
+          modifiedCount,
+          untrackedCount,
+          stagedCount,
+          conflictedCount,
+          exitCode: pushResult.exit_code,
+          signal: pushResult.signal,
+          stdout: pushResult.stdout,
+          stderr: pushResult.stderr,
+          stdoutTruncated: pushResult.stdout_truncated,
+          stderrTruncated: pushResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
       return {
         execution_ok: true,
         pushed: true,
@@ -2929,8 +3233,16 @@ export function createDevGitPushTool({
         head: actualHead,
         expected_head: normalized.expectedHead,
         upstream,
+        remote_head_before: remoteHeadBefore,
+        remote_head_after: remoteHeadAfter,
+        authoritative_remote_verified: true,
         ahead_before: aheadBefore,
         behind_before: behindBefore,
+        working_tree_dirty: workingTreeDirty,
+        modified_count: modifiedCount,
+        untracked_count: untrackedCount,
+        staged_count: stagedCount,
+        conflicted_count: conflictedCount,
         exit_code: pushResult.exit_code,
         signal: pushResult.signal,
         timed_out: false,
@@ -2988,7 +3300,27 @@ export function getDevGitPushCommandMapping() {
     head: [...auditPrefix, "rev-parse", "--verify", "HEAD"],
     branch_check: [...auditPrefix, "symbolic-ref", "--quiet", "--short", "HEAD"],
     upstream_check: [...auditPrefix, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
-    ahead_behind: [...auditPrefix, "rev-list", "--left-right", "--count", "HEAD...origin/main"],
+    authoritative_remote_head_before: [
+      ...networkPrefix,
+      "ls-remote",
+      "--refs",
+      policy.canonicalUrl,
+      `refs/heads/${policy.branch}`,
+    ],
+    authoritative_relation: [
+      ...auditPrefix,
+      "rev-list",
+      "--left-right",
+      "--count",
+      "HEAD...<authoritative-remote-sha>",
+    ],
+    authoritative_remote_head_race_check: [
+      ...networkPrefix,
+      "ls-remote",
+      "--refs",
+      policy.canonicalUrl,
+      `refs/heads/${policy.branch}`,
+    ],
     push: [
       ...networkPrefix,
       "push",
@@ -2996,6 +3328,13 @@ export function getDevGitPushCommandMapping() {
       "--no-verify",
       policy.canonicalUrl,
       "HEAD:refs/heads/main",
+    ],
+    authoritative_remote_head_after: [
+      ...networkPrefix,
+      "ls-remote",
+      "--refs",
+      policy.canonicalUrl,
+      `refs/heads/${policy.branch}`,
     ],
   };
 }
