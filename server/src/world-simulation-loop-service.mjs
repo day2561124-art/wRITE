@@ -78,11 +78,21 @@ import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
+  getStructuredEntityRegistry,
+  normalizeEntityName,
+} from "./structured-canon-entity-registry-service.mjs";
+import {
   commitWorldSimulationTurn,
+  getWorldSimulationHistory,
   getWorldSimulationState,
 } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationLoopVersion = "phase62c-event-loop-v1";
+export const worldSimulationCharacterRuntimeVersion = "character-runtime-v1";
+export const worldSimulationCharacterExperienceContractVersion =
+  "committed-character-experience-receipt-v1";
+export const worldSimulationCharacterExperienceProjectionVersion =
+  "committed-character-experience-projection-v1";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -105,6 +115,779 @@ function nonEmptyString(value, label) {
     throw new Error(`${label} is required.`);
   }
   return value.trim();
+}
+
+function sameCharacterName(left, right) {
+  return String(left ?? "").trim().toLocaleLowerCase("zh-Hant-TW")
+    === String(right ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+}
+
+const strippedCharacterExperienceObservationKeys = new Set([
+  "world_state",
+  "scene_state",
+  "source_position",
+  "target_position",
+  "exact_source_position",
+  "exact_target_position",
+  "relative_position",
+  "distance_m",
+  "target_illumination_lux",
+  "received_level_db",
+  "reference_level_db",
+  "reference_distance_m",
+  "minimum_audible_db",
+  "observer_thresholds_lux",
+  "causal_evidence",
+  "causal_chain",
+  "internal_provenance",
+]);
+
+function keyIsCharacterExperiencePrivate(key) {
+  const normalized = String(key ?? "").toLowerCase();
+  return normalized === "id"
+    || normalized.endsWith("_id")
+    || normalized.endsWith("_ids")
+    || normalized.startsWith("engine_")
+    || normalized.startsWith("internal_")
+    || strippedCharacterExperienceObservationKeys.has(normalized);
+}
+
+function sanitizeCharacterExperienceObservationValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeCharacterExperienceObservationValue);
+  }
+  if (!isObject(value)) return cloneJson(value);
+  const clean = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (keyIsCharacterExperiencePrivate(key)) continue;
+    clean[key] = sanitizeCharacterExperienceObservationValue(child);
+  }
+  return clean;
+}
+
+function boundedCharacterExperienceObservation(perception) {
+  const source = object(perception);
+  return {
+    observed: sanitizeCharacterExperienceObservationValue(array(source.observed)),
+    audible: sanitizeCharacterExperienceObservationValue(array(source.audible)),
+    other_senses: sanitizeCharacterExperienceObservationValue(array(source.other_senses)),
+    information_boundary: sanitizeCharacterExperienceObservationValue(
+      object(source.information_boundary),
+    ),
+  };
+}
+
+function safeCharacterOutcomeScalar(value) {
+  if (value === null || value === undefined) return null;
+  if (["string", "number", "boolean"].includes(typeof value)) return cloneJson(value);
+  return null;
+}
+
+function boundedOwnActionOutcome(outcome, selectedActionId) {
+  const source = object(outcome);
+  const boundedEvidence = object(
+    source.character_experience
+    ?? source.experience_for_actor,
+  );
+  const projected = {
+    action_id: selectedActionId ?? null,
+  };
+  for (const key of ["performed", "perceived_result", "perceived_status"]) {
+    if (!Object.hasOwn(boundedEvidence, key)) continue;
+    const value = safeCharacterOutcomeScalar(boundedEvidence[key]);
+    if (value !== null) projected[key] = value;
+  }
+  return Object.keys(projected).length > 1 ? projected : null;
+}
+
+function verifyCharacterExperienceProjectionEnvelope(projection) {
+  if (!isObject(projection)) {
+    throw new Error("Committed Character Experience projection must be an object.");
+  }
+  const projectionHash = nonEmptyString(
+    projection.projection_hash,
+    "committed character experience projection hash",
+  );
+  const body = cloneJson(projection);
+  delete body.projection_hash;
+  if (hashAgentRunValue(body) !== projectionHash) {
+    const error = new Error("Committed Character Experience projection hash verification failed.");
+    error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_PROJECTION_HASH_MISMATCH";
+    throw error;
+  }
+  return cloneJson(projection);
+}
+
+function nextCommittedCharacterExperienceSequence(
+  history,
+  worldLineage,
+  characterEntityId,
+) {
+  const sequences = [];
+  for (const turn of array(history?.turns)) {
+    const projection = turn?.committed_character_experience_projection;
+    if (!isObject(projection)) continue;
+    for (const characterProjection of array(projection.character_projections)) {
+      if (characterProjection?.world_lineage !== worldLineage
+        || characterProjection?.character_entity_id !== characterEntityId) {
+        continue;
+      }
+      const sequence = Number(characterProjection.experience_sequence);
+      if (!Number.isSafeInteger(sequence) || sequence < 1) {
+        const error = new Error(
+          `Committed Character Experience history contains an invalid sequence for ${characterEntityId}.`,
+        );
+        error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_HISTORY_SEQUENCE_INVALID";
+        throw error;
+      }
+      sequences.push(sequence);
+    }
+  }
+  sequences.sort((left, right) => left - right);
+  for (let index = 0; index < sequences.length; index += 1) {
+    const expected = index + 1;
+    if (sequences[index] !== expected) {
+      const error = new Error(
+        `Committed Character Experience history sequence is not contiguous for ${characterEntityId}: expected ${expected}, found ${sequences[index]}.`,
+      );
+      error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_HISTORY_SEQUENCE_INVALID";
+      throw error;
+    }
+  }
+  return sequences.length + 1;
+}
+
+export function projectWorldSimulationCharacterExperienceEvidence(input = {}) {
+  const preparedTurn = object(input.prepared_turn);
+  const selected = array(input.selected_action_intents);
+  const actionOutcomes = array(input.action_outcomes);
+  const runtimeIdentities = array(input.runtime_identities);
+  const characterProjections = array(preparedTurn.decision_packets).map((packet, projectionSlot) => {
+    const character = nonEmptyString(packet?.character, "decision packet character");
+    const runtimeIdentity = runtimeIdentities.find((item) => sameCharacterName(item?.character, character));
+    if (!runtimeIdentity) {
+      const error = new Error(`Committed Character Experience projection is missing Runtime identity for ${character}.`);
+      error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_RUNTIME_IDENTITY_REQUIRED";
+      throw error;
+    }
+    const worldLineage = nonEmptyString(
+      runtimeIdentity.world_lineage,
+      "committed character experience world lineage",
+    );
+    const characterEntityId = nonEmptyString(
+      runtimeIdentity.character_entity_id,
+      "committed character experience character entity_id",
+    );
+    const experienceSequence = Number(runtimeIdentity.experience_sequence);
+    if (!Number.isSafeInteger(experienceSequence) || experienceSequence < 1) {
+      const error = new Error(
+        `Committed Character Experience sequence is invalid for ${character}.`,
+      );
+      error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_SEQUENCE_INVALID";
+      throw error;
+    }
+    const ownSelection = selected.find((item) => sameCharacterName(item?.character, character)) ?? null;
+    const participated = ownSelection?.selection === "candidate_action_intent";
+    const observation = boundedCharacterExperienceObservation(packet?.perception);
+    const ownActionOutcomes = participated
+      ? actionOutcomes
+        .filter((outcome) => sameCharacterName(outcome?.actor, character))
+        .map((outcome) => boundedOwnActionOutcome(outcome, ownSelection.action_id ?? null))
+        .filter(Boolean)
+      : [];
+    const observedSomething = observation.observed.length > 0
+      || observation.audible.length > 0
+      || observation.other_senses.length > 0;
+    return {
+      projection_slot: projectionSlot,
+      experience_sequence: experienceSequence,
+      world_lineage: worldLineage,
+      character_entity_id: characterEntityId,
+      canonical_name: runtimeIdentity.canonical_name ?? character,
+      identity_source:
+        runtimeIdentity.identity_source
+        ?? "historical_committed_character_experience_projection",
+      formal_identity: runtimeIdentity.formal_identity === true,
+      character,
+      experience: {
+        roles: {
+          participant: participated,
+          observer: observedSomething,
+        },
+        participation: participated
+          ? {
+              selected_intent: {
+                action_id: ownSelection.action_id ?? null,
+                intent: ownSelection.intent ?? null,
+              },
+              experienced_action_outcomes: ownActionOutcomes,
+              selected_intent_is_not_outcome: true,
+            }
+          : {
+              selected_intent: null,
+              experienced_action_outcomes: [],
+              selected_intent_is_not_outcome: true,
+            },
+        observation,
+      },
+      boundaries: {
+        source_is_bounded_character_information: true,
+        raw_world_state_included: false,
+        hidden_causal_chain_included: false,
+        other_character_private_state_included: false,
+        exact_engine_geometry_included: false,
+        participant_intent_promoted_to_success: false,
+        objective_action_result_auto_exposed: false,
+        post_outcome_experience_requires_explicit_bounded_actor_evidence: true,
+      },
+    };
+  });
+  const projection = {
+    experience_contract_version: worldSimulationCharacterExperienceContractVersion,
+    projection_version: worldSimulationCharacterExperienceProjectionVersion,
+    historical_semantics_version: worldSimulationCharacterExperienceProjectionVersion,
+    turn_id: nonEmptyString(preparedTurn.turn_id, "prepared turn_id"),
+    character_projections: characterProjections,
+    boundaries: {
+      objective_world_history_remains_source_of_truth: true,
+      full_next_world_state_stored_here: false,
+      replay_uses_stored_historical_projection: true,
+      current_perception_engine_reinterpretation_required_for_replay: false,
+      character_brain_authors_projection: false,
+      character_brain_authors_receipt: false,
+    },
+  };
+  projection.projection_hash = hashAgentRunValue(projection);
+  return cloneJson(projection);
+}
+
+function buildCommittedCharacterExperienceReceipt({
+  worldLineage,
+  runtimeSnapshot,
+  historyEntry,
+  projectionEnvelope,
+  characterProjection,
+}) {
+  const revision = Number(historyEntry?.revision_to);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error("Committed Character Experience receipt requires a committed revision.");
+  }
+  const committedTurnId = nonEmptyString(
+    historyEntry?.turn_id,
+    "committed character experience history turn_id",
+  );
+  if (projectionEnvelope?.turn_id !== committedTurnId) {
+    const error = new Error(
+      "Committed Character Experience projection turn_id does not match committed history.",
+    );
+    error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_TURN_MISMATCH";
+    throw error;
+  }
+  const experienceSequence = Number(characterProjection?.experience_sequence);
+  if (!Number.isSafeInteger(experienceSequence) || experienceSequence < 1) {
+    const error = new Error("Committed Character Experience receipt sequence is invalid.");
+    error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_SEQUENCE_INVALID";
+    throw error;
+  }
+  const receiptIdentity = {
+    world_lineage: worldLineage,
+    committed_turn_id: committedTurnId,
+    committed_revision: revision,
+    character_entity_id: runtimeSnapshot.character_entity_id,
+    projection_slot: characterProjection.projection_slot,
+    experience_sequence: experienceSequence,
+    experience_contract_version: projectionEnvelope.experience_contract_version,
+    projection_version: projectionEnvelope.projection_version,
+  };
+  return {
+    receipt_id: `character_experience_${hashAgentRunValue(receiptIdentity).slice(0, 28)}`,
+    experience_contract_version: projectionEnvelope.experience_contract_version,
+    projection_version: projectionEnvelope.projection_version,
+    historical_semantics_version: projectionEnvelope.historical_semantics_version,
+    projection_hash: projectionEnvelope.projection_hash,
+    world_lineage: worldLineage,
+    committed_turn_id: committedTurnId,
+    committed_revision: revision,
+    projection_slot: characterProjection.projection_slot,
+    experience_sequence: experienceSequence,
+    character_entity_id: runtimeSnapshot.character_entity_id,
+    character: characterProjection.character,
+    experience: cloneJson(characterProjection.experience),
+    boundaries: {
+      world_truth_is_not_character_experience: true,
+      character_experience_is_not_memory: true,
+      full_world_state_exposed: false,
+      hidden_causal_chain_exposed: false,
+      projector_metadata_exposed_to_character_brain: false,
+      durable_mind_mutation: false,
+    },
+  };
+}
+
+export async function resolveWorldSimulationFormalCharacterIdentity(
+  character,
+  options = {},
+) {
+  const requestedName = nonEmptyString(character, "character");
+  const normalizedRequestedName = normalizeEntityName(requestedName);
+  const { registry } = await getStructuredEntityRegistry(
+    options.characterIdentityRegistryOptions ?? {},
+  );
+  // Registry status may reflect incomplete character details (for example an
+  // unconfirmed ability). Formal Runtime identity is the stable character
+  // entity_id itself, not whether every character field is already settled.
+  const matches = array(registry.characters).filter((entity) => {
+    if (entity.entity_id === requestedName) return true;
+    const names = [entity.canonical_name, ...array(entity.aliases)];
+    return names.some((name) => normalizeEntityName(name) === normalizedRequestedName);
+  });
+
+  if (matches.length === 1) {
+    return {
+      entity_id: nonEmptyString(matches[0].entity_id, "character entity_id"),
+      canonical_name: nonEmptyString(matches[0].canonical_name, "character canonical_name"),
+      identity_source: "structured_canon_entity_registry",
+      formal: true,
+    };
+  }
+
+  if (matches.length > 1) {
+    const error = new Error(
+      `Formal character identity is ambiguous for ${requestedName}.`,
+    );
+    error.code = "WORLD_SIMULATION_CHARACTER_IDENTITY_AMBIGUOUS";
+    throw error;
+  }
+
+  if (options.fixtureRoot) {
+    return {
+      entity_id: `fixture_character_${hashAgentRunValue({ character: requestedName }).slice(0, 20)}`,
+      canonical_name: requestedName,
+      identity_source: "test_fixture_ephemeral_identity",
+      formal: false,
+    };
+  }
+
+  const error = new Error(
+    `Formal character identity could not be resolved for ${requestedName}.`,
+  );
+  error.code = "WORLD_SIMULATION_CHARACTER_IDENTITY_NOT_FOUND";
+  throw error;
+}
+
+async function resolveCharacterRuntimeWorldLineage(
+  worldSimulationSessionId,
+  options = {},
+) {
+  const sessionId = nonEmptyString(
+    worldSimulationSessionId,
+    "world_simulation_session_id",
+  );
+  if (typeof options.characterRuntimeWorldLineageResolver !== "function") {
+    return sessionId;
+  }
+  return nonEmptyString(
+    await options.characterRuntimeWorldLineageResolver({
+      world_simulation_session_id: sessionId,
+    }),
+    "character runtime world lineage",
+  );
+}
+
+function createCharacterRuntimeInstance({ worldLineage, identity }) {
+  const runtimeId = `character_runtime_${hashAgentRunValue({
+    world_lineage: worldLineage,
+    character_entity_id: identity.entity_id,
+  }).slice(0, 20)}`;
+  let queueTail = Promise.resolve();
+  let activeTurns = 0;
+  let pendingTurns = 0;
+  let pendingExperienceDeliveries = 0;
+  let lastCommittedExperienceRevision = null;
+  let lastCommittedExperienceSequence = 0;
+  const consumedExperienceReceiptIds = new Set();
+  const recentExperienceReceipts = [];
+  const lifecycle = {
+    turns_started: 0,
+    turns_completed: 0,
+    turns_failed: 0,
+    max_concurrent_turns: 0,
+  };
+  const experienceLifecycle = {
+    delivery_attempts: 0,
+    committed_experience_effect_count: 0,
+    duplicate_delivery_attempts: 0,
+    delivery_failures: 0,
+  };
+
+  function enqueueRuntimeOperation(execute, onSettled) {
+    const queued = queueTail.then(execute, execute);
+    const tracked = queued.finally(onSettled);
+    queueTail = tracked.then(() => undefined, () => undefined);
+    return tracked;
+  }
+
+  async function runTurn(brainInput, characterBrain) {
+    if (typeof characterBrain !== "function") {
+      const error = new Error("Character Runtime requires a characterBrain backend.");
+      error.code = "WORLD_SIMULATION_CHARACTER_BRAIN_REQUIRED";
+      throw error;
+    }
+    const execute = async () => {
+      lifecycle.turns_started += 1;
+      activeTurns += 1;
+      lifecycle.max_concurrent_turns = Math.max(
+        lifecycle.max_concurrent_turns,
+        activeTurns,
+      );
+      if (activeTurns !== 1) {
+        activeTurns -= 1;
+        const error = new Error("Character Runtime turn became reentrant.");
+        error.code = "WORLD_SIMULATION_CHARACTER_RUNTIME_REENTRANT";
+        throw error;
+      }
+      try {
+        const selection = await characterBrain(cloneJson(brainInput));
+        lifecycle.turns_completed += 1;
+        return selection;
+      } catch (error) {
+        lifecycle.turns_failed += 1;
+        throw error;
+      } finally {
+        activeTurns -= 1;
+      }
+    };
+    pendingTurns += 1;
+    return enqueueRuntimeOperation(execute, () => {
+      pendingTurns -= 1;
+    });
+  }
+
+  async function consumeCommittedExperience(receipt) {
+    const detachedReceipt = cloneJson(receipt);
+    pendingExperienceDeliveries += 1;
+    return enqueueRuntimeOperation(async () => {
+      experienceLifecycle.delivery_attempts += 1;
+      try {
+        if (detachedReceipt.character_entity_id !== identity.entity_id) {
+          const error = new Error("Committed Character Experience receipt character identity does not match Runtime identity.");
+          error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_IDENTITY_MISMATCH";
+          throw error;
+        }
+        if (consumedExperienceReceiptIds.has(detachedReceipt.receipt_id)) {
+          experienceLifecycle.duplicate_delivery_attempts += 1;
+          return {
+            consumed: false,
+            duplicate: true,
+            receipt_id: detachedReceipt.receipt_id,
+            committed_revision: detachedReceipt.committed_revision,
+            experience_sequence: detachedReceipt.experience_sequence,
+          };
+        }
+        const revision = Number(detachedReceipt.committed_revision);
+        if (!Number.isSafeInteger(revision) || revision < 1) {
+          const error = new Error("Committed Character Experience receipt revision is invalid.");
+          error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_REVISION_INVALID";
+          throw error;
+        }
+        const experienceSequence = Number(detachedReceipt.experience_sequence);
+        if (!Number.isSafeInteger(experienceSequence) || experienceSequence < 1) {
+          const error = new Error("Committed Character Experience receipt sequence is invalid.");
+          error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_SEQUENCE_INVALID";
+          throw error;
+        }
+        const expectedExperienceSequence = lastCommittedExperienceSequence + 1;
+        if (experienceSequence !== expectedExperienceSequence) {
+          const error = new Error(
+            `Committed Character Experience receipt is out of order: expected sequence ${expectedExperienceSequence}, received ${experienceSequence}.`,
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_OUT_OF_ORDER";
+          throw error;
+        }
+        if (lastCommittedExperienceRevision !== null
+          && revision <= lastCommittedExperienceRevision) {
+          const error = new Error(
+            `Committed Character Experience receipt revision is out of order: last ${lastCommittedExperienceRevision}, received ${revision}.`,
+          );
+          error.code = "WORLD_SIMULATION_CHARACTER_EXPERIENCE_OUT_OF_ORDER";
+          throw error;
+        }
+        consumedExperienceReceiptIds.add(detachedReceipt.receipt_id);
+        lastCommittedExperienceRevision = revision;
+        lastCommittedExperienceSequence = experienceSequence;
+        experienceLifecycle.committed_experience_effect_count += 1;
+        recentExperienceReceipts.push(detachedReceipt);
+        if (recentExperienceReceipts.length > 16) recentExperienceReceipts.shift();
+        return {
+          consumed: true,
+          duplicate: false,
+          receipt_id: detachedReceipt.receipt_id,
+          committed_revision: revision,
+          experience_sequence: experienceSequence,
+        };
+      } catch (error) {
+        experienceLifecycle.delivery_failures += 1;
+        throw error;
+      }
+    }, () => {
+      pendingExperienceDeliveries -= 1;
+    });
+  }
+
+  function snapshot() {
+    return {
+      runtime_version: worldSimulationCharacterRuntimeVersion,
+      runtime_id: runtimeId,
+      world_lineage: worldLineage,
+      character_entity_id: identity.entity_id,
+      canonical_name: identity.canonical_name,
+      identity_source: identity.identity_source,
+      formal_identity: identity.formal === true,
+      lifecycle: cloneJson(lifecycle),
+      active_turns: activeTurns,
+      pending_turns: pendingTurns,
+      pending_runtime_operations: pendingTurns + pendingExperienceDeliveries,
+      committed_experience: {
+        ...cloneJson(experienceLifecycle),
+        last_committed_revision: lastCommittedExperienceRevision,
+        last_experience_sequence: lastCommittedExperienceSequence,
+        pending_deliveries: pendingExperienceDeliveries,
+        recent_receipts: cloneJson(recentExperienceReceipts),
+        receipt_identity_cache_size: consumedExperienceReceiptIds.size,
+      },
+      durable_mind_persistence: false,
+      durable_mind_mutation_count: 0,
+    };
+  }
+
+  return { runTurn, consumeCommittedExperience, snapshot };
+}
+
+export function createWorldSimulationCharacterRuntimeManager(config = {}) {
+  const identityResolver = typeof config.identityResolver === "function"
+    ? config.identityResolver
+    : resolveWorldSimulationFormalCharacterIdentity;
+  const runtimes = new Map();
+
+  function getOrCreateRuntimeByResolvedIdentity({ worldLineage, identity }) {
+    const resolvedWorldLineage = nonEmptyString(
+      worldLineage,
+      "character runtime world lineage",
+    );
+    const entityId = nonEmptyString(identity?.entity_id, "character entity_id");
+    const key = JSON.stringify([resolvedWorldLineage, entityId]);
+    let runtime = runtimes.get(key);
+    if (!runtime) {
+      runtime = createCharacterRuntimeInstance({
+        worldLineage: resolvedWorldLineage,
+        identity: {
+          entity_id: entityId,
+          canonical_name: identity?.canonical_name ?? entityId,
+          identity_source: identity?.identity_source ?? "resolved_character_runtime_identity",
+          formal: identity?.formal === true,
+        },
+      });
+      runtimes.set(key, runtime);
+    }
+    return runtime;
+  }
+
+  async function getRuntime(input = {}, options = {}) {
+    const character = nonEmptyString(input.character, "character");
+    const worldLineage = await resolveCharacterRuntimeWorldLineage(
+      input.world_simulation_session_id,
+      options,
+    );
+    const identity = await identityResolver(character, options);
+    return getOrCreateRuntimeByResolvedIdentity({
+      worldLineage,
+      identity: {
+        entity_id: identity?.entity_id,
+        canonical_name: identity?.canonical_name ?? character,
+        identity_source: identity?.identity_source ?? "custom_character_identity_resolver",
+        formal: identity?.formal === true,
+      },
+    });
+  }
+
+  async function runCharacterTurn(input = {}, options = {}) {
+    const runtime = await getRuntime(input, options);
+    return runtime.runTurn(input.brain_input, input.characterBrain);
+  }
+
+  async function deliverCommittedExperience(input = {}, options = {}) {
+    const historyEntry = object(input.history_entry);
+    const projectionEnvelope = verifyCharacterExperienceProjectionEnvelope(
+      input.projection_envelope
+      ?? historyEntry.committed_character_experience_projection,
+    );
+    const characterProjection = object(input.character_projection);
+    const character = nonEmptyString(characterProjection.character, "experience projection character");
+    const runtime = getOrCreateRuntimeByResolvedIdentity({
+      worldLineage: nonEmptyString(
+        characterProjection.world_lineage,
+        "historical committed character experience world lineage",
+      ),
+      identity: {
+        entity_id: nonEmptyString(
+          characterProjection.character_entity_id,
+          "historical committed character experience character entity_id",
+        ),
+        canonical_name: characterProjection.canonical_name ?? character,
+        identity_source:
+          characterProjection.identity_source
+          ?? "historical_committed_character_experience_projection",
+        formal: characterProjection.formal_identity === true,
+      },
+    });
+    const runtimeSnapshot = runtime.snapshot();
+    const receipt = buildCommittedCharacterExperienceReceipt({
+      worldLineage: runtimeSnapshot.world_lineage,
+      runtimeSnapshot,
+      historyEntry,
+      projectionEnvelope,
+      characterProjection,
+    });
+    const result = await runtime.consumeCommittedExperience(receipt);
+    return {
+      ...result,
+      character,
+      character_entity_id: runtimeSnapshot.character_entity_id,
+      receipt: cloneJson(receipt),
+    };
+  }
+
+  async function deliverCommittedExperienceProjection(input = {}, options = {}) {
+    const historyEntry = object(input.history_entry);
+    const projectionEnvelope = verifyCharacterExperienceProjectionEnvelope(
+      historyEntry.committed_character_experience_projection,
+    );
+    const characterProjections = array(projectionEnvelope.character_projections);
+    const settledDeliveries = await Promise.allSettled(
+      characterProjections.map((characterProjection) => (
+        deliverCommittedExperience({
+          world_simulation_session_id: input.world_simulation_session_id,
+          history_entry: historyEntry,
+          projection_envelope: projectionEnvelope,
+          character_projection: characterProjection,
+        }, options)
+      )),
+    );
+    const deliveries = settledDeliveries
+      .filter((item) => item.status === "fulfilled")
+      .map((item) => item.value);
+    const failures = settledDeliveries
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === "rejected")
+      .map(({ item, index }) => ({
+        projection_slot: characterProjections[index]?.projection_slot ?? index,
+        character: characterProjections[index]?.character ?? null,
+        character_entity_id: characterProjections[index]?.character_entity_id ?? null,
+        error_code:
+          item.reason?.code
+          ?? "WORLD_SIMULATION_CHARACTER_EXPERIENCE_DELIVERY_FAILED",
+        error_message: item.reason?.message ?? String(item.reason),
+      }));
+    return {
+      projection_version: projectionEnvelope.projection_version,
+      experience_contract_version: projectionEnvelope.experience_contract_version,
+      projection_hash: projectionEnvelope.projection_hash,
+      delivery_count: characterProjections.length,
+      consumed_count: deliveries.filter((item) => item.consumed === true).length,
+      duplicate_count: deliveries.filter((item) => item.duplicate === true).length,
+      failed_count: failures.length,
+      delivery_failed: failures.length > 0,
+      replay_required: failures.length > 0,
+      deliveries,
+      failures,
+    };
+  }
+
+  async function inspectRuntime(input = {}, options = {}) {
+    return (await getRuntime(input, options)).snapshot();
+  }
+
+  async function releaseWorldLineage(worldSimulationSessionId, options = {}) {
+    const worldLineage = await resolveCharacterRuntimeWorldLineage(
+      worldSimulationSessionId,
+      options,
+    );
+    const matching = [...runtimes.entries()].filter(([, runtime]) => (
+      runtime.snapshot().world_lineage === worldLineage
+    ));
+    if (matching.some(([, runtime]) => runtime.snapshot().pending_runtime_operations > 0)) {
+      const error = new Error(
+        `Character Runtime world lineage ${worldLineage} is busy and cannot be released.`,
+      );
+      error.code = "WORLD_SIMULATION_CHARACTER_RUNTIME_LINEAGE_BUSY";
+      throw error;
+    }
+    for (const [key] of matching) runtimes.delete(key);
+    return matching.length;
+  }
+
+  return {
+    runtime_version: worldSimulationCharacterRuntimeVersion,
+    experience_contract_version: worldSimulationCharacterExperienceContractVersion,
+    experience_projection_version: worldSimulationCharacterExperienceProjectionVersion,
+    getRuntime,
+    runCharacterTurn,
+    deliverCommittedExperience,
+    deliverCommittedExperienceProjection,
+    inspectRuntime,
+    releaseWorldLineage,
+    runtimeCount: () => runtimes.size,
+  };
+}
+
+const defaultWorldSimulationCharacterRuntimeManager =
+  createWorldSimulationCharacterRuntimeManager();
+
+export async function replayWorldSimulationCommittedCharacterExperiences(
+  worldSimulationSessionId,
+  options = {},
+) {
+  const sessionId = nonEmptyString(
+    worldSimulationSessionId,
+    "world_simulation_session_id",
+  );
+  await assertWorldSimulationSession(sessionId, options);
+  const history = await getWorldSimulationHistory(sessionId, options);
+  const characterRuntimeManager = options.characterRuntimeManager
+    ?? defaultWorldSimulationCharacterRuntimeManager;
+  if (typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
+    throw new Error(
+      "characterRuntimeManager must provide deliverCommittedExperienceProjection().",
+    );
+  }
+  const committedTurns = array(history.turns)
+    .filter((turn) => isObject(turn?.committed_character_experience_projection))
+    .sort((left, right) => Number(left.revision_to) - Number(right.revision_to));
+  const replayed = [];
+  for (const historyEntry of committedTurns) {
+    replayed.push(await characterRuntimeManager.deliverCommittedExperienceProjection(
+      {
+        world_simulation_session_id: sessionId,
+        history_entry: historyEntry,
+      },
+      options,
+    ));
+  }
+  const failedCount = replayed.reduce((sum, item) => sum + (item.failed_count ?? 0), 0);
+  return {
+    ok: failedCount === 0,
+    world_simulation_session_id: sessionId,
+    replay_source: "immutable_committed_world_history",
+    current_perception_engine_reanalysis_used: false,
+    historical_projection_semantics_preserved: true,
+    committed_turns_with_projection: committedTurns.length,
+    delivery_count: replayed.reduce((sum, item) => sum + item.delivery_count, 0),
+    consumed_count: replayed.reduce((sum, item) => sum + item.consumed_count, 0),
+    duplicate_count: replayed.reduce((sum, item) => sum + item.duplicate_count, 0),
+    failed_count: failedCount,
+    replay_required: failedCount > 0,
+    replays: replayed,
+  };
 }
 
 function characterMapValue(map, character) {
@@ -441,6 +1224,52 @@ export function buildWorldSimulationLoopContract() {
     scheduling: "event_driven",
     world_state_owner: "programmatic_world_simulator",
     character_choice_owner: "chatgpt_character_brain",
+    character_runtime: {
+      version: worldSimulationCharacterRuntimeVersion,
+      identity: "world_lineage_plus_formal_character_entity_id",
+      current_world_lineage_carrier: "world_simulation_session_id",
+      current_world_lineage_carrier_is_permanent_world_philosophy: false,
+      same_runtime_reentrant: false,
+      same_runtime_turns_serialized: true,
+      different_runtimes_share_turn_lock: false,
+      storage_scope: "process_local_ephemeral_memory",
+      lifecycle_release_requires_idle: true,
+      delegates_existing_character_brain_backend: true,
+      durable_mind_persistence: false,
+      durable_mind_mutation_before_world_commit: false,
+      committed_experience_delivery: "at_least_once_with_idempotent_runtime_consumption",
+      committed_experience_ordering_scope: "world_lineage_plus_character_entity_id",
+      committed_experience_ordering_mechanism:
+        "contiguous_per_character_experience_sequence_plus_committed_revision",
+      committed_experience_sequence_source: "immutable_committed_world_history",
+      committed_experience_global_delivery_lock: false,
+      durable_experience_cursor_installed: false,
+    },
+    committed_character_experience: {
+      experience_contract_version: worldSimulationCharacterExperienceContractVersion,
+      projection_version: worldSimulationCharacterExperienceProjectionVersion,
+      owner: "server_owned_programmatic_boundary",
+      world_truth_is_character_experience: false,
+      character_experience_is_memory: false,
+      established_only_after_successful_world_commit: true,
+      blocked_or_failed_commit_delivery_count: 0,
+      history_storage: "hybrid_event_projection",
+      objective_source_of_truth: "committed_world_history",
+      full_next_world_state_stored_in_projection: false,
+      deterministic_receipt_identity: true,
+      replay_uses_historical_projection_semantics: true,
+      replay_reinterprets_history_with_current_perception_engine: false,
+      participant_and_observer_channels_distinct: true,
+      participant_intent_is_successful_outcome: false,
+      objective_action_result_auto_exposed: false,
+      explicit_bounded_actor_experience_evidence_required_for_post_outcome_experience: true,
+      hidden_world_truth_allowed: false,
+      projector_metadata_exposed_to_character_brain: false,
+      gpt_may_author_receipt: false,
+      gpt_may_modify_projection_version: false,
+      receipt_auto_consolidates_memory: false,
+      phase63_subjective_memory_contract_replaced: false,
+    },
     causal_outcome_owner: "programmatic_causal_adjudicator",
     commit_policy: "consistency_critic_must_report_zero_hard_conflicts",
     character_brain_receives_world_truth: false,
@@ -1952,6 +2781,52 @@ export async function resolveWorldSimulationTurn(
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
   });
 
+  const characterRuntimeManager = options.characterRuntimeManager
+    ?? defaultWorldSimulationCharacterRuntimeManager;
+  if (typeof characterRuntimeManager?.inspectRuntime !== "function"
+    || typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
+    throw new Error(
+      "characterRuntimeManager must provide inspectRuntime() and deliverCommittedExperienceProjection().",
+    );
+  }
+  const committedHistoryBeforeTurn = await getWorldSimulationHistory(
+    sessionId,
+    options,
+  );
+  const committedCharacterRuntimeIdentities = [];
+  for (const packet of array(preparedTurn.decision_packets)) {
+    const runtimeSnapshot = await characterRuntimeManager.inspectRuntime(
+      {
+        world_simulation_session_id: sessionId,
+        character: packet.character,
+      },
+      options,
+    );
+    committedCharacterRuntimeIdentities.push({
+      character: packet.character,
+      world_lineage: runtimeSnapshot.world_lineage,
+      character_entity_id: runtimeSnapshot.character_entity_id,
+      canonical_name: runtimeSnapshot.canonical_name,
+      identity_source: runtimeSnapshot.identity_source,
+      formal_identity: runtimeSnapshot.formal_identity === true,
+      experience_sequence: nextCommittedCharacterExperienceSequence(
+        committedHistoryBeforeTurn,
+        runtimeSnapshot.world_lineage,
+        runtimeSnapshot.character_entity_id,
+      ),
+    });
+  }
+
+  // This projection is only commit evidence at this point. No Character
+  // Experience Receipt exists until the atomic world commit below succeeds.
+  const committedCharacterExperienceProjection =
+    projectWorldSimulationCharacterExperienceEvidence({
+      prepared_turn: preparedTurn,
+      selected_action_intents: selected,
+      action_outcomes: array(causalResolution.action_outcomes),
+      runtime_identities: committedCharacterRuntimeIdentities,
+    });
+
   const committed = await commitWorldSimulationTurn(
     sessionId,
     {
@@ -2016,11 +2891,45 @@ export async function resolveWorldSimulationTurn(
         ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
+      committed_character_experience_projection:
+        cloneJson(committedCharacterExperienceProjection),
       trace_ids: traceIds,
       causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     },
     options,
   );
+
+  let committedExperienceDelivery;
+  try {
+    committedExperienceDelivery = await characterRuntimeManager
+      .deliverCommittedExperienceProjection(
+        {
+          world_simulation_session_id: sessionId,
+          history_entry: committed.history_entry,
+        },
+        options,
+      );
+  } catch (error) {
+    // World commit is already authoritative. Preserve the replayable history
+    // projection and surface post-commit delivery failure without pretending
+    // the atomic world commit rolled back.
+    committedExperienceDelivery = {
+      projection_version:
+        committedCharacterExperienceProjection.projection_version,
+      experience_contract_version:
+        committedCharacterExperienceProjection.experience_contract_version,
+      projection_hash:
+        committedCharacterExperienceProjection.projection_hash,
+      delivery_count:
+        committedCharacterExperienceProjection.character_projections.length,
+      consumed_count: 0,
+      duplicate_count: 0,
+      delivery_failed: true,
+      replay_required: true,
+      error_code: error?.code ?? "WORLD_SIMULATION_CHARACTER_EXPERIENCE_DELIVERY_FAILED",
+      error_message: error?.message ?? String(error),
+    };
+  }
 
   return {
     ok: true,
@@ -2071,6 +2980,26 @@ export async function resolveWorldSimulationTurn(
       mutation_count: subjectiveMemoryMutationQueue.mutation_count,
       authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
     },
+    committed_character_experience: {
+      experience_contract_version:
+        committedCharacterExperienceProjection.experience_contract_version,
+      projection_version:
+        committedCharacterExperienceProjection.projection_version,
+      projection_hash:
+        committedCharacterExperienceProjection.projection_hash,
+      receipt_count:
+        committedCharacterExperienceProjection.character_projections.length,
+      delivered_count:
+        committedExperienceDelivery.consumed_count ?? 0,
+      duplicate_delivery_count:
+        committedExperienceDelivery.duplicate_count ?? 0,
+      delivery_failed:
+        committedExperienceDelivery.delivery_failed === true,
+      replay_required:
+        committedExperienceDelivery.replay_required === true,
+      established_after_world_commit: true,
+      durable_mind_mutation_count: 0,
+    },
     trace_ids: traceIds,
     causal_resolution_id: causalResolution.causal_resolution_id ?? null,
     next_event: array(causalResolution.next_world_state.event_queue)[0] ?? null,
@@ -2084,17 +3013,43 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     throw error;
   }
   const prepared = await prepareWorldSimulationTurn(input, options);
+  const characterRuntimeManager = options.characterRuntimeManager
+    ?? defaultWorldSimulationCharacterRuntimeManager;
+  if (typeof characterRuntimeManager?.runCharacterTurn !== "function"
+    || typeof characterRuntimeManager?.inspectRuntime !== "function"
+    || typeof characterRuntimeManager?.deliverCommittedExperienceProjection !== "function") {
+    throw new Error(
+      "characterRuntimeManager must provide runCharacterTurn(), inspectRuntime(), and deliverCommittedExperienceProjection().",
+    );
+  }
   const selections = {};
   for (const packet of prepared.decision_packets) {
-    // Single-source Character Brain ingress projector. Formal transport uses
-    // the same projector without the historical retrieved_memories alias.
+    // Single-source Character Brain ingress projector. Runtime identity and
+    // world-lineage metadata remain engine-side and are never added here.
+    // Formal transport uses the same projector without the historical
+    // retrieved_memories alias.
     const brainInput = buildWorldSimulationCharacterBrainInput(
       packet,
       {
         include_legacy_retrieved_memories_alias: true,
       },
     );
-    selections[packet.character] = await options.characterBrain(brainInput);
+    selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
+      {
+        world_simulation_session_id: prepared.world_simulation_session_id,
+        character: packet.character,
+        brain_input: brainInput,
+        characterBrain: options.characterBrain,
+      },
+      options,
+    );
   }
-  return resolveWorldSimulationTurn(prepared, selections, options);
+  return resolveWorldSimulationTurn(
+    prepared,
+    selections,
+    {
+      ...options,
+      characterRuntimeManager,
+    },
+  );
 }

@@ -281,6 +281,8 @@ export async function commitWorldSimulationTurn(
             subjective_memory_formation: input.subjective_memory_formation ?? null,
             subjective_memory_mutation_queue: input.subjective_memory_mutation_queue ?? null,
             subjective_memory_mutation_execution: input.subjective_memory_mutation_execution ?? null,
+            committed_character_experience_projection:
+              input.committed_character_experience_projection ?? null,
             trace_ids: input.trace_ids ?? [],
             causal_resolution_id: input.causal_resolution_id ?? null,
           });

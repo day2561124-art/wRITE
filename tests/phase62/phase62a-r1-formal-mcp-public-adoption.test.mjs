@@ -44,7 +44,7 @@ const mcpServerPath = path.join(
   "mcp-server.mjs",
 );
 
-const actor = "伊萊亞斯・諾爾";
+const actor = "羅恩・維薩爾";
 const sceneId = "STEP4B2_INTERNAL_SCENE_SECRET";
 const eventId = "STEP4B2_INTERNAL_EVENT_SECRET";
 const eventMetadataSecret = "STEP4B2_EVENT_METADATA_SECRET";
