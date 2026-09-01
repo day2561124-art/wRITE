@@ -240,13 +240,25 @@ publicToolNames.push(
   "dev_move_path",
 );
 publicToolNames.push("dev_git_remote_status");
+const workstreamToolNames = [
+  "dev_workspace_begin_workstream",
+  "dev_workspace_get_workstream",
+  "dev_workspace_list_workstreams",
+  "dev_workspace_update_workstream",
+  "dev_workspace_end_workstream",
+  "dev_workspace_status",
+];
+for (const toolName of workstreamToolNames) {
+  assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
+}
+publicToolNames.push(...workstreamToolNames);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
   [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the fourteen development filesystem/range/write/test/Git tools",
+  "chatgpt_developer must equal chatgpt_public plus the twenty development filesystem/range/write/test/Git/workstream tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -337,6 +349,90 @@ assert.deepEqual(
     "mcp_client_commit_sha_queries",
   ],
 );
+
+for (const [toolName, readOnly, expectedSources] of [
+  ["dev_workspace_begin_workstream", false, [
+    "development_workstream_registry",
+    "repository_git_head",
+    "mcp_client_bounded_workstream_metadata",
+  ]],
+  ["dev_workspace_get_workstream", true, ["development_workstream_registry"]],
+  ["dev_workspace_list_workstreams", true, ["development_workstream_registry"]],
+  ["dev_workspace_update_workstream", false, [
+    "development_workstream_registry",
+    "mcp_client_bounded_workstream_metadata",
+    "mcp_client_expected_revision",
+  ]],
+  ["dev_workspace_end_workstream", false, [
+    "development_workstream_registry",
+    "mcp_client_expected_revision",
+  ]],
+  ["dev_workspace_status", true, ["development_workstream_registry", "repository_git_head"]],
+]) {
+  const workstreamTool = developerList.result.tools.find((tool) => tool.name === toolName);
+  assert(workstreamTool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(workstreamTool.annotations?.readOnlyHint, readOnly);
+  assert.equal(workstreamTool.inputSchema?.type, "object");
+  assert.equal(workstreamTool.inputSchema?.additionalProperties, false);
+  const permission = workstreamTool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, readOnly ? "read_only" : "write_low_risk");
+  assert.equal(permission?.read_or_write, readOnly ? "read" : "write");
+  assert.equal(permission?.risk_level, readOnly ? "read" : "low-risk-write");
+  assert.equal(permission?.log_required, !readOnly);
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+  assert.deepEqual(permission?.allowed_sources, expectedSources);
+  const properties = workstreamTool.inputSchema?.properties ?? {};
+  for (const forbiddenField of [
+    "command", "args", "executable", "cwd", "env", "shell", "storagePath",
+    "registryPath", "path", "worktreePath", "branch", "refspec", "gitRef",
+  ]) {
+    assert.equal(
+      Object.hasOwn(properties, forbiddenField),
+      false,
+      `${toolName} exposed forbidden field ${forbiddenField}`,
+    );
+  }
+}
+
+const developerWorkstreamBegin = developerList.result.tools.find(
+  (tool) => tool.name === "dev_workspace_begin_workstream",
+);
+assert.deepEqual(developerWorkstreamBegin.inputSchema?.required, ["label"]);
+assert.deepEqual(
+  Object.keys(developerWorkstreamBegin.inputSchema?.properties ?? {}).sort(),
+  ["declared_scope", "depends_on", "label", "metadata", "mode", "parent_workstream_id", "purpose"].sort(),
+);
+assert.deepEqual(developerWorkstreamBegin.inputSchema.properties.purpose.enum, ["primary", "experiment", "candidate"]);
+assert.deepEqual(developerWorkstreamBegin.inputSchema.properties.mode.enum, ["shared", "isolated"]);
+assert.equal(developerWorkstreamBegin.inputSchema.properties.mode.default, "shared");
+assert.equal(Object.hasOwn(developerWorkstreamBegin.inputSchema.properties, "base_head"), false);
+assert.equal(Object.hasOwn(developerWorkstreamBegin.inputSchema.properties, "workstream_id"), false);
+assert.equal(developerWorkstreamBegin.inputSchema.properties.depends_on.maxItems, 16);
+assert.equal(developerWorkstreamBegin.inputSchema.properties.declared_scope.maxItems, 64);
+
+const developerWorkstreamUpdate = developerList.result.tools.find(
+  (tool) => tool.name === "dev_workspace_update_workstream",
+);
+assert.deepEqual(developerWorkstreamUpdate.inputSchema?.required, ["workstream_id"]);
+for (const immutableField of ["base_head", "created_at", "workspace_id", "mode", "storage_path"]) {
+  assert.equal(
+    Object.hasOwn(developerWorkstreamUpdate.inputSchema.properties, immutableField),
+    false,
+    `dev_workspace_update_workstream exposed immutable field ${immutableField}`,
+  );
+}
+assert.deepEqual(developerWorkstreamUpdate.inputSchema.properties.state.enum, ["active", "paused", "blocked"]);
+assert.equal(developerWorkstreamUpdate.inputSchema.properties.expected_revision.minimum, 1);
+
+const developerWorkstreamEnd = developerList.result.tools.find(
+  (tool) => tool.name === "dev_workspace_end_workstream",
+);
+assert.deepEqual(developerWorkstreamEnd.inputSchema?.required, ["workstream_id", "outcome"]);
+assert.deepEqual(developerWorkstreamEnd.inputSchema.properties.outcome.enum, ["completed", "abandoned"]);
+assert.equal(developerWorkstreamEnd.inputSchema.properties.expected_revision.minimum, 1);
 
 const developerRangeReadTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_read_file_range",
@@ -672,7 +768,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-10, 10);
+publicToolNames.splice(-16, 16);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -716,8 +812,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 54);
-assert.equal(fullNames.length, 112);
+assert.equal(developerNames.length, 60);
+assert.equal(fullNames.length, 118);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -986,6 +1082,7 @@ publicToolNames.push(
   "dev_move_path",
 );
 publicToolNames.push("dev_git_remote_status");
+publicToolNames.push(...workstreamToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -1002,7 +1099,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-10, 10);
+  publicToolNames.splice(-16, 16);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -1011,5 +1108,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 14}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 20}).`,
 );
