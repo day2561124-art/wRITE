@@ -2044,6 +2044,465 @@ function pushFailureResult({
   };
 }
 
+export const DEV_GIT_REMOTE_STATUS_MAX_COMMITS = 100;
+
+function validateRemoteStatusInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("dev_git_remote_status input must be an object.");
+  }
+  const unknown = Object.keys(input).filter((key) => key !== "commits");
+  if (unknown.length > 0) {
+    throw new Error(`dev_git_remote_status does not accept caller-controlled ${unknown.join(", ")}.`);
+  }
+  const commits = input.commits ?? [];
+  if (!Array.isArray(commits)) {
+    throw new Error("commits must be an array of Git SHA-1 strings.");
+  }
+  if (commits.length > DEV_GIT_REMOTE_STATUS_MAX_COMMITS) {
+    throw new Error(`commits must contain at most ${DEV_GIT_REMOTE_STATUS_MAX_COMMITS} items.`);
+  }
+  if (commits.some((value) => typeof value !== "string" || !gitSha1Pattern.test(value))) {
+    throw new Error("commits must contain only exact 40-character hexadecimal Git SHA-1 strings.");
+  }
+  return {
+    commits: [...new Set(commits.map((value) => value.toLowerCase()))],
+  };
+}
+
+function parseLsRemoteHead(stdout, expectedRef) {
+  const lines = configLines(stdout).filter((line) => line.trim() !== "");
+  if (lines.length !== 1) return null;
+  const match = lines[0].match(/^([A-Fa-f0-9]{40})\s+(\S+)$/u);
+  if (!match || match[2] !== expectedRef) return null;
+  return match[1].toLowerCase();
+}
+
+function remoteRelationLabel(ahead, behind) {
+  if (ahead === 0 && behind === 0) return "equal";
+  if (ahead > 0 && behind === 0) return "local_ahead";
+  if (ahead === 0 && behind > 0) return "local_behind";
+  if (ahead > 0 && behind > 0) return "diverged";
+  return "unknown";
+}
+
+function remoteStatusFailureResult({
+  reason,
+  details = "",
+  executionOk = true,
+  remote = "origin",
+  branch = "main",
+  localHead = null,
+  localBranch = null,
+  trackingHead = null,
+  remoteHead = null,
+  exitCode = null,
+  signal = null,
+  timedOut = false,
+  stderr = "",
+  stderrTruncated = false,
+  durationMs = null,
+}) {
+  return {
+    execution_ok: executionOk,
+    authoritative_remote_read: false,
+    reason,
+    details,
+    remote,
+    branch,
+    local_head: localHead,
+    local_branch: localBranch,
+    tracking_head: trackingHead,
+    remote_head: remoteHead,
+    exit_code: exitCode,
+    signal,
+    timed_out: timedOut,
+    stderr,
+    stderr_truncated: stderrTruncated,
+    duration_ms: durationMs,
+  };
+}
+
+export function createDevGitRemoteStatusTool({
+  repositoryRoot = projectRoot,
+  executable = fixedPushGitExecutable,
+  outputMaxCharacters = DEV_GIT_PUSH_OUTPUT_MAX_CHARACTERS,
+  timeoutMs = DEV_GIT_PUSH_TIMEOUT_MS,
+  policy: suppliedPolicy = DEV_GIT_PUSH_PRODUCTION_POLICY,
+  networkExecutable = executable,
+  networkExecutablePrefix = [],
+} = {}) {
+  const policy = normalizePushPolicy(suppliedPolicy);
+  const gitTools = createDevGitTools({
+    repositoryRoot,
+    executable,
+    outputMaxCharacters,
+    timeoutMs,
+  });
+
+  return async function remoteStatus(input = {}) {
+    const startedAt = Date.now();
+    let normalized;
+    try {
+      normalized = validateRemoteStatusInput(input);
+    } catch (error) {
+      return remoteStatusFailureResult({
+        reason: "INVALID_INPUT",
+        details: redactProcessOutput(error.message),
+        executionOk: false,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
+    let hooksPath = null;
+    let localHead = null;
+    let localBranch = null;
+    let trackingHead = null;
+    let remoteHead = null;
+    try {
+      hooksPath = await mkdtemp(path.join(os.tmpdir(), "writer-workbench-empty-remote-status-hooks-"));
+      const runAudit = (args) => runPushGit({
+        repositoryRoot,
+        executable,
+        argv: [...pushAuditGitPrefix(hooksPath), ...args],
+        outputMaxCharacters,
+        timeoutMs,
+        policy,
+      });
+
+      const configAudit = await auditPushConfiguration({ runAudit, policy });
+      if (!configAudit.ok) {
+        const result = configAudit.result ?? {};
+        return remoteStatusFailureResult({
+          reason: configAudit.reason,
+          details: configAudit.details,
+          executionOk: configAudit.execution_ok,
+          exitCode: result.exit_code ?? null,
+          signal: result.signal ?? null,
+          timedOut: result.timed_out === true,
+          stderr: result.stderr ?? "",
+          stderrTruncated: result.stderr_truncated === true,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const headResult = await runAudit(["rev-parse", "--verify", "HEAD"]);
+      if (!headResult.execution_ok || headResult.exit_code !== 0 || !gitSha1Pattern.test(headResult.stdout.trim())) {
+        return remoteStatusFailureResult({
+          reason: "HEAD_READ_FAILED",
+          details: "Could not read a valid local HEAD.",
+          executionOk: false,
+          exitCode: headResult.exit_code,
+          signal: headResult.signal,
+          timedOut: headResult.timed_out,
+          stderr: headResult.stderr,
+          stderrTruncated: headResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      localHead = headResult.stdout.trim().toLowerCase();
+
+      const branchResult = await runAudit(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+      if (branchResult.execution_ok && branchResult.exit_code === 0) {
+        localBranch = branchResult.stdout.trim() || null;
+      } else if (!(branchResult.execution_ok && branchResult.exit_code === 1)) {
+        return remoteStatusFailureResult({
+          reason: "BRANCH_READ_FAILED",
+          details: "Could not resolve the current local branch.",
+          executionOk: false,
+          localHead,
+          exitCode: branchResult.exit_code,
+          signal: branchResult.signal,
+          timedOut: branchResult.timed_out,
+          stderr: branchResult.stderr,
+          stderrTruncated: branchResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const trackingRef = `refs/remotes/${policy.remote}/${policy.branch}`;
+      const trackingResult = await runAudit(["rev-parse", "--verify", "--quiet", trackingRef]);
+      if (trackingResult.execution_ok && trackingResult.exit_code === 0) {
+        const candidate = trackingResult.stdout.trim();
+        if (!gitSha1Pattern.test(candidate)) {
+          return remoteStatusFailureResult({
+            reason: "TRACKING_READ_FAILED",
+            details: "Local remote-tracking ref did not resolve to a valid Git SHA-1.",
+            executionOk: false,
+            localHead,
+            localBranch,
+            durationMs: Date.now() - startedAt,
+          });
+        }
+        trackingHead = candidate.toLowerCase();
+      } else if (!(trackingResult.execution_ok && trackingResult.exit_code === 1)) {
+        return remoteStatusFailureResult({
+          reason: "TRACKING_READ_FAILED",
+          details: "Could not read the local origin/main tracking ref.",
+          executionOk: false,
+          localHead,
+          localBranch,
+          exitCode: trackingResult.exit_code,
+          signal: trackingResult.signal,
+          timedOut: trackingResult.timed_out,
+          stderr: trackingResult.stderr,
+          stderrTruncated: trackingResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const remoteRef = `refs/heads/${policy.branch}`;
+      const networkPrefix = pushNetworkGitPrefix(
+        hooksPath,
+        policy,
+        configAudit.credential_helpers,
+      );
+      const remoteResult = await runPushGit({
+        repositoryRoot,
+        executable: networkExecutable,
+        executablePrefix: networkExecutablePrefix,
+        argv: [
+          ...networkPrefix,
+          "ls-remote",
+          "--refs",
+          policy.canonicalUrl,
+          remoteRef,
+        ],
+        outputMaxCharacters,
+        timeoutMs,
+        policy,
+      });
+      if (!remoteResult.execution_ok || remoteResult.exit_code !== 0) {
+        return remoteStatusFailureResult({
+          reason: remoteResult.timed_out ? "REMOTE_READ_TIMEOUT" : "REMOTE_READ_FAILED",
+          details: remoteResult.timed_out
+            ? "Authoritative remote HEAD query timed out."
+            : "Authoritative remote HEAD query failed.",
+          executionOk: remoteResult.execution_ok,
+          localHead,
+          localBranch,
+          trackingHead,
+          exitCode: remoteResult.exit_code,
+          signal: remoteResult.signal,
+          timedOut: remoteResult.timed_out,
+          stderr: remoteResult.stderr,
+          stderrTruncated: remoteResult.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      remoteHead = parseLsRemoteHead(remoteResult.stdout, remoteRef);
+      if (!remoteHead) {
+        return remoteStatusFailureResult({
+          reason: "REMOTE_HEAD_PARSE_FAILED",
+          details: `Canonical remote did not return exactly one valid ${remoteRef} SHA.`,
+          executionOk: true,
+          localHead,
+          localBranch,
+          trackingHead,
+          exitCode: remoteResult.exit_code,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      const remoteObjectResult = await runAudit(["cat-file", "-e", `${remoteHead}^{commit}`]);
+      const remoteHeadObjectAvailableLocally = remoteObjectResult.execution_ok
+        && remoteObjectResult.exit_code === 0;
+
+      let localAheadRemote = null;
+      let localBehindRemote = null;
+      let localRemoteRelation = localHead === remoteHead ? "equal" : "unknown_remote_object_not_local";
+      if (localHead === remoteHead) {
+        localAheadRemote = 0;
+        localBehindRemote = 0;
+      } else if (remoteHeadObjectAvailableLocally) {
+        const relationResult = await runAudit([
+          "rev-list",
+          "--left-right",
+          "--count",
+          `HEAD...${remoteHead}`,
+        ]);
+        const relation = relationResult.execution_ok && relationResult.exit_code === 0
+          ? parseAheadBehind(relationResult.stdout)
+          : null;
+        if (!relation) {
+          return remoteStatusFailureResult({
+            reason: "LOCAL_REMOTE_RELATION_FAILED",
+            details: "Could not compute local HEAD versus authoritative remote HEAD relation.",
+            executionOk: false,
+            localHead,
+            localBranch,
+            trackingHead,
+            remoteHead,
+            exitCode: relationResult.exit_code,
+            signal: relationResult.signal,
+            timedOut: relationResult.timed_out,
+            stderr: relationResult.stderr,
+            stderrTruncated: relationResult.stderr_truncated,
+            durationMs: Date.now() - startedAt,
+          });
+        }
+        localAheadRemote = relation.ahead;
+        localBehindRemote = relation.behind;
+        localRemoteRelation = remoteRelationLabel(relation.ahead, relation.behind);
+      }
+
+      const commitChecks = [];
+      for (const sha of normalized.commits) {
+        const localObjectResult = await runAudit(["cat-file", "-e", `${sha}^{commit}`]);
+        const localObjectPresent = localObjectResult.execution_ok && localObjectResult.exit_code === 0;
+        if (sha === remoteHead) {
+          commitChecks.push({
+            sha,
+            local_object_present: localObjectPresent,
+            remote_contains: true,
+            verification: "exact_remote_head_match",
+          });
+          continue;
+        }
+        if (!remoteHeadObjectAvailableLocally) {
+          commitChecks.push({
+            sha,
+            local_object_present: localObjectPresent,
+            remote_contains: null,
+            verification: "unavailable",
+            reason: "remote_head_object_not_available_locally",
+          });
+          continue;
+        }
+        if (!localObjectPresent) {
+          commitChecks.push({
+            sha,
+            local_object_present: false,
+            remote_contains: null,
+            verification: "unavailable",
+            reason: "commit_object_not_available_locally",
+          });
+          continue;
+        }
+        const ancestorResult = await runAudit(["merge-base", "--is-ancestor", sha, remoteHead]);
+        if (!ancestorResult.execution_ok || ![0, 1].includes(ancestorResult.exit_code)) {
+          commitChecks.push({
+            sha,
+            local_object_present: true,
+            remote_contains: null,
+            verification: "failed",
+            reason: "merge_base_check_failed",
+          });
+          continue;
+        }
+        commitChecks.push({
+          sha,
+          local_object_present: true,
+          remote_contains: ancestorResult.exit_code === 0,
+          verification: "remote_head_ancestry",
+        });
+      }
+
+      const workingStatus = await gitTools.status({ includeUntracked: true });
+      return {
+        execution_ok: true,
+        authoritative_remote_read: true,
+        remote: policy.remote,
+        branch: policy.branch,
+        canonical_url: policy.canonicalUrl,
+        remote_ref: remoteRef,
+        remote_head: remoteHead,
+        local_head: localHead,
+        local_branch: localBranch,
+        local_branch_matches_policy: localBranch === policy.branch,
+        tracking_ref: trackingRef,
+        tracking_head: trackingHead,
+        tracking_present: trackingHead !== null,
+        tracking_matches_remote: trackingHead === remoteHead,
+        tracking_stale: trackingHead !== remoteHead,
+        local_matches_remote: localHead === remoteHead,
+        remote_head_object_available_locally: remoteHeadObjectAvailableLocally,
+        local_ahead_remote: localAheadRemote,
+        local_behind_remote: localBehindRemote,
+        local_remote_relation: localRemoteRelation,
+        dirty_worktree_allowed: true,
+        working_tree_status_read_ok: workingStatus.execution_ok && workingStatus.exit_code === 0,
+        working_tree_clean: workingStatus.execution_ok && workingStatus.exit_code === 0
+          ? workingStatus.clean
+          : null,
+        commit_checks: commitChecks,
+        exit_code: remoteResult.exit_code,
+        signal: remoteResult.signal,
+        timed_out: false,
+        stderr: remoteResult.stderr,
+        stderr_truncated: remoteResult.stderr_truncated,
+        duration_ms: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return remoteStatusFailureResult({
+        reason: "INTERNAL_ERROR",
+        details: redactProcessOutput(error.message),
+        executionOk: false,
+        localHead,
+        localBranch,
+        trackingHead,
+        remoteHead,
+        durationMs: Date.now() - startedAt,
+      });
+    } finally {
+      if (hooksPath) await rm(hooksPath, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+}
+
+export const dev_git_remote_status = createDevGitRemoteStatusTool();
+
+export function getDevGitRemoteStatusCommandMapping() {
+  const policy = DEV_GIT_PUSH_PRODUCTION_POLICY;
+  const hooksPlaceholder = "<server-owned-empty-hooks-dir>";
+  const auditPrefix = pushAuditGitPrefix(hooksPlaceholder);
+  const networkPrefix = pushNetworkGitPrefix(
+    hooksPlaceholder,
+    policy,
+    ["<server-validated-safe-credential-helper-if-configured>"],
+  );
+  return {
+    executable: fixedPushGitExecutable,
+    cwd: ".",
+    shell: false,
+    timeout_ms: DEV_GIT_PUSH_TIMEOUT_MS,
+    remote: policy.remote,
+    branch: policy.branch,
+    tracking_ref: `refs/remotes/${policy.remote}/${policy.branch}`,
+    canonical_url: policy.canonicalUrl,
+    allowed_protocols: [...policy.allowedProtocols],
+    local_head: [...auditPrefix, "rev-parse", "--verify", "HEAD"],
+    local_branch: [...auditPrefix, "symbolic-ref", "--quiet", "--short", "HEAD"],
+    tracking_head: [
+      ...auditPrefix,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/remotes/${policy.remote}/${policy.branch}`,
+    ],
+    remote_head: [
+      ...networkPrefix,
+      "ls-remote",
+      "--refs",
+      policy.canonicalUrl,
+      `refs/heads/${policy.branch}`,
+    ],
+    local_remote_relation: [
+      ...auditPrefix,
+      "rev-list",
+      "--left-right",
+      "--count",
+      "HEAD...<authoritative-remote-sha>",
+    ],
+    commit_containment: [
+      ...auditPrefix,
+      "merge-base",
+      "--is-ancestor",
+      "<validated-40-hex-sha>",
+      "<authoritative-remote-sha>",
+    ],
+  };
+}
+
 export function createDevGitPushTool({
   repositoryRoot = projectRoot,
   executable = fixedPushGitExecutable,

@@ -18,8 +18,10 @@ import {
 import {
   createDevGitCommitTool,
   createDevGitPushTool,
+  createDevGitRemoteStatusTool,
   getDevGitCommitCommandMapping,
   getDevGitPushCommandMapping,
+  getDevGitRemoteStatusCommandMapping,
 } from "../../server/src/mcp-development-write-tools.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -529,6 +531,32 @@ try {
     );
   }
 
+  const remoteStatusMapping = getDevGitRemoteStatusCommandMapping();
+  assert.equal(remoteStatusMapping.executable, process.platform === "win32" ? "git.exe" : "git");
+  assert.equal(remoteStatusMapping.cwd, ".");
+  assert.equal(remoteStatusMapping.shell, false);
+  assert.equal(remoteStatusMapping.timeout_ms, 120_000);
+  assert.equal(remoteStatusMapping.remote, "origin");
+  assert.equal(remoteStatusMapping.branch, "main");
+  assert.equal(remoteStatusMapping.tracking_ref, "refs/remotes/origin/main");
+  assert.equal(remoteStatusMapping.canonical_url, "https://github.com/day2561124-art/wRITE.git");
+  assert.deepEqual(remoteStatusMapping.allowed_protocols, ["https"]);
+  assert(remoteStatusMapping.remote_head.includes("ls-remote"));
+  assert(remoteStatusMapping.remote_head.includes("--refs"));
+  assert.equal(remoteStatusMapping.remote_head.at(-2), "https://github.com/day2561124-art/wRITE.git");
+  assert.equal(remoteStatusMapping.remote_head.at(-1), "refs/heads/main");
+  assert(remoteStatusMapping.local_remote_relation.includes("rev-list"));
+  assert(remoteStatusMapping.commit_containment.includes("merge-base"));
+  for (const forbiddenToken of [
+    "fetch", "pull", "push", "reset", "restore", "checkout", "rebase", "merge", "clean", "stash",
+  ]) {
+    assert.equal(
+      remoteStatusMapping.remote_head.includes(forbiddenToken),
+      false,
+      `remote status mapping exposed forbidden network argv token ${forbiddenToken}`,
+    );
+  }
+
   const gitRoot = path.join(tempRoot, "git-fixture");
   await mkdir(gitRoot, { recursive: true });
   runFixtureGit(gitRoot, ["init"]);
@@ -1006,6 +1034,105 @@ try {
     /server\/src\/requested\.mjs/u,
   );
 
+  const remoteStatusFixture = await createPushFixture(tempRoot, "remote-status");
+  const remoteStatusTool = createDevGitRemoteStatusTool({
+    repositoryRoot: remoteStatusFixture.repositoryRoot,
+    policy: pushTestPolicy(remoteStatusFixture.remoteUrl),
+  });
+  const remoteStatusTrackingPath = path.join(
+    remoteStatusFixture.repositoryRoot,
+    ".git",
+    "refs",
+    "remotes",
+    "origin",
+    "main",
+  );
+  const remoteStatusIndexPath = path.join(remoteStatusFixture.repositoryRoot, ".git", "index");
+  const remoteStatusTrackingBefore = await readFile(remoteStatusTrackingPath, "utf8");
+  const remoteStatusIndexBefore = await readFile(remoteStatusIndexPath);
+  const remoteStatusBeforePush = await remoteStatusTool({
+    commits: [remoteStatusFixture.baseHead, remoteStatusFixture.head],
+  });
+  assert.equal(remoteStatusBeforePush.execution_ok, true);
+  assert.equal(remoteStatusBeforePush.authoritative_remote_read, true);
+  assert.equal(remoteStatusBeforePush.remote, "origin");
+  assert.equal(remoteStatusBeforePush.branch, "main");
+  assert.equal(remoteStatusBeforePush.local_head, remoteStatusFixture.head);
+  assert.equal(remoteStatusBeforePush.local_branch, "main");
+  assert.equal(remoteStatusBeforePush.local_branch_matches_policy, true);
+  assert.equal(remoteStatusBeforePush.tracking_head, remoteStatusFixture.baseHead);
+  assert.equal(remoteStatusBeforePush.remote_head, remoteStatusFixture.baseHead);
+  assert.equal(remoteStatusBeforePush.tracking_matches_remote, true);
+  assert.equal(remoteStatusBeforePush.tracking_stale, false);
+  assert.equal(remoteStatusBeforePush.local_matches_remote, false);
+  assert.equal(remoteStatusBeforePush.remote_head_object_available_locally, true);
+  assert.equal(remoteStatusBeforePush.local_ahead_remote, 1);
+  assert.equal(remoteStatusBeforePush.local_behind_remote, 0);
+  assert.equal(remoteStatusBeforePush.local_remote_relation, "local_ahead");
+  assert.equal(remoteStatusBeforePush.dirty_worktree_allowed, true);
+  assert.equal(
+    remoteStatusBeforePush.commit_checks.find((item) => item.sha === remoteStatusFixture.baseHead)?.remote_contains,
+    true,
+  );
+  assert.equal(
+    remoteStatusBeforePush.commit_checks.find((item) => item.sha === remoteStatusFixture.head)?.remote_contains,
+    false,
+  );
+  assert.equal(await readFile(remoteStatusTrackingPath, "utf8"), remoteStatusTrackingBefore);
+  assert.deepEqual(await readFile(remoteStatusIndexPath), remoteStatusIndexBefore);
+
+  runFixtureGit(remoteStatusFixture.repositoryRoot, [
+    "push",
+    remoteStatusFixture.remoteUrl,
+    "HEAD:refs/heads/main",
+  ]);
+  await writeFile(
+    path.join(remoteStatusFixture.repositoryRoot, "server", "src", "unrelated.mjs"),
+    "export const unrelated = 123;\n",
+    "utf8",
+  );
+  const staleTrackingStatus = await remoteStatusTool({
+    commits: [remoteStatusFixture.baseHead, remoteStatusFixture.head],
+  });
+  assert.equal(staleTrackingStatus.execution_ok, true);
+  assert.equal(staleTrackingStatus.authoritative_remote_read, true);
+  assert.equal(staleTrackingStatus.local_head, remoteStatusFixture.head);
+  assert.equal(staleTrackingStatus.remote_head, remoteStatusFixture.head);
+  assert.equal(staleTrackingStatus.tracking_head, remoteStatusFixture.baseHead);
+  assert.equal(staleTrackingStatus.tracking_matches_remote, false);
+  assert.equal(staleTrackingStatus.tracking_stale, true);
+  assert.equal(staleTrackingStatus.local_matches_remote, true);
+  assert.equal(staleTrackingStatus.local_ahead_remote, 0);
+  assert.equal(staleTrackingStatus.local_behind_remote, 0);
+  assert.equal(staleTrackingStatus.local_remote_relation, "equal");
+  assert.equal(staleTrackingStatus.working_tree_status_read_ok, true);
+  assert.equal(staleTrackingStatus.working_tree_clean, false);
+  assert.equal(
+    staleTrackingStatus.commit_checks.every((item) => item.remote_contains === true),
+    true,
+  );
+  assert.equal(
+    await readFile(remoteStatusTrackingPath, "utf8"),
+    remoteStatusTrackingBefore,
+    "dev_git_remote_status mutated the stale local origin/main tracking ref",
+  );
+  assert.deepEqual(
+    await readFile(remoteStatusIndexPath),
+    remoteStatusIndexBefore,
+    "dev_git_remote_status modified the Git index",
+  );
+
+  for (const invalidRemoteStatusInput of [
+    { commits: ["not-a-sha"] },
+    { commits: [remoteStatusFixture.head], command: "ls-remote" },
+    { commits: Array.from({ length: 101 }, () => remoteStatusFixture.head) },
+  ]) {
+    const invalidRemoteStatus = await remoteStatusTool(invalidRemoteStatusInput);
+    assert.equal(invalidRemoteStatus.execution_ok, false);
+    assert.equal(invalidRemoteStatus.authoritative_remote_read, false);
+    assert.equal(invalidRemoteStatus.reason, "INVALID_INPUT");
+  }
+
   const pushSuccessFixture = await createPushFixture(tempRoot, "push-success");
   const pushSuccessTool = createDevGitPushTool({
     repositoryRoot: pushSuccessFixture.repositoryRoot,
@@ -1434,6 +1561,7 @@ try {
     { name: "dev_read_file_range", arguments: { path: "server/src/mcp-server.mjs", startLine: 1, command: "cat" }, expected: "Unknown argument for dev_read_file_range: command." },
     { name: "dev_delete_file", arguments: { path: "server/src/mcp-server.mjs", command: "rm" }, expected: "Unknown argument for dev_delete_file: command." },
     { name: "dev_git_status", arguments: { command: "status" }, expected: "Unknown argument for dev_git_status: command." },
+    { name: "dev_git_remote_status", arguments: { command: "ls-remote" }, expected: "Unknown argument for dev_git_remote_status: command." },
     { name: "dev_git_diff", arguments: { mode: "working", args: ["--name-only"] }, expected: "Unknown argument for dev_git_diff: args." },
     { name: "dev_git_diff_check", arguments: { mode: "working; whoami" }, expected: "mode must be one of: working, staged." },
     { name: "dev_git_push", arguments: { expectedHead: "0000000000000000000000000000000000000000", remote: "evil" }, expected: "Unknown argument for dev_git_push: remote." },

@@ -144,6 +144,7 @@ import {
   DEV_CREATE_FILE_MAX_TEXT_CHARACTERS,
   DEV_GIT_COMMIT_MAX_PATHS,
   DEV_GIT_COMMIT_MESSAGE_MAX_CHARACTERS,
+  DEV_GIT_REMOTE_STATUS_MAX_COMMITS,
   dev_apply_patch,
   dev_create_directory,
   dev_create_file,
@@ -151,6 +152,7 @@ import {
   dev_get_file_info,
   dev_git_commit,
   dev_git_push,
+  dev_git_remote_status,
   dev_move_path,
 } from "./mcp-development-write-tools.mjs";
 import {
@@ -1822,6 +1824,25 @@ const toolDefinitions = [
       includeUntracked: { type: "boolean", default: true },
     }),
     handler: async (args) => jsonContent(await dev_git_status(args)),
+  },
+  {
+    name: "dev_git_remote_status",
+    description: "Read-only authoritative canonical remote main status. Uses a server-owned HTTPS ls-remote query without fetch/pull or local ref mutation, compares local HEAD and origin/main tracking state, and can verify a bounded list of exact Git SHA-1 commits against the authoritative remote HEAD ancestry.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      commits: {
+        type: "array",
+        maxItems: DEV_GIT_REMOTE_STATUS_MAX_COMMITS,
+        items: {
+          type: "string",
+          minLength: 40,
+          maxLength: 40,
+          pattern: "^[A-Fa-f0-9]{40}$",
+        },
+      },
+    }),
+    handler: async (args) => jsonContent(await dev_git_remote_status(args)),
   },
   {
     name: "dev_git_diff",
@@ -3682,6 +3703,7 @@ const chatgptDeveloperToolNames = new Set([
   "dev_read_file_range",
   "dev_get_file_info",
   "dev_git_status",
+  "dev_git_remote_status",
   "dev_git_diff",
   "dev_git_diff_check",
   "dev_create_file",
@@ -3726,6 +3748,12 @@ const permissionSources = {
   dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
   dev_git_push: ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],
   dev_git_status: ["repository_git_worktree_status"],
+  dev_git_remote_status: [
+    "repository_git_head",
+    "repository_git_tracking_ref",
+    "canonical_git_remote_head",
+    "mcp_client_commit_sha_queries",
+  ],
   dev_git_diff: ["repository_git_worktree_diff", "repository_git_index_diff"],
   dev_git_diff_check: ["repository_git_worktree_diff_check", "repository_git_index_diff_check"],
   get_current_project_state: ["repository"],

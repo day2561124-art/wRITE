@@ -73,6 +73,7 @@ const blockedToolNames = [
   "dev_create_directory",
   "dev_move_path",
   "dev_git_status",
+  "dev_git_remote_status",
   "dev_git_diff",
   "dev_git_diff_check",
   "dev_apply_patch",
@@ -238,13 +239,14 @@ publicToolNames.push(
   "dev_create_directory",
   "dev_move_path",
 );
+publicToolNames.push("dev_git_remote_status");
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
   [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
-  "chatgpt_developer must equal chatgpt_public plus the thirteen development filesystem/range/write/test/Git tools",
+  "chatgpt_developer must equal chatgpt_public plus the fourteen development filesystem/range/write/test/Git tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
@@ -285,6 +287,56 @@ for (const [toolName, expectedProperties, expectedSources] of [
   assert.equal(permission?.can_modify_memory, false);
   assert.deepEqual(permission?.allowed_sources, expectedSources);
 }
+
+const developerRemoteStatusTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_git_remote_status",
+);
+assert(developerRemoteStatusTool, "chatgpt_developer is missing dev_git_remote_status");
+assert.equal(developerRemoteStatusTool.annotations?.readOnlyHint, true);
+assert.equal(developerRemoteStatusTool.inputSchema?.type, "object");
+assert.equal(developerRemoteStatusTool.inputSchema?.additionalProperties, false);
+assert.deepEqual(
+  Object.keys(developerRemoteStatusTool.inputSchema?.properties ?? {}),
+  ["commits"],
+);
+assert.equal(developerRemoteStatusTool.inputSchema.properties.commits.type, "array");
+assert.equal(developerRemoteStatusTool.inputSchema.properties.commits.maxItems, 100);
+assert.equal(developerRemoteStatusTool.inputSchema.properties.commits.items.type, "string");
+assert.equal(developerRemoteStatusTool.inputSchema.properties.commits.items.minLength, 40);
+assert.equal(developerRemoteStatusTool.inputSchema.properties.commits.items.maxLength, 40);
+assert.equal(
+  developerRemoteStatusTool.inputSchema.properties.commits.items.pattern,
+  "^[A-Fa-f0-9]{40}$",
+);
+for (const forbiddenField of [
+  "command", "args", "executable", "cwd", "env", "shell", "path", "pathspec",
+  "remote", "url", "branch", "ref", "fetch", "force",
+]) {
+  assert.equal(
+    Object.hasOwn(developerRemoteStatusTool.inputSchema.properties, forbiddenField),
+    false,
+    `dev_git_remote_status exposed forbidden field ${forbiddenField}`,
+  );
+}
+const developerRemoteStatusPermission =
+  developerRemoteStatusTool._meta?.["armed-academy/permission"];
+assert.equal(developerRemoteStatusPermission?.permission_level, "read_only");
+assert.equal(developerRemoteStatusPermission?.read_or_write, "read");
+assert.equal(developerRemoteStatusPermission?.risk_level, "read");
+assert.equal(developerRemoteStatusPermission?.log_required, false);
+assert.equal(developerRemoteStatusPermission?.can_modify_canon, false);
+assert.equal(developerRemoteStatusPermission?.can_modify_active_engine, false);
+assert.equal(developerRemoteStatusPermission?.can_modify_story_graph, false);
+assert.equal(developerRemoteStatusPermission?.can_modify_memory, false);
+assert.deepEqual(
+  developerRemoteStatusPermission?.allowed_sources,
+  [
+    "repository_git_head",
+    "repository_git_tracking_ref",
+    "canonical_git_remote_head",
+    "mcp_client_commit_sha_queries",
+  ],
+);
 
 const developerRangeReadTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_read_file_range",
@@ -620,7 +672,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-9, 9);
+publicToolNames.splice(-10, 10);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -664,8 +716,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 53);
-assert.equal(fullNames.length, 111);
+assert.equal(developerNames.length, 54);
+assert.equal(fullNames.length, 112);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -933,6 +985,7 @@ publicToolNames.push(
   "dev_create_directory",
   "dev_move_path",
 );
+publicToolNames.push("dev_git_remote_status");
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -949,7 +1002,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-9, 9);
+  publicToolNames.splice(-10, 10);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -958,5 +1011,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 13}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 14}).`,
 );
