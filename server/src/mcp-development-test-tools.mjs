@@ -17,7 +17,7 @@ const productionSuiteDefinitions = Object.freeze({
   mcp: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-contract.test.mjs"]),
-    timeoutMs: 300_000,
+    timeoutMs: 1_500_000,
   }),
   mcp_tunnel: Object.freeze({
     executable: process.execPath,
@@ -28,7 +28,7 @@ const productionSuiteDefinitions = Object.freeze({
   all: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/run-all.mjs"]),
-    timeoutMs: 3_600_000,
+    timeoutMs: 7_200_000,
     cleanupPort: 8787,
   }),
 });

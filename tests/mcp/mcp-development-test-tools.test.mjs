@@ -257,9 +257,9 @@ try {
   assert.deepEqual(mapping.mcp.argv, ["tests/tools/mcp-contract.test.mjs"]);
   assert.deepEqual(mapping.mcp_tunnel.argv, ["tests/mcp-tunnel-launcher.test.mjs"]);
   assert.deepEqual(mapping.all.argv, ["tests/run-all.mjs"]);
-  assert.equal(mapping.mcp.timeout_ms, 300_000);
+  assert.equal(mapping.mcp.timeout_ms, 1_500_000);
   assert.equal(mapping.mcp_tunnel.timeout_ms, 300_000);
-  assert.equal(mapping.all.timeout_ms, 3_600_000);
+  assert.equal(mapping.all.timeout_ms, 7_200_000);
 
   process.env.OPENAI_API_KEY = "sk-test-secret-not-for-child";
   const failingRunner = createDevTestRunner({
