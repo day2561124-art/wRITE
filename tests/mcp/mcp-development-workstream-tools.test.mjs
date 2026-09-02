@@ -670,6 +670,39 @@ test("tracked, staged, and conflicted isolated worktrees are all removal-blockin
   }
 });
 
+test("shared workspace execution context accepts detached HEAD symbolic-ref exit 1", async () => {
+  const harness = await createHarness("detached-shared-context");
+  const repositoryRoot = path.join(harness.root, "repo");
+  try {
+    await mkdir(repositoryRoot, { recursive: true });
+    const gitRunner = async (args) => {
+      const key = args.join(" ");
+      if (key === "rev-parse --show-toplevel") return { stdout: `${repositoryRoot}\n` };
+      if (key === "rev-parse --git-dir") return { stdout: ".git\n" };
+      if (key === "rev-parse --git-common-dir") return { stdout: ".git\n" };
+      if (key === "rev-parse --verify HEAD") return { stdout: `${TEST_HEAD}\n` };
+      if (key === "symbolic-ref --quiet --short HEAD") {
+        throw Object.assign(new Error("detached HEAD"), { code: 1 });
+      }
+      throw new Error(`Unexpected Git argv: ${key}`);
+    };
+    const service = createDevWorkstreamRegistryService({
+      registryPath: harness.registryPath,
+      headReader: async () => TEST_HEAD,
+      repositoryRoot,
+      worktreeRootPath: path.join(harness.root, "worktrees"),
+      gitRunner,
+    });
+    const context = await service.resolveExecutionContext({});
+    assert.equal(context.workspace_id, DEV_WORKSTREAM_WORKSPACE_ID);
+    assert.equal(context.root, path.resolve(repositoryRoot));
+    assert.equal(context.branch, null);
+    assert.equal(context.current_head, TEST_HEAD);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("Phase 2C workspace-aware developer runtime isolates filesystem, Git, tests, and commits", async () => {
   const harness = await createGitHarness("phase2c-runtime");
   try {

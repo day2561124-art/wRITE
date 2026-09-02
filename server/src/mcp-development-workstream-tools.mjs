@@ -798,7 +798,13 @@ export function createDevWorkstreamRegistryService({
       const gitDir = await gitRunner(["rev-parse", "--git-dir"], { cwd: repositoryRoot });
       const gitCommonDir = await gitRunner(["rev-parse", "--git-common-dir"], { cwd: repositoryRoot });
       const head = await gitRunner(["rev-parse", "--verify", "HEAD"], { cwd: repositoryRoot });
-      const branch = await gitRunner(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repositoryRoot });
+      let branch;
+      try {
+        branch = await gitRunner(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repositoryRoot });
+      } catch (error) {
+        if (error?.code !== 1) throw error;
+        branch = { stdout: "" };
+      }
       const resolvedRoot = path.resolve(String(topLevel.stdout).trim());
       const currentHead = String(head.stdout).trim().toLowerCase();
       if (resolvedRoot !== path.resolve(repositoryRoot)) throw new Error("Shared workspace Git top-level does not match the canonical repository root.");
