@@ -5,6 +5,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
 import fs from 'fs';
+import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
 function safeTransportSend(transport, payload, label = 'transport.send') {
   try {
@@ -124,7 +125,8 @@ const config = {
   ...(portOverride === null ? {} : { port: portOverride }),
 };
 const sessions = new Map();
-// The long-lived HTTP parent owns only the world-simulation prepared-turn broker.
+// The long-lived HTTP parent owns the world-simulation prepared-turn broker
+// and the bounded developer reload/integration control routes.
 // Legacy raw-story payloads no longer cross MCP child boundaries.
 const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   ownership: 'mcp_http_parent',
@@ -132,6 +134,7 @@ const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
 });
 
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
+const integrationControl = createParentIntegrationControl({ profile: activeToolProfileName });
 const DEV_MCP_RELOAD_TOOL_NAME = 'dev_mcp_reload';
 const devMcpReloadToolDefinition = Object.freeze({
   name: DEV_MCP_RELOAD_TOOL_NAME,
@@ -268,6 +271,9 @@ async function handleDevMcpReload(entry, message) {
     console.error(
       `[mcp-http] dev_mcp_reload requested profile=${activeToolProfileName} parent_pid=${process.pid} child_pid=${before.child_pid}`,
     );
+    // Capture the fixed integration service while bootstrap is still installed.
+    // Child replacement and subsequent bootstrap cleanup cannot revoke this route.
+    await integrationControl.prepare();
     const reloaded = await entry.session.restart();
     const after = entry.session.getStatus();
     console.error(
@@ -344,6 +350,13 @@ function bindBridge(entry) {
         return;
       }
 
+      if (message?.method === 'tools/call' && message?.params?.name === INTEGRATE_TOOL_NAME) {
+        void integrationControl.call(message).then((reply) => {
+          if (reply) safeTransportSend(transport, reply, 'transport.send(dev_workspace_integrate)');
+        });
+        return;
+      }
+
       if (message.id === undefined) {
         session.send(message);
         return;
@@ -372,11 +385,15 @@ function bindBridge(entry) {
           return;
         }
 
-        safeTransportSend(
-          transport,
-          decorateParentOwnedTools(message, reply),
-          'transport.send(reply)',
-        );
+        if (message.method === 'tools/list') {
+          void integrationControl.prepare().then(() => {
+            safeTransportSend(transport, integrationControl.decorate(decorateParentOwnedTools(message, reply)), 'transport.send(tools/list)');
+          }).catch((error) => {
+            safeTransportSend(transport, { jsonrpc: '2.0', id: message.id, error: { code: -32000, message: error.message } }, 'transport.send(integration-control-error)');
+          });
+          return;
+        }
+        safeTransportSend(transport, reply, 'transport.send(reply)');
       });
     } catch (error) {
       console.error(
