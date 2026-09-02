@@ -2086,6 +2086,12 @@ const expectedContentStringFields = new Set([
 ]);
 
 function expectedStringMaxLength(field) {
+  if (field === "workspace_id") {
+    return 64;
+  }
+  if (field === "expectedHead") {
+    return 40;
+  }
   if (field === "expectedSha256") {
     return 64;
   }

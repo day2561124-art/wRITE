@@ -7,11 +7,8 @@ import {
   redactProcessOutput,
   terminateProcessTree,
 } from "./process-control.mjs";
-import {
-  normalizeProjectPath,
-  projectRoot,
-  resolveProjectPath,
-} from "./project-paths.mjs";
+import { projectRoot } from "./project-paths.mjs";
+import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 
 export const DEV_LIST_MAX_ENTRIES = 500;
 export const DEV_READ_MAX_BYTES = 256 * 1024;
@@ -109,9 +106,40 @@ function isInside(basePath, targetPath) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function pathSegments(filePath) {
-  const relative = path.relative(projectRoot, filePath);
+function pathSegments(filePath, repositoryRoot = projectRoot) {
+  const relative = path.relative(repositoryRoot, filePath);
   return relative ? relative.split(/[\\/]+/u) : [];
+}
+
+function normalizeRepositoryPath(repositoryRoot, filePath) {
+  return path.relative(repositoryRoot, filePath).replaceAll(path.sep, "/");
+}
+
+function resolveRepositoryPath(repositoryRoot, value, label, fallback = "") {
+  const candidate = value === undefined || value === null || value === "" ? fallback : value;
+  if (typeof candidate !== "string" || !candidate.trim()) {
+    throw new Error(`${label} requires a path.`);
+  }
+  if (path.isAbsolute(candidate) || /^[A-Za-z]:[\\/]/u.test(candidate) || /^[\\/]{2}/u.test(candidate)) {
+    throw new Error(`${label} must be workspace-relative; absolute paths are not allowed.`);
+  }
+  const resolved = path.resolve(repositoryRoot, candidate);
+  if (!isInside(path.resolve(repositoryRoot), resolved)) {
+    const scopeLabel = repositoryRoot === projectRoot ? "project" : "workspace";
+    throw new Error(`${label} must stay inside the ${scopeLabel}.`);
+  }
+  return resolved;
+}
+
+export function workspaceExecutionProvenance(context) {
+  return {
+    workspace_id: context.workspace_id,
+    workstream_id: context.workstream_id,
+    workspace_type: context.workspace_type,
+    branch: context.branch,
+    base_head: context.base_head,
+    current_head: context.current_head,
+  };
 }
 
 export function isSecretName(name) {
@@ -136,8 +164,8 @@ export function isSecretName(name) {
     || /\.(?:cer|cert|crt|der|jks|key|keystore|p12|p7b|p7c|pem|pfx)$/iu.test(name);
 }
 
-export function assertAllowedPathPolicy(resolved, label) {
-  const segments = pathSegments(resolved);
+export function assertAllowedPathPolicy(resolved, label, repositoryRoot = projectRoot) {
+  const segments = pathSegments(resolved, repositoryRoot);
   if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     throw new Error(`${label} cannot access .git internals.`);
   }
@@ -146,10 +174,9 @@ export function assertAllowedPathPolicy(resolved, label) {
   }
 }
 
-function resolveAllowedPath(value, label, fallback = "") {
-  const candidate = value === undefined || value === null || value === "" ? fallback : value;
-  const resolved = resolveProjectPath(candidate, label);
-  assertAllowedPathPolicy(resolved, label);
+function resolveAllowedPath(value, label, fallback = "", repositoryRoot = projectRoot) {
+  const resolved = resolveRepositoryPath(repositoryRoot, value, label, fallback);
+  assertAllowedPathPolicy(resolved, label, repositoryRoot);
   return resolved;
 }
 
@@ -161,19 +188,20 @@ function positiveIntegerWithin(value, fallback, maximum, field) {
   return normalized;
 }
 
-export async function assertExistingSafePath(resolved, label) {
+export async function assertExistingSafePath(resolved, label, repositoryRoot = projectRoot) {
   const info = await lstat(resolved);
   if (info.isSymbolicLink()) {
     throw new Error(`${label} cannot access symbolic links.`);
   }
   const [realRoot, realTarget] = await Promise.all([
-    realProjectRootPromise,
+    repositoryRoot === projectRoot ? realProjectRootPromise : realpath(repositoryRoot),
     realpath(resolved),
   ]);
   if (!isInside(realRoot, realTarget)) {
-    throw new Error(`${label} resolves outside the project through a symbolic link.`);
+    const scopeLabel = repositoryRoot === projectRoot ? "project" : "workspace";
+    throw new Error(`${label} resolves outside the ${scopeLabel} through a symbolic link.`);
   }
-  assertAllowedPathPolicy(realTarget, label);
+  assertAllowedPathPolicy(realTarget, label, repositoryRoot);
   return info;
 }
 
@@ -201,24 +229,42 @@ function entryType(entry) {
   return "other";
 }
 
-function publicEntry(directory, entry) {
+function publicEntry(directory, entry, repositoryRoot) {
   const absolute = path.join(directory, entry.name);
   return {
     name: entry.name,
-    path: normalizeProjectPath(absolute),
+    path: normalizeRepositoryPath(repositoryRoot, absolute),
     type: entryType(entry),
   };
 }
 
-export async function dev_list_directory(input = {}) {
-  const directory = resolveAllowedPath(input.path, "path", ".");
+async function resolveWorkspaceContext(
+  input,
+  { mutation = false, workspaceContextResolver = resolveDevWorkspaceExecutionContext } = {},
+) {
+  return workspaceContextResolver(
+    { workspace_id: input?.workspace_id },
+    { mutation },
+  );
+}
+
+function attachWorkspaceContext(result, context) {
+  return {
+    ...result,
+    workspace_context: workspaceExecutionProvenance(context),
+  };
+}
+
+export async function dev_list_directory(input = {}, options = {}) {
+  const context = await resolveWorkspaceContext(input, options);
+  const directory = resolveAllowedPath(input.path, "path", ".", context.root);
   const maxEntries = positiveIntegerWithin(
     input.maxEntries,
     200,
     DEV_LIST_MAX_ENTRIES,
     "maxEntries",
   );
-  const info = await assertExistingSafePath(directory, "path");
+  const info = await assertExistingSafePath(directory, "path", context.root);
   if (!info.isDirectory()) {
     throw new Error("path must reference a directory.");
   }
@@ -227,16 +273,17 @@ export async function dev_list_directory(input = {}) {
     .filter((entry) => entry.name.toLowerCase() !== ".git" && !isSecretName(entry.name))
     .sort((left, right) => left.name.localeCompare(right.name, "en"));
 
-  return {
-    path: normalizeProjectPath(directory) || ".",
-    entries: entries.slice(0, maxEntries).map((entry) => publicEntry(directory, entry)),
+  return attachWorkspaceContext({
+    path: normalizeRepositoryPath(context.root, directory) || ".",
+    entries: entries.slice(0, maxEntries).map((entry) => publicEntry(directory, entry, context.root)),
     returned_entries: Math.min(entries.length, maxEntries),
     truncated: entries.length > maxEntries,
-  };
+  }, context);
 }
 
-export async function dev_read_file(input = {}) {
-  const filePath = resolveAllowedPath(input.path, "path");
+export async function dev_read_file(input = {}, options = {}) {
+  const context = await resolveWorkspaceContext(input, options);
+  const filePath = resolveAllowedPath(input.path, "path", "", context.root);
   const maxBytes = positiveIntegerWithin(
     input.maxBytes,
     DEV_READ_MAX_BYTES,
@@ -246,7 +293,7 @@ export async function dev_read_file(input = {}) {
   if (!isSupportedTextPath(filePath)) {
     throw new Error("path must reference a supported UTF-8 text file.");
   }
-  const info = await assertExistingSafePath(filePath, "path");
+  const info = await assertExistingSafePath(filePath, "path", context.root);
   if (!info.isFile()) {
     throw new Error("path must reference a file.");
   }
@@ -255,15 +302,16 @@ export async function dev_read_file(input = {}) {
   }
 
   const content = decodeText(await readFile(filePath), "path");
-  return {
-    path: normalizeProjectPath(filePath),
+  return attachWorkspaceContext({
+    path: normalizeRepositoryPath(context.root, filePath),
     bytes: info.size,
     content,
-  };
+  }, context);
 }
 
-export async function dev_read_file_range(input = {}) {
-  const filePath = resolveAllowedPath(input.path, "path");
+export async function dev_read_file_range(input = {}, options = {}) {
+  const context = await resolveWorkspaceContext(input, options);
+  const filePath = resolveAllowedPath(input.path, "path", "", context.root);
   const startLine = positiveIntegerWithin(
     input.startLine,
     1,
@@ -279,7 +327,7 @@ export async function dev_read_file_range(input = {}) {
   if (!isSupportedTextPath(filePath)) {
     throw new Error("path must reference a supported UTF-8 text file.");
   }
-  const info = await assertExistingSafePath(filePath, "path");
+  const info = await assertExistingSafePath(filePath, "path", context.root);
   if (!info.isFile()) {
     throw new Error("path must reference a file.");
   }
@@ -302,8 +350,8 @@ export async function dev_read_file_range(input = {}) {
     if (startLine !== 1) {
       throw new Error("startLine exceeds the file line count (0).");
     }
-    return {
-      path: normalizeProjectPath(filePath),
+    return attachWorkspaceContext({
+      path: normalizeRepositoryPath(context.root, filePath),
       bytes: info.size,
       total_lines: 0,
       start_line: 1,
@@ -312,7 +360,7 @@ export async function dev_read_file_range(input = {}) {
       returned_bytes: 0,
       truncated: false,
       content: "",
-    };
+    }, context);
   }
   if (startLine > totalLines) {
     throw new Error(`startLine exceeds the file line count (${totalLines}).`);
@@ -340,8 +388,8 @@ export async function dev_read_file_range(input = {}) {
   const endLine = startLine + returnedLineCount - 1;
   const truncated = endOffset < buffer.length;
 
-  return {
-    path: normalizeProjectPath(filePath),
+  return attachWorkspaceContext({
+    path: normalizeRepositoryPath(context.root, filePath),
     bytes: info.size,
     total_lines: totalLines,
     start_line: startLine,
@@ -350,7 +398,7 @@ export async function dev_read_file_range(input = {}) {
     returned_bytes: slice.length,
     truncated,
     content,
-  };
+  }, context);
 }
 
 function isExcludedSearchDirectory(name) {
@@ -370,8 +418,9 @@ function previewLine(line, column) {
   return line.slice(start, start + previewMaxCharacters);
 }
 
-export async function dev_search_files(input = {}) {
-  const directory = resolveAllowedPath(input.path, "path", ".");
+export async function dev_search_files(input = {}, options = {}) {
+  const context = await resolveWorkspaceContext(input, options);
+  const directory = resolveAllowedPath(input.path, "path", ".", context.root);
   const query = typeof input.query === "string" ? input.query : "";
   if (!query.trim()) {
     throw new Error("query is required.");
@@ -386,7 +435,7 @@ export async function dev_search_files(input = {}) {
   if (typeof caseSensitive !== "boolean") {
     throw new Error("caseSensitive must be a boolean.");
   }
-  const info = await assertExistingSafePath(directory, "path");
+  const info = await assertExistingSafePath(directory, "path", context.root);
   if (!info.isDirectory()) {
     throw new Error("path must reference a directory.");
   }
@@ -430,7 +479,7 @@ export async function dev_search_files(input = {}) {
 
       scannedFiles += 1;
       try {
-        const candidateInfo = await assertExistingSafePath(candidate, "search candidate");
+        const candidateInfo = await assertExistingSafePath(candidate, "search candidate", context.root);
         if (candidateInfo.size > searchFileMaxBytes) {
           skippedFiles += 1;
           continue;
@@ -441,7 +490,7 @@ export async function dev_search_files(input = {}) {
           const column = lineMatch(lines[lineIndex], query, normalizedQuery, caseSensitive);
           if (column === -1) continue;
           matches.push({
-            path: normalizeProjectPath(candidate),
+            path: normalizeRepositoryPath(context.root, candidate),
             line: lineIndex + 1,
             column: column + 1,
             preview: previewLine(lines[lineIndex], column),
@@ -457,8 +506,8 @@ export async function dev_search_files(input = {}) {
   if (matches.length >= maxResults || scannedFiles >= searchMaxFiles) {
     truncated = true;
   }
-  return {
-    path: normalizeProjectPath(directory) || ".",
+  return attachWorkspaceContext({
+    path: normalizeRepositoryPath(context.root, directory) || ".",
     query,
     case_sensitive: caseSensitive,
     matches,
@@ -466,7 +515,7 @@ export async function dev_search_files(input = {}) {
     scanned_files: scannedFiles,
     skipped_files: skippedFiles,
     truncated,
-  };
+  }, context);
 }
 
 export const DEV_GIT_DIFF_MODES = Object.freeze(["working", "staged"]);
@@ -771,10 +820,25 @@ export function createDevGitTools({
   };
 }
 
-const productionGitTools = createDevGitTools();
-export const dev_git_status = productionGitTools.status;
-export const dev_git_diff = productionGitTools.diff;
-export const dev_git_diff_check = productionGitTools.diffCheck;
+async function runWorkspaceGitTool(input, method, options = {}) {
+  const context = await resolveWorkspaceContext(input, options);
+  const tools = createDevGitTools({ repositoryRoot: context.root });
+  const toolInput = { ...input };
+  delete toolInput.workspace_id;
+  return attachWorkspaceContext(await tools[method](toolInput), context);
+}
+
+export async function dev_git_status(input = {}, options = {}) {
+  return runWorkspaceGitTool(input, "status", options);
+}
+
+export async function dev_git_diff(input = {}, options = {}) {
+  return runWorkspaceGitTool(input, "diff", options);
+}
+
+export async function dev_git_diff_check(input = {}, options = {}) {
+  return runWorkspaceGitTool(input, "diffCheck", options);
+}
 
 export function getDevGitCommandMapping() {
   return {

@@ -270,9 +270,9 @@ assert.deepEqual(
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
-  ["dev_git_status", ["includeUntracked"], ["repository_git_worktree_status"]],
-  ["dev_git_diff", ["mode"], ["repository_git_worktree_diff", "repository_git_index_diff"]],
-  ["dev_git_diff_check", ["mode"], ["repository_git_worktree_diff_check", "repository_git_index_diff_check"]],
+  ["dev_git_status", ["includeUntracked", "workspace_id"], ["repository_git_worktree_status"]],
+  ["dev_git_diff", ["mode", "workspace_id"], ["repository_git_worktree_diff", "repository_git_index_diff"]],
+  ["dev_git_diff_check", ["mode", "workspace_id"], ["repository_git_worktree_diff_check", "repository_git_index_diff_check"]],
 ]) {
   const gitTool = developerList.result.tools.find((tool) => tool.name === toolName);
   assert(gitTool, `chatgpt_developer is missing ${toolName}`);
@@ -463,7 +463,7 @@ assert(developerRangeReadTool, "chatgpt_developer is missing dev_read_file_range
 assert.equal(developerRangeReadTool.annotations?.readOnlyHint, true);
 assert.deepEqual(
   Object.keys(developerRangeReadTool.inputSchema?.properties ?? {}).sort(),
-  ["maxBytes", "path", "startLine"],
+  ["maxBytes", "path", "startLine", "workspace_id"],
 );
 assert.deepEqual(developerRangeReadTool.inputSchema?.required, ["path"]);
 assert.equal(developerRangeReadTool.inputSchema.properties.startLine.minimum, 1);
@@ -486,7 +486,7 @@ assert(developerFileInfoTool, "chatgpt_developer is missing dev_get_file_info");
 assert.equal(developerFileInfoTool.annotations?.readOnlyHint, true);
 assert.equal(developerFileInfoTool.inputSchema?.additionalProperties, false);
 assert.deepEqual(developerFileInfoTool.inputSchema?.required, ["path"]);
-assert.deepEqual(Object.keys(developerFileInfoTool.inputSchema?.properties ?? {}), ["path"]);
+assert.deepEqual(Object.keys(developerFileInfoTool.inputSchema?.properties ?? {}), ["path", "workspace_id"]);
 const developerFileInfoPermission = developerFileInfoTool._meta?.["armed-academy/permission"];
 assert.equal(developerFileInfoPermission?.permission_level, "read_only");
 assert.equal(developerFileInfoPermission?.read_or_write, "read");
@@ -527,7 +527,7 @@ for (const [toolName, expectedRequired, expectedProperties, expectedSources] of 
   assert.deepEqual(filesystemTool.inputSchema?.required, expectedRequired);
   assert.deepEqual(
     Object.keys(filesystemTool.inputSchema?.properties ?? {}).sort(),
-    expectedProperties,
+    [...expectedProperties, "workspace_id"].sort(),
   );
   for (const forbiddenField of [
     "command", "args", "executable", "cwd", "env", "shell", "flags", "mode",
@@ -568,7 +568,7 @@ assert.equal(developerDeleteTool.annotations?.readOnlyHint, false);
 assert.deepEqual(developerDeleteTool.inputSchema?.required, ["path"]);
 assert.deepEqual(
   Object.keys(developerDeleteTool.inputSchema?.properties ?? {}).sort(),
-  ["expectedSha256", "path"],
+  ["expectedSha256", "path", "workspace_id"],
 );
 assert.equal(developerDeleteTool.inputSchema.properties.expectedSha256.pattern, "^[A-Fa-f0-9]{64}$");
 const developerDeletePermission = developerDeleteTool._meta?.["armed-academy/permission"];
@@ -680,7 +680,7 @@ assert.equal(developerPatchSchema?.additionalProperties, false);
 assert.deepEqual(developerPatchSchema?.required, ["path", "oldText", "newText"]);
 assert.deepEqual(
   Object.keys(developerPatchSchema?.properties ?? {}).sort(),
-  ["expectedSha256", "newText", "oldText", "path"].sort(),
+  ["expectedSha256", "newText", "oldText", "path", "workspace_id"].sort(),
 );
 assert.equal(developerPatchSchema.properties.path.type, "string");
 assert.equal(developerPatchSchema.properties.path.maxLength, 4096);
@@ -719,7 +719,7 @@ const developerTestSchema = developerTestTool.inputSchema;
 assert.equal(developerTestSchema?.type, "object");
 assert.equal(developerTestSchema?.additionalProperties, false);
 assert.deepEqual(developerTestSchema?.required, ["suite"]);
-assert.deepEqual(Object.keys(developerTestSchema?.properties ?? {}), ["suite"]);
+assert.deepEqual(Object.keys(developerTestSchema?.properties ?? {}), ["suite", "workspace_id"]);
 assert.equal(developerTestSchema.properties.suite.type, "string");
 assert.deepEqual(developerTestSchema.properties.suite.enum, ["mcp", "mcp_tunnel", "all"]);
 for (const forbiddenField of [
@@ -753,10 +753,10 @@ assert.equal(developerCommitTool.annotations?.readOnlyHint, false);
 const developerCommitSchema = developerCommitTool.inputSchema;
 assert.equal(developerCommitSchema?.type, "object");
 assert.equal(developerCommitSchema?.additionalProperties, false);
-assert.deepEqual(developerCommitSchema?.required, ["paths", "message"]);
+assert.deepEqual(developerCommitSchema?.required, ["paths", "message", "expectedHead"]);
 assert.deepEqual(
   Object.keys(developerCommitSchema?.properties ?? {}).sort(),
-  ["message", "paths"],
+  ["expectedHead", "message", "paths", "workspace_id"],
 );
 assert.equal(developerCommitSchema.properties.paths.type, "array");
 assert.equal(developerCommitSchema.properties.paths.minItems, 1);

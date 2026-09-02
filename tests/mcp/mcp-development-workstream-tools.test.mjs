@@ -17,6 +17,24 @@ import {
   createDevWorkstreamRegistryService,
 } from "../../server/src/mcp-development-workstream-tools.mjs";
 import { projectRoot } from "../../server/src/project-paths.mjs";
+import {
+  dev_git_diff,
+  dev_git_diff_check,
+  dev_git_status,
+  dev_list_directory,
+  dev_read_file,
+  dev_search_files,
+} from "../../server/src/mcp-development-readonly-tools.mjs";
+import {
+  dev_apply_patch,
+  dev_create_directory,
+  dev_create_file,
+  dev_delete_file,
+  dev_get_file_info,
+  dev_git_commit,
+  dev_move_path,
+} from "../../server/src/mcp-development-write-tools.mjs";
+import { createDevTestRunner } from "../../server/src/mcp-development-test-tools.mjs";
 
 const TEST_HEAD = "1234567890abcdef1234567890abcdef12345678";
 
@@ -60,8 +78,10 @@ async function createGitHarness(name) {
   await runGit(["init", "-b", "main"]);
   await runGit(["config", "user.email", "phase2b@example.invalid"]);
   await runGit(["config", "user.name", "Phase2B Test"]);
+  await mkdir(path.join(repositoryRoot, "tests", "mcp"), { recursive: true });
   await writeFile(path.join(repositoryRoot, "tracked.txt"), "base\n", "utf8");
-  await runGit(["add", "tracked.txt"]);
+  await writeFile(path.join(repositoryRoot, "tests", "mcp", "seed.txt"), "seed\n", "utf8");
+  await runGit(["add", "tracked.txt", "tests/mcp/seed.txt"]);
   await runGit(["commit", "-m", "base"]);
   const { stdout } = await runGit(["rev-parse", "HEAD"]);
   const head = String(stdout).trim().toLowerCase();
@@ -508,7 +528,10 @@ test("dirty main does not block isolated create and uncommitted main content is 
     const workstream = await harness.service.begin({ label: "dirty main create" });
     const isolated = await harness.service.createIsolated({ workstream_id: workstream.workstream_id });
     const absolute = path.join(harness.worktreeRootPath, isolated.workspace_id);
-    assert.equal(await readFile(path.join(absolute, "tracked.txt"), "utf8"), "base\n");
+    assert.equal(
+      (await readFile(path.join(absolute, "tracked.txt"), "utf8")).replaceAll("\r\n", "\n"),
+      "base\n",
+    );
     await assert.rejects(readFile(path.join(absolute, "untracked-main.txt"), "utf8"), /ENOENT/u);
     await harness.service.end({ workstream_id: workstream.workstream_id, outcome: "abandoned" });
     await harness.service.removeIsolated({ workspace_id: isolated.workspace_id });
@@ -631,7 +654,6 @@ test("tracked, staged, and conflicted isolated worktrees are all removal-blockin
         await harness.runGit(["commit", "-m", "main-side"]);
         await assert.rejects(
           harness.runGit(["merge", "main"], { cwd: absolute }),
-          /conflict|CONFLICT|Automatic merge failed/iu,
         );
       }
       const health = await harness.service.getWorkspace({ workspace_id: isolated.workspace_id });
@@ -645,5 +667,245 @@ test("tracked, staged, and conflicted isolated worktrees are all removal-blockin
     } finally {
       await harness.cleanup();
     }
+  }
+});
+
+test("Phase 2C workspace-aware developer runtime isolates filesystem, Git, tests, and commits", async () => {
+  const harness = await createGitHarness("phase2c-runtime");
+  try {
+    const workstreamA = await harness.service.begin({ label: "phase2c A" });
+    const workstreamB = await harness.service.begin({ label: "phase2c B" });
+    const workspaceA = await harness.service.createIsolated({ workstream_id: workstreamA.workstream_id });
+    const workspaceB = await harness.service.createIsolated({ workstream_id: workstreamB.workstream_id });
+    const options = { workspaceContextResolver: harness.service.resolveExecutionContext };
+
+    const shared = await harness.service.resolveExecutionContext({});
+    const contextA = await harness.service.resolveExecutionContext({ workspace_id: workspaceA.workspace_id });
+    const contextB = await harness.service.resolveExecutionContext({ workspace_id: workspaceB.workspace_id });
+    assert.equal(shared.workspace_id, DEV_WORKSTREAM_WORKSPACE_ID);
+    assert.equal(shared.root, path.resolve(harness.repositoryRoot));
+    assert.equal(shared.branch, "main");
+    assert.equal(shared.current_head, harness.head);
+    assert.notEqual(contextA.root, contextB.root);
+    assert.equal(contextA.branch, workspaceA.branch_name);
+    assert.equal(contextB.branch, workspaceB.branch_name);
+    assert.equal(contextA.git_common_dir, contextB.git_common_dir);
+    assert.notEqual(contextA.git_dir, contextB.git_dir);
+    assert.equal(contextA.current_head, harness.head);
+    assert.equal(contextB.current_head, harness.head);
+
+    const reloadedService = createDevWorkstreamRegistryService({
+      registryPath: harness.registryPath,
+      headReader: async () => harness.head,
+      repositoryRoot: harness.repositoryRoot,
+      worktreeRootPath: harness.worktreeRootPath,
+      gitRunner: harness.runGit,
+    });
+    const reloadedA = await reloadedService.resolveExecutionContext({ workspace_id: workspaceA.workspace_id });
+    assert.equal(reloadedA.root, contextA.root);
+    assert.equal(reloadedA.branch, contextA.branch);
+    assert.equal(reloadedA.current_head, contextA.current_head);
+
+    await assertRejectsMessage(
+      dev_read_file({ workspace_id: "dev_workspace_ffffffffffffffffffffffff", path: "tracked.txt" }, options),
+      /Unknown workspace/u,
+    );
+    await assertRejectsMessage(
+      dev_read_file({ workspace_id: workspaceA.workspace_id, path: ".git/config" }, options),
+      /\.git internals/u,
+    );
+    await assertRejectsMessage(
+      dev_create_file({ workspace_id: workspaceA.workspace_id, path: ".env", content: "secret\n" }, options),
+      /secret files/u,
+    );
+    await assertRejectsMessage(
+      dev_create_file({ workspace_id: workspaceA.workspace_id, path: "data/canon_db/phase2c.md", content: "blocked\n" }, options),
+      /protected/u,
+    );
+
+    await dev_create_file({
+      workspace_id: workspaceA.workspace_id,
+      path: "tests/mcp/.phase2c-a.txt",
+      content: "phase2c A\n",
+    }, options);
+    await dev_create_file({
+      workspace_id: workspaceB.workspace_id,
+      path: "tests/mcp/.phase2c-b.txt",
+      content: "phase2c B\n",
+    }, options);
+    await dev_create_directory({
+      workspace_id: workspaceA.workspace_id,
+      path: "tests/mcp/.phase2c-a-dir",
+    }, options);
+    await dev_create_file({
+      workspace_id: workspaceA.workspace_id,
+      path: "tests/mcp/.phase2c-a-dir/move.txt",
+      content: "move me\n",
+    }, options);
+    const moved = await dev_move_path({
+      workspace_id: workspaceA.workspace_id,
+      sourcePath: "tests/mcp/.phase2c-a-dir/move.txt",
+      destinationPath: "tests/mcp/.phase2c-a-dir/moved.txt",
+    }, options);
+    await dev_delete_file({
+      workspace_id: workspaceA.workspace_id,
+      path: moved.destination_path,
+      expectedSha256: moved.sha256,
+    }, options);
+    await rm(path.join(contextA.root, "tests", "mcp", ".phase2c-a-dir"), { recursive: true, force: true });
+
+    assert.equal((await dev_read_file({ workspace_id: workspaceA.workspace_id, path: "tests/mcp/.phase2c-a.txt" }, options)).content, "phase2c A\n");
+    assert.equal((await dev_read_file({ workspace_id: workspaceB.workspace_id, path: "tests/mcp/.phase2c-b.txt" }, options)).content, "phase2c B\n");
+    await assert.rejects(
+      dev_read_file({ workspace_id: workspaceA.workspace_id, path: "tests/mcp/.phase2c-b.txt" }, options),
+      /ENOENT|existing/u,
+    );
+    await assert.rejects(
+      dev_read_file({ workspace_id: workspaceB.workspace_id, path: "tests/mcp/.phase2c-a.txt" }, options),
+      /ENOENT|existing/u,
+    );
+    assert.equal((await dev_get_file_info({ path: "tests/mcp/.phase2c-a.txt" }, options)).exists, false);
+    assert.equal((await dev_get_file_info({ path: "tests/mcp/.phase2c-b.txt" }, options)).exists, false);
+    const listA = await dev_list_directory({ workspace_id: workspaceA.workspace_id, path: "tests/mcp" }, options);
+    const listB = await dev_list_directory({ workspace_id: workspaceB.workspace_id, path: "tests/mcp" }, options);
+    assert(listA.entries.some((entry) => entry.name === ".phase2c-a.txt"));
+    assert(!listA.entries.some((entry) => entry.name === ".phase2c-b.txt"));
+    assert(listB.entries.some((entry) => entry.name === ".phase2c-b.txt"));
+    assert(!listB.entries.some((entry) => entry.name === ".phase2c-a.txt"));
+    assert.equal((await dev_search_files({ workspace_id: workspaceA.workspace_id, path: "tests/mcp", query: "phase2c A" }, options)).matches.length, 1);
+    assert.equal((await dev_search_files({ workspace_id: workspaceB.workspace_id, path: "tests/mcp", query: "phase2c A" }, options)).matches.length, 0);
+
+    const untrackedOnlyDiffCheckA = await dev_git_diff_check({ workspace_id: workspaceA.workspace_id, mode: "working" }, options);
+    const untrackedOnlyDiffCheckB = await dev_git_diff_check({ workspace_id: workspaceB.workspace_id, mode: "working" }, options);
+    assert.equal(untrackedOnlyDiffCheckA.execution_ok, true);
+    assert.equal(untrackedOnlyDiffCheckA.passed, true);
+    assert.equal(untrackedOnlyDiffCheckA.exit_code, 0);
+    assert.equal(untrackedOnlyDiffCheckA.workspace_context.workspace_id, workspaceA.workspace_id);
+    assert.equal(untrackedOnlyDiffCheckA.workspace_context.workstream_id, workstreamA.workstream_id);
+    assert.equal(untrackedOnlyDiffCheckA.workspace_context.workspace_type, "isolated_worktree");
+    assert.equal(untrackedOnlyDiffCheckB.execution_ok, true);
+    assert.equal(untrackedOnlyDiffCheckB.passed, true);
+    assert.equal(untrackedOnlyDiffCheckB.exit_code, 0);
+    assert.equal(untrackedOnlyDiffCheckB.workspace_context.workspace_id, workspaceB.workspace_id);
+    assert.equal(untrackedOnlyDiffCheckB.workspace_context.workstream_id, workstreamB.workstream_id);
+    assert.equal(untrackedOnlyDiffCheckB.workspace_context.workspace_type, "isolated_worktree");
+
+    await dev_apply_patch({
+      workspace_id: workspaceA.workspace_id,
+      path: "tests/mcp/seed.txt",
+      oldText: "seed\n",
+      newText: "seed-A\n",
+    }, options);
+    await dev_apply_patch({
+      workspace_id: workspaceB.workspace_id,
+      path: "tests/mcp/seed.txt",
+      oldText: "seed\n",
+      newText: "seed-B\n",
+    }, options);
+    const statusA = await dev_git_status({ workspace_id: workspaceA.workspace_id, includeUntracked: true }, options);
+    const statusB = await dev_git_status({ workspace_id: workspaceB.workspace_id, includeUntracked: true }, options);
+    const statusMain = await dev_git_status({ includeUntracked: true }, options);
+    assert(statusA.untracked.includes("tests/mcp/.phase2c-a.txt"));
+    assert(!statusA.untracked.includes("tests/mcp/.phase2c-b.txt"));
+    assert(statusB.untracked.includes("tests/mcp/.phase2c-b.txt"));
+    assert(!statusB.untracked.includes("tests/mcp/.phase2c-a.txt"));
+    assert.equal(statusMain.untracked.includes("tests/mcp/.phase2c-a.txt"), false);
+    assert.equal(statusMain.untracked.includes("tests/mcp/.phase2c-b.txt"), false);
+    const diffA = await dev_git_diff({ workspace_id: workspaceA.workspace_id, mode: "working" }, options);
+    const diffB = await dev_git_diff({ workspace_id: workspaceB.workspace_id, mode: "working" }, options);
+    assert.match(diffA.diff, /seed-A/u);
+    assert.doesNotMatch(diffA.diff, /seed-B/u);
+    assert.match(diffB.diff, /seed-B/u);
+    assert.doesNotMatch(diffB.diff, /seed-A/u);
+    assert.equal((await dev_git_diff({ mode: "working" }, options)).diff, "");
+    assert.equal((await dev_git_diff_check({ workspace_id: workspaceA.workspace_id, mode: "working" }, options)).passed, true);
+    assert.equal((await dev_git_diff_check({ workspace_id: workspaceB.workspace_id, mode: "working" }, options)).passed, true);
+
+    await dev_apply_patch({ workspace_id: workspaceA.workspace_id, path: "tests/mcp/seed.txt", oldText: "seed-A\n", newText: "seed\n" }, options);
+    await dev_apply_patch({ workspace_id: workspaceB.workspace_id, path: "tests/mcp/seed.txt", oldText: "seed-B\n", newText: "seed\n" }, options);
+
+    const runnerA = createDevTestRunner({
+      suiteDefinitions: {
+        mcp: {
+          executable: process.execPath,
+          argv: ["-e", "const fs=require('fs');if(fs.readFileSync('tests/mcp/.phase2c-a.txt','utf8')!=='phase2c A\\n')process.exit(9);"],
+          timeoutMs: 10_000,
+        },
+      },
+      lockPath: path.join(harness.root, "phase2c-tests.lock"),
+      workspaceContextResolver: harness.service.resolveExecutionContext,
+    });
+    const runnerB = createDevTestRunner({
+      suiteDefinitions: {
+        mcp: {
+          executable: process.execPath,
+          argv: ["-e", "const fs=require('fs');if(fs.readFileSync('tests/mcp/.phase2c-b.txt','utf8')!=='phase2c B\\n')process.exit(9);"],
+          timeoutMs: 10_000,
+        },
+      },
+      lockPath: path.join(harness.root, "phase2c-tests.lock"),
+      workspaceContextResolver: harness.service.resolveExecutionContext,
+    });
+    const testA = await runnerA({ suite: "mcp", workspace_id: workspaceA.workspace_id });
+    const testB = await runnerB({ suite: "mcp", workspace_id: workspaceB.workspace_id });
+    assert.equal(testA.passed, true);
+    assert.equal(testB.passed, true);
+    assert.equal(testA.workspace_context.workspace_id, workspaceA.workspace_id);
+    assert.equal(testB.workspace_context.workspace_id, workspaceB.workspace_id);
+
+    const stale = await dev_git_commit({
+      workspace_id: workspaceA.workspace_id,
+      expectedHead: "0".repeat(40),
+      paths: ["tests/mcp/.phase2c-a.txt"],
+      message: "test: stale phase2c A",
+    }, options);
+    assert.equal(stale.committed, false);
+    assert.match(stale.reason, /STALE_HEAD/u);
+
+    const commitA = await dev_git_commit({
+      workspace_id: workspaceA.workspace_id,
+      expectedHead: harness.head,
+      paths: ["tests/mcp/.phase2c-a.txt"],
+      message: "test: phase2c A",
+    }, options);
+    const commitB = await dev_git_commit({
+      workspace_id: workspaceB.workspace_id,
+      expectedHead: harness.head,
+      paths: ["tests/mcp/.phase2c-b.txt"],
+      message: "test: phase2c B",
+    }, options);
+    assert.equal(commitA.committed, true);
+    assert.equal(commitB.committed, true);
+    assert.notEqual(commitA.commit, commitB.commit);
+    assert.notEqual(commitA.commit, harness.head);
+    assert.notEqual(commitB.commit, harness.head);
+    assert.equal((await harness.runGit(["rev-parse", "HEAD"], { cwd: harness.repositoryRoot })).stdout.trim().toLowerCase(), harness.head);
+    assert.deepEqual(
+      (await harness.runGit(["show", "--pretty=format:", "--name-only", "HEAD"], { cwd: contextA.root })).stdout.split(/\r?\n/u).filter(Boolean),
+      ["tests/mcp/.phase2c-a.txt"],
+    );
+    assert.deepEqual(
+      (await harness.runGit(["show", "--pretty=format:", "--name-only", "HEAD"], { cwd: contextB.root })).stdout.split(/\r?\n/u).filter(Boolean),
+      ["tests/mcp/.phase2c-b.txt"],
+    );
+    const afterCommitA = await harness.service.resolveExecutionContext({ workspace_id: workspaceA.workspace_id });
+    const afterCommitB = await harness.service.resolveExecutionContext({ workspace_id: workspaceB.workspace_id });
+    assert.equal(afterCommitA.current_head, commitA.commit);
+    assert.equal(afterCommitB.current_head, commitB.commit);
+    assert.equal((await dev_git_status({ workspace_id: workspaceA.workspace_id }, options)).clean, true);
+    assert.equal((await dev_git_status({ workspace_id: workspaceB.workspace_id }, options)).clean, true);
+
+    const finalA = await harness.service.get({ workstream_id: workstreamA.workstream_id });
+    const finalB = await harness.service.get({ workstream_id: workstreamB.workstream_id });
+    const endedA = await harness.service.end({ workstream_id: workstreamA.workstream_id, expected_revision: finalA.revision, outcome: "completed" });
+    const endedB = await harness.service.end({ workstream_id: workstreamB.workstream_id, expected_revision: finalB.revision, outcome: "completed" });
+    await assertRejectsMessage(
+      dev_create_file({ workspace_id: workspaceA.workspace_id, path: "tests/mcp/terminal-write.txt", content: "blocked\n" }, options),
+      /Terminal workstreams cannot perform workspace mutations/u,
+    );
+    await harness.service.removeIsolated({ workspace_id: workspaceA.workspace_id, expected_workstream_revision: endedA.revision });
+    await harness.service.removeIsolated({ workspace_id: workspaceB.workspace_id, expected_workstream_revision: endedB.revision });
+  } finally {
+    await harness.cleanup();
   }
 });

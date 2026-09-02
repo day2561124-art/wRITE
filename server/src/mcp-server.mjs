@@ -161,6 +161,7 @@ import {
 } from "./mcp-development-test-tools.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
+  DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE,
   DEV_WORKSPACE_ID_PATTERN_SOURCE,
   DEV_WORKSPACE_MAX_LIST_RESULTS,
   DEV_WORKSPACE_STATES,
@@ -209,6 +210,29 @@ const serverInfo = {
   name: "armed-academy-fiction-engine",
   version: "0.1.0",
 };
+
+process.on("uncaughtExceptionMonitor", (error, origin) => {
+  console.error(
+    `[mcp-server fatal] uncaughtException origin=${origin} pid=${process.pid}`,
+    error,
+  );
+});
+
+process.once("exit", (code) => {
+  if (code !== 0) {
+    console.error(`[mcp-server exit] pid=${process.pid} code=${code}`);
+  }
+});
+
+let stdinEndedNormally = false;
+process.stdin.once("end", () => {
+  stdinEndedNormally = true;
+});
+process.stdin.once("close", () => {
+  if (!stdinEndedNormally) {
+    console.error(`[mcp-server stdin-close-unexpected] pid=${process.pid}`);
+  }
+});
 
 const defaultProtocolVersion = "2024-11-05";
 const maxChildOutputBytes = 20 * 1024 * 1024;
@@ -1179,6 +1203,9 @@ const contentStringFields = new Set([
 ]);
 
 function stringMaxLengthFor(field) {
+  if (field === "workspace_id") {
+    return 64;
+  }
   if (field === "expectedSha256") {
     return 64;
   }
@@ -1634,6 +1661,14 @@ function validateToolPathArguments(toolName, args) {
     validateOptionalProjectPath(args.source, "source");
   }
 }
+
+const devWorkspaceExecutionProperties = Object.freeze({
+  workspace_id: Object.freeze({
+    type: "string",
+    pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE,
+    maxLength: 64,
+  }),
+});
 
 const toolDefinitions = [
   {
@@ -3894,6 +3929,51 @@ const toolDefinitions = [
     },
   },
 ];
+
+const workspaceAwareDeveloperToolNames = new Set([
+  "dev_list_directory",
+  "dev_read_file",
+  "dev_read_file_range",
+  "dev_search_files",
+  "dev_get_file_info",
+  "dev_create_file",
+  "dev_create_directory",
+  "dev_apply_patch",
+  "dev_move_path",
+  "dev_delete_file",
+  "dev_run_tests",
+  "dev_git_status",
+  "dev_git_diff",
+  "dev_git_diff_check",
+  "dev_git_commit",
+]);
+
+const workspaceRoutingEnabledForProfile = (
+  (process.env.MCP_TOOL_PROFILE?.trim() || "full") !== "chatgpt_public"
+);
+
+for (const definition of toolDefinitions) {
+  if (!workspaceAwareDeveloperToolNames.has(definition.name)) continue;
+  const properties = {
+    ...(definition.inputSchema?.properties ?? {}),
+    ...(workspaceRoutingEnabledForProfile ? devWorkspaceExecutionProperties : {}),
+  };
+  const required = new Set(definition.inputSchema?.required ?? []);
+  if (definition.name === "dev_git_commit") {
+    properties.expectedHead = {
+      type: "string",
+      minLength: 40,
+      maxLength: 40,
+      pattern: "^[A-Fa-f0-9]{40}$",
+    };
+    required.add("expectedHead");
+  }
+  definition.inputSchema = {
+    ...definition.inputSchema,
+    properties,
+    ...(required.size > 0 ? { required: [...required] } : {}),
+  };
+}
 
 const toolRegistry = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
 

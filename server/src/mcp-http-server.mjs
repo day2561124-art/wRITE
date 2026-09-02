@@ -599,6 +599,13 @@ const server = http.createServer(async (req, res) => {
   res.end('Method Not Allowed');
 });
 
+// Compatibility workaround for @modelcontextprotocol/sdk 1.29.0: an MCP
+// session is keyed by Mcp-Session-Id and must outlive any one HTTP/1.1 TCP
+// connection. The SDK can currently treat Node's default 5s idle keep-alive
+// socket close as a transport/session close, so keep the parent-side socket
+// alive until the upstream transport lifecycle no longer couples the two.
+server.keepAliveTimeout = 0;
+
 async function shutdown(signal) {
   console.error(
     '[mcp-http] received ' +

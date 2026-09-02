@@ -28,7 +28,9 @@ import {
   DEV_GIT_WHITESPACE_POLICY,
   isSecretName,
   isSupportedTextPath,
+  workspaceExecutionProvenance,
 } from "./mcp-development-readonly-tools.mjs";
+import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 import {
   controlledProcessEnvironment,
   createBoundedOutputCollector,
@@ -163,25 +165,38 @@ export function assertDevelopmentRelativePathPolicy(relativePath, label = "path"
   );
 }
 
-export function assertDevelopmentWritePathPolicy(resolved, label = "path") {
-  assertDevelopmentRelativePathPolicy(normalizeProjectPath(resolved), label);
+function normalizeDevelopmentPath(repositoryRoot, resolved) {
+  return path.relative(repositoryRoot, resolved).replaceAll(path.sep, "/");
+}
+
+function resolveInsideDevelopmentRoot(repositoryRoot, value, label) {
+  assertRepositoryRelativePath(value, label);
+  const resolved = path.resolve(repositoryRoot, value);
+  if (!isInside(path.resolve(repositoryRoot), resolved)) {
+    const scopeLabel = repositoryRoot === projectRoot ? "project" : "workspace";
+    throw new Error(`${label} must stay inside the ${scopeLabel}.`);
+  }
   return resolved;
 }
 
-function resolveDevelopmentPatchPath(value, label = "path") {
-  assertRepositoryRelativePath(value, label);
-  const resolved = resolveProjectPath(value, label);
-  assertAllowedPathPolicy(resolved, label);
-  return assertDevelopmentWritePathPolicy(resolved, label);
+export function assertDevelopmentWritePathPolicy(resolved, label = "path", repositoryRoot = projectRoot) {
+  assertDevelopmentRelativePathPolicy(normalizeDevelopmentPath(repositoryRoot, resolved), label);
+  return resolved;
 }
 
-async function assertExistingPatchFile(filePath, label = "path") {
+function resolveDevelopmentPatchPath(value, label = "path", repositoryRoot = projectRoot) {
+  const resolved = resolveInsideDevelopmentRoot(repositoryRoot, value, label);
+  assertAllowedPathPolicy(resolved, label, repositoryRoot);
+  return assertDevelopmentWritePathPolicy(resolved, label, repositoryRoot);
+}
+
+async function assertExistingPatchFile(filePath, label = "path", repositoryRoot = projectRoot) {
   if (!isSupportedTextPath(filePath)) {
     throw new Error(`${label} must reference a supported UTF-8 text file.`);
   }
   let info;
   try {
-    info = await assertExistingSafePath(filePath, label);
+    info = await assertExistingSafePath(filePath, label, repositoryRoot);
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(`${label} must reference an existing file.`);
@@ -197,10 +212,10 @@ async function assertExistingPatchFile(filePath, label = "path") {
   return info;
 }
 
-async function assertExistingSafeDevelopmentDirectory(directoryPath, label) {
+async function assertExistingSafeDevelopmentDirectory(directoryPath, label, repositoryRoot = projectRoot) {
   let info;
   try {
-    info = await assertExistingSafePath(directoryPath, label);
+    info = await assertExistingSafePath(directoryPath, label, repositoryRoot);
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(`${label} must reference an existing directory.`);
@@ -223,10 +238,27 @@ async function assertMissingDevelopmentPath(targetPath, label) {
   throw new Error(`${label} already exists; overwrite is not allowed.`);
 }
 
-async function assertSafeDestinationParent(targetPath, label) {
+async function assertSafeDestinationParent(targetPath, label, repositoryRoot = projectRoot) {
   const parentPath = path.dirname(targetPath);
-  await assertExistingSafeDevelopmentDirectory(parentPath, `${label} parent`);
+  await assertExistingSafeDevelopmentDirectory(parentPath, `${label} parent`, repositoryRoot);
   return parentPath;
+}
+
+async function resolveMutationContext(
+  input,
+  { workspaceContextResolver = resolveDevWorkspaceExecutionContext } = {},
+) {
+  return workspaceContextResolver(
+    { workspace_id: input?.workspace_id },
+    { mutation: true },
+  );
+}
+
+function attachMutationContext(result, context) {
+  return {
+    ...result,
+    workspace_context: workspaceExecutionProvenance(context),
+  };
 }
 
 async function withDevelopmentWriteLock(toolName, operation) {
@@ -294,8 +326,9 @@ function validateInput(input) {
 
 export async function dev_apply_patch(input = {}, options = {}) {
   validateInput(input);
-  const filePath = resolveDevelopmentPatchPath(input.path, "path");
-  await assertExistingPatchFile(filePath, "path");
+  const context = await resolveMutationContext(input, options);
+  const filePath = resolveDevelopmentPatchPath(input.path, "path", context.root);
+  await assertExistingPatchFile(filePath, "path", context.root);
 
   const expectedSha256 = input.expectedSha256 === undefined || input.expectedSha256 === null
     ? null
@@ -307,7 +340,7 @@ export async function dev_apply_patch(input = {}, options = {}) {
       type: "write",
       filePath,
       beforeRead: async () => {
-        await assertExistingPatchFile(filePath, "path");
+        await assertExistingPatchFile(filePath, "path", context.root);
       },
       contentFactory: async ({ previousExists, previousContent }) => {
         if (!previousExists) {
@@ -359,7 +392,7 @@ export async function dev_apply_patch(input = {}, options = {}) {
 
         result = {
           ok: true,
-          path: normalizeProjectPath(filePath),
+          path: normalizeDevelopmentPath(context.root, filePath),
           changed: true,
           before_sha256: beforeSha256,
           after_sha256: afterSha256,
@@ -372,13 +405,13 @@ export async function dev_apply_patch(input = {}, options = {}) {
   ], {
     ...(options.transactionMetadata ?? {}),
     tool: "dev_apply_patch",
-    path: normalizeProjectPath(filePath),
-  });
+    path: normalizeDevelopmentPath(context.root, filePath),
+  }, { repositoryRoot: context.root });
 
   if (!result) {
     throw new Error("dev_apply_patch completed without a patch result.");
   }
-  return result;
+  return attachMutationContext(result, context);
 }
 
 function validateDeleteInput(input) {
@@ -399,8 +432,9 @@ function validateDeleteInput(input) {
 
 export async function dev_delete_file(input = {}, options = {}) {
   validateDeleteInput(input);
-  const filePath = resolveDevelopmentPatchPath(input.path, "path");
-  const info = await assertExistingPatchFile(filePath, "path");
+  const context = await resolveMutationContext(input, options);
+  const filePath = resolveDevelopmentPatchPath(input.path, "path", context.root);
+  const info = await assertExistingPatchFile(filePath, "path", context.root);
   if (info.size > DEV_DELETE_FILE_MAX_BYTES) {
     throw new Error(`path exceeds the ${DEV_DELETE_FILE_MAX_BYTES}-byte delete limit.`);
   }
@@ -415,7 +449,7 @@ export async function dev_delete_file(input = {}, options = {}) {
       type: "delete",
       filePath,
       beforeRead: async () => {
-        const currentInfo = await assertExistingPatchFile(filePath, "path");
+        const currentInfo = await assertExistingPatchFile(filePath, "path", context.root);
         if (currentInfo.size > DEV_DELETE_FILE_MAX_BYTES) {
           throw new Error(`path exceeds the ${DEV_DELETE_FILE_MAX_BYTES}-byte delete limit.`);
         }
@@ -436,7 +470,7 @@ export async function dev_delete_file(input = {}, options = {}) {
         }
         result = {
           ok: true,
-          path: normalizeProjectPath(filePath),
+          path: normalizeDevelopmentPath(context.root, filePath),
           deleted: true,
           before_sha256: beforeSha256,
           before_bytes: previousContent.length,
@@ -448,13 +482,13 @@ export async function dev_delete_file(input = {}, options = {}) {
   ], {
     ...(options.transactionMetadata ?? {}),
     tool: "dev_delete_file",
-    path: normalizeProjectPath(filePath),
-  });
+    path: normalizeDevelopmentPath(context.root, filePath),
+  }, { repositoryRoot: context.root });
 
   if (!result) {
     throw new Error("dev_delete_file completed without a deletion result.");
   }
-  return result;
+  return attachMutationContext(result, context);
 }
 
 function validateCreateFileInput(input) {
@@ -486,16 +520,17 @@ function encodeCreateFileContent(content) {
   return encoded;
 }
 
-export async function dev_create_file(input = {}) {
+export async function dev_create_file(input = {}, options = {}) {
   validateCreateFileInput(input);
-  const filePath = resolveDevelopmentPatchPath(input.path, "path");
+  const context = await resolveMutationContext(input, options);
+  const filePath = resolveDevelopmentPatchPath(input.path, "path", context.root);
   if (!isSupportedTextPath(filePath)) {
     throw new Error("path must reference a supported UTF-8 text file.");
   }
   const content = encodeCreateFileContent(input.content);
 
-  return withDevelopmentWriteLock("dev_create_file", async ({ transactionId }) => {
-    await assertSafeDestinationParent(filePath, "path");
+  const result = await withDevelopmentWriteLock("dev_create_file", async ({ transactionId }) => {
+    await assertSafeDestinationParent(filePath, "path", context.root);
     await assertMissingDevelopmentPath(filePath, "path");
 
     const tempPath = path.join(
@@ -524,7 +559,7 @@ export async function dev_create_file(input = {}) {
       throw error;
     }
 
-    const info = await assertExistingSafePath(filePath, "path");
+    const info = await assertExistingSafePath(filePath, "path", context.root);
     if (!info.isFile()) {
       await unlink(filePath).catch(() => {});
       throw new Error("created path is not a regular file.");
@@ -538,12 +573,13 @@ export async function dev_create_file(input = {}) {
     return {
       ok: true,
       created: true,
-      path: normalizeProjectPath(filePath),
+      path: normalizeDevelopmentPath(context.root, filePath),
       bytes: verified.length,
       sha256: sha256(verified),
       create_semantics: "exclusive_temp_write_then_no_overwrite_link",
     };
   });
+  return attachMutationContext(result, context);
 }
 
 function validateCreateDirectoryInput(input) {
@@ -555,12 +591,13 @@ function validateCreateDirectoryInput(input) {
   }
 }
 
-export async function dev_create_directory(input = {}) {
+export async function dev_create_directory(input = {}, options = {}) {
   validateCreateDirectoryInput(input);
-  const directoryPath = resolveDevelopmentPatchPath(input.path, "path");
+  const context = await resolveMutationContext(input, options);
+  const directoryPath = resolveDevelopmentPatchPath(input.path, "path", context.root);
 
-  return withDevelopmentWriteLock("dev_create_directory", async () => {
-    await assertSafeDestinationParent(directoryPath, "path");
+  const result = await withDevelopmentWriteLock("dev_create_directory", async () => {
+    await assertSafeDestinationParent(directoryPath, "path", context.root);
     await assertMissingDevelopmentPath(directoryPath, "path");
     try {
       await mkdir(directoryPath, { recursive: false });
@@ -570,18 +607,19 @@ export async function dev_create_directory(input = {}) {
       }
       throw error;
     }
-    const info = await assertExistingSafePath(directoryPath, "path");
+    const info = await assertExistingSafePath(directoryPath, "path", context.root);
     if (!info.isDirectory()) {
       throw new Error("created path is not a directory.");
     }
     return {
       ok: true,
       created: true,
-      path: normalizeProjectPath(directoryPath),
+      path: normalizeDevelopmentPath(context.root, directoryPath),
       type: "directory",
       recursive: false,
     };
   });
+  return attachMutationContext(result, context);
 }
 
 function validateMovePathInput(input) {
@@ -603,10 +641,10 @@ function validateMovePathInput(input) {
   }
 }
 
-async function assertExistingMoveFile(filePath, label) {
+async function assertExistingMoveFile(filePath, label, repositoryRoot = projectRoot) {
   let info;
   try {
-    info = await assertExistingSafePath(filePath, label);
+    info = await assertExistingSafePath(filePath, label, repositoryRoot);
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(`${label} must reference an existing file.`);
@@ -628,10 +666,11 @@ async function assertExistingMoveFile(filePath, label) {
   return info;
 }
 
-export async function dev_move_path(input = {}) {
+export async function dev_move_path(input = {}, options = {}) {
   validateMovePathInput(input);
-  const sourcePath = resolveDevelopmentPatchPath(input.sourcePath, "sourcePath");
-  const destinationPath = resolveDevelopmentPatchPath(input.destinationPath, "destinationPath");
+  const context = await resolveMutationContext(input, options);
+  const sourcePath = resolveDevelopmentPatchPath(input.sourcePath, "sourcePath", context.root);
+  const destinationPath = resolveDevelopmentPatchPath(input.destinationPath, "destinationPath", context.root);
   if (!isSupportedTextPath(destinationPath)) {
     throw new Error("destinationPath must reference a supported UTF-8 text file.");
   }
@@ -642,9 +681,9 @@ export async function dev_move_path(input = {}) {
     ? null
     : input.expectedSha256.toLowerCase();
 
-  return withDevelopmentWriteLock("dev_move_path", async () => {
-    const sourceInfo = await assertExistingMoveFile(sourcePath, "sourcePath");
-    await assertSafeDestinationParent(destinationPath, "destinationPath");
+  const result = await withDevelopmentWriteLock("dev_move_path", async () => {
+    const sourceInfo = await assertExistingMoveFile(sourcePath, "sourcePath", context.root);
+    await assertSafeDestinationParent(destinationPath, "destinationPath", context.root);
     await assertMissingDevelopmentPath(destinationPath, "destinationPath");
 
     const sourceContent = await readFile(sourcePath);
@@ -658,7 +697,7 @@ export async function dev_move_path(input = {}) {
     try {
       await link(sourcePath, destinationPath);
       destinationLinked = true;
-      const destinationInfo = await assertExistingSafePath(destinationPath, "destinationPath");
+      const destinationInfo = await assertExistingSafePath(destinationPath, "destinationPath", context.root);
       if (!destinationInfo.isFile()) {
         throw new Error("destinationPath is not a regular file after move preparation.");
       }
@@ -688,8 +727,8 @@ export async function dev_move_path(input = {}) {
     return {
       ok: true,
       moved: true,
-      source_path: normalizeProjectPath(sourcePath),
-      destination_path: normalizeProjectPath(destinationPath),
+      source_path: normalizeDevelopmentPath(context.root, sourcePath),
+      destination_path: normalizeDevelopmentPath(context.root, destinationPath),
       bytes: sourceInfo.size,
       sha256: beforeSha256,
       source_exists: false,
@@ -697,6 +736,7 @@ export async function dev_move_path(input = {}) {
       move_semantics: "file_only_hardlink_then_unlink_no_overwrite",
     };
   });
+  return attachMutationContext(result, context);
 }
 
 function validateGetFileInfoInput(input) {
@@ -708,17 +748,22 @@ function validateGetFileInfoInput(input) {
   }
 }
 
-export async function dev_get_file_info(input = {}) {
+export async function dev_get_file_info(input = {}, options = {}) {
   validateGetFileInfoInput(input);
-  const targetPath = resolveDevelopmentPatchPath(input.path, "path");
+  const workspaceContextResolver = options.workspaceContextResolver ?? resolveDevWorkspaceExecutionContext;
+  const context = await workspaceContextResolver(
+    { workspace_id: input.workspace_id },
+    { mutation: false },
+  );
+  const targetPath = resolveDevelopmentPatchPath(input.path, "path", context.root);
   let rawInfo;
   try {
     rawInfo = await lstat(targetPath);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    await assertSafeDestinationParent(targetPath, "path");
-    return {
-      path: normalizeProjectPath(targetPath),
+    await assertSafeDestinationParent(targetPath, "path", context.root);
+    return attachMutationContext({
+      path: normalizeDevelopmentPath(context.root, targetPath),
       exists: false,
       type: null,
       size: null,
@@ -730,13 +775,13 @@ export async function dev_get_file_info(input = {}) {
       protected: false,
       writable: true,
       classification: "approved_development_path",
-    };
+    }, context);
   }
 
-  const info = await assertExistingSafePath(targetPath, "path");
+  const info = await assertExistingSafePath(targetPath, "path", context.root);
   if (info.isDirectory()) {
-    return {
-      path: normalizeProjectPath(targetPath),
+    return attachMutationContext({
+      path: normalizeDevelopmentPath(context.root, targetPath),
       exists: true,
       type: "directory",
       size: info.size,
@@ -748,7 +793,7 @@ export async function dev_get_file_info(input = {}) {
       protected: false,
       writable: true,
       classification: "approved_development_path",
-    };
+    }, context);
   }
   if (!info.isFile()) {
     throw new Error("path must reference a regular file or directory.");
@@ -761,8 +806,8 @@ export async function dev_get_file_info(input = {}) {
   }
   const content = await readFile(targetPath);
   decodeText(content, "path");
-  return {
-    path: normalizeProjectPath(targetPath),
+  return attachMutationContext({
+    path: normalizeDevelopmentPath(context.root, targetPath),
     exists: true,
     type: "file",
     size: info.size,
@@ -774,7 +819,7 @@ export async function dev_get_file_info(input = {}) {
     protected: false,
     writable: true,
     classification: "approved_development_path",
-  };
+  }, context);
 }
 
 export const DEV_GIT_COMMIT_MAX_PATHS = 100;
@@ -1609,7 +1654,43 @@ export function createDevGitCommitTool({
   };
 }
 
-export const dev_git_commit = createDevGitCommitTool();
+const devGitCommitShaPattern = /^[A-Fa-f0-9]{40}$/u;
+
+export async function dev_git_commit(input = {}, options = {}) {
+  const startedAt = Date.now();
+  if (typeof input?.expectedHead !== "string" || !devGitCommitShaPattern.test(input.expectedHead)) {
+    return failureResult({
+      reason: "expectedHead must be exactly 40 hexadecimal Git SHA-1 characters.",
+      executionOk: false,
+      durationMs: Date.now() - startedAt,
+    });
+  }
+
+  let context;
+  try {
+    context = await resolveMutationContext(input, options);
+  } catch (error) {
+    return failureResult({
+      reason: redactProcessOutput(error.message),
+      executionOk: false,
+      durationMs: Date.now() - startedAt,
+    });
+  }
+
+  const expectedHead = input.expectedHead.toLowerCase();
+  if (context.current_head !== expectedHead) {
+    return attachMutationContext(failureResult({
+      reason: `STALE_HEAD: current workspace HEAD ${context.current_head} does not match expectedHead ${expectedHead}.`,
+      executionOk: true,
+      branch: context.branch,
+      durationMs: Date.now() - startedAt,
+    }), context);
+  }
+
+  const commitTool = createDevGitCommitTool({ repositoryRoot: context.root });
+  const result = await commitTool({ paths: input.paths, message: input.message });
+  return attachMutationContext(result, context);
+}
 
 export function getDevGitCommitCommandMapping() {
   const hooksPlaceholder = "<server-owned-empty-hooks-dir>";

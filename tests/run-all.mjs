@@ -38,6 +38,7 @@ const steps = [
 
   ["Launcher contract", ["tests/launcher.test.mjs"]],
   ["MCP tunnel launcher", ["tests/mcp-tunnel-launcher.test.mjs"]],
+  ["MCP development workstream/workspace runtime", ["tests/mcp/mcp-development-workstream-tools.test.mjs"]],
 
   ["Path policy security", ["tests/security/path-policy.test.mjs"]],
 

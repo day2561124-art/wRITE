@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
 import { createServer } from "node:net";
 import {
   mkdir,
@@ -196,6 +197,173 @@ async function waitForPortAvailable(port, timeoutMs = 10_000) {
   throw new Error(`Port ${port} did not become available after MCP cleanup.`);
 }
 
+function parseMcpHttpPayload(text) {
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const messages = [];
+    for (const line of text.split(/\r?\n/u)) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice("data:".length).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        messages.push(JSON.parse(data));
+      } catch {
+        // Ignore non-JSON SSE fields; the assertion below reports the body.
+      }
+    }
+    return messages.at(-1) ?? text;
+  }
+}
+
+function postMcpHttpRequest({
+  port,
+  agent,
+  sessionId,
+  protocolVersion,
+  message,
+}) {
+  const payload = JSON.stringify(message);
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+    "Content-Length": Buffer.byteLength(payload),
+  };
+  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
+  if (protocolVersion) headers["MCP-Protocol-Version"] = protocolVersion;
+
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/mcp",
+        method: "POST",
+        agent,
+        headers,
+      },
+      (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => { text += chunk; });
+        response.once("error", reject);
+        response.once("end", () => {
+          resolve({
+            statusCode: response.statusCode,
+            headers: response.headers,
+            text,
+            payload: parseMcpHttpPayload(text),
+          });
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end(payload);
+  });
+}
+
+async function verifyMcpSessionSurvivesIdleConnectionBoundary(port) {
+  const firstConnectionAgent = new http.Agent({
+    keepAlive: true,
+    maxSockets: 1,
+    maxFreeSockets: 1,
+  });
+  const secondConnectionAgent = new http.Agent({
+    keepAlive: true,
+    maxSockets: 1,
+    maxFreeSockets: 1,
+  });
+
+  try {
+    const initialize = await postMcpHttpRequest({
+      port,
+      agent: firstConnectionAgent,
+      message: {
+        jsonrpc: "2.0",
+        id: "idle-session-init",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: {
+            name: "mcp-http-idle-session-lifecycle-test",
+            version: "1.0.0",
+          },
+        },
+      },
+    });
+    assert(
+      initialize.statusCode === 200 && initialize.payload?.result,
+      `MCP session initialize failed. status=${initialize.statusCode} body=${initialize.text}`,
+    );
+
+    const sessionIdHeader = initialize.headers["mcp-session-id"];
+    const sessionId = Array.isArray(sessionIdHeader)
+      ? sessionIdHeader[0]
+      : sessionIdHeader;
+    assert(sessionId, "MCP initialize response did not include Mcp-Session-Id.");
+    const protocolVersion = initialize.payload.result.protocolVersion ?? "2025-03-26";
+
+    const initialized = await postMcpHttpRequest({
+      port,
+      agent: firstConnectionAgent,
+      sessionId,
+      protocolVersion,
+      message: {
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      },
+    });
+    assert(
+      initialized.statusCode === 202 || initialized.statusCode === 200,
+      `MCP initialized notification failed. status=${initialized.statusCode} body=${initialized.text}`,
+    );
+
+    const beforeIdle = await postMcpHttpRequest({
+      port,
+      agent: firstConnectionAgent,
+      sessionId,
+      protocolVersion,
+      message: {
+        jsonrpc: "2.0",
+        id: "idle-session-before",
+        method: "tools/list",
+        params: {},
+      },
+    });
+    assert(
+      beforeIdle.statusCode === 200 && Array.isArray(beforeIdle.payload?.result?.tools),
+      `MCP pre-idle tools/list failed. status=${beforeIdle.statusCode} body=${beforeIdle.text}`,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 6_200));
+
+    // A distinct Agent guarantees a distinct TCP connection while preserving
+    // the MCP session identity carried only by Mcp-Session-Id.
+    const afterIdle = await postMcpHttpRequest({
+      port,
+      agent: secondConnectionAgent,
+      sessionId,
+      protocolVersion,
+      message: {
+        jsonrpc: "2.0",
+        id: "idle-session-after",
+        method: "tools/list",
+        params: {},
+      },
+    });
+    assert(
+      afterIdle.statusCode === 200 && Array.isArray(afterIdle.payload?.result?.tools),
+      `MCP session did not survive >5s idle/new-connection boundary. status=${afterIdle.statusCode} body=${afterIdle.text}`,
+    );
+  } finally {
+    firstConnectionAgent.destroy();
+    secondConnectionAgent.destroy();
+  }
+}
+
 function externalProcessHandle(pid) {
   return {
     pid,
@@ -251,6 +419,10 @@ async function verifyLauncherMcpProfile({
       result.stdout.includes(`MCP_TOOL_PROFILE=${expectedProfile}`),
       `Launcher did not report MCP_TOOL_PROFILE=${expectedProfile}. stdout=${result.stdout}`,
     );
+
+    if (expectReload) {
+      await verifyMcpSessionSurvivesIdleConnectionBoundary(port);
+    }
 
     client = new Client(
       { name: `mcp-tunnel-${label}-profile-test`, version: "1.0.0" },

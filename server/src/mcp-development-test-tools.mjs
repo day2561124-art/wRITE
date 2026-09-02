@@ -9,6 +9,8 @@ import {
   terminateProcessTree,
 } from "./process-control.mjs";
 import { projectRoot } from "./project-paths.mjs";
+import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
+import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 
 export const DEV_TEST_SUITES = Object.freeze(["mcp", "mcp_tunnel", "all"]);
 export const DEV_TEST_OUTPUT_MAX_CHARACTERS = 128 * 1024;
@@ -242,7 +244,7 @@ function baseResult(suite, startedAt) {
   };
 }
 
-async function runDefinition(suite, definition, outputMaxCharacters, lockHandle) {
+async function runDefinition(suite, definition, outputMaxCharacters, lockHandle, repositoryRoot) {
   const startedAt = Date.now();
   const stdout = createBoundedCollector(outputMaxCharacters);
   const stderr = createBoundedCollector(outputMaxCharacters);
@@ -255,7 +257,7 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle)
 
   try {
     child = spawn(definition.executable, [...definition.argv], {
-      cwd: projectRoot,
+      cwd: repositoryRoot,
       env: controlledEnvironment(definition.fixedEnvironment),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -327,11 +329,24 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle)
   };
 }
 
+function sharedTestWorkspaceContext() {
+  return {
+    workspace_id: "dev_workspace_shared_repository_v1",
+    workstream_id: null,
+    workspace_type: "shared",
+    root: projectRoot,
+    branch: "main",
+    base_head: null,
+    current_head: null,
+  };
+}
+
 export function createDevTestRunner({
   suiteDefinitions = productionSuiteDefinitions,
   lockPath = productionLockPath,
   resultPath = lastResultPathForLock(lockPath),
   outputMaxCharacters = DEV_TEST_OUTPUT_MAX_CHARACTERS,
+  workspaceContextResolver = async () => sharedTestWorkspaceContext(),
 } = {}) {
   return async function runTests(input = {}) {
     const startedAt = Date.now();
@@ -341,6 +356,7 @@ export function createDevTestRunner({
       throw new Error(`suite must be one of: ${DEV_TEST_SUITES.join(", ")}.`);
     }
 
+    let context;
     let lockHandle;
     try {
       lockHandle = await acquireRunLock(lockPath, suite);
@@ -357,9 +373,28 @@ export function createDevTestRunner({
       };
     }
 
+    try {
+      context = await workspaceContextResolver(
+        { workspace_id: input?.workspace_id },
+        { mutation: true },
+      );
+    } catch (error) {
+      await releaseRunLock(lockHandle, lockPath);
+      return {
+        ...baseResult(suite, startedAt),
+        stderr: redactTestOutput(`Could not resolve workspace execution context: ${error.message}`),
+      };
+    }
+
     let result;
     try {
-      result = await runDefinition(suite, definition, outputMaxCharacters, lockHandle);
+      result = await runDefinition(
+        suite,
+        definition,
+        outputMaxCharacters,
+        lockHandle,
+        context.root,
+      );
     } catch (error) {
       result = {
         ...baseResult(suite, startedAt),
@@ -382,11 +417,16 @@ export function createDevTestRunner({
     } finally {
       await releaseRunLock(lockHandle, lockPath);
     }
-    return result;
+    return {
+      ...result,
+      workspace_context: workspaceExecutionProvenance(context),
+    };
   };
 }
 
-export const dev_run_tests = createDevTestRunner();
+export const dev_run_tests = createDevTestRunner({
+  workspaceContextResolver: resolveDevWorkspaceExecutionContext,
+});
 
 export function getDevTestSuiteMapping() {
   return Object.fromEntries(

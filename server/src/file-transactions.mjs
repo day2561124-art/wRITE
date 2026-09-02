@@ -123,21 +123,40 @@ async function writeManifest(manifest, targetDirectory = transactionDir) {
   );
 }
 
+function transactionPathInside(repositoryRoot, filePath, label) {
+  const root = path.resolve(repositoryRoot);
+  const resolved = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : path.resolve(root, filePath);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`${label} must stay inside the transaction repository root.`);
+  }
+  return resolved;
+}
+
+function normalizeTransactionPath(repositoryRoot, filePath) {
+  return path.relative(repositoryRoot, filePath).replaceAll(path.sep, "/");
+}
+
 export function createTransactionId() {
   return `TX-${new Date().toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
-export async function commitFileTransaction(name, operations, metadata = {}) {
+export async function commitFileTransaction(name, operations, metadata = {}, options = {}) {
   if (!Array.isArray(operations) || operations.length === 0) {
     throw new Error("A file transaction requires at least one operation.");
   }
 
+  const repositoryRoot = options.repositoryRoot ?? projectRoot;
   const transactionId = metadata.transaction_id || createTransactionId();
   const manifestDirectory = transactionDirectoryFor(metadata);
   const normalizedOperations = operations.map((operation) => ({
     ...operation,
     type: operation.type ?? "write",
-    filePath: resolveProjectPath(operation.filePath, `${name} target`),
+    filePath: repositoryRoot === projectRoot
+      ? resolveProjectPath(operation.filePath, `${name} target`)
+      : transactionPathInside(repositoryRoot, operation.filePath, `${name} target`),
   }));
   const uniquePaths = new Set(normalizedOperations.map((operation) => operation.filePath));
   if (uniquePaths.size !== normalizedOperations.length) {
@@ -237,10 +256,10 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
       pid: process.pid,
       started_at: startedAt.toISOString(),
       completed_at: new Date().toISOString(),
-      affected_paths: prepared.map((item) => normalizeProjectPath(item.filePath)),
+      affected_paths: prepared.map((item) => normalizeTransactionPath(repositoryRoot, item.filePath)),
       operations: prepared.map((item) => ({
         type: item.type,
-        path: normalizeProjectPath(item.filePath),
+        path: normalizeTransactionPath(repositoryRoot, item.filePath),
         previous_exists: item.previous.exists,
         previous_bytes: item.previous.content.length,
         next_bytes: item.nextContent?.length ?? 0,
@@ -267,7 +286,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
           await rm(item.filePath, { force: true });
         }
       } catch (rollbackError) {
-        rollbackErrors.push(`${normalizeProjectPath(item.filePath)}: ${rollbackError.message}`);
+        rollbackErrors.push(`${normalizeTransactionPath(repositoryRoot, item.filePath)}: ${rollbackError.message}`);
       }
     }
     for (const item of prepared) {
@@ -281,7 +300,7 @@ export async function commitFileTransaction(name, operations, metadata = {}) {
         pid: process.pid,
         started_at: startedAt.toISOString(),
         completed_at: new Date().toISOString(),
-        affected_paths: prepared.map((item) => normalizeProjectPath(item.filePath)),
+        affected_paths: prepared.map((item) => normalizeTransactionPath(repositoryRoot, item.filePath)),
         metadata: Object.fromEntries(
           Object.entries(metadata).filter(([key]) => !key.startsWith("test_")),
         ),

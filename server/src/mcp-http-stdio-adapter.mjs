@@ -24,6 +24,7 @@ export function createStdioSession(options = {}) {
   let generation = 0;
   let restarting = false;
   let closed = false;
+  let lastExit = null;
 
   function notifyPendingListeners(error) {
     for (const [id, cb] of listeners.entries()) {
@@ -32,7 +33,7 @@ export function createStdioSession(options = {}) {
     }
   }
 
-  function bindChild(nextChild) {
+  function bindChild(nextChild, childGeneration) {
     const detachPreparedTurnBrokerIpc = options.preparedTurnBroker
       ? attachWorldSimulationPreparedTurnBrokerIpc(
         nextChild,
@@ -93,19 +94,39 @@ export function createStdioSession(options = {}) {
 
     nextChild.stderr.on('data', (chunk) => {
       const s = chunk.toString('utf8');
-      console.error('[mcp-server stderr]', s);
+      console.error(`[mcp-server stderr pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}]`, s);
     });
 
     nextChild.on('error', (err) => {
-      console.error('[mcp-server child error]', err);
-      if (child === nextChild) notifyPendingListeners(new Error('child process error'));
+      console.error(
+        `[mcp-server child error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}]`,
+        err,
+      );
+      if (child === nextChild) {
+        notifyPendingListeners(new Error(
+          `child process error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}: ${err?.message ?? String(err)}`,
+        ));
+      }
     });
 
     nextChild.on('exit', (code, signal) => {
       detachPreparedTurnBrokerIpc();
-      console.error(`[mcp-server] child exited code=${code} signal=${signal}`);
+      lastExit = {
+        child_pid: nextChild.pid ?? null,
+        generation: childGeneration,
+        exit_code: code,
+        signal: signal ?? null,
+        restarting,
+        closed,
+        exited_at: new Date().toISOString(),
+      };
+      console.error(
+        `[mcp-server] child exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal} restarting=${lastExit.restarting} closed=${lastExit.closed}`,
+      );
       if (child === nextChild && !restarting && !closed) {
-        notifyPendingListeners(new Error('child process exited'));
+        notifyPendingListeners(new Error(
+          `child process exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal}`,
+        ));
       }
     });
   }
@@ -123,7 +144,7 @@ export function createStdioSession(options = {}) {
     });
     generation += 1;
     child = nextChild;
-    bindChild(nextChild);
+    bindChild(nextChild, generation);
     return nextChild;
   }
 
@@ -249,6 +270,7 @@ export function createStdioSession(options = {}) {
       restarting,
       closed,
       initialized: initializeRequest !== null,
+      last_exit: lastExit,
     };
   }
 

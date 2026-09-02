@@ -26,6 +26,7 @@ export const DEV_WORKSPACE_TYPES = Object.freeze(["isolated_worktree"]);
 export const DEV_WORKSPACE_STATES = Object.freeze(["creating", "active", "removing", "removed", "error"]);
 export const DEV_WORKSPACE_MAX_LIST_RESULTS = 100;
 export const DEV_WORKSPACE_ID_PATTERN_SOURCE = "^dev_workspace_[a-f0-9]{24}$";
+export const DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE = "^(?:dev_workspace_[a-f0-9]{24}|dev_workspace_shared_repository_v1)$";
 export const DEV_WORKSTREAM_LIST_LIFECYCLES = Object.freeze(["all", "active", "terminal"]);
 export const DEV_WORKSTREAM_MAX_LABEL_CHARACTERS = 160;
 export const DEV_WORKSTREAM_MAX_DEPENDENCIES = 16;
@@ -450,6 +451,12 @@ async function runFixedGit(args, { cwd = projectRoot, timeout = 30_000, maxBuffe
   });
 }
 
+function normalizeGitMetadataPath(root, value, label) {
+  const raw = String(value ?? "").trim();
+  if (!raw) throw new Error(`${label} could not be resolved.`);
+  return path.resolve(root, raw);
+}
+
 async function ensureSafeWorktreeRoot(root = worktreeRoot) {
   const parent = path.dirname(root);
   const parentInfo = await lstat(parent);
@@ -779,6 +786,78 @@ export function createDevWorkstreamRegistryService({
         throw error;
       }
     });
+  }
+
+  async function resolveExecutionContext(input = {}, { mutation = false } = {}) {
+    const allowed = new Set(["workspace_id"]);
+    assertObject(input, "workspace execution context input", allowed);
+    const workspaceId = input.workspace_id ?? DEV_WORKSTREAM_WORKSPACE_ID;
+
+    if (workspaceId === DEV_WORKSTREAM_WORKSPACE_ID) {
+      const topLevel = await gitRunner(["rev-parse", "--show-toplevel"], { cwd: repositoryRoot });
+      const gitDir = await gitRunner(["rev-parse", "--git-dir"], { cwd: repositoryRoot });
+      const gitCommonDir = await gitRunner(["rev-parse", "--git-common-dir"], { cwd: repositoryRoot });
+      const head = await gitRunner(["rev-parse", "--verify", "HEAD"], { cwd: repositoryRoot });
+      const branch = await gitRunner(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repositoryRoot });
+      const resolvedRoot = path.resolve(String(topLevel.stdout).trim());
+      const currentHead = String(head.stdout).trim().toLowerCase();
+      if (resolvedRoot !== path.resolve(repositoryRoot)) throw new Error("Shared workspace Git top-level does not match the canonical repository root.");
+      if (!gitSha1Pattern.test(currentHead)) throw new Error("Shared workspace HEAD is invalid.");
+      return {
+        workspace_id: DEV_WORKSTREAM_WORKSPACE_ID,
+        workstream_id: null,
+        workspace_type: "shared",
+        root: resolvedRoot,
+        branch: String(branch.stdout).trim() || null,
+        base_head: currentHead,
+        current_head: currentHead,
+        git_dir: normalizeGitMetadataPath(resolvedRoot, gitDir.stdout, "git_dir"),
+        git_common_dir: normalizeGitMetadataPath(resolvedRoot, gitCommonDir.stdout, "git_common_dir"),
+        lifecycle_state: "active",
+        workstream_state: null,
+        healthy: true,
+        mutation_allowed: true,
+      };
+    }
+
+    if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) {
+      throw new Error("workspace_id must be a server-issued workspace ID.");
+    }
+    const { registry } = await readRegistryWithHealth();
+    const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace) ?? null;
+    if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
+    if (record.workspace.state !== "active") throw new Error(`Workspace is not active: ${record.workspace.state}.`);
+    if (mutation && terminalStateSet.has(record.state)) throw new Error("Terminal workstreams cannot perform workspace mutations.");
+
+    const health = await inspectRegisteredWorkspace(record.workspace);
+    if (!health.healthy || record.workspace.locked !== health.locked) throw new Error("Workspace mapping is unhealthy; execution is refused.");
+    const root = absoluteWorkspacePath(workspaceId);
+    const topLevel = await gitRunner(["rev-parse", "--show-toplevel"], { cwd: root });
+    const gitDir = await gitRunner(["rev-parse", "--git-dir"], { cwd: root });
+    const gitCommonDir = await gitRunner(["rev-parse", "--git-common-dir"], { cwd: root });
+    const head = await gitRunner(["rev-parse", "--verify", "HEAD"], { cwd: root });
+    const branch = await gitRunner(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: root });
+    const resolvedRoot = path.resolve(String(topLevel.stdout).trim());
+    const currentHead = String(head.stdout).trim().toLowerCase();
+    const branchName = String(branch.stdout).trim() || null;
+    if (resolvedRoot !== path.resolve(root)) throw new Error("Workspace Git top-level does not match the registered worktree root.");
+    if (!gitSha1Pattern.test(currentHead)) throw new Error("Workspace HEAD is invalid.");
+    if (branchName !== record.workspace.branch_name) throw new Error("Workspace branch no longer matches the registry mapping.");
+    return {
+      workspace_id: workspaceId,
+      workstream_id: record.workstream_id,
+      workspace_type: record.workspace.workspace_type,
+      root: resolvedRoot,
+      branch: branchName,
+      base_head: record.workspace.base_head,
+      current_head: currentHead,
+      git_dir: normalizeGitMetadataPath(resolvedRoot, gitDir.stdout, "git_dir"),
+      git_common_dir: normalizeGitMetadataPath(resolvedRoot, gitCommonDir.stdout, "git_common_dir"),
+      lifecycle_state: record.workspace.state,
+      workstream_state: record.state,
+      healthy: true,
+      mutation_allowed: !terminalStateSet.has(record.state),
+    };
   }
 
   async function getWorkspace(input = {}) {
@@ -1196,6 +1275,7 @@ export function createDevWorkstreamRegistryService({
     lockWorkspace,
     unlockWorkspace,
     removeIsolated,
+    resolveExecutionContext,
     registryPath: storagePath,
   };
 }
@@ -1214,3 +1294,4 @@ export const dev_workspace_list_workspaces = defaultService.listWorkspaces;
 export const dev_workspace_lock = defaultService.lockWorkspace;
 export const dev_workspace_unlock = defaultService.unlockWorkspace;
 export const dev_workspace_remove_isolated = defaultService.removeIsolated;
+export const resolveDevWorkspaceExecutionContext = defaultService.resolveExecutionContext;

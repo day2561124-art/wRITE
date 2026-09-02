@@ -1766,6 +1766,7 @@ try {
       arguments: {
         paths: ["../must-not-stage"],
         message: "test: sk-proj-1234567890abcdef must be redacted",
+        expectedHead: fixtureHead(rootDir),
       },
       _meta: { actor: "dev-git-commit-audit-fixture" },
     },
