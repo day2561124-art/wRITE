@@ -49,6 +49,23 @@ function safeTransportSend(transport, payload, label = 'transport.send') {
 }
 
 const DEFAULT_PORT = 8787;
+const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_MAX_IDLE_SESSION_COUNT = 32;
+const DEFAULT_MAX_TOTAL_SESSION_COUNT = 64;
+const DEFAULT_SESSION_REAPER_INTERVAL_MS = 60 * 1000;
+
+function boundedIntegerEnvironment(name, fallback, minimum, maximum) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  if (!/^\d+$/u.test(raw)) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}.`);
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}.`);
+  }
+  return parsed;
+}
 
 function readConfig(configPath) {
   try {
@@ -94,6 +111,12 @@ function writeJsonRpcError(res, statusCode, code, message) {
 function readPostBody(req) {
   return new Promise((resolve) => {
     let body = '';
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
 
     req.on('data', (chunk) => {
       body += chunk.toString('utf8');
@@ -101,11 +124,13 @@ function readPostBody(req) {
 
     req.on('end', () => {
       try {
-        resolve(JSON.parse(body));
+        finish(JSON.parse(body));
       } catch {
-        resolve(undefined);
+        finish(undefined);
       }
     });
+    req.once('aborted', () => finish(undefined));
+    req.once('error', () => finish(undefined));
   });
 }
 
@@ -125,6 +150,133 @@ const config = {
   ...(portOverride === null ? {} : { port: portOverride }),
 };
 const sessions = new Map();
+const bridgeEntries = new Set();
+const sessionIdleTimeoutMs = boundedIntegerEnvironment(
+  'MCP_HTTP_SESSION_IDLE_TIMEOUT_MS',
+  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+  100,
+  24 * 60 * 60 * 1000,
+);
+const maxIdleSessionCount = boundedIntegerEnvironment(
+  'MCP_HTTP_MAX_IDLE_SESSION_COUNT',
+  DEFAULT_MAX_IDLE_SESSION_COUNT,
+  1,
+  10_000,
+);
+const maxTotalSessionCount = boundedIntegerEnvironment(
+  'MCP_HTTP_MAX_TOTAL_SESSION_COUNT',
+  DEFAULT_MAX_TOTAL_SESSION_COUNT,
+  1,
+  10_000,
+);
+const sessionReaperIntervalMs = boundedIntegerEnvironment(
+  'MCP_HTTP_SESSION_REAPER_INTERVAL_MS',
+  Math.min(DEFAULT_SESSION_REAPER_INTERVAL_MS, Math.max(100, Math.floor(sessionIdleTimeoutMs / 4))),
+  50,
+  60 * 60 * 1000,
+);
+let sessionReaperRunning = false;
+
+function touchBridgeSession(entry) {
+  if (!entry || entry.closed) return;
+  entry.last_activity_at = Date.now();
+}
+
+function beginBridgeRequest(entry) {
+  if (!entry || entry.closed) return false;
+  entry.active_request_count += 1;
+  touchBridgeSession(entry);
+  return true;
+}
+
+function endBridgeRequest(entry) {
+  if (!entry) return;
+  entry.active_request_count = Math.max(0, entry.active_request_count - 1);
+  touchBridgeSession(entry);
+  enforceIdleSessionCap();
+}
+
+function isBridgeSessionIdle(entry) {
+  return Boolean(
+    entry
+    && !entry.closed
+    && !entry.expiring
+    && entry.active_request_count === 0
+    && entry.session.pendingCallCount() === 0
+  );
+}
+
+function expireBridgeSession(entry, reason) {
+  if (!isBridgeSessionIdle(entry)) return false;
+  entry.expiring = true;
+  const sessionId = entry.transport.sessionId ?? null;
+  const childPid = entry.session.getStatus().child_pid;
+  closeBridgeSession(entry, reason);
+  try {
+    const closeResult = entry.transport.close();
+    if (closeResult && typeof closeResult.then === 'function') {
+      closeResult.catch((error) => {
+        console.error(
+          `[mcp-http] transport close after session eviction failed id=${sessionId ?? 'uninitialized'} reason=${reason}`,
+          error,
+        );
+      });
+    }
+  } catch (error) {
+    console.error(
+      `[mcp-http] transport close after session eviction failed id=${sessionId ?? 'uninitialized'} reason=${reason}`,
+      error,
+    );
+  }
+  console.error(
+    `[mcp-http] session evicted id=${sessionId ?? 'uninitialized'} reason=${reason} child_pid=${childPid ?? 'unknown'}`,
+  );
+  return true;
+}
+
+function sortedIdleBridgeEntries() {
+  return [...bridgeEntries]
+    .filter((entry) => isBridgeSessionIdle(entry))
+    .sort((left, right) => left.last_activity_at - right.last_activity_at);
+}
+
+function enforceIdleSessionCap() {
+  const idleEntries = sortedIdleBridgeEntries();
+  const excess = idleEntries.length - maxIdleSessionCount;
+  for (let index = 0; index < excess; index += 1) {
+    expireBridgeSession(idleEntries[index], 'max_idle_session_count');
+  }
+}
+
+function ensureBridgeSessionCapacity() {
+  enforceIdleSessionCap();
+  while (bridgeEntries.size >= maxTotalSessionCount) {
+    const oldestIdle = sortedIdleBridgeEntries()[0];
+    if (!oldestIdle || !expireBridgeSession(oldestIdle, 'max_total_session_count')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function reapIdleSessions() {
+  if (sessionReaperRunning) return;
+  sessionReaperRunning = true;
+  try {
+    const now = Date.now();
+    for (const entry of [...bridgeEntries]) {
+      if (!isBridgeSessionIdle(entry)) continue;
+      if (now - entry.last_activity_at < sessionIdleTimeoutMs) continue;
+      expireBridgeSession(entry, 'idle_timeout');
+    }
+    enforceIdleSessionCap();
+  } finally {
+    sessionReaperRunning = false;
+  }
+}
+
+const sessionReaper = setInterval(reapIdleSessions, sessionReaperIntervalMs);
+sessionReaper.unref?.();
 // The long-lived HTTP parent owns the world-simulation prepared-turn broker
 // and the bounded developer reload/integration control routes.
 // Legacy raw-story payloads no longer cross MCP child boundaries.
@@ -314,18 +466,21 @@ async function handleDevMcpReload(entry, message) {
   }
 }
 
-function closeBridgeSession(entry) {
+function closeBridgeSession(entry, reason = 'transport_closed') {
   if (!entry || entry.closed) {
     return;
   }
 
   entry.closed = true;
+  entry.close_reason = reason;
 
   const sessionId = entry.transport.sessionId;
+  const childPid = entry.session.getStatus().child_pid;
 
   if (sessionId && sessions.get(sessionId) === entry) {
     sessions.delete(sessionId);
   }
+  bridgeEntries.delete(entry);
 
   try {
     entry.session.close();
@@ -335,6 +490,10 @@ function closeBridgeSession(entry) {
       error,
     );
   }
+
+  console.error(
+    `[mcp-http] session lifecycle closed id=${sessionId ?? 'uninitialized'} reason=${reason} child_pid=${childPid ?? 'unknown'} remaining_sessions=${sessions.size}`,
+  );
 }
 
 function bindBridge(entry) {
@@ -441,11 +600,17 @@ function createBridgeSession() {
 
     onsessioninitialized: (sessionId) => {
       sessions.set(sessionId, entry);
+      touchBridgeSession(entry);
 
       console.error(
         '[mcp-http] session initialized id=' +
-          sessionId,
+          sessionId +
+          ' child_pid=' +
+          (entry.session.getStatus().child_pid ?? 'unknown') +
+          ' sessions=' +
+          sessions.size,
       );
+      enforceIdleSessionCap();
     },
 
     onsessionclosed: (sessionId) => {
@@ -466,7 +631,12 @@ function createBridgeSession() {
     transport,
     session,
     closed: false,
+    expiring: false,
+    close_reason: null,
+    active_request_count: 0,
+    last_activity_at: Date.now(),
   };
+  bridgeEntries.add(entry);
 
   bindBridge(entry);
 
@@ -504,8 +674,8 @@ const server = http.createServer(async (req, res) => {
   const sessionId = getSessionId(req);
 
   if (req.method === 'POST') {
-    const parsed = await readPostBody(req);
     let entry;
+    let requestStarted = false;
 
     if (sessionId) {
       entry = sessions.get(sessionId);
@@ -519,19 +689,39 @@ const server = http.createServer(async (req, res) => {
         );
         return;
       }
-    } else if (
-      parsed !== undefined &&
-      isInitializeRequest(parsed)
-    ) {
-      entry = createBridgeSession();
-    } else {
-      writeJsonRpcError(
-        res,
-        400,
-        -32000,
-        'Bad Request: No valid session ID provided',
-      );
-      return;
+      requestStarted = beginBridgeRequest(entry);
+    }
+
+    const parsed = await readPostBody(req);
+
+    if (!entry) {
+      if (
+        parsed !== undefined &&
+        isInitializeRequest(parsed)
+      ) {
+        if (!ensureBridgeSessionCapacity()) {
+          console.error(
+            `[mcp-http] session initialization rejected reason=max_total_session_count total_sessions=${bridgeEntries.size} max_total_sessions=${maxTotalSessionCount}`,
+          );
+          writeJsonRpcError(
+            res,
+            503,
+            -32002,
+            'MCP session capacity reached; retry later.',
+          );
+          return;
+        }
+        entry = createBridgeSession();
+        requestStarted = beginBridgeRequest(entry);
+      } else {
+        writeJsonRpcError(
+          res,
+          400,
+          -32000,
+          'Bad Request: No valid session ID provided',
+        );
+        return;
+      }
     }
 
     try {
@@ -553,7 +743,9 @@ const server = http.createServer(async (req, res) => {
         'Internal Server Error',
       );
 
-      closeBridgeSession(entry);
+      closeBridgeSession(entry, 'post_request_error');
+    } finally {
+      if (requestStarted) endBridgeRequest(entry);
     }
 
     return;
@@ -585,6 +777,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const requestStarted = beginBridgeRequest(entry);
     try {
       await entry.transport.handleRequest(
         req,
@@ -604,6 +797,8 @@ const server = http.createServer(async (req, res) => {
         -32603,
         'Internal Server Error',
       );
+    } finally {
+      if (requestStarted) endBridgeRequest(entry);
     }
 
     return;
@@ -629,10 +824,9 @@ async function shutdown(signal) {
       signal +
       '; closing sessions',
   );
+  clearInterval(sessionReaper);
 
-  const entries = [
-    ...new Set(sessions.values()),
-  ];
+  const entries = [...bridgeEntries];
 
   for (const entry of entries) {
     try {
@@ -642,8 +836,8 @@ async function shutdown(signal) {
         '[mcp-http] transport close failed',
         error,
       );
-
-      closeBridgeSession(entry);
+    } finally {
+      closeBridgeSession(entry, 'http_parent_shutdown');
     }
   }
 
@@ -676,6 +870,9 @@ server.listen(
         ':' +
         port +
         '/mcp',
+    );
+    console.error(
+      `[mcp-http] session lifecycle idle_timeout_ms=${sessionIdleTimeoutMs} max_idle_sessions=${maxIdleSessionCount} max_total_sessions=${maxTotalSessionCount} reaper_interval_ms=${sessionReaperIntervalMs}`,
     );
   },
 );

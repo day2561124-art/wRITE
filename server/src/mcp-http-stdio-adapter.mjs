@@ -275,8 +275,16 @@ export function createStdioSession(options = {}) {
   }
 
   function close() {
+    if (closed) return;
     closed = true;
-    try { child?.kill(); } catch {}
+    notifyPendingListeners(new Error('MCP stdio session closed.'));
+    const currentChild = child;
+    if (!currentChild || currentChild.exitCode !== null || currentChild.signalCode !== null) return;
+    try {
+      terminateProcessTree(currentChild);
+    } catch {
+      try { currentChild.kill(); } catch {}
+    }
   }
 
   spawnChild();

@@ -197,6 +197,34 @@ async function waitForPortAvailable(port, timeoutMs = 10_000) {
   throw new Error(`Port ${port} did not become available after MCP cleanup.`);
 }
 
+async function waitForPortListening(port, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!await isPortAvailable(port)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Port ${port} did not start listening.`);
+}
+
+function isProcessRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function waitUntil(predicate, message, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(message);
+}
+
 function parseMcpHttpPayload(text) {
   if (!text.trim()) return null;
 
@@ -262,6 +290,366 @@ function postMcpHttpRequest({
     request.once("error", reject);
     request.end(payload);
   });
+}
+
+function beginSlowMcpHttpRequest({ port, sessionId, protocolVersion }) {
+  const request = http.request({
+    host: "127.0.0.1",
+    port,
+    path: "/mcp",
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "Content-Length": 4096,
+      "Mcp-Session-Id": sessionId,
+      "MCP-Protocol-Version": protocolVersion,
+    },
+  });
+  request.on("error", () => {});
+  request.flushHeaders();
+  request.write('{"jsonrpc":"2.0","id":"slow-active-request","method":"tools/list","params":{}');
+  return request;
+}
+
+async function initializeMcpHttpSession({ port, agent, clientName }) {
+  const initialize = await postMcpHttpRequest({
+    port,
+    agent,
+    message: {
+      jsonrpc: "2.0",
+      id: `initialize-${clientName}`,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: {
+          name: clientName,
+          version: "1.0.0",
+        },
+      },
+    },
+  });
+  assert(
+    initialize.statusCode === 200 && initialize.payload?.result,
+    `MCP session initialize failed for ${clientName}. status=${initialize.statusCode} body=${initialize.text}`,
+  );
+  const sessionIdHeader = initialize.headers["mcp-session-id"];
+  const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
+  assert(sessionId, `MCP initialize response did not include Mcp-Session-Id for ${clientName}.`);
+  const protocolVersion = initialize.payload.result.protocolVersion ?? "2025-03-26";
+  const initialized = await postMcpHttpRequest({
+    port,
+    agent,
+    sessionId,
+    protocolVersion,
+    message: {
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    },
+  });
+  assert(
+    initialized.statusCode === 202 || initialized.statusCode === 200,
+    `MCP initialized notification failed for ${clientName}. status=${initialized.statusCode} body=${initialized.text}`,
+  );
+  return { sessionId, protocolVersion };
+}
+
+function childPidForSessionLog(stderrText, sessionId) {
+  const line = stderrText
+    .split(/\r?\n/u)
+    .find((candidate) => candidate.includes(`session initialized id=${sessionId} `));
+  const match = line?.match(/child_pid=(\d+)/u);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+async function verifyMcpIdleSessionCapReclaimsChildren() {
+  const port = await freePort();
+  let stderrText = "";
+  const agents = [];
+  const serverProcess = spawn(
+    process.execPath,
+    ["server/src/mcp-http-server.mjs", "--port", String(port)],
+    {
+      cwd: rootDir,
+      env: childEnvironment({
+        MCP_TOOL_PROFILE: "chatgpt_developer",
+        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "2",
+      }),
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    },
+  );
+  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+
+  try {
+    await waitForPortListening(port);
+    const sessions = [];
+    for (let index = 0; index < 4; index += 1) {
+      const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+      agents.push(agent);
+      sessions.push(await initializeMcpHttpSession({
+        port,
+        agent,
+        clientName: `bounded-session-${index}`,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+
+    const childPids = sessions.map(({ sessionId }) => childPidForSessionLog(stderrText, sessionId));
+    assert(childPids.every((pid) => Number.isInteger(pid) && pid > 0), `Could not resolve MCP child PIDs from lifecycle logs. stderr=${stderrText}`);
+
+    await waitUntil(
+      () => childPids.slice(0, 2).every((pid) => !isProcessRunning(pid)),
+      `Oldest idle MCP child processes were not reclaimed by the idle-session cap. pids=${childPids.join(",")} stderr=${stderrText}`,
+    );
+
+    for (let index = 0; index < 2; index += 1) {
+      const response = await postMcpHttpRequest({
+        port,
+        sessionId: sessions[index].sessionId,
+        protocolVersion: sessions[index].protocolVersion,
+        message: {
+          jsonrpc: "2.0",
+          id: `evicted-${index}`,
+          method: "tools/list",
+          params: {},
+        },
+      });
+      assert(response.statusCode === 404, `Evicted MCP session ${index} remained addressable. status=${response.statusCode} body=${response.text}`);
+    }
+
+    for (let index = 2; index < 4; index += 1) {
+      const response = await postMcpHttpRequest({
+        port,
+        sessionId: sessions[index].sessionId,
+        protocolVersion: sessions[index].protocolVersion,
+        message: {
+          jsonrpc: "2.0",
+          id: `survivor-${index}`,
+          method: "tools/list",
+          params: {},
+        },
+      });
+      assert(response.statusCode === 200 && Array.isArray(response.payload?.result?.tools), `Newest bounded MCP session ${index} was evicted unexpectedly. status=${response.statusCode} body=${response.text}`);
+      assert(isProcessRunning(childPids[index]), `Newest bounded MCP child ${childPids[index]} exited unexpectedly.`);
+    }
+    assert(stderrText.includes("reason=max_idle_session_count"), `Idle-session cap did not report bounded eviction. stderr=${stderrText}`);
+  } finally {
+    for (const agent of agents) agent.destroy();
+    terminateProcessTree(serverProcess);
+    await waitForPortAvailable(port);
+  }
+}
+
+async function verifyMcpTotalSessionCapReclaimsIdleChildren() {
+  const port = await freePort();
+  let stderrText = "";
+  const agents = [];
+  const serverProcess = spawn(
+    process.execPath,
+    ["server/src/mcp-http-server.mjs", "--port", String(port)],
+    {
+      cwd: rootDir,
+      env: childEnvironment({
+        MCP_TOOL_PROFILE: "chatgpt_developer",
+        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+        MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "2",
+      }),
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    },
+  );
+  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+
+  try {
+    await waitForPortListening(port);
+    const sessions = [];
+    for (let index = 0; index < 4; index += 1) {
+      const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+      agents.push(agent);
+      sessions.push(await initializeMcpHttpSession({
+        port,
+        agent,
+        clientName: `total-cap-session-${index}`,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+
+    const childPids = sessions.map(({ sessionId }) => childPidForSessionLog(stderrText, sessionId));
+    assert(childPids.every((pid) => Number.isInteger(pid) && pid > 0), `Could not resolve total-cap MCP child PIDs. stderr=${stderrText}`);
+    await waitUntil(
+      () => childPids.slice(0, 2).every((pid) => !isProcessRunning(pid)),
+      `Oldest idle MCP children were not reclaimed by the total-session cap. pids=${childPids.join(",")} stderr=${stderrText}`,
+    );
+
+    for (let index = 0; index < 2; index += 1) {
+      const response = await postMcpHttpRequest({
+        port,
+        sessionId: sessions[index].sessionId,
+        protocolVersion: sessions[index].protocolVersion,
+        message: {
+          jsonrpc: "2.0",
+          id: `total-cap-evicted-${index}`,
+          method: "tools/list",
+          params: {},
+        },
+      });
+      assert(response.statusCode === 404, `Total-cap evicted MCP session ${index} remained addressable. status=${response.statusCode} body=${response.text}`);
+    }
+
+    for (let index = 2; index < 4; index += 1) {
+      const response = await postMcpHttpRequest({
+        port,
+        sessionId: sessions[index].sessionId,
+        protocolVersion: sessions[index].protocolVersion,
+        message: {
+          jsonrpc: "2.0",
+          id: `total-cap-survivor-${index}`,
+          method: "tools/list",
+          params: {},
+        },
+      });
+      assert(response.statusCode === 200 && Array.isArray(response.payload?.result?.tools), `Newest total-cap MCP session ${index} was evicted unexpectedly. status=${response.statusCode} body=${response.text}`);
+      assert(isProcessRunning(childPids[index]), `Newest total-cap MCP child ${childPids[index]} exited unexpectedly.`);
+    }
+    assert(stderrText.includes("reason=max_total_session_count"), `Total-session cap did not report bounded eviction. stderr=${stderrText}`);
+  } finally {
+    for (const agent of agents) agent.destroy();
+    terminateProcessTree(serverProcess);
+    await waitForPortAvailable(port);
+  }
+}
+
+async function verifyMcpTotalSessionCapProtectsActiveRequest() {
+  const port = await freePort();
+  let stderrText = "";
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+  let slowRequest;
+  const serverProcess = spawn(
+    process.execPath,
+    ["server/src/mcp-http-server.mjs", "--port", String(port)],
+    {
+      cwd: rootDir,
+      env: childEnvironment({
+        MCP_TOOL_PROFILE: "chatgpt_developer",
+        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+        MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "1",
+      }),
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    },
+  );
+  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+
+  try {
+    await waitForPortListening(port);
+    const session = await initializeMcpHttpSession({
+      port,
+      agent,
+      clientName: "active-cap-session",
+    });
+    const childPid = childPidForSessionLog(stderrText, session.sessionId);
+    assert(Number.isInteger(childPid) && childPid > 0, `Could not resolve active-cap MCP child PID. stderr=${stderrText}`);
+
+    slowRequest = beginSlowMcpHttpRequest({
+      port,
+      sessionId: session.sessionId,
+      protocolVersion: session.protocolVersion,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const rejected = await postMcpHttpRequest({
+      port,
+      message: {
+        jsonrpc: "2.0",
+        id: "capacity-rejected-initialize",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: {
+            name: "capacity-rejected-client",
+            version: "1.0.0",
+          },
+        },
+      },
+    });
+    assert(rejected.statusCode === 503, `Total-session cap did not reject a new session while the only existing session was active. status=${rejected.statusCode} body=${rejected.text}`);
+    assert(String(rejected.payload?.error?.message ?? "").includes("capacity reached"), `Total-session cap rejection message drifted. body=${rejected.text}`);
+    assert(isProcessRunning(childPid), `Active MCP child ${childPid} was killed to make room for a new session.`);
+    assert(stderrText.includes("session initialization rejected reason=max_total_session_count"), `Active-session capacity rejection was not logged. stderr=${stderrText}`);
+  } finally {
+    slowRequest?.destroy();
+    agent.destroy();
+    terminateProcessTree(serverProcess);
+    await waitForPortAvailable(port);
+  }
+}
+
+async function verifyMcpIdleTimeoutReclaimsChild() {
+  const port = await freePort();
+  let stderrText = "";
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+  const serverProcess = spawn(
+    process.execPath,
+    ["server/src/mcp-http-server.mjs", "--port", String(port)],
+    {
+      cwd: rootDir,
+      env: childEnvironment({
+        MCP_TOOL_PROFILE: "chatgpt_developer",
+        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "350",
+        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+      }),
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    },
+  );
+  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+
+  try {
+    await waitForPortListening(port);
+    const session = await initializeMcpHttpSession({
+      port,
+      agent,
+      clientName: "idle-timeout-session",
+    });
+    const childPid = childPidForSessionLog(stderrText, session.sessionId);
+    assert(Number.isInteger(childPid) && childPid > 0, `Could not resolve idle-timeout MCP child PID. stderr=${stderrText}`);
+
+    await waitUntil(
+      () => stderrText.includes(`session evicted id=${session.sessionId} reason=idle_timeout`),
+      `Idle MCP session was not reaped after the configured timeout. stderr=${stderrText}`,
+    );
+    await waitUntil(
+      () => !isProcessRunning(childPid),
+      `Idle MCP child ${childPid} remained alive after session timeout. stderr=${stderrText}`,
+    );
+
+    const response = await postMcpHttpRequest({
+      port,
+      sessionId: session.sessionId,
+      protocolVersion: session.protocolVersion,
+      message: {
+        jsonrpc: "2.0",
+        id: "expired-session-check",
+        method: "tools/list",
+        params: {},
+      },
+    });
+    assert(response.statusCode === 404, `Expired MCP session remained addressable. status=${response.statusCode} body=${response.text}`);
+  } finally {
+    agent.destroy();
+    terminateProcessTree(serverProcess);
+    await waitForPortAvailable(port);
+  }
 }
 
 async function verifyMcpSessionSurvivesIdleConnectionBoundary(port) {
@@ -689,6 +1077,11 @@ async function main() {
 
     await new Promise((resolve) => server.close(resolve));
     serverClosed = true;
+
+    await verifyMcpIdleSessionCapReclaimsChildren();
+    await verifyMcpTotalSessionCapReclaimsIdleChildren();
+    await verifyMcpTotalSessionCapProtectsActiveRequest();
+    await verifyMcpIdleTimeoutReclaimsChild();
 
     await verifyLauncherMcpProfile({
       fixtureDir,
