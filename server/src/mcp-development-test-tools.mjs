@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -244,7 +244,59 @@ function baseResult(suite, startedAt) {
   };
 }
 
-async function runDefinition(suite, definition, outputMaxCharacters, lockHandle, repositoryRoot) {
+async function prepareWorkspaceDependencyBridge(context, dependencyRoot) {
+  if (!["isolated_worktree", "integration_worktree"].includes(context?.workspace_type)) {
+    return async () => {};
+  }
+  const repositoryRoot = path.resolve(context.root);
+  const sourcePath = path.join(path.resolve(dependencyRoot), "node_modules");
+  const bridgePath = path.join(repositoryRoot, "node_modules");
+  const sourceInfo = await lstat(sourcePath);
+  if (!sourceInfo.isDirectory() || sourceInfo.isSymbolicLink()) {
+    throw new Error("Project node_modules must be a real directory before isolated test execution.");
+  }
+  const sourceRealPath = await realpath(sourcePath);
+  try {
+    const existing = await lstat(bridgePath);
+    if (existing.isDirectory() && !existing.isSymbolicLink()) {
+      return async () => {};
+    }
+    if (!existing.isSymbolicLink()) {
+      throw new Error("Workspace node_modules exists but is not a server-owned dependency bridge or directory.");
+    }
+    const existingRealPath = await realpath(bridgePath);
+    if (existingRealPath !== sourceRealPath) {
+      throw new Error("Workspace node_modules dependency bridge points outside the project dependency root.");
+    }
+    return async () => {};
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  await symlink(sourceRealPath, bridgePath, process.platform === "win32" ? "junction" : "dir");
+  const linkedRealPath = await realpath(bridgePath);
+  if (linkedRealPath !== sourceRealPath) {
+    await unlink(bridgePath).catch(() => {});
+    throw new Error("Workspace dependency bridge verification failed.");
+  }
+  return async () => {
+    const info = await lstat(bridgePath).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!info) return;
+    if (!info.isSymbolicLink()) {
+      throw new Error("Workspace dependency bridge changed type during test execution; cleanup refused.");
+    }
+    const currentRealPath = await realpath(bridgePath);
+    if (currentRealPath !== sourceRealPath) {
+      throw new Error("Workspace dependency bridge target changed during test execution; cleanup refused.");
+    }
+    await unlink(bridgePath);
+  };
+}
+
+async function runDefinition(suite, definition, outputMaxCharacters, lockHandle, repositoryRoot, dependencyRoot) {
   const startedAt = Date.now();
   const stdout = createBoundedCollector(outputMaxCharacters);
   const stderr = createBoundedCollector(outputMaxCharacters);
@@ -258,7 +310,10 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle,
   try {
     child = spawn(definition.executable, [...definition.argv], {
       cwd: repositoryRoot,
-      env: controlledEnvironment(definition.fixedEnvironment),
+      env: controlledEnvironment({
+        ...definition.fixedEnvironment,
+        WRITER_WORKBENCH_DEPENDENCY_ROOT: path.resolve(dependencyRoot),
+      }),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
@@ -347,6 +402,7 @@ export function createDevTestRunner({
   resultPath = lastResultPathForLock(lockPath),
   outputMaxCharacters = DEV_TEST_OUTPUT_MAX_CHARACTERS,
   workspaceContextResolver = async () => sharedTestWorkspaceContext(),
+  dependencyRoot = process.env.WRITER_WORKBENCH_DEPENDENCY_ROOT?.trim() || projectRoot,
 } = {}) {
   return async function runTests(input = {}) {
     const startedAt = Date.now();
@@ -386,6 +442,18 @@ export function createDevTestRunner({
       };
     }
 
+    let dependencyBridgeCleanup = async () => {};
+    try {
+      dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
+    } catch (error) {
+      await releaseRunLock(lockHandle, lockPath);
+      return {
+        ...baseResult(suite, startedAt),
+        stderr: redactTestOutput(`Could not prepare workspace dependency bridge: ${error.message}`),
+        workspace_context: workspaceExecutionProvenance(context),
+      };
+    }
+
     let result;
     try {
       result = await runDefinition(
@@ -394,11 +462,26 @@ export function createDevTestRunner({
         outputMaxCharacters,
         lockHandle,
         context.root,
+        dependencyRoot,
       );
     } catch (error) {
       result = {
         ...baseResult(suite, startedAt),
         stderr: redactTestOutput(`Internal test runner failure: ${error.message}`),
+      };
+    }
+
+    try {
+      await dependencyBridgeCleanup();
+    } catch (error) {
+      result = {
+        ...result,
+        execution_ok: false,
+        passed: false,
+        stderr: [
+          result.stderr,
+          redactTestOutput(`Could not clean workspace dependency bridge: ${error.message}`),
+        ].filter(Boolean).join("\n"),
       };
     }
 

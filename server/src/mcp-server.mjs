@@ -192,6 +192,16 @@ import {
   dev_workspace_unlock,
   dev_workspace_update_workstream,
 } from "./mcp-development-workstream-tools.mjs";
+import {
+  DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE,
+  DEV_INTEGRATION_MAX_LIST_RESULTS,
+  DEV_INTEGRATION_STATES,
+  dev_workspace_get_integration_candidate,
+  dev_workspace_integrate,
+  dev_workspace_integration_preflight,
+  dev_workspace_list_integration_candidates,
+  dev_workspace_validate_integration,
+} from "./mcp-development-integration-tools.mjs";
 import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -2122,6 +2132,61 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await dev_workspace_remove_isolated(args)),
   },
   {
+    name: "dev_workspace_integration_preflight",
+    description: "Create a persistent controlled integration candidate for one completed registered isolated workstream. The server resolves exact source/main heads, dependency gates, ancestry, merge-tree semantics, result tree, and any server-created merge commit; callers cannot select branches, refs, commits, Git arguments, strategy, paths, or environment.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
+      expected_workstream_revision: { type: "integer", minimum: 1 },
+    }, ["workstream_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_integration_preflight(args)),
+  },
+  {
+    name: "dev_workspace_get_integration_candidate",
+    description: "Read one persistent integration candidate by opaque server-issued ID, including exact source/target/integration commit identity, lifecycle state, dependency snapshot, validation report, and cleanup health.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      integration_candidate_id: { type: "string", pattern: DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["integration_candidate_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_get_integration_candidate(args)),
+  },
+  {
+    name: "dev_workspace_list_integration_candidates",
+    description: "Read a bounded persistent integration candidate list using only finite state/workstream filters and opaque server-issued identities.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      state: { type: "string", enum: DEV_INTEGRATION_STATES },
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
+      limit: { type: "integer", minimum: 1, maximum: DEV_INTEGRATION_MAX_LIST_RESULTS, default: DEV_INTEGRATION_MAX_LIST_RESULTS },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_list_integration_candidates(args)),
+  },
+  {
+    name: "dev_workspace_validate_integration",
+    description: "Materialize the exact candidate integration commit in a server-owned detached temporary worktree, run fixed diff checks plus the bounded Phase 2D validation plan, persist the exact validation report, and perform no-force cleanup.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      integration_candidate_id: { type: "string", pattern: DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, maxLength: 64 },
+      expected_revision: { type: "integer", minimum: 1 },
+    }, ["integration_candidate_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_validate_integration(args)),
+  },
+  {
+    name: "dev_workspace_integrate",
+    description: "High-risk controlled local-main advancement for one exact ready integration candidate. Revalidates target/source/dependency freshness under the repository integration lock, refuses staged/conflicted/active-operation state, dry-runs dirty-main carry-forward, and advances only by the fixed validated fast-forward result while preserving unrelated dirty state.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      integration_candidate_id: { type: "string", pattern: DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, maxLength: 64 },
+      expected_revision: { type: "integer", minimum: 1 },
+    }, ["integration_candidate_id", "expected_revision"]),
+    handler: async (args) => jsonContent(await dev_workspace_integrate(args)),
+  },
+  {
     name: "dev_git_diff",
     description: "Read-only bounded Git diff using server-fixed working or staged argv with external diff/textconv disabled; no caller-controlled command, argv, cwd, environment, shell, or pathspec is accepted.",
     risk: "read",
@@ -4038,6 +4103,11 @@ const chatgptDeveloperToolNames = new Set([
   "dev_workspace_lock",
   "dev_workspace_unlock",
   "dev_workspace_remove_isolated",
+  "dev_workspace_integration_preflight",
+  "dev_workspace_get_integration_candidate",
+  "dev_workspace_list_integration_candidates",
+  "dev_workspace_validate_integration",
+  "dev_workspace_integrate",
   "dev_git_diff",
   "dev_git_diff_check",
   "dev_create_file",
@@ -4111,6 +4181,31 @@ const permissionSources = {
   dev_workspace_lock: ["development_workstream_registry", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
   dev_workspace_unlock: ["development_workstream_registry", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
   dev_workspace_remove_isolated: ["development_workstream_registry", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
+  dev_workspace_integration_preflight: [
+    "development_workstream_registry",
+    "development_integration_registry",
+    "repository_git_head",
+    "repository_git_worktree_metadata",
+    "repository_git_merge_tree",
+    "mcp_client_expected_revision",
+  ],
+  dev_workspace_get_integration_candidate: ["development_integration_registry"],
+  dev_workspace_list_integration_candidates: ["development_integration_registry"],
+  dev_workspace_validate_integration: [
+    "development_integration_registry",
+    "repository_integration_worktree",
+    "repository_test_entrypoints",
+    "server_owned_test_allowlist",
+    "mcp_client_expected_revision",
+  ],
+  dev_workspace_integrate: [
+    "development_integration_registry",
+    "development_workstream_registry",
+    "repository_git_head",
+    "repository_git_worktree_status",
+    "repository_integration_lock",
+    "mcp_client_expected_revision",
+  ],
   dev_git_diff: ["repository_git_worktree_diff", "repository_git_index_diff"],
   dev_git_diff_check: ["repository_git_worktree_diff_check", "repository_git_index_diff_check"],
   get_current_project_state: ["repository"],

@@ -256,11 +256,19 @@ const workspaceToolNames = [
   "dev_workspace_unlock",
   "dev_workspace_remove_isolated",
 ];
-for (const toolName of [...workstreamToolNames, ...workspaceToolNames]) {
+const integrationToolNames = [
+  "dev_workspace_integration_preflight",
+  "dev_workspace_get_integration_candidate",
+  "dev_workspace_list_integration_candidates",
+  "dev_workspace_validate_integration",
+  "dev_workspace_integrate",
+];
+for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames]) {
   assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
 }
 publicToolNames.push(...workstreamToolNames);
 publicToolNames.push(...workspaceToolNames);
+publicToolNames.push(...integrationToolNames);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
@@ -418,6 +426,82 @@ for (const toolName of workspaceToolNames) {
   assert(workspaceTool, `chatgpt_developer is missing ${toolName}`);
   assert.equal(Object.hasOwn(workspaceTool.inputSchema?.properties ?? {}, "mode"), false, `${toolName} exposed caller-controlled mode`);
 }
+
+const integrationExpected = new Map([
+  ["dev_workspace_integration_preflight", {
+    readOnly: false,
+    permission: "write_low_risk",
+    risk: "low-risk-write",
+    required: ["workstream_id"],
+    properties: ["expected_workstream_revision", "workstream_id"],
+    sources: ["development_workstream_registry", "development_integration_registry", "repository_git_head", "repository_git_worktree_metadata", "repository_git_merge_tree", "mcp_client_expected_revision"],
+  }],
+  ["dev_workspace_get_integration_candidate", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: ["integration_candidate_id"],
+    properties: ["integration_candidate_id"],
+    sources: ["development_integration_registry"],
+  }],
+  ["dev_workspace_list_integration_candidates", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: [],
+    properties: ["limit", "state", "workstream_id"],
+    sources: ["development_integration_registry"],
+  }],
+  ["dev_workspace_validate_integration", {
+    readOnly: false,
+    permission: "write_low_risk",
+    risk: "low-risk-write",
+    required: ["integration_candidate_id"],
+    properties: ["expected_revision", "integration_candidate_id"],
+    sources: ["development_integration_registry", "repository_integration_worktree", "repository_test_entrypoints", "server_owned_test_allowlist", "mcp_client_expected_revision"],
+  }],
+  ["dev_workspace_integrate", {
+    readOnly: false,
+    permission: "write_high_risk",
+    risk: "high-risk-write",
+    required: ["integration_candidate_id", "expected_revision"],
+    properties: ["expected_revision", "integration_candidate_id"],
+    sources: ["development_integration_registry", "development_workstream_registry", "repository_git_head", "repository_git_worktree_status", "repository_integration_lock", "mcp_client_expected_revision"],
+  }],
+]);
+const forbiddenIntegrationFields = [
+  "targetBranch", "sourceBranch", "targetHead", "sourceHead", "commitSha", "tree", "parents",
+  "mergeStrategy", "gitArgs", "command", "args", "executable", "cwd", "env", "shell", "force",
+  "rebase", "squash", "cherryPick", "ref", "refspec", "worktreePath", "integrationPath", "testCommand",
+];
+for (const [toolName, expectation] of integrationExpected) {
+  const tool = developerList.result.tools.find((item) => item.name === toolName);
+  assert(tool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(tool.annotations?.readOnlyHint, expectation.readOnly);
+  assert.equal(tool.inputSchema?.additionalProperties, false);
+  assert.deepEqual([...(tool.inputSchema?.required ?? [])].sort(), [...expectation.required].sort());
+  assert.deepEqual(Object.keys(tool.inputSchema?.properties ?? {}).sort(), [...expectation.properties].sort());
+  for (const forbiddenField of forbiddenIntegrationFields) {
+    assert.equal(Object.hasOwn(tool.inputSchema?.properties ?? {}, forbiddenField), false, `${toolName} exposed forbidden integration field ${forbiddenField}`);
+  }
+  const permission = tool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, expectation.permission);
+  assert.equal(permission?.risk_level, expectation.risk);
+  assert.equal(permission?.read_or_write, expectation.readOnly ? "read" : "write");
+  assert.equal(permission?.log_required, !expectation.readOnly);
+  assert.equal(permission?.requires_user_confirmation, toolName === "dev_workspace_integrate");
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+  assert.deepEqual(permission?.allowed_sources, expectation.sources);
+}
+const integrationListTool = developerList.result.tools.find((tool) => tool.name === "dev_workspace_list_integration_candidates");
+assert.deepEqual(integrationListTool.inputSchema.properties.state.enum, [
+  "created", "preflight_passed", "materialized", "testing", "validated", "ready", "applying", "integrated",
+  "conflicted", "failed", "stale", "blocked", "abandoned",
+]);
+assert.equal(integrationListTool.inputSchema.properties.limit.maximum, 100);
 
 const developerWorkstreamBegin = developerList.result.tools.find(
   (tool) => tool.name === "dev_workspace_begin_workstream",
@@ -790,7 +874,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-22, 22);
+publicToolNames.splice(-27, 27);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -834,8 +918,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 66);
-assert.equal(fullNames.length, 124);
+assert.equal(developerNames.length, 71);
+assert.equal(fullNames.length, 129);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -1106,6 +1190,7 @@ publicToolNames.push(
 publicToolNames.push("dev_git_remote_status");
 publicToolNames.push(...workstreamToolNames);
 publicToolNames.push(...workspaceToolNames);
+publicToolNames.push(...integrationToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -1122,7 +1207,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-22, 22);
+  publicToolNames.splice(-27, 27);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -1131,5 +1216,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 26}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 31}).`,
 );

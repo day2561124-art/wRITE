@@ -282,6 +282,44 @@ try {
   assert.equal(mapping.mcp_tunnel.timeout_ms, 300_000);
   assert.equal(mapping.all.timeout_ms, 7_200_000);
 
+  const dependencyBridgeWorkspace = path.join(tempRoot, "dependency-bridge-workspace");
+  const dependencySourceRoot = path.join(tempRoot, "dependency-source-root");
+  const fakeSdkRoot = path.join(dependencySourceRoot, "node_modules", "@modelcontextprotocol", "sdk");
+  await mkdir(path.join(fakeSdkRoot, "client"), { recursive: true });
+  await writeFile(
+    path.join(fakeSdkRoot, "package.json"),
+    `${JSON.stringify({ name: "@modelcontextprotocol/sdk", type: "module", exports: { "./client/index.js": "./client/index.js" } })}\n`,
+    "utf8",
+  );
+  await writeFile(path.join(fakeSdkRoot, "client", "index.js"), "export class Client {}\n", "utf8");
+  await mkdir(dependencyBridgeWorkspace, { recursive: true });
+  await writeFile(
+    path.join(dependencyBridgeWorkspace, "dependency-probe.mjs"),
+    "import { Client } from '@modelcontextprotocol/sdk/client/index.js';\nif (typeof Client !== 'function') process.exit(2);\n",
+    "utf8",
+  );
+  assert.equal(await pathExists(path.join(dependencyBridgeWorkspace, "node_modules")), false);
+  const dependencyBridgeRunner = createDevTestRunner({
+    suiteDefinitions: {
+      mcp: testDefinition(["dependency-probe.mjs"]),
+    },
+    lockPath: path.join(tempRoot, "dependency-bridge.lock"),
+    dependencyRoot: dependencySourceRoot,
+    workspaceContextResolver: async () => ({
+      workspace_id: "dev_workspace_000000000000000000000001",
+      workstream_id: "dev_workstream_20260902-120000_000000000001",
+      workspace_type: "isolated_worktree",
+      root: dependencyBridgeWorkspace,
+      branch: "dev-ws/000000000000000000000001",
+      base_head: "0000000000000000000000000000000000000000",
+      current_head: "0000000000000000000000000000000000000000",
+    }),
+  });
+  const dependencyBridgeResult = await dependencyBridgeRunner({ suite: "mcp" });
+  assert.equal(dependencyBridgeResult.execution_ok, true);
+  assert.equal(dependencyBridgeResult.passed, true);
+  assert.equal(await pathExists(path.join(dependencyBridgeWorkspace, "node_modules")), false, "server-owned dependency bridge was not cleaned");
+
   process.env.OPENAI_API_KEY = "sk-test-secret-not-for-child";
   const failingRunner = createDevTestRunner({
     suiteDefinitions: {
