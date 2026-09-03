@@ -199,8 +199,11 @@ try {
   assert(finalPolisherSchema);
   assert.match(finalPolisherSchema, /raw_story_integrity_manifest/u);
   assert.match(finalPolisherSchema, /chunk_sha256:[\s\S]*?maxItems: 1024/u);
-  assert.match(finalPolisherSchema, /raw_story_handoff_id/u);
-  assert.match(finalPolisherSchema, /\["external_brain_session_id", "writing_context_bundle_id"\]/u);
+  assert.doesNotMatch(finalPolisherSchema, /raw_story_handoff_id/u);
+  assert.match(
+    finalPolisherSchema,
+    /\["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"\]/u,
+  );
   assert.doesNotMatch(
     finalPolisherSchema.match(/\}, \["external_brain_session_id"[\s\S]*?\]\),/u)?.[0] ?? "",
     /raw_story_integrity_manifest"/u,

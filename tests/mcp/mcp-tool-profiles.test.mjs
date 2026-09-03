@@ -46,7 +46,6 @@ const publicToolNames = [
   "chatgpt_bridge_use_style_drift_detector",
   "chatgpt_bridge_use_over_governance_detector",
   "chatgpt_bridge_use_writing_card_director",
-  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
@@ -64,6 +63,10 @@ const publicToolNames = [
   "chatgpt_bridge_search_visual_assets",
   "chatgpt_bridge_get_visual_asset",
   "preview_visual_reference_consumer_output_guard",
+];
+
+const retiredLegacyWritingToolNames = [
+  "chatgpt_bridge_seal_raw_story_handoff",
 ];
 
 const blockedToolNames = [
@@ -162,6 +165,9 @@ const fullResponses = await runStdioSession("full", [listRequest]);
 const fullNames = fullResponses[0].result.tools.map((tool) => tool.name);
 const registeredNames = extractDirectMcpToolNames(await readFile(serverPath, "utf8"));
 assert.deepEqual(fullNames, registeredNames, "full tools/list drifted from the MCP registry");
+for (const toolName of retiredLegacyWritingToolNames) {
+  assert.equal(fullNames.includes(toolName), false, `${toolName} must remain retired from the MCP registry`);
+}
 for (const toolName of blockedToolNames) {
   assert(fullNames.includes(toolName), `full profile is missing ${toolName}`);
 }
@@ -215,6 +221,9 @@ assert.deepEqual(
 );
 
 const publicToolMap = new Map(publicList.result.tools.map((tool) => [tool.name, tool]));
+for (const toolName of retiredLegacyWritingToolNames) {
+  assert.equal(publicToolMap.has(toolName), false, `${toolName} must remain retired from chatgpt_public`);
+}
 assert.equal(
   publicToolMap.has("dev_apply_patch"),
   false,
@@ -1052,9 +1061,9 @@ assert.deepEqual(
 );
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
-assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 88);
-assert.equal(fullNames.length, 146);
+assert.equal(publicToolNames.length, 39);
+assert.equal(developerNames.length, 87);
+assert.equal(fullNames.length, 145);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",

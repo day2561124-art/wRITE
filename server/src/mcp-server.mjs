@@ -79,7 +79,6 @@ import {
   chatgpt_bridge_use_style_drift_detector,
   chatgpt_bridge_use_over_governance_detector,
   chatgpt_bridge_use_writing_card_director,
-  chatgpt_bridge_seal_raw_story_handoff,
   chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_get_entity_registry_summary,
   chatgpt_bridge_search_canon_entities,
@@ -3425,24 +3424,12 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_use_writing_card_director(args)),
   },
   {
-    name: "chatgpt_bridge_seal_raw_story_handoff",
-    description: "[legacy low-risk-write] Connection-local immutable raw-story seal retained only for the legacy writing route. The exact raw_story_text is stored in the current MCP child process ephemeral memory behind a run/bundle-scoped raw_story_handoff_id. A later final-polisher sealed handoff must occur on the same MCP connection/child. Cross-child parent-broker IPC is retired; nothing is persisted across process restart.",
-    risk: "low-risk-write",
-    inputSchema: baseSchema({
-      external_brain_session_id: { type: "string" },
-      writing_context_bundle_id: { type: "string" },
-      raw_story_text: { type: "string", maxLength: 250000 },
-    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text"]),
-    handler: async (args) => jsonContent(await chatgpt_bridge_seal_raw_story_handoff(args)),
-  },
-  {
     name: "chatgpt_bridge_use_final_polisher",
-    description: "[legacy low-risk-write] ChatGPT-owned post-generation external-brain final polisher retained temporarily during writing-module retirement. Sealed handoff is connection-local: raw_story_handoff_id must resolve in the same MCP child that created it. Cross-child parent-broker IPC is retired. The compatible direct exact-SHA route and Phase47D mismatch forensics remain unchanged until the final-polisher subtree is retired.",
+    description: "[low-risk-write] Writing-only post-generation external-brain final-polisher capability. Accept the exact ChatGPT-authored raw_story_text plus its lowercase SHA-256 on the same writing session, run the bounded final-polisher diagnostic/review capability, and never generate replacement prose or mutate candidate/Canon/active_engine/adoption/settlement state. The retired raw-story seal route is not exposed.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       external_brain_session_id: { type: "string" },
       writing_context_bundle_id: { type: "string" },
-      raw_story_handoff_id: { type: "string", pattern: "^raw_story_handoff_[0-9]{8}-[0-9]{6}-[a-f0-9]{12}$" },
       raw_story_text: { type: "string", maxLength: 250000 },
       raw_story_sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" },
       raw_story_integrity_manifest: {
@@ -3499,7 +3486,7 @@ const toolDefinitions = [
         ],
       },
       capability_input: { type: "object" },
-    }, ["external_brain_session_id", "writing_context_bundle_id"]),
+    }, ["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"]),
     handler: async (args) => jsonContent(await chatgpt_bridge_use_final_polisher(args)),
   },
   {
@@ -4296,7 +4283,6 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_use_style_drift_detector",
   "chatgpt_bridge_use_over_governance_detector",
   "chatgpt_bridge_use_writing_card_director",
-  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
   "chatgpt_bridge_run_full_neural_writing_pipeline",
   "chatgpt_bridge_build_proofing_context",
@@ -4561,9 +4547,6 @@ const permissionSources = {
   ],
   chatgpt_bridge_review_draft_ephemeral: [
     "user_input", "registered_project_sources", "entity_registry", "active_engine",
-  ],
-  chatgpt_bridge_seal_raw_story_handoff: [
-    "user_input", "gpt_writing_context_records", "agent_run_records", "neural_trace_records",
   ],
   ...Object.fromEntries([
     "scene_planner", "character_simulator", "neural_critic", "style_drift_detector",

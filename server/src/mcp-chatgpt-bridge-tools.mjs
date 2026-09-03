@@ -56,7 +56,6 @@ import { buildChatgptNativeNeuralWritingHandoff } from "./chatgpt-native-neural-
 import {
   beginChatgptOwnedExternalBrainWritingSession,
   externalBrainGenerationBoundary,
-  sealChatgptOwnedRawStoryHandoff,
   useChatgptOwnedExternalBrainCapability,
 } from "./chatgpt-owned-external-brain-service.mjs";
 import {
@@ -11976,28 +11975,6 @@ export async function chatgpt_bridge_review_draft_ephemeral(input = {}, options 
   }
 }
 
-export async function chatgpt_bridge_seal_raw_story_handoff(input = {}, options = {}) {
-  try {
-    return await sealChatgptOwnedRawStoryHandoff(input, options);
-  } catch (error) {
-    return {
-      ok: false,
-      tool_name: "chatgpt_bridge_seal_raw_story_handoff",
-      architecture_route: "chatgpt_owned_external_brain",
-      handoff_route: "single_ingress_immutable_seal",
-      external_brain_session_id: input.external_brain_session_id ?? null,
-      writing_context_bundle_id: input.writing_context_bundle_id ?? null,
-      raw_story_handoff_id: null,
-      blocked: true,
-      blocked_stage: String(error?.message ?? error).includes("parent_broker_")
-        ? "parent_broker_unavailable"
-        : "raw_story_handoff_seal_store",
-      blocked_reason: error instanceof Error ? error.message : String(error),
-      mutation_guards: { ...chatgptBridgeSafety },
-    };
-  }
-}
-
 function externalBrainCapabilityTool(name, capabilityName) {
   return async (input = {}, options = {}) => {
     try {
@@ -12176,7 +12153,6 @@ export const chatgptBridgeTools = {
   chatgpt_bridge_use_style_drift_detector,
   chatgpt_bridge_use_over_governance_detector,
   chatgpt_bridge_use_writing_card_director,
-  chatgpt_bridge_seal_raw_story_handoff,
   chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_run_full_neural_writing_pipeline,
   chatgpt_bridge_build_proofing_context,
@@ -12279,32 +12255,6 @@ export const chatgptBridgeToolMetadata = {
     neural_critic_executed: true,
     style_drift_detector_executed: false,
     final_polisher_executed: false,
-  },
-  chatgpt_bridge_seal_raw_story_handoff: {
-    permission: "write_low_risk",
-    writes_files: false,
-    writes_only_to: [],
-    ...chatgptBridgeSafety,
-    architecture_primary_route: true,
-    individual_external_brain_capability: true,
-    handoff_route: "single_ingress_immutable_seal",
-    storage_scope: "process_local_ephemeral_memory",
-    production_broker_ownership: "mcp_http_parent",
-    broker_storage_scope: "mcp_http_parent_process_ephemeral_memory",
-    broker_transport: "node_internal_ipc",
-    broker_persistence: "none",
-    persists_across_process_restart: false,
-    exact_story_returned: false,
-    secure_memory_erase_claimed: false,
-    orchestration_mode: "chatgpt_owned_external_brain",
-    orchestration_owner: "chatgpt",
-    runtime_host: "writer_workbench_runtime",
-    final_prose_generator: "chatgpt",
-    candidate_created: false,
-    canon_update_allowed: false,
-    active_engine_update_allowed: false,
-    adoption_allowed: false,
-    settlement_allowed: false,
   },
   ...Object.fromEntries([
     "scene_planner",

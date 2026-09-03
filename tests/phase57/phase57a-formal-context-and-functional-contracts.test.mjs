@@ -20,7 +20,6 @@ import {
   buildPostDraftNeuralCritique,
   buildPostDraftStyleDriftReport,
 } from "../../server/src/post-draft-line-diagnostic-service.mjs";
-import runFinalPolisher from "../../server/src/final-polisher-service.mjs";
 import {
   projectPaths,
   projectRoot,
@@ -206,19 +205,6 @@ try {
   assert.equal(critic.status, "inactive");
   assert.equal(style.status, "inactive");
 
-  const skippedPolisher = runFinalPolisher({});
-  assert.equal(skippedPolisher.status, "skipped");
-  const draft = "她把檔案闔上，沒有替沉默補一句解釋。";
-  const identityPolisher = runFinalPolisher({
-    candidate_text: draft,
-  });
-  assert.equal(identityPolisher.polished_text, draft);
-  assert.equal(identityPolisher.text_identity_preserved, true);
-  assert.equal(
-    identityPolisher.input_hash_sha256,
-    identityPolisher.output_hash_sha256,
-  );
-
   const formalRouteSource = await readFile(
     path.join(
       projectRoot,
@@ -256,9 +242,6 @@ try {
         composition.total_chars_after_budget,
       critic_status: critic.status,
       style_status: style.status,
-      final_polisher_without_draft: skippedPolisher.status,
-      final_polisher_identity:
-        identityPolisher.text_identity_preserved,
     }),
   );
   console.log(

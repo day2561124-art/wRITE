@@ -18,20 +18,7 @@ const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const currentAddedToolName = "get_active_engine_dependency_status";
-const developmentToolNames = [
-  "dev_list_directory",
-  "dev_read_file",
-  "dev_search_files",
-  "dev_read_file_range",
-  "dev_apply_patch",
-  "dev_delete_file",
-  "dev_run_tests",
-  "dev_git_status",
-  "dev_git_diff",
-  "dev_git_diff_check",
-  "dev_git_commit",
-  "dev_git_push",
-];
+const isDevelopmentToolName = (name) => name.startsWith("dev_");
 const preStep4B2WorldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
@@ -65,16 +52,19 @@ const externalBrainToolNames = [
   "chatgpt_bridge_use_style_drift_detector",
   "chatgpt_bridge_use_over_governance_detector",
   "chatgpt_bridge_use_writing_card_director",
-  "chatgpt_bridge_seal_raw_story_handoff",
   "chatgpt_bridge_use_final_polisher",
+];
+const retiredLegacyWritingToolNames = [
+  "chatgpt_bridge_seal_raw_story_handoff",
 ];
 const visualBridgeToolNames = [
   "chatgpt_bridge_search_visual_assets",
   "chatgpt_bridge_get_visual_asset",
 ];
-// Preserve the pre-Step4B-2 direct/runtime digest as a historical anti-drift
-// baseline. Step4B-2 adds exactly three named formal transport tools on top.
-const expectedPreStep4B2DirectDigest = "b45365f2bd1d6aa0c7bd36e1f85e801aa12425a7bf221704f47921c7d4a3e98d";
+// Preserve the post-legacy-seal-retirement pre-Step4B-2 direct/runtime digest
+// as the current anti-drift baseline. Step4B-2 adds exactly three named formal
+// transport tools on top; retired developer tooling is excluded by namespace.
+const expectedPreStep4B2DirectDigest = "b826e530c2f15f56e8cce379839dfd5ac587a457398b036de051bfa4068c86dd";
 const expectedPreStep4B2RuntimeDigest = expectedPreStep4B2DirectDigest;
 const expectedPublicNames = [
   "dev_list_directory",
@@ -190,7 +180,7 @@ const historicalNames = extractDirectMcpToolNames(gitShow(
 const directNames = extractDirectMcpToolNames(currentSource);
 const directPreStep4B2Names = directNames.filter((name) => (
   name !== currentAddedToolName
-  && !developmentToolNames.includes(name)
+  && !isDevelopmentToolName(name)
   && !step4B2AddedToolNames.includes(name)
 ));
 
@@ -199,6 +189,9 @@ assert(directNames);
 assert.equal(historicalNames.length, 70);
 assert.equal(config.expected_mcp_tool_count, directNames.length);
 assert.deepEqual(duplicates(directNames), []);
+for (const toolName of retiredLegacyWritingToolNames) {
+  assert.equal(directNames.includes(toolName), false, `${toolName} must remain retired from direct MCP registration`);
+}
 assert.deepEqual(
   directPreStep4B2Names.filter((name) => !historicalNames.includes(name)),
   [...preStep4B2WorldSimulationToolNames, ...externalBrainToolNames, ...visualBridgeToolNames, addedToolName],
@@ -257,12 +250,16 @@ const [fullTools, publicTools] = await Promise.all([
 ]);
 const fullNames = fullTools.map((tool) => tool.name);
 const publicNames = publicTools.map((tool) => tool.name);
+for (const toolName of retiredLegacyWritingToolNames) {
+  assert.equal(fullNames.includes(toolName), false, `${toolName} must remain retired from full tools/list`);
+  assert.equal(publicNames.includes(toolName), false, `${toolName} must remain retired from chatgpt_public tools/list`);
+}
 assert.deepEqual(fullNames, directNames);
 assert.deepEqual(duplicates(fullNames), []);
 assert.equal(
   digest(fullNames.filter((name) => (
     name !== currentAddedToolName
-    && !developmentToolNames.includes(name)
+    && !isDevelopmentToolName(name)
     && !step4B2AddedToolNames.includes(name)
   ))),
   expectedPreStep4B2RuntimeDigest,

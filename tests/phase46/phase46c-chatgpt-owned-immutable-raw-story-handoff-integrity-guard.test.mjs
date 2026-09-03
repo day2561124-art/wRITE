@@ -102,6 +102,7 @@ function assertMatched(response, expectedHash) {
   assert.equal(response.raw_story_sha256, expectedHash);
   assert.deepEqual(response.raw_story_integrity, {
     guard_used: true,
+    integrity_route: "direct_exact_sha256",
     status: "matched",
     declared_raw_story_sha256: expectedHash,
     received_raw_story_sha256: expectedHash,
@@ -123,6 +124,7 @@ function assertBlocked(response, status, declaredHash, receivedHash) {
   const { forensics, ...primaryIntegrityVerdict } = response.raw_story_integrity;
   assert.deepEqual(primaryIntegrityVerdict, {
     guard_used: true,
+    integrity_route: "direct_exact_sha256",
     status,
     declared_raw_story_sha256: declaredHash,
     received_raw_story_sha256: receivedHash,
@@ -162,8 +164,11 @@ try {
   )?.[0];
   assert(finalPolisherTool, "production final-polisher MCP tool definition must be inspectable");
   assert.match(finalPolisherTool, /raw_story_sha256: \{ type: "string", minLength: 64, maxLength: 64, pattern: "\^\[a-f0-9\]\{64\}\$" \}/u);
-  assert.match(finalPolisherTool, /raw_story_handoff_id/u);
-  assert.match(finalPolisherTool, /\["external_brain_session_id", "writing_context_bundle_id"\]/u);
+  assert.doesNotMatch(finalPolisherTool, /raw_story_handoff_id/u);
+  assert.match(
+    finalPolisherTool,
+    /\["external_brain_session_id", "writing_context_bundle_id", "raw_story_text", "raw_story_sha256"\]/u,
+  );
 
   // Case A — exact ASCII match through the production external-brain capability path.
   const asciiSession = await readySession("exact ASCII match");

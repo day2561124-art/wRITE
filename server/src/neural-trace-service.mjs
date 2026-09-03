@@ -16,7 +16,6 @@ import { assertPathInside, projectPaths, projectRoot } from "./project-paths.mjs
 
 export const neuralTraceIdPattern = /^neural_trace_\d{8}-\d{6}-[a-f0-9]{8}$/u;
 const writingContextBundleIdPattern = /^gptctx_\d{8}-\d{6}-[a-f0-9]{8}$/u;
-const rawStoryHandoffIdPattern = /^raw_story_handoff_\d{8}-\d{6}-[a-f0-9]{12}$/u;
 const traceStatuses = new Set(["success", "failed", "skipped"]);
 const wrapperProof = Symbol("neural-wrapper-execution");
 
@@ -73,10 +72,6 @@ function normalizeTrace(input, allowSuccess) {
     && !writingContextBundleIdPattern.test(String(input.writing_context_bundle_id))) {
     throw new Error("writing_context_bundle_id is invalid for neural trace lineage.");
   }
-  if (input.raw_story_handoff_id !== undefined
-    && !rawStoryHandoffIdPattern.test(String(input.raw_story_handoff_id))) {
-    throw new Error("raw_story_handoff_id is invalid for neural trace lineage.");
-  }
   // Normalize module name: accept either "run_*" wrapper names or canonical module keys
   let moduleNameRaw = String(input.module_name ?? "").trim();
   if (!moduleNameRaw) throw new Error("module_name is required.");
@@ -86,9 +81,6 @@ function normalizeTrace(input, allowSuccess) {
     run_id: input.run_id,
     ...(input.writing_context_bundle_id ? {
       writing_context_bundle_id: input.writing_context_bundle_id,
-    } : {}),
-    ...(input.raw_story_handoff_id ? {
-      raw_story_handoff_id: input.raw_story_handoff_id,
     } : {}),
     trace_id: traceId,
     task_type: requireString(input.task_type, "task_type", 100),

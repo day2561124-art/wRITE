@@ -66,8 +66,6 @@ const steps = [
   ["Phase47A backup export scaling portable regression", ["tests/phase47/phase47a-backup-export-scaling-regression.test.mjs"]],
   ["Phase47B writing-card-director integrated authorship cognition synthesis", ["tests/phase47/phase47b-writing-card-director-integrated-authorship-cognition-synthesis.test.mjs"]],
   ["Phase47D exact raw-story handoff mismatch forensics", ["tests/phase47/phase47d-exact-raw-story-handoff-mismatch-forensics.test.mjs"]],
-  ["Phase47F single-ingress immutable raw-story seal handoff", ["tests/phase47/phase47f-single-ingress-immutable-raw-story-seal-handoff.test.mjs"]],
-  ["Phase47H raw-story seal session authority reconciliation", ["tests/phase47/phase47h-raw-story-seal-session-authority-reconciliation.test.mjs"]],
   ["Phase48A primary external brain character Canon grounding", ["tests/phase48/phase48a-character-canon-grounding-primary-route.test.mjs"]],
   ["Phase48B generated cast grounding and original entity freedom", ["tests/phase48/phase48b-generated-cast-grounding-original-entity-freedom.test.mjs"]],
   ["Phase48C existing Canon world entity grounding", ["tests/phase48/phase48c-existing-canon-world-entity-grounding.test.mjs"]],
@@ -695,9 +693,7 @@ const steps = [
 
   ["Phase 46A existing-neural human-prose cognition upgrade", ["tests/phase46/phase46a-existing-neural-human-prose-cognition-upgrade.test.mjs"]],
 
-  ["Phase 46C immutable raw-story handoff integrity guard", ["tests/phase46/phase46c-chatgpt-owned-immutable-raw-story-handoff-integrity-guard.test.mjs"]],
-
-  ["Phase 46F immutable raw-story handoff live acceptance closure", ["tests/phase46/phase46f-immutable-raw-story-handoff-live-acceptance-closure.test.mjs"]],
+  ["Phase 46C direct exact-SHA raw-story integrity guard", ["tests/phase46/phase46c-chatgpt-owned-immutable-raw-story-handoff-integrity-guard.test.mjs"]],
 
   ["MCP contract tests", ["tests/tools/mcp-contract.test.mjs"]],
 

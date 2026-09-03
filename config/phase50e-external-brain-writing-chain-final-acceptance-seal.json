@@ -3,7 +3,7 @@
   "phase": "50E",
   "acceptance_kind": "external_brain_writing_chain_final_acceptance_seal",
   "base_commit": "37c6a13bdf73f0648192f7ccafcf82f2eb4ae399",
-  "acceptance_version": "phase50e-external-brain-writing-chain-acceptance-v1",
+  "acceptance_version": "phase50e-external-brain-writing-chain-acceptance-v2",
   "architecture_route": "chatgpt_owned_external_brain",
   "orchestration_owner": "ChatGPT",
   "prose_generator": "ChatGPT",
@@ -19,7 +19,7 @@
     "neural_critic",
     "style_drift_detector"
   ],
-  "required_handoff_route": "single_ingress_immutable_seal",
+  "required_handoff_route": "direct_exact_sha256",
   "fixture": {
     "id": "rainy_entryway_silence_boundary",
     "problem_draft_sha256": "bd49aa83f20acf8ec755e20bccf3d1b061081cdbfe0301754e11b451d36c8786",
@@ -45,8 +45,8 @@
     "problem_draft_exact_line_findings",
     "chatgpt_owned_revision",
     "release_diagnostics_no_must_fix",
-    "single_ingress_immutable_seal",
-    "triple_sha_exact_match",
+    "direct_exact_sha256_handoff",
+    "direct_sha_exact_match",
     "final_polisher_exact_identity",
     "session_completed",
     "mutation_guards_closed",
@@ -54,5 +54,5 @@
     "candidate_adoption_settlement_state_unchanged",
     "raw_story_not_persisted"
   ],
-  "expected_deterministic_digest": "e8d054ed9010945c31de88be4cc2dbbb5a37af91e520780d0ce0c3e1e3da05a1"
+  "expected_deterministic_digest": "290a50b20b024fe7ba773446a21a091d77ed3866551c7e754c973593b7a01213"
 }

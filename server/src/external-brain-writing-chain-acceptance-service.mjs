@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const externalBrainWritingChainAcceptanceVersion =
-  "phase50e-external-brain-writing-chain-acceptance-v1";
+  "phase50e-external-brain-writing-chain-acceptance-v2";
 
 export const externalBrainWritingChainRequiredPreGenerationCapabilities = [
   "scene_planner",
@@ -145,7 +145,6 @@ export function buildExternalBrainWritingChainAcceptanceSeal({
   problem_draft_diagnostic_responses: problemDraftDiagnosticResponses = [],
   release_story_text: releaseStoryText,
   release_diagnostic_responses: releaseDiagnosticResponses = [],
-  sealed_handoff_response: sealedHandoffResponse,
   final_polisher_response: finalPolisherResponse,
   protected_hashes_before: protectedHashesBefore = {},
   protected_hashes_after: protectedHashesAfter = {},
@@ -170,7 +169,6 @@ export function buildExternalBrainWritingChainAcceptanceSeal({
     ...preGenerationDiagnosticResponses,
     ...problemDraftDiagnosticResponses,
     ...releaseDiagnosticResponses,
-    sealedHandoffResponse,
     finalPolisherResponse,
   ].filter(Boolean);
   const problemDiagnostics = problemDraftDiagnosticResponses.map((response) => (
@@ -280,21 +278,24 @@ export function buildExternalBrainWritingChainAcceptanceSeal({
   );
   addViolation(
     violations,
-    sealedHandoffResponse?.ok === true
-      && sealedHandoffResponse?.handoff_route === "single_ingress_immutable_seal"
-      && sealedHandoffResponse?.raw_story_sha256 === releaseStorySha256
-      && sealedHandoffResponse?.seal_ingress_raw_story_sha256 === releaseStorySha256
-      && sealedHandoffResponse?.parent_broker_received_raw_story_sha256
+    finalPolisherResponse?.ok === true
+      && finalPolisherResponse?.handoff_route === "direct_exact_sha256"
+      && finalPolisherResponse?.raw_story_sha256 === releaseStorySha256
+      && finalPolisherResponse?.raw_story_integrity?.integrity_route
+        === "direct_exact_sha256"
+      && finalPolisherResponse?.raw_story_integrity?.declared_raw_story_sha256
         === releaseStorySha256
-      && sealedHandoffResponse?.internal_payload_continuity_exact_match === true,
-    "sealed_handoff_exact_identity_failed",
+      && finalPolisherResponse?.raw_story_integrity?.received_raw_story_sha256
+        === releaseStorySha256
+      && finalPolisherResponse?.raw_story_integrity?.exact_match === true,
+    "direct_handoff_exact_identity_failed",
   );
   addViolation(
     violations,
     finalPolisherResponse?.ok === true
-      && finalPolisherResponse?.handoff_route === "single_ingress_immutable_seal"
+      && finalPolisherResponse?.handoff_route === "direct_exact_sha256"
       && finalPolisherResponse?.raw_story_sha256 === releaseStorySha256
-      && finalPolisherResponse?.raw_story_integrity?.triple_hash_exact_match === true
+      && finalPolisherResponse?.raw_story_integrity?.exact_match === true
       && finalPolisherResponse?.final_polisher_minimal_intervention_guard
         ?.text_identity_preserved === true
       && finalPolisherResponse?.final_polisher_minimal_intervention_guard
@@ -327,7 +328,7 @@ export function buildExternalBrainWritingChainAcceptanceSeal({
   addViolation(
     violations,
     rawStoryPersisted === false,
-    "raw_story_persisted_outside_ephemeral_handoff",
+    "raw_story_persisted_outside_runtime_evaluation",
   );
 
   const accepted = violations.length === 0;
@@ -351,9 +352,14 @@ export function buildExternalBrainWritingChainAcceptanceSeal({
     release_story_diagnostics: releaseDiagnostics,
     revision_owner: "ChatGPT",
     final_polisher_generated_replacement_prose: false,
-    handoff_route: sealedHandoffResponse?.handoff_route ?? null,
-    triple_hash_exact_match:
-      finalPolisherResponse?.raw_story_integrity?.triple_hash_exact_match === true,
+    handoff_route: finalPolisherResponse?.handoff_route ?? null,
+    direct_sha_exact_match:
+      finalPolisherResponse?.raw_story_integrity?.integrity_route === "direct_exact_sha256"
+      && finalPolisherResponse?.raw_story_integrity?.declared_raw_story_sha256
+        === releaseStorySha256
+      && finalPolisherResponse?.raw_story_integrity?.received_raw_story_sha256
+        === releaseStorySha256
+      && finalPolisherResponse?.raw_story_integrity?.exact_match === true,
     final_polisher_text_identity_preserved:
       finalPolisherResponse?.final_polisher_minimal_intervention_guard
         ?.text_identity_preserved === true,

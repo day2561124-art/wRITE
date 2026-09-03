@@ -11,7 +11,6 @@ import path from "node:path";
 
 import {
   chatgpt_bridge_begin_external_brain_writing_session,
-  chatgpt_bridge_seal_raw_story_handoff,
   chatgpt_bridge_use_character_simulator,
   chatgpt_bridge_use_final_polisher,
   chatgpt_bridge_use_neural_critic,
@@ -27,9 +26,6 @@ import {
   externalBrainWritingChainRequiredPostDraftDiagnostics,
   externalBrainWritingChainRequiredPreGenerationCapabilities,
 } from "../../server/src/external-brain-writing-chain-acceptance-service.mjs";
-import {
-  getRawStoryHandoffReceipt,
-} from "../../server/src/raw-story-handoff-seal-service.mjs";
 import { projectPaths, projectRoot } from "../../server/src/project-paths.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -423,19 +419,14 @@ try {
     false,
   );
 
-  const sealed = await chatgpt_bridge_seal_raw_story_handoff({
-    ...common,
-    raw_story_text: releaseStory,
-  });
-  assert.equal(sealed.ok, true);
-  assert.equal(sealed.handoff_route, "single_ingress_immutable_seal");
-  assert.equal(sealed.raw_story_sha256, sha256(releaseStory));
-  assertMutationGuards(sealed);
-
   const finalPolisher = await chatgpt_bridge_use_final_polisher({
     ...common,
-    raw_story_handoff_id: sealed.raw_story_handoff_id,
+    raw_story_text: releaseStory,
+    raw_story_sha256: sha256(releaseStory),
   });
+  assert.equal(finalPolisher.handoff_route, "direct_exact_sha256");
+  assert.equal(finalPolisher.raw_story_integrity.integrity_route, "direct_exact_sha256");
+  assert.equal(finalPolisher.raw_story_integrity.exact_match, true);
   assert.equal(finalPolisher.ok, true);
   assert.equal(finalPolisher.trace.status, "success");
   assert.equal(finalPolisher.agent_run_status, "success");
@@ -456,10 +447,6 @@ try {
     0,
   );
   assertMutationGuards(finalPolisher);
-
-  const receipt = getRawStoryHandoffReceipt(sealed.raw_story_handoff_id);
-  assert.equal(receipt.status, "consumed");
-  assert.equal(receipt.payload_reference_active, false);
 
   const protectedAfter = await protectedHashes();
   const mutationAfter = await snapshotNamedTrees(forbiddenMutationRoots);
@@ -494,7 +481,6 @@ try {
     problem_draft_diagnostic_responses: [problemCritic, problemStyle],
     release_story_text: releaseStory,
     release_diagnostic_responses: [releaseCritic, releaseStyle],
-    sealed_handoff_response: sealed,
     final_polisher_response: finalPolisher,
     protected_hashes_before: protectedBefore,
     protected_hashes_after: protectedAfter,
@@ -510,7 +496,7 @@ try {
   assert.deepEqual(acceptance.violations, []);
   assert.equal(acceptance.seal.revision_owner, "ChatGPT");
   assert.equal(acceptance.seal.final_polisher_generated_replacement_prose, false);
-  assert.equal(acceptance.seal.triple_hash_exact_match, true);
+  assert.equal(acceptance.seal.direct_sha_exact_match, true);
   assert.equal(acceptance.seal.final_polisher_text_identity_preserved, true);
   assert.equal(acceptance.seal.protected_hashes_unchanged, true);
   assert.equal(acceptance.seal.forbidden_workflow_state_unchanged, true);
