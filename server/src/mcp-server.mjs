@@ -227,6 +227,16 @@ import {
   dev_workspace_recover_checkpoint,
   initializeDevCheckpointRuntime,
 } from "./mcp-development-checkpoint-tools.mjs";
+import {
+  DEV_TRANSACTION_ID_PATTERN_SOURCE,
+  DEV_TRANSACTION_MAX_LIST_RESULTS,
+  DEV_TRANSACTION_STATES,
+  dev_workspace_get_transaction,
+  dev_workspace_list_transactions,
+  dev_workspace_restore_checkpoint_in_place,
+  dev_workspace_transaction_status,
+  initializeDevTransactionRuntime,
+} from "./mcp-development-transaction-tools.mjs";
 import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -2241,6 +2251,49 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
     handler: async () => jsonContent(await dev_workspace_checkpoint_status()),
+  },
+  {
+    name: "dev_workspace_restore_checkpoint_in_place",
+    description: "High-risk same-HEAD in-place checkpoint restore through the server-owned persistent multi-file transaction runtime. Caller supplies only opaque workspace/checkpoint identity and optional source snapshot CAS; paths, operations, order, staging, rollback, Git refs, shell, and force controls are never accepted.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_ID_PATTERN_SOURCE, maxLength: 64 },
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      expected_current_snapshot_id: { type: "string", pattern: "^[a-f0-9]{64}$", minLength: 64, maxLength: 64 },
+    }, ["workspace_id", "checkpoint_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_restore_checkpoint_in_place(args)),
+  },
+  {
+    name: "dev_workspace_get_transaction",
+    description: "Read one server-owned checkpoint restore transaction, including immutable source/target identity, plan hash, durable marker presence, recovery checkpoint, lifecycle state, health, bounded failure metadata, and provenance operation IDs.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      transaction_id: { type: "string", pattern: DEV_TRANSACTION_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["transaction_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_get_transaction(args)),
+  },
+  {
+    name: "dev_workspace_list_transactions",
+    description: "Read a bounded list of server-owned checkpoint restore transactions using opaque workspace/checkpoint identity and finite transaction-state filters.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_ID_PATTERN_SOURCE, maxLength: 64 },
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      state: { type: "string", enum: DEV_TRANSACTION_STATES },
+      limit: { type: "integer", minimum: 1, maximum: DEV_TRANSACTION_MAX_LIST_RESULTS, default: 50 },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_list_transactions(args)),
+  },
+  {
+    name: "dev_workspace_transaction_status",
+    description: "Read persistent checkpoint-restore transaction subsystem health, active transactions, blocked workspaces, and recovery-required identities. Does not expose filesystem contents or mutation controls.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await dev_workspace_transaction_status()),
   },
   {
     name: "dev_workspace_create_isolated",
@@ -4288,6 +4341,10 @@ const chatgptDeveloperToolNames = new Set([
   "dev_workspace_delete_checkpoint",
   "dev_workspace_checkpoint_gc",
   "dev_workspace_checkpoint_status",
+  "dev_workspace_restore_checkpoint_in_place",
+  "dev_workspace_get_transaction",
+  "dev_workspace_list_transactions",
+  "dev_workspace_transaction_status",
   "dev_workspace_create_isolated",
   "dev_workspace_get_workspace",
   "dev_workspace_list_workspaces",
@@ -4379,6 +4436,10 @@ const permissionSources = {
   dev_workspace_delete_checkpoint: ["development_checkpoint_store", "development_operation_journal", "mcp_client_checkpoint_id"],
   dev_workspace_checkpoint_gc: ["development_checkpoint_store", "development_operation_journal", "server_owned_checkpoint_reachability"],
   dev_workspace_checkpoint_status: ["development_checkpoint_store"],
+  dev_workspace_restore_checkpoint_in_place: ["development_transaction_store", "development_checkpoint_store", "development_operation_journal", "development_workstream_registry", "repository_git_head", "repository_git_worktree_status", "server_owned_transaction_barrier", "mcp_client_checkpoint_id", "mcp_client_expected_snapshot"],
+  dev_workspace_get_transaction: ["development_transaction_store", "mcp_client_transaction_id"],
+  dev_workspace_list_transactions: ["development_transaction_store", "mcp_client_bounded_transaction_filters"],
+  dev_workspace_transaction_status: ["development_transaction_store", "server_owned_transaction_barrier"],
   dev_workspace_create_isolated: ["development_workstream_registry", "repository_git_head", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
   dev_workspace_get_workspace: ["development_workstream_registry", "repository_git_worktree_metadata"],
   dev_workspace_list_workspaces: ["development_workstream_registry", "repository_git_worktree_metadata"],
@@ -5692,6 +5753,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
 await initializeDevJournalRuntime();
 await initializeDevCheckpointRuntime();
+await initializeDevTransactionRuntime();
 
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);

@@ -67,6 +67,7 @@ export const DEV_CHECKPOINT_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED
   : path.join(projectPaths.outputLogs, "development_runtime", "checkpoints");
 
 const checkpointIdPattern = new RegExp(DEV_CHECKPOINT_ID_PATTERN_SOURCE, "u");
+const transactionIdPattern = /^dev_transaction_[a-f0-9]{32}$/u;
 const workstreamIdPattern = /^dev_workstream_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u;
 const workspaceIdPattern = /^dev_workspace_[a-f0-9]{24}$/u;
 const sha256Pattern = /^[a-f0-9]{64}$/u;
@@ -189,6 +190,10 @@ function validateRegistryEntry(entry) {
   if (typeof entry.created_at !== "string" || !Number.isFinite(Date.parse(entry.created_at))) throw new Error("Checkpoint registry created_at is invalid.");
   if (entry.deleted_at !== null && (typeof entry.deleted_at !== "string" || !Number.isFinite(Date.parse(entry.deleted_at)))) throw new Error("Checkpoint registry deleted_at is invalid.");
   if (entry.label !== null) boundedLabel(entry.label);
+  if (entry.internal_purpose !== null && entry.internal_purpose !== undefined && entry.internal_purpose !== "transaction_recovery") throw new Error("Checkpoint registry internal purpose is invalid.");
+  const internalOwnerTransactionId = entry.internal_owner_transaction_id ?? null;
+  if (entry.internal_purpose === "transaction_recovery" && !transactionIdPattern.test(internalOwnerTransactionId ?? "")) throw new Error("Transaction recovery checkpoint registry owner is invalid.");
+  if (entry.internal_purpose !== "transaction_recovery" && internalOwnerTransactionId !== null) throw new Error("Public checkpoint registry entries cannot have an internal transaction owner.");
   if (!sha256Pattern.test(entry.manifest_identity ?? "")) throw new Error("Checkpoint registry manifest identity is invalid.");
   if (typeof entry.provenance_operation_id !== "string" || !/^dev_operation_[a-f0-9]{32}$/u.test(entry.provenance_operation_id)) throw new Error("Checkpoint registry provenance operation identity is invalid.");
   return entry;
@@ -235,6 +240,10 @@ function validateIdentityManifest(manifest) {
   if (!sha256Pattern.test(manifest.workspace_snapshot_id ?? "")) throw new Error("Checkpoint identity manifest snapshot ID is invalid.");
   if (typeof manifest.created_at !== "string" || !Number.isFinite(Date.parse(manifest.created_at))) throw new Error("Checkpoint identity manifest created_at is invalid.");
   if (manifest.label !== null) boundedLabel(manifest.label);
+  if (manifest.internal_purpose !== null && manifest.internal_purpose !== undefined && manifest.internal_purpose !== "transaction_recovery") throw new Error("Checkpoint identity internal purpose is invalid.");
+  const internalOwnerTransactionId = manifest.internal_owner_transaction_id ?? null;
+  if (manifest.internal_purpose === "transaction_recovery" && !transactionIdPattern.test(internalOwnerTransactionId ?? "")) throw new Error("Transaction recovery checkpoint identity owner is invalid.");
+  if (manifest.internal_purpose !== "transaction_recovery" && internalOwnerTransactionId !== null) throw new Error("Public checkpoint identity cannot have an internal transaction owner.");
   if (!Number.isSafeInteger(manifest.artifact_count) || manifest.artifact_count < 0) throw new Error("Checkpoint identity artifact count is invalid.");
   if (!Number.isSafeInteger(manifest.logical_bytes) || manifest.logical_bytes < 0) throw new Error("Checkpoint identity logical bytes are invalid.");
   if (!/^dev_operation_[a-f0-9]{32}$/u.test(manifest.provenance_operation_id ?? "")) throw new Error("Checkpoint identity provenance operation is invalid.");
@@ -277,6 +286,10 @@ function registryEntryFromIdentity(identity) {
     created_at: identity.created_at,
     deleted_at: null,
     label: identity.label,
+    internal_purpose: identity.internal_purpose ?? null,
+    ...(identity.internal_purpose === "transaction_recovery"
+      ? { internal_owner_transaction_id: identity.internal_owner_transaction_id }
+      : {}),
     workstream_id: identity.workstream_id,
     workspace_id: identity.workspace_id,
     git_head: identity.git_head,
@@ -750,11 +763,19 @@ export function createDevCheckpointService({
     });
   }
 
-  async function create(input = {}) {
+  async function create(input = {}, internal = {}) {
     assertObjectKeys(input, "dev_workspace_create_checkpoint input", new Set(["workspace_id", "label"]));
     const workspaceId = assertWorkspaceId(input.workspace_id);
     const label = boundedLabel(input.label);
-    const context = await workspaceContextResolver({ workspace_id: workspaceId }, { mutation: true });
+    const internalPurpose = internal.internalPurpose ?? null;
+    if (internalPurpose !== null && internalPurpose !== "transaction_recovery") throw new Error("Unsupported internal checkpoint purpose.");
+    const internalOwnerTransactionId = internalPurpose === "transaction_recovery" ? internal.transactionId ?? null : null;
+    if (internalPurpose === "transaction_recovery" && !transactionIdPattern.test(internalOwnerTransactionId ?? "")) throw new Error("Internal transaction recovery checkpoint requires a valid server-issued transaction owner.");
+    const context = internal.context ?? await workspaceContextResolver({ workspace_id: workspaceId }, {
+      mutation: true,
+      transactionId: internal.transactionId ?? null,
+    });
+    if (context.workspace_id !== workspaceId) throw new Error("Internal checkpoint context does not match workspace_id.");
     if (context.workspace_type !== "isolated_worktree" || context.lifecycle_state !== "active" || !context.healthy) throw checkpointError("CHECKPOINT_INVALID_WORKSPACE", "Checkpoint source must be a healthy active isolated workspace.");
     const gitTools = createDevGitTools({ repositoryRoot: context.root });
     const gitStatus = await gitTools.status({ includeUntracked: true });
@@ -777,10 +798,11 @@ export function createDevCheckpointService({
     const checkpointId = idGenerator();
     assertCheckpointId(checkpointId);
     const journalOperation = await journalApi.begin({
-      operation_type: "checkpoint_create",
-      tool_name: "dev_workspace_create_checkpoint",
+      operation_type: internal.operationType ?? "checkpoint_create",
+      tool_name: internal.toolName ?? "dev_workspace_create_checkpoint",
       workstream_id: context.workstream_id,
       workspace_id: context.workspace_id,
+      parent_operation_id: internal.parentOperationId ?? null,
       links: [{ relation: "used_by", workspace_snapshot_id: initialSnapshot.workspace_snapshot_id }],
       result: {
         checkpoint_id: checkpointId,
@@ -840,6 +862,10 @@ export function createDevCheckpointService({
           workspace_snapshot_id: initialSnapshot.workspace_snapshot_id,
           created_at: createdAt,
           label,
+          internal_purpose: internalPurpose,
+          ...(internalPurpose === "transaction_recovery"
+            ? { internal_owner_transaction_id: internalOwnerTransactionId }
+            : {}),
           state: "active",
           artifact_count: capture.artifacts.length,
           logical_bytes: capture.logicalBytes,
@@ -915,6 +941,7 @@ export function createDevCheckpointService({
   async function get(input = {}) {
     assertObjectKeys(input, "dev_workspace_get_checkpoint input", new Set(["checkpoint_id"]));
     const loaded = await loadCheckpoint(assertCheckpointId(input.checkpoint_id), { requireActive: false, verifyBlobs: false });
+    if (loaded.entry.internal_purpose) throw checkpointError("CHECKPOINT_INTERNAL", "Internal transaction recovery checkpoints are not exposed through the public checkpoint detail surface.");
     let health = "healthy";
     if (loaded.entry.state === "active") {
       try { for (const artifact of loaded.content.artifacts) if (artifact.blob) await verifyBlob(artifact.blob); } catch { health = "corrupt"; }
@@ -942,7 +969,9 @@ export function createDevCheckpointService({
     if (after !== null) assertCheckpointId(after);
     return withLock(async () => {
       const registry = await reconcileRegistryUnlocked();
-      let entries = [...registry.checkpoints].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.checkpoint_id.localeCompare(b.checkpoint_id));
+      let entries = registry.checkpoints
+        .filter((entry) => !entry.internal_purpose)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.checkpoint_id.localeCompare(b.checkpoint_id));
       if (input.workstream_id) entries = entries.filter((entry) => entry.workstream_id === input.workstream_id);
       if (input.workspace_id) entries = entries.filter((entry) => entry.workspace_id === input.workspace_id);
       if (input.state) entries = entries.filter((entry) => entry.state === input.state);
@@ -1209,6 +1238,9 @@ export function createDevCheckpointService({
     assertObjectKeys(input, "dev_workspace_delete_checkpoint input", new Set(["checkpoint_id"]));
     const checkpointId = assertCheckpointId(input.checkpoint_id);
     const loaded = await loadCheckpoint(checkpointId, { requireActive: true, verifyBlobs: false });
+    if (loaded.entry.internal_purpose) throw checkpointError("CHECKPOINT_INTERNAL", "Internal transaction recovery checkpoints cannot be deleted through the public checkpoint surface.");
+    const { assertDevWorkspaceTransactionAvailable } = await import("./mcp-development-transaction-tools.mjs");
+    await assertDevWorkspaceTransactionAvailable(loaded.identity.workspace_id);
     const operation = await journalApi.begin({ operation_type: "checkpoint_delete", tool_name: "dev_workspace_delete_checkpoint", workstream_id: loaded.identity.workstream_id, workspace_id: loaded.identity.workspace_id, links: [{ relation: "retires", checkpoint_id: checkpointId }], result: { checkpoint_id: checkpointId } });
     try {
       const result = await withLock(async () => {
@@ -1400,7 +1432,7 @@ export function createDevCheckpointService({
 
   async function inspectOperationEffect(started) {
     if (!isObject(started)) return { outcome: "ambiguous_effect", reconciliation_required: true };
-    if (started.operation_type === "checkpoint_create") {
+    if (started.operation_type === "checkpoint_create" || started.operation_type === "checkpoint_transaction_recovery_capture") {
       const checkpointId = started.result?.checkpoint_id;
       if (!checkpointIdPattern.test(checkpointId ?? "")) return { outcome: "ambiguous_effect", reconciliation_required: true };
       try { await readIdentity(checkpointId); return { outcome: "intended_effect_observed", reconciliation_required: false }; } catch (error) {
@@ -1426,6 +1458,89 @@ export function createDevCheckpointService({
     return { outcome: "no_effect_observed", reconciliation_required: false };
   }
 
+  async function captureInternalTransactionRecovery({ context, transactionId, parentOperationId = null }) {
+    if (!context || context.workspace_id === undefined) throw new Error("Internal transaction checkpoint capture requires a resolved workspace context.");
+    return create({
+      workspace_id: context.workspace_id,
+      label: `Internal transaction recovery ${transactionId}`,
+    }, {
+      context,
+      transactionId,
+      internalPurpose: "transaction_recovery",
+      operationType: "checkpoint_transaction_recovery_capture",
+      toolName: "dev_workspace_restore_checkpoint_in_place",
+      parentOperationId,
+    });
+  }
+
+  async function loadInternalTransactionCheckpoint(checkpointId, { verifyBlobs = true } = {}) {
+    return loadCheckpoint(assertCheckpointId(checkpointId), { requireActive: true, verifyBlobs });
+  }
+
+  async function readInternalBlob(descriptor) {
+    return verifyBlob(descriptor);
+  }
+
+  async function verifyWorkspaceAgainstCheckpointInternal(context, checkpointId) {
+    const checkpoint = await loadCheckpoint(assertCheckpointId(checkpointId), { requireActive: true, verifyBlobs: true });
+    const snapshot = await computeWorkspaceSnapshot(context);
+    const expectedDirectories = checkpoint.content.artifacts
+      .filter((artifact) => artifact.state === "directory")
+      .map((artifact) => artifact.path)
+      .sort((a, b) => a.localeCompare(b));
+    const actualDirectories = await collectEmptyDevelopmentDirectories(context.root, effectiveQuotas);
+    return {
+      matches: snapshot.workspace_snapshot_id === checkpoint.identity.workspace_snapshot_id
+        && canonicalJson(actualDirectories) === canonicalJson(expectedDirectories),
+      snapshot,
+      expected_directories: expectedDirectories,
+      actual_directories: actualDirectories,
+      checkpoint,
+    };
+  }
+
+  async function retireInternalTransactionCheckpoint(checkpointId) {
+    return withLock(async () => {
+      const registry = await reconcileRegistryUnlocked();
+      const entry = registry.checkpoints.find((candidate) => candidate.checkpoint_id === assertCheckpointId(checkpointId));
+      if (!entry) throw checkpointError("CHECKPOINT_NOT_FOUND", `Unknown checkpoint: ${checkpointId}.`);
+      if (entry.internal_purpose !== "transaction_recovery") throw checkpointError("CHECKPOINT_INTERNAL_PURPOSE_MISMATCH", "Only transaction recovery checkpoints may be retired by the transaction runtime.");
+      if (entry.state === "deleted") return structuredClone(entry);
+      entry.state = "deleted";
+      entry.deleted_at = clock().toISOString();
+      await writeRegistryUnlocked(registry);
+      return structuredClone(entry);
+    });
+  }
+
+  async function listInternalTransactionCheckpointsByOwner(transactionId) {
+    if (!transactionIdPattern.test(transactionId ?? "")) throw checkpointError("CHECKPOINT_INTERNAL_OWNER_INVALID", "Internal checkpoint owner must be a server-issued transaction ID.");
+    return withLock(async () => {
+      const registry = await reconcileRegistryUnlocked();
+      return registry.checkpoints
+        .filter((entry) => entry.internal_purpose === "transaction_recovery" && entry.internal_owner_transaction_id === transactionId)
+        .map((entry) => structuredClone(entry));
+    });
+  }
+
+  async function retireInternalTransactionCheckpointsByOwner(transactionId) {
+    if (!transactionIdPattern.test(transactionId ?? "")) throw checkpointError("CHECKPOINT_INTERNAL_OWNER_INVALID", "Internal checkpoint owner must be a server-issued transaction ID.");
+    return withLock(async () => {
+      const registry = await reconcileRegistryUnlocked();
+      const matches = registry.checkpoints.filter((entry) => entry.internal_purpose === "transaction_recovery" && entry.internal_owner_transaction_id === transactionId);
+      const retired = [];
+      for (const entry of matches) {
+        if (entry.state === "active") {
+          entry.state = "deleted";
+          entry.deleted_at = clock().toISOString();
+          retired.push(entry.checkpoint_id);
+        }
+      }
+      if (retired.length > 0) await writeRegistryUnlocked(registry);
+      return { transaction_id: transactionId, matched_count: matches.length, retired_count: retired.length, retired_checkpoint_ids: retired };
+    });
+  }
+
   return {
     create,
     get,
@@ -1438,6 +1553,13 @@ export function createDevCheckpointService({
     status,
     initialize,
     inspectOperationEffect,
+    captureInternalTransactionRecovery,
+    loadInternalTransactionCheckpoint,
+    readInternalBlob,
+    verifyWorkspaceAgainstCheckpointInternal,
+    retireInternalTransactionCheckpoint,
+    listInternalTransactionCheckpointsByOwner,
+    retireInternalTransactionCheckpointsByOwner,
     storageRoot,
   };
 }
@@ -1455,3 +1577,10 @@ export const dev_workspace_checkpoint_gc = (input) => defaultCheckpointService.g
 export const dev_workspace_checkpoint_status = () => defaultCheckpointService.status();
 export const initializeDevCheckpointRuntime = () => defaultCheckpointService.initialize();
 export const inspectDevCheckpointOperationEffect = (started) => defaultCheckpointService.inspectOperationEffect(started);
+export const captureDevTransactionRecoveryCheckpoint = (input) => defaultCheckpointService.captureInternalTransactionRecovery(input);
+export const loadDevCheckpointInternal = (checkpointId, options) => defaultCheckpointService.loadInternalTransactionCheckpoint(checkpointId, options);
+export const readDevCheckpointBlobInternal = (descriptor) => defaultCheckpointService.readInternalBlob(descriptor);
+export const verifyDevWorkspaceAgainstCheckpointInternal = (context, checkpointId) => defaultCheckpointService.verifyWorkspaceAgainstCheckpointInternal(context, checkpointId);
+export const retireDevTransactionRecoveryCheckpoint = (checkpointId) => defaultCheckpointService.retireInternalTransactionCheckpoint(checkpointId);
+export const listDevTransactionRecoveryCheckpointsByOwner = (transactionId) => defaultCheckpointService.listInternalTransactionCheckpointsByOwner(transactionId);
+export const retireDevTransactionRecoveryCheckpointsByOwner = (transactionId) => defaultCheckpointService.retireInternalTransactionCheckpointsByOwner(transactionId);

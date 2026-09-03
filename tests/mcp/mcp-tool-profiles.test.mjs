@@ -280,7 +280,13 @@ const checkpointToolNames = [
   "dev_workspace_checkpoint_gc",
   "dev_workspace_checkpoint_status",
 ];
-for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames, ...checkpointToolNames]) {
+const transactionToolNames = [
+  "dev_workspace_restore_checkpoint_in_place",
+  "dev_workspace_get_transaction",
+  "dev_workspace_list_transactions",
+  "dev_workspace_transaction_status",
+];
+for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames, ...checkpointToolNames, ...transactionToolNames]) {
   assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
 }
 publicToolNames.push(...workstreamToolNames);
@@ -288,6 +294,7 @@ publicToolNames.push(...workspaceToolNames);
 publicToolNames.push(...integrationToolNames);
 publicToolNames.push(...journalToolNames);
 publicToolNames.push(...checkpointToolNames);
+publicToolNames.push(...transactionToolNames);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
@@ -490,6 +497,70 @@ for (const [toolName, expectedProperties] of checkpointExpectedProperties) {
   assert.equal(permission?.can_modify_story_graph, false);
   assert.equal(permission?.can_modify_memory, false);
 }
+
+const transactionExpected = new Map([
+  ["dev_workspace_restore_checkpoint_in_place", {
+    readOnly: false,
+    permission: "write_high_risk",
+    risk: "high-risk-write",
+    required: ["checkpoint_id", "workspace_id"],
+    properties: ["checkpoint_id", "expected_current_snapshot_id", "workspace_id"],
+  }],
+  ["dev_workspace_get_transaction", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: ["transaction_id"],
+    properties: ["transaction_id"],
+  }],
+  ["dev_workspace_list_transactions", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: [],
+    properties: ["checkpoint_id", "limit", "state", "workspace_id"],
+  }],
+  ["dev_workspace_transaction_status", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: [],
+    properties: [],
+  }],
+]);
+const forbiddenTransactionFields = [
+  "transaction_id_override", "plan", "plan_hash", "actions", "operations", "paths", "path", "content",
+  "targetSha", "beforeSha", "stagingPath", "recovery_checkpoint_id", "preparedMarker", "commitMarker",
+  "operationOrder", "rollback", "rollbackSteps", "gitHead", "branch", "ref", "cwd", "root", "shell",
+  "executable", "env", "gitArgs", "force", "reset", "clean", "stash", "restore", "bypassTransactionBarrier",
+];
+for (const [toolName, expectation] of transactionExpected) {
+  const tool = developerList.result.tools.find((candidate) => candidate.name === toolName);
+  assert(tool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(tool.annotations?.readOnlyHint, expectation.readOnly);
+  assert.equal(tool.inputSchema?.additionalProperties, false);
+  assert.deepEqual([...(tool.inputSchema?.required ?? [])].sort(), expectation.required);
+  assert.deepEqual(Object.keys(tool.inputSchema?.properties ?? {}).sort(), expectation.properties);
+  for (const forbiddenField of forbiddenTransactionFields) {
+    assert.equal(Object.hasOwn(tool.inputSchema?.properties ?? {}, forbiddenField), false, `${toolName} exposed forbidden transaction field ${forbiddenField}`);
+  }
+  const permission = tool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, expectation.permission);
+  assert.equal(permission?.risk_level, expectation.risk);
+  assert.equal(permission?.read_or_write, expectation.readOnly ? "read" : "write");
+  assert.equal(permission?.requires_user_confirmation, toolName === "dev_workspace_restore_checkpoint_in_place");
+  assert.equal(permission?.log_required, !expectation.readOnly);
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+}
+const transactionListTool = developerList.result.tools.find((tool) => tool.name === "dev_workspace_list_transactions");
+assert.deepEqual(transactionListTool.inputSchema.properties.state.enum, [
+  "created", "preparing", "prepared", "applying", "verifying", "committed", "cleaning", "completed",
+  "rolling_back", "rolled_back", "recovering", "recovery_required", "degraded", "corrupt", "abandoned",
+]);
+assert.equal(transactionListTool.inputSchema.properties.limit.maximum, 100);
 
 const integrationExpected = new Map([
   ["dev_workspace_integration_preflight", {
@@ -938,7 +1009,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-40, 40);
+publicToolNames.splice(-44, 44);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -982,8 +1053,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 84);
-assert.equal(fullNames.length, 142);
+assert.equal(developerNames.length, 88);
+assert.equal(fullNames.length, 146);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -1257,6 +1328,7 @@ publicToolNames.push(...workspaceToolNames);
 publicToolNames.push(...integrationToolNames);
 publicToolNames.push(...journalToolNames);
 publicToolNames.push(...checkpointToolNames);
+publicToolNames.push(...transactionToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -1273,7 +1345,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-40, 40);
+  publicToolNames.splice(-44, 44);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -1282,5 +1354,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 44}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 48}).`,
 );

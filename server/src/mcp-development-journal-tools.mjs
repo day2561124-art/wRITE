@@ -583,8 +583,10 @@ export function createDevOperationJournalService({
     for (const operationId of verification.dangling_operations) {
       const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
       if (!started) continue;
+      const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
+        || started.operation_type.startsWith("transaction_");
       let context = null;
-      if (!started.operation_type.startsWith("checkpoint_")) {
+      if (!started.operation_type.startsWith("checkpoint_") && !transactionOperation) {
         try {
           context = await resolveContext(started.workspace_id);
         } catch (error) {
@@ -598,7 +600,17 @@ export function createDevOperationJournalService({
       let outcome = "no_effect_observed";
       let ambiguous = false;
       let observedTargets = [];
-      if (started.operation_type.startsWith("checkpoint_")) {
+      if (transactionOperation) {
+        try {
+          const { inspectDevTransactionOperationEffect } = await import("./mcp-development-transaction-tools.mjs");
+          const inspection = await inspectDevTransactionOperationEffect(started);
+          outcome = inspection.outcome;
+          ambiguous = inspection.reconciliation_required === true || outcome === "ambiguous_effect";
+        } catch {
+          outcome = "ambiguous_effect";
+          ambiguous = true;
+        }
+      } else if (started.operation_type.startsWith("checkpoint_")) {
         try {
           const { inspectDevCheckpointOperationEffect } = await import("./mcp-development-checkpoint-tools.mjs");
           const inspection = await inspectDevCheckpointOperationEffect(started);

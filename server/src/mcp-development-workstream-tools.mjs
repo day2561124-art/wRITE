@@ -549,6 +549,11 @@ export function createDevWorkstreamRegistryService({
   const absoluteWorkspacePath = (workspaceId) => workspacePathForId(workspaceId, worktreeRootPath);
   const relativeWorkspacePath = (workspaceId) => workspaceRelativePath(workspaceId, worktreeRootPath, repositoryRoot);
 
+  async function assertWorkspaceTransactionAvailable(workspaceId, options = {}) {
+    const { assertDevWorkspaceTransactionAvailable } = await import("./mcp-development-transaction-tools.mjs");
+    await assertDevWorkspaceTransactionAvailable(workspaceId, options);
+  }
+
   async function listGitWorktrees() {
     const { stdout } = await gitRunner(["worktree", "list", "--porcelain", "-z"], { cwd: repositoryRoot });
     const tokens = String(stdout).split("\0");
@@ -944,7 +949,7 @@ export function createDevWorkstreamRegistryService({
       }));
   }
 
-  async function resolveExecutionContext(input = {}, { mutation = false, lifecycleStates = null } = {}) {
+  async function resolveExecutionContext(input = {}, { mutation = false, lifecycleStates = null, transactionId = null } = {}) {
     const allowed = new Set(["workspace_id"]);
     assertObject(input, "workspace execution context input", allowed);
     const workspaceId = input.workspace_id ?? DEV_WORKSTREAM_WORKSPACE_ID;
@@ -985,6 +990,7 @@ export function createDevWorkstreamRegistryService({
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) {
       throw new Error("workspace_id must be a server-issued workspace ID.");
     }
+    await assertWorkspaceTransactionAvailable(workspaceId, { transactionId });
     const { registry } = await readRegistryWithHealth();
     const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace) ?? null;
     if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
@@ -1030,6 +1036,7 @@ export function createDevWorkstreamRegistryService({
     assertObject(input, "dev_workspace_get_workspace input", allowed);
     const workspaceId = input.workspace_id;
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    await assertWorkspaceTransactionAvailable(workspaceId);
     const { registry } = await readRegistryWithHealth();
     const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace) ?? null;
     if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
@@ -1060,6 +1067,7 @@ export function createDevWorkstreamRegistryService({
     assertObject(input, "dev_workspace_lock input", allowed);
     const workspaceId = input.workspace_id;
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    await assertWorkspaceTransactionAvailable(workspaceId);
     return mutate("dev_workspace_lock", async (registry) => {
       const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
       if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
@@ -1088,6 +1096,7 @@ export function createDevWorkstreamRegistryService({
     assertObject(input, "dev_workspace_unlock input", allowed);
     const workspaceId = input.workspace_id;
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    await assertWorkspaceTransactionAvailable(workspaceId);
     return mutate("dev_workspace_unlock", async (registry) => {
       const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
       if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
@@ -1114,6 +1123,7 @@ export function createDevWorkstreamRegistryService({
     assertObject(input, "dev_workspace_remove_isolated input", allowed);
     const workspaceId = input.workspace_id;
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    await assertWorkspaceTransactionAvailable(workspaceId);
     return mutate("dev_workspace_remove_isolated", async (registry) => {
       const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
       if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
@@ -1295,6 +1305,7 @@ export function createDevWorkstreamRegistryService({
     return mutate("dev_workspace_update_workstream", async (registry) => {
       const record = findRecord(registry, workstreamId);
       if (!record) throw new Error(`Unknown workstream: ${workstreamId}.`);
+      if (record.workspace?.workspace_id) await assertWorkspaceTransactionAvailable(record.workspace.workspace_id);
       if (terminalStateSet.has(record.state)) {
         throw new Error("Terminal workstreams cannot be updated or restarted.");
       }
@@ -1362,6 +1373,7 @@ export function createDevWorkstreamRegistryService({
     return mutate("dev_workspace_end_workstream", async (registry) => {
       const record = findRecord(registry, workstreamId);
       if (!record) throw new Error(`Unknown workstream: ${workstreamId}.`);
+      if (record.workspace?.workspace_id) await assertWorkspaceTransactionAvailable(record.workspace.workspace_id);
       if (terminalStateSet.has(record.state)) {
         throw new Error(`Workstream is already terminal: ${record.state}.`);
       }
