@@ -13,6 +13,7 @@ const testScripts = [
   "tests/mcp/mcp-development-write-tools.test.mjs",
   "tests/mcp/mcp-development-test-tools.test.mjs",
   "tests/mcp/mcp-development-journal-tools.test.mjs",
+  "tests/mcp/mcp-development-checkpoint-tools.test.mjs",
   "tests/mcp/mcp-http-integration-control.test.mjs",
   "tests/mcp/mcp-http-session-lifecycle.test.mjs",
   "tests/mcp/mcp-development-integration-tools.test.mjs",
@@ -22,7 +23,11 @@ function runTestScript(scriptPath) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath], {
       cwd: rootDir,
-      env: { ...process.env, WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: "1" },
+      env: {
+        ...process.env,
+        WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: "1",
+        WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT: "1",
+      },
       stdio: "inherit",
       windowsHide: true,
     });

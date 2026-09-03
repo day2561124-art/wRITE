@@ -212,6 +212,21 @@ import {
   dev_workspace_list_operations,
   initializeDevJournalRuntime,
 } from "./mcp-development-journal-tools.mjs";
+import {
+  DEV_CHECKPOINT_ID_PATTERN_SOURCE,
+  DEV_CHECKPOINT_MAX_LIST_RESULTS,
+  DEV_CHECKPOINT_STATES,
+  dev_workspace_checkpoint_gc,
+  dev_workspace_checkpoint_status,
+  dev_workspace_compare_checkpoint,
+  dev_workspace_create_checkpoint,
+  dev_workspace_delete_checkpoint,
+  dev_workspace_get_checkpoint,
+  dev_workspace_list_checkpoints,
+  dev_workspace_read_checkpoint_file,
+  dev_workspace_recover_checkpoint,
+  initializeDevCheckpointRuntime,
+} from "./mcp-development-checkpoint-tools.mjs";
 import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -2112,7 +2127,7 @@ const toolDefinitions = [
   },
   {
     name: "dev_workspace_get_provenance",
-    description: "Read bounded provenance for one server-resolved workspace-relative path, exact commit SHA, or integration candidate ID. Arbitrary roots, cwd, event paths, and audit payloads are not accepted.",
+    description: "Read bounded provenance for one server-resolved workspace-relative path, exact commit SHA, integration candidate ID, checkpoint ID, or workstream ID. Arbitrary roots, cwd, event paths, and audit payloads are not accepted.",
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
@@ -2120,9 +2135,112 @@ const toolDefinitions = [
       path: { type: "string", minLength: 1, maxLength: 4096 },
       commit: { type: "string", pattern: "^[A-Fa-f0-9]{40}$", maxLength: 40 },
       integration_candidate_id: { type: "string", pattern: DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, maxLength: 64 },
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
       limit: { type: "integer", minimum: 1, maximum: DEV_JOURNAL_MAX_QUERY_RESULTS, default: 50 },
     }),
     handler: async (args) => jsonContent(await dev_workspace_get_provenance(args)),
+  },
+  {
+    name: "dev_workspace_create_checkpoint",
+    description: "Capture one immutable server-owned checkpoint of a healthy isolated development workspace as exact Git HEAD plus the complete authorized working-tree overlay. Caller cannot select paths, ignored files, secrets, storage locations, refs, or Git arguments.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_ID_PATTERN_SOURCE, maxLength: 64 },
+      label: { type: "string", minLength: 1, maxLength: 160 },
+    }, ["workspace_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_create_checkpoint(args)),
+  },
+  {
+    name: "dev_workspace_get_checkpoint",
+    description: "Read one immutable development checkpoint identity, source snapshot, bounded artifact summary, coverage, lifecycle state, provenance identity, and health.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["checkpoint_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_get_checkpoint(args)),
+  },
+  {
+    name: "dev_workspace_list_checkpoints",
+    description: "Read a bounded page of server-owned development checkpoints using opaque workstream/workspace identities and finite lifecycle filters.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_ID_PATTERN_SOURCE, maxLength: 64 },
+      state: { type: "string", enum: DEV_CHECKPOINT_STATES },
+      limit: { type: "integer", minimum: 1, maximum: DEV_CHECKPOINT_MAX_LIST_RESULTS, default: DEV_CHECKPOINT_MAX_LIST_RESULTS },
+      after: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_list_checkpoints(args)),
+  },
+  {
+    name: "dev_workspace_compare_checkpoint",
+    description: "Compare one active checkpoint with either one current isolated workspace or another active checkpoint. Returns bounded identity/hash/path summaries only; no full textual diff and no mutation.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_ID_PATTERN_SOURCE, maxLength: 64 },
+      other_checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["checkpoint_id"], [{
+      type: "exactlyOne",
+      fields: ["workspace_id", "other_checkpoint_id"],
+      message: "Exactly one comparison target is required: workspace_id or other_checkpoint_id.",
+    }]),
+    handler: async (args) => jsonContent(await dev_workspace_compare_checkpoint(args)),
+  },
+  {
+    name: "dev_workspace_read_checkpoint_file",
+    description: "Read one bounded UTF-8 development file from an active immutable checkpoint CAS blob after path, digest, size, and checkpoint health verification. Does not write to any workspace.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      path: { type: "string", minLength: 1, maxLength: 4096 },
+    }, ["checkpoint_id", "path"]),
+    handler: async (args) => jsonContent(await dev_workspace_read_checkpoint_file(args)),
+  },
+  {
+    name: "dev_workspace_recover_checkpoint",
+    description: "Fork an active immutable checkpoint into a new server-generated recovery workstream and isolated worktree based on the checkpoint's exact Git HEAD, materialize its authorized overlay, verify the exact snapshot, and only then mark the new workspace active. The source workspace and main are never overwritten.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+      label: { type: "string", minLength: 1, maxLength: 160 },
+    }, ["checkpoint_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_recover_checkpoint(args)),
+  },
+  {
+    name: "dev_workspace_delete_checkpoint",
+    description: "Logically delete one active checkpoint from the retention root set. Immutable manifests and shared CAS blobs are not recursively deleted by this operation.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      checkpoint_id: { type: "string", pattern: DEV_CHECKPOINT_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["checkpoint_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_delete_checkpoint(args)),
+  },
+  {
+    name: "dev_workspace_checkpoint_gc",
+    description: "Run server-owned checkpoint-store reachability GC. It can only reclaim validated CAS blobs unreferenced by non-deleted checkpoint manifests; no paths, force flags, or caller deletion lists are accepted.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      dryRun: { type: "boolean", default: false },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_checkpoint_gc(args)),
+  },
+  {
+    name: "dev_workspace_checkpoint_status",
+    description: "Read checkpoint-store registry/content/blob health, active/deleted counts, logical and physical bytes, deduplication savings, and reclaimable orphan blob statistics.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await dev_workspace_checkpoint_status()),
   },
   {
     name: "dev_workspace_create_isolated",
@@ -4161,6 +4279,15 @@ const chatgptDeveloperToolNames = new Set([
   "dev_workspace_get_operation",
   "dev_workspace_list_operations",
   "dev_workspace_get_provenance",
+  "dev_workspace_create_checkpoint",
+  "dev_workspace_get_checkpoint",
+  "dev_workspace_list_checkpoints",
+  "dev_workspace_compare_checkpoint",
+  "dev_workspace_read_checkpoint_file",
+  "dev_workspace_recover_checkpoint",
+  "dev_workspace_delete_checkpoint",
+  "dev_workspace_checkpoint_gc",
+  "dev_workspace_checkpoint_status",
   "dev_workspace_create_isolated",
   "dev_workspace_get_workspace",
   "dev_workspace_list_workspaces",
@@ -4242,7 +4369,16 @@ const permissionSources = {
   dev_workspace_journal_status: ["development_operation_journal"],
   dev_workspace_get_operation: ["development_operation_journal", "mcp_client_operation_id"],
   dev_workspace_list_operations: ["development_operation_journal", "mcp_client_bounded_provenance_filters"],
-  dev_workspace_get_provenance: ["development_operation_journal", "development_workstream_registry", "development_integration_registry", "repository_git_head"],
+  dev_workspace_get_provenance: ["development_operation_journal", "development_workstream_registry", "development_integration_registry", "development_checkpoint_store", "repository_git_head"],
+  dev_workspace_create_checkpoint: ["development_checkpoint_store", "development_operation_journal", "development_workstream_registry", "repository_git_worktree_status", "repository_development_paths", "mcp_client_bounded_checkpoint_label"],
+  dev_workspace_get_checkpoint: ["development_checkpoint_store", "mcp_client_checkpoint_id"],
+  dev_workspace_list_checkpoints: ["development_checkpoint_store", "mcp_client_bounded_checkpoint_filters"],
+  dev_workspace_compare_checkpoint: ["development_checkpoint_store", "development_workstream_registry", "repository_git_worktree_status", "mcp_client_checkpoint_id"],
+  dev_workspace_read_checkpoint_file: ["development_checkpoint_store", "repository_development_path_policy", "mcp_client_checkpoint_id", "mcp_client_workspace_relative_path"],
+  dev_workspace_recover_checkpoint: ["development_checkpoint_store", "development_operation_journal", "development_workstream_registry", "repository_git_worktree_metadata", "mcp_client_checkpoint_id", "mcp_client_bounded_checkpoint_label"],
+  dev_workspace_delete_checkpoint: ["development_checkpoint_store", "development_operation_journal", "mcp_client_checkpoint_id"],
+  dev_workspace_checkpoint_gc: ["development_checkpoint_store", "development_operation_journal", "server_owned_checkpoint_reachability"],
+  dev_workspace_checkpoint_status: ["development_checkpoint_store"],
   dev_workspace_create_isolated: ["development_workstream_registry", "repository_git_head", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
   dev_workspace_get_workspace: ["development_workstream_registry", "repository_git_worktree_metadata"],
   dev_workspace_list_workspaces: ["development_workstream_registry", "repository_git_worktree_metadata"],
@@ -5555,6 +5691,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 }
 
 await initializeDevJournalRuntime();
+await initializeDevCheckpointRuntime();
 
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);

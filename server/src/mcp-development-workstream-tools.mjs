@@ -23,7 +23,25 @@ export const DEV_WORKSTREAM_TERMINAL_STATES = Object.freeze(["completed", "aband
 export const DEV_WORKSTREAM_MODES = Object.freeze(["shared", "isolated"]);
 export const DEV_WORKSTREAM_SUPPORTED_MODE = "shared";
 export const DEV_WORKSPACE_TYPES = Object.freeze(["isolated_worktree"]);
-export const DEV_WORKSPACE_STATES = Object.freeze(["creating", "active", "removing", "removed", "error"]);
+export const DEV_WORKSPACE_STATES = Object.freeze([
+  "creating",
+  "materializing",
+  "verifying",
+  "active",
+  "materialization_failed",
+  "verification_failed",
+  "reconciliation_required",
+  "removing",
+  "removed",
+  "error",
+]);
+export const DEV_WORKSPACE_RECOVERY_STATES = Object.freeze([
+  "materializing",
+  "verifying",
+  "materialization_failed",
+  "verification_failed",
+  "reconciliation_required",
+]);
 export const DEV_WORKSPACE_MAX_LIST_RESULTS = 100;
 export const DEV_WORKSPACE_ID_PATTERN_SOURCE = "^dev_workspace_[a-f0-9]{24}$";
 export const DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE = "^(?:dev_workspace_[a-f0-9]{24}|dev_workspace_shared_repository_v1)$";
@@ -41,6 +59,8 @@ export const DEV_WORKSTREAM_WORKSPACE_ID = "dev_workspace_shared_repository_v1";
 
 const workstreamIdPattern = new RegExp(DEV_WORKSTREAM_ID_PATTERN_SOURCE, "u");
 const workspaceIdPattern = new RegExp(DEV_WORKSPACE_ID_PATTERN_SOURCE, "u");
+const checkpointIdPattern = /^dev_checkpoint_[a-f0-9]{32}$/u;
+const operationIdPattern = /^dev_operation_[a-f0-9]{32}$/u;
 const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const workspaceStateSet = new Set(DEV_WORKSPACE_STATES);
 const workspaceTypeSet = new Set(DEV_WORKSPACE_TYPES);
@@ -684,18 +704,22 @@ export function createDevWorkstreamRegistryService({
     };
   }
 
-  async function createIsolated(input = {}) {
+  async function createIsolated(input = {}, options = {}) {
     const allowed = new Set(["workstream_id", "expected_workstream_revision"]);
     assertObject(input, "dev_workspace_create_isolated input", allowed);
     const workstreamId = assertWorkstreamId(input.workstream_id);
     const expectedRevision = input.expected_workstream_revision;
+    const recoveryMode = options?.recovery === true;
 
-    return mutate("dev_workspace_create_isolated", async (registry) => {
+    return mutate(recoveryMode ? "dev_workspace_create_recovery_isolated" : "dev_workspace_create_isolated", async (registry) => {
       const record = findRecord(registry, workstreamId);
       if (!record) throw new Error(`Unknown workstream: ${workstreamId}.`);
       if (terminalStateSet.has(record.state)) throw new Error("Terminal workstreams cannot create isolated workspaces.");
       assertExpectedRevision(record, expectedRevision);
       if (record.mode !== "shared" || record.workspace) throw new Error("Workstream already has an isolated workspace lifecycle record.");
+      if (recoveryMode && !checkpointIdPattern.test(record.metadata?.recovery_source_checkpoint_id ?? "")) {
+        throw new Error("Recovery workspace creation requires a server-created checkpoint recovery workstream.");
+      }
 
       await ensureSafeWorktreeRoot(worktreeRootPath);
       const unregistered = await findUnregisteredServerWorktrees(registry);
@@ -762,7 +786,7 @@ export function createDevWorkstreamRegistryService({
         }
         if (health.git_worktree_head !== record.base_head) throw new Error("Created worktree HEAD does not match the server-captured workstream base_head.");
         if (!health.locked) throw new Error("Created worktree is not Git-locked.");
-        record.workspace.state = "active";
+        record.workspace.state = recoveryMode ? "materializing" : "active";
         record.workspace.locked = true;
         record.workspace.lock_reason = health.lock_reason ?? reason;
         record.workspace.git_worktree_head = health.git_worktree_head;
@@ -788,7 +812,139 @@ export function createDevWorkstreamRegistryService({
     });
   }
 
-  async function resolveExecutionContext(input = {}, { mutation = false } = {}) {
+  async function beginRecovery(input = {}) {
+    const allowed = new Set(["checkpoint_id", "source_workstream_id", "base_head", "label", "recovery_operation_id"]);
+    assertObject(input, "checkpoint recovery workstream input", allowed);
+    if (!checkpointIdPattern.test(input.checkpoint_id ?? "")) throw new Error("checkpoint_id must be a server-issued checkpoint ID.");
+    if (!operationIdPattern.test(input.recovery_operation_id ?? "")) throw new Error("recovery_operation_id must be a server-issued operation ID.");
+    const sourceWorkstreamId = assertWorkstreamId(input.source_workstream_id, "source_workstream_id");
+    const baseHead = String(input.base_head ?? "").toLowerCase();
+    if (!gitSha1Pattern.test(baseHead)) throw new Error("checkpoint recovery base_head must be an exact Git SHA-1.");
+    const label = assertBoundedString(input.label ?? `Recovery from ${input.checkpoint_id}`, "label", {
+      min: 1,
+      max: DEV_WORKSTREAM_MAX_LABEL_CHARACTERS,
+    });
+    await gitRunner(["cat-file", "-e", `${baseHead}^{commit}`], { cwd: repositoryRoot });
+
+    return mutate("dev_workspace_begin_checkpoint_recovery", async (registry) => {
+      if (registry.workstreams.length >= DEV_WORKSTREAM_MAX_RECORDS) {
+        throw new Error(`workstream registry reached the ${DEV_WORKSTREAM_MAX_RECORDS}-record limit.`);
+      }
+      const source = findRecord(registry, sourceWorkstreamId);
+      if (!source) throw new Error(`Unknown source workstream: ${sourceWorkstreamId}.`);
+      let workstreamId;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const candidate = idGenerator(clock());
+        assertWorkstreamId(candidate, "generated recovery workstream_id");
+        if (!findRecord(registry, candidate)) {
+          workstreamId = candidate;
+          break;
+        }
+      }
+      if (!workstreamId) throw new Error("Could not generate a unique recovery workstream ID.");
+      const now = clock().toISOString();
+      const record = {
+        workstream_id: workstreamId,
+        schema_version: DEV_WORKSTREAM_SCHEMA_VERSION,
+        revision: 1,
+        label,
+        purpose: "experiment",
+        state: "active",
+        mode: DEV_WORKSTREAM_SUPPORTED_MODE,
+        base_head: baseHead,
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+        parent_workstream_id: sourceWorkstreamId,
+        depends_on: [],
+        declared_scope: structuredClone(source.declared_scope),
+        workspace_id: DEV_WORKSTREAM_WORKSPACE_ID,
+        metadata: {
+          phase: "3B",
+          recovery: true,
+          derived_from_workstream_id: sourceWorkstreamId,
+          recovery_source_checkpoint_id: input.checkpoint_id,
+          recovery_operation_id: input.recovery_operation_id,
+        },
+      };
+      registry.workstreams.push(record);
+      assertAcyclic(registry);
+      return (nextRegistry) => ({
+        ...withOverlap(nextRegistry, findRecord(nextRegistry, workstreamId)),
+        registry_revision: nextRegistry.revision,
+      });
+    });
+  }
+
+  async function transitionRecoveryWorkspace(input = {}) {
+    const allowed = new Set(["workspace_id", "state", "last_error"]);
+    assertObject(input, "checkpoint recovery workspace transition input", allowed);
+    const workspaceId = input.workspace_id;
+    if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    const nextState = input.state;
+    const recoveryTransitionStates = new Set([...DEV_WORKSPACE_RECOVERY_STATES, "active"]);
+    if (!recoveryTransitionStates.has(nextState)) throw new Error("Invalid checkpoint recovery workspace state transition target.");
+    const lastError = input.last_error === undefined || input.last_error === null
+      ? null
+      : assertBoundedString(input.last_error, "last_error", { min: 1, max: 1024 });
+    const legal = {
+      materializing: new Set(["materializing", "verifying", "materialization_failed", "reconciliation_required"]),
+      verifying: new Set(["verifying", "active", "verification_failed", "reconciliation_required", "materializing"]),
+      materialization_failed: new Set(["materialization_failed", "reconciliation_required"]),
+      verification_failed: new Set(["verification_failed", "reconciliation_required"]),
+      reconciliation_required: new Set(["reconciliation_required"]),
+    };
+
+    return mutate("dev_workspace_checkpoint_recovery_transition", async (registry) => {
+      const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
+      if (!record) throw new Error(`Unknown recovery workspace: ${workspaceId}.`);
+      if (!checkpointIdPattern.test(record.metadata?.recovery_source_checkpoint_id ?? "")) {
+        throw new Error("Workspace is not a checkpoint recovery workspace.");
+      }
+      const currentState = record.workspace.state;
+      if (!legal[currentState]?.has(nextState)) {
+        throw new Error(`Illegal checkpoint recovery workspace transition: ${currentState} -> ${nextState}.`);
+      }
+      const health = await inspectRegisteredWorkspace(record.workspace);
+      if (!health.filesystem_path_exists || !health.git_worktree_mapping_exists || !health.registered_branch_matches || !health.registry_mapping_consistent || !health.locked) {
+        throw new Error("Recovery workspace mapping is unhealthy; lifecycle transition is refused.");
+      }
+      const now = clock().toISOString();
+      record.workspace.state = nextState;
+      record.workspace.last_error = lastError;
+      record.workspace.git_worktree_head = health.git_worktree_head;
+      record.workspace.updated_at = now;
+      record.workspace.revision += 1;
+      record.revision += 1;
+      record.updated_at = now;
+      record.last_activity_at = now;
+      return (nextRegistry) => ({
+        ...(findRecord(nextRegistry, record.workstream_id).workspace),
+        workstream_id: record.workstream_id,
+        workstream_revision: findRecord(nextRegistry, record.workstream_id).revision,
+        registry_revision: nextRegistry.revision,
+      });
+    });
+  }
+
+  async function listRecoveryWorkspacesInternal() {
+    const { registry } = await readRegistryWithHealth();
+    return registry.workstreams
+      .filter((record) => checkpointIdPattern.test(record.metadata?.recovery_source_checkpoint_id ?? ""))
+      .map((record) => ({
+        workstream_id: record.workstream_id,
+        workstream_revision: record.revision,
+        workspace_id: record.workspace?.workspace_id ?? null,
+        workspace_state: record.workspace?.state ?? "creating",
+        checkpoint_id: record.metadata.recovery_source_checkpoint_id,
+        recovery_operation_id: operationIdPattern.test(record.metadata?.recovery_operation_id ?? "")
+          ? record.metadata.recovery_operation_id
+          : null,
+        derived_from_workstream_id: record.metadata.derived_from_workstream_id ?? record.parent_workstream_id,
+      }));
+  }
+
+  async function resolveExecutionContext(input = {}, { mutation = false, lifecycleStates = null } = {}) {
     const allowed = new Set(["workspace_id"]);
     assertObject(input, "workspace execution context input", allowed);
     const workspaceId = input.workspace_id ?? DEV_WORKSTREAM_WORKSPACE_ID;
@@ -832,7 +988,10 @@ export function createDevWorkstreamRegistryService({
     const { registry } = await readRegistryWithHealth();
     const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace) ?? null;
     if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
-    if (record.workspace.state !== "active") throw new Error(`Workspace is not active: ${record.workspace.state}.`);
+    const allowedLifecycleStates = lifecycleStates === null ? new Set(["active"]) : new Set(lifecycleStates);
+    if (!allowedLifecycleStates.has(record.workspace.state)) {
+      throw new Error(`Workspace lifecycle state is not executable: ${record.workspace.state}.`);
+    }
     if (mutation && terminalStateSet.has(record.state)) throw new Error("Terminal workstreams cannot perform workspace mutations.");
 
     const health = await inspectRegisteredWorkspace(record.workspace);
@@ -1281,6 +1440,9 @@ export function createDevWorkstreamRegistryService({
     lockWorkspace,
     unlockWorkspace,
     removeIsolated,
+    beginRecovery,
+    transitionRecoveryWorkspace,
+    listRecoveryWorkspacesInternal,
     resolveExecutionContext,
     registryPath: storagePath,
   };
@@ -1300,4 +1462,12 @@ export const dev_workspace_list_workspaces = defaultService.listWorkspaces;
 export const dev_workspace_lock = defaultService.lockWorkspace;
 export const dev_workspace_unlock = defaultService.unlockWorkspace;
 export const dev_workspace_remove_isolated = defaultService.removeIsolated;
+export const beginDevCheckpointRecoveryWorkstream = defaultService.beginRecovery;
+export const createDevCheckpointRecoveryIsolated = (input) => defaultService.createIsolated(input, { recovery: true });
+export const transitionDevCheckpointRecoveryWorkspace = defaultService.transitionRecoveryWorkspace;
+export const listDevCheckpointRecoveryWorkspaces = defaultService.listRecoveryWorkspacesInternal;
 export const resolveDevWorkspaceExecutionContext = defaultService.resolveExecutionContext;
+export const resolveDevCheckpointRecoveryExecutionContext = (input) => defaultService.resolveExecutionContext(input, {
+  mutation: true,
+  lifecycleStates: ["materializing", "verifying"],
+});

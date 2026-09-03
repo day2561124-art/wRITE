@@ -34,6 +34,9 @@ export const DEV_JOURNAL_LINK_TYPES = Object.freeze([
   "validated_by",
   "committed_by",
   "integrated_by",
+  "used_by",
+  "produced",
+  "retires",
   "related_to",
 ]);
 export const DEV_JOURNAL_MAX_EVENT_BYTES = 128 * 1024;
@@ -49,6 +52,7 @@ const operationIdPattern = new RegExp(DEV_OPERATION_ID_PATTERN_SOURCE, "u");
 const eventIdPattern = new RegExp(DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE, "u");
 const workspaceIdPattern = /^(?:dev_workspace_[a-f0-9]{24}|dev_workspace_shared_repository_v1)$/u;
 const workstreamIdPattern = /^dev_workstream_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u;
+const checkpointIdPattern = /^dev_checkpoint_[a-f0-9]{32}$/u;
 const sha256Pattern = /^[a-f0-9]{64}$/u;
 const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const stageSet = new Set(DEV_JOURNAL_STAGES);
@@ -149,6 +153,23 @@ function normalizeLinks(links = []) {
     }
     if (link.integration_candidate_id !== undefined && link.integration_candidate_id !== null) {
       normalized.integration_candidate_id = assertBoundedString(link.integration_candidate_id, `links[${index}].integration_candidate_id`, 128);
+    }
+    if (link.checkpoint_id !== undefined && link.checkpoint_id !== null) {
+      if (!checkpointIdPattern.test(link.checkpoint_id)) throw new Error(`links[${index}].checkpoint_id is invalid.`);
+      normalized.checkpoint_id = link.checkpoint_id;
+    }
+    if (link.workstream_id !== undefined && link.workstream_id !== null) {
+      if (!workstreamIdPattern.test(link.workstream_id)) throw new Error(`links[${index}].workstream_id is invalid.`);
+      normalized.workstream_id = link.workstream_id;
+    }
+    if (link.workspace_id !== undefined && link.workspace_id !== null) {
+      if (!workspaceIdPattern.test(link.workspace_id)) throw new Error(`links[${index}].workspace_id is invalid.`);
+      normalized.workspace_id = link.workspace_id;
+    }
+    if (link.workspace_snapshot_id !== undefined && link.workspace_snapshot_id !== null) {
+      const snapshotId = String(link.workspace_snapshot_id).toLowerCase();
+      if (!sha256Pattern.test(snapshotId)) throw new Error(`links[${index}].workspace_snapshot_id is invalid.`);
+      normalized.workspace_snapshot_id = snapshotId;
     }
     if (Object.keys(normalized).length === 1) throw new Error(`links[${index}] must reference a bounded provenance identity.`);
     return normalized;
@@ -562,20 +583,32 @@ export function createDevOperationJournalService({
     for (const operationId of verification.dangling_operations) {
       const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
       if (!started) continue;
-      let context;
-      try {
-        context = await resolveContext(started.workspace_id);
-      } catch (error) {
-        runtimeHealth = "degraded";
-        reconciliationRequired = true;
-        lastHealthError = `Could not resolve dangling operation workspace ${started.workspace_id}: ${error.message}`;
-        return verify();
+      let context = null;
+      if (!started.operation_type.startsWith("checkpoint_")) {
+        try {
+          context = await resolveContext(started.workspace_id);
+        } catch (error) {
+          runtimeHealth = "degraded";
+          reconciliationRequired = true;
+          lastHealthError = `Could not resolve dangling operation workspace ${started.workspace_id}: ${error.message}`;
+          return verify();
+        }
       }
 
       let outcome = "no_effect_observed";
       let ambiguous = false;
       let observedTargets = [];
-      if (started.operation_type === "integration_apply") {
+      if (started.operation_type.startsWith("checkpoint_")) {
+        try {
+          const { inspectDevCheckpointOperationEffect } = await import("./mcp-development-checkpoint-tools.mjs");
+          const inspection = await inspectDevCheckpointOperationEffect(started);
+          outcome = inspection.outcome;
+          ambiguous = inspection.reconciliation_required === true || outcome === "ambiguous_effect";
+        } catch {
+          outcome = "ambiguous_effect";
+          ambiguous = true;
+        }
+      } else if (started.operation_type === "integration_apply") {
         const targetHead = started.result?.target_head ?? null;
         const integrationCommit = started.result?.integration_commit ?? null;
         const actualMainHead = (await runSnapshotGit(projectRoot, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
@@ -809,11 +842,18 @@ export function createDevOperationJournalService({
   }
 
   async function getProvenance(input = {}) {
-    const allowed = new Set(["workspace_id", "path", "commit", "integration_candidate_id", "limit"]);
+    const allowed = new Set(["workspace_id", "workstream_id", "path", "commit", "integration_candidate_id", "checkpoint_id", "limit"]);
     if (!isObject(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new Error("dev_workspace_get_provenance received unsupported filters.");
-    const selectors = [input.path !== undefined, input.commit !== undefined, input.integration_candidate_id !== undefined].filter(Boolean).length;
-    if (selectors !== 1) throw new Error("Exactly one provenance selector is required: path, commit, or integration_candidate_id.");
+    const selectors = [
+      input.path !== undefined,
+      input.commit !== undefined,
+      input.integration_candidate_id !== undefined,
+      input.checkpoint_id !== undefined,
+      input.workstream_id !== undefined,
+    ].filter(Boolean).length;
+    if (selectors !== 1) throw new Error("Exactly one provenance selector is required: path, commit, integration_candidate_id, checkpoint_id, or workstream_id.");
     if (input.workspace_id !== undefined && !workspaceIdPattern.test(input.workspace_id)) throw new Error("workspace_id is invalid.");
+    if (input.workstream_id !== undefined && !workstreamIdPattern.test(input.workstream_id)) throw new Error("workstream_id is invalid.");
     if (input.path !== undefined && input.workspace_id === undefined) throw new Error("workspace_id is required when querying provenance by path.");
     const limit = input.limit ?? 50;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > DEV_JOURNAL_MAX_QUERY_RESULTS) throw new Error(`limit must be 1-${DEV_JOURNAL_MAX_QUERY_RESULTS}.`);
@@ -833,9 +873,21 @@ export function createDevOperationJournalService({
         || event.result?.integration_commit === commit
         || event.links.some((link) => link.commit === commit)
       ));
-    } else {
+    } else if (input.integration_candidate_id !== undefined) {
       const candidateId = assertBoundedString(input.integration_candidate_id, "integration_candidate_id", 128);
       matching = matching.filter((event) => event.result?.integration_candidate_id === candidateId || event.links.some((link) => link.integration_candidate_id === candidateId));
+    } else if (input.checkpoint_id !== undefined) {
+      if (!checkpointIdPattern.test(input.checkpoint_id)) throw new Error("checkpoint_id must be a server-issued checkpoint ID.");
+      matching = matching.filter((event) => (
+        event.result?.checkpoint_id === input.checkpoint_id
+        || event.result?.recovery_source_checkpoint_id === input.checkpoint_id
+        || event.links.some((link) => link.checkpoint_id === input.checkpoint_id)
+      ));
+    } else {
+      matching = matching.filter((event) => (
+        event.workstream_id === input.workstream_id
+        || event.links.some((link) => link.workstream_id === input.workstream_id)
+      ));
     }
 
     const eventsByOperation = new Map();
