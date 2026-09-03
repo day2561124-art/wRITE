@@ -50,8 +50,8 @@ function safeTransportSend(transport, payload, label = 'transport.send') {
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
-const DEFAULT_MAX_IDLE_SESSION_COUNT = 32;
-const DEFAULT_MAX_TOTAL_SESSION_COUNT = 64;
+const DEFAULT_MAX_IDLE_SESSION_COUNT = 16;
+const DEFAULT_MAX_TOTAL_SESSION_COUNT = 32;
 const DEFAULT_SESSION_REAPER_INTERVAL_MS = 60 * 1000;
 
 function boundedIntegerEnvironment(name, fallback, minimum, maximum) {
@@ -777,6 +777,32 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Streamable HTTP GET is a long-lived SSE receive channel. Treating the
+    // lifetime of that socket as an active operation prevents an abandoned
+    // session from ever becoming idle. GET/SSE also does not refresh session
+    // liveness: client-to-server POST activity is what extends the idle TTL.
+    if (req.method === 'GET') {
+      try {
+        await entry.transport.handleRequest(
+          req,
+          res,
+        );
+      } catch (error) {
+        console.error(
+          '[mcp-http] transport.handleRequest (GET) threw',
+          error,
+        );
+
+        writeJsonRpcError(
+          res,
+          500,
+          -32603,
+          'Internal Server Error',
+        );
+      }
+      return;
+    }
+
     const requestStarted = beginBridgeRequest(entry);
     try {
       await entry.transport.handleRequest(
@@ -785,9 +811,7 @@ const server = http.createServer(async (req, res) => {
       );
     } catch (error) {
       console.error(
-        '[mcp-http] transport.handleRequest (' +
-          req.method +
-          ') threw',
+        '[mcp-http] transport.handleRequest (DELETE) threw',
         error,
       );
 
