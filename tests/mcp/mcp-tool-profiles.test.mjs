@@ -263,12 +263,19 @@ const integrationToolNames = [
   "dev_workspace_validate_integration",
   "dev_workspace_integrate",
 ];
-for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames]) {
+const journalToolNames = [
+  "dev_workspace_journal_status",
+  "dev_workspace_get_operation",
+  "dev_workspace_list_operations",
+  "dev_workspace_get_provenance",
+];
+for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames]) {
   assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
 }
 publicToolNames.push(...workstreamToolNames);
 publicToolNames.push(...workspaceToolNames);
 publicToolNames.push(...integrationToolNames);
+publicToolNames.push(...journalToolNames);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
@@ -874,7 +881,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-27, 27);
+publicToolNames.splice(-31, 31);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -918,8 +925,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 40);
-assert.equal(developerNames.length, 71);
-assert.equal(fullNames.length, 129);
+assert.equal(developerNames.length, 75);
+assert.equal(fullNames.length, 133);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -1191,6 +1198,7 @@ publicToolNames.push("dev_git_remote_status");
 publicToolNames.push(...workstreamToolNames);
 publicToolNames.push(...workspaceToolNames);
 publicToolNames.push(...integrationToolNames);
+publicToolNames.push(...journalToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -1207,7 +1215,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-27, 27);
+  publicToolNames.splice(-31, 31);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -1216,5 +1224,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 31}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 35}).`,
 );

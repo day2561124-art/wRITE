@@ -584,7 +584,10 @@ async function verifyMcpTotalSessionCapProtectsActiveRequest() {
     assert(rejected.statusCode === 503, `Total-session cap did not reject a new session while the only existing session was active. status=${rejected.statusCode} body=${rejected.text}`);
     assert(String(rejected.payload?.error?.message ?? "").includes("capacity reached"), `Total-session cap rejection message drifted. body=${rejected.text}`);
     assert(isProcessRunning(childPid), `Active MCP child ${childPid} was killed to make room for a new session.`);
-    assert(stderrText.includes("session initialization rejected reason=max_total_session_count"), `Active-session capacity rejection was not logged. stderr=${stderrText}`);
+    await waitUntil(
+      () => stderrText.includes("session initialization rejected reason=max_total_session_count"),
+      `Active-session capacity rejection was not logged. stderr=${stderrText}`,
+    );
   } finally {
     slowRequest?.destroy();
     agent.destroy();
@@ -1088,7 +1091,7 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 72,
+      expectedCount: 76,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
@@ -1115,7 +1118,7 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (72 tools: 71 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (76 tools: 75 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));

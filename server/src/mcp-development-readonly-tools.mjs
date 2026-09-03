@@ -9,6 +9,12 @@ import {
 } from "./process-control.mjs";
 import { projectRoot } from "./project-paths.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
+import {
+  beginDevJournalOperation,
+  completeDevJournalOperation,
+  computeWorkspaceSnapshot,
+  markDevJournalDegraded,
+} from "./mcp-development-journal-tools.mjs";
 
 export const DEV_LIST_MAX_ENTRIES = 500;
 export const DEV_READ_MAX_BYTES = 256 * 1024;
@@ -837,7 +843,39 @@ export async function dev_git_diff(input = {}, options = {}) {
 }
 
 export async function dev_git_diff_check(input = {}, options = {}) {
-  return runWorkspaceGitTool(input, "diffCheck", options);
+  const context = await resolveWorkspaceContext(input, options);
+  const snapshot = await computeWorkspaceSnapshot(context);
+  const mode = input.mode ?? "working";
+  const journalOperation = await beginDevJournalOperation({
+    operation_type: "diff_check",
+    tool_name: "dev_git_diff_check",
+    workstream_id: context.workstream_id,
+    workspace_id: context.workspace_id,
+    result: {
+      mode,
+      workspace_snapshot_id: snapshot.workspace_snapshot_id,
+      head: snapshot.head,
+      changed_artifact_count: snapshot.changed_artifact_count,
+    },
+  });
+  const tools = createDevGitTools({ repositoryRoot: context.root });
+  const result = await tools.diffCheck({ mode });
+  try {
+    await completeDevJournalOperation(journalOperation.operation_id, {
+      result: {
+        mode,
+        passed: result.passed === true,
+        execution_ok: result.execution_ok === true,
+        timed_out: result.timed_out === true,
+        workspace_snapshot_id: snapshot.workspace_snapshot_id,
+        head: snapshot.head,
+      },
+    });
+  } catch (error) {
+    await markDevJournalDegraded(`dev_git_diff_check terminal append failed: ${error.message}`);
+    throw new Error(`dev_git_diff_check completed but provenance terminal append failed: ${error.message}`);
+  }
+  return attachWorkspaceContext({ ...result, operation_id: journalOperation.operation_id, workspace_snapshot_id: snapshot.workspace_snapshot_id }, context);
 }
 
 export function getDevGitCommandMapping() {

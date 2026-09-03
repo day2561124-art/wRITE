@@ -10,6 +10,12 @@ import {
   DEV_INTEGRATION_SCHEMA_VERSION,
   createDevIntegrationService,
 } from "../../server/src/mcp-development-integration-tools.mjs";
+import {
+  beginDevJournalOperation,
+  completeDevJournalOperation,
+  computeWorkspaceSnapshot,
+  dev_workspace_get_provenance,
+} from "../../server/src/mcp-development-journal-tools.mjs";
 
 const execFileAsync = promisify(execFile);
 const gitExecutable = process.platform === "win32" ? "git.exe" : "git";
@@ -121,13 +127,49 @@ async function createHarness(name) {
     };
   }
 
-  const validationRunner = async (integrationPath) => {
+  const validationRunner = async (integrationPath, candidate) => {
     const status = (await git(integrationPath, ["status", "--porcelain=v1", "--untracked-files=all"])).stdout;
     assert.equal(status, "");
-    return [
-      { suite: "mcp", execution_ok: true, passed: true, timed_out: false, exit_code: 0, duration_ms: 1 },
-      { suite: "mcp_tunnel", execution_ok: true, passed: true, timed_out: false, exit_code: 0, duration_ms: 1 },
-    ];
+    const snapshot = await computeWorkspaceSnapshot({
+      root: integrationPath,
+      workspace_id: candidate.workspace_id,
+      current_head: candidate.integration_commit,
+    });
+    const results = [];
+    for (const suite of ["mcp", "mcp_tunnel"]) {
+      const operation = await beginDevJournalOperation({
+        operation_type: "test_evidence",
+        tool_name: "dev_run_tests",
+        workstream_id: candidate.workstream_id,
+        workspace_id: candidate.workspace_id,
+        result: {
+          suite,
+          workspace_snapshot_id: snapshot.workspace_snapshot_id,
+          head: snapshot.head,
+        },
+      });
+      await completeDevJournalOperation(operation.operation_id, {
+        result: {
+          suite,
+          workspace_snapshot_id: snapshot.workspace_snapshot_id,
+          head: snapshot.head,
+          execution_ok: true,
+          passed: true,
+          timed_out: false,
+          duration_ms: 1,
+        },
+      });
+      results.push({
+        suite,
+        execution_ok: true,
+        passed: true,
+        timed_out: false,
+        exit_code: 0,
+        duration_ms: 1,
+        operation_id: operation.operation_id,
+      });
+    }
+    return results;
   };
 
   function createService() {
@@ -203,6 +245,17 @@ test("fast-forward candidate persists, validates exact commit, and preserves unr
     assert.equal(ready.validation_report.integration_commit, source.sourceHead);
     assert.equal(ready.integration_workspace.state, "removed");
     assert.equal(ready.integration_workspace.cleanup_pending, false);
+    const validationProvenance = await dev_workspace_get_provenance({
+      integration_candidate_id: candidate.integration_candidate_id,
+      limit: 100,
+    });
+    const validationStarted = validationProvenance.events.find((event) => event.stage === "operation_started" && event.operation_type === "integration_validation");
+    assert(validationStarted);
+    const validationCompleted = validationProvenance.events.find((event) => event.operation_id === validationStarted.operation_id && event.stage === "operation_completed");
+    assert(validationCompleted);
+    assert(validationCompleted.links.some((link) => link.relation === "related_to" && link.integration_candidate_id === candidate.integration_candidate_id));
+    assert.equal(validationCompleted.links.filter((link) => link.relation === "validated_by" && typeof link.operation_id === "string").length, 2);
+    assert(validationCompleted.links.some((link) => link.relation === "used" && link.commit === source.sourceHead));
 
     const dirtyPath = path.join(harness.repositoryRoot, "unrelated-dirty.txt");
     await writeFile(dirtyPath, "preserve me\n", "utf8");
@@ -212,6 +265,29 @@ test("fast-forward candidate persists, validates exact commit, and preserves unr
       expected_revision: ready.revision,
     });
     assert.equal(integrated.state, "integrated");
+    const candidateProvenance = await dev_workspace_get_provenance({
+      integration_candidate_id: candidate.integration_candidate_id,
+      limit: 100,
+    });
+    const integrationStarted = candidateProvenance.events.find((event) => event.stage === "operation_started" && event.operation_type === "integration_apply");
+    assert(integrationStarted);
+    const integrationCompleted = candidateProvenance.events.find((event) => event.operation_id === integrationStarted.operation_id && event.stage === "operation_completed");
+    assert(integrationCompleted);
+    assert(integrationCompleted.links.some((link) => link.relation === "integrated_by" && link.commit === source.sourceHead));
+    assert(candidateProvenance.operation_ids.includes(validationStarted.operation_id));
+    assert(candidateProvenance.operation_ids.includes(integrationStarted.operation_id));
+    assert.equal(
+      new Set(candidateProvenance.events.filter((event) => event.stage === "operation_started").map((event) => event.operation_type)).has("integration_validation"),
+      true,
+    );
+    assert.equal(
+      new Set(candidateProvenance.events.filter((event) => event.stage === "operation_started").map((event) => event.operation_type)).has("integration_apply"),
+      true,
+    );
+    assert.equal(
+      candidateProvenance.events.filter((event) => event.stage === "operation_started" && event.operation_type === "test_evidence").length,
+      2,
+    );
     assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), source.sourceHead);
     assert.equal(await sha256(dirtyPath), dirtyHash);
     assert.equal(await readFile(dirtyPath, "utf8"), "preserve me\n");

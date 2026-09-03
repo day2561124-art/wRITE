@@ -202,6 +202,16 @@ import {
   dev_workspace_list_integration_candidates,
   dev_workspace_validate_integration,
 } from "./mcp-development-integration-tools.mjs";
+import {
+  DEV_JOURNAL_MAX_QUERY_RESULTS,
+  DEV_OPERATION_ID_PATTERN_SOURCE,
+  assertDevJournalMutationAllowed,
+  dev_workspace_get_operation,
+  dev_workspace_get_provenance,
+  dev_workspace_journal_status,
+  dev_workspace_list_operations,
+  initializeDevJournalRuntime,
+} from "./mcp-development-journal-tools.mjs";
 import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -1076,6 +1086,9 @@ async function auditedToolCall(tool, args, actor) {
     const guardError = confirmationGuardError(tool, effectiveArgs);
     if (guardError) {
       throw new Error(guardError);
+    }
+    if (tool.name.startsWith("dev_")) {
+      await assertDevJournalMutationAllowed();
     }
     result = await tool.handler(effectiveArgs);
   } catch (error) {
@@ -2063,6 +2076,53 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
     handler: async (args) => jsonContent(await dev_workspace_status(args)),
+  },
+  {
+    name: "dev_workspace_journal_status",
+    description: "Read server-owned development operation journal health, verified hash-chain head, dangling-operation count, and reconciliation requirement. No journal mutation controls are exposed.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await dev_workspace_journal_status()),
+  },
+  {
+    name: "dev_workspace_get_operation",
+    description: "Read one logical development operation by opaque server-issued operation_id, including bounded immutable journal events and typed provenance links.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      operation_id: { type: "string", pattern: DEV_OPERATION_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["operation_id"]),
+    handler: async (args) => jsonContent(await dev_workspace_get_operation(args)),
+  },
+  {
+    name: "dev_workspace_list_operations",
+    description: "Read a bounded page of development operations using opaque workstream/workspace identity and finite operation/outcome filters.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+      operation_type: { type: "string", minLength: 1, maxLength: 160 },
+      outcome: { type: "string", enum: ["completed", "failed", "recovered", "dangling"] },
+      limit: { type: "integer", minimum: 1, maximum: DEV_JOURNAL_MAX_QUERY_RESULTS, default: 50 },
+      after_sequence: { type: "integer", minimum: 0 },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_list_operations(args)),
+  },
+  {
+    name: "dev_workspace_get_provenance",
+    description: "Read bounded provenance for one server-resolved workspace-relative path, exact commit SHA, or integration candidate ID. Arbitrary roots, cwd, event paths, and audit payloads are not accepted.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+      path: { type: "string", minLength: 1, maxLength: 4096 },
+      commit: { type: "string", pattern: "^[A-Fa-f0-9]{40}$", maxLength: 40 },
+      integration_candidate_id: { type: "string", pattern: DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, maxLength: 64 },
+      limit: { type: "integer", minimum: 1, maximum: DEV_JOURNAL_MAX_QUERY_RESULTS, default: 50 },
+    }),
+    handler: async (args) => jsonContent(await dev_workspace_get_provenance(args)),
   },
   {
     name: "dev_workspace_create_isolated",
@@ -4097,6 +4157,10 @@ const chatgptDeveloperToolNames = new Set([
   "dev_workspace_update_workstream",
   "dev_workspace_end_workstream",
   "dev_workspace_status",
+  "dev_workspace_journal_status",
+  "dev_workspace_get_operation",
+  "dev_workspace_list_operations",
+  "dev_workspace_get_provenance",
   "dev_workspace_create_isolated",
   "dev_workspace_get_workspace",
   "dev_workspace_list_workspaces",
@@ -4175,6 +4239,10 @@ const permissionSources = {
     "mcp_client_expected_revision",
   ],
   dev_workspace_status: ["development_workstream_registry", "repository_git_head"],
+  dev_workspace_journal_status: ["development_operation_journal"],
+  dev_workspace_get_operation: ["development_operation_journal", "mcp_client_operation_id"],
+  dev_workspace_list_operations: ["development_operation_journal", "mcp_client_bounded_provenance_filters"],
+  dev_workspace_get_provenance: ["development_operation_journal", "development_workstream_registry", "development_integration_registry", "repository_git_head"],
   dev_workspace_create_isolated: ["development_workstream_registry", "repository_git_head", "repository_git_worktree_metadata", "mcp_client_expected_revision"],
   dev_workspace_get_workspace: ["development_workstream_registry", "repository_git_worktree_metadata"],
   dev_workspace_list_workspaces: ["development_workstream_registry", "repository_git_worktree_metadata"],
@@ -5485,6 +5553,8 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.error(usage());
   process.exit(0);
 }
+
+await initializeDevJournalRuntime();
 
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);

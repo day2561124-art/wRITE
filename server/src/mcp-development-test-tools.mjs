@@ -11,6 +11,13 @@ import {
 import { projectRoot } from "./project-paths.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
+import {
+  beginDevJournalOperation,
+  completeDevJournalOperation,
+  computeWorkspaceSnapshot,
+  failDevJournalOperation,
+  markDevJournalDegraded,
+} from "./mcp-development-journal-tools.mjs";
 
 export const DEV_TEST_SUITES = Object.freeze(["mcp", "mcp_tunnel", "all"]);
 export const DEV_TEST_OUTPUT_MAX_CHARACTERS = 128 * 1024;
@@ -442,14 +449,55 @@ export function createDevTestRunner({
       };
     }
 
-    let dependencyBridgeCleanup = async () => {};
+    let journalOperation;
+    let workspaceSnapshot;
     try {
-      dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
+      workspaceSnapshot = await computeWorkspaceSnapshot(context);
+      journalOperation = await beginDevJournalOperation({
+        operation_type: "test_evidence",
+        tool_name: "dev_run_tests",
+        workstream_id: context.workstream_id,
+        workspace_id: context.workspace_id,
+        result: {
+          suite,
+          workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+          head: workspaceSnapshot.head,
+          changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+        },
+      });
     } catch (error) {
       await releaseRunLock(lockHandle, lockPath);
       return {
         ...baseResult(suite, startedAt),
+        stderr: redactTestOutput(`Could not establish test provenance before execution: ${error.message}`),
+        workspace_context: workspaceExecutionProvenance(context),
+      };
+    }
+
+    let dependencyBridgeCleanup = async () => {};
+    try {
+      dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
+    } catch (error) {
+      try {
+        await failDevJournalOperation(journalOperation.operation_id, {
+          result: {
+            suite,
+            execution_ok: false,
+            passed: false,
+            reason: `dependency_bridge_setup_failed:${String(error.message).slice(0, 512)}`,
+            workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+            head: workspaceSnapshot.head,
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_run_tests setup failure terminal append failed: ${journalError.message}`);
+      }
+      await releaseRunLock(lockHandle, lockPath);
+      return {
+        ...baseResult(suite, startedAt),
         stderr: redactTestOutput(`Could not prepare workspace dependency bridge: ${error.message}`),
+        operation_id: journalOperation.operation_id,
+        workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
         workspace_context: workspaceExecutionProvenance(context),
       };
     }
@@ -497,11 +545,36 @@ export function createDevTestRunner({
           redactTestOutput(`Could not persist test-run result: ${error.message}`),
         ].filter(Boolean).join("\n"),
       };
-    } finally {
-      await releaseRunLock(lockHandle, lockPath);
     }
+    try {
+      await completeDevJournalOperation(journalOperation.operation_id, {
+        result: {
+          suite,
+          passed: result.passed === true,
+          execution_ok: result.execution_ok === true,
+          timed_out: result.timed_out === true,
+          duration_ms: result.duration_ms,
+          workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+          head: workspaceSnapshot.head,
+        },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_run_tests terminal append failed: ${error.message}`);
+      result = {
+        ...result,
+        execution_ok: false,
+        passed: false,
+        stderr: [
+          result.stderr,
+          redactTestOutput(`Test effect completed but provenance terminal append failed: ${error.message}`),
+        ].filter(Boolean).join("\n"),
+      };
+    }
+    await releaseRunLock(lockHandle, lockPath);
     return {
       ...result,
+      operation_id: journalOperation.operation_id,
+      workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
       workspace_context: workspaceExecutionProvenance(context),
     };
   };

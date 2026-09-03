@@ -42,6 +42,15 @@ import {
   projectRoot,
   resolveProjectPath,
 } from "./project-paths.mjs";
+import {
+  beginDevJournalOperation,
+  captureDevArtifactState,
+  completeDevJournalOperation,
+  computeWorkspaceSnapshot,
+  failDevJournalOperation,
+  findLatestMatchingProducer,
+  markDevJournalDegraded,
+} from "./mcp-development-journal-tools.mjs";
 
 export const DEV_APPLY_PATCH_MAX_BYTES = 16 * 1024 * 1024;
 export const DEV_APPLY_PATCH_MAX_TEXT_CHARACTERS = 256 * 1024;
@@ -334,8 +343,10 @@ export async function dev_apply_patch(input = {}, options = {}) {
     ? null
     : input.expectedSha256.toLowerCase();
   let result;
+  let journalOperation = null;
 
-  await commitFileTransaction("dev-apply-patch", [
+  try {
+    await commitFileTransaction("dev-apply-patch", [
     {
       type: "write",
       filePath,
@@ -390,6 +401,20 @@ export async function dev_apply_patch(input = {}, options = {}) {
           throw new Error("newText must produce an actual file change.");
         }
 
+        journalOperation = await beginDevJournalOperation({
+          operation_type: "filesystem_patch",
+          tool_name: "dev_apply_patch",
+          workstream_id: context.workstream_id,
+          workspace_id: context.workspace_id,
+          targets: [{
+            path: normalizeDevelopmentPath(context.root, filePath),
+            role: "modified_file",
+            before: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: previousContent.length },
+            expected: { exists: true, artifact_type: "file", sha256: afterSha256, bytes: nextContent.length },
+          }],
+          result: { expected_effect_fingerprint: afterSha256 },
+        });
+
         result = {
           ok: true,
           path: normalizeDevelopmentPath(context.root, filePath),
@@ -406,12 +431,53 @@ export async function dev_apply_patch(input = {}, options = {}) {
     ...(options.transactionMetadata ?? {}),
     tool: "dev_apply_patch",
     path: normalizeDevelopmentPath(context.root, filePath),
-  }, { repositoryRoot: context.root });
-
-  if (!result) {
-    throw new Error("dev_apply_patch completed without a patch result.");
+    }, { repositoryRoot: context.root });
+  } catch (error) {
+    if (journalOperation && result) {
+      try {
+        const observed = await captureDevArtifactState(context.root, result.path);
+        const matchesBefore = observed.exists === true && observed.sha256 === result.before_sha256 && observed.bytes === result.before_bytes;
+        const matchesExpected = observed.exists === true && observed.sha256 === result.after_sha256 && observed.bytes === result.after_bytes;
+        await failDevJournalOperation(journalOperation.operation_id, {
+          targets: [{
+            path: result.path,
+            role: "modified_file",
+            before: { exists: true, artifact_type: "file", sha256: result.before_sha256, bytes: result.before_bytes },
+            expected: { exists: true, artifact_type: "file", sha256: result.after_sha256, bytes: result.after_bytes },
+            after: observed,
+          }],
+          result: {
+            outcome: matchesBefore ? "failed_no_effect" : (matchesExpected ? "failed_intended_effect_observed" : "ambiguous_effect"),
+            reconciliation_required: !matchesBefore && !matchesExpected,
+            reason: String(error.message).slice(0, 512),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_apply_patch failure terminal append failed: ${journalError.message}`);
+      }
+    }
+    throw error;
   }
-  return attachMutationContext(result, context);
+
+  if (!result || !journalOperation) {
+    throw new Error("dev_apply_patch completed without a patch/journal result.");
+  }
+  try {
+    await completeDevJournalOperation(journalOperation.operation_id, {
+      targets: [{
+        path: result.path,
+        role: "modified_file",
+        before: { exists: true, artifact_type: "file", sha256: result.before_sha256, bytes: result.before_bytes },
+        expected: { exists: true, artifact_type: "file", sha256: result.after_sha256, bytes: result.after_bytes },
+        after: { exists: true, artifact_type: "file", sha256: result.after_sha256, bytes: result.after_bytes },
+      }],
+      result: { changed: true, after_sha256: result.after_sha256 },
+    });
+  } catch (error) {
+    await markDevJournalDegraded(`dev_apply_patch terminal append failed: ${error.message}`);
+    throw new Error(`dev_apply_patch effect completed but provenance terminal append failed: ${error.message}`);
+  }
+  return attachMutationContext({ ...result, operation_id: journalOperation.operation_id }, context);
 }
 
 function validateDeleteInput(input) {
@@ -443,8 +509,10 @@ export async function dev_delete_file(input = {}, options = {}) {
     ? null
     : input.expectedSha256.toLowerCase();
   let result;
+  let journalOperation = null;
 
-  await commitFileTransaction("dev-delete-file", [
+  try {
+    await commitFileTransaction("dev-delete-file", [
     {
       type: "delete",
       filePath,
@@ -468,6 +536,19 @@ export async function dev_delete_file(input = {}, options = {}) {
             `expectedSha256 mismatch: current file sha256 is ${beforeSha256}.`,
           );
         }
+        journalOperation = await beginDevJournalOperation({
+          operation_type: "filesystem_delete",
+          tool_name: "dev_delete_file",
+          workstream_id: context.workstream_id,
+          workspace_id: context.workspace_id,
+          targets: [{
+            path: normalizeDevelopmentPath(context.root, filePath),
+            role: "deleted_file",
+            before: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: previousContent.length },
+            expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+          }],
+          result: { expected_effect_fingerprint: `delete:${beforeSha256}` },
+        });
         result = {
           ok: true,
           path: normalizeDevelopmentPath(context.root, filePath),
@@ -483,12 +564,53 @@ export async function dev_delete_file(input = {}, options = {}) {
     ...(options.transactionMetadata ?? {}),
     tool: "dev_delete_file",
     path: normalizeDevelopmentPath(context.root, filePath),
-  }, { repositoryRoot: context.root });
-
-  if (!result) {
-    throw new Error("dev_delete_file completed without a deletion result.");
+    }, { repositoryRoot: context.root });
+  } catch (error) {
+    if (journalOperation && result) {
+      try {
+        const observed = await captureDevArtifactState(context.root, result.path);
+        const matchesBefore = observed.exists === true && observed.sha256 === result.before_sha256 && observed.bytes === result.before_bytes;
+        const matchesExpected = observed.exists === false;
+        await failDevJournalOperation(journalOperation.operation_id, {
+          targets: [{
+            path: result.path,
+            role: "deleted_file",
+            before: { exists: true, artifact_type: "file", sha256: result.before_sha256, bytes: result.before_bytes },
+            expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+            after: observed,
+          }],
+          result: {
+            outcome: matchesBefore ? "failed_no_effect" : (matchesExpected ? "failed_intended_effect_observed" : "ambiguous_effect"),
+            reconciliation_required: !matchesBefore && !matchesExpected,
+            reason: String(error.message).slice(0, 512),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_delete_file failure terminal append failed: ${journalError.message}`);
+      }
+    }
+    throw error;
   }
-  return attachMutationContext(result, context);
+
+  if (!result || !journalOperation) {
+    throw new Error("dev_delete_file completed without a deletion/journal result.");
+  }
+  try {
+    await completeDevJournalOperation(journalOperation.operation_id, {
+      targets: [{
+        path: result.path,
+        role: "deleted_file",
+        before: { exists: true, artifact_type: "file", sha256: result.before_sha256, bytes: result.before_bytes },
+        expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+        after: { exists: false, artifact_type: null, sha256: null, bytes: null },
+      }],
+      result: { deleted: true },
+    });
+  } catch (error) {
+    await markDevJournalDegraded(`dev_delete_file terminal append failed: ${error.message}`);
+    throw new Error(`dev_delete_file effect completed but provenance terminal append failed: ${error.message}`);
+  }
+  return attachMutationContext({ ...result, operation_id: journalOperation.operation_id }, context);
 }
 
 function validateCreateFileInput(input) {
@@ -532,7 +654,23 @@ export async function dev_create_file(input = {}, options = {}) {
   const result = await withDevelopmentWriteLock("dev_create_file", async ({ transactionId }) => {
     await assertSafeDestinationParent(filePath, "path", context.root);
     await assertMissingDevelopmentPath(filePath, "path");
+    const relativePath = normalizeDevelopmentPath(context.root, filePath);
+    const expectedSha256 = sha256(content);
+    const journalOperation = await beginDevJournalOperation({
+      operation_type: "filesystem_create",
+      tool_name: "dev_create_file",
+      workstream_id: context.workstream_id,
+      workspace_id: context.workspace_id,
+      targets: [{
+        path: relativePath,
+        role: "created_file",
+        before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+        expected: { exists: true, artifact_type: "file", sha256: expectedSha256, bytes: content.length },
+      }],
+      result: { expected_effect_fingerprint: expectedSha256 },
+    });
 
+    try {
     const tempPath = path.join(
       path.dirname(filePath),
       `.${path.basename(filePath)}.${transactionId}.create.tmp`,
@@ -570,14 +708,57 @@ export async function dev_create_file(input = {}, options = {}) {
       await unlink(filePath).catch(() => {});
       throw new Error("created file verification failed.");
     }
+    const observedSha256 = sha256(verified);
+    try {
+      await completeDevJournalOperation(journalOperation.operation_id, {
+        targets: [{
+          path: relativePath,
+          role: "created_file",
+          before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+          expected: { exists: true, artifact_type: "file", sha256: expectedSha256, bytes: content.length },
+          after: { exists: true, artifact_type: "file", sha256: observedSha256, bytes: verified.length },
+        }],
+        result: { created: true, after_sha256: observedSha256 },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_create_file terminal append failed: ${error.message}`);
+      const provenanceError = new Error(`dev_create_file effect completed but provenance terminal append failed: ${error.message}`);
+      provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
+      throw provenanceError;
+    }
     return {
       ok: true,
       created: true,
-      path: normalizeDevelopmentPath(context.root, filePath),
+      path: relativePath,
       bytes: verified.length,
-      sha256: sha256(verified),
+      sha256: observedSha256,
+      operation_id: journalOperation.operation_id,
       create_semantics: "exclusive_temp_write_then_no_overwrite_link",
     };
+    } catch (error) {
+      if (error?.code === "JOURNAL_TERMINAL_APPEND_FAILED") throw error;
+      const observed = await captureDevArtifactState(context.root, relativePath).catch(() => null);
+      try {
+        await failDevJournalOperation(journalOperation.operation_id, {
+          targets: [{
+            path: relativePath,
+            role: "created_file",
+            before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+            expected: { exists: true, artifact_type: "file", sha256: expectedSha256, bytes: content.length },
+            ...(observed ? { after: observed } : {}),
+          }],
+          result: {
+            created: false,
+            effect_observed: observed?.exists === true,
+            reason: String(error.message ?? error).slice(0, 1024),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_create_file failure terminal append failed: ${journalError.message}`);
+        throw new Error(`dev_create_file failed and provenance terminal append failed: ${journalError.message}`);
+      }
+      throw error;
+    }
   });
   return attachMutationContext(result, context);
 }
@@ -599,6 +780,21 @@ export async function dev_create_directory(input = {}, options = {}) {
   const result = await withDevelopmentWriteLock("dev_create_directory", async () => {
     await assertSafeDestinationParent(directoryPath, "path", context.root);
     await assertMissingDevelopmentPath(directoryPath, "path");
+    const relativePath = normalizeDevelopmentPath(context.root, directoryPath);
+    const journalOperation = await beginDevJournalOperation({
+      operation_type: "filesystem_directory_create",
+      tool_name: "dev_create_directory",
+      workstream_id: context.workstream_id,
+      workspace_id: context.workspace_id,
+      targets: [{
+        path: relativePath,
+        role: "created_directory",
+        before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+        expected: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
+      }],
+      result: { expected_effect_fingerprint: "directory:present" },
+    });
+    try {
     try {
       await mkdir(directoryPath, { recursive: false });
     } catch (error) {
@@ -611,13 +807,55 @@ export async function dev_create_directory(input = {}, options = {}) {
     if (!info.isDirectory()) {
       throw new Error("created path is not a directory.");
     }
+    try {
+      await completeDevJournalOperation(journalOperation.operation_id, {
+        targets: [{
+          path: relativePath,
+          role: "created_directory",
+          before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+          expected: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
+          after: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
+        }],
+        result: { created: true, artifact_type: "directory" },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_create_directory terminal append failed: ${error.message}`);
+      const provenanceError = new Error(`dev_create_directory effect completed but provenance terminal append failed: ${error.message}`);
+      provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
+      throw provenanceError;
+    }
     return {
       ok: true,
       created: true,
-      path: normalizeDevelopmentPath(context.root, directoryPath),
+      path: relativePath,
       type: "directory",
+      operation_id: journalOperation.operation_id,
       recursive: false,
     };
+    } catch (error) {
+      if (error?.code === "JOURNAL_TERMINAL_APPEND_FAILED") throw error;
+      const observed = await captureDevArtifactState(context.root, relativePath).catch(() => null);
+      try {
+        await failDevJournalOperation(journalOperation.operation_id, {
+          targets: [{
+            path: relativePath,
+            role: "created_directory",
+            before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+            expected: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
+            ...(observed ? { after: observed } : {}),
+          }],
+          result: {
+            created: false,
+            effect_observed: observed?.exists === true,
+            reason: String(error.message ?? error).slice(0, 1024),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_create_directory failure terminal append failed: ${journalError.message}`);
+        throw new Error(`dev_create_directory failed and provenance terminal append failed: ${journalError.message}`);
+      }
+      throw error;
+    }
   });
   return attachMutationContext(result, context);
 }
@@ -692,7 +930,31 @@ export async function dev_move_path(input = {}, options = {}) {
     if (expectedSha256 && beforeSha256 !== expectedSha256) {
       throw new Error(`expectedSha256 mismatch: current file sha256 is ${beforeSha256}.`);
     }
+    const sourceRelativePath = normalizeDevelopmentPath(context.root, sourcePath);
+    const destinationRelativePath = normalizeDevelopmentPath(context.root, destinationPath);
+    const journalOperation = await beginDevJournalOperation({
+      operation_type: "filesystem_move",
+      tool_name: "dev_move_path",
+      workstream_id: context.workstream_id,
+      workspace_id: context.workspace_id,
+      targets: [
+        {
+          path: sourceRelativePath,
+          role: "move_source",
+          before: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+          expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+        },
+        {
+          path: destinationRelativePath,
+          role: "move_destination",
+          before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+          expected: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+        },
+      ],
+      result: { expected_effect_fingerprint: `move:${beforeSha256}` },
+    });
 
+    try {
     let destinationLinked = false;
     try {
       await link(sourcePath, destinationPath);
@@ -724,17 +986,80 @@ export async function dev_move_path(input = {}, options = {}) {
       throw error;
     }
 
+    try {
+      await completeDevJournalOperation(journalOperation.operation_id, {
+        targets: [
+          {
+            path: sourceRelativePath,
+            role: "move_source",
+            before: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+            expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+            after: { exists: false, artifact_type: null, sha256: null, bytes: null },
+          },
+          {
+            path: destinationRelativePath,
+            role: "move_destination",
+            before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+            expected: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+            after: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+          },
+        ],
+        result: { moved: true, after_sha256: beforeSha256 },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_move_path terminal append failed: ${error.message}`);
+      const provenanceError = new Error(`dev_move_path effect completed but provenance terminal append failed: ${error.message}`);
+      provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
+      throw provenanceError;
+    }
     return {
       ok: true,
       moved: true,
-      source_path: normalizeDevelopmentPath(context.root, sourcePath),
-      destination_path: normalizeDevelopmentPath(context.root, destinationPath),
+      source_path: sourceRelativePath,
+      destination_path: destinationRelativePath,
       bytes: sourceInfo.size,
       sha256: beforeSha256,
+      operation_id: journalOperation.operation_id,
       source_exists: false,
       destination_exists: true,
       move_semantics: "file_only_hardlink_then_unlink_no_overwrite",
     };
+    } catch (error) {
+      if (error?.code === "JOURNAL_TERMINAL_APPEND_FAILED") throw error;
+      const [observedSource, observedDestination] = await Promise.all([
+        captureDevArtifactState(context.root, sourceRelativePath).catch(() => null),
+        captureDevArtifactState(context.root, destinationRelativePath).catch(() => null),
+      ]);
+      try {
+        await failDevJournalOperation(journalOperation.operation_id, {
+          targets: [
+            {
+              path: sourceRelativePath,
+              role: "move_source",
+              before: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+              expected: { exists: false, artifact_type: null, sha256: null, bytes: null },
+              ...(observedSource ? { after: observedSource } : {}),
+            },
+            {
+              path: destinationRelativePath,
+              role: "move_destination",
+              before: { exists: false, artifact_type: null, sha256: null, bytes: null },
+              expected: { exists: true, artifact_type: "file", sha256: beforeSha256, bytes: sourceContent.length },
+              ...(observedDestination ? { after: observedDestination } : {}),
+            },
+          ],
+          result: {
+            moved: false,
+            effect_observed: observedSource?.exists === false || observedDestination?.exists === true,
+            reason: String(error.message ?? error).slice(0, 1024),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_move_path failure terminal append failed: ${journalError.message}`);
+        throw new Error(`dev_move_path failed and provenance terminal append failed: ${journalError.message}`);
+      }
+      throw error;
+    }
   });
   return attachMutationContext(result, context);
 }
@@ -1688,8 +2013,134 @@ export async function dev_git_commit(input = {}, options = {}) {
   }
 
   const commitTool = createDevGitCommitTool({ repositoryRoot: context.root });
-  const result = await commitTool({ paths: input.paths, message: input.message });
-  return attachMutationContext(result, context);
+  let normalizedCommitInput;
+  try {
+    normalizedCommitInput = validateCommitInput({ paths: input.paths, message: input.message });
+    for (let index = 0; index < normalizedCommitInput.paths.length; index += 1) {
+      await assertCommitFilesystemPathSafety(
+        context.root,
+        normalizedCommitInput.paths[index],
+        `paths[${index}]`,
+      );
+    }
+  } catch {
+    // Preserve the pre-Phase-3A validation contract exactly. Rejected input has not
+    // begun a durable mutation, so no operation journal record is required.
+    const rejected = await commitTool({ paths: input.paths, message: input.message });
+    return attachMutationContext(rejected, context);
+  }
+
+  let snapshot;
+  let journalOperation;
+  try {
+    snapshot = await computeWorkspaceSnapshot(context);
+    journalOperation = await beginDevJournalOperation({
+      operation_type: "git_commit",
+      tool_name: "dev_git_commit",
+      workstream_id: context.workstream_id,
+      workspace_id: context.workspace_id,
+      targets: normalizedCommitInput.paths.map((item) => ({
+        path: item,
+        role: "commit_path",
+        before: null,
+        expected: null,
+      })),
+      result: {
+        before_head: context.current_head,
+        workspace_snapshot_id: snapshot.workspace_snapshot_id,
+        requested_paths: normalizedCommitInput.paths,
+      },
+    });
+  } catch (error) {
+    return attachMutationContext(failureResult({
+      reason: `Could not establish commit provenance before mutation: ${redactProcessOutput(error.message)}`,
+      executionOk: false,
+      branch: context.branch,
+      durationMs: Date.now() - startedAt,
+    }), context);
+  }
+
+  const result = await commitTool({ paths: normalizedCommitInput.paths, message: normalizedCommitInput.message });
+  if (!result.committed) {
+    try {
+      await failDevJournalOperation(journalOperation.operation_id, {
+        result: {
+          committed: false,
+          execution_ok: result.execution_ok === true,
+          reason: String(result.reason ?? "commit_rejected").slice(0, 1024),
+          before_head: context.current_head,
+          workspace_snapshot_id: snapshot.workspace_snapshot_id,
+        },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_git_commit failure terminal append failed: ${error.message}`);
+      return attachMutationContext({
+        ...result,
+        execution_ok: false,
+        reason: `${result.reason ?? "commit failed"}; provenance terminal append failed: ${redactProcessOutput(error.message)}`,
+        operation_id: journalOperation.operation_id,
+      }, context);
+    }
+    return attachMutationContext({ ...result, operation_id: journalOperation.operation_id, workspace_snapshot_id: snapshot.workspace_snapshot_id }, context);
+  }
+
+  const links = [];
+  const linkedPaths = [];
+  const unlinkedPaths = [];
+  for (const committedPath of result.paths ?? []) {
+    try {
+      const state = await captureDevArtifactState(context.root, committedPath);
+      const producer = state.sha256
+        ? await findLatestMatchingProducer({ workspaceId: context.workspace_id, artifactPath: committedPath, sha256: state.sha256 })
+        : null;
+      if (producer) {
+        linkedPaths.push(committedPath);
+        links.push({ relation: "produced_by", operation_id: producer });
+      } else {
+        unlinkedPaths.push(committedPath);
+      }
+    } catch {
+      unlinkedPaths.push(committedPath);
+    }
+  }
+  const totalPaths = (result.paths ?? []).length;
+  const coverage = totalPaths === 0 || linkedPaths.length === 0
+    ? "none"
+    : (linkedPaths.length === totalPaths ? "complete" : "partial");
+  try {
+    await completeDevJournalOperation(journalOperation.operation_id, {
+      links,
+      result: {
+        committed: true,
+        before_head: context.current_head,
+        after_head: result.commit,
+        commit: result.commit,
+        committed_paths: result.paths ?? [],
+        workspace_snapshot_id: snapshot.workspace_snapshot_id,
+        provenance_coverage: coverage,
+        total_paths: totalPaths,
+        linked_paths: linkedPaths.length,
+        unlinked_paths: unlinkedPaths,
+      },
+    });
+  } catch (error) {
+    await markDevJournalDegraded(`dev_git_commit terminal append failed: ${error.message}`);
+    return attachMutationContext({
+      ...result,
+      execution_ok: false,
+      operation_id: journalOperation.operation_id,
+      provenance_coverage: coverage,
+      provenance_error: redactProcessOutput(error.message),
+    }, context);
+  }
+  return attachMutationContext({
+    ...result,
+    operation_id: journalOperation.operation_id,
+    workspace_snapshot_id: snapshot.workspace_snapshot_id,
+    provenance_coverage: coverage,
+    linked_paths: linkedPaths,
+    unlinked_paths: unlinkedPaths,
+  }, context);
 }
 
 export function getDevGitCommitCommandMapping() {

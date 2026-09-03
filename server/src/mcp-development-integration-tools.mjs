@@ -22,6 +22,13 @@ import {
 } from "./mcp-development-workstream-tools.mjs";
 import { controlledProcessEnvironment } from "./process-control.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
+import {
+  DEV_OPERATION_ID_PATTERN_SOURCE,
+  beginDevJournalOperation,
+  completeDevJournalOperation,
+  failDevJournalOperation,
+  markDevJournalDegraded,
+} from "./mcp-development-journal-tools.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +59,7 @@ export const DEV_INTEGRATION_STRATEGIES = Object.freeze([
 
 const candidateIdPattern = new RegExp(DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE, "u");
 const workstreamIdPattern = new RegExp(DEV_WORKSTREAM_ID_PATTERN_SOURCE, "u");
+const operationIdPattern = new RegExp(DEV_OPERATION_ID_PATTERN_SOURCE, "u");
 const workspaceIdPattern = /^dev_workspace_[a-f0-9]{24}$/u;
 const gitSha1Pattern = /^[a-f0-9]{40}$/u;
 const stateSet = new Set(DEV_INTEGRATION_STATES);
@@ -417,7 +425,7 @@ function parseMergeTreeConflicts(stdout, stderr) {
 
 async function productionValidationRunner(root, candidate) {
   const contextResolver = async () => ({
-    workspace_id: candidate.integration_candidate_id,
+    workspace_id: candidate.workspace_id,
     workstream_id: candidate.workstream_id,
     workspace_type: "integration_worktree",
     root,
@@ -432,7 +440,7 @@ async function productionValidationRunner(root, candidate) {
   const runner = createDevTestRunner({ workspaceContextResolver: contextResolver });
   const results = [];
   for (const suite of ["mcp", "mcp_tunnel"]) {
-    results.push(await runner({ suite, workspace_id: candidate.integration_candidate_id }));
+    results.push(await runner({ suite, workspace_id: candidate.workspace_id }));
   }
   return results;
 }
@@ -848,7 +856,26 @@ export function createDevIntegrationService({
       });
     }
 
-    await ensureIntegrationRoot();
+    const journalOperation = await beginDevJournalOperation({
+      operation_type: "integration_validation",
+      tool_name: "dev_workspace_validate_integration",
+      workstream_id: candidate.workstream_id,
+      workspace_id: candidate.workspace_id,
+      links: [
+        { relation: "used", commit: candidate.source_head },
+        { relation: "related_to", integration_candidate_id: candidate.integration_candidate_id },
+      ],
+      result: {
+        integration_candidate_id: candidate.integration_candidate_id,
+        source_head: candidate.source_head,
+        target_head: candidate.target_head,
+        integration_commit: candidate.integration_commit,
+        strategy: candidate.strategy,
+      },
+    });
+
+    try {
+      await ensureIntegrationRoot();
     const integrationPath = path.join(integrationRoot, candidateId);
     try {
       await access(integrationPath);
@@ -926,7 +953,58 @@ export function createDevIntegrationService({
       record.integration_workspace.last_error = cleanup.error;
       if (allPassed) transitionCandidate(record, "ready");
     });
+    const validationEvidenceLinks = suites
+      .filter((result) => operationIdPattern.test(result?.operation_id ?? ""))
+      .map((result) => ({ relation: "validated_by", operation_id: result.operation_id }));
+    try {
+      await completeDevJournalOperation(journalOperation.operation_id, {
+        links: [
+          { relation: "used", commit: candidate.source_head },
+          { relation: "used", commit: candidate.integration_commit },
+          { relation: "related_to", integration_candidate_id: candidate.integration_candidate_id },
+          ...validationEvidenceLinks,
+        ],
+        result: {
+          integration_candidate_id: candidate.integration_candidate_id,
+          source_head: candidate.source_head,
+          target_head: candidate.target_head,
+          integration_commit: candidate.integration_commit,
+          strategy: candidate.strategy,
+          passed: allPassed,
+          execution_ok: validationReport.execution_ok,
+          timed_out: validationReport.timed_out,
+          diff_check_passed: validationReport.diff_check?.passed === true,
+          suite_names: validationReport.suites.map((item) => item.suite),
+          cleanup_completed: cleanup.cleaned,
+        },
+      });
+    } catch (error) {
+      await markDevJournalDegraded(`dev_workspace_validate_integration terminal append failed: ${error.message}`);
+      const provenanceError = new Error(`Integration validation completed but provenance terminal append failed: ${error.message}`);
+      provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
+      throw provenanceError;
+    }
     return candidate;
+    } catch (error) {
+      if (error?.code === "JOURNAL_TERMINAL_APPEND_FAILED") throw error;
+      try {
+        await failDevJournalOperation(journalOperation.operation_id, {
+          result: {
+            integration_candidate_id: candidate.integration_candidate_id,
+            source_head: candidate.source_head,
+            target_head: candidate.target_head,
+            integration_commit: candidate.integration_commit,
+            strategy: candidate.strategy,
+            validation_failed: true,
+            reason: String(error.message ?? error).slice(0, 1024),
+          },
+        });
+      } catch (journalError) {
+        await markDevJournalDegraded(`dev_workspace_validate_integration failure terminal append failed: ${journalError.message}`);
+        throw new Error(`Integration validation failed and provenance terminal append failed: ${journalError.message}`);
+      }
+      throw error;
+    }
   }
 
   async function operationState() {
@@ -1041,10 +1119,6 @@ export function createDevIntegrationService({
         });
       }
 
-      candidate = await updateCandidate(candidateId, candidate.revision, (record) => {
-        transitionCandidate(record, "applying");
-        record.failure_reason = null;
-      });
       const finalHead = await readMainHead();
       const finalSource = await readBranchHead(candidate.source_branch);
       if (finalHead !== candidate.target_head || finalSource !== candidate.source_head) {
@@ -1061,6 +1135,30 @@ export function createDevIntegrationService({
         });
       }
 
+      const journalOperation = await beginDevJournalOperation({
+        operation_type: "integration_apply",
+        tool_name: "dev_workspace_integrate",
+        workstream_id: candidate.workstream_id,
+        workspace_id: candidate.workspace_id,
+        links: [
+          { relation: "used", commit: candidate.source_head },
+          { relation: "related_to", integration_candidate_id: candidate.integration_candidate_id },
+        ],
+        result: {
+          integration_candidate_id: candidate.integration_candidate_id,
+          source_head: candidate.source_head,
+          target_head: candidate.target_head,
+          integration_commit: candidate.integration_commit,
+          strategy: candidate.strategy,
+          validation_passed: candidate.validation_report?.passed === true,
+        },
+      });
+
+      candidate = await updateCandidate(candidateId, candidate.revision, (record) => {
+        transitionCandidate(record, "applying");
+        record.failure_reason = null;
+      });
+
       // The candidate integration commit is proven to descend from the exact target_head.
       // A fixed ff-only merge delegates ref/index/worktree transition to Git as one native
       // fast-forward operation, preserving safe local dirty carry-forward semantics. No
@@ -1074,6 +1172,23 @@ export function createDevIntegrationService({
       });
       if (advancement.exit_code !== 0) {
         const actualHead = await readMainHead();
+        try {
+          await failDevJournalOperation(journalOperation.operation_id, {
+            result: {
+              integration_candidate_id: candidate.integration_candidate_id,
+              source_head: candidate.source_head,
+              target_head: candidate.target_head,
+              integration_commit: candidate.integration_commit,
+              strategy: candidate.strategy,
+              actual_head: actualHead,
+              advancement_exit_code: advancement.exit_code,
+              effect_observed: actualHead !== candidate.target_head,
+            },
+          });
+        } catch (error) {
+          await markDevJournalDegraded(`dev_workspace_integrate failure terminal append failed: ${error.message}`);
+          throw new Error(`Integration apply failed and provenance terminal append failed: ${error.message}`);
+        }
         return updateCandidate(candidateId, candidate.revision, (record) => {
           if (actualHead !== record.target_head) {
             transitionCandidate(record, "stale");
@@ -1097,6 +1212,23 @@ export function createDevIntegrationService({
         || dirtyChanges.length > 0
         || postDiffCheck.exit_code !== 0
       ) {
+        try {
+          await failDevJournalOperation(journalOperation.operation_id, {
+            result: {
+              integration_candidate_id: candidate.integration_candidate_id,
+              source_head: candidate.source_head,
+              target_head: candidate.target_head,
+              integration_commit: candidate.integration_commit,
+              strategy: candidate.strategy,
+              actual_head: postHead,
+              post_verify_passed: false,
+              effect_observed: postHead === candidate.integration_commit,
+            },
+          });
+        } catch (error) {
+          await markDevJournalDegraded(`dev_workspace_integrate post-verify terminal append failed: ${error.message}`);
+          throw new Error(`Integration effect completed but provenance terminal append failed: ${error.message}`);
+        }
         return updateCandidate(candidateId, candidate.revision, (record) => {
           transitionCandidate(record, "failed");
           record.failure_reason = {
@@ -1110,12 +1242,35 @@ export function createDevIntegrationService({
         });
       }
 
-      return updateCandidate(candidateId, candidate.revision, (record) => {
+      const integrated = await updateCandidate(candidateId, candidate.revision, (record) => {
         transitionCandidate(record, "integrated");
         record.integrated_at = clock().toISOString();
         record.failure_reason = null;
         record.stale_reason = null;
       });
+      try {
+        await completeDevJournalOperation(journalOperation.operation_id, {
+          links: [
+            { relation: "used", commit: candidate.source_head },
+            { relation: "integrated_by", commit: candidate.integration_commit },
+            { relation: "related_to", integration_candidate_id: candidate.integration_candidate_id },
+          ],
+          result: {
+            integration_candidate_id: candidate.integration_candidate_id,
+            source_head: candidate.source_head,
+            target_head: candidate.target_head,
+            integration_commit: candidate.integration_commit,
+            strategy: candidate.strategy,
+            actual_head: postHead,
+            post_verify_passed: true,
+            integrated: true,
+          },
+        });
+      } catch (error) {
+        await markDevJournalDegraded(`dev_workspace_integrate terminal append failed: ${error.message}`);
+        throw new Error(`Integration effect completed but provenance terminal append failed: ${error.message}`);
+      }
+      return integrated;
     } finally {
       await releaseFileLock(lock, applyLock);
     }

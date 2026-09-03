@@ -397,8 +397,12 @@ try {
     lockPath: path.join(tempRoot, "concurrent.lock"),
   });
   const firstRun = concurrentRunner({ suite: "mcp" });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  const activeLock = JSON.parse(await readFile(path.join(tempRoot, "concurrent.lock"), "utf8"));
+  let activeLock = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    activeLock = JSON.parse(await readFile(path.join(tempRoot, "concurrent.lock"), "utf8"));
+    if (Number.isInteger(activeLock.child_pid) && activeLock.child_pid > 0) break;
+  }
   assert.equal(activeLock.owner_pid, process.pid);
   assert.equal(Number.isInteger(activeLock.child_pid), true);
   assert.equal(activeLock.child_pid > 0, true);
