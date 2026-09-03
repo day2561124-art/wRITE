@@ -359,7 +359,12 @@ function sanitizeCurrentMindCharacterValue(value) {
 
 function currentMindCharacterItem(candidate) {
   if (!isObject(candidate)) return null;
+  const contextOrigin = candidate.source_kind === "committed_experience"
+    || candidate.source_kind === "committed_action_experience"
+    ? "committed_experience"
+    : null;
   return {
+    ...(contextOrigin ? { context_origin: contextOrigin } : {}),
     content: sanitizeCurrentMindCharacterValue(candidate.content),
   };
 }
@@ -578,7 +583,7 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       ?? compatibilityState.expectation
       ?? null
     : null;
-  const temporaryExpectation = cloneJson(
+  const temporaryExpectation = sanitizeCurrentMindValue(
     priorState.temporary_expectation
     ?? legacyExpectationBootstrap
     ?? null,
@@ -1005,7 +1010,7 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       character_experience_is_not_current_mind: true,
       current_mind_is_not_memory: true,
       full_world_state_included: false,
-      hidden_causal_chain_included: false,
+      hidden_causal_material_included: false,
       gpt_hidden_reasoning_included: false,
       character_brain_authors_projection: false,
       attention_focus_directly_controls_memory_encoding: false,
