@@ -220,6 +220,8 @@ try {
       recollection_reinstatement_v3_installed: true,
       recollection_single_semantic_exposure_enforced: true,
       native_character_brain_memory_channel: "cognition.working_context",
+      selective_working_memory_output_gating_v5_installed: true,
+      output_gating_installed: true,
     },
   }, {
     include_legacy_retrieved_memories_alias: true,
@@ -256,6 +258,65 @@ try {
     }),
     (error) => error?.code === "WORLD_SIMULATION_RECOLLECTION_CURRENT_MIND_REQUIRED",
     "v3 must fail closed when Runtime-owned working_context is missing",
+  );
+
+  const v5Projected = buildWorldSimulationCharacterBrainInput({
+    character: actor,
+    perception: { observed: [], audible: [], other_senses: [] },
+    cognition: {
+      attention: {
+        focus: { content: "behaviorally open Current Mind item" },
+        active_context: [{ content: "output-closed Current Mind item" }],
+        peripheral_context: [],
+        fading_context: [],
+        suspended_context: [],
+      },
+      working_context: {
+        focus: { content: "behaviorally open Current Mind item" },
+        active_context: [],
+        peripheral_context: [],
+        fading_context: [],
+        suspended_context: [],
+      },
+    },
+    output_gate_decisions: [{
+      candidate_id: "engine-private-candidate",
+      gate_outcome: "closed",
+      reason_codes: ["no_current_readout_support"],
+    }],
+    candidate_action_intents: [{ action_id: "wait", intent: "等待" }],
+    boundaries: {
+      selective_working_memory_output_gating_v5_installed: true,
+      output_gating_installed: true,
+    },
+  });
+  const v5ProjectedText = JSON.stringify(v5Projected);
+  assert.equal(
+    v5Projected.cognition.working_context.focus.content,
+    "behaviorally open Current Mind item",
+  );
+  assert.equal(
+    JSON.stringify(v5Projected.cognition.attention).includes("behaviorally open Current Mind item"),
+    true,
+  );
+  assert.equal(
+    v5ProjectedText.includes("output-closed Current Mind item"),
+    false,
+    "v5 final ingress must not allow cognition.attention to bypass the Runtime working-context readout",
+  );
+  assert.equal(v5ProjectedText.includes("engine-private-candidate"), false);
+  assert.equal(v5ProjectedText.includes("no_current_readout_support"), false);
+  assert.throws(
+    () => buildWorldSimulationCharacterBrainInput({
+      character: actor,
+      cognition: { attention: { focus: { content: "must not bypass" } } },
+      boundaries: {
+        selective_working_memory_output_gating_v5_installed: true,
+        output_gating_installed: true,
+      },
+    }),
+    (error) => error?.code === "WORLD_SIMULATION_WORKING_MEMORY_OUTPUT_GATE_CONTEXT_REQUIRED",
+    "v5 must fail closed when the authoritative Runtime readout is missing",
   );
 
   // Broker unit: one active turn/session, strict decision ordering, one-shot take.

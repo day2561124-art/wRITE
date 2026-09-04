@@ -1,5 +1,5 @@
 export const worldSimulationCharacterBrainInputVersion =
-  "character-runtime-v3-recollection-single-exposure-v1";
+  "character-runtime-v5-working-memory-output-gating-v1";
 
 function isObject(value) {
   return Boolean(value)
@@ -39,19 +39,64 @@ function withoutRecoveredMemoryAttentionDuplicates(attention) {
   return projected;
 }
 
-function characterBrainCognition(packet, recollectionV3) {
+function workingContextSemanticKeys(workingContext) {
+  if (!isObject(workingContext)) return new Set();
+  return new Set([
+    workingContext.focus,
+    ...array(workingContext.active_context),
+    ...array(workingContext.peripheral_context),
+    ...array(workingContext.fading_context),
+    ...array(workingContext.suspended_context),
+  ]
+    .filter(Boolean)
+    .map((item) => JSON.stringify(item)));
+}
+
+function withoutOutputClosedAttention(attention, workingContext) {
+  if (!isObject(attention)) return cloneJson(attention ?? null);
+  const allowed = workingContextSemanticKeys(workingContext);
+  const projected = cloneJson(attention);
+  const isAllowed = (item) => Boolean(item)
+    && allowed.has(JSON.stringify(item));
+  if (!isAllowed(projected.focus)) projected.focus = null;
+  for (const key of [
+    "active_context",
+    "peripheral_context",
+    "fading_context",
+    "suspended_context",
+  ]) {
+    if (!Object.hasOwn(projected, key)) continue;
+    projected[key] = array(projected[key]).filter(isAllowed);
+  }
+  return projected;
+}
+
+function characterBrainCognition(packet, recollectionV3, outputGatingV5) {
   const cognition = isObject(packet.cognition)
     ? cloneJson(packet.cognition)
     : {};
-  if (!recollectionV3) return cognition;
+  if (!recollectionV3 && !outputGatingV5) return cognition;
 
   if (!isObject(cognition.working_context)) {
     const error = new Error(
-      "Character Runtime v3 recollection ingress requires Runtime-owned cognition.working_context.",
+      outputGatingV5
+        ? "Character Runtime v5 output gating requires Runtime-owned cognition.working_context."
+        : "Character Runtime v3 recollection ingress requires Runtime-owned cognition.working_context.",
     );
-    error.code = "WORLD_SIMULATION_RECOLLECTION_CURRENT_MIND_REQUIRED";
+    error.code = outputGatingV5
+      ? "WORLD_SIMULATION_WORKING_MEMORY_OUTPUT_GATE_CONTEXT_REQUIRED"
+      : "WORLD_SIMULATION_RECOLLECTION_CURRENT_MIND_REQUIRED";
     throw error;
   }
+
+  if (outputGatingV5 && Object.hasOwn(cognition, "attention")) {
+    cognition.attention = withoutOutputClosedAttention(
+      cognition.attention,
+      cognition.working_context,
+    );
+  }
+
+  if (!recollectionV3) return cognition;
 
   // Phase63C recovered content may exist in several internal plumbing layers,
   // but Character Brain sees that semantic content only through the Runtime
@@ -77,6 +122,8 @@ export function buildWorldSimulationCharacterBrainInput(
     : {};
   const recollectionV3 =
     packet.boundaries?.recollection_reinstatement_v3_installed === true;
+  const outputGatingV5 =
+    packet.boundaries?.selective_working_memory_output_gating_v5_installed === true;
 
   const input = {
     character:
@@ -113,7 +160,7 @@ export function buildWorldSimulationCharacterBrainInput(
       ),
 
     cognition:
-      characterBrainCognition(packet, recollectionV3),
+      characterBrainCognition(packet, recollectionV3, outputGatingV5),
 
     candidate_action_intents:
       cloneJson(

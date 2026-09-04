@@ -1274,7 +1274,15 @@ try {
   );
   assert.equal(gatingTurnOne.projection.resolver_audit.selective_input_gating_installed, true);
   assert.equal(gatingTurnOne.projection.resolver_audit.input_gate_closed_by_default, true);
-  assert.equal(gatingTurnOne.projection.resolver_audit.output_gating_installed, false);
+  assert.equal(gatingTurnOne.projection.resolver_audit.output_gating_installed, true);
+  assert.equal(
+    gatingTurnOne.projection.resolver_audit.output_gate_uses_learned_policy,
+    false,
+  );
+  assert.deepEqual(
+    gatingTurnOne.projection.resolver_audit.output_gate_outcomes,
+    ["open", "closed"],
+  );
   assert.equal(
     gatingTurnOne.projection.admission_decisions.some(
       (decision) => decision.source_kind === "perception" && decision.gate_outcome === "admit",
@@ -1351,6 +1359,110 @@ try {
     ),
     true,
     "rejected perception must remain distinct from peripheral Current Mind placement",
+  );
+
+  const outputGateRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `output_gate_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "phase62c_v5_working_memory_output_gate_fixture",
+      formal: true,
+    }),
+  });
+  const outputGateInput = {
+    world_simulation_session_id: "output-gating-lineage",
+    turn_id: "output-gating-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:06:15+08:00",
+    perception: {
+      observed: [
+        {
+          perceptual_label: "目前任務告警",
+          goal_relevance: "high",
+          salience: "medium",
+        },
+        {
+          perceptual_label: "窗外高亮閃光",
+          salience: "high",
+        },
+      ],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "檢查告警面板",
+    compatibility_state: { goals: ["檢查告警面板"] },
+  };
+  const outputGateTurn = await outputGateRuntimeManager
+    .prepareSpeculativeCurrentMind(outputGateInput);
+  const repeatedOutputGateTurn = await outputGateRuntimeManager
+    .prepareSpeculativeCurrentMind(outputGateInput);
+  assert.deepEqual(
+    outputGateTurn.projection.output_gate_decisions,
+    repeatedOutputGateTurn.projection.output_gate_decisions,
+    "same Current Mind state and evidence must yield identical v5 output-gate decisions",
+  );
+  assert.equal(outputGateTurn.projection.resolver_audit.output_gating_installed, true);
+  assert.equal(
+    outputGateTurn.projection.resolver_audit.output_gate_changes_current_mind_state,
+    false,
+  );
+  assert.equal(
+    outputGateTurn.projection.output_gate_decisions.some(
+      (decision) => decision.source_kind === "perception"
+        && decision.gate_outcome === "closed"
+        && decision.reason_codes.includes("no_current_readout_support"),
+    ),
+    true,
+    "salience-only content may remain in Current Mind while its behavioral readout is closed",
+  );
+  assert.equal(
+    outputGateTurn.projection.output_gate_decisions.some(
+      (decision) => decision.source_kind === "current_action"
+        && decision.gate_outcome === "open"
+        && decision.reason_codes.includes("current_action"),
+    ),
+    true,
+    "the current action representation must remain behaviorally readable",
+  );
+  assert.equal(
+    outputGateTurn.projection.output_gate_decisions.find(
+      (decision) => decision.slot === "focus",
+    )?.gate_outcome,
+    "open",
+    "the selected focus must always be readable through the v5 output gate",
+  );
+  const outputGateFullStateText = JSON.stringify({
+    reducer_state_after: outputGateTurn.projection.reducer_state_after,
+    character_view_after: outputGateTurn.projection.character_view_after,
+  });
+  assert.equal(outputGateFullStateText.includes("窗外高亮閃光"), true);
+  const outputGateReadoutText = JSON.stringify(outputGateTurn.working_context);
+  assert.equal(outputGateReadoutText.includes("窗外高亮閃光"), false);
+  assert.equal(outputGateReadoutText.includes("檢查告警面板"), true);
+  assert.equal(outputGateReadoutText.includes("output_gate"), false);
+  assert.equal(outputGateReadoutText.includes("gate_outcome"), false);
+  assert.equal(outputGateReadoutText.includes("reason_codes"), false);
+  assert.equal(outputGateReadoutText.includes("candidate_id"), false);
+  const outputGateEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "output-gating-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        current_mind_transition_projection: outputGateTurn.projection,
+      }],
+    },
+  });
+  assert.deepEqual(
+    outputGateEnvelope.character_projections[0].output_gate_decisions,
+    outputGateTurn.projection.output_gate_decisions,
+    "historical projection must preserve v5 readout decisions rather than recompute them",
+  );
+  assert.equal(
+    JSON.stringify(outputGateEnvelope.character_projections[0].character_view_after)
+      .includes("窗外高亮閃光"),
+    true,
+    "historical Current Mind state must retain output-closed representations",
   );
 
   const weakRecollectionInput = {

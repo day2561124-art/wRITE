@@ -88,17 +88,19 @@ import {
 } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationLoopVersion = "phase62c-event-loop-v1";
-export const worldSimulationCharacterRuntimeVersion = "character-runtime-v4";
+export const worldSimulationCharacterRuntimeVersion = "character-runtime-v5";
 export const worldSimulationCharacterExperienceContractVersion =
   "committed-character-experience-receipt-v1";
 export const worldSimulationCharacterExperienceProjectionVersion =
   "committed-character-experience-projection-v1";
 export const worldSimulationCharacterCurrentMindContractVersion =
-  "character-current-mind-contract-v3";
+  "character-current-mind-contract-v4";
 export const worldSimulationCharacterAttentionReducerVersion =
   "deterministic-attention-reducer-v2";
+export const worldSimulationCharacterWorkingMemoryOutputGateVersion =
+  "deterministic-working-memory-output-gate-v1";
 export const worldSimulationCharacterCurrentMindProjectionVersion =
-  "committed-character-current-mind-projection-v3";
+  "committed-character-current-mind-projection-v4";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -665,6 +667,97 @@ function currentMindAdmissionDecision(candidate, context) {
   };
 }
 
+function currentMindOutputGateDecision(candidate, slot, admissionDecision = null) {
+  if (!isObject(candidate)) return null;
+  const evidence = object(candidate.priority_evidence);
+  const admissionReasons = new Set(array(admissionDecision?.reason_codes));
+  const reasonCodes = [];
+  if (slot === "focus") reasonCodes.push("focus_selected");
+  if (candidate.source_kind === "current_action") reasonCodes.push("current_action");
+  if (evidence.immediate_constraint_urgency > 0) {
+    reasonCodes.push("immediate_constraint_or_urgency");
+  }
+  if (evidence.expectation_violation === true) {
+    reasonCodes.push("expectation_violation");
+  }
+  if (evidence.goal_intention_relevance > 0
+    || admissionReasons.has("goal_or_intention_support")) {
+    reasonCodes.push("goal_or_intention_support");
+  }
+  const open = reasonCodes.length > 0;
+  return {
+    candidate_id: candidate.candidate_id,
+    source_kind: candidate.source_kind,
+    slot,
+    gate_outcome: open ? "open" : "closed",
+    reason_codes: open ? [...new Set(reasonCodes)] : ["no_current_readout_support"],
+  };
+}
+
+function currentMindOutputGateDecisions(state, prioritized, admissionDecisions) {
+  const byId = new Map(
+    array(prioritized)
+      .filter(isObject)
+      .map((candidate) => [candidate.candidate_id, candidate]),
+  );
+  const admissionById = new Map(
+    array(admissionDecisions)
+      .filter(isObject)
+      .map((decision) => [decision.candidate_id, decision]),
+  );
+  const decisions = [];
+  const addDecision = (candidate, slot) => {
+    if (!isObject(candidate)) return;
+    const evidenceCandidate = byId.get(candidate.candidate_id) ?? candidate;
+    const decision = currentMindOutputGateDecision(
+      evidenceCandidate,
+      slot,
+      admissionById.get(candidate.candidate_id) ?? null,
+    );
+    if (decision) decisions.push(decision);
+  };
+  addDecision(state?.focus, "focus");
+  for (const [slot, values] of [
+    ["active_context", state?.active_context],
+    ["peripheral_context", state?.peripheral_context],
+    ["fading_context", state?.fading_context],
+    ["suspended_context", state?.suspended_context],
+  ]) {
+    for (const candidate of array(values)) addDecision(candidate, slot);
+  }
+  return decisions;
+}
+
+function currentMindCharacterReadout(state, decisions) {
+  const gateByCandidateId = new Map(
+    array(decisions).map((decision) => [decision.candidate_id, decision.gate_outcome]),
+  );
+  const isOpen = (candidate) => isObject(candidate)
+    && gateByCandidateId.get(candidate.candidate_id) === "open";
+  return {
+    focus: isOpen(state?.focus) ? currentMindCharacterItem(state.focus) : null,
+    active_context: array(state?.active_context)
+      .filter(isOpen)
+      .map(currentMindCharacterItem)
+      .filter(Boolean),
+    peripheral_context: array(state?.peripheral_context)
+      .filter(isOpen)
+      .map(currentMindCharacterItem)
+      .filter(Boolean),
+    fading_context: array(state?.fading_context)
+      .filter(isOpen)
+      .map(currentMindCharacterItem)
+      .filter(Boolean),
+    suspended_context: array(state?.suspended_context)
+      .filter(isOpen)
+      .map(currentMindCharacterItem)
+      .filter(Boolean),
+    temporary_expectation: sanitizeCurrentMindCharacterValue(
+      state?.temporary_expectation ?? null,
+    ),
+  };
+}
+
 function currentMindCandidatePrecedes(left, right) {
   if (!right) return true;
   const leftEvidence = left.priority_evidence;
@@ -1081,6 +1174,15 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     ),
   };
   const characterView = currentMindCharacterView(stateAfter);
+  const outputGateDecisions = currentMindOutputGateDecisions(
+    stateAfter,
+    prioritized,
+    admissionDecisions,
+  );
+  const characterReadout = currentMindCharacterReadout(
+    stateAfter,
+    outputGateDecisions,
+  );
   const processingByCandidateId = new Map();
   if (stateAfter.focus?.candidate_id) processingByCandidateId.set(stateAfter.focus.candidate_id, "focus");
   for (const item of stateAfter.active_context) processingByCandidateId.set(item.candidate_id, "active");
@@ -1158,6 +1260,8 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     source_refs: sourceRefs,
     source_snapshot_hash: hashAgentRunValue(sourceSnapshot),
     admission_decisions: cloneJson(admissionDecisions),
+    output_gate_version: worldSimulationCharacterWorkingMemoryOutputGateVersion,
+    output_gate_decisions: cloneJson(outputGateDecisions),
     focus_transition: focusTransition,
     context_transition: {
       admitted_count: admissionDecisions.filter((decision) => decision.gate_outcome === "admit").length,
@@ -1165,6 +1269,8 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       rejected_count: admissionDecisions.filter((decision) => decision.gate_outcome === "reject").length,
       cleared_count: admissionDecisions.filter((decision) => decision.gate_outcome === "clear").length,
       decaying_count: admissionDecisions.filter((decision) => decision.gate_outcome === "decay").length,
+      output_open_count: outputGateDecisions.filter((decision) => decision.gate_outcome === "open").length,
+      output_closed_count: outputGateDecisions.filter((decision) => decision.gate_outcome === "closed").length,
       active_context_count: stateAfter.active_context.length,
       peripheral_context_count: stateAfter.peripheral_context.length,
       fading_context_count: stateAfter.fading_context.length,
@@ -1185,7 +1291,11 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       input_gate_closed_by_default: true,
       gate_outcomes: ["admit", "maintain", "reject", "clear", "decay"],
       admission_hysteresis: "fresh_entry_requires_more_support_than_prior_maintenance",
-      output_gating_installed: false,
+      output_gating_installed: true,
+      output_gate_version: worldSimulationCharacterWorkingMemoryOutputGateVersion,
+      output_gate_outcomes: ["open", "closed"],
+      output_gate_changes_current_mind_state: false,
+      output_gate_uses_learned_policy: false,
       deterministic_pairwise_resolver: true,
       focus_resolution_evidence: cloneJson(focusResolutionEvidence),
       focus_retention_bonus: focusRetentionBonus,
@@ -1220,7 +1330,11 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       selective_current_mind_input_gating_installed: true,
       rejected_perception_means_not_admitted_not_unperceived: true,
       current_mind_clear_does_not_mutate_source_memory: true,
-      output_gating_installed: false,
+      output_gating_installed: true,
+      output_gate_version: worldSimulationCharacterWorkingMemoryOutputGateVersion,
+      output_gate_closed_representation_remains_in_current_mind: true,
+      output_gate_does_not_mutate_source_memory: true,
+      output_gate_does_not_change_current_mind_placement: true,
       attention_focus_directly_controls_memory_encoding: false,
     },
   };
@@ -1228,17 +1342,18 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
 
   return {
     projection: cloneJson(projectionBody),
-    character_facing_attention: cloneJson(characterView),
+    character_facing_attention: cloneJson(characterReadout),
     working_context: cloneJson({
-      focus: characterView.focus,
-      active_context: characterView.active_context,
-      peripheral_context: characterView.peripheral_context,
-      fading_context: characterView.fading_context,
-      suspended_context: characterView.suspended_context,
+      focus: characterReadout.focus,
+      active_context: characterReadout.active_context,
+      peripheral_context: characterReadout.peripheral_context,
+      fading_context: characterReadout.fading_context,
+      suspended_context: characterReadout.suspended_context,
     }),
     encoding_evidence: cloneJson(encodingEvidence),
     internal_attention_state: {
       admission_decisions: cloneJson(admissionDecisions),
+      output_gate_decisions: cloneJson(outputGateDecisions),
       bids: prioritized.map((candidate) => ({
         candidate_id: candidate.candidate_id,
         sources: Object.entries(candidate.attention_bids)
@@ -2851,7 +2966,13 @@ export function buildWorldSimulationLoopContract() {
       rejected_perception_remains_bounded_perception: true,
       prior_supported_context_may_be_maintained_without_refresh: true,
       clear_is_current_mind_representation_removal_not_forgetting: true,
-      output_gating_installed: false,
+      selective_working_memory_output_gating_v5_installed: true,
+      output_gating_installed: true,
+      output_gate_version: worldSimulationCharacterWorkingMemoryOutputGateVersion,
+      output_gate_outcomes: ["open", "closed"],
+      output_gate_changes_current_mind_state: false,
+      output_gate_closed_representation_remains_maintained: true,
+      output_gate_reason_codes_exposed_to_character_brain: false,
       recollection_reinstatement_v3_installed: true,
       recollection_context_origin: "recovered_memory",
       recollection_safe_epistemic_metadata_preserved: true,
@@ -3945,7 +4066,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         working_context_contains_only_admitted_or_maintained_new_semantics:
           true,
 
+        selective_working_memory_output_gating_v5_installed:
+          true,
+
         output_gating_installed:
+          true,
+
+        output_gate_version:
+          worldSimulationCharacterWorkingMemoryOutputGateVersion,
+
+        output_gate_closed_representation_remains_in_current_mind:
+          true,
+
+        output_gate_reason_codes_exposed_to_character_brain:
           false,
 
         recollection_reinstatement_v3_installed:
@@ -4060,7 +4193,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       working_context_contains_only_admitted_or_maintained_new_semantics:
         true,
 
+      selective_working_memory_output_gating_v5_installed:
+        true,
+
       output_gating_installed:
+        true,
+
+      output_gate_version:
+        worldSimulationCharacterWorkingMemoryOutputGateVersion,
+
+      output_gate_closed_representation_remains_in_current_mind:
+        true,
+
+      output_gate_reason_codes_exposed_to_character_brain:
         false,
 
       recollection_reinstatement_v3_installed:
