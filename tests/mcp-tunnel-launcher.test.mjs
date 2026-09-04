@@ -224,6 +224,42 @@ async function waitForPortListening(
   );
 }
 
+async function spawnMcpHttpServerOnAvailablePort({ env, onStderr, maxAttempts = 5 }) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const port = await freePort();
+    let attemptStderr = "";
+    const serverProcess = spawn(
+      process.execPath,
+      ["server/src/mcp-http-server.mjs", "--port", String(port)],
+      {
+        cwd: rootDir,
+        env,
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      },
+    );
+    serverProcess.stderr.on("data", (chunk) => {
+      const text = chunk.toString("utf8");
+      attemptStderr += text;
+      onStderr?.(text);
+    });
+    try {
+      await waitForPortListening(port, 10_000, {
+        child: serverProcess,
+        stderr: () => attemptStderr,
+      });
+      return { port, serverProcess };
+    } catch (error) {
+      lastError = error;
+      terminateProcessTree(serverProcess);
+      const portCollision = attemptStderr.includes("EADDRINUSE");
+      if (!portCollision || attempt === maxAttempts) throw error;
+    }
+  }
+  throw lastError ?? new Error("MCP HTTP test server failed to start.");
+}
+
 function isProcessRunning(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -382,31 +418,19 @@ function childPidForSessionLog(stderrText, sessionId) {
 }
 
 async function verifyMcpIdleSessionCapReclaimsChildren() {
-  const port = await freePort();
   let stderrText = "";
   const agents = [];
-  const serverProcess = spawn(
-    process.execPath,
-    ["server/src/mcp-http-server.mjs", "--port", String(port)],
-    {
-      cwd: rootDir,
-      env: childEnvironment({
-        MCP_TOOL_PROFILE: "chatgpt_developer",
-        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
-        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
-        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "2",
-      }),
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-    },
-  );
-  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+  const { port, serverProcess } = await spawnMcpHttpServerOnAvailablePort({
+    env: childEnvironment({
+      MCP_TOOL_PROFILE: "chatgpt_developer",
+      MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+      MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+      MCP_HTTP_MAX_IDLE_SESSION_COUNT: "2",
+    }),
+    onStderr: (text) => { stderrText += text; },
+  });
 
   try {
-    await waitForPortListening(port, 10_000, {
-      child: serverProcess,
-      stderr: () => stderrText,
-    });
     const sessions = [];
     for (let index = 0; index < 4; index += 1) {
       const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
@@ -466,32 +490,20 @@ async function verifyMcpIdleSessionCapReclaimsChildren() {
 }
 
 async function verifyMcpTotalSessionCapReclaimsIdleChildren() {
-  const port = await freePort();
   let stderrText = "";
   const agents = [];
-  const serverProcess = spawn(
-    process.execPath,
-    ["server/src/mcp-http-server.mjs", "--port", String(port)],
-    {
-      cwd: rootDir,
-      env: childEnvironment({
-        MCP_TOOL_PROFILE: "chatgpt_developer",
-        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
-        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
-        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
-        MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "2",
-      }),
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-    },
-  );
-  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+  const { port, serverProcess } = await spawnMcpHttpServerOnAvailablePort({
+    env: childEnvironment({
+      MCP_TOOL_PROFILE: "chatgpt_developer",
+      MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+      MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+      MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+      MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "2",
+    }),
+    onStderr: (text) => { stderrText += text; },
+  });
 
   try {
-    await waitForPortListening(port, 10_000, {
-      child: serverProcess,
-      stderr: () => stderrText,
-    });
     const sessions = [];
     for (let index = 0; index < 4; index += 1) {
       const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
@@ -550,33 +562,21 @@ async function verifyMcpTotalSessionCapReclaimsIdleChildren() {
 }
 
 async function verifyMcpTotalSessionCapProtectsActiveRequest() {
-  const port = await freePort();
   let stderrText = "";
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
   let slowRequest;
-  const serverProcess = spawn(
-    process.execPath,
-    ["server/src/mcp-http-server.mjs", "--port", String(port)],
-    {
-      cwd: rootDir,
-      env: childEnvironment({
-        MCP_TOOL_PROFILE: "chatgpt_developer",
-        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
-        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
-        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
-        MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "1",
-      }),
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-    },
-  );
-  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+  const { port, serverProcess } = await spawnMcpHttpServerOnAvailablePort({
+    env: childEnvironment({
+      MCP_TOOL_PROFILE: "chatgpt_developer",
+      MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "60000",
+      MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+      MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+      MCP_HTTP_MAX_TOTAL_SESSION_COUNT: "1",
+    }),
+    onStderr: (text) => { stderrText += text; },
+  });
 
   try {
-    await waitForPortListening(port, 10_000, {
-      child: serverProcess,
-      stderr: () => stderrText,
-    });
     const session = await initializeMcpHttpSession({
       port,
       agent,
@@ -624,31 +624,19 @@ async function verifyMcpTotalSessionCapProtectsActiveRequest() {
 }
 
 async function verifyMcpIdleTimeoutReclaimsChild() {
-  const port = await freePort();
   let stderrText = "";
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
-  const serverProcess = spawn(
-    process.execPath,
-    ["server/src/mcp-http-server.mjs", "--port", String(port)],
-    {
-      cwd: rootDir,
-      env: childEnvironment({
-        MCP_TOOL_PROFILE: "chatgpt_developer",
-        MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "350",
-        MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
-        MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
-      }),
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-    },
-  );
-  serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
+  const { port, serverProcess } = await spawnMcpHttpServerOnAvailablePort({
+    env: childEnvironment({
+      MCP_TOOL_PROFILE: "chatgpt_developer",
+      MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "350",
+      MCP_HTTP_SESSION_REAPER_INTERVAL_MS: "50",
+      MCP_HTTP_MAX_IDLE_SESSION_COUNT: "32",
+    }),
+    onStderr: (text) => { stderrText += text; },
+  });
 
   try {
-    await waitForPortListening(port, 10_000, {
-      child: serverProcess,
-      stderr: () => stderrText,
-    });
     const session = await initializeMcpHttpSession({
       port,
       agent,
