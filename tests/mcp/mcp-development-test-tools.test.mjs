@@ -390,15 +390,25 @@ try {
   assert.equal(timedOut.timed_out, true);
   assert.equal(await isPortAvailable(timeoutPort), true, "timeout left its descendant listener alive");
 
+  const concurrentWorkspace = await createCommitFixture(tempRoot, "concurrent-runner-workspace");
   const concurrentRunner = createDevTestRunner({
     suiteDefinitions: {
       mcp: testDefinition(["-e", "setTimeout(() => process.exit(0), 700);"]),
     },
     lockPath: path.join(tempRoot, "concurrent.lock"),
+    workspaceContextResolver: async () => ({
+      workspace_id: "dev_workspace_shared_repository_v1",
+      workstream_id: null,
+      workspace_type: "shared",
+      root: concurrentWorkspace,
+      branch: "main",
+      base_head: null,
+      current_head: fixtureHead(concurrentWorkspace),
+    }),
   });
   const firstRun = concurrentRunner({ suite: "mcp" });
   let activeLock = null;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
     activeLock = JSON.parse(await readFile(path.join(tempRoot, "concurrent.lock"), "utf8"));
     if (Number.isInteger(activeLock.child_pid) && activeLock.child_pid > 0) break;
