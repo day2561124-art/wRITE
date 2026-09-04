@@ -543,6 +543,10 @@ try {
                   kind: "direct_perception",
                   sense: "visual",
                 },
+                perceptual_certainty_at_encoding: "medium",
+                perceptual_clarity_at_encoding: "partial",
+                possibly_incorrect: true,
+                source_confused: true,
                 accessible: true,
                 suppressed: false,
               },
@@ -669,21 +673,101 @@ try {
         characterBrain:
           async (packet) => {
             brainInputs.push(structuredClone(packet));
+            const serializedPacket = JSON.stringify(packet);
             assert.equal(
-              JSON.stringify(packet).includes(unretrievedSecret),
+              serializedPacket.includes(unretrievedSecret),
               false,
             );
             assert.equal(
-              JSON.stringify(packet).includes(recoveredAction),
+              serializedPacket.includes(recoveredAction),
               true,
+            );
+            assert.equal(
+              serializedPacket.split(recoveredAction).length - 1,
+              1,
+              "one recollection must have one semantic exposure at final Character Brain ingress",
             );
             assert.equal(
               packet.retrieval_experience.target_outcome,
               "satisfied",
             );
             assert.equal(
+              Object.hasOwn(packet, "recovered_memories"),
+              false,
+              "v3 final Brain ingress must not bypass Current Mind with raw recovered_memories",
+            );
+            assert.equal(
+              Object.hasOwn(packet, "retrieved_memories"),
+              false,
+              "legacy alias must not bypass v3 single semantic exposure",
+            );
+            assert.equal(
               Object.hasOwn(packet, "projected_memories"),
               false,
+            );
+            assert.equal(
+              Object.hasOwn(packet.cognition, "recovered_memories"),
+              false,
+              "cognition must not duplicate recollection content outside working_context",
+            );
+            assert.equal(
+              Object.hasOwn(packet.cognition, "retrieval_experience"),
+              false,
+              "retrieval_experience must have one final character-facing process-state exposure",
+            );
+            assert.equal(
+              JSON.stringify(packet.cognition.attention).includes(recoveredAction),
+              false,
+              "attention compatibility view must not duplicate recovered-memory semantics",
+            );
+            const workingContextItems = [
+              packet.cognition.working_context?.focus,
+              ...(packet.cognition.working_context?.active_context ?? []),
+              ...(packet.cognition.working_context?.peripheral_context ?? []),
+              ...(packet.cognition.working_context?.fading_context ?? []),
+              ...(packet.cognition.working_context?.suspended_context ?? []),
+            ].filter(Boolean);
+            const recollection = workingContextItems.find(
+              (item) => item.context_origin === "recovered_memory"
+                && item.content === recoveredAction,
+            );
+            assert.ok(
+              recollection,
+              "actual Phase63C recovered content must be reinstated through Current Mind working_context",
+            );
+            assert.equal(recollection.content_kind, "detail");
+            assert.equal(recollection.target_relation, "target_related");
+            assert.equal(recollection.memory_type, "episodic_direct_perception");
+            assert.equal(recollection.perceptual_certainty_at_encoding, "medium");
+            assert.equal(recollection.perceptual_clarity_at_encoding, "partial");
+            assert.equal(recollection.possibly_incorrect, true);
+            assert.equal(recollection.source_confused, true);
+            assert.deepEqual(recollection.source, {
+              kind: "direct_perception",
+              actor: null,
+              sense: "visual",
+            });
+            for (const forbidden of [
+              "phase63c-step3-source-memory",
+              "memory_retrieval_process_",
+              "memory_retrieval_fragment_",
+              "source_memory_ref",
+              "candidate_set_hash",
+              "recollection_occurrence_hash",
+            ]) {
+              assert.equal(
+                serializedPacket.includes(forbidden),
+                false,
+                `Character Brain must not receive recollection engine provenance ${forbidden}`,
+              );
+            }
+            assert.equal(
+              packet.boundaries.recollection_reinstatement_v3_installed,
+              true,
+            );
+            assert.equal(
+              packet.boundaries.native_character_brain_memory_channel,
+              "cognition.working_context",
             );
             return {
               action_id: "remain-still",

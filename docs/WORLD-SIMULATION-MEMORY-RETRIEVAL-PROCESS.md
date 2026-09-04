@@ -98,13 +98,13 @@ unretrieved candidate memory content
 MUST NOT reach Character Brain
 ```
 
-The canonical native Brain memory channel became:
+The canonical Phase63C recovered-content output channel became:
 
 ```text
 recovered_memories
 ```
 
-Before Step 3 that channel was intentionally always empty.
+Before Step 3 that channel was intentionally always empty. Character Runtime v3 later consumes this upstream channel and performs the final Current Mind recollection reinstatement / single-semantic-exposure projection before Character Brain ingress.
 
 ## Step 3 — Actual Retrieval Process Kernel
 
@@ -278,9 +278,9 @@ recovered_any_content = true
 
 The presence of an environmental cue alone does not force spontaneous retrieval; initiation remains an explicit engine-side process decision.
 
-## Step 3 Character Brain boundary
+## Step 3 recovered-content boundary
 
-Character Brain may receive:
+Phase63C produces two character-safe upstream outputs:
 
 ```text
 recovered_memories
@@ -305,6 +305,16 @@ initiation_mode
 target_outcome
 recovered_any_content
 ```
+
+After Character Runtime v3, `recovered_memories` is an **upstream retrieval-result channel**, not a bypass around Current Mind. Actual recovered content is reinstated into Runtime-owned Current Mind and its character-facing recollection semantics are exposed to Character Brain once through:
+
+```text
+cognition.working_context
+```
+
+with `context_origin = recovered_memory`.
+
+The final Character Brain ingress does not duplicate the same recollection again through top-level `recovered_memories`, `cognition.recovered_memories`, or a second recovered-memory copy inside `cognition.attention`. `retrieval_experience` remains independently character-facing because retrieval process state is not the same semantic content as the recovered recollection.
 
 ## Step 4 boundary
 
@@ -375,7 +385,7 @@ multi-step retrieval runtime             false
 candidate-content barrier                true
 source-grounded fragment materialization true
 resolver-authored memory content         false
-native Brain memory channel              recovered_memories
+Phase63C recovered-content channel       recovered_memories
 retrieval experience channel             true
 missing resolver => no process           true
 candidate presence => automatic recall   false
@@ -459,7 +469,7 @@ Selected internal cue
 
 ### Recovery occurrences and cumulative target outcome
 
-Repeated recovery of the same grounded content in different steps is retained as separate `RecoveryOccurrence` evidence. Final `recovered_memories` remains a unique grounded-content projection for Character Brain.
+Repeated recovery of the same grounded content in different steps is retained as separate `RecoveryOccurrence` evidence. Final `recovered_memories` remains a unique grounded-content Phase63C projection. Character Runtime v3 may then reinstate that recovered content into Current Mind for final Character Brain exposure.
 
 Target satisfaction is cumulative across steps and continues to use exact grounded selector membership rather than percentages or thresholds. Target satisfaction does not force process termination; continuation remains an explicit cognitive-control decision.
 

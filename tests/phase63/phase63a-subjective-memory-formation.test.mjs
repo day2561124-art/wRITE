@@ -1440,7 +1440,30 @@ try {
       ...options,
       characterBrain: async (packet) => {
         firstBrainInputs.push(packet);
-        assert.equal(packet.retrieved_memories.length, 0, "new perception must not become retroactive same-turn memory");
+        assert.equal(
+          Object.hasOwn(packet, "retrieved_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose the legacy retrieved_memories alias",
+        );
+        assert.equal(
+          Object.hasOwn(packet, "recovered_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose raw recovered_memories",
+        );
+        const sameTurnRecollectionItems = [
+          packet.cognition?.working_context?.focus,
+          ...(packet.cognition?.working_context?.active_context ?? []),
+          ...(packet.cognition?.working_context?.peripheral_context ?? []),
+          ...(packet.cognition?.working_context?.fading_context ?? []),
+          ...(packet.cognition?.working_context?.suspended_context ?? []),
+        ].filter(Boolean);
+        assert.equal(
+          sameTurnRecollectionItems.some(
+            (item) => item.context_origin === "recovered_memory",
+          ),
+          false,
+          "new perception must not become retroactive same-turn recollection",
+        );
         const serialized = JSON.stringify(packet);
         assert.equal(serialized.includes("前方站著一名穿深色制服的人"), true);
         assert.equal(serialized.includes("身後傳來一聲短促腳步聲"), true);
@@ -1494,14 +1517,31 @@ try {
         // Phase63A owns formation, not retrieval. Phase63C Step2
         // now prevents these persisted traces from reaching Brain
         // until a real retrieval process recovers them.
-        assert.deepEqual(
-          packet.recovered_memories,
-          [],
+        assert.equal(
+          Object.hasOwn(packet, "recovered_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose raw recovered_memories",
         );
 
-        assert.deepEqual(
-          packet.retrieved_memories,
-          [],
+        assert.equal(
+          Object.hasOwn(packet, "retrieved_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose the legacy retrieved_memories alias",
+        );
+
+        const priorMemoryRecollectionItems = [
+          packet.cognition?.working_context?.focus,
+          ...(packet.cognition?.working_context?.active_context ?? []),
+          ...(packet.cognition?.working_context?.peripheral_context ?? []),
+          ...(packet.cognition?.working_context?.fading_context ?? []),
+          ...(packet.cognition?.working_context?.suspended_context ?? []),
+        ].filter(Boolean);
+        assert.equal(
+          priorMemoryRecollectionItems.some(
+            (item) => item.context_origin === "recovered_memory",
+          ),
+          false,
+          "persisted prior memories must remain absent until Phase63C actually recovers them",
         );
 
         assert.equal(
@@ -1583,7 +1623,17 @@ try {
     first_turn_created_memory_count: firstTurn.subjective_memory_formation.created_memory_count,
     first_turn_memory_mutation_count: firstTurn.subjective_memory_formation.mutation_count,
     second_turn_unretrieved_prior_memory_exposed:
-      secondBrainInputs[0].retrieved_memories.length > 0,
+      Object.hasOwn(secondBrainInputs[0], "retrieved_memories")
+      || Object.hasOwn(secondBrainInputs[0], "recovered_memories")
+      || [
+        secondBrainInputs[0].cognition?.working_context?.focus,
+        ...(secondBrainInputs[0].cognition?.working_context?.active_context ?? []),
+        ...(secondBrainInputs[0].cognition?.working_context?.peripheral_context ?? []),
+        ...(secondBrainInputs[0].cognition?.working_context?.fading_context ?? []),
+        ...(secondBrainInputs[0].cognition?.working_context?.suspended_context ?? []),
+      ].filter(Boolean).some(
+        (item) => item.context_origin === "recovered_memory",
+      ),
     final_memory_count: finalState.state.memories[observer].length,
     visual_perceptual_certainty_preserved:
       directVisual.perceptual_certainty_at_encoding === 0.92,

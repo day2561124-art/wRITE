@@ -28,7 +28,7 @@ Security/authority properties:
 - formal transport strips caller-provided runtime callbacks, including custom memory retrieval resolvers and causal adjudicators;
 - missing Phase63C retrieval resolver therefore means no retrieval process in the formal transport core;
 - the formal character input has one source-of-truth projector and does not include raw event/session/turn identity;
-- the formal surface uses `recovered_memories` only; the historical `retrieved_memories` alias remains available only to explicitly compatible direct/native callers;
+- Phase63C `recovered_memories` remains an engine-side/upstream recovered-content channel; when Character Runtime v3 recollection reinstatement is active, the formal Character Brain surface exposes recovered semantics only through `cognition.working_context` with `context_origin = recovered_memory`, while the historical `retrieved_memories` alias is not exposed on the formal surface;
 - model-context isolation is not claimed: sequential packets in one ChatGPT conversation are not equivalent to isolated per-character neural sessions.
 
 ## Phase62A-R1 Step 4B-2 — Formal MCP Public Adoption

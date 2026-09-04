@@ -175,7 +175,7 @@ candidate_memory_records
 
 Historically, the world loop passed that candidate set to `world_memory_retriever` as an engine-authoritative Character Brain projection input.
 
-As of Phase63C Step 2, the native world-loop path may still invoke that compatibility projector engine-side, but projected candidate content is no longer forwarded into native cognition or Character Brain. The native Brain memory channel is `recovered_memories`, which remains empty until an actual Phase63C retrieval process recovers content.
+As of Phase63C Step 2, the native world-loop path may still invoke that compatibility projector engine-side, but projected candidate content is no longer forwarded into native cognition or Character Brain. Phase63C's actual recovered-content channel is `recovered_memories`, which remains empty until an actual retrieval process recovers content. Character Runtime v3 then reinstates that recovered content into Current Mind and the final Character Brain recollection surface is `cognition.working_context`, preventing raw recovered-content plumbing from bypassing attention or being semantically duplicated.
 
 The projector does **not** re-run the legacy rule:
 

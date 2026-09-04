@@ -175,6 +175,89 @@ try {
   });
   assert.deepEqual(compatibilityProjected.retrieved_memories, []);
 
+  const v3RecollectionText = "昨晚門口的燈曾經閃了一下";
+  const v3Projected = buildWorldSimulationCharacterBrainInput({
+    character: actor,
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [{
+      content: v3RecollectionText,
+      memory_id: "engine-private-memory-id",
+    }],
+    retrieval_experience: {
+      process_occurred: true,
+      initiation_mode: "spontaneous",
+      target_outcome: "not_applicable",
+      recovered_any_content: true,
+    },
+    cognition: {
+      recovered_memories: [{ content: v3RecollectionText }],
+      retrieval_experience: { process_occurred: true },
+      attention: {
+        focus: {
+          context_origin: "recovered_memory",
+          content: v3RecollectionText,
+        },
+        active_context: [{ content: "non-recollection attention item" }],
+        peripheral_context: [],
+        fading_context: [],
+        suspended_context: [],
+        temporary_expectation: null,
+      },
+      working_context: {
+        focus: {
+          context_origin: "recovered_memory",
+          content: v3RecollectionText,
+          possibly_incorrect: true,
+        },
+        active_context: [{ content: "non-recollection attention item" }],
+        peripheral_context: [],
+        fading_context: [],
+        suspended_context: [],
+      },
+    },
+    candidate_action_intents: [{ action_id: "wait", intent: "等待" }],
+    boundaries: {
+      recollection_reinstatement_v3_installed: true,
+      recollection_single_semantic_exposure_enforced: true,
+      native_character_brain_memory_channel: "cognition.working_context",
+    },
+  }, {
+    include_legacy_retrieved_memories_alias: true,
+  });
+  const v3ProjectedText = JSON.stringify(v3Projected);
+  assert.equal(Object.hasOwn(v3Projected, "recovered_memories"), false);
+  assert.equal(Object.hasOwn(v3Projected, "retrieved_memories"), false);
+  assert.equal(Object.hasOwn(v3Projected.cognition, "recovered_memories"), false);
+  assert.equal(Object.hasOwn(v3Projected.cognition, "retrieval_experience"), false);
+  assert.equal(v3Projected.cognition.attention.focus, null);
+  assert.equal(
+    v3Projected.cognition.attention.active_context[0].content,
+    "non-recollection attention item",
+    "v3 deduplication must not remove unrelated attention content",
+  );
+  assert.equal(
+    v3Projected.cognition.working_context.focus.context_origin,
+    "recovered_memory",
+  );
+  assert.equal(v3Projected.cognition.working_context.focus.possibly_incorrect, true);
+  assert.equal(
+    v3ProjectedText.split(v3RecollectionText).length - 1,
+    1,
+    "v3 Character Brain ingress must expose one recollection semantic item exactly once",
+  );
+  assert.equal(v3ProjectedText.includes("engine-private-memory-id"), false);
+  assert.equal(v3Projected.retrieval_experience.process_occurred, true);
+  assert.throws(
+    () => buildWorldSimulationCharacterBrainInput({
+      character: actor,
+      recovered_memories: [{ content: "must not bypass Current Mind" }],
+      cognition: {},
+      boundaries: { recollection_reinstatement_v3_installed: true },
+    }),
+    (error) => error?.code === "WORLD_SIMULATION_RECOLLECTION_CURRENT_MIND_REQUIRED",
+    "v3 must fail closed when Runtime-owned working_context is missing",
+  );
+
   // Broker unit: one active turn/session, strict decision ordering, one-shot take.
   const broker = createEphemeralWorldSimulationPreparedTurnBroker();
   const brokerPrepared = {
@@ -322,7 +405,21 @@ try {
     JSON.stringify(firstPrepare.current_decision.character_input).includes(unretrievedSecret),
     false,
   );
-  assert.deepEqual(firstPrepare.current_decision.character_input.recovered_memories, []);
+  assert.equal(
+    Object.hasOwn(firstPrepare.current_decision.character_input, "recovered_memories"),
+    false,
+    "v3 formal Character Brain ingress must not expose the raw Phase63C recovered-content channel",
+  );
+  assert.equal(
+    firstPrepare.current_decision.character_input
+      .boundaries.recollection_reinstatement_v3_installed,
+    true,
+  );
+  assert.equal(
+    firstPrepare.current_decision.character_input
+      .boundaries.native_character_brain_memory_channel,
+    "cognition.working_context",
+  );
   assert.equal(
     firstPrepare.current_decision.character_input.retrieval_experience.process_occurred,
     false,

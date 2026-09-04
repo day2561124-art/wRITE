@@ -88,17 +88,17 @@ import {
 } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationLoopVersion = "phase62c-event-loop-v1";
-export const worldSimulationCharacterRuntimeVersion = "character-runtime-v2";
+export const worldSimulationCharacterRuntimeVersion = "character-runtime-v3";
 export const worldSimulationCharacterExperienceContractVersion =
   "committed-character-experience-receipt-v1";
 export const worldSimulationCharacterExperienceProjectionVersion =
   "committed-character-experience-projection-v1";
 export const worldSimulationCharacterCurrentMindContractVersion =
-  "character-current-mind-contract-v1";
+  "character-current-mind-contract-v2";
 export const worldSimulationCharacterAttentionReducerVersion =
   "deterministic-attention-reducer-v1";
 export const worldSimulationCharacterCurrentMindProjectionVersion =
-  "committed-character-current-mind-projection-v1";
+  "committed-character-current-mind-projection-v2";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -357,15 +357,40 @@ function sanitizeCurrentMindCharacterValue(value) {
   );
 }
 
+function currentMindRecoveredMemoryCharacterContext(memory) {
+  const value = object(memory);
+  const safe = {};
+  for (const key of [
+    "content_kind",
+    "target_relation",
+    "source",
+    "memory_type",
+    "perceptual_certainty_at_encoding",
+    "perceptual_clarity_at_encoding",
+    "possibly_incorrect",
+    "source_confused",
+  ]) {
+    if (!Object.hasOwn(value, key)) continue;
+    safe[key] = cloneJson(value[key]);
+  }
+  return sanitizeCurrentMindCharacterValue(safe);
+}
+
 function currentMindCharacterItem(candidate) {
   if (!isObject(candidate)) return null;
   const contextOrigin = candidate.source_kind === "committed_experience"
     || candidate.source_kind === "committed_action_experience"
     ? "committed_experience"
-    : null;
+    : candidate.source_kind === "recovered_memory"
+      ? "recovered_memory"
+      : null;
+  const recollectionContext = candidate.source_kind === "recovered_memory"
+    ? sanitizeCurrentMindCharacterValue(candidate.character_context ?? {})
+    : {};
   return {
     ...(contextOrigin ? { context_origin: contextOrigin } : {}),
     content: sanitizeCurrentMindCharacterValue(candidate.content),
+    ...recollectionContext,
   };
 }
 
@@ -389,6 +414,7 @@ function currentMindCandidate({
   simulationTime,
   sourceRef,
   rawEvidence = {},
+  characterContext = null,
   fresh = true,
   prior = null,
 }) {
@@ -400,10 +426,17 @@ function currentMindCandidate({
     source_kind: sourceKind,
     content: candidateIdentityContent,
   }).slice(0, 24)}`;
+  const boundedCharacterContext = isObject(characterContext)
+    ? sanitizeCurrentMindCharacterValue(characterContext)
+    : cloneJson(prior?.character_context ?? null);
   return {
     candidate_id: candidateId,
     source_kind: sourceKind,
     content: boundedContent,
+    ...(isObject(boundedCharacterContext)
+      && Object.keys(boundedCharacterContext).length > 0
+      ? { character_context: boundedCharacterContext }
+      : {}),
     activation_order: activationOrder,
     activated_at_sequence: currentMindSequence,
     last_seen_sequence: fresh
@@ -622,6 +655,15 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     const content = isObject(memory)
       ? memory.content ?? memory.memory ?? memory.summary ?? memory
       : memory;
+    const characterContext = isObject(memory)
+      ? currentMindRecoveredMemoryCharacterContext(memory)
+      : {};
+    const recollectionOccurrenceHash = hashAgentRunValue({
+      turn_id: input.turn_id ?? null,
+      recovery_index: memoryIndex,
+      content: sanitizeCurrentMindCharacterValue(content),
+      character_context: characterContext,
+    });
     addCandidate(currentMindCandidate({
       sourceKind: "recovered_memory",
       content,
@@ -630,8 +672,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       simulationTime,
       sourceRef: currentMindSourceRef("recovered_memory", content, {
         recovery_index: memoryIndex,
+        recollection_occurrence_hash: recollectionOccurrenceHash,
       }),
       rawEvidence: isObject(memory) ? memory : {},
+      characterContext,
     }));
   });
 
@@ -2636,6 +2680,15 @@ export function buildWorldSimulationLoopContract() {
       bounded_workspace_budget_is_engineering_bound: true,
       attention_internal_state_exposed_to_character_brain: false,
       character_facing_attention_view_exposed_to_character_brain: true,
+      recollection_reinstatement_v3_installed: true,
+      recollection_context_origin: "recovered_memory",
+      recollection_safe_epistemic_metadata_preserved: true,
+      recollection_engine_provenance_exposed_to_character_brain: false,
+      recollection_single_semantic_exposure_enforced: true,
+      final_character_brain_recollection_channel: "cognition.working_context",
+      raw_recovered_memories_forwarded_at_final_brain_ingress: false,
+      same_memory_later_retrieval_occurrence_allowed: true,
+      recollection_attention_mutates_source_memory: false,
       encoding_evidence_view_available_to_programmatic_policy: true,
       focus_directly_equals_encode: false,
       non_focus_encoding_evidence_allowed: true,
@@ -3705,8 +3758,23 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         unretrieved_candidate_content_exposed_to_character_brain:
           false,
 
-        native_character_brain_memory_channel:
+        phase63c_recovered_memory_upstream_channel:
           "recovered_memories",
+
+        native_character_brain_memory_channel:
+          "cognition.working_context",
+
+        recollection_reinstatement_v3_installed:
+          true,
+
+        recollection_context_origin:
+          "recovered_memory",
+
+        recollection_single_semantic_exposure_enforced:
+          true,
+
+        raw_recovered_memories_forwarded_at_final_brain_ingress:
+          false,
 
         recovered_memory_count:
           recoveredMemories.length,
@@ -3793,8 +3861,20 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       candidate_content_barrier_enforced:
         true,
 
-      native_character_brain_memory_channel:
+      phase63c_recovered_memory_upstream_channel:
         "recovered_memories",
+
+      native_character_brain_memory_channel:
+        "cognition.working_context",
+
+      recollection_reinstatement_v3_installed:
+        true,
+
+      recollection_single_semantic_exposure_enforced:
+        true,
+
+      raw_recovered_memories_forwarded_at_final_brain_ingress:
+        false,
 
       native_retrieval_process_execution_installed:
         true,

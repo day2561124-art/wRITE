@@ -584,11 +584,23 @@ try {
     ),
     false,
   );
-  assert.deepEqual(
-    prepared.current_decision
-      .character_input
-      .recovered_memories,
-    [],
+  assert.equal(
+    Object.hasOwn(
+      prepared.current_decision.character_input,
+      "recovered_memories",
+    ),
+    false,
+    "v3 formal Character Brain surface must not expose the raw Phase63C recovered-content channel",
+  );
+  assert.equal(
+    prepared.current_decision.character_input
+      .boundaries.recollection_reinstatement_v3_installed,
+    true,
+  );
+  assert.equal(
+    prepared.current_decision.character_input
+      .boundaries.native_character_brain_memory_channel,
+    "cognition.working_context",
   );
 
   // The preparer child may disappear after storing the complete turn.

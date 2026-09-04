@@ -2444,14 +2444,31 @@ try {
           false,
         );
 
-        assert.deepEqual(
-          packet.recovered_memories,
-          [],
+        assert.equal(
+          Object.hasOwn(packet, "recovered_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose raw recovered_memories",
         );
 
-        assert.deepEqual(
-          packet.retrieved_memories,
-          [],
+        assert.equal(
+          Object.hasOwn(packet, "retrieved_memories"),
+          false,
+          "v3 final Character Brain ingress must not expose the legacy retrieved_memories alias",
+        );
+
+        const unretrievedCurrentMindItems = [
+          packet.cognition?.working_context?.focus,
+          ...(packet.cognition?.working_context?.active_context ?? []),
+          ...(packet.cognition?.working_context?.peripheral_context ?? []),
+          ...(packet.cognition?.working_context?.fading_context ?? []),
+          ...(packet.cognition?.working_context?.suspended_context ?? []),
+        ].filter(Boolean);
+        assert.equal(
+          unretrievedCurrentMindItems.some(
+            (item) => item.context_origin === "recovered_memory",
+          ),
+          false,
+          "Phase63B accessibility candidates must not become recollection without Phase63C recovery",
         );
 
         assert.equal(
@@ -2472,19 +2489,9 @@ try {
         // packet boundary metadata legitimately contains names such
         // as memory_retrieval_strength_scores_exposed:false.
         const serializedCharacterMemory =
-          JSON.stringify({
-            recovered_memories:
-              packet.recovered_memories,
-
-            retrieved_memories:
-              packet.retrieved_memories,
-
-            cognition_recovered_memories:
-              packet
-                .cognition
-                ?.recovered_memories
-              ?? [],
-          });
+          JSON.stringify(
+            packet.cognition?.working_context ?? {},
+          );
 
         assert.equal(
           serializedCharacterMemory.includes(
@@ -2648,16 +2655,34 @@ try {
     false,
   );
 
-  assert.deepEqual(
-    brainInputs[0]
-      .recovered_memories,
-    [],
+  assert.equal(
+    Object.hasOwn(
+      brainInputs[0],
+      "recovered_memories",
+    ),
+    false,
   );
 
-  assert.deepEqual(
-    brainInputs[0]
-      .retrieved_memories,
-    [],
+  assert.equal(
+    Object.hasOwn(
+      brainInputs[0],
+      "retrieved_memories",
+    ),
+    false,
+  );
+
+  const loopCurrentMindItems = [
+    brainInputs[0].cognition?.working_context?.focus,
+    ...(brainInputs[0].cognition?.working_context?.active_context ?? []),
+    ...(brainInputs[0].cognition?.working_context?.peripheral_context ?? []),
+    ...(brainInputs[0].cognition?.working_context?.fading_context ?? []),
+    ...(brainInputs[0].cognition?.working_context?.suspended_context ?? []),
+  ].filter(Boolean);
+  assert.equal(
+    loopCurrentMindItems.some(
+      (item) => item.context_origin === "recovered_memory",
+    ),
+    false,
   );
 
   assert.equal(
@@ -2858,9 +2883,17 @@ try {
         brainInputs[0],
         "projected_memories",
       ) === false
-      && brainInputs[0]
-        .recovered_memories
-        .length === 0
+      && Object.hasOwn(
+        brainInputs[0],
+        "recovered_memories",
+      ) === false
+      && Object.hasOwn(
+        brainInputs[0],
+        "retrieved_memories",
+      ) === false
+      && loopCurrentMindItems.every(
+        (item) => item.context_origin !== "recovered_memory",
+      )
       && brainInputs[0]
         .boundaries
         .candidate_content_barrier_enforced === true
