@@ -1239,6 +1239,283 @@ try {
     "stable activation ordering must deterministically break otherwise equal attention evidence",
   );
 
+  const gatingRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `gating_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "phase62c_v4_working_memory_gating_fixture",
+      formal: true,
+    }),
+  });
+  const gatingTurnOneInput = {
+    world_simulation_session_id: "gating-lineage",
+    turn_id: "gating-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:05:00+08:00",
+    perception: {
+      observed: [{
+        perceptual_label: "正在閱讀的操作手冊",
+        goal_relevance: "high",
+        salience: "medium",
+      }],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "閱讀操作手冊",
+    compatibility_state: { goals: ["閱讀操作手冊"] },
+  };
+  const gatingTurnOne = await gatingRuntimeManager.prepareSpeculativeCurrentMind(gatingTurnOneInput);
+  const repeatedGatingTurnOne = await gatingRuntimeManager.prepareSpeculativeCurrentMind(gatingTurnOneInput);
+  assert.deepEqual(
+    gatingTurnOne.projection.admission_decisions,
+    repeatedGatingTurnOne.projection.admission_decisions,
+    "same prior state and same inputs must yield identical v4 admission decisions",
+  );
+  assert.equal(gatingTurnOne.projection.resolver_audit.selective_input_gating_installed, true);
+  assert.equal(gatingTurnOne.projection.resolver_audit.input_gate_closed_by_default, true);
+  assert.equal(gatingTurnOne.projection.resolver_audit.output_gating_installed, false);
+  assert.equal(
+    gatingTurnOne.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "perception" && decision.gate_outcome === "admit",
+    ),
+    true,
+    "goal-relevant fresh perception must be admitted",
+  );
+  const gatingTurnOneEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "gating-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        current_mind_transition_projection: gatingTurnOne.projection,
+      }],
+    },
+  });
+  assert.deepEqual(
+    gatingTurnOneEnvelope.character_projections[0].admission_decisions,
+    gatingTurnOne.projection.admission_decisions,
+    "committed projection must preserve historical v4 gate decisions",
+  );
+  await gatingRuntimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "gating-lineage",
+    history_entry: {
+      turn_id: "gating-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_current_mind_projection: gatingTurnOneEnvelope,
+    },
+  });
+
+  const gatingTurnTwo = await gatingRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "gating-lineage",
+    turn_id: "gating-turn-2",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:06:00+08:00",
+    perception: {
+      observed: [{ perceptual_label: "牆上時鐘滴答", salience: "low" }],
+      audible: [],
+      other_senses: [],
+    },
+    recovered_memories: [],
+    current_action: "閱讀操作手冊",
+    compatibility_state: { goals: ["閱讀操作手冊"] },
+  });
+  assert.equal(
+    gatingTurnTwo.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "perception"
+        && decision.gate_outcome === "reject"
+        && decision.reason_codes.includes("insufficient_current_mind_support"),
+    ),
+    true,
+    "low-salience irrelevant fresh perception must be rejectable even with free peripheral capacity",
+  );
+  assert.equal(
+    gatingTurnTwo.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "perception"
+        && decision.gate_outcome === "maintain"
+        && decision.reason_codes.includes("goal_or_intention_support"),
+    ),
+    true,
+    "prior goal-relevant perception must be maintainable without fresh perceptual refresh",
+  );
+  const gatingTurnTwoWorkingText = JSON.stringify(gatingTurnTwo.working_context);
+  assert.equal(gatingTurnTwoWorkingText.includes("正在閱讀的操作手冊"), true);
+  assert.equal(gatingTurnTwoWorkingText.includes("牆上時鐘滴答"), false);
+  assert.equal(gatingTurnTwoWorkingText.includes("gate_outcome"), false);
+  assert.equal(gatingTurnTwoWorkingText.includes("reason_codes"), false);
+  assert.equal(gatingTurnTwoWorkingText.includes("maintenance_evidence"), false);
+  assert.equal(
+    gatingTurnTwo.encoding_evidence.some(
+      (evidence) => evidence.current_mind_gate_outcome === "reject"
+        && evidence.processing_level === "not_admitted",
+    ),
+    true,
+    "rejected perception must remain distinct from peripheral Current Mind placement",
+  );
+
+  const weakRecollectionInput = {
+    world_simulation_session_id: "gating-lineage",
+    turn_id: "gating-weak-recollection",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:06:30+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [{ content: "小時候看過一只藍色杯子" }],
+    current_action: "閱讀操作手冊",
+    compatibility_state: { goals: ["閱讀操作手冊"] },
+  };
+  const weakRecollection = await gatingRuntimeManager.prepareSpeculativeCurrentMind(weakRecollectionInput);
+  assert.equal(
+    weakRecollection.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "recovered_memory" && decision.gate_outcome === "reject",
+    ),
+    true,
+    "Phase63C recovery success must not guarantee Current Mind admission",
+  );
+  assert.equal(JSON.stringify(weakRecollection.working_context).includes("小時候看過一只藍色杯子"), false);
+
+  const targetRelatedRecollectionInput = {
+    ...weakRecollectionInput,
+    turn_id: "gating-target-related-recollection",
+    recovered_memories: [{
+      content: "阿灰撞過活動擋板",
+      target_relation: "target_related",
+      content_kind: "detail",
+    }],
+  };
+  const targetRelatedRecollection = await gatingRuntimeManager
+    .prepareSpeculativeCurrentMind(targetRelatedRecollectionInput);
+  assert.equal(
+    targetRelatedRecollection.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "recovered_memory"
+        && decision.gate_outcome === "admit"
+        && decision.reason_codes.includes("goal_or_intention_support"),
+    ),
+    true,
+    "Phase63C target-related recovered content must provide bounded admission support",
+  );
+  assert.equal(
+    JSON.stringify(targetRelatedRecollection.working_context).includes("阿灰撞過活動擋板"),
+    true,
+  );
+
+  const relevantRecollectionInput = {
+    ...weakRecollectionInput,
+    turn_id: "gating-relevant-recollection",
+    recovered_memories: [{
+      content: "閱讀操作手冊前要先確認總電源",
+      goal_relevance: "high",
+      content_kind: "detail",
+    }],
+  };
+  const relevantRecollection = await gatingRuntimeManager.prepareSpeculativeCurrentMind(relevantRecollectionInput);
+  const repeatedRelevantRecollection = await gatingRuntimeManager.prepareSpeculativeCurrentMind(relevantRecollectionInput);
+  assert.deepEqual(
+    relevantRecollection.projection.admission_decisions,
+    repeatedRelevantRecollection.projection.admission_decisions,
+  );
+  assert.equal(
+    relevantRecollection.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "recovered_memory" && decision.gate_outcome === "admit",
+    ),
+    true,
+    "goal-relevant recollection may be admitted",
+  );
+  assert.equal(
+    JSON.stringify(relevantRecollection.working_context).includes("閱讀操作手冊前要先確認總電源"),
+    true,
+  );
+  const relevantRecollectionAdmissionDecision =
+    relevantRecollection.projection.admission_decisions.find(
+      (decision) => decision.source_kind === "recovered_memory",
+    );
+  assert.equal(
+    Object.hasOwn(relevantRecollectionAdmissionDecision ?? {}, "focus"),
+    false,
+    "admission decision must not directly assign focus",
+  );
+  assert.equal(
+    Object.hasOwn(relevantRecollectionAdmissionDecision ?? {}, "placement"),
+    false,
+    "admission decision must not directly assign Current Mind placement",
+  );
+  assert.equal(
+    relevantRecollection.projection.resolver_audit.deterministic_pairwise_resolver,
+    true,
+  );
+  if (
+    relevantRecollection.working_context.focus?.content
+    === "閱讀操作手冊前要先確認總電源"
+  ) {
+    assert.equal(
+      relevantRecollection.projection.resolver_audit.focus_resolution_evidence
+        ?.selected_candidate_source_kind,
+      "recovered_memory",
+      "an admitted recollection may become focus only through the normal attention resolver",
+    );
+  }
+
+  const clearRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `clear_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "phase62c_v4_clear_fixture",
+      formal: true,
+    }),
+  });
+  const clearTurnOne = await clearRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "clear-lineage",
+    turn_id: "clear-turn-1",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:07:00+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: "推門",
+    compatibility_state: { goals: ["推門"] },
+  });
+  const clearTurnOneEnvelope = projectWorldSimulationCharacterCurrentMindTransitions({
+    prepared_turn: {
+      turn_id: "clear-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        current_mind_transition_projection: clearTurnOne.projection,
+      }],
+    },
+  });
+  await clearRuntimeManager.deliverCommittedCurrentMindProjection({
+    world_simulation_session_id: "clear-lineage",
+    history_entry: {
+      turn_id: "clear-turn-1",
+      revision_from: 0,
+      revision_to: 1,
+      committed_character_current_mind_projection: clearTurnOneEnvelope,
+    },
+  });
+  const clearTurnTwo = await clearRuntimeManager.prepareSpeculativeCurrentMind({
+    world_simulation_session_id: "clear-lineage",
+    turn_id: "clear-turn-2",
+    character: "Alpha",
+    simulation_time: "2026-09-01T12:07:30+08:00",
+    perception: { observed: [], audible: [], other_senses: [] },
+    recovered_memories: [],
+    current_action: "離開房間",
+    compatibility_state: { goals: ["離開房間"] },
+  });
+  assert.equal(
+    clearTurnTwo.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "current_action"
+        && decision.gate_outcome === "clear"
+        && decision.reason_codes.includes("superseded_current_action"),
+    ),
+    true,
+    "a prior current-action representation must clear when explicitly superseded",
+  );
+  assert.equal(JSON.stringify(clearTurnTwo.working_context).includes("推門"), false);
+  assert.equal(JSON.stringify(clearTurnTwo.working_context).includes("離開房間"), true);
+  assert.equal(
+    clearTurnTwo.projection.boundaries.current_mind_clear_does_not_mutate_source_memory,
+    true,
+  );
+
   let releaseAlphaDuringAttention;
   const alphaAttentionGate = new Promise((resolve) => {
     releaseAlphaDuringAttention = resolve;
@@ -1265,7 +1542,7 @@ try {
     perception: { observed: ["Alpha cue"], audible: [], other_senses: [] },
     recovered_memories: [],
     current_action: null,
-    compatibility_state: {},
+    compatibility_state: { goals: ["Alpha cue"] },
   }).then((value) => {
     alphaQueuedAttentionResolved = true;
     return value;
@@ -1278,7 +1555,7 @@ try {
     perception: { observed: ["Beta cue"], audible: [], other_senses: [] },
     recovered_memories: [],
     current_action: null,
-    compatibility_state: {},
+    compatibility_state: { goals: ["Beta cue"] },
   });
   assert.equal(
     betaIndependentAttention.projection.focus_transition.to.content,
@@ -1513,6 +1790,102 @@ try {
   assert.equal(
     alphaExperienceAfterOrdering.committed_experience.committed_experience_effect_count,
     4,
+  );
+
+  const supportedExperienceRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: "character_alpha_supported_experience",
+      canonical_name: character,
+      identity_source: "phase62c_supported_experience_identity_resolver",
+      formal: true,
+    }),
+  });
+  const supportedExperienceProjection = projectWorldSimulationCharacterExperienceEvidence({
+    runtime_identities: [{
+      character: "Alpha",
+      world_lineage: "experience-gating-lineage",
+      character_entity_id: "character_alpha_supported_experience",
+      canonical_name: "Alpha",
+      identity_source: "phase62c_supported_experience_identity_resolver",
+      formal_identity: true,
+      experience_sequence: 1,
+    }],
+    prepared_turn: {
+      turn_id: "supported-experience-turn-1",
+      decision_packets: [{
+        character: "Alpha",
+        perception: {
+          observed: [{
+            perceptual_label: "剛才確認的出口仍與目前目標相關",
+            goal_relevance: "high",
+          }],
+          audible: [],
+          other_senses: [],
+        },
+      }],
+    },
+    selected_action_intents: [{
+      character: "Alpha",
+      selection: "reject_all",
+      action_id: null,
+      intent: null,
+    }],
+    action_outcomes: [],
+  });
+  const supportedExperienceDelivery = await supportedExperienceRuntimeManager
+    .deliverCommittedExperienceProjection({
+      world_simulation_session_id: "experience-gating-lineage",
+      history_entry: {
+        turn_id: supportedExperienceProjection.turn_id,
+        revision_from: 0,
+        revision_to: 1,
+        committed_character_experience_projection: supportedExperienceProjection,
+      },
+    });
+  assert.equal(supportedExperienceDelivery.consumed_count, 1);
+  const supportedExperienceMind = await supportedExperienceRuntimeManager
+    .prepareSpeculativeCurrentMind({
+      world_simulation_session_id: "experience-gating-lineage",
+      turn_id: "supported-experience-attention-2",
+      character: "Alpha",
+      simulation_time: "2026-09-01T13:00:00+08:00",
+      perception: { observed: [], audible: [], other_senses: [] },
+      recovered_memories: [],
+      current_action: null,
+      compatibility_state: {},
+    });
+  assert.equal(
+    supportedExperienceMind.projection.reducer_state_after.last_experience_sequence_integrated,
+    1,
+  );
+  const supportedExperienceAdmission = supportedExperienceMind.projection.admission_decisions.find(
+    (decision) => decision.source_kind === "committed_experience",
+  );
+  assert.ok(supportedExperienceAdmission);
+  assert.equal(supportedExperienceAdmission.gate_outcome, "admit");
+  assert.equal(
+    supportedExperienceAdmission.reason_codes.includes("goal_or_intention_support"),
+    true,
+  );
+  const supportedExperienceWorkingItems = [
+    supportedExperienceMind.working_context.focus,
+    ...supportedExperienceMind.working_context.active_context,
+    ...supportedExperienceMind.working_context.peripheral_context,
+    ...supportedExperienceMind.working_context.fading_context,
+    ...supportedExperienceMind.working_context.suspended_context,
+  ].filter(Boolean);
+  assert.equal(
+    supportedExperienceWorkingItems.some((item) => (
+      item.context_origin === "committed_experience"
+      && item.content?.perceptual_label === "剛才確認的出口仍與目前目標相關"
+    )),
+    true,
+    "goal-supported committed Experience must be eligible for actual N+1 Current Mind admission",
+  );
+  assert.equal(
+    JSON.stringify(supportedExperienceMind.working_context).includes("goal_relevance"),
+    false,
+    "admission evidence must remain private after committed Experience enters working context",
   );
 
   const session = await beginWorldSimulationSession({
@@ -2091,6 +2464,20 @@ try {
     ),
     true,
   );
+  const preparedSecondEliasExperienceAdmissions =
+    preparedSecondEliasMindProjection.admission_decisions.filter(
+      (decision) => decision.source_kind === "committed_experience"
+        || decision.source_kind === "committed_action_experience",
+    );
+  assert.equal(preparedSecondEliasExperienceAdmissions.length > 0, true);
+  assert.equal(
+    preparedSecondEliasExperienceAdmissions.every(
+      (decision) => decision.gate_outcome === "reject"
+        && decision.reason_codes.includes("insufficient_current_mind_support"),
+    ),
+    true,
+    "Receipt N is integrated as an N+1 candidate but unsupported committed Experience is not automatic admission",
+  );
   await assert.rejects(
     () => resolveWorldSimulationTurn(
       preparedSecondTurn,
@@ -2135,8 +2522,8 @@ try {
         assert.equal(serializedBrainPacket.includes("receipt_id"), false);
         assert.equal(
           serializedBrainPacket.includes("committed_experience"),
-          true,
-          "Receipt N may enter bounded working context on Attention cycle N+1",
+          false,
+          "unsupported Receipt N may be integrated as an N+1 candidate without being admitted to working context",
         );
         return { action_id: "elias-wait" };
       },
