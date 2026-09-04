@@ -295,7 +295,15 @@ const transactionToolNames = [
   "dev_workspace_list_transactions",
   "dev_workspace_transaction_status",
 ];
-for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames, ...checkpointToolNames, ...transactionToolNames]) {
+const cleanupToolNames = [
+  "dev_cleanup_scan_storage",
+  "dev_cleanup_create_storage_proposal",
+  "dev_cleanup_get_proposal",
+  "dev_cleanup_list_proposals",
+  "dev_cleanup_approve_proposal",
+  "dev_cleanup_execute_proposal",
+];
+for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames, ...checkpointToolNames, ...transactionToolNames, ...cleanupToolNames]) {
   assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
 }
 publicToolNames.push(...workstreamToolNames);
@@ -304,6 +312,7 @@ publicToolNames.push(...integrationToolNames);
 publicToolNames.push(...journalToolNames);
 publicToolNames.push(...checkpointToolNames);
 publicToolNames.push(...transactionToolNames);
+publicToolNames.push(...cleanupToolNames);
 const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
@@ -501,6 +510,77 @@ for (const [toolName, expectedProperties] of checkpointExpectedProperties) {
   assert.equal(permission?.risk_level, readOnly ? "read" : "low-risk-write");
   assert.equal(permission?.requires_user_confirmation, false);
   assert.equal(permission?.log_required, !readOnly);
+  assert.equal(permission?.can_modify_canon, false);
+  assert.equal(permission?.can_modify_active_engine, false);
+  assert.equal(permission?.can_modify_story_graph, false);
+  assert.equal(permission?.can_modify_memory, false);
+}
+
+const cleanupExpected = new Map([
+  ["dev_cleanup_scan_storage", {
+    readOnly: false,
+    permission: "write_low_risk",
+    risk: "low-risk-write",
+    required: [],
+    properties: ["max_items"],
+  }],
+  ["dev_cleanup_create_storage_proposal", {
+    readOnly: false,
+    permission: "write_low_risk",
+    risk: "low-risk-write",
+    required: [],
+    properties: ["max_items", "title"],
+  }],
+  ["dev_cleanup_get_proposal", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: ["cleanup_proposal_id"],
+    properties: ["cleanup_proposal_id", "include_items", "max_items"],
+  }],
+  ["dev_cleanup_list_proposals", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: [],
+    properties: ["limit"],
+  }],
+  ["dev_cleanup_approve_proposal", {
+    readOnly: false,
+    permission: "write_high_risk",
+    risk: "high-risk-write",
+    required: ["cleanup_proposal_id", "confirm"],
+    properties: ["cleanup_proposal_id", "confirm"],
+  }],
+  ["dev_cleanup_execute_proposal", {
+    readOnly: false,
+    permission: "write_high_risk",
+    risk: "high-risk-write",
+    required: ["cleanup_proposal_id", "confirm"],
+    properties: ["cleanup_proposal_id", "confirm", "max_items"],
+  }],
+]);
+const forbiddenCleanupFields = [
+  "path", "paths", "root", "sourcePath", "trashPath", "itemTypes", "item_types",
+  "retentionPolicy", "retention_policy", "force", "delete", "permanentDelete", "shell",
+  "executable", "cwd", "env", "cleanupRoot", "agentRuns", "engineArchive",
+];
+for (const [toolName, expectation] of cleanupExpected) {
+  const tool = developerList.result.tools.find((candidate) => candidate.name === toolName);
+  assert(tool, `chatgpt_developer is missing ${toolName}`);
+  assert.equal(tool.annotations?.readOnlyHint, expectation.readOnly);
+  assert.equal(tool.inputSchema?.additionalProperties, false);
+  assert.deepEqual([...(tool.inputSchema?.required ?? [])].sort(), expectation.required);
+  assert.deepEqual(Object.keys(tool.inputSchema?.properties ?? {}).sort(), expectation.properties);
+  for (const forbiddenField of forbiddenCleanupFields) {
+    assert.equal(Object.hasOwn(tool.inputSchema?.properties ?? {}, forbiddenField), false, `${toolName} exposed forbidden cleanup field ${forbiddenField}`);
+  }
+  const permission = tool._meta?.["armed-academy/permission"];
+  assert.equal(permission?.permission_level, expectation.permission);
+  assert.equal(permission?.risk_level, expectation.risk);
+  assert.equal(permission?.read_or_write, expectation.readOnly ? "read" : "write");
+  assert.equal(permission?.requires_user_confirmation, expectation.risk === "high-risk-write");
+  assert.equal(permission?.log_required, !expectation.readOnly);
   assert.equal(permission?.can_modify_canon, false);
   assert.equal(permission?.can_modify_active_engine, false);
   assert.equal(permission?.can_modify_story_graph, false);
@@ -1018,7 +1098,7 @@ assert.deepEqual(
   ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
 );
 
-publicToolNames.splice(-44, 44);
+publicToolNames.splice(-50, 50);
 
 const developerPushTool = developerList.result.tools.find(
   (tool) => tool.name === "dev_git_push",
@@ -1062,8 +1142,8 @@ assert.deepEqual(
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
 assert.equal(publicToolNames.length, 39);
-assert.equal(developerNames.length, 87);
-assert.equal(fullNames.length, 145);
+assert.equal(developerNames.length, 93);
+assert.equal(fullNames.length, 151);
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -1338,6 +1418,7 @@ publicToolNames.push(...integrationToolNames);
 publicToolNames.push(...journalToolNames);
 publicToolNames.push(...checkpointToolNames);
 publicToolNames.push(...transactionToolNames);
+publicToolNames.push(...cleanupToolNames);
 process.env.MCP_TOOL_PROFILE = "chatgpt_developer";
 const developerAdapterSession = createStdioSession();
 try {
@@ -1354,7 +1435,7 @@ try {
   );
 } finally {
   developerAdapterSession.close();
-  publicToolNames.splice(-44, 44);
+  publicToolNames.splice(-50, 50);
   if (originalAdapterProfile === undefined) {
     delete process.env.MCP_TOOL_PROFILE;
   } else {
@@ -1363,5 +1444,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 48}).`,
+  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 54}).`,
 );

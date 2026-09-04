@@ -236,6 +236,17 @@ import {
   dev_workspace_transaction_status,
   initializeDevTransactionRuntime,
 } from "./mcp-development-transaction-tools.mjs";
+import {
+  DEV_CLEANUP_MAX_ITEM_PREVIEW,
+  DEV_CLEANUP_MAX_LIST_RESULTS,
+  DEV_CLEANUP_PROPOSAL_ID_PATTERN_SOURCE,
+  dev_cleanup_approve_proposal,
+  dev_cleanup_create_storage_proposal,
+  dev_cleanup_execute_proposal,
+  dev_cleanup_get_proposal,
+  dev_cleanup_list_proposals,
+  dev_cleanup_scan_storage,
+} from "./mcp-development-cleanup-tools.mjs";
 import { redactProcessOutput } from "./process-control.mjs";
 import { getEngineComponentsStatus } from "./engine-component-registry.mjs";
 import {
@@ -2250,6 +2261,72 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
     handler: async () => jsonContent(await dev_workspace_checkpoint_status()),
+  },
+  {
+    name: "dev_cleanup_scan_storage",
+    description: "Run the server-owned retention/reference/ownership scan limited to superseded engine archives and external-brain session storage. Returns bounded previews; callers cannot choose paths or broaden cleanup categories.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      max_items: { type: "integer", minimum: 1, maximum: DEV_CLEANUP_MAX_ITEM_PREVIEW, default: 50 },
+    }),
+    handler: async (args) => jsonContent(await dev_cleanup_scan_storage(args)),
+  },
+  {
+    name: "dev_cleanup_create_storage_proposal",
+    description: "Create one reviewable cleanup proposal limited to retention-eligible engine archives and ownership-proven unreferenced external-brain sessions. No deletion occurs.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      title: { type: "string", minLength: 1, maxLength: 160 },
+      max_items: { type: "integer", minimum: 1, maximum: DEV_CLEANUP_MAX_ITEM_PREVIEW, default: 50 },
+    }),
+    handler: async (args) => jsonContent(await dev_cleanup_create_storage_proposal(args)),
+  },
+  {
+    name: "dev_cleanup_get_proposal",
+    description: "Read one cleanup proposal by opaque server-issued ID with optional bounded item previews.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      cleanup_proposal_id: { type: "string", pattern: DEV_CLEANUP_PROPOSAL_ID_PATTERN_SOURCE, maxLength: 64 },
+      include_items: { type: "boolean", default: false },
+      max_items: { type: "integer", minimum: 1, maximum: DEV_CLEANUP_MAX_ITEM_PREVIEW, default: 50 },
+    }, ["cleanup_proposal_id"]),
+    handler: async (args) => jsonContent(await dev_cleanup_get_proposal(args)),
+  },
+  {
+    name: "dev_cleanup_list_proposals",
+    description: "Read a bounded list of cleanup proposal summaries without exposing arbitrary filesystem paths or mutation controls.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      limit: { type: "integer", minimum: 1, maximum: DEV_CLEANUP_MAX_LIST_RESULTS, default: 20 },
+    }),
+    handler: async (args) => jsonContent(await dev_cleanup_list_proposals(args)),
+  },
+  {
+    name: "dev_cleanup_approve_proposal",
+    description: "High-risk approval gate for one exact cleanup proposal. Re-scans eligibility, references, ownership, and hashes before authorizing execution; requires explicit confirmation.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      cleanup_proposal_id: { type: "string", pattern: DEV_CLEANUP_PROPOSAL_ID_PATTERN_SOURCE, maxLength: 64 },
+      confirm: { type: "boolean" },
+    }, ["cleanup_proposal_id", "confirm"]),
+    handler: async (args) => jsonContent(await dev_cleanup_approve_proposal(args)),
+  },
+  {
+    name: "dev_cleanup_execute_proposal",
+    description: "High-risk execution of one previously approved cleanup proposal. Re-verifies eligibility and hashes, moves content to server-owned trash with tombstones and restore metadata, and requires explicit confirmation.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      cleanup_proposal_id: { type: "string", pattern: DEV_CLEANUP_PROPOSAL_ID_PATTERN_SOURCE, maxLength: 64 },
+      confirm: { type: "boolean" },
+      max_items: { type: "integer", minimum: 1, maximum: DEV_CLEANUP_MAX_ITEM_PREVIEW, default: 50 },
+    }, ["cleanup_proposal_id", "confirm"]),
+    handler: async (args) => jsonContent(await dev_cleanup_execute_proposal(args)),
   },
   {
     name: "dev_workspace_restore_checkpoint_in_place",
@@ -4327,6 +4404,12 @@ const chatgptDeveloperToolNames = new Set([
   "dev_workspace_delete_checkpoint",
   "dev_workspace_checkpoint_gc",
   "dev_workspace_checkpoint_status",
+  "dev_cleanup_scan_storage",
+  "dev_cleanup_create_storage_proposal",
+  "dev_cleanup_get_proposal",
+  "dev_cleanup_list_proposals",
+  "dev_cleanup_approve_proposal",
+  "dev_cleanup_execute_proposal",
   "dev_workspace_restore_checkpoint_in_place",
   "dev_workspace_get_transaction",
   "dev_workspace_list_transactions",
@@ -4422,6 +4505,12 @@ const permissionSources = {
   dev_workspace_delete_checkpoint: ["development_checkpoint_store", "development_operation_journal", "mcp_client_checkpoint_id"],
   dev_workspace_checkpoint_gc: ["development_checkpoint_store", "development_operation_journal", "server_owned_checkpoint_reachability"],
   dev_workspace_checkpoint_status: ["development_checkpoint_store"],
+  dev_cleanup_scan_storage: ["cleanup_retention_policy", "cleanup_reference_graph", "external_brain_session_lineage", "development_operation_journal", "server_owned_storage_scope"],
+  dev_cleanup_create_storage_proposal: ["cleanup_retention_policy", "cleanup_reference_graph", "external_brain_session_lineage", "cleanup_proposal_store", "development_operation_journal", "server_owned_storage_scope"],
+  dev_cleanup_get_proposal: ["cleanup_proposal_store"],
+  dev_cleanup_list_proposals: ["cleanup_proposal_store"],
+  dev_cleanup_approve_proposal: ["cleanup_retention_policy", "cleanup_reference_graph", "external_brain_session_lineage", "cleanup_proposal_store", "cleanup_audit_log", "development_operation_journal", "mcp_client_explicit_confirmation"],
+  dev_cleanup_execute_proposal: ["cleanup_retention_policy", "cleanup_reference_graph", "external_brain_session_lineage", "cleanup_proposal_store", "cleanup_trash_store", "cleanup_tombstone_store", "cleanup_audit_log", "development_operation_journal", "mcp_client_explicit_confirmation"],
   dev_workspace_restore_checkpoint_in_place: ["development_transaction_store", "development_checkpoint_store", "development_operation_journal", "development_workstream_registry", "repository_git_head", "repository_git_worktree_status", "server_owned_transaction_barrier", "mcp_client_checkpoint_id", "mcp_client_expected_snapshot"],
   dev_workspace_get_transaction: ["development_transaction_store", "mcp_client_transaction_id"],
   dev_workspace_list_transactions: ["development_transaction_store", "mcp_client_bounded_transaction_filters"],

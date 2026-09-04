@@ -38,6 +38,19 @@ const proposalStatuses = new Set([
   "executed",
   "blocked",
 ]);
+const cleanupItemTypes = new Set([
+  "archive",
+  "rejected_candidate",
+  "pending_candidate",
+  "snapshot",
+  "candidate_draft",
+  "proof_report",
+  "context_bundle",
+  "settlement_context",
+  "settlement_report",
+  "approval_item",
+  "external_brain_session",
+]);
 const protectedExactPaths = new Set([
   normalizeProjectPath(projectPaths.activeEngine),
   normalizeProjectPath(projectPaths.activationLogs),
@@ -559,6 +572,22 @@ function normalizePolicy(input = {}) {
   return policy;
 }
 
+function normalizeCleanupItemTypes(input = {}) {
+  const value = input.itemTypes ?? input.item_types;
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > cleanupItemTypes.size) {
+    throw errorWithStatus("itemTypes must be a non-empty bounded array of cleanup item types.");
+  }
+  const normalized = [];
+  for (const itemType of value) {
+    if (typeof itemType !== "string" || !cleanupItemTypes.has(itemType)) {
+      throw errorWithStatus(`Unsupported cleanup item type: ${String(itemType)}`);
+    }
+    if (!normalized.includes(itemType)) normalized.push(itemType);
+  }
+  return new Set(normalized);
+}
+
 function statusForProposal(status = "draft", reason = null) {
   if (!proposalStatuses.has(status)) throw errorWithStatus("Invalid cleanup proposal status.");
   return {
@@ -723,21 +752,25 @@ export async function scanCleanupCandidates(input = {}, options = {}) {
       ),
     );
   }
+  const requestedItemTypes = normalizeCleanupItemTypes(input);
+  const scopedItems = requestedItemTypes
+    ? items.filter((item) => requestedItemTypes.has(item.item_type))
+    : items;
   const groups = {
-    eligible_items: items.filter((item) => item.status === "eligible_for_cleanup"),
-    must_keep_items: items.filter((item) => item.status === "must_keep"),
-    needs_review_items: items.filter((item) => item.status === "needs_review"),
-    blocked_items: items.filter((item) => item.status === "blocked_from_cleanup"),
+    eligible_items: scopedItems.filter((item) => item.status === "eligible_for_cleanup"),
+    must_keep_items: scopedItems.filter((item) => item.status === "must_keep"),
+    needs_review_items: scopedItems.filter((item) => item.status === "needs_review"),
+    blocked_items: scopedItems.filter((item) => item.status === "blocked_from_cleanup"),
   };
   const report = {
     scanned_at: now.toISOString(),
     retention_policy: policy,
     ...groups,
     risk_summary: {
-      high_risk_count: items.filter((item) => ["high", "critical"].includes(item.risk_level)).length,
-      pinned_count: items.filter((item) => item.retention === "pinned").length,
+      high_risk_count: scopedItems.filter((item) => ["high", "critical"].includes(item.risk_level)).length,
+      pinned_count: scopedItems.filter((item) => item.retention === "pinned").length,
       rollback_required_count:
-        items.filter((item) => item.retention === "rollback_required").length,
+        scopedItems.filter((item) => item.retention === "rollback_required").length,
       eligible_count: groups.eligible_items.length,
     },
   };
@@ -785,7 +818,7 @@ export async function createCleanupProposal(input = {}, options = {}) {
 }
 
 export async function listCleanupProposals(options = {}) {
-  const roots = await ensureCleanupDirectories(options);
+  const roots = cleanupRoots(options);
   const proposals = [];
   for (const directory of await directoryEntries(roots.cleanupProposals)) {
     const id = path.basename(directory);

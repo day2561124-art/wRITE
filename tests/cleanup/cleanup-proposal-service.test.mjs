@@ -200,6 +200,36 @@ async function main() {
       "Rollback-index snapshot was not preserved.",
     );
 
+    const archiveOnlyScan = await scanCleanupCandidates({
+      retentionPolicy,
+      itemTypes: ["archive"],
+    }, options);
+    assert(
+      archiveOnlyScan.eligible_items.every((item) => item.item_type === "archive")
+        && archiveOnlyScan.must_keep_items.every((item) => item.item_type === "archive")
+        && archiveOnlyScan.needs_review_items.every((item) => item.item_type === "archive")
+        && archiveOnlyScan.blocked_items.every((item) => item.item_type === "archive"),
+      "Cleanup itemTypes scope leaked non-archive items.",
+    );
+    assert(
+      archiveOnlyScan.eligible_items.some((item) => item.item_id === path.basename(normalArchive)),
+      "Scoped archive scan lost an eligible archive.",
+    );
+    await expectReject(
+      () => scanCleanupCandidates({ retentionPolicy, itemTypes: ["unknown_cleanup_type"] }, options),
+      "Unknown cleanup item type was accepted.",
+    );
+
+    const scopedProposal = await createCleanupProposal({
+      retentionPolicy,
+      itemTypes: ["archive"],
+      title: "Archive-only fixture proposal",
+    }, options);
+    assert(
+      scopedProposal.eligible_items.every((item) => item.item_type === "archive"),
+      "Scoped cleanup proposal included a non-archive eligible item.",
+    );
+
     const proposal = await createCleanupProposal({ retentionPolicy }, options);
     assert(
       isSafeCleanupProposalId(proposal.cleanup_proposal_id),

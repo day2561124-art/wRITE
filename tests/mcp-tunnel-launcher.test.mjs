@@ -1109,7 +1109,7 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 88,
+      expectedCount: 94,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
@@ -1136,7 +1136,7 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (88 tools: 87 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (94 tools: 93 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (39 tools, development write/test tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));
