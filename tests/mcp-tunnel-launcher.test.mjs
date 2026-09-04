@@ -197,13 +197,31 @@ async function waitForPortAvailable(port, timeoutMs = 10_000) {
   throw new Error(`Port ${port} did not become available after MCP cleanup.`);
 }
 
-async function waitForPortListening(port, timeoutMs = 10_000) {
+async function waitForPortListening(
+  port,
+  timeoutMs = 10_000,
+  { child = null, stderr = null } = {},
+) {
+  const stderrText = () =>
+    typeof stderr === "function"
+      ? String(stderr() ?? "")
+      : String(stderr ?? "");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!await isPortAvailable(port)) return;
+    if (
+      child
+      && (child.exitCode !== null || child.signalCode !== null)
+    ) {
+      throw new Error(
+        `Process exited before port ${port} started listening. exit_code=${child.exitCode} signal=${child.signalCode ?? "none"} stderr=${stderrText()}`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`Port ${port} did not start listening.`);
+  throw new Error(
+    `Port ${port} did not start listening within ${timeoutMs}ms. child_pid=${child?.pid ?? "unknown"} exit_code=${child?.exitCode ?? "running"} signal=${child?.signalCode ?? "none"} stderr=${stderrText()}`,
+  );
 }
 
 function isProcessRunning(pid) {
@@ -385,7 +403,10 @@ async function verifyMcpIdleSessionCapReclaimsChildren() {
   serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
 
   try {
-    await waitForPortListening(port);
+    await waitForPortListening(port, 10_000, {
+      child: serverProcess,
+      stderr: () => stderrText,
+    });
     const sessions = [];
     for (let index = 0; index < 4; index += 1) {
       const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
@@ -467,7 +488,10 @@ async function verifyMcpTotalSessionCapReclaimsIdleChildren() {
   serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
 
   try {
-    await waitForPortListening(port);
+    await waitForPortListening(port, 10_000, {
+      child: serverProcess,
+      stderr: () => stderrText,
+    });
     const sessions = [];
     for (let index = 0; index < 4; index += 1) {
       const agent = new http.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
@@ -549,7 +573,10 @@ async function verifyMcpTotalSessionCapProtectsActiveRequest() {
   serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
 
   try {
-    await waitForPortListening(port);
+    await waitForPortListening(port, 10_000, {
+      child: serverProcess,
+      stderr: () => stderrText,
+    });
     const session = await initializeMcpHttpSession({
       port,
       agent,
@@ -618,7 +645,10 @@ async function verifyMcpIdleTimeoutReclaimsChild() {
   serverProcess.stderr.on("data", (chunk) => { stderrText += chunk.toString("utf8"); });
 
   try {
-    await waitForPortListening(port);
+    await waitForPortListening(port, 10_000, {
+      child: serverProcess,
+      stderr: () => stderrText,
+    });
     const session = await initializeMcpHttpSession({
       port,
       agent,

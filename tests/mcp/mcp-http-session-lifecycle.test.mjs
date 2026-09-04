@@ -220,7 +220,10 @@ async function verifyOpenSseDoesNotDefeatIdleCap() {
       () => !isProcessRunning(firstPid),
       `Oldest SSE-backed idle session child was not reclaimed. stderr=${stderr()}`,
     );
-    assert.match(stderr(), /reason=max_idle_session_count/u);
+    await waitUntil(
+      () => stderr().includes('reason=max_idle_session_count'),
+      `Idle-session cap eviction log did not arrive after child reclamation. stderr=${stderr()}`,
+    );
 
     const oldSession = await postMcp({
       port,
@@ -252,7 +255,10 @@ async function verifyOpenSseDoesNotDefeatIdleTimeout() {
       () => !isProcessRunning(childPid),
       `SSE-backed idle session child survived configured TTL. stderr=${stderr()}`,
     );
-    assert.match(stderr(), /reason=idle_timeout/u);
+    await waitUntil(
+      () => stderr().includes('reason=idle_timeout'),
+      `Idle-timeout eviction log did not arrive after child reclamation. stderr=${stderr()}`,
+    );
     stream.request.destroy();
   });
 }
@@ -281,7 +287,10 @@ async function verifySseReconnectsDoNotRefreshIdleTimeout() {
       false,
       `Repeated SSE GET reconnects refreshed session liveness and prevented idle eviction. stderr=${stderr()}`,
     );
-    assert.match(stderr(), /reason=idle_timeout/u);
+    await waitUntil(
+      () => stderr().includes('reason=idle_timeout'),
+      `Idle-timeout eviction log did not arrive after reconnect-driven child reclamation. stderr=${stderr()}`,
+    );
   });
 }
 
