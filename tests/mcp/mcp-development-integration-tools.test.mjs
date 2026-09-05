@@ -172,7 +172,7 @@ async function createHarness(name) {
     return results;
   };
 
-  function createService() {
+  function createService(overrides = {}) {
     return createDevIntegrationService({
       repositoryRoot,
       registryPath: path.join(runtimeRoot, "integration_registry.json"),
@@ -182,6 +182,7 @@ async function createHarness(name) {
       workstreamReader,
       workspaceReader,
       validationRunner,
+      ...overrides,
     });
   }
 
@@ -334,6 +335,42 @@ test("integration preserves more than 256 unrelated dirty paths without path-cou
     assert.equal(await readFile(path.join(harness.repositoryRoot, dirtyEntries.at(-1).relativePath), "utf8"), dirtyEntries.at(-1).content);
     const untracked = (await git(harness.repositoryRoot, ["ls-files", "--others", "--exclude-standard"])).stdout.split(/\r?\n/u).filter(Boolean);
     assert.equal(untracked.length, 300);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("overlay preflight uses a large bounded buffer and labels pre-apply failures", async () => {
+  const harness = await createHarness("overlay-buffer-diagnostic");
+  try {
+    const source = await harness.createSource({ changes: { "feature.txt": "feature\n" } });
+    let observedOverlayBuffer = null;
+    const gitRunner = async (args, options = {}) => {
+      if (args[0] === "read-tree" && args.includes("--dry-run")) {
+        observedOverlayBuffer = options.maxBuffer;
+        const error = new Error("stdout maxBuffer length exceeded");
+        error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+        throw error;
+      }
+      return git(options.cwd ?? harness.repositoryRoot, args, { allowFailure: options.allowFailure === true });
+    };
+    const service = harness.createService({ gitRunner });
+    const candidate = await service.preflight({ workstream_id: source.workstream_id });
+    const ready = await service.validateIntegration({
+      integration_candidate_id: candidate.integration_candidate_id,
+      expected_revision: candidate.revision,
+    });
+    await assert.rejects(
+      service.integrate({ integration_candidate_id: ready.integration_candidate_id, expected_revision: ready.revision }),
+      (error) => {
+        assert.equal(error.code, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
+        assert.equal(error.integration_stage, "overlay_preflight");
+        assert.match(error.message, /Integration pre-apply stage overlay_preflight failed/u);
+        return true;
+      },
+    );
+    assert.equal(observedOverlayBuffer, 8 * 1024 * 1024);
+    assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), harness.baseHead);
   } finally {
     await harness.cleanup();
   }

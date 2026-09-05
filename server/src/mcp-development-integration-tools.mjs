@@ -75,6 +75,7 @@ const DIRTY_SNAPSHOT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DIRTY_SNAPSHOT_PATH_BUFFER = 8 * 1024 * 1024;
 const DIRTY_VERIFY_MAX_REPORTED_PATHS = 256;
 const INTEGRATION_SAFETY_STATUS_MAX_BUFFER = 2 * 1024 * 1024;
+const INTEGRATION_OVERLAY_PREFLIGHT_MAX_BUFFER = 8 * 1024 * 1024;
 const CONFLICT_MAX_PATHS = 100;
 
 const legalTransitions = Object.freeze({
@@ -403,6 +404,17 @@ function snapshotsEqual(a, b) {
     && a.size === b.size
     && a.sha256 === b.sha256
     && a.link_target === b.link_target;
+}
+
+async function runIntegrationStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    const wrapped = new Error(`Integration pre-apply stage ${stage} failed: ${error?.message ?? error}`);
+    wrapped.code = error?.code ?? "INTEGRATION_PRE_APPLY_STAGE_FAILED";
+    wrapped.integration_stage = stage;
+    throw wrapped;
+  }
 }
 
 function parseMergeTreeConflicts(stdout, stderr) {
@@ -1070,7 +1082,7 @@ export function createDevIntegrationService({
       cwd: repoRoot,
       allowFailure: true,
       timeout: 60_000,
-      maxBuffer: 512 * 1024,
+      maxBuffer: INTEGRATION_OVERLAY_PREFLIGHT_MAX_BUFFER,
     });
   }
 
@@ -1097,14 +1109,14 @@ export function createDevIntegrationService({
     }
     try {
       candidate = await getCandidate({ integration_candidate_id: candidateId });
-      const freshness = await candidateFreshness(candidate);
+      const freshness = await runIntegrationStage("candidate_freshness", () => candidateFreshness(candidate));
       if (!freshness.fresh) {
         return updateCandidate(candidateId, candidate.revision, (record) => {
           transitionCandidate(record, "stale");
           record.stale_reason = { code: "APPLY_INPUT_STALE", reasons: freshness.reasons };
         });
       }
-      const safety = await mainSafetyStatus();
+      const safety = await runIntegrationStage("main_safety_status", () => mainSafetyStatus());
       if (safety.branch !== DEV_INTEGRATION_TARGET_BRANCH) throw new Error("Shared repository must have main checked out before integration.");
       if (safety.staged.length > 0) {
         const error = new Error("Integration refuses a shared main index with staged changes.");
@@ -1122,8 +1134,8 @@ export function createDevIntegrationService({
         throw error;
       }
 
-      const snapshots = await dirtySnapshot();
-      const overlay = await overlayPreflight(candidate.target_head, candidate.integration_commit);
+      const snapshots = await runIntegrationStage("dirty_snapshot", () => dirtySnapshot());
+      const overlay = await runIntegrationStage("overlay_preflight", () => overlayPreflight(candidate.target_head, candidate.integration_commit));
       if (overlay.exit_code !== 0) {
         return updateCandidate(candidateId, candidate.revision, (record) => {
           if (record.state === "ready") transitionCandidate(record, "blocked");
@@ -1131,15 +1143,17 @@ export function createDevIntegrationService({
         });
       }
 
-      const finalHead = await readMainHead();
-      const finalSource = await readBranchHead(candidate.source_branch);
+      const { finalHead, finalSource } = await runIntegrationStage("final_head_check", async () => ({
+        finalHead: await readMainHead(),
+        finalSource: await readBranchHead(candidate.source_branch),
+      }));
       if (finalHead !== candidate.target_head || finalSource !== candidate.source_head) {
         return updateCandidate(candidateId, candidate.revision, (record) => {
           transitionCandidate(record, "stale");
           record.stale_reason = { code: "APPLY_RACE_DETECTED", target_actual: finalHead, source_actual: finalSource };
         });
       }
-      const secondOverlay = await overlayPreflight(candidate.target_head, candidate.integration_commit);
+      const secondOverlay = await runIntegrationStage("overlay_preflight_after_lock", () => overlayPreflight(candidate.target_head, candidate.integration_commit));
       if (secondOverlay.exit_code !== 0) {
         return updateCandidate(candidateId, candidate.revision, (record) => {
           transitionCandidate(record, "failed");
