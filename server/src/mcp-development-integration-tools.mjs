@@ -77,6 +77,9 @@ const DIRTY_VERIFY_MAX_REPORTED_PATHS = 256;
 const INTEGRATION_SAFETY_STATUS_MAX_BUFFER = 2 * 1024 * 1024;
 const INTEGRATION_OVERLAY_PREFLIGHT_MAX_BUFFER = 8 * 1024 * 1024;
 const CONFLICT_MAX_PATHS = 100;
+const SERVER_OWNED_UNTRACKED_RUNTIME_PATHS = Object.freeze([
+  path.relative(projectRoot, projectPaths.cleanupRoot).replaceAll(path.sep, "/"),
+]);
 
 const legalTransitions = Object.freeze({
   created: new Set(["preflight_passed", "conflicted", "blocked", "failed", "integrated", "abandoned"]),
@@ -372,6 +375,22 @@ function parseStatus(raw) {
 
 function splitNullPaths(raw) {
   return String(raw).split("\0").filter(Boolean);
+}
+
+function untrackedDirtySnapshotArgs() {
+  const excludedPathspecs = SERVER_OWNED_UNTRACKED_RUNTIME_PATHS.flatMap((relativePath) => [
+    `:(exclude)${relativePath}`,
+    `:(exclude)${relativePath}/**`,
+  ]);
+  return [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+    "--",
+    ".",
+    ...excludedPathspecs,
+  ];
 }
 
 async function snapshotPath(filePath) {
@@ -1044,7 +1063,7 @@ export function createDevIntegrationService({
       { cwd: repoRoot, maxBuffer: DIRTY_SNAPSHOT_PATH_BUFFER },
     )).stdout);
     const untracked = splitNullPaths((await gitRunner(
-      ["ls-files", "--others", "--exclude-standard", "-z"],
+      untrackedDirtySnapshotArgs(),
       { cwd: repoRoot, maxBuffer: DIRTY_SNAPSHOT_PATH_BUFFER },
     )).stdout);
     const paths = [...new Set([...tracked, ...untracked])];

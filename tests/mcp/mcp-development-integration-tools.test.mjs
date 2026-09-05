@@ -340,6 +340,63 @@ test("integration preserves more than 256 unrelated dirty paths without path-cou
   }
 });
 
+test("integration excludes server-owned cleanup runtime from untracked carry-forward while preserving ordinary untracked files", async () => {
+  const harness = await createHarness("server-owned-cleanup-runtime");
+  try {
+    const source = await harness.createSource({ changes: { "feature.txt": "feature\n" } });
+    let observedUntrackedArgs = null;
+    const gitRunner = async (args, options = {}) => {
+      if (args[0] === "ls-files" && args.includes("--others")) observedUntrackedArgs = [...args];
+      return git(options.cwd ?? harness.repositoryRoot, args, { allowFailure: options.allowFailure === true });
+    };
+    const service = harness.createService({ gitRunner });
+    const candidate = await service.preflight({ workstream_id: source.workstream_id });
+    const ready = await service.validateIntegration({
+      integration_candidate_id: candidate.integration_candidate_id,
+      expected_revision: candidate.revision,
+    });
+
+    const cleanupPath = path.join(
+      harness.repositoryRoot,
+      "data",
+      "cleanup",
+      "trash",
+      "cleanup_trash_fixture",
+      "payload.txt",
+    );
+    const ordinaryPath = path.join(harness.repositoryRoot, "ordinary-untracked.txt");
+    await mkdir(path.dirname(cleanupPath), { recursive: true });
+    await writeFile(cleanupPath, "server-owned cleanup payload\n", "utf8");
+    await writeFile(ordinaryPath, "ordinary untracked payload\n", "utf8");
+    const cleanupHash = await sha256(cleanupPath);
+    const ordinaryHash = await sha256(ordinaryPath);
+
+    const integrated = await service.integrate({
+      integration_candidate_id: ready.integration_candidate_id,
+      expected_revision: ready.revision,
+    });
+
+    assert.equal(integrated.state, "integrated");
+    assert(observedUntrackedArgs);
+    assert(observedUntrackedArgs.includes("."));
+    assert(observedUntrackedArgs.includes(":(exclude)data/cleanup"));
+    assert(observedUntrackedArgs.includes(":(exclude)data/cleanup/**"));
+
+    const enumerated = String(
+      (await git(harness.repositoryRoot, observedUntrackedArgs)).stdout,
+    ).split("\0").filter(Boolean);
+    assert.equal(enumerated.includes("ordinary-untracked.txt"), true);
+    assert.equal(
+      enumerated.some((relativePath) => relativePath.startsWith("data/cleanup/")),
+      false,
+    );
+    assert.equal(await sha256(cleanupPath), cleanupHash);
+    assert.equal(await sha256(ordinaryPath), ordinaryHash);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("overlay preflight uses a large bounded buffer and labels pre-apply failures", async () => {
   const harness = await createHarness("overlay-buffer-diagnostic");
   try {
