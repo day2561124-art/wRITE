@@ -80,6 +80,12 @@ import {
   worldSimulationMemoryPlasticityVersion,
 } from "./world-simulation-memory-plasticity-service.mjs";
 import {
+  buildWorldSimulationSubjectiveClaimProjectionContract,
+  buildWorldSimulationSubjectiveClaimResolverView,
+  buildWorldSimulationSubjectiveClaims,
+  worldSimulationSubjectiveClaimProjectionVersion,
+} from "./world-simulation-subjective-claim-projection-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -3054,6 +3060,43 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationMemoryRetrievalPersistenceContract(),
     subjective_memory_plasticity:
       buildWorldSimulationMemoryPlasticityContract(),
+    subjective_claim_projection:
+      buildWorldSimulationSubjectiveClaimProjectionContract(),
+
+    subjective_claim_resolver_hook: {
+      owner:
+        "programmatic_subjective_claim_resolver",
+      optional:
+        true,
+      option_name:
+        "subjectiveClaimResolver",
+      source_scope:
+        "current_turn_new_subjective_memories_only",
+      receives_world_state:
+        false,
+      receives_raw_world_event:
+        false,
+      receives_whole_persistent_memory_store:
+        false,
+      receives_retrieval_history:
+        false,
+      receives_memory_plasticity_history:
+        false,
+      receives_internal_memory_provenance:
+        false,
+      may_propose_claim_text:
+        true,
+      may_assert_world_truth:
+        false,
+      may_assert_confidence_probability:
+        false,
+      may_rewrite_memory:
+        false,
+      character_brain_direct_claim_mutation_allowed:
+        false,
+      missing_hook_means_no_new_claims:
+        true,
+    },
 
     memory_context_projection: {
       owner:
@@ -4497,6 +4540,137 @@ async function resolveMemoryEpisodeBindings(
   };
 }
 
+function subjectiveClaimSourceMemoryRecords(
+  subjectiveMemoryFormation,
+) {
+  return array(
+    subjectiveMemoryFormation?.result?.character_updates,
+  ).flatMap(
+    (update) =>
+      array(update?.memory_records)
+        .map(
+          (memoryRecord) => ({
+            character:
+              update?.character
+              ?? null,
+            memory_record:
+              cloneJson(memoryRecord),
+          }),
+        ),
+  );
+}
+
+async function resolveSubjectiveClaimProposals(
+  worldState,
+  preparedTurn,
+  sourceMemoryRecords,
+  options,
+) {
+  const resolver =
+    typeof options.subjectiveClaimResolver === "function"
+      ? options.subjectiveClaimResolver
+      : null;
+
+  const resolverView =
+    buildWorldSimulationSubjectiveClaimResolverView({
+      world_state:
+        worldState,
+      turn_id:
+        preparedTurn.turn_id,
+      source_memory_records:
+        sourceMemoryRecords,
+    });
+
+  if (!resolver) {
+    return {
+      proposals: [],
+      resolver_view:
+        resolverView,
+      audit: {
+        resolver_used:
+          false,
+        missing_resolver_means_no_new_claims:
+          true,
+        current_turn_new_subjective_memories_only:
+          true,
+        world_state_exposed_to_resolver:
+          false,
+        raw_world_event_exposed_to_resolver:
+          false,
+        whole_memory_store_exposed_to_resolver:
+          false,
+        internal_memory_provenance_exposed_to_resolver:
+          false,
+        retrieval_history_exposed_to_resolver:
+          false,
+        memory_plasticity_history_exposed_to_resolver:
+          false,
+        confidence_probability_requested:
+          false,
+        world_truth_judgment_requested:
+          false,
+      },
+    };
+  }
+
+  const inputSnapshot =
+    cloneJson(
+      resolverView,
+    );
+
+  const inputHash =
+    hashAgentRunValue(
+      inputSnapshot,
+    );
+
+  const raw =
+    await resolver(
+      cloneJson(inputSnapshot),
+    );
+
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "subjectiveClaimResolver must return an array of evidence-backed claim proposals.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+
+  return {
+    proposals:
+      cloneJson(raw),
+    resolver_view:
+      resolverView,
+    audit: {
+      resolver_used:
+        true,
+      input_context_hash:
+        inputHash,
+      proposal_count:
+        raw.length,
+      current_turn_new_subjective_memories_only:
+        true,
+      world_state_exposed_to_resolver:
+        false,
+      raw_world_event_exposed_to_resolver:
+        false,
+      whole_memory_store_exposed_to_resolver:
+        false,
+      internal_memory_provenance_exposed_to_resolver:
+        false,
+      retrieval_history_exposed_to_resolver:
+        false,
+      memory_plasticity_history_exposed_to_resolver:
+        false,
+      confidence_probability_requested:
+        false,
+      world_truth_judgment_requested:
+        false,
+    },
+  };
+}
+
 export async function resolveWorldSimulationTurn(
   preparedTurn,
   selectedActions,
@@ -4746,6 +4920,62 @@ export async function resolveWorldSimulationTurn(
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
   });
 
+  const subjectiveClaimSourceMemories =
+    subjectiveClaimSourceMemoryRecords(
+      subjectiveMemoryFormation,
+    );
+
+  const subjectiveClaimProposalResolution =
+    await resolveSubjectiveClaimProposals(
+      subjectiveMemoryMutationExecution.next_world_state,
+      preparedTurn,
+      subjectiveClaimSourceMemories,
+      options,
+    );
+
+  const subjectiveClaimProjection =
+    buildWorldSimulationSubjectiveClaims({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_memory_records:
+        subjectiveClaimSourceMemories,
+      claim_proposals:
+        subjectiveClaimProposalResolution.proposals,
+    });
+
+  const subjectiveClaimMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:subjective_claim`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveMemoryMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        subjectiveClaimProjection
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const subjectiveClaimMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        subjectiveClaimProjection
+          .result
+          .preview_world_state,
+      queue:
+        subjectiveClaimMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -4806,7 +5036,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: subjectiveMemoryMutationExecution.next_world_state,
+      next_world_state: subjectiveClaimMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -4877,6 +5107,59 @@ export async function resolveWorldSimulationTurn(
         ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
+
+      subjective_claim_proposal_resolution: {
+        version:
+          worldSimulationSubjectiveClaimProjectionVersion,
+        proposals:
+          cloneJson(
+            subjectiveClaimProposalResolution.proposals,
+          ),
+        resolver_view_hash:
+          hashAgentRunValue(
+            subjectiveClaimProposalResolution.resolver_view,
+          ),
+        audit:
+          cloneJson(
+            subjectiveClaimProposalResolution.audit,
+          ),
+      },
+      subjective_claim_projection: {
+        version:
+          subjectiveClaimProjection.version,
+        result: {
+          processed_proposal_count:
+            subjectiveClaimProjection.result.processed_proposal_count,
+          claim_events_created:
+            cloneJson(
+              subjectiveClaimProjection.result.claim_events_created,
+            ),
+          already_persisted_claim_event_ids:
+            cloneJson(
+              subjectiveClaimProjection.result.already_persisted_claim_event_ids,
+            ),
+          history_references_appended:
+            cloneJson(
+              subjectiveClaimProjection.result.history_references_appended,
+            ),
+          state_transitions:
+            cloneJson(
+              subjectiveClaimProjection.result.state_transitions,
+            ),
+          audit:
+            cloneJson(
+              subjectiveClaimProjection.result.audit,
+            ),
+        },
+      },
+      subjective_claim_mutation_queue:
+        cloneJson(
+          subjectiveClaimMutationQueue,
+        ),
+      subjective_claim_mutation_execution:
+        cloneJson(
+          subjectiveClaimMutationExecution.execution,
+        ),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -5053,6 +5336,41 @@ export async function resolveWorldSimulationTurn(
       created_memory_count: subjectiveMemoryFormation.result.created_memory_count,
       mutation_count: subjectiveMemoryMutationQueue.mutation_count,
       authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
+    },
+    subjective_claim_projection: {
+      version:
+        worldSimulationSubjectiveClaimProjectionVersion,
+      resolver_used:
+        subjectiveClaimProposalResolution
+          .audit
+          .resolver_used === true,
+      processed_proposal_count:
+        subjectiveClaimProjection
+          .result
+          .processed_proposal_count,
+      created_claim_event_count:
+        subjectiveClaimProjection
+          .result
+          .claim_events_created
+          .length,
+      appended_history_reference_count:
+        subjectiveClaimProjection
+          .result
+          .history_references_appended
+          .length,
+      mutation_count:
+        subjectiveClaimMutationQueue
+          .mutation_count,
+      authoritative_executor:
+        subjectiveClaimMutationExecution
+          .execution
+          .version,
+      same_turn_character_brain_feedback_allowed:
+        false,
+      confidence_probability_modeled:
+        false,
+      belief_revision_modeled:
+        false,
     },
     committed_character_current_mind: {
       current_mind_contract_version:

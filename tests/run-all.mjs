@@ -774,6 +774,7 @@ const steps = [
   ["Phase 64A-R4E2 grounded retrieval cue construction and controlled transition", ["tests/phase64/phase64a-grounded-retrieval-cue-construction.test.mjs"]],
   ["Phase 64A-R4E3 episode-local evidence reprojection", ["tests/phase64/phase64a-retrieval-episode-local-evidence-reprojection.test.mjs"]],
   ["Phase 64A-R4F1 global termination decision semantics and provenance", ["tests/phase64/phase64a-retrieval-global-termination-decision-evidence.test.mjs"]],
+  ["Phase 65A evidence-backed subjective claim projection", ["tests/phase65/phase65a-subjective-claim-projection.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
 

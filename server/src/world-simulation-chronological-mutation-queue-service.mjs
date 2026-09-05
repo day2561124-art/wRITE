@@ -811,6 +811,455 @@ function assertPhase64AMemoryPlasticityMutation(
   }
 }
 
+const phase65aSubjectiveClaimProjectionVersion =
+  "phase65a-evidence-backed-subjective-claim-projection-v1";
+
+const phase65aSubjectiveClaimEventSchema =
+  "phase65a-subjective-claim-event-v1";
+
+const phase65aSubjectiveClaimHistoryReferenceSchema =
+  "phase65a-subjective-claim-history-ref-v1";
+
+function phase65aCharacterMemories(worldState, character) {
+  const direct =
+    worldState?.memories?.[character];
+
+  if (Array.isArray(direct)) return direct;
+
+  const normalized =
+    String(character ?? "")
+      .trim()
+      .toLocaleLowerCase("zh-Hant-TW");
+
+  const entry =
+    Object.entries(
+      object(worldState?.memories),
+    ).find(
+      ([key]) =>
+        String(key ?? "")
+          .trim()
+          .toLocaleLowerCase("zh-Hant-TW")
+        === normalized,
+    );
+
+  return Array.isArray(entry?.[1])
+    ? entry[1]
+    : [];
+}
+
+function phase65aMemoryId(record) {
+  return String(
+    record?.memory_id
+    ?? record?.id
+    ?? "",
+  ).trim();
+}
+
+function assertPhase65AClaimHistoryPrefix(
+  oldHistory,
+  newHistory,
+) {
+  const oldValues =
+    array(oldHistory);
+  const newValues =
+    array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      "Subjective claim history is append-only.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (
+    let index = 0;
+    index < oldValues.length;
+    index += 1
+  ) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        "Subjective claim history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function assertPhase65ASubjectiveClaimMutation(
+  worldState,
+  worldPath,
+  mutation,
+) {
+  if (worldPath[0] === "subjective_claim_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "SubjectiveClaimEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId =
+      String(worldPath[1] ?? "");
+    const existing =
+      getAtPath(worldState, worldPath);
+
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next =
+      mutation?.to;
+
+    if (
+      !isObject(next)
+      || next.schema_version
+        !== phase65aSubjectiveClaimEventSchema
+      || next.immutable !== true
+      || String(next.claim_event_id ?? "")
+        !== eventId
+      || !String(next.claim_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !String(next.proposition ?? "").trim()
+      || !String(next.proposition_hash ?? "").trim()
+      || next.status !== "candidate_subjective_claim"
+      || !Array.isArray(next.evidence)
+      || next.evidence.length === 0
+    ) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} creation payload is not a valid immutable Phase65A event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const hashBody =
+      cloneJson(next);
+    delete hashBody.claim_event_hash;
+
+    if (
+      hashAgentRunValue(hashBody)
+      !== next.claim_event_hash
+    ) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const derivation =
+      object(next.derivation);
+    const expectedEventId =
+      `subjective_claim_event_${hashAgentRunValue({
+        version:
+          phase65aSubjectiveClaimProjectionVersion,
+        source_turn_id:
+          next.source_turn_id,
+        character:
+          next.character,
+        proposition_hash:
+          next.proposition_hash,
+        evidence:
+          next.evidence,
+        proposal_ref:
+          derivation.proposal_ref,
+      }).slice(0, 24)}`;
+
+    if (
+      eventId !== expectedEventId
+      || derivation.mode
+        !== "explicit_current_turn_evidence_projection_v1"
+      || derivation.current_turn_new_subjective_memories_only
+        !== true
+      || derivation.hidden_semantic_graph_traversal_used
+        !== false
+    ) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} failed deterministic identity or derivation-boundary verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+
+    const propositionHash =
+      hashAgentRunValue({
+        character:
+          next.character,
+        proposition:
+          next.proposition,
+      });
+
+    if (propositionHash !== next.proposition_hash) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} proposition hash does not match its proposition.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_PROPOSITION_HASH_MISMATCH";
+      throw error;
+    }
+
+    const seenMemoryRefs =
+      new Set();
+    let supportingEvidenceCount = 0;
+
+    for (const evidence of next.evidence) {
+      const sourceMemoryRef =
+        String(
+          evidence?.source_memory_ref
+          ?? "",
+        ).trim();
+      const sourceMemoryHash =
+        String(
+          evidence?.source_memory_hash
+          ?? "",
+        ).trim();
+      const relation =
+        String(
+          evidence?.relation
+          ?? "",
+        ).trim();
+
+      if (
+        !sourceMemoryRef
+        || !sourceMemoryHash
+        || !["supports", "conflicts"].includes(relation)
+        || seenMemoryRefs.has(sourceMemoryRef)
+      ) {
+        const error = new Error(
+          `SubjectiveClaimEvent ${eventId} contains invalid or duplicate evidence.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVIDENCE_INVALID";
+        throw error;
+      }
+
+      seenMemoryRefs.add(sourceMemoryRef);
+      if (relation === "supports") supportingEvidenceCount += 1;
+
+      const sourceMemory =
+        phase65aCharacterMemories(
+          worldState,
+          next.character,
+        ).find(
+          (candidate) =>
+            phase65aMemoryId(candidate)
+            === sourceMemoryRef,
+        );
+
+      if (!sourceMemory) {
+        const error = new Error(
+          `SubjectiveClaimEvent ${eventId} cannot resolve evidence memory ${sourceMemoryRef}.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVIDENCE_MEMORY_UNRESOLVED";
+        throw error;
+      }
+
+      if (
+        hashAgentRunValue(sourceMemory)
+        !== sourceMemoryHash
+      ) {
+        const error = new Error(
+          `SubjectiveClaimEvent ${eventId} evidence memory ${sourceMemoryRef} failed hash verification.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVIDENCE_MEMORY_HASH_MISMATCH";
+        throw error;
+      }
+
+      if (
+        String(
+          sourceMemory?.internal_provenance?.turn_id
+          ?? "",
+        ) !== next.source_turn_id
+      ) {
+        const error = new Error(
+          `SubjectiveClaimEvent ${eventId} evidence memory ${sourceMemoryRef} is not from the event source turn.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_CLAIM_EVIDENCE_SOURCE_TURN_MISMATCH";
+        throw error;
+      }
+    }
+
+    if (supportingEvidenceCount === 0) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} requires supporting evidence.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_SUPPORTING_EVIDENCE_REQUIRED";
+      throw error;
+    }
+
+    const semantic =
+      object(next.semantic_state);
+    const audit =
+      object(next.engine_audit);
+
+    if (
+      semantic.world_truth_verified !== false
+      || semantic.confidence !== null
+      || semantic.probability !== null
+      || semantic.conflict_resolution_applied !== false
+      || semantic.belief_revision_applied !== false
+      || audit.retrieval_frequency_used_as_evidence !== false
+      || audit.accessibility_strength_used_as_evidence !== false
+      || audit.plasticity_strength_used_as_truth_support !== false
+      || audit.world_truth_authority_claimed !== false
+      || audit.character_brain_mutation_authority !== false
+      || audit.same_turn_character_brain_feedback_allowed !== false
+    ) {
+      const error = new Error(
+        `SubjectiveClaimEvent ${eventId} violates the Phase65A non-authoritative semantic boundary.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_AUTHORITY_BOUNDARY_VIOLATION";
+      throw error;
+    }
+
+    return;
+  }
+
+  if (worldPath[0] !== "subjective_claim_history") {
+    return;
+  }
+
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Subjective claim history may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory =
+    array(
+      getAtPath(
+        worldState,
+        worldPath,
+      ),
+    );
+  const newHistory =
+    array(mutation?.to);
+
+  assertPhase65AClaimHistoryPrefix(
+    oldHistory,
+    newHistory,
+  );
+
+  const seen =
+    new Set(
+      oldHistory.map(
+        (reference) =>
+          String(
+            reference?.claim_event_id
+            ?? "",
+          ),
+      ),
+    );
+
+  for (
+    let index = oldHistory.length;
+    index < newHistory.length;
+    index += 1
+  ) {
+    const reference =
+      newHistory[index];
+    const eventId =
+      String(
+        reference?.claim_event_id
+        ?? "",
+      ).trim();
+
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase65aSubjectiveClaimHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.claim_event_hash ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || !String(reference.proposition_hash ?? "").trim()
+      || reference.status !== "candidate_subjective_claim"
+      || !Number.isInteger(reference.evidence_count)
+      || reference.evidence_count < 1
+    ) {
+      const error = new Error(
+        `Subjective claim history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+
+    if (seen.has(eventId)) {
+      const error = new Error(
+        `Subjective claim history contains duplicate reference ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_DUPLICATE_REFERENCE";
+      throw error;
+    }
+
+    seen.add(eventId);
+
+    const event =
+      object(
+        object(
+          worldState?.subjective_claim_events,
+        )[eventId],
+      );
+
+    if (!Object.keys(event).length) {
+      const error = new Error(
+        `Subjective claim history cannot resolve SubjectiveClaimEvent ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+
+    if (
+      event.claim_event_hash
+        !== reference.claim_event_hash
+      || event.character
+        !== reference.character
+      || event.source_turn_id
+        !== reference.source_turn_id
+      || event.proposition_hash
+        !== reference.proposition_hash
+      || event.status
+        !== reference.status
+      || array(event.evidence).length
+        !== reference.evidence_count
+    ) {
+      const error = new Error(
+        `Subjective claim history reference ${eventId} does not match its canonical event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -891,6 +1340,11 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         worldPath,
         mutation,
       );
+      assertPhase65ASubjectiveClaimMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -947,6 +1401,11 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
       );
       assertPhase64AMemoryPlasticityMutation(
+        executed,
+        worldPath,
+        mutation,
+      );
+      assertPhase65ASubjectiveClaimMutation(
         executed,
         worldPath,
         mutation,
@@ -1032,6 +1491,11 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase63c_retrieval_history_append_only_enforced: true,
       phase63c_retrieval_history_legacy_baseline_immutable: true,
       direct_nested_retrieval_history_mutation_rejected: true,
+      phase65a_subjective_claim_event_write_once_enforced: true,
+      phase65a_subjective_claim_event_content_address_verified: true,
+      phase65a_subjective_claim_evidence_memory_hash_verified: true,
+      phase65a_subjective_claim_history_append_only_enforced: true,
+      direct_nested_subjective_claim_history_mutation_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

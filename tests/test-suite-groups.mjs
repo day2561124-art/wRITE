@@ -61,6 +61,10 @@ export const phase64RetrievalCognitionSteps = Object.freeze([
   Object.freeze(["Phase 64A-R4F1 global termination decision semantics and provenance", Object.freeze(["tests/phase64/phase64a-retrieval-global-termination-decision-evidence.test.mjs"])]),
 ]);
 
+export const phase65BeliefCognitionSteps = Object.freeze([
+  Object.freeze(["Phase 65A evidence-backed subjective claim projection", Object.freeze(["tests/phase65/phase65a-subjective-claim-projection.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -69,12 +73,14 @@ export const worldSimulationSteps = Object.freeze([
   ...phase62WorldSimulationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
+  ...phase65BeliefCognitionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
   ...phase62CognitionIntegrationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
+  ...phase65BeliefCognitionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
