@@ -56,6 +56,9 @@ export const DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY = 4;
 export const DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY = 16;
 export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_WORKSPACES = 32;
 export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS = 20_000;
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_RACY_WINDOW_MS = 1_000;
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_SCHEMA_VERSION = 1;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
@@ -90,6 +93,12 @@ export const DEV_JOURNAL_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED_TE
     "development_runtime",
     "operation-journal",
   );
+
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_ROOT = process.env.WRITER_WORKBENCH_SNAPSHOT_FINGERPRINT_CACHE_ROOT
+  ? path.resolve(process.env.WRITER_WORKBENCH_SNAPSHOT_FINGERPRINT_CACHE_ROOT)
+  : process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1"
+    ? path.join(path.dirname(DEV_JOURNAL_STORAGE_ROOT), "snapshot-fingerprint-cache")
+    : path.join(projectPaths.outputLogs, "development_runtime", "snapshot-fingerprint-cache");
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1139,6 +1148,7 @@ export function createDevOperationJournalService({
 
 const defaultJournal = createDevOperationJournalService();
 const snapshotFingerprintCacheByWorkspace = new Map();
+const snapshotFingerprintStateSet = new Set(["modified", "added", "untracked"]);
 
 function snapshotArtifactVersionToken(info) {
   if (!info || typeof info !== "object") return null;
@@ -1147,26 +1157,130 @@ function snapshotArtifactVersionToken(info) {
   return keys.map((key) => `${key}:${info[key].toString()}`).join("|");
 }
 
-function getSnapshotFingerprintCache(workspaceId, head, generation) {
-  const cached = snapshotFingerprintCacheByWorkspace.get(workspaceId);
-  if (!cached || cached.head !== head || cached.generation !== generation) return null;
-  snapshotFingerprintCacheByWorkspace.delete(workspaceId);
-  snapshotFingerprintCacheByWorkspace.set(workspaceId, cached);
-  return cached;
+function snapshotFingerprintCacheFilePath(workspaceId) {
+  if (!workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id is invalid.");
+  return path.join(DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_ROOT, `${workspaceId}.json`);
 }
 
-function publishSnapshotFingerprintCache(workspaceId, head, generation, entries) {
-  if (!(entries instanceof Map) || entries.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS) {
-    snapshotFingerprintCacheByWorkspace.delete(workspaceId);
-    return false;
+function normalizeSnapshotFingerprintCacheEntry(value) {
+  if (!isObject(value)) return null;
+  const artifactPath = typeof value.path === "string" ? value.path : "";
+  if (!artifactPath || artifactPath.length > 4096 || artifactPath.includes("\u0000")) return null;
+  if (!snapshotFingerprintStateSet.has(value.state)) return null;
+  if (typeof value.version_token !== "string" || !value.version_token || value.version_token.length > 512) return null;
+  if (!isObject(value.artifact) || value.artifact.exists !== true || value.artifact.artifact_type !== "file") return null;
+  if (!sha256Pattern.test(String(value.artifact.sha256 ?? ""))) return null;
+  if (!Number.isSafeInteger(value.artifact.bytes) || value.artifact.bytes < 0 || value.artifact.bytes > DEV_JOURNAL_ARTIFACT_MAX_BYTES) return null;
+  if (!Number.isSafeInteger(value.stable_since_ms) || value.stable_since_ms < 0) return null;
+  return {
+    path: artifactPath,
+    state: value.state,
+    version_token: value.version_token,
+    artifact: {
+      exists: true,
+      artifact_type: "file",
+      sha256: value.artifact.sha256,
+      bytes: value.artifact.bytes,
+    },
+    stable_since_ms: value.stable_since_ms,
+  };
+}
+
+function normalizeSnapshotFingerprintCachePayload(value, workspaceId, head) {
+  if (!isObject(value)
+    || value.schema_version !== DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_SCHEMA_VERSION
+    || value.workspace_id !== workspaceId
+    || value.head !== head
+    || !Number.isSafeInteger(value.published_at_ms)
+    || value.published_at_ms < 0
+    || !Array.isArray(value.entries)
+    || value.entries.length > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS) return null;
+  const entries = new Map();
+  for (const rawEntry of value.entries) {
+    const entry = normalizeSnapshotFingerprintCacheEntry(rawEntry);
+    if (!entry || entries.has(entry.path)) return null;
+    entries.set(entry.path, entry);
   }
+  return { head, entries, published_at_ms: value.published_at_ms };
+}
+
+async function readPersistentSnapshotFingerprintCache(workspaceId, head) {
+  const cachePath = snapshotFingerprintCacheFilePath(workspaceId);
+  try {
+    const info = await lstat(cachePath);
+    if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_BYTES) return null;
+    const parsed = JSON.parse(await readFile(cachePath, "utf8"));
+    return normalizeSnapshotFingerprintCachePayload(parsed, workspaceId, head);
+  } catch {
+    return null;
+  }
+}
+
+async function getSnapshotFingerprintCache(workspaceId, head, generation, { allowMemory = true } = {}) {
+  if (allowMemory) {
+    const cached = snapshotFingerprintCacheByWorkspace.get(workspaceId);
+    if (cached && cached.head === head) {
+      if (cached.generation !== generation) {
+        snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+        return null;
+      }
+      snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+      snapshotFingerprintCacheByWorkspace.set(workspaceId, cached);
+      return { ...cached, source: "memory" };
+    }
+  }
+  const persistent = await readPersistentSnapshotFingerprintCache(workspaceId, head);
+  if (!persistent) return null;
+  const cached = { ...persistent, generation };
   snapshotFingerprintCacheByWorkspace.delete(workspaceId);
-  snapshotFingerprintCacheByWorkspace.set(workspaceId, { head, generation, entries });
+  snapshotFingerprintCacheByWorkspace.set(workspaceId, cached);
   while (snapshotFingerprintCacheByWorkspace.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_WORKSPACES) {
     const oldestWorkspaceId = snapshotFingerprintCacheByWorkspace.keys().next().value;
     snapshotFingerprintCacheByWorkspace.delete(oldestWorkspaceId);
   }
-  return true;
+  return { ...cached, source: "persistent" };
+}
+
+async function writePersistentSnapshotFingerprintCache(workspaceId, head, entries) {
+  const cachePath = snapshotFingerprintCacheFilePath(workspaceId);
+  const payload = {
+    schema_version: DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_SCHEMA_VERSION,
+    workspace_id: workspaceId,
+    head,
+    published_at_ms: Date.now(),
+    entries: [...entries.entries()].map(([artifactPath, entry]) => ({
+      path: artifactPath,
+      state: entry.state,
+      version_token: entry.version_token,
+      artifact: entry.artifact,
+      stable_since_ms: entry.stable_since_ms,
+    })),
+  };
+  const encoded = `${canonicalJson(payload)}\n`;
+  if (Buffer.byteLength(encoded, "utf8") > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_BYTES) return false;
+  try {
+    await mkdir(DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_ROOT, { recursive: true });
+    await atomicWriteJson(cachePath, payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function publishSnapshotFingerprintCache(workspaceId, head, generation, entries) {
+  if (!(entries instanceof Map) || entries.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS) {
+    snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+    return { memory: false, persistent: false };
+  }
+  const cached = { head, generation, entries, published_at_ms: Date.now() };
+  snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+  snapshotFingerprintCacheByWorkspace.set(workspaceId, cached);
+  while (snapshotFingerprintCacheByWorkspace.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_WORKSPACES) {
+    const oldestWorkspaceId = snapshotFingerprintCacheByWorkspace.keys().next().value;
+    snapshotFingerprintCacheByWorkspace.delete(oldestWorkspaceId);
+  }
+  const persistent = await writePersistentSnapshotFingerprintCache(workspaceId, head, entries);
+  return { memory: true, persistent };
 }
 
 function workspaceSnapshotUnstableError(reason, pathValue = null) {
@@ -1229,6 +1343,7 @@ async function captureSnapshotArtifactStateWithinRoot(
   realRepositoryRoot,
   relativePath,
   cachedEntry = null,
+  racyWindowMs = DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_RACY_WINDOW_MS,
 ) {
   const target = path.resolve(repositoryRoot, relativePath);
   if (!isInside(repositoryRoot, target)) throw new Error("Artifact path escapes the workspace root.");
@@ -1247,7 +1362,9 @@ async function captureSnapshotArtifactStateWithinRoot(
     return {
       artifact: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
       version_token: null,
+      stable_since_ms: null,
       cache_reused: false,
+      cache_racy_miss: false,
       exact_hashed: false,
     };
   }
@@ -1259,24 +1376,33 @@ async function captureSnapshotArtifactStateWithinRoot(
     return {
       artifact: { exists: true, artifact_type: "file", sha256: null, bytes },
       version_token: snapshotArtifactVersionToken(info),
+      stable_since_ms: null,
       cache_reused: false,
+      cache_racy_miss: false,
       exact_hashed: false,
     };
   }
 
   const versionToken = snapshotArtifactVersionToken(info);
-  if (
+  const cacheTokenMatched = Boolean(
     versionToken !== null
     && cachedEntry?.state
     && cachedEntry.version_token === versionToken
     && cachedEntry.artifact?.artifact_type === "file"
     && sha256Pattern.test(String(cachedEntry.artifact.sha256 ?? ""))
     && cachedEntry.artifact.bytes === bytes
-  ) {
+    && Number.isSafeInteger(cachedEntry.stable_since_ms)
+    && cachedEntry.stable_since_ms >= 0
+  );
+  const cacheStable = cacheTokenMatched
+    && Date.now() - cachedEntry.stable_since_ms >= racyWindowMs;
+  if (cacheStable) {
     return {
       artifact: { ...cachedEntry.artifact },
       version_token: versionToken,
+      stable_since_ms: cachedEntry.stable_since_ms,
       cache_reused: true,
+      cache_racy_miss: false,
       exact_hashed: false,
     };
   }
@@ -1309,7 +1435,9 @@ async function captureSnapshotArtifactStateWithinRoot(
       bytes: content.length,
     },
     version_token: versionToken,
+    stable_since_ms: Date.now(),
     cache_reused: false,
+    cache_racy_miss: cacheTokenMatched && !cacheStable,
     exact_hashed: true,
   };
 }
@@ -1409,6 +1537,8 @@ async function computeWorkspaceSnapshotAttempt(context, {
   captureConcurrency,
   attempt,
   generation,
+  racyWindowMs,
+  allowMemoryFingerprintCache,
   afterArtifactCaptured,
 }) {
   const attemptStartedAt = performance.now();
@@ -1445,14 +1575,18 @@ async function computeWorkspaceSnapshotAttempt(context, {
             capture_peak_concurrency: 0,
             capture_task_count: 0,
             fingerprint_cache_eligible: false,
+            fingerprint_cache_source: "none",
+            fingerprint_cache_persistent_loaded: false,
             fingerprint_cache_source_entry_count: 0,
             fingerprint_cache_hit_count: 0,
             fingerprint_cache_miss_count: 0,
+            fingerprint_cache_racy_miss_count: 0,
             fingerprint_cache_reused_bytes: 0,
             fingerprint_versioned_artifact_count: 0,
             fingerprint_version_recheck_ms: 0,
             fingerprint_version_recheck_count: 0,
             fingerprint_cache_published: false,
+            fingerprint_cache_persistent_published: false,
             manifest_finalize_ms: 0,
             status_bytes: 0,
             hashed_artifact_count: 0,
@@ -1502,11 +1636,17 @@ async function computeWorkspaceSnapshotAttempt(context, {
   }
 
   const captureEntries = entries.filter((entry) => entry.state !== "deleted");
-  const fingerprintCache = getSnapshotFingerprintCache(context.workspace_id, head, generation);
+  const fingerprintCache = await getSnapshotFingerprintCache(
+    context.workspace_id,
+    head,
+    generation,
+    { allowMemory: allowMemoryFingerprintCache },
+  );
   const fingerprintEntries = new Map();
   const artifactVersionChecks = [];
   let fingerprintCacheHitCount = 0;
   let fingerprintCacheMissCount = 0;
+  let fingerprintCacheRacyMissCount = 0;
   let fingerprintCacheReusedBytes = 0;
   const artifactsByStatusIndex = new Array(entries.length);
   const artifactCaptureStartedAt = performance.now();
@@ -1520,6 +1660,7 @@ async function computeWorkspaceSnapshotAttempt(context, {
         realRepositoryRoot,
         entry.path,
         cachedEntry?.state === entry.state ? cachedEntry : null,
+        racyWindowMs,
       );
       const artifact = captured.artifact;
       if (captured.cache_reused) {
@@ -1528,11 +1669,13 @@ async function computeWorkspaceSnapshotAttempt(context, {
       } else if (captured.exact_hashed) {
         fingerprintCacheMissCount += 1;
       }
+      if (captured.cache_racy_miss) fingerprintCacheRacyMissCount += 1;
       if (captured.version_token !== null && artifact.sha256 !== null) {
         fingerprintEntries.set(entry.path, {
           state: entry.state,
           version_token: captured.version_token,
           artifact: { ...artifact },
+          stable_since_ms: captured.stable_since_ms,
         });
         artifactVersionChecks.push({ path: entry.path, version_token: captured.version_token });
       }
@@ -1600,9 +1743,12 @@ async function computeWorkspaceSnapshotAttempt(context, {
         capture_peak_concurrency: capture.peak_concurrency,
         capture_task_count: captureEntries.length,
         fingerprint_cache_eligible: fingerprintCache !== null,
+        fingerprint_cache_source: fingerprintCache?.source ?? "none",
+        fingerprint_cache_persistent_loaded: fingerprintCache?.source === "persistent",
         fingerprint_cache_source_entry_count: fingerprintCache?.entries.size ?? 0,
         fingerprint_cache_hit_count: fingerprintCacheHitCount,
         fingerprint_cache_miss_count: fingerprintCacheMissCount,
+        fingerprint_cache_racy_miss_count: fingerprintCacheRacyMissCount,
         fingerprint_cache_reused_bytes: fingerprintCacheReusedBytes,
         fingerprint_versioned_artifact_count: artifactVersionChecks.length,
         manifest_finalize_ms: manifestFinalizeMs,
@@ -1650,6 +1796,14 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
   ) {
     throw new Error(`captureConcurrency must be between 1 and ${DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY}.`);
   }
+  const fingerprintRacyWindowMs = options.fingerprintRacyWindowMs ?? DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_RACY_WINDOW_MS;
+  if (!Number.isSafeInteger(fingerprintRacyWindowMs) || fingerprintRacyWindowMs < 0 || fingerprintRacyWindowMs > 60_000) {
+    throw new Error("fingerprintRacyWindowMs must be an integer between 0 and 60000.");
+  }
+  if (options.allowMemoryFingerprintCache !== undefined && typeof options.allowMemoryFingerprintCache !== "boolean") {
+    throw new Error("allowMemoryFingerprintCache must be a boolean when provided.");
+  }
+  const allowMemoryFingerprintCache = options.allowMemoryFingerprintCache !== false;
 
   const snapshotStartedAt = performance.now();
   const timingTotals = {
@@ -1681,6 +1835,8 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
         captureConcurrency,
         attempt,
         generation: generationStart.generation,
+        racyWindowMs: fingerprintRacyWindowMs,
+        allowMemoryFingerprintCache,
         afterArtifactCaptured: options.afterArtifactCaptured,
       });
     } catch (error) {
@@ -1747,7 +1903,7 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
     else if (!artifactVersionsStable) consistencyReason = "artifact_version_changed";
 
     if (consistencyReason === null) {
-      const fingerprintCachePublished = publishSnapshotFingerprintCache(
+      const fingerprintCachePublish = await publishSnapshotFingerprintCache(
         context.workspace_id,
         attempted.snapshot.head,
         generationEnd.generation,
@@ -1770,7 +1926,8 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
           mutation_generation_end: generationEnd.generation,
           fingerprint_version_recheck_ms: timingTotals.fingerprint_version_recheck_ms,
           fingerprint_version_recheck_count: timingTotals.fingerprint_version_recheck_count,
-          fingerprint_cache_published: fingerprintCachePublished,
+          fingerprint_cache_published: fingerprintCachePublish.memory || fingerprintCachePublish.persistent,
+          fingerprint_cache_persistent_published: fingerprintCachePublish.persistent,
         },
       };
     }

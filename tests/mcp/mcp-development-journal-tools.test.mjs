@@ -833,14 +833,18 @@ assert.equal(
     assert.equal(testAOperation.events[0].result.snapshot_capture_peak_concurrency, 0);
     assert.equal(testAOperation.events[0].result.snapshot_capture_task_count, 0);
     assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_eligible, "boolean");
+    assert(["none", "memory", "persistent"].includes(testAOperation.events[0].result.snapshot_fingerprint_cache_source));
+    assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_persistent_loaded, "boolean");
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_source_entry_count));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_hit_count));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_miss_count));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_racy_miss_count));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_reused_bytes));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_versioned_artifact_count));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_version_recheck_ms));
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_version_recheck_count));
     assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_published, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_persistent_published, "boolean");
     assert.equal(
       testAOperation.events[0].result.snapshot_mutation_generation_start,
       testAOperation.events[0].result.snapshot_mutation_generation_end,
@@ -1020,23 +1024,76 @@ assert.equal(
       )
     )));
     const context = await harness.contextResolver();
-    const cold = await computeWorkspaceSnapshot(context);
+    const cold = await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
     assert.equal(cold.diagnostics.fingerprint_cache_eligible, false);
     assert.equal(cold.diagnostics.fingerprint_cache_hit_count, 0);
     assert.equal(cold.diagnostics.fingerprint_cache_miss_count, cold.diagnostics.hashed_artifact_count);
     assert.equal(cold.diagnostics.fingerprint_cache_published, true);
+    assert.equal(cold.diagnostics.fingerprint_cache_persistent_published, true);
     assert.equal(cold.diagnostics.fingerprint_version_recheck_count, cold.diagnostics.hashed_artifact_count);
 
-    const warm = await computeWorkspaceSnapshot(context);
+    const warm = await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
     assert.equal(warm.workspace_snapshot_id, cold.workspace_snapshot_id);
     assert.deepEqual(warm.manifest, cold.manifest);
     assert.equal(warm.diagnostics.fingerprint_cache_eligible, true);
+    assert.equal(warm.diagnostics.fingerprint_cache_source, "memory");
+    assert.equal(warm.diagnostics.fingerprint_cache_persistent_loaded, false);
     assert.equal(warm.diagnostics.fingerprint_cache_source_entry_count, cold.diagnostics.hashed_artifact_count);
     assert.equal(warm.diagnostics.fingerprint_cache_hit_count, warm.diagnostics.hashed_artifact_count);
     assert.equal(warm.diagnostics.fingerprint_cache_miss_count, 0);
     assert.equal(warm.diagnostics.fingerprint_cache_reused_bytes, warm.diagnostics.hashed_bytes);
     assert.equal(warm.diagnostics.fingerprint_version_recheck_count, warm.diagnostics.hashed_artifact_count);
     assert.equal(warm.diagnostics.fingerprint_cache_published, true);
+  } finally { await harness.cleanup(); }
+}
+
+// Persistent L2 survives the loss of process-local L1 state and preserves exact identity.
+{
+  const harness = await gitHarness("snapshot-fingerprint-persistent", 30);
+  try {
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), "persistent fingerprint base\n", "utf8");
+    await Promise.all(Array.from({ length: 12 }, (_, index) => (
+      writeFile(
+        path.join(harness.repositoryRoot, "tests", `persistent-${String(index).padStart(2, "0")}.txt`),
+        `persistent artifact ${index}\n`,
+        "utf8",
+      )
+    )));
+    const context = await harness.contextResolver();
+    const cold = await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
+    assert.equal(cold.diagnostics.fingerprint_cache_persistent_published, true);
+
+    const persistentWarm = await computeWorkspaceSnapshot(context, {
+      allowMemoryFingerprintCache: false,
+      fingerprintRacyWindowMs: 0,
+    });
+    assert.equal(persistentWarm.workspace_snapshot_id, cold.workspace_snapshot_id);
+    assert.deepEqual(persistentWarm.manifest, cold.manifest);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_eligible, true);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_source, "persistent");
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_persistent_loaded, true);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_hit_count, persistentWarm.diagnostics.hashed_artifact_count);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_miss_count, 0);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_racy_miss_count, 0);
+    assert.equal(persistentWarm.diagnostics.fingerprint_cache_reused_bytes, persistentWarm.diagnostics.hashed_bytes);
+  } finally { await harness.cleanup(); }
+}
+
+// A recently published fingerprint remains a hint only and falls back to exact hashing inside the racy window.
+{
+  const harness = await gitHarness("snapshot-fingerprint-racy-window", 31);
+  try {
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), "racy fingerprint base\n", "utf8");
+    const context = await harness.contextResolver();
+    await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
+    const conservative = await computeWorkspaceSnapshot(context, {
+      allowMemoryFingerprintCache: false,
+      fingerprintRacyWindowMs: 60_000,
+    });
+    assert.equal(conservative.diagnostics.fingerprint_cache_source, "persistent");
+    assert.equal(conservative.diagnostics.fingerprint_cache_hit_count, 0);
+    assert.equal(conservative.diagnostics.fingerprint_cache_miss_count, 1);
+    assert.equal(conservative.diagnostics.fingerprint_cache_racy_miss_count, 1);
   } finally { await harness.cleanup(); }
 }
 
@@ -1118,9 +1175,10 @@ assert.equal(
     const basePath = path.join(harness.repositoryRoot, "base.txt");
     await writeFile(basePath, firstContent, "utf8");
     const context = await harness.contextResolver();
-    await computeWorkspaceSnapshot(context);
+    await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
     let mutated = false;
     const snapshot = await computeWorkspaceSnapshot(context, {
+      fingerprintRacyWindowMs: 0,
       afterArtifactCaptured: async ({ attempt, path: artifactPath, cache_reused: cacheReused }) => {
         if (attempt !== 1 || mutated || artifactPath !== "base.txt" || !cacheReused) return;
         mutated = true;
