@@ -50,6 +50,8 @@ export const DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS = 10_000;
 export const DEV_JOURNAL_LOCK_RETRY_MIN_MS = 25;
 export const DEV_JOURNAL_LOCK_RETRY_MAX_MS = 200;
 export const DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES = 8;
+export const DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS = 3;
+export const DEV_WORKSPACE_SNAPSHOT_RETRY_DELAY_MS = 25;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
@@ -64,6 +66,18 @@ const stageSet = new Set(DEV_JOURNAL_STAGES);
 const linkTypeSet = new Set(DEV_JOURNAL_LINK_TYPES);
 const terminalStageSet = new Set(["operation_completed", "operation_failed", "operation_recovered"]);
 const fixedGitExecutable = process.platform === "win32" ? "git.exe" : "git";
+const explicitWorkspaceMutationOperationTypes = new Set(["git_commit", "integration_apply"]);
+
+function eventRepresentsWorkspaceMutation(event) {
+  if (explicitWorkspaceMutationOperationTypes.has(event?.operation_type)) return true;
+  return Array.isArray(event?.targets) && event.targets.some((target) => (
+    target?.before !== null
+    && target?.before !== undefined
+    && target?.expected !== null
+    && target?.expected !== undefined
+    && canonicalJson(target.before) !== canonicalJson(target.expected)
+  ));
+}
 
 export const DEV_JOURNAL_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1"
   ? path.join(os.tmpdir(), `writer-workbench-operation-journal-test-${process.pid}`, "operation-journal")
@@ -483,6 +497,39 @@ export function createDevOperationJournalService({
   let reconciliationRequired = false;
   let lastHealthError = null;
   let explicitDegraded = false;
+  const workspaceMutationState = new Map();
+
+  function mutationStateFor(workspaceId) {
+    let state = workspaceMutationState.get(workspaceId);
+    if (!state) {
+      state = { generation: 0, active_operation_ids: new Set() };
+      workspaceMutationState.set(workspaceId, state);
+    }
+    return state;
+  }
+
+  function getMutationToken(workspaceId) {
+    if (!workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id is invalid.");
+    const state = workspaceMutationState.get(workspaceId);
+    return {
+      generation: state?.generation ?? 0,
+      active_mutation_count: state?.active_operation_ids.size ?? 0,
+    };
+  }
+
+  function noteMutationStarted(event) {
+    if (!eventRepresentsWorkspaceMutation(event)) return;
+    const state = mutationStateFor(event.workspace_id);
+    state.generation += 1;
+    state.active_operation_ids.add(event.operation_id);
+  }
+
+  function noteMutationTerminal(event) {
+    const state = workspaceMutationState.get(event.workspace_id);
+    if (!state?.active_operation_ids.has(event.operation_id)) return;
+    state.active_operation_ids.delete(event.operation_id);
+    state.generation += 1;
+  }
 
   function snapshotsEqual(left, right) {
     if (left.head.latest_sequence !== right.head.latest_sequence
@@ -778,6 +825,7 @@ export function createDevOperationJournalService({
       operation_id: operationId,
       stage: "operation_started",
     });
+    noteMutationStarted(event);
     return { operation_id: operationId, started_event_id: event.journal_event_id, started_sequence: event.sequence };
   }
 
@@ -802,6 +850,7 @@ export function createDevOperationJournalService({
       links: input.links ?? started.links,
       result: input.result ?? {},
     });
+    noteMutationTerminal(event);
     if (!explicitDegraded) {
       runtimeHealth = "healthy";
       reconciliationRequired = false;
@@ -1079,6 +1128,7 @@ export function createDevOperationJournalService({
     getOperation,
     listOperations,
     getProvenance,
+    getMutationToken,
     storageRoot,
   };
 }
@@ -1165,9 +1215,8 @@ function elapsedSnapshotMs(startedAt) {
   return Math.max(0, performance.now() - startedAt);
 }
 
-export async function computeWorkspaceSnapshot(context) {
-  if (!context?.root || !workspaceIdPattern.test(context.workspace_id)) throw new Error("A resolved workspace execution context is required for snapshot identity.");
-  const snapshotStartedAt = performance.now();
+async function computeWorkspaceSnapshotAttempt(context) {
+  const attemptStartedAt = performance.now();
   let gitHeadMs = 0;
   let gitStatusMs = 0;
   let head;
@@ -1184,27 +1233,30 @@ export async function computeWorkspaceSnapshot(context) {
     if (/^0{40}$/u.test(fixtureHead)) {
       const payload = { head: fixtureHead, manifest: [] };
       return {
-        workspace_snapshot_id: sha256Text(canonicalJson(payload)),
-        head: fixtureHead,
-        changed_artifact_count: 0,
-        manifest: [],
-        synthetic_test_fixture: true,
-        diagnostics: {
-          total_ms: elapsedSnapshotMs(snapshotStartedAt),
-          git_head_ms: gitHeadMs,
-          git_status_ms: gitStatusMs,
-          root_resolve_ms: 0,
-          artifact_capture_ms: 0,
-          manifest_finalize_ms: 0,
-          status_bytes: 0,
-          hashed_artifact_count: 0,
-          hashed_bytes: 0,
-          unhashed_file_count: 0,
-          directory_count: 0,
-          modified_count: 0,
-          added_count: 0,
-          deleted_count: 0,
-          untracked_count: 0,
+        raw_status: "",
+        snapshot: {
+          workspace_snapshot_id: sha256Text(canonicalJson(payload)),
+          head: fixtureHead,
+          changed_artifact_count: 0,
+          manifest: [],
+          synthetic_test_fixture: true,
+          diagnostics: {
+            total_ms: elapsedSnapshotMs(attemptStartedAt),
+            git_head_ms: gitHeadMs,
+            git_status_ms: gitStatusMs,
+            root_resolve_ms: 0,
+            artifact_capture_ms: 0,
+            manifest_finalize_ms: 0,
+            status_bytes: 0,
+            hashed_artifact_count: 0,
+            hashed_bytes: 0,
+            unhashed_file_count: 0,
+            directory_count: 0,
+            modified_count: 0,
+            added_count: 0,
+            deleted_count: 0,
+            untracked_count: 0,
+          },
         },
       };
     }
@@ -1264,28 +1316,143 @@ export async function computeWorkspaceSnapshot(context) {
   const workspaceSnapshotId = sha256Text(canonicalJson(payload));
   const manifestFinalizeMs = elapsedSnapshotMs(manifestFinalizeStartedAt);
   return {
-    workspace_snapshot_id: workspaceSnapshotId,
-    head,
-    changed_artifact_count: manifest.length,
-    manifest,
-    diagnostics: {
-      total_ms: elapsedSnapshotMs(snapshotStartedAt),
-      git_head_ms: gitHeadMs,
-      git_status_ms: gitStatusMs,
-      root_resolve_ms: rootResolveMs,
-      artifact_capture_ms: artifactCaptureMs,
-      manifest_finalize_ms: manifestFinalizeMs,
-      status_bytes: Buffer.byteLength(rawStatus, "utf8"),
-      hashed_artifact_count: hashedArtifactCount,
-      hashed_bytes: hashedBytes,
-      unhashed_file_count: unhashedFileCount,
-      directory_count: directoryCount,
-      modified_count: modifiedCount,
-      added_count: addedCount,
-      deleted_count: deletedCount,
-      untracked_count: untrackedCount,
+    raw_status: rawStatus,
+    snapshot: {
+      workspace_snapshot_id: workspaceSnapshotId,
+      head,
+      changed_artifact_count: manifest.length,
+      manifest,
+      diagnostics: {
+        total_ms: elapsedSnapshotMs(attemptStartedAt),
+        git_head_ms: gitHeadMs,
+        git_status_ms: gitStatusMs,
+        root_resolve_ms: rootResolveMs,
+        artifact_capture_ms: artifactCaptureMs,
+        manifest_finalize_ms: manifestFinalizeMs,
+        status_bytes: Buffer.byteLength(rawStatus, "utf8"),
+        hashed_artifact_count: hashedArtifactCount,
+        hashed_bytes: hashedBytes,
+        unhashed_file_count: unhashedFileCount,
+        directory_count: directoryCount,
+        modified_count: modifiedCount,
+        added_count: addedCount,
+        deleted_count: deletedCount,
+        untracked_count: untrackedCount,
+      },
     },
   };
+}
+
+function addSnapshotAttemptTimings(total, diagnostics) {
+  total.git_head_ms += diagnostics.git_head_ms ?? 0;
+  total.git_status_ms += diagnostics.git_status_ms ?? 0;
+  total.root_resolve_ms += diagnostics.root_resolve_ms ?? 0;
+  total.artifact_capture_ms += diagnostics.artifact_capture_ms ?? 0;
+  total.manifest_finalize_ms += diagnostics.manifest_finalize_ms ?? 0;
+}
+
+async function delaySnapshotRetry(attempt) {
+  const delayMs = DEV_WORKSPACE_SNAPSHOT_RETRY_DELAY_MS * attempt;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+export async function computeWorkspaceSnapshot(context, options = {}) {
+  if (!context?.root || !workspaceIdPattern.test(context.workspace_id)) throw new Error("A resolved workspace execution context is required for snapshot identity.");
+  if (!isObject(options)) throw new Error("Workspace snapshot options must be an object.");
+  if (options.afterArtifactCapture !== undefined && typeof options.afterArtifactCapture !== "function") {
+    throw new Error("afterArtifactCapture must be a function when provided.");
+  }
+
+  const snapshotStartedAt = performance.now();
+  const timingTotals = {
+    git_head_ms: 0,
+    git_status_ms: 0,
+    root_resolve_ms: 0,
+    artifact_capture_ms: 0,
+    manifest_finalize_ms: 0,
+    consistency_recheck_ms: 0,
+  };
+  let lastConsistencyReason = "unknown";
+
+  for (let attempt = 1; attempt <= DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS; attempt += 1) {
+    const generationStart = defaultJournal.getMutationToken(context.workspace_id);
+    if (generationStart.active_mutation_count > 0) {
+      lastConsistencyReason = "active_mutation_at_start";
+      if (attempt < DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS) {
+        await delaySnapshotRetry(attempt);
+        continue;
+      }
+      break;
+    }
+
+    const attempted = await computeWorkspaceSnapshotAttempt(context);
+    addSnapshotAttemptTimings(timingTotals, attempted.snapshot.diagnostics);
+    if (attempted.snapshot.synthetic_test_fixture === true) {
+      return {
+        ...attempted.snapshot,
+        diagnostics: {
+          ...attempted.snapshot.diagnostics,
+          total_ms: elapsedSnapshotMs(snapshotStartedAt),
+          consistency_attempt_count: attempt,
+          consistency_retry_count: attempt - 1,
+          consistency_recheck_ms: timingTotals.consistency_recheck_ms,
+          mutation_generation_start: generationStart.generation,
+          mutation_generation_end: generationStart.generation,
+        },
+      };
+    }
+
+    if (options.afterArtifactCapture) {
+      await options.afterArtifactCapture({
+        attempt,
+        head: attempted.snapshot.head,
+        manifest: attempted.snapshot.manifest,
+      });
+    }
+
+    const consistencyRecheckStartedAt = performance.now();
+    const recheckHead = (await runSnapshotGit(context.root, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
+    const recheckStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    timingTotals.consistency_recheck_ms += elapsedSnapshotMs(consistencyRecheckStartedAt);
+    const generationEnd = defaultJournal.getMutationToken(context.workspace_id);
+
+    let consistencyReason = null;
+    if (generationEnd.active_mutation_count > 0) consistencyReason = "active_mutation_at_end";
+    else if (generationEnd.generation !== generationStart.generation) consistencyReason = "mutation_generation_changed";
+    else if (recheckHead !== attempted.snapshot.head) consistencyReason = "head_changed";
+    else if (recheckStatus !== attempted.raw_status) consistencyReason = "status_changed";
+
+    if (consistencyReason === null) {
+      return {
+        ...attempted.snapshot,
+        diagnostics: {
+          ...attempted.snapshot.diagnostics,
+          total_ms: elapsedSnapshotMs(snapshotStartedAt),
+          git_head_ms: timingTotals.git_head_ms,
+          git_status_ms: timingTotals.git_status_ms,
+          root_resolve_ms: timingTotals.root_resolve_ms,
+          artifact_capture_ms: timingTotals.artifact_capture_ms,
+          manifest_finalize_ms: timingTotals.manifest_finalize_ms,
+          consistency_attempt_count: attempt,
+          consistency_retry_count: attempt - 1,
+          consistency_recheck_ms: timingTotals.consistency_recheck_ms,
+          mutation_generation_start: generationStart.generation,
+          mutation_generation_end: generationEnd.generation,
+        },
+      };
+    }
+
+    lastConsistencyReason = consistencyReason;
+    if (attempt < DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS) {
+      await delaySnapshotRetry(attempt);
+    }
+  }
+
+  const error = new Error(`Workspace snapshot remained unstable after ${DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS} attempts (${lastConsistencyReason}).`);
+  error.code = "WORKSPACE_SNAPSHOT_UNSTABLE";
+  error.consistency_reason = lastConsistencyReason;
+  error.consistency_attempt_count = DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS;
+  throw error;
 }
 
 export async function findLatestMatchingProducer({ workspaceId, artifactPath, sha256 }) {

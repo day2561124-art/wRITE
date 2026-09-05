@@ -376,6 +376,14 @@ try {
   assert(Number.isFinite(persistedFailure.snapshot_total_ms));
   assert(Number.isFinite(persistedFailure.snapshot_git_status_ms));
   assert(Number.isFinite(persistedFailure.snapshot_artifact_capture_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_consistency_recheck_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_consistency_attempt_count));
+  assert(Number.isFinite(persistedFailure.snapshot_consistency_retry_count));
+  assert(Number.isFinite(persistedFailure.snapshot_mutation_generation_start));
+  assert(Number.isFinite(persistedFailure.snapshot_mutation_generation_end));
+  assert(persistedFailure.snapshot_consistency_attempt_count >= 1);
+  assert(persistedFailure.snapshot_consistency_retry_count >= 0);
+  assert.equal(persistedFailure.snapshot_mutation_generation_start, persistedFailure.snapshot_mutation_generation_end);
   assert(Number.isFinite(persistedFailure.snapshot_hashed_artifact_count));
   assert(Number.isFinite(persistedFailure.snapshot_hashed_bytes));
   assert(Number.isFinite(persistedFailure.total_wall_clock_ms));
@@ -456,6 +464,10 @@ try {
   assert.equal(persistedConcurrent.timed_out, false);
   assert.match(persistedConcurrent.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
   assert(Number.isFinite(persistedConcurrent.snapshot_total_ms));
+  assert(Number.isFinite(persistedConcurrent.snapshot_consistency_recheck_ms));
+  assert(Number.isFinite(persistedConcurrent.snapshot_consistency_attempt_count));
+  assert(Number.isFinite(persistedConcurrent.snapshot_consistency_retry_count));
+  assert.equal(persistedConcurrent.snapshot_mutation_generation_start, persistedConcurrent.snapshot_mutation_generation_end);
   assert(Number.isFinite(persistedConcurrent.total_wall_clock_ms));
   assert(persistedConcurrent.total_wall_clock_ms >= persistedConcurrent.duration_ms);
 

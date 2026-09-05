@@ -16,7 +16,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   DEV_JOURNAL_STORAGE_ROOT,
+  beginDevJournalOperation,
   canonicalJson,
+  completeDevJournalOperation,
   computeWorkspaceSnapshot,
   createDevOperationJournalService,
   dev_workspace_get_operation,
@@ -821,6 +823,13 @@ assert.equal(
     assert.equal(testAOperation.events[1].result.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
     assert.equal(testAOperation.events[0].result.snapshot_hashed_artifact_count, 0);
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_total_ms));
+    assert.equal(testAOperation.events[0].result.snapshot_consistency_attempt_count, 1);
+    assert.equal(testAOperation.events[0].result.snapshot_consistency_retry_count, 0);
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_consistency_recheck_ms));
+    assert.equal(
+      testAOperation.events[0].result.snapshot_mutation_generation_start,
+      testAOperation.events[0].result.snapshot_mutation_generation_end,
+    );
     assert(Number.isFinite(testAOperation.events[1].result.total_wall_clock_ms));
     assert.equal(diffAOperation.events[1].result.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
     assert.equal(testBOperation.events[1].result.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
@@ -828,6 +837,59 @@ assert.equal(
     assert.equal(testBOperation.events[0].result.snapshot_hashed_bytes, snapshotB.diagnostics.hashed_bytes);
     assert(Number.isFinite(testBOperation.events[1].result.snapshot_artifact_capture_ms));
     assert.equal(diffBOperation.events[1].result.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
+  } finally { await harness.cleanup(); }
+}
+
+// Snapshot generation guard retries when content changes but porcelain status remains unchanged.
+{
+  const harness = await gitHarness("snapshot-generation", 23);
+  try {
+    const firstContent = "base dirty generation one\n";
+    const secondContent = "base dirty generation two\n";
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), firstContent, "utf8");
+    const context = await harness.contextResolver();
+    let hookCount = 0;
+    const snapshot = await computeWorkspaceSnapshot(context, {
+      afterArtifactCapture: async ({ attempt }) => {
+        if (attempt !== 1) return;
+        hookCount += 1;
+        const operation = await beginDevJournalOperation({
+          operation_type: "filesystem_patch",
+          tool_name: "dev_snapshot_generation_fixture",
+          workstream_id: harness.workstream_id,
+          workspace_id: harness.workspace_id,
+          targets: [{
+            path: "base.txt",
+            role: "modified_file",
+            before: fileState(firstContent),
+            expected: fileState(secondContent),
+          }],
+        });
+        await writeFile(path.join(harness.repositoryRoot, "base.txt"), secondContent, "utf8");
+        await completeDevJournalOperation(operation.operation_id, {
+          targets: [{
+            path: "base.txt",
+            role: "modified_file",
+            before: fileState(firstContent),
+            expected: fileState(secondContent),
+            after: fileState(secondContent),
+          }],
+          result: { changed: true },
+        });
+      },
+    });
+    assert.equal(hookCount, 1);
+    assert.equal(snapshot.diagnostics.consistency_attempt_count, 2);
+    assert.equal(snapshot.diagnostics.consistency_retry_count, 1);
+    assert(Number.isFinite(snapshot.diagnostics.consistency_recheck_ms));
+    assert.equal(snapshot.diagnostics.mutation_generation_start, snapshot.diagnostics.mutation_generation_end);
+    const baseEntry = snapshot.manifest.find((entry) => entry.path === "base.txt");
+    assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
+    assert.equal(baseEntry?.bytes, Buffer.byteLength(secondContent, "utf8"));
+    assert.equal(
+      snapshot.workspace_snapshot_id,
+      sha256(Buffer.from(canonicalJson({ head: snapshot.head, manifest: snapshot.manifest }), "utf8")),
+    );
   } finally { await harness.cleanup(); }
 }
 
