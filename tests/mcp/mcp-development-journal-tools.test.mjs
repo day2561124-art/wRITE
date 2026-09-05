@@ -7,6 +7,8 @@ import {
   readdir,
   rename,
   rm,
+  stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -830,6 +832,15 @@ assert.equal(
     assert.equal(testAOperation.events[0].result.snapshot_capture_concurrency_limit, DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY);
     assert.equal(testAOperation.events[0].result.snapshot_capture_peak_concurrency, 0);
     assert.equal(testAOperation.events[0].result.snapshot_capture_task_count, 0);
+    assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_eligible, "boolean");
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_source_entry_count));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_hit_count));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_miss_count));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_cache_reused_bytes));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_versioned_artifact_count));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_version_recheck_ms));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_version_recheck_count));
+    assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_published, "boolean");
     assert.equal(
       testAOperation.events[0].result.snapshot_mutation_generation_start,
       testAOperation.events[0].result.snapshot_mutation_generation_end,
@@ -989,6 +1000,141 @@ assert.equal(
     const baseEntry = snapshot.manifest.find((entry) => entry.path === "base.txt");
     assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
     assert.equal(baseEntry?.bytes, Buffer.byteLength(secondContent, "utf8"));
+    assert.equal(
+      snapshot.workspace_snapshot_id,
+      sha256(Buffer.from(canonicalJson({ head: snapshot.head, manifest: snapshot.manifest }), "utf8")),
+    );
+  } finally { await harness.cleanup(); }
+}
+
+// Incremental fingerprint reuse preserves exact identity and skips warm exact hashing.
+{
+  const harness = await gitHarness("snapshot-fingerprint-warm", 26);
+  try {
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), "fingerprint warm base\n", "utf8");
+    await Promise.all(Array.from({ length: 16 }, (_, index) => (
+      writeFile(
+        path.join(harness.repositoryRoot, "tests", `fingerprint-${String(index).padStart(2, "0")}.txt`),
+        `fingerprint artifact ${index}\n`,
+        "utf8",
+      )
+    )));
+    const context = await harness.contextResolver();
+    const cold = await computeWorkspaceSnapshot(context);
+    assert.equal(cold.diagnostics.fingerprint_cache_eligible, false);
+    assert.equal(cold.diagnostics.fingerprint_cache_hit_count, 0);
+    assert.equal(cold.diagnostics.fingerprint_cache_miss_count, cold.diagnostics.hashed_artifact_count);
+    assert.equal(cold.diagnostics.fingerprint_cache_published, true);
+    assert.equal(cold.diagnostics.fingerprint_version_recheck_count, cold.diagnostics.hashed_artifact_count);
+
+    const warm = await computeWorkspaceSnapshot(context);
+    assert.equal(warm.workspace_snapshot_id, cold.workspace_snapshot_id);
+    assert.deepEqual(warm.manifest, cold.manifest);
+    assert.equal(warm.diagnostics.fingerprint_cache_eligible, true);
+    assert.equal(warm.diagnostics.fingerprint_cache_source_entry_count, cold.diagnostics.hashed_artifact_count);
+    assert.equal(warm.diagnostics.fingerprint_cache_hit_count, warm.diagnostics.hashed_artifact_count);
+    assert.equal(warm.diagnostics.fingerprint_cache_miss_count, 0);
+    assert.equal(warm.diagnostics.fingerprint_cache_reused_bytes, warm.diagnostics.hashed_bytes);
+    assert.equal(warm.diagnostics.fingerprint_version_recheck_count, warm.diagnostics.hashed_artifact_count);
+    assert.equal(warm.diagnostics.fingerprint_cache_published, true);
+  } finally { await harness.cleanup(); }
+}
+
+// Same-size external mutation with restored mtime cannot reuse a stale fingerprint.
+{
+  const harness = await gitHarness("snapshot-fingerprint-strong-token", 27);
+  try {
+    const firstContent = "fingerprint value AAAA\n";
+    const secondContent = "fingerprint value BBBB\n";
+    assert.equal(Buffer.byteLength(firstContent), Buffer.byteLength(secondContent));
+    const basePath = path.join(harness.repositoryRoot, "base.txt");
+    await writeFile(basePath, firstContent, "utf8");
+    const context = await harness.contextResolver();
+    const cold = await computeWorkspaceSnapshot(context);
+    const before = await stat(basePath);
+    await writeFile(basePath, secondContent, "utf8");
+    await utimes(basePath, before.atime, before.mtime);
+
+    const changed = await computeWorkspaceSnapshot(context);
+    assert.equal(changed.diagnostics.fingerprint_cache_eligible, true);
+    assert.equal(changed.diagnostics.fingerprint_cache_hit_count, 0);
+    assert.equal(changed.diagnostics.fingerprint_cache_miss_count, 1);
+    assert.notEqual(changed.workspace_snapshot_id, cold.workspace_snapshot_id);
+    const baseEntry = changed.manifest.find((entry) => entry.path === "base.txt");
+    assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
+    assert.equal(baseEntry?.bytes, Buffer.byteLength(secondContent));
+  } finally { await harness.cleanup(); }
+}
+
+// Controlled workspace generation changes invalidate the prior cache conservatively.
+{
+  const harness = await gitHarness("snapshot-fingerprint-generation", 28);
+  try {
+    const firstContent = "fingerprint generation one\n";
+    const secondContent = "fingerprint generation two\n";
+    const basePath = path.join(harness.repositoryRoot, "base.txt");
+    await writeFile(basePath, firstContent, "utf8");
+    const context = await harness.contextResolver();
+    await computeWorkspaceSnapshot(context);
+    const operation = await beginDevJournalOperation({
+      operation_type: "filesystem_patch",
+      tool_name: "dev_snapshot_fingerprint_generation_fixture",
+      workstream_id: harness.workstream_id,
+      workspace_id: harness.workspace_id,
+      targets: [{
+        path: "base.txt",
+        role: "modified_file",
+        before: fileState(firstContent),
+        expected: fileState(secondContent),
+      }],
+    });
+    await writeFile(basePath, secondContent, "utf8");
+    await completeDevJournalOperation(operation.operation_id, {
+      targets: [{
+        path: "base.txt",
+        role: "modified_file",
+        before: fileState(firstContent),
+        expected: fileState(secondContent),
+        after: fileState(secondContent),
+      }],
+      result: { changed: true },
+    });
+    const changed = await computeWorkspaceSnapshot(context);
+    assert.equal(changed.diagnostics.fingerprint_cache_eligible, false);
+    assert.equal(changed.diagnostics.fingerprint_cache_hit_count, 0);
+    assert.equal(changed.diagnostics.fingerprint_cache_miss_count, 1);
+    const baseEntry = changed.manifest.find((entry) => entry.path === "base.txt");
+    assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
+  } finally { await harness.cleanup(); }
+}
+
+// A mutation after a warm cache hit is caught by the final version-token recheck and retried.
+{
+  const harness = await gitHarness("snapshot-fingerprint-recheck", 29);
+  try {
+    const firstContent = "fingerprint recheck AAAA\n";
+    const secondContent = "fingerprint recheck BBBB\n";
+    assert.equal(Buffer.byteLength(firstContent), Buffer.byteLength(secondContent));
+    const basePath = path.join(harness.repositoryRoot, "base.txt");
+    await writeFile(basePath, firstContent, "utf8");
+    const context = await harness.contextResolver();
+    await computeWorkspaceSnapshot(context);
+    let mutated = false;
+    const snapshot = await computeWorkspaceSnapshot(context, {
+      afterArtifactCaptured: async ({ attempt, path: artifactPath, cache_reused: cacheReused }) => {
+        if (attempt !== 1 || mutated || artifactPath !== "base.txt" || !cacheReused) return;
+        mutated = true;
+        const before = await stat(basePath);
+        await writeFile(basePath, secondContent, "utf8");
+        await utimes(basePath, before.atime, before.mtime);
+      },
+    });
+    assert.equal(mutated, true);
+    assert.equal(snapshot.diagnostics.consistency_attempt_count, 2);
+    assert.equal(snapshot.diagnostics.consistency_retry_count, 1);
+    assert(snapshot.diagnostics.fingerprint_version_recheck_ms >= 0);
+    const baseEntry = snapshot.manifest.find((entry) => entry.path === "base.txt");
+    assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
     assert.equal(
       snapshot.workspace_snapshot_id,
       sha256(Buffer.from(canonicalJson({ head: snapshot.head, manifest: snapshot.manifest }), "utf8")),

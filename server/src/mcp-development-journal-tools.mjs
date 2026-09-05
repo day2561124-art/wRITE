@@ -54,6 +54,8 @@ export const DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS = 3;
 export const DEV_WORKSPACE_SNAPSHOT_RETRY_DELAY_MS = 25;
 export const DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY = 4;
 export const DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY = 16;
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_WORKSPACES = 32;
+export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS = 20_000;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
@@ -1136,6 +1138,45 @@ export function createDevOperationJournalService({
 }
 
 const defaultJournal = createDevOperationJournalService();
+const snapshotFingerprintCacheByWorkspace = new Map();
+
+function snapshotArtifactVersionToken(info) {
+  if (!info || typeof info !== "object") return null;
+  const keys = ["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs", "birthtimeNs"];
+  if (keys.some((key) => typeof info[key] !== "bigint")) return null;
+  return keys.map((key) => `${key}:${info[key].toString()}`).join("|");
+}
+
+function getSnapshotFingerprintCache(workspaceId, head, generation) {
+  const cached = snapshotFingerprintCacheByWorkspace.get(workspaceId);
+  if (!cached || cached.head !== head || cached.generation !== generation) return null;
+  snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+  snapshotFingerprintCacheByWorkspace.set(workspaceId, cached);
+  return cached;
+}
+
+function publishSnapshotFingerprintCache(workspaceId, head, generation, entries) {
+  if (!(entries instanceof Map) || entries.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_ARTIFACTS) {
+    snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+    return false;
+  }
+  snapshotFingerprintCacheByWorkspace.delete(workspaceId);
+  snapshotFingerprintCacheByWorkspace.set(workspaceId, { head, generation, entries });
+  while (snapshotFingerprintCacheByWorkspace.size > DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_MAX_WORKSPACES) {
+    const oldestWorkspaceId = snapshotFingerprintCacheByWorkspace.keys().next().value;
+    snapshotFingerprintCacheByWorkspace.delete(oldestWorkspaceId);
+  }
+  return true;
+}
+
+function workspaceSnapshotUnstableError(reason, pathValue = null) {
+  const suffix = pathValue ? ` (${pathValue})` : "";
+  const error = new Error(`Workspace snapshot artifact changed during capture: ${reason}${suffix}.`);
+  error.code = "WORKSPACE_SNAPSHOT_ARTIFACT_CHANGED";
+  error.consistency_reason = reason;
+  error.artifact_path = pathValue;
+  return error;
+}
 
 export async function initializeDevJournalRuntime() {
   try {
@@ -1181,6 +1222,117 @@ async function captureDevArtifactStateWithinRoot(repositoryRoot, realRepositoryR
     sha256: createHash("sha256").update(content).digest("hex"),
     bytes: content.length,
   };
+}
+
+async function captureSnapshotArtifactStateWithinRoot(
+  repositoryRoot,
+  realRepositoryRoot,
+  relativePath,
+  cachedEntry = null,
+) {
+  const target = path.resolve(repositoryRoot, relativePath);
+  if (!isInside(repositoryRoot, target)) throw new Error("Artifact path escapes the workspace root.");
+
+  let info;
+  try {
+    info = await lstat(target, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") throw workspaceSnapshotUnstableError("artifact_missing_during_capture", relativePath);
+    throw error;
+  }
+  if (info.isSymbolicLink()) throw new Error("Artifact provenance refuses symbolic links or junctions.");
+  const realTarget = await realpath(target);
+  if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
+  if (info.isDirectory()) {
+    return {
+      artifact: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
+      version_token: null,
+      cache_reused: false,
+      exact_hashed: false,
+    };
+  }
+  if (!info.isFile()) throw new Error("Artifact provenance supports regular files and directories only.");
+
+  const bytes = Number(info.size);
+  if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("Artifact size exceeds the supported numeric range.");
+  if (info.size > BigInt(DEV_JOURNAL_ARTIFACT_MAX_BYTES)) {
+    return {
+      artifact: { exists: true, artifact_type: "file", sha256: null, bytes },
+      version_token: snapshotArtifactVersionToken(info),
+      cache_reused: false,
+      exact_hashed: false,
+    };
+  }
+
+  const versionToken = snapshotArtifactVersionToken(info);
+  if (
+    versionToken !== null
+    && cachedEntry?.state
+    && cachedEntry.version_token === versionToken
+    && cachedEntry.artifact?.artifact_type === "file"
+    && sha256Pattern.test(String(cachedEntry.artifact.sha256 ?? ""))
+    && cachedEntry.artifact.bytes === bytes
+  ) {
+    return {
+      artifact: { ...cachedEntry.artifact },
+      version_token: versionToken,
+      cache_reused: true,
+      exact_hashed: false,
+    };
+  }
+
+  const content = await readFile(target);
+  let postInfo;
+  try {
+    postInfo = await lstat(target, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") throw workspaceSnapshotUnstableError("artifact_missing_after_hash", relativePath);
+    throw error;
+  }
+  const postVersionToken = snapshotArtifactVersionToken(postInfo);
+  if (
+    postInfo.isSymbolicLink()
+    || !postInfo.isFile()
+    || versionToken === null
+    || postVersionToken === null
+    || postVersionToken !== versionToken
+    || content.length !== bytes
+  ) {
+    throw workspaceSnapshotUnstableError("artifact_version_changed_during_hash", relativePath);
+  }
+
+  return {
+    artifact: {
+      exists: true,
+      artifact_type: "file",
+      sha256: createHash("sha256").update(content).digest("hex"),
+      bytes: content.length,
+    },
+    version_token: versionToken,
+    cache_reused: false,
+    exact_hashed: true,
+  };
+}
+
+async function recheckSnapshotArtifactVersionWithinRoot(repositoryRoot, realRepositoryRoot, entry) {
+  if (!entry?.version_token) return true;
+  const target = path.resolve(repositoryRoot, entry.path);
+  if (!isInside(repositoryRoot, target)) return false;
+  let info;
+  try {
+    info = await lstat(target, { bigint: true });
+  } catch {
+    return false;
+  }
+  if (info.isSymbolicLink() || !info.isFile()) return false;
+  let realTarget;
+  try {
+    realTarget = await realpath(target);
+  } catch {
+    return false;
+  }
+  if (!isInside(realRepositoryRoot, realTarget)) return false;
+  return snapshotArtifactVersionToken(info) === entry.version_token;
 }
 
 export async function captureDevArtifactState(repositoryRoot, relativePath) {
@@ -1256,6 +1408,7 @@ async function mapSnapshotArtifactsBounded(items, concurrency, mapper) {
 async function computeWorkspaceSnapshotAttempt(context, {
   captureConcurrency,
   attempt,
+  generation,
   afterArtifactCaptured,
 }) {
   const attemptStartedAt = performance.now();
@@ -1291,6 +1444,15 @@ async function computeWorkspaceSnapshotAttempt(context, {
             capture_concurrency_limit: captureConcurrency,
             capture_peak_concurrency: 0,
             capture_task_count: 0,
+            fingerprint_cache_eligible: false,
+            fingerprint_cache_source_entry_count: 0,
+            fingerprint_cache_hit_count: 0,
+            fingerprint_cache_miss_count: 0,
+            fingerprint_cache_reused_bytes: 0,
+            fingerprint_versioned_artifact_count: 0,
+            fingerprint_version_recheck_ms: 0,
+            fingerprint_version_recheck_count: 0,
+            fingerprint_cache_published: false,
             manifest_finalize_ms: 0,
             status_bytes: 0,
             hashed_artifact_count: 0,
@@ -1340,23 +1502,47 @@ async function computeWorkspaceSnapshotAttempt(context, {
   }
 
   const captureEntries = entries.filter((entry) => entry.state !== "deleted");
+  const fingerprintCache = getSnapshotFingerprintCache(context.workspace_id, head, generation);
+  const fingerprintEntries = new Map();
+  const artifactVersionChecks = [];
+  let fingerprintCacheHitCount = 0;
+  let fingerprintCacheMissCount = 0;
+  let fingerprintCacheReusedBytes = 0;
   const artifactsByStatusIndex = new Array(entries.length);
   const artifactCaptureStartedAt = performance.now();
   const capture = await mapSnapshotArtifactsBounded(
     captureEntries,
     captureConcurrency,
     async (entry) => {
-      const artifact = await captureDevArtifactStateWithinRoot(
+      const cachedEntry = fingerprintCache?.entries.get(entry.path);
+      const captured = await captureSnapshotArtifactStateWithinRoot(
         resolvedRepositoryRoot,
         realRepositoryRoot,
         entry.path,
+        cachedEntry?.state === entry.state ? cachedEntry : null,
       );
+      const artifact = captured.artifact;
+      if (captured.cache_reused) {
+        fingerprintCacheHitCount += 1;
+        fingerprintCacheReusedBytes += artifact.bytes ?? 0;
+      } else if (captured.exact_hashed) {
+        fingerprintCacheMissCount += 1;
+      }
+      if (captured.version_token !== null && artifact.sha256 !== null) {
+        fingerprintEntries.set(entry.path, {
+          state: entry.state,
+          version_token: captured.version_token,
+          artifact: { ...artifact },
+        });
+        artifactVersionChecks.push({ path: entry.path, version_token: captured.version_token });
+      }
       if (afterArtifactCaptured) {
         await afterArtifactCaptured({
           attempt,
           path: entry.path,
           state: entry.state,
           artifact,
+          cache_reused: captured.cache_reused,
         });
       }
       return { statusIndex: entry.statusIndex, artifact };
@@ -1395,6 +1581,10 @@ async function computeWorkspaceSnapshotAttempt(context, {
   const manifestFinalizeMs = elapsedSnapshotMs(manifestFinalizeStartedAt);
   return {
     raw_status: rawStatus,
+    fingerprint_entries: fingerprintEntries,
+    artifact_version_checks: artifactVersionChecks,
+    resolved_repository_root: resolvedRepositoryRoot,
+    real_repository_root: realRepositoryRoot,
     snapshot: {
       workspace_snapshot_id: workspaceSnapshotId,
       head,
@@ -1409,6 +1599,12 @@ async function computeWorkspaceSnapshotAttempt(context, {
         capture_concurrency_limit: captureConcurrency,
         capture_peak_concurrency: capture.peak_concurrency,
         capture_task_count: captureEntries.length,
+        fingerprint_cache_eligible: fingerprintCache !== null,
+        fingerprint_cache_source_entry_count: fingerprintCache?.entries.size ?? 0,
+        fingerprint_cache_hit_count: fingerprintCacheHitCount,
+        fingerprint_cache_miss_count: fingerprintCacheMissCount,
+        fingerprint_cache_reused_bytes: fingerprintCacheReusedBytes,
+        fingerprint_versioned_artifact_count: artifactVersionChecks.length,
         manifest_finalize_ms: manifestFinalizeMs,
         status_bytes: Buffer.byteLength(rawStatus, "utf8"),
         hashed_artifact_count: hashedArtifactCount,
@@ -1463,6 +1659,8 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
     artifact_capture_ms: 0,
     manifest_finalize_ms: 0,
     consistency_recheck_ms: 0,
+    fingerprint_version_recheck_ms: 0,
+    fingerprint_version_recheck_count: 0,
   };
   let lastConsistencyReason = "unknown";
 
@@ -1477,11 +1675,23 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
       break;
     }
 
-    const attempted = await computeWorkspaceSnapshotAttempt(context, {
-      captureConcurrency,
-      attempt,
-      afterArtifactCaptured: options.afterArtifactCaptured,
-    });
+    let attempted;
+    try {
+      attempted = await computeWorkspaceSnapshotAttempt(context, {
+        captureConcurrency,
+        attempt,
+        generation: generationStart.generation,
+        afterArtifactCaptured: options.afterArtifactCaptured,
+      });
+    } catch (error) {
+      if (error?.code !== "WORKSPACE_SNAPSHOT_ARTIFACT_CHANGED") throw error;
+      lastConsistencyReason = error.consistency_reason ?? "artifact_changed_during_capture";
+      if (attempt < DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS) {
+        await delaySnapshotRetry(attempt);
+        continue;
+      }
+      break;
+    }
     addSnapshotAttemptTimings(timingTotals, attempted.snapshot.diagnostics);
     if (attempted.snapshot.synthetic_test_fixture === true) {
       return {
@@ -1510,15 +1720,39 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
     const recheckHead = (await runSnapshotGit(context.root, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
     const recheckStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
     timingTotals.consistency_recheck_ms += elapsedSnapshotMs(consistencyRecheckStartedAt);
-    const generationEnd = defaultJournal.getMutationToken(context.workspace_id);
 
+    let artifactVersionsStable = true;
+    if (recheckHead === attempted.snapshot.head && recheckStatus === attempted.raw_status) {
+      const versionRecheckStartedAt = performance.now();
+      const versionRecheck = await mapSnapshotArtifactsBounded(
+        attempted.artifact_version_checks,
+        captureConcurrency,
+        (entry) => recheckSnapshotArtifactVersionWithinRoot(
+          attempted.resolved_repository_root,
+          attempted.real_repository_root,
+          entry,
+        ),
+      );
+      timingTotals.fingerprint_version_recheck_ms += elapsedSnapshotMs(versionRecheckStartedAt);
+      timingTotals.fingerprint_version_recheck_count += attempted.artifact_version_checks.length;
+      artifactVersionsStable = versionRecheck.results.every(Boolean);
+    }
+
+    const generationEnd = defaultJournal.getMutationToken(context.workspace_id);
     let consistencyReason = null;
     if (generationEnd.active_mutation_count > 0) consistencyReason = "active_mutation_at_end";
     else if (generationEnd.generation !== generationStart.generation) consistencyReason = "mutation_generation_changed";
     else if (recheckHead !== attempted.snapshot.head) consistencyReason = "head_changed";
     else if (recheckStatus !== attempted.raw_status) consistencyReason = "status_changed";
+    else if (!artifactVersionsStable) consistencyReason = "artifact_version_changed";
 
     if (consistencyReason === null) {
+      const fingerprintCachePublished = publishSnapshotFingerprintCache(
+        context.workspace_id,
+        attempted.snapshot.head,
+        generationEnd.generation,
+        attempted.fingerprint_entries,
+      );
       return {
         ...attempted.snapshot,
         diagnostics: {
@@ -1534,6 +1768,9 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
           consistency_recheck_ms: timingTotals.consistency_recheck_ms,
           mutation_generation_start: generationStart.generation,
           mutation_generation_end: generationEnd.generation,
+          fingerprint_version_recheck_ms: timingTotals.fingerprint_version_recheck_ms,
+          fingerprint_version_recheck_count: timingTotals.fingerprint_version_recheck_count,
+          fingerprint_cache_published: fingerprintCachePublished,
         },
       };
     }
