@@ -1832,6 +1832,11 @@ function emptySnapshotAuthorityTelemetry(available) {
     authority_epoch: null,
     authority_workspace_epoch: null,
     authority_query_ms: 0,
+    authority_sync_attempted: false,
+    authority_sync_started: false,
+    authority_sync_completed: false,
+    authority_sync_reason: available ? "not_attempted" : "parent_authority_unavailable",
+    authority_sync_change_epoch: null,
     authority_published: false,
     authority_publish_ms: 0,
   };
@@ -1943,7 +1948,49 @@ async function tryReuseWorkspaceSnapshotFromAuthority(context, options, captureC
   };
 }
 
-async function publishWorkspaceSnapshotToAuthority(context, snapshot, options, telemetry) {
+async function beginWorkspaceSnapshotAuthoritySynchronization(context, options, telemetry) {
+  const client = snapshotAuthorityClientFor(options);
+  if (!client || options.allowParentSnapshotAuthority === false || typeof client.beginSynchronization !== "function") {
+    telemetry.authority_sync_reason = client ? "change_clock_sync_unavailable" : "parent_authority_unavailable";
+    return { token: null, telemetry };
+  }
+  if (options.afterArtifactCapture || options.afterArtifactCaptured) {
+    telemetry.authority_sync_reason = "deterministic_capture_hook_present";
+    return { token: null, telemetry };
+  }
+  telemetry.authority_sync_attempted = true;
+  let response;
+  try {
+    response = await client.beginSynchronization(context.workspace_id);
+  } catch {
+    telemetry.authority_sync_reason = "parent_authority_unavailable";
+    return { token: null, telemetry };
+  }
+  telemetry.authority_watch_state = typeof response?.watch_state === "string"
+    ? response.watch_state
+    : telemetry.authority_watch_state;
+  telemetry.authority_epoch = Number.isSafeInteger(response?.authority_epoch)
+    ? response.authority_epoch
+    : telemetry.authority_epoch;
+  telemetry.authority_workspace_epoch = Number.isSafeInteger(response?.workspace_epoch)
+    ? response.workspace_epoch
+    : telemetry.authority_workspace_epoch;
+  telemetry.authority_sync_started = response?.started === true && response?.token !== null;
+  telemetry.authority_sync_reason = telemetry.authority_sync_started
+    ? null
+    : typeof response?.reason === "string"
+      ? response.reason.slice(0, 160)
+      : "change_clock_sync_not_started";
+  telemetry.authority_sync_change_epoch = Number.isSafeInteger(response?.token?.change_epoch)
+    ? response.token.change_epoch
+    : null;
+  return {
+    token: telemetry.authority_sync_started ? structuredClone(response.token) : null,
+    telemetry,
+  };
+}
+
+async function publishWorkspaceSnapshotToAuthority(context, snapshot, options, telemetry, synchronizationToken = null) {
   const client = snapshotAuthorityClientFor(options);
   if (!client || options.allowParentSnapshotAuthority === false || snapshot.synthetic_test_fixture === true) {
     return telemetry;
@@ -1955,7 +2002,7 @@ async function publishWorkspaceSnapshotToAuthority(context, snapshot, options, t
       head: snapshot.head,
       changed_artifact_count: snapshot.changed_artifact_count,
       manifest: snapshot.manifest,
-    });
+    }, synchronizationToken);
     telemetry.authority_published = result?.stored === true;
     telemetry.authority_watch_state = typeof result?.watch_state === "string"
       ? result.watch_state
@@ -1966,6 +2013,14 @@ async function publishWorkspaceSnapshotToAuthority(context, snapshot, options, t
     telemetry.authority_workspace_epoch = Number.isSafeInteger(result?.workspace_epoch)
       ? result.workspace_epoch
       : telemetry.authority_workspace_epoch;
+    telemetry.authority_sync_completed = result?.synchronization_completed === true;
+    if (telemetry.authority_sync_started) {
+      telemetry.authority_sync_reason = telemetry.authority_sync_completed
+        ? null
+        : typeof result?.synchronization_reason === "string"
+          ? result.synchronization_reason.slice(0, 160)
+          : "change_clock_sync_not_completed";
+    }
   } catch {
     telemetry.authority_published = false;
   }
@@ -2018,6 +2073,12 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
     };
   }
   const authorityTelemetry = authorityAttempt.telemetry;
+  const authoritySynchronization = await beginWorkspaceSnapshotAuthoritySynchronization(
+    context,
+    options,
+    authorityTelemetry,
+  );
+  const authoritySynchronizationToken = authoritySynchronization.token;
 
   const timingTotals = {
     git_head_ms: 0,
@@ -2149,6 +2210,7 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
         exactSnapshot,
         options,
         authorityTelemetry,
+        authoritySynchronizationToken,
       );
       return {
         ...exactSnapshot,

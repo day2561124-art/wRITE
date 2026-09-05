@@ -5,6 +5,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
+import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
 import fs from 'fs';
 import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
@@ -285,7 +286,10 @@ const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
-const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority();
+const workspaceChangeClock = createWorkspaceChangeClock();
+const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority({
+  change_clock: workspaceChangeClock,
+});
 
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
 const integrationControl = createParentIntegrationControl({ profile: activeToolProfileName });
@@ -451,6 +455,15 @@ async function handleDevMcpReload(entry, message) {
         workspace_snapshot_authority_watch_state: workspaceSnapshotAuthority.status({
           workspace_id: 'dev_workspace_shared_repository_v1',
         }).watch_state,
+        workspace_change_clock_provider_ready: workspaceChangeClock.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).provider_ready,
+        workspace_change_clock_fresh_instance: workspaceChangeClock.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).fresh_instance,
+        workspace_change_clock_change_epoch: workspaceChangeClock.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).change_epoch,
         child_ephemeral_state_reset: true,
       }),
       'transport.send(dev_mcp_reload-success)',

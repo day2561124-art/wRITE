@@ -144,6 +144,14 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
     throw new Error("max_workspaces must be an integer between 1 and 1024.");
   }
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
+  const changeClock = options.change_clock ?? null;
+  if (changeClock !== null) {
+    for (const method of ["status", "beginSynchronization", "completeSynchronization", "noteChange"]) {
+      if (typeof changeClock?.[method] !== "function") {
+        throw new Error(`change_clock must expose ${method}().`);
+      }
+    }
+  }
   const states = new Map();
   let authorityEpoch = 0;
 
@@ -157,6 +165,8 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
         workspace_epoch: 0,
         snapshot: null,
         snapshot_epoch: null,
+        snapshot_change_epoch: null,
+        snapshot_watch_instance_id: null,
         published_at_ms: null,
         source_pid: null,
         invalidation_reason: "authority_initialized_without_watcher",
@@ -177,23 +187,44 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
     }
   }
 
+  function watchStatus(state) {
+    if (changeClock) return changeClock.status({ workspace_id: state.workspace_id });
+    return {
+      watch_state: state.watch_state,
+      provider_instance_id: null,
+      watch_instance_id: null,
+      change_epoch: state.workspace_epoch,
+      baseline_epoch: state.watch_state === "healthy" ? state.workspace_epoch : null,
+      synchronized: state.watch_state === "healthy",
+      fresh_instance: false,
+      last_reason: state.invalidation_reason,
+    };
+  }
+
   function invalidate({ workspace_id, reason = "workspace_invalidated" } = {}) {
     const state = stateFor(workspace_id);
     authorityEpoch += 1;
     state.workspace_epoch += 1;
     state.invalidation_reason = String(reason || "workspace_invalidated").slice(0, 160);
+    if (changeClock) {
+      changeClock.noteChange({ workspace_id: state.workspace_id, reason: state.invalidation_reason });
+    }
+    const watch = watchStatus(state);
     return {
       schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
       workspace_id: state.workspace_id,
       authority_epoch: authorityEpoch,
       workspace_epoch: state.workspace_epoch,
-      watch_state: state.watch_state,
+      watch_state: watch.watch_state,
+      change_epoch: watch.change_epoch,
+      watch_instance_id: watch.watch_instance_id,
       reusable: false,
       reason: state.invalidation_reason,
     };
   }
 
   function setWatchState({ workspace_id, watch_state, reason = null } = {}) {
+    if (changeClock) throw new Error("setWatchState is unavailable when a change_clock owns watcher state.");
     if (!watchStateSet.has(watch_state)) throw new Error("watch_state is invalid.");
     const state = stateFor(workspace_id);
     if (state.watch_state !== watch_state) {
@@ -207,23 +238,74 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
     return status({ workspace_id: state.workspace_id });
   }
 
-  function publishExact({ workspace_id, snapshot, source_pid = null } = {}) {
+  function beginSynchronization({ workspace_id } = {}) {
+    const state = stateFor(workspace_id);
+    if (!changeClock) {
+      return {
+        schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
+        workspace_id: state.workspace_id,
+        authority_epoch: authorityEpoch,
+        workspace_epoch: state.workspace_epoch,
+        watch_state: state.watch_state,
+        started: false,
+        reason: "change_clock_provider_unavailable",
+        token: null,
+      };
+    }
+    const result = changeClock.beginSynchronization({ workspace_id: state.workspace_id });
+    return {
+      schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
+      authority_epoch: authorityEpoch,
+      workspace_epoch: state.workspace_epoch,
+      ...result,
+    };
+  }
+
+  function publishExact({ workspace_id, snapshot, source_pid = null, synchronization_token = null } = {}) {
     const state = stateFor(workspace_id);
     const exact = normalizeExactWorkspaceSnapshot(snapshot);
     state.snapshot = exact;
     state.snapshot_epoch = state.workspace_epoch;
+    state.snapshot_change_epoch = null;
+    state.snapshot_watch_instance_id = null;
     state.published_at_ms = clock();
     state.source_pid = Number.isSafeInteger(source_pid) && source_pid > 0 ? source_pid : null;
     state.invalidation_reason = null;
+
+    let synchronization = null;
+    if (changeClock && synchronization_token) {
+      synchronization = changeClock.completeSynchronization({
+        workspace_id: state.workspace_id,
+        token: synchronization_token,
+      });
+      if (synchronization?.completed === true) {
+        state.snapshot_change_epoch = synchronization.change_epoch;
+        state.snapshot_watch_instance_id = synchronization.watch_instance_id;
+      }
+    }
+    const watch = watchStatus(state);
+    const reusable = changeClock
+      ? Boolean(
+        synchronization?.completed === true
+        && watch.watch_state === "healthy"
+        && watch.synchronized === true
+        && state.snapshot_change_epoch === watch.change_epoch
+        && state.snapshot_watch_instance_id === watch.watch_instance_id
+      )
+      : state.watch_state === "healthy";
     authorityEpoch += 1;
     return {
       schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
       workspace_id: state.workspace_id,
       authority_epoch: authorityEpoch,
       workspace_epoch: state.workspace_epoch,
-      watch_state: state.watch_state,
+      watch_state: watch.watch_state,
+      change_epoch: watch.change_epoch,
+      watch_instance_id: watch.watch_instance_id,
       stored: true,
-      reusable: state.watch_state === "healthy",
+      reusable,
+      synchronization_completed: synchronization?.completed === true,
+      synchronization_reason: synchronization?.reason ?? null,
       workspace_snapshot_id: exact.workspace_snapshot_id,
       head: exact.head,
       changed_artifact_count: exact.changed_artifact_count,
@@ -233,18 +315,31 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
 
   function tryReuse({ workspace_id } = {}) {
     const state = stateFor(workspace_id);
+    const watch = watchStatus(state);
     const base = {
       schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
       workspace_id: state.workspace_id,
       authority_epoch: authorityEpoch,
       workspace_epoch: state.workspace_epoch,
-      watch_state: state.watch_state,
+      watch_state: watch.watch_state,
+      provider_instance_id: watch.provider_instance_id ?? null,
+      watch_instance_id: watch.watch_instance_id ?? null,
+      change_epoch: Number.isSafeInteger(watch.change_epoch) ? watch.change_epoch : null,
+      baseline_epoch: Number.isSafeInteger(watch.baseline_epoch) ? watch.baseline_epoch : null,
+      fresh_instance: watch.fresh_instance === true,
     };
-    if (state.watch_state !== "healthy") {
-      return { ...base, hit: false, reason: `watcher_${state.watch_state}` };
+    if (watch.watch_state !== "healthy" || watch.synchronized !== true) {
+      return { ...base, hit: false, reason: `watcher_${watch.watch_state}` };
     }
     if (!state.snapshot) return { ...base, hit: false, reason: "snapshot_not_published" };
-    if (state.snapshot_epoch !== state.workspace_epoch) {
+    if (changeClock) {
+      if (
+        state.snapshot_change_epoch !== watch.change_epoch
+        || state.snapshot_watch_instance_id !== watch.watch_instance_id
+      ) {
+        return { ...base, hit: false, reason: state.invalidation_reason ?? "change_clock_advanced" };
+      }
+    } else if (state.snapshot_epoch !== state.workspace_epoch) {
       return { ...base, hit: false, reason: state.invalidation_reason ?? "snapshot_invalidated" };
     }
     return {
@@ -259,24 +354,37 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
 
   function status({ workspace_id } = {}) {
     const state = stateFor(workspace_id);
+    const watch = watchStatus(state);
+    const snapshotReusable = Boolean(
+      state.snapshot
+      && watch.watch_state === "healthy"
+      && watch.synchronized === true
+      && (changeClock
+        ? state.snapshot_change_epoch === watch.change_epoch
+          && state.snapshot_watch_instance_id === watch.watch_instance_id
+        : state.snapshot_epoch === state.workspace_epoch)
+    );
     return {
       schema_version: WORKSPACE_SNAPSHOT_AUTHORITY_SCHEMA_VERSION,
       ownership: "mcp_http_parent_process_ephemeral_memory",
       workspace_id: state.workspace_id,
       authority_epoch: authorityEpoch,
       workspace_epoch: state.workspace_epoch,
-      watch_state: state.watch_state,
+      watch_state: watch.watch_state,
+      provider_instance_id: watch.provider_instance_id ?? null,
+      watch_instance_id: watch.watch_instance_id ?? null,
+      change_epoch: Number.isSafeInteger(watch.change_epoch) ? watch.change_epoch : null,
+      baseline_epoch: Number.isSafeInteger(watch.baseline_epoch) ? watch.baseline_epoch : null,
+      watch_synchronized: watch.synchronized === true,
+      fresh_instance: watch.fresh_instance === true,
       snapshot_present: state.snapshot !== null,
       snapshot_epoch: state.snapshot_epoch,
-      snapshot_reusable: Boolean(
-        state.snapshot
-        && state.watch_state === "healthy"
-        && state.snapshot_epoch === state.workspace_epoch
-      ),
+      snapshot_change_epoch: state.snapshot_change_epoch,
+      snapshot_reusable: snapshotReusable,
       workspace_snapshot_id: state.snapshot?.workspace_snapshot_id ?? null,
       published_at_ms: state.published_at_ms,
       source_pid: state.source_pid,
-      invalidation_reason: state.invalidation_reason,
+      invalidation_reason: state.invalidation_reason ?? watch.last_reason ?? null,
     };
   }
 
@@ -284,9 +392,10 @@ export function createWorkspaceSnapshotAuthority(options = {}) {
     ownership: "mcp_http_parent_workspace_snapshot_authority",
     publishExact,
     tryReuse,
+    beginSynchronization,
     invalidate,
     status,
-    // Server-only seam. It is deliberately not exposed by the child IPC protocol.
+    // Legacy server-only seam for B4A compatibility tests. Change-clock mode owns watcher state.
     setWatchState,
   });
 }

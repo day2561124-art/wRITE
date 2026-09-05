@@ -398,7 +398,19 @@ try {
   assert.equal(typeof persistedFailure.snapshot_authority_reused, "boolean");
   assert(["none", "mcp_http_parent"].includes(persistedFailure.snapshot_authority_source));
   assert.equal(typeof persistedFailure.snapshot_authority_miss_reason, "string");
-  assert(["unknown", "healthy", "unhealthy"].includes(persistedFailure.snapshot_authority_watch_state));
+  assert(["starting", "synchronizing", "healthy", "unknown", "failed", "unhealthy"].includes(persistedFailure.snapshot_authority_watch_state));
+  assert.equal(typeof persistedFailure.snapshot_authority_sync_attempted, "boolean");
+  assert.equal(typeof persistedFailure.snapshot_authority_sync_started, "boolean");
+  assert.equal(typeof persistedFailure.snapshot_authority_sync_completed, "boolean");
+  assert.equal(
+    persistedFailure.snapshot_authority_sync_reason === null
+      || typeof persistedFailure.snapshot_authority_sync_reason === "string",
+    true,
+  );
+  assert(
+    persistedFailure.snapshot_authority_sync_change_epoch === null
+      || Number.isFinite(persistedFailure.snapshot_authority_sync_change_epoch),
+  );
   assert(Number.isFinite(persistedFailure.snapshot_authority_query_ms));
   assert.equal(typeof persistedFailure.snapshot_authority_published, "boolean");
   assert(Number.isFinite(persistedFailure.snapshot_authority_publish_ms));
@@ -512,7 +524,19 @@ try {
   assert.equal(typeof persistedConcurrent.snapshot_authority_reused, "boolean");
   assert(["none", "mcp_http_parent"].includes(persistedConcurrent.snapshot_authority_source));
   assert.equal(typeof persistedConcurrent.snapshot_authority_miss_reason, "string");
-  assert(["unknown", "healthy", "unhealthy"].includes(persistedConcurrent.snapshot_authority_watch_state));
+  assert(["starting", "synchronizing", "healthy", "unknown", "failed", "unhealthy"].includes(persistedConcurrent.snapshot_authority_watch_state));
+  assert.equal(typeof persistedConcurrent.snapshot_authority_sync_attempted, "boolean");
+  assert.equal(typeof persistedConcurrent.snapshot_authority_sync_started, "boolean");
+  assert.equal(typeof persistedConcurrent.snapshot_authority_sync_completed, "boolean");
+  assert.equal(
+    persistedConcurrent.snapshot_authority_sync_reason === null
+      || typeof persistedConcurrent.snapshot_authority_sync_reason === "string",
+    true,
+  );
+  assert(
+    persistedConcurrent.snapshot_authority_sync_change_epoch === null
+      || Number.isFinite(persistedConcurrent.snapshot_authority_sync_change_epoch),
+  );
   assert(Number.isFinite(persistedConcurrent.snapshot_authority_query_ms));
   assert.equal(typeof persistedConcurrent.snapshot_authority_published, "boolean");
   assert(Number.isFinite(persistedConcurrent.snapshot_authority_publish_ms));

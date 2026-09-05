@@ -5,6 +5,7 @@ export const workspaceSnapshotAuthorityProtocol =
 
 const allowedOperations = new Set([
   "snapshot_try_reuse",
+  "snapshot_begin_synchronization",
   "snapshot_publish_exact",
   "snapshot_invalidate",
   "snapshot_status",
@@ -92,9 +93,13 @@ export function createWorkspaceSnapshotAuthorityIpcClient(options = {}) {
     tryReuse: (workspaceId) => request("snapshot_try_reuse", {
       workspace_id: workspaceId,
     }),
-    publishExact: (workspaceId, snapshot) => request("snapshot_publish_exact", {
+    beginSynchronization: (workspaceId) => request("snapshot_begin_synchronization", {
+      workspace_id: workspaceId,
+    }),
+    publishExact: (workspaceId, snapshot, synchronizationToken = null) => request("snapshot_publish_exact", {
       workspace_id: workspaceId,
       snapshot,
+      synchronization_token: synchronizationToken,
     }),
     invalidate: (workspaceId, reason = "workspace_mutation") => request("snapshot_invalidate", {
       workspace_id: workspaceId,
@@ -110,6 +115,7 @@ export function createWorkspaceSnapshotAuthorityIpcClient(options = {}) {
 export function attachWorkspaceSnapshotAuthorityIpc(child, authority) {
   const operationHandlers = {
     snapshot_try_reuse: (payload) => authority.tryReuse(payload),
+    snapshot_begin_synchronization: (payload) => authority.beginSynchronization(payload),
     snapshot_publish_exact: (payload) => authority.publishExact({
       ...payload,
       source_pid: child.pid ?? null,

@@ -851,7 +851,10 @@ assert.equal(
     assert.equal(typeof testAOperation.events[0].result.snapshot_authority_reused, "boolean");
     assert(["none", "mcp_http_parent"].includes(testAOperation.events[0].result.snapshot_authority_source));
     assert.equal(typeof testAOperation.events[0].result.snapshot_authority_miss_reason, "string");
-    assert(["unknown", "healthy", "unhealthy"].includes(testAOperation.events[0].result.snapshot_authority_watch_state));
+    assert(["starting", "synchronizing", "healthy", "unknown", "failed", "unhealthy"].includes(testAOperation.events[0].result.snapshot_authority_watch_state));
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_sync_attempted, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_sync_started, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_sync_completed, "boolean");
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_authority_query_ms));
     assert.equal(typeof testAOperation.events[0].result.snapshot_authority_published, "boolean");
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_authority_publish_ms));
@@ -1251,13 +1254,14 @@ assert.equal(
     const context = await harness.contextResolver();
     let stored = null;
     let authorityEpoch = 1;
+    let synchronizationNonce = 0;
     const fakeAuthority = {
       async tryReuse() {
         if (!stored) {
           return {
             hit: false,
             reason: "snapshot_not_published",
-            watch_state: "healthy",
+            watch_state: "synchronizing",
             authority_epoch: authorityEpoch,
             workspace_epoch: 0,
           };
@@ -1271,14 +1275,37 @@ assert.equal(
           snapshot: structuredClone(stored),
         };
       },
-      async publishExact(workspaceIdValue, snapshotValue) {
+      async beginSynchronization(workspaceIdValue) {
+        assert.equal(workspaceIdValue, harness.workspace_id);
+        synchronizationNonce += 1;
+        return {
+          started: true,
+          reason: null,
+          watch_state: "synchronizing",
+          authority_epoch: authorityEpoch,
+          workspace_epoch: 0,
+          token: {
+            schema_version: 1,
+            workspace_id: harness.workspace_id,
+            provider_instance_id: "fake-provider",
+            watch_instance_id: "fake-watch",
+            root_identity: "fake-root",
+            change_epoch: 7,
+            sync_nonce: `fake-sync-${synchronizationNonce}`,
+          },
+        };
+      },
+      async publishExact(workspaceIdValue, snapshotValue, synchronizationToken) {
         assert.equal(workspaceIdValue, harness.workspace_id);
         stored = structuredClone(snapshotValue);
         authorityEpoch += 1;
+        const synchronized = synchronizationToken?.change_epoch === 7;
         return {
           stored: true,
-          reusable: true,
-          watch_state: "healthy",
+          reusable: synchronized,
+          synchronization_completed: synchronized,
+          synchronization_reason: synchronized ? null : "synchronization_token_missing",
+          watch_state: synchronized ? "healthy" : "synchronizing",
           authority_epoch: authorityEpoch,
           workspace_epoch: 0,
         };
@@ -1293,6 +1320,11 @@ assert.equal(
     assert.equal(cold.diagnostics.authority_query_attempted, true);
     assert.equal(cold.diagnostics.authority_reused, false);
     assert.equal(cold.diagnostics.authority_miss_reason, "snapshot_not_published");
+    assert.equal(cold.diagnostics.authority_sync_attempted, true);
+    assert.equal(cold.diagnostics.authority_sync_started, true);
+    assert.equal(cold.diagnostics.authority_sync_completed, true);
+    assert.equal(cold.diagnostics.authority_sync_reason, null);
+    assert.equal(cold.diagnostics.authority_sync_change_epoch, 7);
     assert.equal(cold.diagnostics.authority_published, true);
     assert(cold.diagnostics.consistency_attempt_count >= 1);
 
@@ -1308,6 +1340,9 @@ assert.equal(
     assert.equal(warm.diagnostics.authority_source, "mcp_http_parent");
     assert.equal(warm.diagnostics.authority_watch_state, "healthy");
     assert.equal(warm.diagnostics.authority_miss_reason, null);
+    assert.equal(warm.diagnostics.authority_sync_attempted, false);
+    assert.equal(warm.diagnostics.authority_sync_started, false);
+    assert.equal(warm.diagnostics.authority_sync_completed, false);
     assert.equal(warm.diagnostics.consistency_attempt_count, 0);
     assert.equal(warm.diagnostics.capture_task_count, 0);
     assert.equal(warm.diagnostics.fingerprint_cache_hit_count, 0);
@@ -1324,6 +1359,10 @@ assert.equal(
     assert.equal(hooked.diagnostics.authority_reused, false);
     assert.equal(hooked.diagnostics.authority_query_attempted, false);
     assert.equal(hooked.diagnostics.authority_miss_reason, "deterministic_capture_hook_present");
+    assert.equal(hooked.diagnostics.authority_sync_attempted, false);
+    assert.equal(hooked.diagnostics.authority_sync_started, false);
+    assert.equal(hooked.diagnostics.authority_sync_completed, false);
+    assert.equal(hooked.diagnostics.authority_sync_reason, "deterministic_capture_hook_present");
     assert.equal(hooked.diagnostics.authority_published, true);
   } finally { await harness.cleanup(); }
 }

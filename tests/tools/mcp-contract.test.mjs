@@ -13,6 +13,7 @@ const testScripts = [
   "tests/mcp/mcp-development-write-tools.test.mjs",
   "tests/mcp/mcp-development-test-tools.test.mjs",
   "tests/mcp/mcp-development-journal-tools.test.mjs",
+  "tests/mcp/mcp-workspace-change-clock.test.mjs",
   "tests/mcp/mcp-workspace-snapshot-authority.test.mjs",
   "tests/mcp/mcp-development-checkpoint-tools.test.mjs",
   "tests/mcp/mcp-development-transaction-tools.test.mjs",
