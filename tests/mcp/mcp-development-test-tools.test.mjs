@@ -376,6 +376,10 @@ try {
   assert(Number.isFinite(persistedFailure.snapshot_total_ms));
   assert(Number.isFinite(persistedFailure.snapshot_git_status_ms));
   assert(Number.isFinite(persistedFailure.snapshot_artifact_capture_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_capture_concurrency_limit));
+  assert(Number.isFinite(persistedFailure.snapshot_capture_peak_concurrency));
+  assert(Number.isFinite(persistedFailure.snapshot_capture_task_count));
+  assert(persistedFailure.snapshot_capture_peak_concurrency <= persistedFailure.snapshot_capture_concurrency_limit);
   assert(Number.isFinite(persistedFailure.snapshot_consistency_recheck_ms));
   assert(Number.isFinite(persistedFailure.snapshot_consistency_attempt_count));
   assert(Number.isFinite(persistedFailure.snapshot_consistency_retry_count));
@@ -464,6 +468,10 @@ try {
   assert.equal(persistedConcurrent.timed_out, false);
   assert.match(persistedConcurrent.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
   assert(Number.isFinite(persistedConcurrent.snapshot_total_ms));
+  assert(Number.isFinite(persistedConcurrent.snapshot_capture_concurrency_limit));
+  assert(Number.isFinite(persistedConcurrent.snapshot_capture_peak_concurrency));
+  assert(Number.isFinite(persistedConcurrent.snapshot_capture_task_count));
+  assert(persistedConcurrent.snapshot_capture_peak_concurrency <= persistedConcurrent.snapshot_capture_concurrency_limit);
   assert(Number.isFinite(persistedConcurrent.snapshot_consistency_recheck_ms));
   assert(Number.isFinite(persistedConcurrent.snapshot_consistency_attempt_count));
   assert(Number.isFinite(persistedConcurrent.snapshot_consistency_retry_count));

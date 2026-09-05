@@ -52,6 +52,8 @@ export const DEV_JOURNAL_LOCK_RETRY_MAX_MS = 200;
 export const DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES = 8;
 export const DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS = 3;
 export const DEV_WORKSPACE_SNAPSHOT_RETRY_DELAY_MS = 25;
+export const DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY = 4;
+export const DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY = 16;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
@@ -1215,7 +1217,47 @@ function elapsedSnapshotMs(startedAt) {
   return Math.max(0, performance.now() - startedAt);
 }
 
-async function computeWorkspaceSnapshotAttempt(context) {
+async function mapSnapshotArtifactsBounded(items, concurrency, mapper) {
+  if (!Array.isArray(items)) throw new Error("Snapshot capture items must be an array.");
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY) {
+    throw new Error(`Snapshot capture concurrency must be between 1 and ${DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY}.`);
+  }
+  if (items.length === 0) return { results: [], peak_concurrency: 0 };
+
+  const results = new Array(items.length);
+  const workerCount = Math.min(concurrency, items.length);
+  let nextIndex = 0;
+  let active = 0;
+  let peakConcurrency = 0;
+  let stopped = false;
+
+  async function worker() {
+    while (!stopped) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      active += 1;
+      peakConcurrency = Math.max(peakConcurrency, active);
+      try {
+        results[index] = await mapper(items[index], index);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      } finally {
+        active -= 1;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return { results, peak_concurrency: peakConcurrency };
+}
+
+async function computeWorkspaceSnapshotAttempt(context, {
+  captureConcurrency,
+  attempt,
+  afterArtifactCaptured,
+}) {
   const attemptStartedAt = performance.now();
   let gitHeadMs = 0;
   let gitStatusMs = 0;
@@ -1246,6 +1288,9 @@ async function computeWorkspaceSnapshotAttempt(context) {
             git_status_ms: gitStatusMs,
             root_resolve_ms: 0,
             artifact_capture_ms: 0,
+            capture_concurrency_limit: captureConcurrency,
+            capture_peak_concurrency: 0,
+            capture_task_count: 0,
             manifest_finalize_ms: 0,
             status_bytes: 0,
             hashed_artifact_count: 0,
@@ -1273,31 +1318,65 @@ async function computeWorkspaceSnapshotAttempt(context) {
     realRepositoryRoot = await realpath(resolvedRepositoryRoot);
     rootResolveMs = elapsedSnapshotMs(rootResolveStartedAt);
   }
-  const manifest = [];
-  let hashedArtifactCount = 0;
-  let hashedBytes = 0;
-  let unhashedFileCount = 0;
-  let directoryCount = 0;
-  let modifiedCount = 0;
-  let addedCount = 0;
-  let deletedCount = 0;
-  let untrackedCount = 0;
-
-  const artifactCaptureStartedAt = performance.now();
-  for (const line of statusLines) {
+  const entries = statusLines.map((line, statusIndex) => {
     const xy = line.slice(0, 2);
     const artifactPath = parsePorcelainPath(line);
     let state = "modified";
     if (xy === "??") state = "untracked";
     else if (xy.includes("D")) state = "deleted";
     else if (xy.includes("A")) state = "added";
-    if (state === "modified") modifiedCount += 1;
-    else if (state === "added") addedCount += 1;
-    else if (state === "deleted") deletedCount += 1;
-    else if (state === "untracked") untrackedCount += 1;
-    const artifact = state === "deleted"
+    return { statusIndex, path: artifactPath, state };
+  });
+
+  let modifiedCount = 0;
+  let addedCount = 0;
+  let deletedCount = 0;
+  let untrackedCount = 0;
+  for (const entry of entries) {
+    if (entry.state === "modified") modifiedCount += 1;
+    else if (entry.state === "added") addedCount += 1;
+    else if (entry.state === "deleted") deletedCount += 1;
+    else if (entry.state === "untracked") untrackedCount += 1;
+  }
+
+  const captureEntries = entries.filter((entry) => entry.state !== "deleted");
+  const artifactsByStatusIndex = new Array(entries.length);
+  const artifactCaptureStartedAt = performance.now();
+  const capture = await mapSnapshotArtifactsBounded(
+    captureEntries,
+    captureConcurrency,
+    async (entry) => {
+      const artifact = await captureDevArtifactStateWithinRoot(
+        resolvedRepositoryRoot,
+        realRepositoryRoot,
+        entry.path,
+      );
+      if (afterArtifactCaptured) {
+        await afterArtifactCaptured({
+          attempt,
+          path: entry.path,
+          state: entry.state,
+          artifact,
+        });
+      }
+      return { statusIndex: entry.statusIndex, artifact };
+    },
+  );
+  for (const captured of capture.results) {
+    artifactsByStatusIndex[captured.statusIndex] = captured.artifact;
+  }
+  const artifactCaptureMs = elapsedSnapshotMs(artifactCaptureStartedAt);
+
+  const manifest = [];
+  let hashedArtifactCount = 0;
+  let hashedBytes = 0;
+  let unhashedFileCount = 0;
+  let directoryCount = 0;
+  for (const entry of entries) {
+    const artifact = entry.state === "deleted"
       ? { exists: false, artifact_type: null, sha256: null, bytes: null }
-      : await captureDevArtifactStateWithinRoot(resolvedRepositoryRoot, realRepositoryRoot, artifactPath);
+      : artifactsByStatusIndex[entry.statusIndex];
+    if (!artifact) throw new Error(`Workspace snapshot capture did not resolve ${entry.path}.`);
     if (artifact.sha256 !== null) {
       hashedArtifactCount += 1;
       hashedBytes += artifact.bytes ?? 0;
@@ -1306,9 +1385,8 @@ async function computeWorkspaceSnapshotAttempt(context) {
     } else if (artifact.artifact_type === "directory") {
       directoryCount += 1;
     }
-    manifest.push({ path: artifactPath, state, sha256: artifact.sha256, bytes: artifact.bytes, artifact_type: artifact.artifact_type });
+    manifest.push({ path: entry.path, state: entry.state, sha256: artifact.sha256, bytes: artifact.bytes, artifact_type: artifact.artifact_type });
   }
-  const artifactCaptureMs = elapsedSnapshotMs(artifactCaptureStartedAt);
 
   const manifestFinalizeStartedAt = performance.now();
   manifest.sort((a, b) => a.path.localeCompare(b.path) || a.state.localeCompare(b.state));
@@ -1328,6 +1406,9 @@ async function computeWorkspaceSnapshotAttempt(context) {
         git_status_ms: gitStatusMs,
         root_resolve_ms: rootResolveMs,
         artifact_capture_ms: artifactCaptureMs,
+        capture_concurrency_limit: captureConcurrency,
+        capture_peak_concurrency: capture.peak_concurrency,
+        capture_task_count: captureEntries.length,
         manifest_finalize_ms: manifestFinalizeMs,
         status_bytes: Buffer.byteLength(rawStatus, "utf8"),
         hashed_artifact_count: hashedArtifactCount,
@@ -1362,6 +1443,17 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
   if (options.afterArtifactCapture !== undefined && typeof options.afterArtifactCapture !== "function") {
     throw new Error("afterArtifactCapture must be a function when provided.");
   }
+  if (options.afterArtifactCaptured !== undefined && typeof options.afterArtifactCaptured !== "function") {
+    throw new Error("afterArtifactCaptured must be a function when provided.");
+  }
+  const captureConcurrency = options.captureConcurrency ?? DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY;
+  if (
+    !Number.isSafeInteger(captureConcurrency)
+    || captureConcurrency < 1
+    || captureConcurrency > DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY
+  ) {
+    throw new Error(`captureConcurrency must be between 1 and ${DEV_WORKSPACE_SNAPSHOT_MAX_CAPTURE_CONCURRENCY}.`);
+  }
 
   const snapshotStartedAt = performance.now();
   const timingTotals = {
@@ -1385,7 +1477,11 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
       break;
     }
 
-    const attempted = await computeWorkspaceSnapshotAttempt(context);
+    const attempted = await computeWorkspaceSnapshotAttempt(context, {
+      captureConcurrency,
+      attempt,
+      afterArtifactCaptured: options.afterArtifactCaptured,
+    });
     addSnapshotAttemptTimings(timingTotals, attempted.snapshot.diagnostics);
     if (attempted.snapshot.synthetic_test_fixture === true) {
       return {

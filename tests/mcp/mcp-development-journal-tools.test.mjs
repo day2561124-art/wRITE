@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   DEV_JOURNAL_STORAGE_ROOT,
+  DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY,
   beginDevJournalOperation,
   canonicalJson,
   completeDevJournalOperation,
@@ -826,6 +827,9 @@ assert.equal(
     assert.equal(testAOperation.events[0].result.snapshot_consistency_attempt_count, 1);
     assert.equal(testAOperation.events[0].result.snapshot_consistency_retry_count, 0);
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_consistency_recheck_ms));
+    assert.equal(testAOperation.events[0].result.snapshot_capture_concurrency_limit, DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY);
+    assert.equal(testAOperation.events[0].result.snapshot_capture_peak_concurrency, 0);
+    assert.equal(testAOperation.events[0].result.snapshot_capture_task_count, 0);
     assert.equal(
       testAOperation.events[0].result.snapshot_mutation_generation_start,
       testAOperation.events[0].result.snapshot_mutation_generation_end,
@@ -883,6 +887,105 @@ assert.equal(
     assert.equal(snapshot.diagnostics.consistency_retry_count, 1);
     assert(Number.isFinite(snapshot.diagnostics.consistency_recheck_ms));
     assert.equal(snapshot.diagnostics.mutation_generation_start, snapshot.diagnostics.mutation_generation_end);
+    const baseEntry = snapshot.manifest.find((entry) => entry.path === "base.txt");
+    assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
+    assert.equal(baseEntry?.bytes, Buffer.byteLength(secondContent, "utf8"));
+    assert.equal(
+      snapshot.workspace_snapshot_id,
+      sha256(Buffer.from(canonicalJson({ head: snapshot.head, manifest: snapshot.manifest }), "utf8")),
+    );
+  } finally { await harness.cleanup(); }
+}
+
+// Bounded parallel capture preserves exact snapshot identity across 1/2/4/8 workers.
+{
+  const harness = await gitHarness("snapshot-parallel-equivalence", 24);
+  try {
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), "parallel base dirty\n", "utf8");
+    await Promise.all(Array.from({ length: 32 }, (_, index) => (
+      writeFile(
+        path.join(harness.repositoryRoot, "tests", `parallel-${String(index).padStart(2, "0")}.txt`),
+        `parallel artifact ${index}\n`,
+        "utf8",
+      )
+    )));
+    const context = await harness.contextResolver();
+    const snapshots = [];
+    for (const captureConcurrency of [1, 2, 4, 8]) {
+      const snapshot = await computeWorkspaceSnapshot(context, { captureConcurrency });
+      assert.equal(snapshot.diagnostics.capture_concurrency_limit, captureConcurrency);
+      assert(snapshot.diagnostics.capture_peak_concurrency >= 1);
+      assert(snapshot.diagnostics.capture_peak_concurrency <= captureConcurrency);
+      assert.equal(snapshot.diagnostics.capture_task_count, snapshot.changed_artifact_count);
+      snapshots.push(snapshot);
+    }
+    const reference = snapshots[0];
+    for (const snapshot of snapshots.slice(1)) {
+      assert.equal(snapshot.head, reference.head);
+      assert.deepEqual(snapshot.manifest, reference.manifest);
+      assert.equal(snapshot.workspace_snapshot_id, reference.workspace_snapshot_id);
+    }
+    const productionSnapshot = await computeWorkspaceSnapshot(context);
+    assert.equal(
+      productionSnapshot.diagnostics.capture_concurrency_limit,
+      DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY,
+    );
+    assert.equal(productionSnapshot.workspace_snapshot_id, reference.workspace_snapshot_id);
+    assert.deepEqual(productionSnapshot.manifest, reference.manifest);
+  } finally { await harness.cleanup(); }
+}
+
+// Parallel capture still discards the whole attempt when a controlled mutation lands mid-capture.
+{
+  const harness = await gitHarness("snapshot-parallel-mutation", 25);
+  try {
+    const firstContent = "parallel mutation generation one\n";
+    const secondContent = "parallel mutation generation two\n";
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), firstContent, "utf8");
+    await Promise.all(Array.from({ length: 24 }, (_, index) => (
+      writeFile(
+        path.join(harness.repositoryRoot, "tests", `mutation-${String(index).padStart(2, "0")}.txt`),
+        `mutation artifact ${index}\n`,
+        "utf8",
+      )
+    )));
+    const context = await harness.contextResolver();
+    let mutationCount = 0;
+    const snapshot = await computeWorkspaceSnapshot(context, {
+      captureConcurrency: 4,
+      afterArtifactCaptured: async ({ attempt }) => {
+        if (attempt !== 1 || mutationCount > 0) return;
+        mutationCount += 1;
+        const operation = await beginDevJournalOperation({
+          operation_type: "filesystem_patch",
+          tool_name: "dev_snapshot_parallel_generation_fixture",
+          workstream_id: harness.workstream_id,
+          workspace_id: harness.workspace_id,
+          targets: [{
+            path: "base.txt",
+            role: "modified_file",
+            before: fileState(firstContent),
+            expected: fileState(secondContent),
+          }],
+        });
+        await writeFile(path.join(harness.repositoryRoot, "base.txt"), secondContent, "utf8");
+        await completeDevJournalOperation(operation.operation_id, {
+          targets: [{
+            path: "base.txt",
+            role: "modified_file",
+            before: fileState(firstContent),
+            expected: fileState(secondContent),
+            after: fileState(secondContent),
+          }],
+          result: { changed: true },
+        });
+      },
+    });
+    assert.equal(mutationCount, 1);
+    assert.equal(snapshot.diagnostics.consistency_attempt_count, 2);
+    assert.equal(snapshot.diagnostics.consistency_retry_count, 1);
+    assert(snapshot.diagnostics.capture_peak_concurrency >= 1);
+    assert(snapshot.diagnostics.capture_peak_concurrency <= 4);
     const baseEntry = snapshot.manifest.find((entry) => entry.path === "base.txt");
     assert.equal(baseEntry?.sha256, fileState(secondContent).sha256);
     assert.equal(baseEntry?.bytes, Buffer.byteLength(secondContent, "utf8"));
