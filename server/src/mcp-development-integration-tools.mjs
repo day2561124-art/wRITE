@@ -70,8 +70,11 @@ const defaultRegistryPath = path.join(registryDirectory, "integration_registry.j
 const defaultRegistryLockPath = path.join(registryDirectory, "integration_registry.lock");
 const defaultApplyLockPath = path.join(registryDirectory, "integration_apply.lock");
 const defaultIntegrationRoot = path.join(path.dirname(projectRoot), ".writer-workbench-integrations");
-const DIRTY_SNAPSHOT_MAX_FILES = 256;
+const DIRTY_SNAPSHOT_MAX_FILES = 10_000;
 const DIRTY_SNAPSHOT_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const DIRTY_SNAPSHOT_PATH_BUFFER = 8 * 1024 * 1024;
+const DIRTY_VERIFY_MAX_REPORTED_PATHS = 256;
+const INTEGRATION_SAFETY_STATUS_MAX_BUFFER = 2 * 1024 * 1024;
 const CONFLICT_MAX_PATHS = 100;
 
 const legalTransitions = Object.freeze({
@@ -1024,8 +1027,14 @@ export function createDevIntegrationService({
   }
 
   async function dirtySnapshot() {
-    const tracked = splitNullPaths((await gitRunner(["diff", "--name-only", "-z", "--no-renames"], { cwd: repoRoot })).stdout);
-    const untracked = splitNullPaths((await gitRunner(["ls-files", "--others", "--exclude-standard", "-z"], { cwd: repoRoot })).stdout);
+    const tracked = splitNullPaths((await gitRunner(
+      ["diff", "--name-only", "-z", "--no-renames"],
+      { cwd: repoRoot, maxBuffer: DIRTY_SNAPSHOT_PATH_BUFFER },
+    )).stdout);
+    const untracked = splitNullPaths((await gitRunner(
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      { cwd: repoRoot, maxBuffer: DIRTY_SNAPSHOT_PATH_BUFFER },
+    )).stdout);
     const paths = [...new Set([...tracked, ...untracked])];
     if (paths.length > DIRTY_SNAPSHOT_MAX_FILES) {
       const error = new Error(`Dirty main contains more than ${DIRTY_SNAPSHOT_MAX_FILES} paths; bounded carry-forward verification is unavailable.`);
@@ -1049,7 +1058,10 @@ export function createDevIntegrationService({
   async function mainSafetyStatus() {
     const branchResult = await gitRunner(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repoRoot, allowFailure: true });
     const branch = String(branchResult.stdout).trim() || null;
-    const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: repoRoot })).stdout);
+    const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=no"], {
+      cwd: repoRoot,
+      maxBuffer: INTEGRATION_SAFETY_STATUS_MAX_BUFFER,
+    })).stdout);
     return { branch, ...status, operation_state: await operationState() };
   }
 
@@ -1236,7 +1248,7 @@ export function createDevIntegrationService({
             head_matches: postHead === record.integration_commit,
             staged_count: postSafety.staged.length,
             conflicted_count: postSafety.conflicted.length,
-            changed_dirty_paths: dirtyChanges.slice(0, DIRTY_SNAPSHOT_MAX_FILES),
+            changed_dirty_paths: dirtyChanges.slice(0, DIRTY_VERIFY_MAX_REPORTED_PATHS),
             diff_check_passed: postDiffCheck.exit_code === 0,
           };
         });

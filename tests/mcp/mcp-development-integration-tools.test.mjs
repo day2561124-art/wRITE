@@ -303,6 +303,42 @@ test("fast-forward candidate persists, validates exact commit, and preserves unr
   }
 });
 
+test("integration preserves more than 256 unrelated dirty paths without path-count rejection", async () => {
+  const harness = await createHarness("large-dirty-main");
+  try {
+    const source = await harness.createSource({ changes: { "feature.txt": "feature\n" } });
+    const service = harness.createService();
+    const candidate = await service.preflight({ workstream_id: source.workstream_id });
+    const ready = await service.validateIntegration({
+      integration_candidate_id: candidate.integration_candidate_id,
+      expected_revision: candidate.revision,
+    });
+
+    const dirtyDirectory = path.join(harness.repositoryRoot, "runtime-dirty");
+    await mkdir(dirtyDirectory, { recursive: true });
+    const dirtyEntries = [];
+    for (let index = 0; index < 300; index += 1) {
+      const relativePath = `runtime-dirty/item-${String(index).padStart(3, "0")}.txt`;
+      const content = `dirty-${index}\n`;
+      await writeFile(path.join(harness.repositoryRoot, relativePath), content, "utf8");
+      dirtyEntries.push({ relativePath, content });
+    }
+
+    const integrated = await service.integrate({
+      integration_candidate_id: ready.integration_candidate_id,
+      expected_revision: ready.revision,
+    });
+    assert.equal(integrated.state, "integrated");
+    assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), source.sourceHead);
+    assert.equal(await readFile(path.join(harness.repositoryRoot, dirtyEntries[0].relativePath), "utf8"), dirtyEntries[0].content);
+    assert.equal(await readFile(path.join(harness.repositoryRoot, dirtyEntries.at(-1).relativePath), "utf8"), dirtyEntries.at(-1).content);
+    const untracked = (await git(harness.repositoryRoot, ["ls-files", "--others", "--exclude-standard"])).stdout.split(/\r?\n/u).filter(Boolean);
+    assert.equal(untracked.length, 300);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("diverged histories produce a server merge commit with exact parents and integrate by fast-forward", async () => {
   const harness = await createHarness("merge-commit");
   try {
