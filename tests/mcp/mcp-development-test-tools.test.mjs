@@ -266,6 +266,19 @@ async function pathExists(filePath) {
   }
 }
 
+async function removeTempTree(target) {
+  const retryable = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch (error) {
+      if (!retryable.has(error?.code) || attempt === 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
+
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "writer-workbench-dev-tests-"));
 const originalApiKey = process.env.OPENAI_API_KEY;
 let auditBefore = null;
@@ -357,6 +370,16 @@ try {
   assert.equal(persistedFailure.passed, false);
   assert.equal(persistedFailure.exit_code, 1);
   assert.equal(persistedFailure.timed_out, false);
+  assert.match(persistedFailure.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
+  assert.match(persistedFailure.head, /^[a-f0-9]{40}$/u);
+  assert(Number.isFinite(persistedFailure.changed_artifact_count));
+  assert(Number.isFinite(persistedFailure.snapshot_total_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_git_status_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_artifact_capture_ms));
+  assert(Number.isFinite(persistedFailure.snapshot_hashed_artifact_count));
+  assert(Number.isFinite(persistedFailure.snapshot_hashed_bytes));
+  assert(Number.isFinite(persistedFailure.total_wall_clock_ms));
+  assert(persistedFailure.total_wall_clock_ms >= persistedFailure.duration_ms);
   assert.match(persistedFailure.stdout_tail, /USEFUL_STDOUT_TAIL/u);
   assert.match(persistedFailure.stderr_tail, /USEFUL_STDERR_TAIL/u);
   assert.equal(
@@ -431,6 +454,10 @@ try {
   assert.equal(persistedConcurrent.passed, true);
   assert.equal(persistedConcurrent.exit_code, 0);
   assert.equal(persistedConcurrent.timed_out, false);
+  assert.match(persistedConcurrent.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
+  assert(Number.isFinite(persistedConcurrent.snapshot_total_ms));
+  assert(Number.isFinite(persistedConcurrent.total_wall_clock_ms));
+  assert(persistedConcurrent.total_wall_clock_ms >= persistedConcurrent.duration_ms);
 
   const legacySelfLockPath = path.join(tempRoot, "legacy-self.lock");
   await writeFile(
@@ -1943,5 +1970,5 @@ try {
   else process.env.OPENAI_API_KEY = originalApiKey;
   if (auditExisted) await writeFile(auditLogPath, auditBefore);
   else await rm(auditLogPath, { force: true });
-  await rm(tempRoot, { recursive: true, force: true });
+  await removeTempTree(tempRoot);
 }

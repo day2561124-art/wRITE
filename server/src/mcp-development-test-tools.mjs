@@ -220,6 +220,11 @@ async function persistLastRunResult(resultPath, result) {
     signal: typeof result.signal === "string" ? result.signal : null,
     timed_out: result.timed_out === true,
     duration_ms: Number.isFinite(result.duration_ms) ? Math.max(0, result.duration_ms) : null,
+    total_wall_clock_ms: Number.isFinite(result.total_wall_clock_ms) ? Math.max(0, result.total_wall_clock_ms) : null,
+    workspace_snapshot_id: typeof result.workspace_snapshot_id === "string" ? result.workspace_snapshot_id : null,
+    head: typeof result.head === "string" ? result.head : null,
+    changed_artifact_count: Number.isFinite(result.changed_artifact_count) ? result.changed_artifact_count : null,
+    ...snapshotJournalTelemetry({ diagnostics: result.snapshot_diagnostics }),
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
     stdout_tail: tailText(result.stdout),
@@ -248,6 +253,27 @@ function baseResult(suite, startedAt) {
     stderr: "",
     stdout_truncated: false,
     stderr_truncated: false,
+  };
+}
+
+function snapshotJournalTelemetry(snapshot) {
+  const diagnostics = snapshot?.diagnostics ?? {};
+  return {
+    snapshot_total_ms: Number.isFinite(diagnostics.total_ms) ? diagnostics.total_ms : null,
+    snapshot_git_head_ms: Number.isFinite(diagnostics.git_head_ms) ? diagnostics.git_head_ms : null,
+    snapshot_git_status_ms: Number.isFinite(diagnostics.git_status_ms) ? diagnostics.git_status_ms : null,
+    snapshot_root_resolve_ms: Number.isFinite(diagnostics.root_resolve_ms) ? diagnostics.root_resolve_ms : null,
+    snapshot_artifact_capture_ms: Number.isFinite(diagnostics.artifact_capture_ms) ? diagnostics.artifact_capture_ms : null,
+    snapshot_manifest_finalize_ms: Number.isFinite(diagnostics.manifest_finalize_ms) ? diagnostics.manifest_finalize_ms : null,
+    snapshot_status_bytes: Number.isFinite(diagnostics.status_bytes) ? diagnostics.status_bytes : null,
+    snapshot_hashed_artifact_count: Number.isFinite(diagnostics.hashed_artifact_count) ? diagnostics.hashed_artifact_count : null,
+    snapshot_hashed_bytes: Number.isFinite(diagnostics.hashed_bytes) ? diagnostics.hashed_bytes : null,
+    snapshot_unhashed_file_count: Number.isFinite(diagnostics.unhashed_file_count) ? diagnostics.unhashed_file_count : null,
+    snapshot_directory_count: Number.isFinite(diagnostics.directory_count) ? diagnostics.directory_count : null,
+    snapshot_modified_count: Number.isFinite(diagnostics.modified_count) ? diagnostics.modified_count : null,
+    snapshot_added_count: Number.isFinite(diagnostics.added_count) ? diagnostics.added_count : null,
+    snapshot_deleted_count: Number.isFinite(diagnostics.deleted_count) ? diagnostics.deleted_count : null,
+    snapshot_untracked_count: Number.isFinite(diagnostics.untracked_count) ? diagnostics.untracked_count : null,
   };
 }
 
@@ -463,6 +489,7 @@ export function createDevTestRunner({
           workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
           head: workspaceSnapshot.head,
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+          ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
     } catch (error) {
@@ -487,6 +514,9 @@ export function createDevTestRunner({
             reason: `dependency_bridge_setup_failed:${String(error.message).slice(0, 512)}`,
             workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
             head: workspaceSnapshot.head,
+            changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+            total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
+            ...snapshotJournalTelemetry(workspaceSnapshot),
           },
         });
       } catch (journalError) {
@@ -498,6 +528,8 @@ export function createDevTestRunner({
         stderr: redactTestOutput(`Could not prepare workspace dependency bridge: ${error.message}`),
         operation_id: journalOperation.operation_id,
         workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+        snapshot_diagnostics: workspaceSnapshot.diagnostics ?? null,
+        total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
         workspace_context: workspaceExecutionProvenance(context),
       };
     }
@@ -534,7 +566,14 @@ export function createDevTestRunner({
     }
 
     try {
-      await persistLastRunResult(resultPath, result);
+      await persistLastRunResult(resultPath, {
+        ...result,
+        total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
+        workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+        head: workspaceSnapshot.head,
+        changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+        snapshot_diagnostics: workspaceSnapshot.diagnostics ?? null,
+      });
     } catch (error) {
       result = {
         ...result,
@@ -554,8 +593,11 @@ export function createDevTestRunner({
           execution_ok: result.execution_ok === true,
           timed_out: result.timed_out === true,
           duration_ms: result.duration_ms,
+          total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
           workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
           head: workspaceSnapshot.head,
+          changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+          ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
     } catch (error) {
@@ -575,6 +617,8 @@ export function createDevTestRunner({
       ...result,
       operation_id: journalOperation.operation_id,
       workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+      snapshot_diagnostics: workspaceSnapshot.diagnostics ?? null,
+      total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
       workspace_context: workspaceExecutionProvenance(context),
     };
   };
