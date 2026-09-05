@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { controlledProcessEnvironment } from "./process-control.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
@@ -1007,10 +1008,9 @@ export const recoverDevJournalOperation = (operationId, input) => defaultJournal
 export const assertDevJournalMutationAllowed = () => defaultJournal.assertMutationAllowed();
 export const markDevJournalDegraded = (reason) => defaultJournal.markDegraded(reason);
 
-export async function captureDevArtifactState(repositoryRoot, relativePath) {
-  const root = await realpath(repositoryRoot);
+async function captureDevArtifactStateWithinRoot(repositoryRoot, realRepositoryRoot, relativePath) {
   const target = path.resolve(repositoryRoot, relativePath);
-  if (!isInside(path.resolve(repositoryRoot), target)) throw new Error("Artifact path escapes the workspace root.");
+  if (!isInside(repositoryRoot, target)) throw new Error("Artifact path escapes the workspace root.");
   let info;
   try {
     info = await lstat(target);
@@ -1020,7 +1020,7 @@ export async function captureDevArtifactState(repositoryRoot, relativePath) {
   }
   if (info.isSymbolicLink()) throw new Error("Artifact provenance refuses symbolic links or junctions.");
   const realTarget = await realpath(target);
-  if (!isInside(root, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
+  if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
   if (info.isDirectory()) return { exists: true, artifact_type: "directory", sha256: null, bytes: null };
   if (!info.isFile()) throw new Error("Artifact provenance supports regular files and directories only.");
   if (info.size > DEV_JOURNAL_ARTIFACT_MAX_BYTES) return { exists: true, artifact_type: "file", sha256: null, bytes: info.size };
@@ -1031,6 +1031,12 @@ export async function captureDevArtifactState(repositoryRoot, relativePath) {
     sha256: createHash("sha256").update(content).digest("hex"),
     bytes: content.length,
   };
+}
+
+export async function captureDevArtifactState(repositoryRoot, relativePath) {
+  const resolvedRepositoryRoot = path.resolve(repositoryRoot);
+  const realRepositoryRoot = await realpath(resolvedRepositoryRoot);
+  return captureDevArtifactStateWithinRoot(resolvedRepositoryRoot, realRepositoryRoot, relativePath);
 }
 
 async function runSnapshotGit(repositoryRoot, args) {
@@ -1057,13 +1063,24 @@ function parsePorcelainPath(line) {
   return (arrowIndex === -1 ? raw : raw.slice(arrowIndex + 4)).replaceAll("\\", "/");
 }
 
+function elapsedSnapshotMs(startedAt) {
+  return Math.max(0, performance.now() - startedAt);
+}
+
 export async function computeWorkspaceSnapshot(context) {
   if (!context?.root || !workspaceIdPattern.test(context.workspace_id)) throw new Error("A resolved workspace execution context is required for snapshot identity.");
+  const snapshotStartedAt = performance.now();
+  let gitHeadMs = 0;
+  let gitStatusMs = 0;
   let head;
   let rawStatus;
   try {
+    const headStartedAt = performance.now();
     head = (await runSnapshotGit(context.root, ["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
+    gitHeadMs = elapsedSnapshotMs(headStartedAt);
+    const statusStartedAt = performance.now();
     rawStatus = await runSnapshotGit(context.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+    gitStatusMs = elapsedSnapshotMs(statusStartedAt);
   } catch (error) {
     const fixtureHead = String(context.current_head ?? "").toLowerCase();
     if (/^0{40}$/u.test(fixtureHead)) {
@@ -1074,31 +1091,102 @@ export async function computeWorkspaceSnapshot(context) {
         changed_artifact_count: 0,
         manifest: [],
         synthetic_test_fixture: true,
+        diagnostics: {
+          total_ms: elapsedSnapshotMs(snapshotStartedAt),
+          git_head_ms: gitHeadMs,
+          git_status_ms: gitStatusMs,
+          root_resolve_ms: 0,
+          artifact_capture_ms: 0,
+          manifest_finalize_ms: 0,
+          status_bytes: 0,
+          hashed_artifact_count: 0,
+          hashed_bytes: 0,
+          unhashed_file_count: 0,
+          directory_count: 0,
+          modified_count: 0,
+          added_count: 0,
+          deleted_count: 0,
+          untracked_count: 0,
+        },
       };
     }
     throw error;
   }
   if (!gitSha1Pattern.test(head)) throw new Error("Workspace snapshot could not read a valid HEAD.");
+
+  const statusLines = rawStatus.split(/\r?\n/u).filter(Boolean);
+  const resolvedRepositoryRoot = path.resolve(context.root);
+  let realRepositoryRoot = resolvedRepositoryRoot;
+  let rootResolveMs = 0;
+  if (statusLines.length > 0) {
+    const rootResolveStartedAt = performance.now();
+    realRepositoryRoot = await realpath(resolvedRepositoryRoot);
+    rootResolveMs = elapsedSnapshotMs(rootResolveStartedAt);
+  }
   const manifest = [];
-  for (const line of rawStatus.split(/\r?\n/u).filter(Boolean)) {
+  let hashedArtifactCount = 0;
+  let hashedBytes = 0;
+  let unhashedFileCount = 0;
+  let directoryCount = 0;
+  let modifiedCount = 0;
+  let addedCount = 0;
+  let deletedCount = 0;
+  let untrackedCount = 0;
+
+  const artifactCaptureStartedAt = performance.now();
+  for (const line of statusLines) {
     const xy = line.slice(0, 2);
     const artifactPath = parsePorcelainPath(line);
     let state = "modified";
     if (xy === "??") state = "untracked";
     else if (xy.includes("D")) state = "deleted";
     else if (xy.includes("A")) state = "added";
+    if (state === "modified") modifiedCount += 1;
+    else if (state === "added") addedCount += 1;
+    else if (state === "deleted") deletedCount += 1;
+    else if (state === "untracked") untrackedCount += 1;
     const artifact = state === "deleted"
       ? { exists: false, artifact_type: null, sha256: null, bytes: null }
-      : await captureDevArtifactState(context.root, artifactPath);
+      : await captureDevArtifactStateWithinRoot(resolvedRepositoryRoot, realRepositoryRoot, artifactPath);
+    if (artifact.sha256 !== null) {
+      hashedArtifactCount += 1;
+      hashedBytes += artifact.bytes ?? 0;
+    } else if (artifact.artifact_type === "file") {
+      unhashedFileCount += 1;
+    } else if (artifact.artifact_type === "directory") {
+      directoryCount += 1;
+    }
     manifest.push({ path: artifactPath, state, sha256: artifact.sha256, bytes: artifact.bytes, artifact_type: artifact.artifact_type });
   }
+  const artifactCaptureMs = elapsedSnapshotMs(artifactCaptureStartedAt);
+
+  const manifestFinalizeStartedAt = performance.now();
   manifest.sort((a, b) => a.path.localeCompare(b.path) || a.state.localeCompare(b.state));
   const payload = { head, manifest };
+  const workspaceSnapshotId = sha256Text(canonicalJson(payload));
+  const manifestFinalizeMs = elapsedSnapshotMs(manifestFinalizeStartedAt);
   return {
-    workspace_snapshot_id: sha256Text(canonicalJson(payload)),
+    workspace_snapshot_id: workspaceSnapshotId,
     head,
     changed_artifact_count: manifest.length,
     manifest,
+    diagnostics: {
+      total_ms: elapsedSnapshotMs(snapshotStartedAt),
+      git_head_ms: gitHeadMs,
+      git_status_ms: gitStatusMs,
+      root_resolve_ms: rootResolveMs,
+      artifact_capture_ms: artifactCaptureMs,
+      manifest_finalize_ms: manifestFinalizeMs,
+      status_bytes: Buffer.byteLength(rawStatus, "utf8"),
+      hashed_artifact_count: hashedArtifactCount,
+      hashed_bytes: hashedBytes,
+      unhashed_file_count: unhashedFileCount,
+      directory_count: directoryCount,
+      modified_count: modifiedCount,
+      added_count: addedCount,
+      deleted_count: deletedCount,
+      untracked_count: untrackedCount,
+    },
   };
 }
 

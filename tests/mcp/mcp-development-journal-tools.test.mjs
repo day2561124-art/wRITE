@@ -573,6 +573,16 @@ assert.equal(
     const options = { workspaceContextResolver: harness.contextResolver };
     const contextA = await harness.contextResolver();
     const snapshotA = await computeWorkspaceSnapshot(contextA);
+    assert.equal(
+      snapshotA.workspace_snapshot_id,
+      sha256(Buffer.from(canonicalJson({ head: snapshotA.head, manifest: snapshotA.manifest }), "utf8")),
+    );
+    assert(Number.isFinite(snapshotA.diagnostics.total_ms));
+    assert(Number.isFinite(snapshotA.diagnostics.git_status_ms));
+    assert(Number.isFinite(snapshotA.diagnostics.artifact_capture_ms));
+    assert.equal(snapshotA.diagnostics.root_resolve_ms, 0);
+    assert.equal(snapshotA.diagnostics.hashed_artifact_count, 0);
+    assert.equal(snapshotA.diagnostics.hashed_bytes, 0);
     const diffA = await dev_git_diff_check({ mode: "working", workspace_id: harness.workspace_id }, options);
     const runner = createDevTestRunner({
       suiteDefinitions: {
@@ -584,6 +594,9 @@ assert.equal(
     });
     const testA = await runner({ suite: "mcp", workspace_id: harness.workspace_id });
     assert.equal(testA.passed, true);
+    assert(Number.isFinite(testA.total_wall_clock_ms));
+    assert(testA.total_wall_clock_ms >= testA.duration_ms);
+    assert.equal(testA.snapshot_diagnostics.hashed_artifact_count, 0);
     assert.equal(diffA.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
     assert.equal(testA.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
 
@@ -592,9 +605,19 @@ assert.equal(
     const snapshotB = await computeWorkspaceSnapshot(contextB);
     assert.equal(snapshotB.head, snapshotA.head);
     assert.notEqual(snapshotB.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
+    assert.equal(
+      snapshotB.workspace_snapshot_id,
+      sha256(Buffer.from(canonicalJson({ head: snapshotB.head, manifest: snapshotB.manifest }), "utf8")),
+    );
+    assert.equal(snapshotB.diagnostics.hashed_artifact_count, 1);
+    assert.equal(snapshotB.diagnostics.hashed_bytes, Buffer.byteLength("base changed without HEAD movement\n", "utf8"));
+    assert(snapshotB.diagnostics.status_bytes > 0);
     const diffB = await dev_git_diff_check({ mode: "working", workspace_id: harness.workspace_id }, options);
     const testB = await runner({ suite: "mcp", workspace_id: harness.workspace_id });
     assert.equal(testB.passed, true);
+    assert.equal(testB.snapshot_diagnostics.hashed_artifact_count, 1);
+    assert.equal(testB.snapshot_diagnostics.hashed_bytes, snapshotB.diagnostics.hashed_bytes);
+    assert(Number.isFinite(testB.total_wall_clock_ms));
     assert.equal(diffB.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
     assert.equal(testB.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
     assert.notEqual(testB.workspace_snapshot_id, testA.workspace_snapshot_id);
@@ -606,8 +629,14 @@ assert.equal(
       diffB.operation_id,
     ].map((operation_id) => dev_workspace_get_operation({ operation_id })));
     assert.equal(testAOperation.events[1].result.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
+    assert.equal(testAOperation.events[0].result.snapshot_hashed_artifact_count, 0);
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_total_ms));
+    assert(Number.isFinite(testAOperation.events[1].result.total_wall_clock_ms));
     assert.equal(diffAOperation.events[1].result.workspace_snapshot_id, snapshotA.workspace_snapshot_id);
     assert.equal(testBOperation.events[1].result.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
+    assert.equal(testBOperation.events[0].result.snapshot_hashed_artifact_count, 1);
+    assert.equal(testBOperation.events[0].result.snapshot_hashed_bytes, snapshotB.diagnostics.hashed_bytes);
+    assert(Number.isFinite(testBOperation.events[1].result.snapshot_artifact_capture_ms));
     assert.equal(diffBOperation.events[1].result.workspace_snapshot_id, snapshotB.workspace_snapshot_id);
   } finally { await harness.cleanup(); }
 }
