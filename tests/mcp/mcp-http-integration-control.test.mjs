@@ -165,6 +165,7 @@ async function fixture() {
   await mkdir(runtime);
   for (const file of [
     'mcp-http-server.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
+    'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs',
     'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
   ]) await copyFile(path.join(root, 'server', 'src', file), path.join(src, file));

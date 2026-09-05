@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
+import { attachWorkspaceSnapshotAuthorityIpc } from './mcp-workspace-snapshot-authority-ipc.mjs';
 import { terminateProcessTree } from './process-control.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
@@ -38,6 +39,12 @@ export function createStdioSession(options = {}) {
       ? attachWorldSimulationPreparedTurnBrokerIpc(
         nextChild,
         options.preparedTurnBroker,
+      )
+      : () => {};
+    const detachWorkspaceSnapshotAuthorityIpc = options.workspaceSnapshotAuthority
+      ? attachWorkspaceSnapshotAuthorityIpc(
+        nextChild,
+        options.workspaceSnapshotAuthority,
       )
       : () => {};
 
@@ -111,6 +118,7 @@ export function createStdioSession(options = {}) {
 
     nextChild.on('exit', (code, signal) => {
       detachPreparedTurnBrokerIpc();
+      detachWorkspaceSnapshotAuthorityIpc();
       lastExit = {
         child_pid: nextChild.pid ?? null,
         generation: childGeneration,
@@ -140,6 +148,9 @@ export function createStdioSession(options = {}) {
       env: {
         ...process.env,
         MCP_TOOL_PROFILE: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public',
+        ...(options.workspaceSnapshotAuthority
+          ? { WRITER_WORKBENCH_PARENT_SNAPSHOT_AUTHORITY: '1' }
+          : {}),
       },
     });
     generation += 1;

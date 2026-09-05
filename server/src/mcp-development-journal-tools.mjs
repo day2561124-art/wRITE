@@ -17,8 +17,15 @@ import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { controlledProcessEnvironment } from "./process-control.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
+import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
+import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
 
 const execFileAsync = promisify(execFile);
+const parentWorkspaceSnapshotAuthorityIpcClient =
+  process.env.WRITER_WORKBENCH_PARENT_SNAPSHOT_AUTHORITY === "1"
+    && typeof process.send === "function"
+    ? createWorkspaceSnapshotAuthorityIpcClient()
+    : null;
 
 export const DEV_JOURNAL_SCHEMA_VERSION = 1;
 export const DEV_JOURNAL_HEALTH = Object.freeze(["healthy", "recovering", "degraded", "corrupt"]);
@@ -84,6 +91,24 @@ function eventRepresentsWorkspaceMutation(event) {
     && target?.expected !== undefined
     && canonicalJson(target.before) !== canonicalJson(target.expected)
   ));
+}
+
+async function invalidateParentWorkspaceSnapshotAuthority(event) {
+  if (!parentWorkspaceSnapshotAuthorityIpcClient || !eventRepresentsWorkspaceMutation(event)) {
+    return { attempted: false, invalidated: false };
+  }
+  try {
+    await parentWorkspaceSnapshotAuthorityIpcClient.invalidate(
+      event.workspace_id,
+      `journal_mutation_started:${event.operation_type}`,
+    );
+    return { attempted: true, invalidated: true };
+  } catch {
+    // B4A never treats an unacknowledged parent authority as reusable without a
+    // healthy parent-owned change clock. Keep the mutation path available and
+    // let the authority remain fail-closed until B4B watcher certainty exists.
+    return { attempted: true, invalidated: false };
+  }
 }
 
 export const DEV_JOURNAL_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1"
@@ -839,6 +864,7 @@ export function createDevOperationJournalService({
       stage: "operation_started",
     });
     noteMutationStarted(event);
+    await invalidateParentWorkspaceSnapshotAuthority(event);
     return { operation_id: operationId, started_event_id: event.journal_event_id, started_sequence: event.sequence };
   }
 
@@ -1783,6 +1809,170 @@ async function delaySnapshotRetry(attempt) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+function snapshotAuthorityClientFor(options) {
+  if (options.workspaceSnapshotAuthorityClient !== undefined) {
+    const candidate = options.workspaceSnapshotAuthorityClient;
+    if (candidate === null) return null;
+    if (!candidate || typeof candidate.tryReuse !== "function" || typeof candidate.publishExact !== "function") {
+      throw new Error("workspaceSnapshotAuthorityClient must expose tryReuse and publishExact.");
+    }
+    return candidate;
+  }
+  return parentWorkspaceSnapshotAuthorityIpcClient;
+}
+
+function emptySnapshotAuthorityTelemetry(available) {
+  return {
+    authority_available: available,
+    authority_query_attempted: false,
+    authority_reused: false,
+    authority_source: "none",
+    authority_miss_reason: available ? "not_queried" : "parent_authority_unavailable",
+    authority_watch_state: "unknown",
+    authority_epoch: null,
+    authority_workspace_epoch: null,
+    authority_query_ms: 0,
+    authority_published: false,
+    authority_publish_ms: 0,
+  };
+}
+
+async function tryReuseWorkspaceSnapshotFromAuthority(context, options, captureConcurrency) {
+  const client = snapshotAuthorityClientFor(options);
+  const telemetry = emptySnapshotAuthorityTelemetry(client !== null);
+  if (!client) return { snapshot: null, telemetry };
+  if (options.allowParentSnapshotAuthority === false) {
+    telemetry.authority_miss_reason = "authority_disabled";
+    return { snapshot: null, telemetry };
+  }
+  if (options.afterArtifactCapture || options.afterArtifactCaptured) {
+    telemetry.authority_miss_reason = "deterministic_capture_hook_present";
+    return { snapshot: null, telemetry };
+  }
+
+  const generationStart = defaultJournal.getMutationToken(context.workspace_id);
+  if (generationStart.active_mutation_count > 0) {
+    telemetry.authority_miss_reason = "active_local_mutation";
+    return { snapshot: null, telemetry };
+  }
+
+  telemetry.authority_query_attempted = true;
+  const queryStartedAt = performance.now();
+  let response;
+  try {
+    response = await client.tryReuse(context.workspace_id);
+  } catch {
+    telemetry.authority_query_ms = elapsedSnapshotMs(queryStartedAt);
+    telemetry.authority_miss_reason = "parent_authority_unavailable";
+    return { snapshot: null, telemetry };
+  }
+  telemetry.authority_query_ms = elapsedSnapshotMs(queryStartedAt);
+  telemetry.authority_watch_state = typeof response?.watch_state === "string"
+    ? response.watch_state
+    : "unknown";
+  telemetry.authority_epoch = Number.isSafeInteger(response?.authority_epoch)
+    ? response.authority_epoch
+    : null;
+  telemetry.authority_workspace_epoch = Number.isSafeInteger(response?.workspace_epoch)
+    ? response.workspace_epoch
+    : null;
+
+  const generationEnd = defaultJournal.getMutationToken(context.workspace_id);
+  if (generationEnd.active_mutation_count > 0 || generationEnd.generation !== generationStart.generation) {
+    telemetry.authority_miss_reason = "local_mutation_generation_changed";
+    return { snapshot: null, telemetry };
+  }
+  if (response?.hit !== true || !response.snapshot) {
+    telemetry.authority_miss_reason = typeof response?.reason === "string"
+      ? response.reason.slice(0, 160)
+      : "authority_miss";
+    return { snapshot: null, telemetry };
+  }
+
+  let normalized;
+  try {
+    normalized = normalizeExactWorkspaceSnapshot(response.snapshot);
+  } catch {
+    telemetry.authority_miss_reason = "authority_snapshot_invalid";
+    return { snapshot: null, telemetry };
+  }
+  const structure = normalized.structural_diagnostics;
+  telemetry.authority_reused = true;
+  telemetry.authority_source = "mcp_http_parent";
+  telemetry.authority_miss_reason = null;
+  return {
+    snapshot: {
+      workspace_snapshot_id: normalized.workspace_snapshot_id,
+      head: normalized.head,
+      changed_artifact_count: normalized.changed_artifact_count,
+      manifest: normalized.manifest,
+      diagnostics: {
+        total_ms: telemetry.authority_query_ms,
+        git_head_ms: 0,
+        git_status_ms: 0,
+        root_resolve_ms: 0,
+        artifact_capture_ms: 0,
+        capture_concurrency_limit: captureConcurrency,
+        capture_peak_concurrency: 0,
+        capture_task_count: 0,
+        fingerprint_cache_eligible: false,
+        fingerprint_cache_source: "none",
+        fingerprint_cache_persistent_loaded: false,
+        fingerprint_cache_source_entry_count: 0,
+        fingerprint_cache_hit_count: 0,
+        fingerprint_cache_miss_count: 0,
+        fingerprint_cache_racy_miss_count: 0,
+        fingerprint_cache_reused_bytes: 0,
+        fingerprint_versioned_artifact_count: 0,
+        fingerprint_version_recheck_ms: 0,
+        fingerprint_version_recheck_count: 0,
+        fingerprint_cache_published: false,
+        fingerprint_cache_persistent_published: false,
+        manifest_finalize_ms: 0,
+        consistency_attempt_count: 0,
+        consistency_retry_count: 0,
+        consistency_recheck_ms: 0,
+        mutation_generation_start: generationStart.generation,
+        mutation_generation_end: generationEnd.generation,
+        status_bytes: 0,
+        ...structure,
+        ...telemetry,
+      },
+    },
+    telemetry,
+  };
+}
+
+async function publishWorkspaceSnapshotToAuthority(context, snapshot, options, telemetry) {
+  const client = snapshotAuthorityClientFor(options);
+  if (!client || options.allowParentSnapshotAuthority === false || snapshot.synthetic_test_fixture === true) {
+    return telemetry;
+  }
+  const publishStartedAt = performance.now();
+  try {
+    const result = await client.publishExact(context.workspace_id, {
+      workspace_snapshot_id: snapshot.workspace_snapshot_id,
+      head: snapshot.head,
+      changed_artifact_count: snapshot.changed_artifact_count,
+      manifest: snapshot.manifest,
+    });
+    telemetry.authority_published = result?.stored === true;
+    telemetry.authority_watch_state = typeof result?.watch_state === "string"
+      ? result.watch_state
+      : telemetry.authority_watch_state;
+    telemetry.authority_epoch = Number.isSafeInteger(result?.authority_epoch)
+      ? result.authority_epoch
+      : telemetry.authority_epoch;
+    telemetry.authority_workspace_epoch = Number.isSafeInteger(result?.workspace_epoch)
+      ? result.workspace_epoch
+      : telemetry.authority_workspace_epoch;
+  } catch {
+    telemetry.authority_published = false;
+  }
+  telemetry.authority_publish_ms = elapsedSnapshotMs(publishStartedAt);
+  return telemetry;
+}
+
 export async function computeWorkspaceSnapshot(context, options = {}) {
   if (!context?.root || !workspaceIdPattern.test(context.workspace_id)) throw new Error("A resolved workspace execution context is required for snapshot identity.");
   if (!isObject(options)) throw new Error("Workspace snapshot options must be an object.");
@@ -1807,9 +1997,28 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
   if (options.allowMemoryFingerprintCache !== undefined && typeof options.allowMemoryFingerprintCache !== "boolean") {
     throw new Error("allowMemoryFingerprintCache must be a boolean when provided.");
   }
+  if (options.allowParentSnapshotAuthority !== undefined && typeof options.allowParentSnapshotAuthority !== "boolean") {
+    throw new Error("allowParentSnapshotAuthority must be a boolean when provided.");
+  }
   const allowMemoryFingerprintCache = options.allowMemoryFingerprintCache !== false;
 
   const snapshotStartedAt = performance.now();
+  const authorityAttempt = await tryReuseWorkspaceSnapshotFromAuthority(
+    context,
+    options,
+    captureConcurrency,
+  );
+  if (authorityAttempt.snapshot) {
+    return {
+      ...authorityAttempt.snapshot,
+      diagnostics: {
+        ...authorityAttempt.snapshot.diagnostics,
+        total_ms: elapsedSnapshotMs(snapshotStartedAt),
+      },
+    };
+  }
+  const authorityTelemetry = authorityAttempt.telemetry;
+
   const timingTotals = {
     git_head_ms: 0,
     git_status_ms: 0,
@@ -1864,6 +2073,7 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
           consistency_recheck_ms: timingTotals.consistency_recheck_ms,
           mutation_generation_start: generationStart.generation,
           mutation_generation_end: generationStart.generation,
+          ...authorityTelemetry,
         },
       };
     }
@@ -1913,11 +2123,10 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
         generationEnd.generation,
         attempted.fingerprint_entries,
       );
-      return {
+      const exactSnapshot = {
         ...attempted.snapshot,
         diagnostics: {
           ...attempted.snapshot.diagnostics,
-          total_ms: elapsedSnapshotMs(snapshotStartedAt),
           git_head_ms: timingTotals.git_head_ms,
           git_status_ms: timingTotals.git_status_ms,
           root_resolve_ms: timingTotals.root_resolve_ms,
@@ -1932,6 +2141,21 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
           fingerprint_version_recheck_count: timingTotals.fingerprint_version_recheck_count,
           fingerprint_cache_published: fingerprintCachePublish.memory || fingerprintCachePublish.persistent,
           fingerprint_cache_persistent_published: fingerprintCachePublish.persistent,
+          ...authorityTelemetry,
+        },
+      };
+      const publishedAuthorityTelemetry = await publishWorkspaceSnapshotToAuthority(
+        context,
+        exactSnapshot,
+        options,
+        authorityTelemetry,
+      );
+      return {
+        ...exactSnapshot,
+        diagnostics: {
+          ...exactSnapshot.diagnostics,
+          ...publishedAuthorityTelemetry,
+          total_ms: elapsedSnapshotMs(snapshotStartedAt),
         },
       };
     }

@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
+import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import fs from 'fs';
 import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
@@ -284,6 +285,7 @@ const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   ownership: 'mcp_http_parent',
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
+const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority();
 
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
 const integrationControl = createParentIntegrationControl({ profile: activeToolProfileName });
@@ -445,6 +447,10 @@ async function handleDevMcpReload(entry, message) {
         http_parent_preserved: true,
         tunnel_preserved: true,
         prepared_turn_broker_preserved: true,
+        workspace_snapshot_authority_preserved: true,
+        workspace_snapshot_authority_watch_state: workspaceSnapshotAuthority.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).watch_state,
         child_ephemeral_state_reset: true,
       }),
       'transport.send(dev_mcp_reload-success)',
@@ -510,6 +516,10 @@ function bindBridge(entry) {
       }
 
       if (message?.method === 'tools/call' && message?.params?.name === INTEGRATE_TOOL_NAME) {
+        workspaceSnapshotAuthority.invalidate({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+          reason: 'parent_owned_integration_requested',
+        });
         void integrationControl.call(message).then((reply) => {
           if (reply) safeTransportSend(transport, reply, 'transport.send(dev_workspace_integrate)');
         });
@@ -592,6 +602,7 @@ function bindBridge(entry) {
 function createBridgeSession() {
   const session = createStdioSession({
     preparedTurnBroker,
+    workspaceSnapshotAuthority,
   });
   let entry;
 

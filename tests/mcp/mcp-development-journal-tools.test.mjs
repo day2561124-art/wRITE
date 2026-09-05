@@ -846,6 +846,15 @@ assert.equal(
     assert(Number.isFinite(testAOperation.events[0].result.snapshot_fingerprint_version_recheck_count));
     assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_published, "boolean");
     assert.equal(typeof testAOperation.events[0].result.snapshot_fingerprint_cache_persistent_published, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_available, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_query_attempted, "boolean");
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_reused, "boolean");
+    assert(["none", "mcp_http_parent"].includes(testAOperation.events[0].result.snapshot_authority_source));
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_miss_reason, "string");
+    assert(["unknown", "healthy", "unhealthy"].includes(testAOperation.events[0].result.snapshot_authority_watch_state));
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_authority_query_ms));
+    assert.equal(typeof testAOperation.events[0].result.snapshot_authority_published, "boolean");
+    assert(Number.isFinite(testAOperation.events[0].result.snapshot_authority_publish_ms));
     assert.equal(
       testAOperation.events[0].result.snapshot_mutation_generation_start,
       testAOperation.events[0].result.snapshot_mutation_generation_end,
@@ -1229,6 +1238,93 @@ assert.equal(
       snapshot.workspace_snapshot_id,
       sha256(Buffer.from(canonicalJson({ head: snapshot.head, manifest: snapshot.manifest }), "utf8")),
     );
+  } finally { await harness.cleanup(); }
+}
+
+// B4A parent authority is a common computeWorkspaceSnapshot shortcut: the first
+// miss performs the existing exact pipeline and publishes, while the second call
+// reuses the same canonical identity without running a consistency attempt.
+{
+  const harness = await gitHarness("snapshot-parent-authority", 32);
+  try {
+    await writeFile(path.join(harness.repositoryRoot, "base.txt"), "authority fixture\n", "utf8");
+    const context = await harness.contextResolver();
+    let stored = null;
+    let authorityEpoch = 1;
+    const fakeAuthority = {
+      async tryReuse() {
+        if (!stored) {
+          return {
+            hit: false,
+            reason: "snapshot_not_published",
+            watch_state: "healthy",
+            authority_epoch: authorityEpoch,
+            workspace_epoch: 0,
+          };
+        }
+        return {
+          hit: true,
+          reason: null,
+          watch_state: "healthy",
+          authority_epoch: authorityEpoch,
+          workspace_epoch: 0,
+          snapshot: structuredClone(stored),
+        };
+      },
+      async publishExact(workspaceIdValue, snapshotValue) {
+        assert.equal(workspaceIdValue, harness.workspace_id);
+        stored = structuredClone(snapshotValue);
+        authorityEpoch += 1;
+        return {
+          stored: true,
+          reusable: true,
+          watch_state: "healthy",
+          authority_epoch: authorityEpoch,
+          workspace_epoch: 0,
+        };
+      },
+    };
+
+    const cold = await computeWorkspaceSnapshot(context, {
+      workspaceSnapshotAuthorityClient: fakeAuthority,
+      fingerprintRacyWindowMs: 0,
+    });
+    assert.equal(cold.diagnostics.authority_available, true);
+    assert.equal(cold.diagnostics.authority_query_attempted, true);
+    assert.equal(cold.diagnostics.authority_reused, false);
+    assert.equal(cold.diagnostics.authority_miss_reason, "snapshot_not_published");
+    assert.equal(cold.diagnostics.authority_published, true);
+    assert(cold.diagnostics.consistency_attempt_count >= 1);
+
+    const warm = await computeWorkspaceSnapshot(context, {
+      workspaceSnapshotAuthorityClient: fakeAuthority,
+      fingerprintRacyWindowMs: 0,
+    });
+    assert.equal(warm.workspace_snapshot_id, cold.workspace_snapshot_id);
+    assert.deepEqual(warm.manifest, cold.manifest);
+    assert.equal(warm.diagnostics.authority_available, true);
+    assert.equal(warm.diagnostics.authority_query_attempted, true);
+    assert.equal(warm.diagnostics.authority_reused, true);
+    assert.equal(warm.diagnostics.authority_source, "mcp_http_parent");
+    assert.equal(warm.diagnostics.authority_watch_state, "healthy");
+    assert.equal(warm.diagnostics.authority_miss_reason, null);
+    assert.equal(warm.diagnostics.consistency_attempt_count, 0);
+    assert.equal(warm.diagnostics.capture_task_count, 0);
+    assert.equal(warm.diagnostics.fingerprint_cache_hit_count, 0);
+    assert(warm.diagnostics.authority_query_ms >= 0);
+
+    let hookCalls = 0;
+    const hooked = await computeWorkspaceSnapshot(context, {
+      workspaceSnapshotAuthorityClient: fakeAuthority,
+      fingerprintRacyWindowMs: 0,
+      afterArtifactCapture: async () => { hookCalls += 1; },
+    });
+    assert.equal(hookCalls, 1);
+    assert.equal(hooked.workspace_snapshot_id, cold.workspace_snapshot_id);
+    assert.equal(hooked.diagnostics.authority_reused, false);
+    assert.equal(hooked.diagnostics.authority_query_attempted, false);
+    assert.equal(hooked.diagnostics.authority_miss_reason, "deterministic_capture_hook_present");
+    assert.equal(hooked.diagnostics.authority_published, true);
   } finally { await harness.cleanup(); }
 }
 
