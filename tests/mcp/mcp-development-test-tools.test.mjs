@@ -1329,6 +1329,29 @@ try {
   assert.equal(untrackedPush.conflicted_count, 0);
   assert.equal(await readFile(untrackedPushPath, "utf8"), untrackedPushBefore);
 
+  const truncatedUntrackedPushFixture = await createPushFixture(tempRoot, "push-truncated-untracked-status");
+  for (let index = 0; index < 200; index += 1) {
+    const suffix = `${String(index).padStart(3, "0")}-${"x".repeat(64)}.txt`;
+    await writeFile(
+      path.join(truncatedUntrackedPushFixture.repositoryRoot, `untracked-${suffix}`),
+      "preserve me\n",
+      "utf8",
+    );
+  }
+  const truncatedUntrackedPushTool = createDevGitPushTool({
+    repositoryRoot: truncatedUntrackedPushFixture.repositoryRoot,
+    policy: pushTestPolicy(truncatedUntrackedPushFixture.remoteUrl),
+    outputMaxCharacters: 4096,
+  });
+  const truncatedUntrackedPush = await truncatedUntrackedPushTool({ expectedHead: truncatedUntrackedPushFixture.head });
+  assert.equal(truncatedUntrackedPush.pushed, true, JSON.stringify(truncatedUntrackedPush));
+  assert.equal(truncatedUntrackedPush.authoritative_remote_verified, true);
+  assert.equal(truncatedUntrackedPush.working_tree_dirty, true);
+  assert.equal(truncatedUntrackedPush.untracked_count > 0, true);
+  assert.equal(truncatedUntrackedPush.staged_count, 0);
+  assert.equal(truncatedUntrackedPush.conflicted_count, 0);
+  assert.equal(fixtureBareHead(truncatedUntrackedPushFixture.bareRoot), truncatedUntrackedPushFixture.head);
+
   const combinedDirtyPushFixture = await createPushFixture(tempRoot, "push-combined-dirty");
   const combinedDirtyPushTool = createDevGitPushTool({
     repositoryRoot: combinedDirtyPushFixture.repositoryRoot,

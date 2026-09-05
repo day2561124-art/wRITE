@@ -3461,11 +3461,33 @@ export function createDevGitPushTool({
           durationMs: Date.now() - startedAt,
         });
       }
-      modifiedCount = status.modified.length + status.deleted.length + status.renamed.length;
+      const statusSafety = status.raw_truncated
+        ? await gitTools.status({ includeUntracked: false })
+        : status;
+      if (!statusSafety.execution_ok || statusSafety.exit_code !== 0) {
+        return pushFailureResult({
+          reason: "STATUS_READ_FAILED",
+          details: "Could not read a complete tracked-only repository status before push.",
+          executionOk: false,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          exitCode: statusSafety.exit_code,
+          signal: statusSafety.signal,
+          timedOut: statusSafety.timed_out,
+          stderr: statusSafety.stderr,
+          stderrTruncated: statusSafety.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      modifiedCount = statusSafety.modified.length + statusSafety.deleted.length + statusSafety.renamed.length;
       untrackedCount = status.untracked.length;
-      stagedCount = status.staged.length;
-      conflictedCount = status.conflicted.length;
-      workingTreeDirty = !status.clean;
+      stagedCount = statusSafety.staged.length;
+      conflictedCount = statusSafety.conflicted.length;
+      workingTreeDirty = !statusSafety.clean || status.untracked.length > 0;
       if (conflictedCount > 0) {
         return pushFailureResult({
           reason: "CONFLICTED",
@@ -3552,11 +3574,33 @@ export function createDevGitPushTool({
           durationMs: Date.now() - startedAt,
         });
       }
-      modifiedCount = finalStatus.modified.length + finalStatus.deleted.length + finalStatus.renamed.length;
+      const finalStatusSafety = finalStatus.raw_truncated
+        ? await gitTools.status({ includeUntracked: false })
+        : finalStatus;
+      if (!finalStatusSafety.execution_ok || finalStatusSafety.exit_code !== 0) {
+        return pushFailureResult({
+          reason: "STATUS_READ_FAILED",
+          details: "Could not read a complete tracked-only repository status at the final push race gate.",
+          executionOk: false,
+          head: actualHead,
+          expectedHead: normalized.expectedHead,
+          upstream,
+          remoteHeadBefore,
+          aheadBefore,
+          behindBefore,
+          exitCode: finalStatusSafety.exit_code,
+          signal: finalStatusSafety.signal,
+          timedOut: finalStatusSafety.timed_out,
+          stderr: finalStatusSafety.stderr,
+          stderrTruncated: finalStatusSafety.stderr_truncated,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      modifiedCount = finalStatusSafety.modified.length + finalStatusSafety.deleted.length + finalStatusSafety.renamed.length;
       untrackedCount = finalStatus.untracked.length;
-      stagedCount = finalStatus.staged.length;
-      conflictedCount = finalStatus.conflicted.length;
-      workingTreeDirty = !finalStatus.clean;
+      stagedCount = finalStatusSafety.staged.length;
+      conflictedCount = finalStatusSafety.conflicted.length;
+      workingTreeDirty = !finalStatusSafety.clean || finalStatus.untracked.length > 0;
       if (conflictedCount > 0) {
         return pushFailureResult({ reason: "CONFLICTED", details: "Conflicted paths appeared during the final push race gate.", head: actualHead, expectedHead: normalized.expectedHead, upstream, remoteHeadBefore, aheadBefore, behindBefore, workingTreeDirty, modifiedCount, untrackedCount, stagedCount, conflictedCount, durationMs: Date.now() - startedAt });
       }
