@@ -8,6 +8,7 @@ import {
   rename,
   rm,
   stat,
+  symlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -1076,6 +1077,37 @@ assert.equal(
     assert.equal(persistentWarm.diagnostics.fingerprint_cache_miss_count, 0);
     assert.equal(persistentWarm.diagnostics.fingerprint_cache_racy_miss_count, 0);
     assert.equal(persistentWarm.diagnostics.fingerprint_cache_reused_bytes, persistentWarm.diagnostics.hashed_bytes);
+  } finally { await harness.cleanup(); }
+}
+
+// Cache reuse never bypasses symbolic-link containment checks, including persistent L2 reuse.
+{
+  const harness = await gitHarness("snapshot-fingerprint-symlink-guard", 32);
+  try {
+    const basePath = path.join(harness.repositoryRoot, "base.txt");
+    const outsidePath = path.join(harness.root, "outside.txt");
+    const content = "symlink guard fingerprint\n";
+    await writeFile(basePath, content, "utf8");
+    await writeFile(outsidePath, content, "utf8");
+    const context = await harness.contextResolver();
+    await computeWorkspaceSnapshot(context, { fingerprintRacyWindowMs: 0 });
+    await rm(basePath, { force: true });
+    let symlinkSupported = true;
+    try {
+      await symlink(outsidePath, basePath, "file");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOSYS"].includes(error?.code)) symlinkSupported = false;
+      else throw error;
+    }
+    if (symlinkSupported) {
+      await assert.rejects(
+        computeWorkspaceSnapshot(context, {
+          allowMemoryFingerprintCache: false,
+          fingerprintRacyWindowMs: 0,
+        }),
+        /symbolic links or junctions/u,
+      );
+    }
   } finally { await harness.cleanup(); }
 }
 

@@ -1356,9 +1356,9 @@ async function captureSnapshotArtifactStateWithinRoot(
     throw error;
   }
   if (info.isSymbolicLink()) throw new Error("Artifact provenance refuses symbolic links or junctions.");
-  const realTarget = await realpath(target);
-  if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
   if (info.isDirectory()) {
+    const realTarget = await realpath(target);
+    if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
     return {
       artifact: { exists: true, artifact_type: "directory", sha256: null, bytes: null },
       version_token: null,
@@ -1373,6 +1373,8 @@ async function captureSnapshotArtifactStateWithinRoot(
   const bytes = Number(info.size);
   if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("Artifact size exceeds the supported numeric range.");
   if (info.size > BigInt(DEV_JOURNAL_ARTIFACT_MAX_BYTES)) {
+    const realTarget = await realpath(target);
+    if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
     return {
       artifact: { exists: true, artifact_type: "file", sha256: null, bytes },
       version_token: snapshotArtifactVersionToken(info),
@@ -1407,6 +1409,8 @@ async function captureSnapshotArtifactStateWithinRoot(
     };
   }
 
+  const realTarget = await realpath(target);
+  if (!isInside(realRepositoryRoot, realTarget)) throw new Error("Artifact provenance resolved outside the workspace root.");
   const content = await readFile(target);
   let postInfo;
   try {
