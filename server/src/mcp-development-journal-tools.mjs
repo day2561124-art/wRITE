@@ -45,6 +45,10 @@ export const DEV_JOURNAL_MAX_LINKS = 100;
 export const DEV_JOURNAL_MAX_QUERY_RESULTS = 100;
 export const DEV_JOURNAL_MAX_RECOVERY_SCAN = 10_000;
 export const DEV_JOURNAL_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
+export const DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS = 10_000;
+export const DEV_JOURNAL_LOCK_RETRY_MIN_MS = 25;
+export const DEV_JOURNAL_LOCK_RETRY_MAX_MS = 200;
+export const DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES = 8;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
@@ -378,8 +382,26 @@ async function removeJournalLockFile(lockPath, { attempts = 80 } = {}) {
   return false;
 }
 
-async function acquireJournalLock(lockPath) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+function journalLockContentionError(timeoutMs) {
+  const error = new Error(`Could not acquire the journal append lock within ${timeoutMs} ms because another live development operation retained it.`);
+  error.code = "JOURNAL_LOCK_CONTENDED";
+  return error;
+}
+
+function journalSnapshotUnstableError() {
+  const error = new Error(`Journal verification could not catch up to a stable append-only snapshot within ${DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES} passes.`);
+  error.code = "JOURNAL_SNAPSHOT_UNSTABLE";
+  return error;
+}
+
+function isTransientJournalVerificationError(error) {
+  return ["JOURNAL_LOCK_CONTENDED", "JOURNAL_SNAPSHOT_UNSTABLE", "JOURNAL_LOCK_RELEASE_FAILED"].includes(error?.code);
+}
+
+async function acquireJournalLock(lockPath, { timeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS } = {}) {
+  const startedAt = Date.now();
+  let attempt = 0;
+  while (true) {
     try {
       const handle = await open(lockPath, "wx");
       await handle.writeFile(`${JSON.stringify({ pid: process.pid, hostname: os.hostname(), acquired_at: new Date().toISOString() })}\n`, "utf8");
@@ -394,17 +416,27 @@ async function acquireJournalLock(lockPath) {
       } catch {
         // Missing, unreadable, or transiently inaccessible lock fails closed until the bounded retry completes.
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const elapsedMs = Date.now() - startedAt;
+      const remainingMs = timeoutMs - elapsedMs;
+      if (remainingMs <= 0) throw journalLockContentionError(timeoutMs);
+      const retryMs = Math.min(
+        DEV_JOURNAL_LOCK_RETRY_MAX_MS,
+        DEV_JOURNAL_LOCK_RETRY_MIN_MS * (2 ** Math.min(attempt, 3)),
+        remainingMs,
+      );
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }
-  throw new Error("Could not acquire the journal append lock within 2 seconds.");
 }
 
 async function releaseJournalLock(handle, lockPath) {
   if (!handle) return;
   await handle.close();
   if (!await removeJournalLockFile(lockPath)) {
-    throw new Error("Could not release the journal append lock within 2 seconds.");
+    const error = new Error("Could not release the journal append lock within 2 seconds.");
+    error.code = "JOURNAL_LOCK_RELEASE_FAILED";
+    throw error;
   }
 }
 
@@ -438,7 +470,12 @@ export function createDevOperationJournalService({
   clock = () => new Date(),
   operationIdGenerator = generateOperationId,
   eventIdGenerator = generateEventId,
+  eventReader = readFile,
+  lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
 } = {}) {
+  if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
+    throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
+  }
   const headPath = path.join(storageRoot, "head.json");
   const lockPath = path.join(storageRoot, "append.lock");
   let runtimeHealth = "healthy";
@@ -446,73 +483,128 @@ export function createDevOperationJournalService({
   let lastHealthError = null;
   let explicitDegraded = false;
 
-  async function verifyUnlocked() {
+  function snapshotsEqual(left, right) {
+    if (left.head.latest_sequence !== right.head.latest_sequence
+      || left.head.latest_event_id !== right.head.latest_event_id
+      || left.head.latest_event_hash !== right.head.latest_event_hash
+      || left.files.length !== right.files.length) return false;
+    return left.files.every((fileName, index) => fileName === right.files[index]);
+  }
+
+  async function captureSnapshot(eventsPath) {
+    const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
     try {
-      const { eventsPath } = await ensureStorageRoot(storageRoot);
       const head = await readHead(headPath);
       const files = await listEventFiles(eventsPath);
       if (files.length > DEV_JOURNAL_MAX_RECOVERY_SCAN) throw new Error(`Journal scan exceeds ${DEV_JOURNAL_MAX_RECOVERY_SCAN} events.`);
-      let previousHash = null;
-      let previousSequence = 0;
-      const events = [];
-      const seenSequence = new Set();
-      for (const fileName of files) {
-        const filePath = path.join(eventsPath, fileName);
-        const info = await lstat(filePath);
-        if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
-        const event = parseEvent(await readFile(filePath, "utf8"));
-        if (seenSequence.has(event.sequence)) throw new Error(`Duplicate journal sequence ${event.sequence}.`);
-        seenSequence.add(event.sequence);
-        if (event.sequence !== previousSequence + 1) throw new Error(`Journal sequence gap or reorder at ${event.sequence}.`);
-        if (event.previous_event_hash !== previousHash) throw new Error(`Journal previous hash mismatch at ${event.sequence}.`);
-        if (!fileName.startsWith(`${String(event.sequence).padStart(12, "0")}-${event.journal_event_id}`)) throw new Error(`Journal filename/event identity mismatch at ${event.sequence}.`);
-        previousSequence = event.sequence;
-        previousHash = event.event_hash;
-        events.push(event);
+      if (files.length !== head.latest_sequence) {
+        throw new Error("Journal event-file snapshot cardinality does not match the captured head sequence.");
       }
-      if (head.latest_sequence !== previousSequence || head.latest_event_hash !== previousHash || head.latest_event_id !== (events.at(-1)?.journal_event_id ?? null)) {
-        throw new Error("Journal head does not match the verified event tail.");
+      if (head.latest_sequence > 0) {
+        const tailPrefix = `${String(head.latest_sequence).padStart(12, "0")}-${head.latest_event_id}`;
+        if (!files.at(-1)?.startsWith(tailPrefix)) throw new Error("Journal captured head does not identify the event-file snapshot tail.");
       }
-      const byOperation = new Map();
-      for (const event of events) {
-        const list = byOperation.get(event.operation_id) ?? [];
-        list.push(event);
-        byOperation.set(event.operation_id, list);
+      return { head, files };
+    } finally {
+      await releaseJournalLock(lockHandle, lockPath);
+    }
+  }
+
+  async function verifySnapshotExtension({ eventsPath, base, snapshot }) {
+    if (snapshot.files.length < base.files.length) throw new Error("Journal event-file snapshot moved backwards during verification.");
+    for (let index = 0; index < base.files.length; index += 1) {
+      if (snapshot.files[index] !== base.files[index]) throw new Error("Journal event-file snapshot changed a previously captured immutable prefix.");
+    }
+    let previousHash = base.head.latest_event_hash;
+    let previousSequence = base.head.latest_sequence;
+    const events = [...base.events];
+    const seenSequence = new Set(events.map((event) => event.sequence));
+    for (const fileName of snapshot.files.slice(base.files.length)) {
+      const filePath = path.join(eventsPath, fileName);
+      const beforeInfo = await lstat(filePath);
+      if (beforeInfo.isSymbolicLink() || !beforeInfo.isFile() || beforeInfo.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
+      const event = parseEvent(await eventReader(filePath, "utf8"));
+      const afterInfo = await lstat(filePath);
+      if (!afterInfo.isFile()
+        || afterInfo.isSymbolicLink()
+        || beforeInfo.size !== afterInfo.size
+        || beforeInfo.mtimeMs !== afterInfo.mtimeMs
+        || beforeInfo.ctimeMs !== afterInfo.ctimeMs) {
+        throw new Error(`Journal event file changed while its immutable snapshot was being verified: ${fileName}.`);
       }
-      const dangling = [];
-      const active = [];
-      for (const [operationId, operationEvents] of byOperation.entries()) {
-        const starts = operationEvents.filter((event) => event.stage === "operation_started");
-        const terminals = operationEvents.filter((event) => terminalStageSet.has(event.stage));
-        if (starts.length !== 1) throw new Error(`Operation ${operationId} has invalid STARTED cardinality.`);
-        if (terminals.length > 1) throw new Error(`Operation ${operationId} has multiple terminal events.`);
-        if (terminals.length === 0) {
-          const diagnostic = starts[0].diagnostic;
-          const ownerActive = diagnostic?.hostname === os.hostname() && isProcessRunning(diagnostic?.owner_pid);
-          if (ownerActive) active.push(operationId);
-          else dangling.push(operationId);
-        }
+      if (seenSequence.has(event.sequence)) throw new Error(`Duplicate journal sequence ${event.sequence}.`);
+      seenSequence.add(event.sequence);
+      if (event.sequence !== previousSequence + 1) throw new Error(`Journal sequence gap or reorder at ${event.sequence}.`);
+      if (event.previous_event_hash !== previousHash) throw new Error(`Journal previous hash mismatch at ${event.sequence}.`);
+      if (!fileName.startsWith(`${String(event.sequence).padStart(12, "0")}-${event.journal_event_id}`)) throw new Error(`Journal filename/event identity mismatch at ${event.sequence}.`);
+      previousSequence = event.sequence;
+      previousHash = event.event_hash;
+      events.push(event);
+    }
+    if (snapshot.head.latest_sequence !== previousSequence
+      || snapshot.head.latest_event_hash !== previousHash
+      || snapshot.head.latest_event_id !== (events.at(-1)?.journal_event_id ?? null)) {
+      throw new Error("Journal head does not match the verified event tail.");
+    }
+    return { head: snapshot.head, files: snapshot.files, events };
+  }
+
+  function classifyVerifiedSnapshot({ head, events }) {
+    const byOperation = new Map();
+    for (const event of events) {
+      const list = byOperation.get(event.operation_id) ?? [];
+      list.push(event);
+      byOperation.set(event.operation_id, list);
+    }
+    const dangling = [];
+    const active = [];
+    for (const [operationId, operationEvents] of byOperation.entries()) {
+      const starts = operationEvents.filter((event) => event.stage === "operation_started");
+      const terminals = operationEvents.filter((event) => terminalStageSet.has(event.stage));
+      if (starts.length !== 1) throw new Error(`Operation ${operationId} has invalid STARTED cardinality.`);
+      if (terminals.length > 1) throw new Error(`Operation ${operationId} has multiple terminal events.`);
+      if (terminals.length === 0) {
+        const diagnostic = starts[0].diagnostic;
+        const ownerActive = diagnostic?.hostname === os.hostname() && isProcessRunning(diagnostic?.owner_pid);
+        if (ownerActive) active.push(operationId);
+        else dangling.push(operationId);
       }
-      const ambiguousTerminal = events.some((event) => (
-        terminalStageSet.has(event.stage)
-        && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
-      ));
-      const chainDegraded = dangling.length > 0 || ambiguousTerminal;
-      runtimeHealth = explicitDegraded || chainDegraded ? "degraded" : "healthy";
-      reconciliationRequired = explicitDegraded || chainDegraded;
-      if (!explicitDegraded) {
-        lastHealthError = dangling.length > 0
-          ? "dangling_operations_require_reconciliation"
-          : (ambiguousTerminal ? "ambiguous_terminal_operation_requires_reconciliation" : null);
+    }
+    const ambiguousTerminal = events.some((event) => (
+      terminalStageSet.has(event.stage)
+      && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
+    ));
+    const chainDegraded = dangling.length > 0 || ambiguousTerminal;
+    runtimeHealth = explicitDegraded || chainDegraded ? "degraded" : "healthy";
+    reconciliationRequired = explicitDegraded || chainDegraded;
+    if (!explicitDegraded) {
+      lastHealthError = dangling.length > 0
+        ? "dangling_operations_require_reconciliation"
+        : (ambiguousTerminal ? "ambiguous_terminal_operation_requires_reconciliation" : null);
+    }
+    return {
+      head,
+      events,
+      dangling_operations: dangling,
+      active_operations: active,
+      ambiguous_terminal: ambiguousTerminal,
+    };
+  }
+
+  async function verify() {
+    const { eventsPath } = await ensureStorageRoot(storageRoot);
+    try {
+      let verified = { head: emptyHead(), files: [], events: [] };
+      let snapshot = await captureSnapshot(eventsPath);
+      for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
+        verified = await verifySnapshotExtension({ eventsPath, base: verified, snapshot });
+        const confirmation = await captureSnapshot(eventsPath);
+        if (snapshotsEqual(snapshot, confirmation)) return classifyVerifiedSnapshot(verified);
+        snapshot = confirmation;
       }
-      return {
-        head,
-        events,
-        dangling_operations: dangling,
-        active_operations: active,
-        ambiguous_terminal: ambiguousTerminal,
-      };
+      throw journalSnapshotUnstableError();
     } catch (error) {
+      if (isTransientJournalVerificationError(error)) throw error;
       runtimeHealth = "corrupt";
       reconciliationRequired = true;
       lastHealthError = error.message;
@@ -520,20 +612,10 @@ export function createDevOperationJournalService({
     }
   }
 
-  async function verify() {
-    await ensureStorageRoot(storageRoot);
-    const lockHandle = await acquireJournalLock(lockPath);
-    try {
-      return await verifyUnlocked();
-    } finally {
-      await releaseJournalLock(lockHandle, lockPath);
-    }
-  }
-
   async function append(input) {
     if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
     const { eventsPath } = await ensureStorageRoot(storageRoot);
-    const lockHandle = await acquireJournalLock(lockPath);
+    const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
     try {
       const head = await readHead(headPath);
       const sequence = head.latest_sequence + 1;
@@ -679,10 +761,9 @@ export function createDevOperationJournalService({
 
   async function assertMutationAllowed() {
     await reconcileDangling();
-    const currentStatus = await status();
-    if (currentStatus.health !== "healthy") {
-      const error = new Error(`JOURNAL_${currentStatus.health.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
-      error.code = `JOURNAL_${currentStatus.health.toUpperCase()}`;
+    if (runtimeHealth !== "healthy") {
+      const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
+      error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
       throw error;
     }
   }
@@ -765,7 +846,24 @@ export function createDevOperationJournalService({
         last_health_error: lastHealthError,
         storage: "server_owned_per_event_files",
       };
-    } catch {
+    } catch (error) {
+      if (isTransientJournalVerificationError(error) && runtimeHealth !== "corrupt") {
+        return {
+          schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+          health: runtimeHealth === "degraded" ? "degraded" : "recovering",
+          chain_verified: false,
+          latest_sequence: null,
+          latest_event_id: null,
+          latest_event_hash: null,
+          dangling_operation_count: null,
+          dangling_operations: [],
+          active_operation_count: null,
+          active_operations: [],
+          reconciliation_required: reconciliationRequired,
+          last_health_error: `${error.code}: ${error.message}`,
+          storage: "server_owned_per_event_files",
+        };
+      }
       return {
         schema_version: DEV_JOURNAL_SCHEMA_VERSION,
         health: "corrupt",

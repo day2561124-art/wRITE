@@ -126,6 +126,18 @@ async function readEvent(storageRoot, index) {
   return { file: files[index], event: JSON.parse(await readFile(path.join(storageRoot, "events", files[index]), "utf8")) };
 }
 
+async function writeJournalLock(storageRoot, pid = process.pid) {
+  await writeFile(
+    path.join(storageRoot, "append.lock"),
+    `${JSON.stringify({ pid, hostname: os.hostname(), acquired_at: new Date().toISOString() })}\n`,
+    { encoding: "utf8", flag: "wx" },
+  );
+}
+
+async function delay(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function runWorker(storageRoot, mode, extra = {}) {
   const child = spawn(process.execPath, [__filename, "--worker", mode], {
     env: {
@@ -220,6 +232,11 @@ async function expectCorrupt(label, mutate) {
     assert.equal(status.health, "corrupt", label);
     assert.equal(status.chain_verified, false, label);
     assert.equal(status.reconciliation_required, true, label);
+    await assert.rejects(
+      service.begin({ operation_type: "must_fail_closed", tool_name: "dev_fixture", workspace_id: workspaceId }),
+      undefined,
+      `${label} corruption must fail closed for new mutation`,
+    );
   } finally { await clean(fixture); }
 }
 
@@ -368,6 +385,179 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
     }
     assert.equal((await service.status()).health, "healthy");
   } finally { await clean(fixture); }
+}
+
+// begin() performs one admission verification when no dangling operation exists; it must not
+// immediately repeat the same full read-only scan through status().
+{
+  const { fixture } = await completedFixture("begin-single-verification");
+  try {
+    let eventReadCount = 0;
+    const service = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => {
+        eventReadCount += 1;
+        return readFile(...args);
+      },
+    });
+    const started = await service.begin({
+      operation_type: "single_admission_verify",
+      tool_name: "dev_fixture",
+      workspace_id: workspaceId,
+    });
+    assert.equal(eventReadCount, 2, "begin admission should scan the existing two-event journal exactly once");
+    await service.complete(started.operation_id, { result: { single_verify: true } });
+  } finally { await clean(fixture); }
+}
+
+// Snapshot verification must not retain append.lock while hashing the captured immutable prefix.
+// A legal concurrent append may advance the live head; the verifier catches up to the new suffix
+// without classifying that forward progress as corruption.
+{
+  const { fixture } = await completedFixture("snapshot-catchup");
+  let signalFirstRead;
+  let releaseFirstRead;
+  const firstReadStarted = new Promise((resolve) => { signalFirstRead = resolve; });
+  const firstReadGate = new Promise((resolve) => { releaseFirstRead = resolve; });
+  let blocked = false;
+  try {
+    const slowVerifier = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => {
+        if (!blocked) {
+          blocked = true;
+          signalFirstRead();
+          await firstReadGate;
+        }
+        return readFile(...args);
+      },
+    });
+    const verificationPromise = slowVerifier.verify();
+    await firstReadStarted;
+
+    const concurrentService = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      lockAcquireTimeoutMs: 500,
+    });
+    let concurrentStarted;
+    try {
+      concurrentStarted = await concurrentService.begin({
+        operation_type: "concurrent_during_verify",
+        tool_name: "dev_fixture",
+        workspace_id: workspaceId,
+      });
+      await concurrentService.complete(concurrentStarted.operation_id, { result: { concurrent: true } });
+    } finally {
+      releaseFirstRead();
+    }
+
+    const verified = await verificationPromise;
+    assert.equal(verified.events.length, 4);
+    assert.equal(verified.head.latest_sequence, 4);
+    assert(verified.events.some((event) => event.operation_id === concurrentStarted.operation_id && event.stage === "operation_completed"));
+    assert.equal(verified.head.latest_event_hash, verified.events.at(-1).event_hash);
+    assert.equal((await slowVerifier.status()).health, "healthy");
+  } finally { await clean(fixture); }
+}
+
+// A live same-host owner retains append.lock. A contender waits with bounded backoff and succeeds
+// after the owner releases the lock, while total ordering and head/hash-chain identity stay intact.
+{
+  const { fixture } = await completedFixture("live-lock-wait");
+  const lockPath = path.join(fixture.storageRoot, "append.lock");
+  try {
+    await writeJournalLock(fixture.storageRoot);
+    const contender = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      lockAcquireTimeoutMs: 1_000,
+    });
+    let settled = false;
+    const waiting = contender.begin({
+      operation_type: "wait_for_live_lock",
+      tool_name: "dev_fixture",
+      workspace_id: workspaceId,
+    }).then(
+      (value) => { settled = true; return value; },
+      (error) => { settled = true; throw error; },
+    );
+    await delay(80);
+    assert.equal(settled, false, "contender must wait while the live-PID lock remains owned");
+    await rm(lockPath);
+    const started = await waiting;
+    await contender.complete(started.operation_id, { result: { waited: true } });
+    const verified = await contender.verify();
+    assert.equal(verified.head.latest_sequence, 4);
+    assert.equal(verified.head.latest_event_hash, verified.events.at(-1).event_hash);
+    for (let index = 0; index < verified.events.length; index += 1) {
+      assert.equal(verified.events[index].sequence, index + 1);
+      assert.equal(verified.events[index].previous_event_hash, index === 0 ? null : verified.events[index - 1].event_hash);
+    }
+  } finally {
+    await rm(lockPath, { force: true });
+    await clean(fixture);
+  }
+}
+
+// A live lock held beyond the configured acquisition deadline is explicit transient contention,
+// never fake success and never a sticky corruption classification. Once released, health recovers.
+{
+  const { fixture } = await completedFixture("lock-timeout");
+  const lockPath = path.join(fixture.storageRoot, "append.lock");
+  try {
+    await writeJournalLock(fixture.storageRoot);
+    const shortDeadline = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      lockAcquireTimeoutMs: 120,
+    });
+    await assert.rejects(
+      shortDeadline.verify(),
+      (error) => {
+        assert.equal(error.code, "JOURNAL_LOCK_CONTENDED");
+        return true;
+      },
+    );
+    const transient = await shortDeadline.status();
+    assert.equal(transient.health, "recovering");
+    assert.equal(transient.chain_verified, false);
+    assert.equal(transient.reconciliation_required, false);
+    assert.match(transient.last_health_error, /JOURNAL_LOCK_CONTENDED/u);
+
+    await rm(lockPath);
+    const recovered = await shortDeadline.status();
+    assert.equal(recovered.health, "healthy");
+    assert.equal(recovered.chain_verified, true);
+    assert.equal(recovered.reconciliation_required, false);
+  } finally {
+    await rm(lockPath, { force: true });
+    await clean(fixture);
+  }
+}
+
+// A dead same-host PID lock is still formally stale and recoverable; stale recovery must not weaken
+// append ordering or the verified chain.
+{
+  const { fixture } = await completedFixture("stale-lock");
+  const lockPath = path.join(fixture.storageRoot, "append.lock");
+  try {
+    await writeJournalLock(fixture.storageRoot, 2_147_483_647);
+    const service = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      lockAcquireTimeoutMs: 1_000,
+    });
+    const started = await service.begin({
+      operation_type: "stale_lock_recovery",
+      tool_name: "dev_fixture",
+      workspace_id: workspaceId,
+    });
+    await service.complete(started.operation_id, { result: { stale_recovered: true } });
+    const status = await service.status();
+    assert.equal(status.health, "healthy");
+    assert.equal(status.chain_verified, true);
+    assert.equal(status.latest_sequence, 4);
+  } finally {
+    await rm(lockPath, { force: true });
+    await clean(fixture);
+  }
 }
 
 // Explicit in-process degradation (for example terminal append failure) must stay sticky
