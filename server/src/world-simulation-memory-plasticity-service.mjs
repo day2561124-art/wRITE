@@ -1013,7 +1013,7 @@ export function buildWorldSimulationMemoryPlasticityContract() {
       false,
 
     native_world_loop_adoption_installed:
-      false,
+      true,
 
     authoritative_mutation_owner:
       "phase62k-authoritative-mutation-executor-v1",

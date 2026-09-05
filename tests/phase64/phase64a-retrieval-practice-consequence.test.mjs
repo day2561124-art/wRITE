@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   hashAgentRunValue,
@@ -354,7 +355,7 @@ assert.equal(
 );
 assert.equal(
   contract.native_world_loop_adoption_installed,
-  false,
+  true,
 );
 
 const sourceMemorySnapshot =
@@ -943,6 +944,81 @@ assert.throws(
     error?.code
       === "WORLD_SIMULATION_MEMORY_PLASTICITY_RETRIEVAL_EVENT_UNRESOLVED",
 );
+
+const loopSource =
+  (await readFile(
+    new URL(
+      "../../server/src/world-simulation-loop-service.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  )).replace(/\r\n?/g, "\n");
+
+for (
+  const requiredSnippet
+  of [
+    "buildWorldSimulationMemoryPlasticityContract",
+    "buildWorldSimulationMemoryPlasticity",
+    "subjective_memory_plasticity:",
+    "const subjectiveMemoryPlasticitySourceEventIds =",
+    "const subjectiveMemoryPlasticity =",
+    "const subjectiveMemoryPlasticityMutationQueue =",
+    "const subjectiveMemoryPlasticityMutationExecution =",
+    "const plasticityPersistedWorldState =",
+    "`${preparedTurn.turn_id}:memory_plasticity`",
+    "world_state:\n        plasticityPersistedWorldState,",
+  ]
+) {
+  assert.equal(
+    loopSource.includes(requiredSnippet),
+    true,
+    `world loop is missing Phase64A-R1 native adoption wiring: ${requiredSnippet}`,
+  );
+}
+
+const r2ProjectionIndex =
+  loopSource.indexOf(
+    "const retrievalPracticeActivationProjection =",
+  );
+const r1ConsequenceIndex =
+  loopSource.indexOf(
+    "const subjectiveMemoryPlasticity =",
+  );
+const episodicFormationIndex =
+  loopSource.indexOf(
+    "const subjectiveMemoryFormation =",
+  );
+
+assert.ok(
+  r2ProjectionIndex >= 0
+    && r1ConsequenceIndex > r2ProjectionIndex
+    && episodicFormationIndex > r1ConsequenceIndex,
+  "native ordering must remain prior-practice projection -> current-turn R1 consequence -> new episodic encoding",
+);
+
+const stateServiceSource =
+  (await readFile(
+    new URL(
+      "../../server/src/world-simulation-state-service.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  )).replace(/\r\n?/g, "\n");
+
+for (
+  const requiredHistoryField
+  of [
+    "subjective_memory_plasticity:",
+    "subjective_memory_plasticity_mutation_queue:",
+    "subjective_memory_plasticity_mutation_execution:",
+  ]
+) {
+  assert.equal(
+    stateServiceSource.includes(requiredHistoryField),
+    true,
+    `world history is missing Phase64A-R1 evidence field: ${requiredHistoryField}`,
+  );
+}
 
 const noOp =
   buildWorldSimulationMemoryPlasticity({
