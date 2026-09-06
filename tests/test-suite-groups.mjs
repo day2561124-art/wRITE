@@ -65,6 +65,7 @@ export const phase65BeliefCognitionSteps = Object.freeze([
   Object.freeze(["Phase 65A evidence-backed subjective claim projection", Object.freeze(["tests/phase65/phase65a-subjective-claim-projection.test.mjs"])]),
   Object.freeze(["Phase 65B subjective claim conflict revision projection", Object.freeze(["tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs"])]),
   Object.freeze(["Phase 65C committed subjective cognition read projection", Object.freeze(["tests/phase65/phase65c-subjective-cognition-read-projection.test.mjs"])]),
+  Object.freeze(["Phase 65D evidence-grounded subjective belief resolution", Object.freeze(["tests/phase65/phase65d-subjective-belief-resolution.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

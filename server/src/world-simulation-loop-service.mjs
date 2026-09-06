@@ -97,6 +97,11 @@ import {
   worldSimulationSubjectiveCognitionProjectionVersion,
 } from "./world-simulation-subjective-cognition-projection-service.mjs";
 import {
+  buildWorldSimulationSubjectiveBeliefResolutionContract,
+  resolveWorldSimulationSubjectiveBeliefs,
+  worldSimulationSubjectiveBeliefResolutionVersion,
+} from "./world-simulation-subjective-belief-resolution-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -3075,6 +3080,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveClaimProjectionContract(),
     subjective_claim_conflict_revision_projection:
       buildWorldSimulationSubjectiveClaimConflictRevisionContract(),
+    subjective_belief_resolution:
+      buildWorldSimulationSubjectiveBeliefResolutionContract(),
     subjective_cognition_read_projection:
       buildWorldSimulationSubjectiveCognitionProjectionContract(),
 
@@ -5264,6 +5271,14 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  const subjectiveBeliefResolution =
+    resolveWorldSimulationSubjectiveBeliefs({
+      world_state:
+        subjectiveClaimRelationMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -5500,6 +5515,14 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           subjectiveClaimRelationMutationExecution.execution,
         ),
+      subjective_belief_resolution: {
+        version:
+          subjectiveBeliefResolution.version,
+        result:
+          cloneJson(
+            subjectiveBeliefResolution.result,
+          ),
+      },
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -5772,6 +5795,33 @@ export async function resolveWorldSimulationTurn(
       historical_claim_mutation_allowed:
         false,
       unresolved_competing_claims_preserved:
+        true,
+    },
+    subjective_belief_resolution: {
+      version:
+        worldSimulationSubjectiveBeliefResolutionVersion,
+      decision_count:
+        subjectiveBeliefResolution
+          .result
+          .decision_count,
+      unresolved_decision_count:
+        subjectiveBeliefResolution
+          .result
+          .audit
+          .unresolved_decision_count,
+      pure_resolution:
+        true,
+      durable_belief_revision_persisted:
+        false,
+      world_truth_authority_claimed:
+        false,
+      confidence_probability_modeled:
+        false,
+      last_write_wins_applied:
+        false,
+      same_turn_character_brain_feedback_allowed:
+        false,
+      phase66_required_for_durable_revision:
         true,
     },
     committed_character_current_mind: {

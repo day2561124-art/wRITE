@@ -781,6 +781,7 @@ const steps = [
   ["Phase 65A evidence-backed subjective claim projection", ["tests/phase65/phase65a-subjective-claim-projection.test.mjs"]],
   ["Phase 65B subjective claim conflict revision projection", ["tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs"]],
   ["Phase 65C committed subjective cognition read projection", ["tests/phase65/phase65c-subjective-cognition-read-projection.test.mjs"]],
+  ["Phase 65D evidence-grounded subjective belief resolution", ["tests/phase65/phase65d-subjective-belief-resolution.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
