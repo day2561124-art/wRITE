@@ -1287,8 +1287,18 @@ try {
               false,
               "Turn N Character Brain must run before the Turn N subjective claim is derived",
             );
+            assert.deepEqual(
+              packet.cognition.subjective_cognition.claims,
+              [],
+              "Turn N Phase65C read surface must exist but contain no Turn N claim",
+            );
             assert.equal(
-              serialized.includes("subjective_claim"),
+              packet.boundaries
+                .subjective_cognition_same_turn_claim_feedback_allowed,
+              false,
+            );
+            assert.equal(
+              serialized.includes("source_memory_ref"),
               false,
             );
 
@@ -1474,11 +1484,25 @@ try {
 
             assert.equal(
               serialized.includes(nativeClaimText),
-              false,
-              "Phase65A does not expose persisted claims to Character Brain even on the next turn",
+              true,
+              "Phase65C must expose the already committed Phase65A claim on the next turn",
+            );
+            assert.deepEqual(
+              packet.cognition.subjective_cognition.claims,
+              [
+                {
+                  proposition: nativeClaimText,
+                  subjective_not_world_truth: true,
+                },
+              ],
             );
             assert.equal(
-              serialized.includes("subjective_claim"),
+              packet.boundaries
+                .subjective_cognition_same_turn_claim_feedback_allowed,
+              false,
+            );
+            assert.equal(
+              serialized.includes("source_memory_ref"),
               false,
             );
 

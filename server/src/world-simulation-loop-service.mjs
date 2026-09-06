@@ -92,6 +92,11 @@ import {
   worldSimulationSubjectiveClaimConflictRevisionProjectionVersion,
 } from "./world-simulation-subjective-claim-conflict-revision-projection-service.mjs";
 import {
+  buildWorldSimulationSubjectiveCognitionProjectionContract,
+  projectWorldSimulationSubjectiveCognition,
+  worldSimulationSubjectiveCognitionProjectionVersion,
+} from "./world-simulation-subjective-cognition-projection-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -3070,6 +3075,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveClaimProjectionContract(),
     subjective_claim_conflict_revision_projection:
       buildWorldSimulationSubjectiveClaimConflictRevisionContract(),
+    subjective_cognition_read_projection:
+      buildWorldSimulationSubjectiveCognitionProjectionContract(),
 
     subjective_claim_resolver_hook: {
       owner:
@@ -3495,6 +3502,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const decisionPackets = [];
   const attentionEncodingEvidence = [];
   const currentMindTransitionProjections = [];
+  const subjectiveCognitionProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -4026,6 +4034,27 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       projection: cloneJson(speculativeCurrentMind.projection),
     });
 
+    // Phase65C is a read-only bridge from already committed prior-turn
+    // subjective claims into practical cognition. Building the projection
+    // here guarantees that claims created later in resolveWorldSimulationTurn
+    // cannot feed back into the same turn's cognition or Character Brain.
+    const subjectiveCognitionProjection =
+      projectWorldSimulationSubjectiveCognition({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+      });
+
+    subjectiveCognitionProjections.push({
+      character,
+      version: subjectiveCognitionProjection.version,
+      projection_hash:
+        hashAgentRunValue(
+          subjectiveCognitionProjection.character_view,
+        ),
+      audit: cloneJson(subjectiveCognitionProjection.audit),
+    });
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -4053,10 +4082,20 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       options,
       traceIds,
     );
-    const characterCognition = cloneJson(
-      cognition.character_view
-      ?? cognition,
-    );
+    const characterCognition = {
+      ...object(
+        cloneJson(
+          cognition.character_view
+          ?? cognition,
+        ),
+      ),
+      // Engine-owned Phase65C projection wins over any neural capability
+      // attempt to omit or rewrite this bounded committed-subjective view.
+      subjective_cognition:
+        cloneJson(
+          subjectiveCognitionProjection.character_view,
+        ),
+    };
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
@@ -4218,6 +4257,31 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
         memory_retrieval_strength_scores_exposed:
           false,
+
+        subjective_cognition_read_projection_installed:
+          true,
+
+        subjective_cognition_projection_version:
+          worldSimulationSubjectiveCognitionProjectionVersion,
+
+        subjective_cognition_source:
+          "same_character_committed_prior_turn_claim_history_only",
+
+        subjective_cognition_same_turn_claim_feedback_allowed:
+          false,
+
+        subjective_cognition_world_truth_authority_exposed:
+          false,
+
+        subjective_cognition_confidence_probability_exposed:
+          false,
+
+        subjective_cognition_claim_evidence_exposed:
+          false,
+
+        subjective_cognition_candidate_supersession_is_truth_resolution:
+          false,
+
         engine_visibility_target_ids_exposed: false,
         engine_sound_source_ids_exposed: false,
       },
@@ -4236,6 +4300,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     decision_packets: decisionPackets,
     attention_encoding_evidence: cloneJson(attentionEncodingEvidence),
     current_mind_transition_projections: cloneJson(currentMindTransitionProjections),
+    subjective_cognition_projections: cloneJson(subjectiveCognitionProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -4331,6 +4396,28 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
       memory_accessibility_scores_not_forwarded_to_character_brain:
         true,
+
+      subjective_cognition_read_projection_installed:
+        true,
+
+      subjective_cognition_projection_version:
+        worldSimulationSubjectiveCognitionProjectionVersion,
+
+      subjective_cognition_committed_prior_turn_only:
+        true,
+
+      subjective_cognition_same_turn_feedback_allowed:
+        false,
+
+      subjective_cognition_world_truth_authority_exposed:
+        false,
+
+      subjective_cognition_claim_evidence_exposed:
+        false,
+
+      subjective_cognition_candidate_supersession_is_truth_resolution:
+        false,
+
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
       sound_engine_source_ids_not_forwarded_to_character_brain: true,
     },
@@ -5522,6 +5609,29 @@ export async function resolveWorldSimulationTurn(
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
     consistency,
+
+    subjective_cognition_read_projection: {
+      version:
+        worldSimulationSubjectiveCognitionProjectionVersion,
+      character_projection_count:
+        array(preparedTurn.subjective_cognition_projections).length,
+      committed_prior_turn_only:
+        true,
+      action_proposer_exposure_installed:
+        true,
+      character_brain_exposure_installed:
+        true,
+      same_turn_claim_feedback_allowed:
+        false,
+      world_truth_authority_exposed:
+        false,
+      confidence_probability_exposed:
+        false,
+      claim_evidence_exposed:
+        false,
+      candidate_supersession_is_truth_resolution:
+        false,
+    },
 
     subjective_memory_encoding_decisions:
       cloneJson(
