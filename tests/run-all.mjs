@@ -780,6 +780,7 @@ const steps = [
   ["Phase 64A-R4F1 global termination decision semantics and provenance", ["tests/phase64/phase64a-retrieval-global-termination-decision-evidence.test.mjs"]],
   ["Phase 65A evidence-backed subjective claim projection", ["tests/phase65/phase65a-subjective-claim-projection.test.mjs"]],
   ["Phase 65B subjective claim conflict revision projection", ["tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs"]],
+  ["Phase 65C committed subjective cognition read projection", ["tests/phase65/phase65c-subjective-cognition-read-projection.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

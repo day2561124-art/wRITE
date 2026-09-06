@@ -1258,7 +1258,21 @@ try {
               serialized.includes(nativeCurrentClaimText),
               false,
             );
-            assert.equal(serialized.includes("subjective_claim"), false);
+            assert.deepEqual(
+              packet.cognition.subjective_cognition.claims,
+              [],
+              "first-turn Character Brain may receive the Phase65C surface, but no same-turn claim may appear in it",
+            );
+            assert.deepEqual(
+              packet.cognition.subjective_cognition.relations,
+              [],
+            );
+            assert.equal(serialized.includes("source_memory_ref"), false);
+            assert.equal(
+              packet.boundaries
+                .subjective_cognition_same_turn_claim_feedback_allowed,
+              false,
+            );
             return {
               action_id: "continue-observing",
             };
@@ -1321,14 +1335,29 @@ try {
             const serialized = JSON.stringify(packet);
             assert.equal(
               serialized.includes(nativePriorClaimText),
-              false,
-              "Phase65B must not expose prior subjective claims to Character Brain yet",
+              true,
+              "Phase65C must expose the already committed prior subjective claim",
             );
             assert.equal(
               serialized.includes(nativeCurrentClaimText),
               false,
+              "the second-turn claim is not formed until after Character Brain runs",
             );
-            assert.equal(serialized.includes("subjective_claim"), false);
+            assert.deepEqual(
+              packet.cognition.subjective_cognition.claims,
+              [
+                {
+                  proposition: nativePriorClaimText,
+                  subjective_not_world_truth: true,
+                },
+              ],
+            );
+            assert.equal(
+              packet.boundaries
+                .subjective_cognition_same_turn_claim_feedback_allowed,
+              false,
+            );
+            assert.equal(serialized.includes("source_memory_ref"), false);
             return {
               action_id: "continue-observing",
             };
