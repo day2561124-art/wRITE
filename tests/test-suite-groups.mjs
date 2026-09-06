@@ -70,6 +70,7 @@ export const phase65BeliefCognitionSteps = Object.freeze([
 
 export const phase66BeliefRevisionSteps = Object.freeze([
   Object.freeze(["Phase 66A append-only subjective belief revision events", Object.freeze(["tests/phase66/phase66a-subjective-belief-revision-event.test.mjs"])]),
+  Object.freeze(["Phase 66B effective subjective belief state projection", Object.freeze(["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
