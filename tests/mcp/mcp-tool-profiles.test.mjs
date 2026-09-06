@@ -1029,7 +1029,15 @@ assert.equal(developerTestSchema?.additionalProperties, false);
 assert.deepEqual(developerTestSchema?.required, ["suite"]);
 assert.deepEqual(Object.keys(developerTestSchema?.properties ?? {}), ["suite", "workspace_id"]);
 assert.equal(developerTestSchema.properties.suite.type, "string");
-assert.deepEqual(developerTestSchema.properties.suite.enum, ["mcp", "mcp_tunnel", "all"]);
+assert.deepEqual(developerTestSchema.properties.suite.enum, [
+  "mcp",
+  "mcp_tunnel",
+  "affected",
+  "world_simulation",
+  "cognition",
+  "memory_retrieval",
+  "all",
+]);
 for (const forbiddenField of [
   "command", "args", "cwd", "env", "program", "shell", "script", "path",
 ]) {

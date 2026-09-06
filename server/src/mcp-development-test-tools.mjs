@@ -19,7 +19,15 @@ import {
   markDevJournalDegraded,
 } from "./mcp-development-journal-tools.mjs";
 
-export const DEV_TEST_SUITES = Object.freeze(["mcp", "mcp_tunnel", "all"]);
+export const DEV_TEST_SUITES = Object.freeze([
+  "mcp",
+  "mcp_tunnel",
+  "affected",
+  "world_simulation",
+  "cognition",
+  "memory_retrieval",
+  "all",
+]);
 export const DEV_TEST_OUTPUT_MAX_CHARACTERS = 128 * 1024;
 
 const productionSuiteDefinitions = Object.freeze({
@@ -33,6 +41,27 @@ const productionSuiteDefinitions = Object.freeze({
     argv: Object.freeze(["tests/mcp-tunnel-launcher.test.mjs"]),
     timeoutMs: 300_000,
     cleanupPort: 8787,
+  }),
+  affected: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/run-affected.mjs"]),
+    timeoutMs: 7_200_000,
+    cleanupPort: 8787,
+  }),
+  world_simulation: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/run-world-simulation.mjs"]),
+    timeoutMs: 3_600_000,
+  }),
+  cognition: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/run-cognition.mjs"]),
+    timeoutMs: 2_700_000,
+  }),
+  memory_retrieval: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/run-memory-retrieval.mjs"]),
+    timeoutMs: 1_800_000,
   }),
   all: Object.freeze({
     executable: process.execPath,

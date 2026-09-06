@@ -5,6 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { terminateProcessTree } from "../server/src/process-control.mjs";
+import {
+  formatTestDuration,
+  printTestTimingSummary,
+} from "./test-runner-core.mjs";
 
 
 
@@ -776,6 +780,7 @@ const steps = [
   ["Phase 64A-R4F1 global termination decision semantics and provenance", ["tests/phase64/phase64a-retrieval-global-termination-decision-evidence.test.mjs"]],
   ["Phase 65A evidence-backed subjective claim projection", ["tests/phase65/phase65a-subjective-claim-projection.test.mjs"]],
   ["Phase 65B subjective claim conflict revision projection", ["tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs"]],
+  ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
 
@@ -815,6 +820,8 @@ function getTimeoutMs(label) {
 function runStep(label, args) {
 
   return new Promise((resolve, reject) => {
+
+    const startedAt = Date.now();
 
     console.log(`\n== ${label} ==`);
 
@@ -868,7 +875,11 @@ function runStep(label, args) {
 
       if (code === 0) {
 
-        resolve();
+        const durationMs = Math.max(0, Date.now() - startedAt);
+
+        console.log(`-- ${label} passed in ${formatTestDuration(durationMs)}.`);
+
+        resolve({ label, duration_ms: durationMs });
 
         return;
 
@@ -886,11 +897,21 @@ function runStep(label, args) {
 
 async function main() {
 
+  const suiteStartedAt = Date.now();
+
+  const timings = [];
+
   for (const [label, args] of steps) {
 
-    await runStep(label, args);
+    timings.push(await runStep(label, args));
 
   }
+
+  const suiteDurationMs = Math.max(0, Date.now() - suiteStartedAt);
+
+  printTestTimingSummary(timings);
+
+  console.log(`\nAll tests completed in ${formatTestDuration(suiteDurationMs)}.`);
 
   console.log("\nAll tests passed.");
 

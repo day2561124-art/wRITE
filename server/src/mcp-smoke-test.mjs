@@ -332,7 +332,7 @@ const enumConstraintFixtures = [
     name: "dev_run_tests",
     field: "suite",
     arguments: { suite: "mcp; whoami" },
-    expectedMessage: "suite must be one of: mcp, mcp_tunnel, all.",
+    expectedMessage: "suite must be one of: mcp, mcp_tunnel, affected, world_simulation, cognition, memory_retrieval, all.",
   },
   {
     label: "run_creative_task invalid source",

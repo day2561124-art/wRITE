@@ -9,6 +9,7 @@ const rootDir = path.resolve(__dirname, "..", "..");
 
 const testScripts = [
   "server/src/mcp-smoke-test.mjs",
+  "tests/affected-test-selector.test.mjs",
   "tests/mcp/mcp-tool-profiles.test.mjs",
   "tests/mcp/mcp-development-write-tools.test.mjs",
   "tests/mcp/mcp-development-test-tools.test.mjs",

@@ -286,13 +286,29 @@ let auditExisted = false;
 
 try {
   const mapping = getDevTestSuiteMapping();
-  assert.deepEqual(Object.keys(mapping), ["mcp", "mcp_tunnel", "all"]);
+  assert.deepEqual(Object.keys(mapping), [
+    "mcp",
+    "mcp_tunnel",
+    "affected",
+    "world_simulation",
+    "cognition",
+    "memory_retrieval",
+    "all",
+  ]);
   assert.equal(mapping.mcp.executable, process.execPath);
   assert.deepEqual(mapping.mcp.argv, ["tests/tools/mcp-contract.test.mjs"]);
   assert.deepEqual(mapping.mcp_tunnel.argv, ["tests/mcp-tunnel-launcher.test.mjs"]);
+  assert.deepEqual(mapping.affected.argv, ["tests/run-affected.mjs"]);
+  assert.deepEqual(mapping.world_simulation.argv, ["tests/run-world-simulation.mjs"]);
+  assert.deepEqual(mapping.cognition.argv, ["tests/run-cognition.mjs"]);
+  assert.deepEqual(mapping.memory_retrieval.argv, ["tests/run-memory-retrieval.mjs"]);
   assert.deepEqual(mapping.all.argv, ["tests/run-all.mjs"]);
   assert.equal(mapping.mcp.timeout_ms, 1_500_000);
   assert.equal(mapping.mcp_tunnel.timeout_ms, 300_000);
+  assert.equal(mapping.affected.timeout_ms, 7_200_000);
+  assert.equal(mapping.world_simulation.timeout_ms, 3_600_000);
+  assert.equal(mapping.cognition.timeout_ms, 2_700_000);
+  assert.equal(mapping.memory_retrieval.timeout_ms, 1_800_000);
   assert.equal(mapping.all.timeout_ms, 7_200_000);
 
   const dependencyBridgeWorkspace = path.join(tempRoot, "dependency-bridge-workspace");
@@ -1895,12 +1911,12 @@ try {
     {
       id: "dev-test-injection-semicolon",
       arguments: { suite: "mcp; whoami" },
-      expected: "suite must be one of: mcp, mcp_tunnel, all.",
+      expected: "suite must be one of: mcp, mcp_tunnel, affected, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-injection-powershell",
       arguments: { suite: "mcp && powershell -NoProfile" },
-      expected: "suite must be one of: mcp, mcp_tunnel, all.",
+      expected: "suite must be one of: mcp, mcp_tunnel, affected, world_simulation, cognition, memory_retrieval, all.",
     },
     {
       id: "dev-test-unknown-command",
