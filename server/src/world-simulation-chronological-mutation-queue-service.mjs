@@ -820,6 +820,15 @@ const phase65aSubjectiveClaimEventSchema =
 const phase65aSubjectiveClaimHistoryReferenceSchema =
   "phase65a-subjective-claim-history-ref-v1";
 
+const phase65bSubjectiveClaimConflictRevisionProjectionVersion =
+  "phase65b-subjective-claim-conflict-revision-projection-v1";
+
+const phase65bSubjectiveClaimRelationEventSchema =
+  "phase65b-subjective-claim-relation-event-v1";
+
+const phase65bSubjectiveClaimRelationHistoryReferenceSchema =
+  "phase65b-subjective-claim-relation-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -1260,6 +1269,547 @@ function assertPhase65ASubjectiveClaimMutation(
   }
 }
 
+function assertPhase65BClaimRelationHistoryPrefix(
+  oldHistory,
+  newHistory,
+) {
+  const oldValues =
+    array(oldHistory);
+  const newValues =
+    array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      "Subjective claim relation history is append-only.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (
+    let index = 0;
+    index < oldValues.length;
+    index += 1
+  ) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        "Subjective claim relation history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function phase65bCanonicalClaim(
+  worldState,
+  claimEventId,
+) {
+  const claim =
+    object(
+      object(
+        worldState?.subjective_claim_events,
+      )[claimEventId],
+    );
+
+  if (
+    !Object.keys(claim).length
+    || claim.schema_version
+      !== phase65aSubjectiveClaimEventSchema
+    || claim.immutable !== true
+    || String(claim.claim_event_id ?? "")
+      !== claimEventId
+    || !String(claim.claim_event_hash ?? "").trim()
+    || !String(claim.character ?? "").trim()
+    || !String(claim.source_turn_id ?? "").trim()
+    || !String(claim.proposition_hash ?? "").trim()
+    || claim.status !== "candidate_subjective_claim"
+  ) {
+    const error = new Error(
+      `Phase65B cannot resolve canonical SubjectiveClaimEvent ${claimEventId}.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_CLAIM_UNRESOLVED";
+    throw error;
+  }
+
+  const hashBody =
+    cloneJson(claim);
+  delete hashBody.claim_event_hash;
+
+  if (
+    hashAgentRunValue(hashBody)
+    !== claim.claim_event_hash
+  ) {
+    const error = new Error(
+      `SubjectiveClaimEvent ${claimEventId} failed Phase65B hash verification.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_CLAIM_HASH_MISMATCH";
+    throw error;
+  }
+
+  if (
+    hashAgentRunValue({
+      character:
+        claim.character,
+      proposition:
+        claim.proposition,
+    }) !== claim.proposition_hash
+  ) {
+    const error = new Error(
+      `SubjectiveClaimEvent ${claimEventId} proposition hash is invalid for Phase65B.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_CLAIM_PROPOSITION_HASH_MISMATCH";
+    throw error;
+  }
+
+  return claim;
+}
+
+function assertPhase65BSubjectiveClaimRelationMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "subjective_claim_relation_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "SubjectiveClaimRelationEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId =
+      String(worldPath[1] ?? "");
+    const existing =
+      getAtPath(worldState, worldPath);
+
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next =
+      mutation?.to;
+
+    if (
+      !isObject(next)
+      || next.schema_version
+        !== phase65bSubjectiveClaimRelationEventSchema
+      || next.immutable !== true
+      || String(next.relation_event_id ?? "")
+        !== eventId
+      || !String(next.relation_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !String(next.source_claim_event_id ?? "").trim()
+      || !String(next.source_claim_event_hash ?? "").trim()
+      || !String(next.source_claim_proposition_hash ?? "").trim()
+      || !String(next.target_claim_event_id ?? "").trim()
+      || !String(next.target_claim_event_hash ?? "").trim()
+      || !String(next.target_claim_proposition_hash ?? "").trim()
+      || !String(next.target_source_turn_id ?? "").trim()
+      || !["challenges", "supersedes"].includes(next.relation)
+      || next.status !== "candidate_subjective_claim_relation"
+      || !Array.isArray(next.evidence_basis)
+      || next.evidence_basis.length === 0
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} creation payload is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const hashBody =
+      cloneJson(next);
+    delete hashBody.relation_event_hash;
+
+    if (
+      hashAgentRunValue(hashBody)
+      !== next.relation_event_hash
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const derivation =
+      object(next.derivation);
+    const expectedEventId =
+      `subjective_claim_relation_event_${hashAgentRunValue({
+        version:
+          phase65bSubjectiveClaimConflictRevisionProjectionVersion,
+        source_turn_id:
+          next.source_turn_id,
+        character:
+          next.character,
+        source_claim_event_id:
+          next.source_claim_event_id,
+        source_claim_event_hash:
+          next.source_claim_event_hash,
+        target_claim_event_id:
+          next.target_claim_event_id,
+        target_claim_event_hash:
+          next.target_claim_event_hash,
+        relation:
+          next.relation,
+        proposal_ref:
+          derivation.proposal_ref,
+      }).slice(0, 24)}`;
+
+    if (
+      eventId !== expectedEventId
+      || derivation.mode
+        !== "explicit_claim_to_claim_relation_projection_v1"
+      || derivation.current_turn_source_claim_required
+        !== true
+      || derivation.source_claim_evidence_pinned
+        !== true
+      || derivation.hidden_semantic_graph_traversal_used
+        !== false
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} failed deterministic identity or derivation-boundary verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+
+    const expectedQueueTurnId =
+      `${next.source_turn_id}:subjective_claim_relation`;
+
+    if (String(queueTurnId ?? "") !== expectedQueueTurnId) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} must be executed by its exact source-turn relation queue.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_QUEUE_TURN_MISMATCH";
+      error.expected_queue_turn_id =
+        expectedQueueTurnId;
+      error.actual_queue_turn_id =
+        queueTurnId ?? null;
+      throw error;
+    }
+
+    if (next.source_claim_event_id === next.target_claim_event_id) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} may not relate a claim to itself.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_SELF_REFERENCE";
+      throw error;
+    }
+
+    const sourceClaim =
+      phase65bCanonicalClaim(
+        worldState,
+        next.source_claim_event_id,
+      );
+    const targetClaim =
+      phase65bCanonicalClaim(
+        worldState,
+        next.target_claim_event_id,
+      );
+
+    const normalizedCharacter =
+      String(next.character)
+        .trim()
+        .toLocaleLowerCase("zh-Hant-TW");
+    const sourceCharacter =
+      String(sourceClaim.character)
+        .trim()
+        .toLocaleLowerCase("zh-Hant-TW");
+    const targetCharacter =
+      String(targetClaim.character)
+        .trim()
+        .toLocaleLowerCase("zh-Hant-TW");
+
+    if (
+      sourceCharacter !== normalizedCharacter
+      || targetCharacter !== normalizedCharacter
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} crosses character ownership boundaries.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_CHARACTER_MISMATCH";
+      throw error;
+    }
+
+    if (
+      sourceClaim.claim_event_hash
+        !== next.source_claim_event_hash
+      || sourceClaim.proposition_hash
+        !== next.source_claim_proposition_hash
+      || targetClaim.claim_event_hash
+        !== next.target_claim_event_hash
+      || targetClaim.proposition_hash
+        !== next.target_claim_proposition_hash
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} does not pin the exact canonical claim images.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_CLAIM_HASH_MISMATCH";
+      throw error;
+    }
+
+    if (
+      sourceClaim.source_turn_id
+        !== next.source_turn_id
+      || targetClaim.source_turn_id
+        !== next.target_source_turn_id
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} source-turn provenance does not match its claims.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_TURN_PROVENANCE_MISMATCH";
+      throw error;
+    }
+
+    if (
+      next.relation === "supersedes"
+      && targetClaim.source_turn_id
+        === sourceClaim.source_turn_id
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} cannot model same-turn supersession as causal precedence.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_SUPERSESSION_TARGET_NOT_PRIOR_TURN";
+      throw error;
+    }
+
+    const expectedEvidenceBasis =
+      array(sourceClaim.evidence)
+        .filter(
+          (evidence) =>
+            evidence?.relation === "supports",
+        )
+        .map(
+          (evidence) => ({
+            source_memory_ref:
+              evidence.source_memory_ref,
+            source_memory_hash:
+              evidence.source_memory_hash,
+            relation:
+              evidence.relation,
+          }),
+        );
+
+    if (
+      !expectedEvidenceBasis.length
+      || !sameValue(
+        expectedEvidenceBasis,
+        next.evidence_basis,
+      )
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} evidence basis must exactly pin the source claim's supporting evidence.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_EVIDENCE_BASIS_MISMATCH";
+      throw error;
+    }
+
+    const semantic =
+      object(next.semantic_state);
+    const audit =
+      object(next.engine_audit);
+
+    if (
+      semantic.world_truth_verified !== false
+      || semantic.confidence !== null
+      || semantic.probability !== null
+      || semantic.conflict_resolution_applied !== false
+      || semantic.belief_revision_applied !== false
+      || semantic.target_claim_invalidated !== false
+      || semantic.target_claim_deleted !== false
+      || semantic.target_claim_rewritten !== false
+      || semantic.supersession_is_candidate_relation_only !== true
+      || audit.source_claim_hash_verified !== true
+      || audit.target_claim_hash_verified !== true
+      || audit.source_claim_current_turn_verified !== true
+      || audit.source_claim_supporting_evidence_pinned !== true
+      || audit.same_character_relation_verified !== true
+      || audit.same_turn_supersession_allowed !== false
+      || audit.retrieval_frequency_used_as_credibility !== false
+      || audit.accessibility_strength_used_as_credibility !== false
+      || audit.plasticity_strength_used_as_truth_support !== false
+      || audit.world_truth_authority_claimed !== false
+      || audit.character_brain_mutation_authority !== false
+      || audit.same_turn_character_brain_feedback_allowed !== false
+      || audit.semantic_graph_traversal_used !== false
+      || audit.last_write_wins_applied !== false
+      || audit.historical_claim_mutation_applied !== false
+      || audit.confidence_probability_modeled !== false
+    ) {
+      const error = new Error(
+        `SubjectiveClaimRelationEvent ${eventId} violates the Phase65B non-authoritative revision boundary.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_AUTHORITY_BOUNDARY_VIOLATION";
+      throw error;
+    }
+
+    return;
+  }
+
+  if (worldPath[0] !== "subjective_claim_relation_history") {
+    return;
+  }
+
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Subjective claim relation history may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory =
+    array(
+      getAtPath(
+        worldState,
+        worldPath,
+      ),
+    );
+  const newHistory =
+    array(mutation?.to);
+
+  assertPhase65BClaimRelationHistoryPrefix(
+    oldHistory,
+    newHistory,
+  );
+
+  const seen =
+    new Set(
+      oldHistory.map(
+        (reference) =>
+          String(
+            reference?.relation_event_id
+            ?? "",
+          ),
+      ),
+    );
+
+  for (
+    let index = oldHistory.length;
+    index < newHistory.length;
+    index += 1
+  ) {
+    const reference =
+      newHistory[index];
+    const eventId =
+      String(
+        reference?.relation_event_id
+        ?? "",
+      ).trim();
+
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase65bSubjectiveClaimRelationHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.relation_event_hash ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || !String(reference.source_claim_event_id ?? "").trim()
+      || !String(reference.target_claim_event_id ?? "").trim()
+      || !["challenges", "supersedes"].includes(reference.relation)
+      || reference.status !== "candidate_subjective_claim_relation"
+      || !Number.isInteger(reference.evidence_basis_count)
+      || reference.evidence_basis_count < 1
+    ) {
+      const error = new Error(
+        `Subjective claim relation history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+
+    if (seen.has(eventId)) {
+      const error = new Error(
+        `Subjective claim relation history contains duplicate reference ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_DUPLICATE_REFERENCE";
+      throw error;
+    }
+
+    seen.add(eventId);
+
+    const event =
+      object(
+        object(
+          worldState?.subjective_claim_relation_events,
+        )[eventId],
+      );
+
+    if (!Object.keys(event).length) {
+      const error = new Error(
+        `Subjective claim relation history cannot resolve SubjectiveClaimRelationEvent ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+
+    const eventHashBody =
+      cloneJson(event);
+    delete eventHashBody.relation_event_hash;
+
+    if (
+      hashAgentRunValue(eventHashBody)
+        !== event.relation_event_hash
+      || event.relation_event_hash
+        !== reference.relation_event_hash
+      || event.character
+        !== reference.character
+      || event.source_turn_id
+        !== reference.source_turn_id
+      || event.source_claim_event_id
+        !== reference.source_claim_event_id
+      || event.target_claim_event_id
+        !== reference.target_claim_event_id
+      || event.relation
+        !== reference.relation
+      || event.status
+        !== reference.status
+      || array(event.evidence_basis).length
+        !== reference.evidence_basis_count
+    ) {
+      const error = new Error(
+        `Subjective claim relation history reference ${eventId} does not match its canonical event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_CLAIM_RELATION_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -1345,6 +1895,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         worldPath,
         mutation,
       );
+      assertPhase65BSubjectiveClaimRelationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -1409,6 +1965,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         executed,
         worldPath,
         mutation,
+      );
+      assertPhase65BSubjectiveClaimRelationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
       );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
@@ -1496,6 +2058,12 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase65a_subjective_claim_evidence_memory_hash_verified: true,
       phase65a_subjective_claim_history_append_only_enforced: true,
       direct_nested_subjective_claim_history_mutation_rejected: true,
+      phase65b_subjective_claim_relation_event_write_once_enforced: true,
+      phase65b_subjective_claim_relation_event_content_address_verified: true,
+      phase65b_subjective_claim_relation_claim_hash_pinning_enforced: true,
+      phase65b_subjective_claim_relation_history_append_only_enforced: true,
+      direct_nested_subjective_claim_relation_history_mutation_rejected: true,
+      phase65b_historical_claim_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
