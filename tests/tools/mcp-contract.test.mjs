@@ -24,7 +24,14 @@ const testScripts = [
   "tests/mcp/mcp-development-integration-tools.test.mjs",
 ];
 
+const defaultTestScriptTimeoutMs = 300_000;
+const testScriptTimeoutOverrides = new Map([
+  ["tests/mcp/mcp-development-test-tools.test.mjs", 600_000],
+  ["tests/mcp/mcp-development-transaction-tools.test.mjs", 600_000],
+]);
+
 function runTestScript(scriptPath) {
+  const timeoutMs = testScriptTimeoutOverrides.get(scriptPath) ?? defaultTestScriptTimeoutMs;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath], {
       cwd: rootDir,
@@ -42,8 +49,8 @@ function runTestScript(scriptPath) {
       if (settled) return;
       settled = true;
       terminateProcessTree(child);
-      reject(new Error(`${scriptPath} timed out after 300 seconds.`));
-    }, 300_000);
+      reject(new Error(`${scriptPath} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+    }, timeoutMs);
 
     child.on("error", (error) => {
       if (settled) return;

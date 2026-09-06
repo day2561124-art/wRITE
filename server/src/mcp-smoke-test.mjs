@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { terminateProcessTree } from "./process-control.mjs";
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3993,6 +3994,7 @@ async function runSmokeTest(options) {
     windowsHide: true,
   });
 
+  try {
   let stdoutBuffer = Buffer.alloc(0);
   let stderrBuffer = "";
   const responses = {
@@ -4215,7 +4217,7 @@ async function runSmokeTest(options) {
   const earlyPostUnknownArgumentPing = await waitForResponse(
     responses,
     postUnknownArgumentPingRequestId,
-    10_000,
+    mcpSmokeResponseTimeoutMs,
   );
   const firstEnumConstraintRequestId = postUnknownArgumentPingRequestId + 1;
   for (const [index, fixture] of enumConstraintFixtures.entries()) {
@@ -4999,9 +5001,6 @@ async function runSmokeTest(options) {
     oversizedHeaderRecoveryPingRequestId,
     10_000,
   );
-
-  child.stdin.end();
-  child.kill();
 
   assert(!initialize.error, `initialize failed: ${JSON.stringify(initialize.error)}`);
   assert(initialize.result?.serverInfo?.name === "armed-academy-fiction-engine", "initialize returned unexpected serverInfo.");
@@ -6962,6 +6961,12 @@ async function runSmokeTest(options) {
     audit_records_added: auditRecordsAdded,
     audit_log: normalizePath(auditLogPath),
   };
+  } finally {
+    if (!child.stdin.destroyed) {
+      child.stdin.end();
+    }
+    terminateProcessTree(child);
+  }
 }
 
 async function main() {
