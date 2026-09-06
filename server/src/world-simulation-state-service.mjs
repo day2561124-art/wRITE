@@ -312,6 +312,12 @@ export async function commitWorldSimulationTurn(
               input.subjective_claim_relation_mutation_execution ?? null,
             subjective_belief_resolution:
               input.subjective_belief_resolution ?? null,
+            subjective_belief_revision_projection:
+              input.subjective_belief_revision_projection ?? null,
+            subjective_belief_revision_mutation_queue:
+              input.subjective_belief_revision_mutation_queue ?? null,
+            subjective_belief_revision_mutation_execution:
+              input.subjective_belief_revision_mutation_execution ?? null,
             committed_character_current_mind_projection:
               input.committed_character_current_mind_projection ?? null,
             committed_character_experience_projection:

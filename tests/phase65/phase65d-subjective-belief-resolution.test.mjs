@@ -700,9 +700,13 @@ assert.ok(beliefResolutionIndex > relationExecutionIndex);
 assert.ok(commitIndex > beliefResolutionIndex);
 assert.ok(
   loopSource.includes(
-    "next_world_state: subjectiveClaimRelationMutationExecution.next_world_state",
+    "next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state",
   ),
-  "Phase65D must not replace the authoritative final world-state writer",
+  "Phase66A may extend the committed world state only through the authoritative Phase62K mutation executor",
+);
+assert.ok(
+  loopSource.includes("buildWorldSimulationSubjectiveBeliefRevisions({"),
+  "Phase66A must consume Phase65D decisions after pure resolution",
 );
 const runCharacterTurnIndex = loopSource.lastIndexOf(
   "selections[packet.character] = await characterRuntimeManager.runCharacterTurn",
@@ -960,9 +964,8 @@ try {
   for (const forbiddenDurableField of [
     "subjective_beliefs",
     "subjective_belief_events",
-    "subjective_belief_revision_events",
-    "subjective_belief_revision_history",
     "effective_beliefs",
+    "effective_subjective_beliefs",
   ]) {
     assert.equal(
       Object.hasOwn(nativeState.state, forbiddenDurableField),

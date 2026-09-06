@@ -102,6 +102,11 @@ import {
   worldSimulationSubjectiveBeliefResolutionVersion,
 } from "./world-simulation-subjective-belief-resolution-service.mjs";
 import {
+  buildWorldSimulationSubjectiveBeliefRevisionContract,
+  buildWorldSimulationSubjectiveBeliefRevisions,
+  worldSimulationSubjectiveBeliefRevisionVersion,
+} from "./world-simulation-subjective-belief-revision-service.mjs";
+import {
   assertWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
@@ -3082,6 +3087,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveClaimConflictRevisionContract(),
     subjective_belief_resolution:
       buildWorldSimulationSubjectiveBeliefResolutionContract(),
+    subjective_belief_revision:
+      buildWorldSimulationSubjectiveBeliefRevisionContract(),
     subjective_cognition_read_projection:
       buildWorldSimulationSubjectiveCognitionProjectionContract(),
 
@@ -5279,6 +5286,47 @@ export async function resolveWorldSimulationTurn(
         preparedTurn.turn_id,
     });
 
+  const subjectiveBeliefRevision =
+    buildWorldSimulationSubjectiveBeliefRevisions({
+      world_state:
+        subjectiveClaimRelationMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      resolution:
+        subjectiveBeliefResolution.result,
+    });
+
+  const subjectiveBeliefRevisionMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:subjective_belief_revision`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveClaimRelationMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        subjectiveBeliefRevision
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const subjectiveBeliefRevisionMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveClaimRelationMutationExecution.next_world_state,
+      preview_world_state:
+        subjectiveBeliefRevision
+          .result
+          .preview_world_state,
+      queue:
+        subjectiveBeliefRevisionMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -5339,7 +5387,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: subjectiveClaimRelationMutationExecution.next_world_state,
+      next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -5523,6 +5571,32 @@ export async function resolveWorldSimulationTurn(
             subjectiveBeliefResolution.result,
           ),
       },
+      subjective_belief_revision_projection: {
+        version:
+          subjectiveBeliefRevision.version,
+        result: {
+          processed_resolution_decision_count:
+            subjectiveBeliefRevision.result.processed_resolution_decision_count,
+          actionable_resolution_decision_count:
+            subjectiveBeliefRevision.result.actionable_resolution_decision_count,
+          unresolved_resolution_decision_count:
+            subjectiveBeliefRevision.result.unresolved_resolution_decision_count,
+          revision_events_created:
+            cloneJson(subjectiveBeliefRevision.result.revision_events_created),
+          already_persisted_revision_event_ids:
+            cloneJson(subjectiveBeliefRevision.result.already_persisted_revision_event_ids),
+          history_references_appended:
+            cloneJson(subjectiveBeliefRevision.result.history_references_appended),
+          state_transitions:
+            cloneJson(subjectiveBeliefRevision.result.state_transitions),
+          audit:
+            cloneJson(subjectiveBeliefRevision.result.audit),
+        },
+      },
+      subjective_belief_revision_mutation_queue:
+        cloneJson(subjectiveBeliefRevisionMutationQueue),
+      subjective_belief_revision_mutation_execution:
+        cloneJson(subjectiveBeliefRevisionMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -5823,6 +5897,34 @@ export async function resolveWorldSimulationTurn(
         false,
       phase66_required_for_durable_revision:
         true,
+    },
+    subjective_belief_revision: {
+      version:
+        worldSimulationSubjectiveBeliefRevisionVersion,
+      processed_resolution_decision_count:
+        subjectiveBeliefRevision.result.processed_resolution_decision_count,
+      actionable_resolution_decision_count:
+        subjectiveBeliefRevision.result.actionable_resolution_decision_count,
+      unresolved_resolution_decision_count:
+        subjectiveBeliefRevision.result.unresolved_resolution_decision_count,
+      created_revision_event_count:
+        subjectiveBeliefRevision.result.revision_events_created.length,
+      appended_history_reference_count:
+        subjectiveBeliefRevision.result.history_references_appended.length,
+      mutation_count:
+        subjectiveBeliefRevisionMutationQueue.mutation_count,
+      authoritative_executor:
+        subjectiveBeliefRevisionMutationExecution.execution.version,
+      unresolved_decision_persisted:
+        false,
+      effective_belief_projection_applied:
+        false,
+      same_turn_character_brain_feedback_allowed:
+        false,
+      world_truth_authority_claimed:
+        false,
+      confidence_probability_modeled:
+        false,
     },
     committed_character_current_mind: {
       current_mind_contract_version:

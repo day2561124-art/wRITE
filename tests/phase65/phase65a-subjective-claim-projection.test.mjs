@@ -910,9 +910,13 @@ assert.ok(
 );
 assert.ok(
   loopSource.includes(
-    "next_world_state: subjectiveClaimRelationMutationExecution.next_world_state",
+    "next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state",
   ),
-  "atomic world commit must use the final authoritative state after Phase65B claim-relation mutation execution",
+  "atomic world commit must use the final authoritative Phase62K state after all installed cognition mutations",
+);
+assert.ok(
+  loopSource.includes("const subjectiveBeliefRevisionMutationExecution ="),
+  "later cognition persistence may extend Phase65A only through the same authoritative mutation executor",
 );
 
 const memoryExecutionIndex =

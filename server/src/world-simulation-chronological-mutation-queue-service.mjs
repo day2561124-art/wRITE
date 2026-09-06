@@ -829,6 +829,21 @@ const phase65bSubjectiveClaimRelationEventSchema =
 const phase65bSubjectiveClaimRelationHistoryReferenceSchema =
   "phase65b-subjective-claim-relation-history-ref-v1";
 
+const phase65dSubjectiveBeliefResolutionVersion =
+  "phase65d-evidence-grounded-subjective-belief-resolution-v1";
+
+const phase65dSubjectiveBeliefResolutionDecisionSchema =
+  "phase65d-subjective-belief-resolution-decision-v1";
+
+const phase66aSubjectiveBeliefRevisionVersion =
+  "phase66a-append-only-subjective-belief-revision-v1";
+
+const phase66aSubjectiveBeliefRevisionEventSchema =
+  "phase66a-subjective-belief-revision-event-v1";
+
+const phase66aSubjectiveBeliefRevisionHistoryReferenceSchema =
+  "phase66a-subjective-belief-revision-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -1810,6 +1825,629 @@ function assertPhase65BSubjectiveClaimRelationMutation(
   }
 }
 
+const phase66aCommitmentByAction = Object.freeze({
+  adopt: "active",
+  supersede: "superseded",
+});
+
+function assertPhase66ARevisionHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      "Subjective belief revision history is append-only.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        "Subjective belief revision history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function phase66aCanonicalRelation(worldState, relationEventId, character) {
+  const relation = object(
+    object(worldState?.subjective_claim_relation_events)[relationEventId],
+  );
+
+  if (
+    !Object.keys(relation).length
+    || relation.schema_version
+      !== phase65bSubjectiveClaimRelationEventSchema
+    || relation.immutable !== true
+    || String(relation.relation_event_id ?? "") !== relationEventId
+    || !String(relation.relation_event_hash ?? "").trim()
+    || !String(relation.character ?? "").trim()
+    || !String(relation.source_claim_event_id ?? "").trim()
+    || !String(relation.target_claim_event_id ?? "").trim()
+    || !["challenges", "supersedes"].includes(relation.relation)
+    || relation.status !== "candidate_subjective_claim_relation"
+  ) {
+    const error = new Error(
+      `Phase66A cannot resolve SubjectiveClaimRelationEvent ${relationEventId}.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_RELATION_UNRESOLVED";
+    throw error;
+  }
+
+  const body = cloneJson(relation);
+  delete body.relation_event_hash;
+  if (hashAgentRunValue(body) !== relation.relation_event_hash) {
+    const error = new Error(
+      `SubjectiveClaimRelationEvent ${relationEventId} failed Phase66A hash verification.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_RELATION_HASH_MISMATCH";
+    throw error;
+  }
+
+  const normalized = String(character ?? "")
+    .trim()
+    .toLocaleLowerCase("zh-Hant-TW");
+  if (
+    String(relation.character ?? "")
+      .trim()
+      .toLocaleLowerCase("zh-Hant-TW")
+    !== normalized
+  ) {
+    const error = new Error(
+      `SubjectiveClaimRelationEvent ${relationEventId} crosses the Phase66A character boundary.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_CHARACTER_MISMATCH";
+    throw error;
+  }
+
+  const sourceClaim = phase65bCanonicalClaim(
+    worldState,
+    relation.source_claim_event_id,
+  );
+  const targetClaim = phase65bCanonicalClaim(
+    worldState,
+    relation.target_claim_event_id,
+  );
+
+  if (
+    String(sourceClaim.character ?? "")
+      .trim()
+      .toLocaleLowerCase("zh-Hant-TW") !== normalized
+    || String(targetClaim.character ?? "")
+      .trim()
+      .toLocaleLowerCase("zh-Hant-TW") !== normalized
+    || relation.source_claim_event_hash !== sourceClaim.claim_event_hash
+    || relation.target_claim_event_hash !== targetClaim.claim_event_hash
+    || relation.source_claim_proposition_hash !== sourceClaim.proposition_hash
+    || relation.target_claim_proposition_hash !== targetClaim.proposition_hash
+  ) {
+    const error = new Error(
+      `SubjectiveClaimRelationEvent ${relationEventId} does not pin same-character canonical claims.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_RELATION_CLAIM_HASH_MISMATCH";
+    throw error;
+  }
+
+  return relation;
+}
+
+function assertPhase66ASourceResolutionDecision(decision, worldState) {
+  if (
+    !isObject(decision)
+    || decision.schema_version
+      !== phase65dSubjectiveBeliefResolutionDecisionSchema
+    || !String(decision.decision_id ?? "").trim()
+    || !String(decision.decision_hash ?? "").trim()
+    || !String(decision.character ?? "").trim()
+    || !String(decision.source_turn_id ?? "").trim()
+    || !["adopt", "supersede"].includes(decision.action)
+    || phase66aCommitmentByAction[decision.action]
+      !== decision.commitment
+    || !Array.isArray(decision.claim_event_ids)
+    || !Array.isArray(decision.relation_event_ids)
+    || !String(decision.reason ?? "").trim()
+    || decision.subjective_not_world_truth !== true
+    || decision.confidence !== null
+    || decision.probability !== null
+  ) {
+    const error = new Error(
+      "SubjectiveBeliefRevisionEvent must embed one actionable canonical Phase65D decision.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_DECISION_INVALID";
+    throw error;
+  }
+
+  const decisionBody = cloneJson(decision);
+  delete decisionBody.decision_hash;
+  if (hashAgentRunValue(decisionBody) !== decision.decision_hash) {
+    const error = new Error(
+      `Phase65D decision ${decision.decision_id} failed embedded hash verification.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_DECISION_HASH_MISMATCH";
+    throw error;
+  }
+
+  const claimIds = [...new Set(
+    decision.claim_event_ids.map((value) => String(value ?? "").trim()),
+  )].filter(Boolean).sort((a, b) => a.localeCompare(b, "en"));
+  const relationIds = [...new Set(
+    decision.relation_event_ids.map((value) => String(value ?? "").trim()),
+  )].filter(Boolean).sort((a, b) => a.localeCompare(b, "en"));
+
+  if (
+    !sameValue(claimIds, decision.claim_event_ids)
+    || !sameValue(relationIds, decision.relation_event_ids)
+  ) {
+    const error = new Error(
+      `Phase65D decision ${decision.decision_id} has invalid reference ordering.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_DECISION_REFERENCE_ORDER_INVALID";
+    throw error;
+  }
+
+  const expectedDecisionId =
+    `subjective_belief_resolution_${hashAgentRunValue({
+      version: phase65dSubjectiveBeliefResolutionVersion,
+      character: decision.character,
+      source_turn_id: decision.source_turn_id,
+      action: decision.action,
+      commitment: decision.commitment,
+      claim_event_ids: claimIds,
+      relation_event_ids: relationIds,
+      reason: decision.reason,
+    }).slice(0, 24)}`;
+
+  if (expectedDecisionId !== decision.decision_id) {
+    const error = new Error(
+      `Phase65D decision ${decision.decision_id} failed deterministic identity verification.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_DECISION_IDENTITY_MISMATCH";
+    throw error;
+  }
+
+  const derivation = object(decision.derivation);
+  const audit = object(decision.engine_audit);
+  if (
+    derivation.mode !== "explicit_local_claim_relation_resolution_v1"
+    || derivation.hidden_semantic_graph_traversal_used !== false
+    || derivation.deterministic_sort_used_as_epistemic_precedence !== false
+    || audit.claim_hashes_verified !== true
+    || audit.relation_hashes_verified !== true
+    || audit.relation_claim_hash_pinning_verified !== true
+    || audit.same_character_scope_verified !== true
+    || audit.historical_claim_mutation_applied !== false
+    || audit.historical_relation_mutation_applied !== false
+    || audit.world_state_mutation_applied !== false
+    || audit.world_truth_authority_claimed !== false
+    || audit.retrieval_frequency_used_as_credibility !== false
+    || audit.accessibility_strength_used_as_credibility !== false
+    || audit.plasticity_strength_used_as_truth_support !== false
+    || audit.confidence_probability_modeled !== false
+    || audit.last_write_wins_applied !== false
+    || audit.same_turn_character_brain_feedback_allowed !== false
+  ) {
+    const error = new Error(
+      `Phase65D decision ${decision.decision_id} violates the Phase66A authority boundary.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_DECISION_AUTHORITY_BOUNDARY_VIOLATION";
+    throw error;
+  }
+
+  const claims = claimIds.map((claimEventId) => {
+    const claim = phase65bCanonicalClaim(worldState, claimEventId);
+    if (
+      String(claim.character ?? "")
+        .trim()
+        .toLocaleLowerCase("zh-Hant-TW")
+      !== String(decision.character)
+        .trim()
+        .toLocaleLowerCase("zh-Hant-TW")
+    ) {
+      const error = new Error(
+        `Phase65D decision ${decision.decision_id} crosses claim ownership.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_CHARACTER_MISMATCH";
+      throw error;
+    }
+    return claim;
+  });
+  const relations = relationIds.map(
+    (relationEventId) => phase66aCanonicalRelation(
+      worldState,
+      relationEventId,
+      decision.character,
+    ),
+  );
+
+  if (decision.action === "adopt" && claimIds.length !== 1) {
+    const error = new Error(
+      `Phase66A adopt decision ${decision.decision_id} must identify exactly one claim.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_ADOPT_CLAIM_COUNT_INVALID";
+    throw error;
+  }
+
+  if (decision.action === "adopt") {
+    for (const relation of relations) {
+      if (
+        relation.relation !== "supersedes"
+        || relation.source_claim_event_id !== claimIds[0]
+      ) {
+        const error = new Error(
+          `Phase66A adopt decision ${decision.decision_id} contains an invalid relation basis.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_ADOPT_RELATION_INVALID";
+        throw error;
+      }
+    }
+  }
+
+  if (
+    decision.action === "supersede"
+    && (
+      relations.length !== 1
+      || relations[0].relation !== "supersedes"
+      || !claimIds.includes(relations[0].target_claim_event_id)
+    )
+  ) {
+    const error = new Error(
+      `Phase66A supersede decision ${decision.decision_id} has an invalid target relation.`,
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_SUPERSESSION_RELATION_INVALID";
+    throw error;
+  }
+
+  return { claims, relations };
+}
+
+function assertPhase66ASubjectiveBeliefRevisionMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "subjective_belief_revision_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "SubjectiveBeliefRevisionEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId = String(worldPath[1] ?? "");
+    const existing = getAtPath(worldState, worldPath);
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next = mutation?.to;
+    if (
+      !isObject(next)
+      || next.schema_version !== phase66aSubjectiveBeliefRevisionEventSchema
+      || next.immutable !== true
+      || String(next.belief_revision_event_id ?? "") !== eventId
+      || !String(next.belief_revision_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !String(next.source_resolution_decision_id ?? "").trim()
+      || !String(next.source_resolution_decision_hash ?? "").trim()
+      || !["adopt", "supersede"].includes(next.resolution_action)
+      || next.from_commitment !== null
+      || phase66aCommitmentByAction[next.resolution_action]
+        !== next.to_commitment
+      || !Array.isArray(next.claim_references)
+      || !Array.isArray(next.relation_references)
+      || next.status !== "subjective_belief_revision_recorded"
+    ) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} creation payload is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventBody = cloneJson(next);
+    delete eventBody.belief_revision_event_hash;
+    if (hashAgentRunValue(eventBody) !== next.belief_revision_event_hash) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const expectedQueueTurnId =
+      `${next.source_turn_id}:subjective_belief_revision`;
+    if (String(queueTurnId ?? "") !== expectedQueueTurnId) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} must be executed by its exact source-turn revision queue.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+
+    const validated = assertPhase66ASourceResolutionDecision(
+      next.source_resolution_decision,
+      worldState,
+    );
+    const decision = next.source_resolution_decision;
+
+    if (
+      decision.decision_id !== next.source_resolution_decision_id
+      || decision.decision_hash !== next.source_resolution_decision_hash
+      || decision.character !== next.character
+      || decision.source_turn_id !== next.source_turn_id
+      || decision.action !== next.resolution_action
+      || decision.commitment !== next.to_commitment
+    ) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} does not match its embedded Phase65D decision.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_SOURCE_DECISION_MISMATCH";
+      throw error;
+    }
+
+    const expectedClaimRefs = validated.claims
+      .map((claim) => ({
+        claim_event_id: claim.claim_event_id,
+        claim_event_hash: claim.claim_event_hash,
+        proposition_hash: claim.proposition_hash,
+        source_turn_id: claim.source_turn_id,
+      }))
+      .sort((a, b) => a.claim_event_id.localeCompare(b.claim_event_id, "en"));
+    const expectedRelationRefs = validated.relations
+      .map((relation) => ({
+        relation_event_id: relation.relation_event_id,
+        relation_event_hash: relation.relation_event_hash,
+        relation: relation.relation,
+        source_claim_event_id: relation.source_claim_event_id,
+        target_claim_event_id: relation.target_claim_event_id,
+      }))
+      .sort((a, b) => a.relation_event_id.localeCompare(b.relation_event_id, "en"));
+    const expectedAdopted = decision.action === "adopt"
+      ? [...decision.claim_event_ids]
+      : [];
+    const expectedSuperseded = decision.action === "supersede"
+      ? [...new Set(
+        validated.relations.map((relation) => relation.target_claim_event_id),
+      )].sort((a, b) => a.localeCompare(b, "en"))
+      : [];
+
+    if (
+      !sameValue(next.claim_references, expectedClaimRefs)
+      || !sameValue(next.relation_references, expectedRelationRefs)
+      || !sameValue(next.adopted_claim_event_ids, expectedAdopted)
+      || !sameValue(next.superseded_claim_event_ids, expectedSuperseded)
+      || !sameValue(next.suspended_claim_event_ids, [])
+      || !sameValue(next.withdrawn_claim_event_ids, [])
+    ) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} does not preserve its exact source basis.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_SOURCE_BASIS_MISMATCH";
+      throw error;
+    }
+
+    const expectedEventId =
+      `subjective_belief_revision_event_${hashAgentRunValue({
+        version: phase66aSubjectiveBeliefRevisionVersion,
+        source_turn_id: next.source_turn_id,
+        character: next.character,
+        source_resolution_decision_id: next.source_resolution_decision_id,
+        source_resolution_decision_hash: next.source_resolution_decision_hash,
+        resolution_action: next.resolution_action,
+        previous_belief_revision_event_hash:
+          next.previous_belief_revision_event_hash ?? null,
+      }).slice(0, 24)}`;
+
+    const semantic = object(next.semantic_state);
+    const derivation = object(next.derivation);
+    const audit = object(next.engine_audit);
+    if (
+      eventId !== expectedEventId
+      || semantic.subjective_not_world_truth !== true
+      || semantic.world_truth_verified !== false
+      || semantic.confidence !== null
+      || semantic.probability !== null
+      || semantic.effective_belief_projection_applied !== false
+      || derivation.mode
+        !== "phase65d_resolution_to_append_only_revision_event_v1"
+      || derivation.source_resolution_decision_hash_pinned !== true
+      || derivation.source_claim_hashes_pinned !== true
+      || derivation.source_relation_hashes_pinned !== true
+      || derivation.deterministic_sort_used_as_epistemic_precedence !== false
+      || derivation.hidden_semantic_graph_traversal_used !== false
+      || audit.source_resolution_decision_hash_verified !== true
+      || audit.source_claim_hashes_verified !== true
+      || audit.source_relation_hashes_verified !== true
+      || audit.same_character_scope_verified !== true
+      || audit.unresolved_decision_persisted !== false
+      || audit.historical_claim_mutation_applied !== false
+      || audit.historical_relation_mutation_applied !== false
+      || audit.historical_revision_mutation_applied !== false
+      || audit.effective_belief_projection_applied !== false
+      || audit.world_truth_authority_claimed !== false
+      || audit.confidence_probability_modeled !== false
+      || audit.retrieval_frequency_used_as_credibility !== false
+      || audit.accessibility_strength_used_as_credibility !== false
+      || audit.plasticity_strength_used_as_truth_support !== false
+      || audit.last_write_wins_applied !== false
+      || audit.same_turn_character_brain_feedback_allowed !== false
+    ) {
+      const error = new Error(
+        `SubjectiveBeliefRevisionEvent ${eventId} violates the Phase66A event boundary.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+
+    return;
+  }
+
+  if (worldPath[0] !== "subjective_belief_revision_history") return;
+
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Subjective belief revision history may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  assertPhase66ARevisionHistoryPrefix(oldHistory, newHistory);
+
+  const seenEventIds = new Set();
+  const seenDecisionIds = new Set();
+  const latestByCharacter = new Map();
+
+  for (const reference of oldHistory) {
+    const eventId = String(reference?.belief_revision_event_id ?? "").trim();
+    const decisionId = String(reference?.source_resolution_decision_id ?? "").trim();
+    if (eventId) seenEventIds.add(eventId);
+    if (decisionId) seenDecisionIds.add(decisionId);
+    if (eventId && String(reference?.character ?? "").trim()) {
+      const event = object(
+        object(worldState?.subjective_belief_revision_events)[eventId],
+      );
+      if (Object.keys(event).length) {
+        latestByCharacter.set(
+          String(reference.character)
+            .trim()
+            .toLocaleLowerCase("zh-Hant-TW"),
+          event,
+        );
+      }
+    }
+  }
+
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.belief_revision_event_id ?? "").trim();
+    const decisionId = String(reference?.source_resolution_decision_id ?? "").trim();
+
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase66aSubjectiveBeliefRevisionHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.belief_revision_event_hash ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || !decisionId
+      || !String(reference.source_resolution_decision_hash ?? "").trim()
+      || !["adopt", "supersede"].includes(reference.resolution_action)
+      || phase66aCommitmentByAction[reference.resolution_action]
+        !== reference.to_commitment
+      || reference.status !== "subjective_belief_revision_recorded"
+    ) {
+      const error = new Error(
+        `Subjective belief revision history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+
+    if (seenEventIds.has(eventId) || seenDecisionIds.has(decisionId)) {
+      const error = new Error(
+        `Subjective belief revision history contains duplicate event or source decision at index ${index}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_DUPLICATE_REFERENCE";
+      throw error;
+    }
+
+    const event = object(
+      object(worldState?.subjective_belief_revision_events)[eventId],
+    );
+    if (!Object.keys(event).length) {
+      const error = new Error(
+        `Subjective belief revision history cannot resolve SubjectiveBeliefRevisionEvent ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+
+    const eventBody = cloneJson(event);
+    delete eventBody.belief_revision_event_hash;
+    const characterKey = String(reference.character)
+      .trim()
+      .toLocaleLowerCase("zh-Hant-TW");
+    const previous = latestByCharacter.get(characterKey) ?? null;
+    const expectedPreviousId = previous?.belief_revision_event_id ?? null;
+    const expectedPreviousHash = previous?.belief_revision_event_hash ?? null;
+
+    if (
+      hashAgentRunValue(eventBody) !== event.belief_revision_event_hash
+      || event.belief_revision_event_hash
+        !== reference.belief_revision_event_hash
+      || event.character !== reference.character
+      || event.source_turn_id !== reference.source_turn_id
+      || event.source_resolution_decision_id
+        !== reference.source_resolution_decision_id
+      || event.source_resolution_decision_hash
+        !== reference.source_resolution_decision_hash
+      || event.resolution_action !== reference.resolution_action
+      || event.to_commitment !== reference.to_commitment
+      || event.previous_belief_revision_event_id
+        !== reference.previous_belief_revision_event_id
+      || event.previous_belief_revision_event_hash
+        !== reference.previous_belief_revision_event_hash
+      || event.previous_belief_revision_event_id !== expectedPreviousId
+      || event.previous_belief_revision_event_hash !== expectedPreviousHash
+      || event.status !== reference.status
+    ) {
+      const error = new Error(
+        `Subjective belief revision history reference ${eventId} does not match its canonical event chain.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_BELIEF_REVISION_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+
+    seenEventIds.add(eventId);
+    seenDecisionIds.add(decisionId);
+    latestByCharacter.set(characterKey, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -1901,6 +2539,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase66ASubjectiveBeliefRevisionMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -1967,6 +2611,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
       );
       assertPhase65BSubjectiveClaimRelationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase66ASubjectiveBeliefRevisionMutation(
         executed,
         worldPath,
         mutation,
@@ -2064,6 +2714,14 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase65b_subjective_claim_relation_history_append_only_enforced: true,
       direct_nested_subjective_claim_relation_history_mutation_rejected: true,
       phase65b_historical_claim_rewrite_rejected: true,
+      phase66a_subjective_belief_revision_event_write_once_enforced: true,
+      phase66a_subjective_belief_revision_event_content_address_verified: true,
+      phase66a_source_resolution_decision_hash_verified: true,
+      phase66a_source_claim_relation_hash_pinning_enforced: true,
+      phase66a_subjective_belief_revision_history_append_only_enforced: true,
+      phase66a_per_character_revision_hash_chain_enforced: true,
+      direct_nested_subjective_belief_revision_history_mutation_rejected: true,
+      phase66a_historical_revision_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

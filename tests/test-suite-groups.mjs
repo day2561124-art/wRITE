@@ -68,6 +68,10 @@ export const phase65BeliefCognitionSteps = Object.freeze([
   Object.freeze(["Phase 65D evidence-grounded subjective belief resolution", Object.freeze(["tests/phase65/phase65d-subjective-belief-resolution.test.mjs"])]),
 ]);
 
+export const phase66BeliefRevisionSteps = Object.freeze([
+  Object.freeze(["Phase 66A append-only subjective belief revision events", Object.freeze(["tests/phase66/phase66a-subjective-belief-revision-event.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -77,6 +81,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
   ...phase65BeliefCognitionSteps,
+  ...phase66BeliefRevisionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -84,6 +89,7 @@ export const cognitionSteps = Object.freeze([
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
   ...phase65BeliefCognitionSteps,
+  ...phase66BeliefRevisionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([

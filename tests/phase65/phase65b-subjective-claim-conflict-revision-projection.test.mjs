@@ -909,7 +909,8 @@ for (const sourceAnchor of [
   "buildWorldSimulationSubjectiveClaimConflictRevisionContract",
   "subjectiveClaimRelationResolver",
   "current_turn_claims_plus_same_character_prior_claims",
-  "next_world_state: subjectiveClaimRelationMutationExecution.next_world_state",
+  "next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state",
+  "const subjectiveBeliefRevisionMutationExecution =",
 ]) {
   assert.ok(
     loopSource.includes(sourceAnchor),
