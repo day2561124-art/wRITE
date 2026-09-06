@@ -112,14 +112,74 @@ export function createWorkspaceSnapshotAuthorityIpcClient(options = {}) {
   });
 }
 
-export function attachWorkspaceSnapshotAuthorityIpc(child, authority) {
+export function attachWorkspaceSnapshotAuthorityIpc(child, authority, options = {}) {
+  const changeClockProvider = options.change_clock_provider ?? null;
+
+  async function runProviderStep(step, payload) {
+    if (!changeClockProvider || typeof changeClockProvider[step] !== "function") return null;
+    try {
+      return await changeClockProvider[step](payload);
+    } catch {
+      const reason = `change_clock_provider_${step}_failed`;
+      authority.invalidate({
+        workspace_id: payload?.workspace_id,
+        reason,
+      });
+      return { ok: false, reason, provider_step_failed: true };
+    }
+  }
+
   const operationHandlers = {
-    snapshot_try_reuse: (payload) => authority.tryReuse(payload),
-    snapshot_begin_synchronization: (payload) => authority.beginSynchronization(payload),
-    snapshot_publish_exact: (payload) => authority.publishExact({
-      ...payload,
-      source_pid: child.pid ?? null,
-    }),
+    snapshot_try_reuse: async (payload) => {
+      const candidate = authority.tryReuse(payload);
+      if (candidate?.hit !== true) return candidate;
+      const providerResult = await runProviderStep("prepareReuse", {
+        ...payload,
+        snapshot: candidate.snapshot,
+      });
+      // B4A/B4B1 compatibility: an older parent with no production provider
+      // retains the pre-B4B2 authority semantics. A B4B2 provider, however,
+      // must positively fence the candidate before it can leave the parent.
+      if (providerResult === null) return candidate;
+      if (providerResult?.ok !== true || providerResult?.fenced !== true) {
+        authority.invalidate({
+          workspace_id: payload?.workspace_id,
+          reason: providerResult?.reason ?? "change_clock_provider_reuse_fence_failed",
+        });
+      }
+      return authority.tryReuse(payload);
+    },
+    snapshot_begin_synchronization: async (payload) => {
+      const providerResult = await runProviderStep("prepareSynchronization", payload);
+      if (providerResult !== null && providerResult?.ready !== true) {
+        return {
+          ...authority.status(payload),
+          started: false,
+          reason: providerResult?.reason ?? "change_clock_provider_sync_prepare_failed",
+          token: null,
+        };
+      }
+      return authority.beginSynchronization(payload);
+    },
+    snapshot_publish_exact: async (payload) => {
+      if (payload?.synchronization_token) {
+        const providerResult = await runProviderStep("fenceSynchronization", {
+          workspace_id: payload.workspace_id,
+          token: payload.synchronization_token,
+          snapshot: payload.snapshot,
+        });
+        if (providerResult !== null && providerResult?.ok !== true) {
+          authority.invalidate({
+            workspace_id: payload.workspace_id,
+            reason: providerResult?.reason ?? "change_clock_provider_sync_fence_failed",
+          });
+        }
+      }
+      return authority.publishExact({
+        ...payload,
+        source_pid: child.pid ?? null,
+      });
+    },
     snapshot_invalidate: (payload) => authority.invalidate(payload),
     snapshot_status: (payload) => authority.status(payload),
   };

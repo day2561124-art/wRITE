@@ -195,4 +195,113 @@ function ipcPair(childPid) {
   }
 }
 
+// B4B2 provider orchestration must run before authority decisions: synchronization
+// readiness precedes token minting, publication is fenced, and reuse is fenced.
+{
+  let ids = 0;
+  let prepareReuseCount = 0;
+  let prepareSynchronizationCount = 0;
+  let fenceSynchronizationCount = 0;
+  let invalidateOnReuse = false;
+  let failPrepareSynchronization = false;
+  let failReuse = false;
+  let failFence = false;
+  const changeClock = createWorkspaceChangeClock({
+    provider_instance_id: "authority-provider-order",
+    id_factory: () => `authority-provider-order-${++ids}`,
+  });
+  const authority = createWorkspaceSnapshotAuthority({ change_clock: changeClock });
+  const provider = {
+    async prepareSynchronization({ workspace_id }) {
+      prepareSynchronizationCount += 1;
+      if (failPrepareSynchronization) throw new Error("synthetic synchronization preparation failure");
+      const state = changeClock.status({ workspace_id });
+      if (!state.provider_ready) {
+        changeClock.markProviderReady({ workspace_id, root_identity: "root:provider-order" });
+      }
+      return { ready: true };
+    },
+    async fenceSynchronization() {
+      fenceSynchronizationCount += 1;
+      if (failFence) throw new Error("synthetic fence failure");
+      return { ok: true };
+    },
+    async prepareReuse({ workspace_id, snapshot }) {
+      prepareReuseCount += 1;
+      assert.equal(typeof snapshot?.workspace_snapshot_id, "string");
+      if (failReuse) throw new Error("synthetic reuse fence failure");
+      if (invalidateOnReuse) {
+        changeClock.noteChange({ workspace_id, reason: "synthetic pre-reuse change" });
+      }
+      return { ok: true, fenced: true };
+    },
+  };
+  const child = ipcPair(301);
+  const detach = attachWorkspaceSnapshotAuthorityIpc(child.parentView, authority, {
+    change_clock_provider: provider,
+  });
+  const client = createWorkspaceSnapshotAuthorityIpcClient({ process_like: child.childView, timeout_ms: 1_000 });
+  try {
+    const snapshot = exactSnapshot("provider ordering");
+    const sync = await client.beginSynchronization(workspaceId);
+    assert.equal(prepareSynchronizationCount, 1);
+    assert.equal(sync.started, true);
+    const published = await client.publishExact(workspaceId, snapshot, sync.token);
+    assert.equal(fenceSynchronizationCount, 1);
+    assert.equal(published.reusable, true);
+
+    const reused = await client.tryReuse(workspaceId);
+    assert.equal(prepareReuseCount, 1);
+    assert.equal(reused.hit, true);
+
+    failPrepareSynchronization = true;
+    const failedPrepare = await client.beginSynchronization(workspaceId);
+    assert.equal(prepareSynchronizationCount, 2);
+    assert.equal(failedPrepare.started, false);
+    assert.equal(failedPrepare.reason, "change_clock_provider_prepareSynchronization_failed");
+    assert.equal(failedPrepare.token, null);
+
+    failPrepareSynchronization = false;
+    const recoveredPrepare = await client.beginSynchronization(workspaceId);
+    assert.equal(prepareSynchronizationCount, 3);
+    assert.equal(recoveredPrepare.started, true);
+    const recoveredPreparePublish = await client.publishExact(
+      workspaceId,
+      exactSnapshot("provider ordering after prepare failure"),
+      recoveredPrepare.token,
+    );
+    assert.equal(recoveredPreparePublish.reusable, true);
+
+    failReuse = true;
+    const failedReuse = await client.tryReuse(workspaceId);
+    assert.equal(prepareReuseCount, 2);
+    assert.equal(failedReuse.hit, false);
+    assert.equal(failedReuse.reason, "watcher_synchronizing");
+    const failedReuseStatus = await client.status(workspaceId);
+    assert.equal(failedReuseStatus.invalidation_reason, "change_clock_provider_prepareReuse_failed");
+
+    failReuse = false;
+    const restoredSync = await client.beginSynchronization(workspaceId);
+    assert.equal(restoredSync.started, true);
+    const restoredPublish = await client.publishExact(workspaceId, exactSnapshot("provider ordering restored"), restoredSync.token);
+    assert.equal(restoredPublish.reusable, true);
+
+    invalidateOnReuse = true;
+    const invalidatedBeforeReuse = await client.tryReuse(workspaceId);
+    assert.equal(prepareReuseCount, 3);
+    assert.equal(invalidatedBeforeReuse.hit, false);
+    assert.equal(invalidatedBeforeReuse.reason, "watcher_synchronizing");
+
+    invalidateOnReuse = false;
+    const retry = await client.beginSynchronization(workspaceId);
+    failFence = true;
+    const failedFencePublish = await client.publishExact(workspaceId, exactSnapshot("fence failure"), retry.token);
+    assert.equal(failedFencePublish.stored, true);
+    assert.equal(failedFencePublish.reusable, false);
+    assert.equal(failedFencePublish.synchronization_completed, false);
+  } finally {
+    detach();
+  }
+}
+
 console.log("Workspace snapshot authority tests passed.");

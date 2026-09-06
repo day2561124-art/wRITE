@@ -45,6 +45,9 @@ export function createStdioSession(options = {}) {
       ? attachWorkspaceSnapshotAuthorityIpc(
         nextChild,
         options.workspaceSnapshotAuthority,
+        {
+          change_clock_provider: options.workspaceChangeClockProvider ?? null,
+        },
       )
       : () => {};
 

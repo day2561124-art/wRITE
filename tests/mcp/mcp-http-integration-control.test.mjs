@@ -160,16 +160,22 @@ async function fixture() {
   const temp = await mkdtemp(path.join(tempParent, 'integration-control-'));
   let parent;
   try {
-  const repo = path.join(temp, 'repo'), src = path.join(repo, 'server', 'src'), runtime = path.join(temp, 'runtime');
+  const repo = path.join(temp, 'repo'), src = path.join(repo, 'server', 'src'), scripts = path.join(repo, 'scripts'), runtime = path.join(temp, 'runtime');
   await mkdir(src, { recursive: true });
+  await mkdir(scripts, { recursive: true });
   await mkdir(runtime);
   for (const file of [
     'mcp-http-server.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
+    'mcp-workspace-change-clock-provider.mjs',
     'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
   ]) await copyFile(path.join(root, 'server', 'src', file), path.join(src, file));
-  await writeFile(path.join(repo, '.gitignore'), 'data/outputs/\n');
+  await copyFile(
+    path.join(root, 'scripts', 'mcp-workspace-change-watch.ps1'),
+    path.join(scripts, 'mcp-workspace-change-watch.ps1'),
+  );
+  await writeFile(path.join(repo, '.gitignore'), 'data/outputs/\ntests/.tmp/\n');
   await writeFile(path.join(repo, 'base.txt'), 'base\n');
   await writeFile(path.join(repo, 'overlap.txt'), 'base overlap\n');
   await writeFile(path.join(src, 'mcp-server.mjs'), childCode(false));

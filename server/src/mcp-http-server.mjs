@@ -6,6 +6,7 @@ import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
+import { createWorkspaceChangeClockProvider } from './mcp-workspace-change-clock-provider.mjs';
 import fs from 'fs';
 import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
@@ -287,6 +288,9 @@ const preparedTurnBroker = createEphemeralWorldSimulationPreparedTurnBroker({
   storage_scope: 'mcp_http_parent_process_ephemeral_memory',
 });
 const workspaceChangeClock = createWorkspaceChangeClock();
+const workspaceChangeClockProvider = createWorkspaceChangeClockProvider({
+  change_clock: workspaceChangeClock,
+});
 const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority({
   change_clock: workspaceChangeClock,
 });
@@ -464,6 +468,21 @@ async function handleDevMcpReload(entry, message) {
         workspace_change_clock_change_epoch: workspaceChangeClock.status({
           workspace_id: 'dev_workspace_shared_repository_v1',
         }).change_epoch,
+        workspace_change_clock_backend: workspaceChangeClockProvider.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).backend,
+        workspace_change_clock_helper_ready: workspaceChangeClockProvider.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).helper_ready,
+        workspace_change_clock_watch_root_count: workspaceChangeClockProvider.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).watch_root_count,
+        workspace_change_clock_fence_count: workspaceChangeClockProvider.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).fence_count,
+        workspace_change_clock_overflow_count: workspaceChangeClockProvider.status({
+          workspace_id: 'dev_workspace_shared_repository_v1',
+        }).overflow_count,
         child_ephemeral_state_reset: true,
       }),
       'transport.send(dev_mcp_reload-success)',
@@ -616,6 +635,7 @@ function createBridgeSession() {
   const session = createStdioSession({
     preparedTurnBroker,
     workspaceSnapshotAuthority,
+    workspaceChangeClockProvider,
   });
   let entry;
 
@@ -873,6 +893,7 @@ async function shutdown(signal) {
       '; closing sessions',
   );
   clearInterval(sessionReaper);
+  workspaceChangeClockProvider.close();
 
   const entries = [...bridgeEntries];
 
