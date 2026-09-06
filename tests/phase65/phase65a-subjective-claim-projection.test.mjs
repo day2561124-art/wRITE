@@ -910,9 +910,9 @@ assert.ok(
 );
 assert.ok(
   loopSource.includes(
-    "next_world_state: subjectiveClaimMutationExecution.next_world_state",
+    "next_world_state: subjectiveClaimRelationMutationExecution.next_world_state",
   ),
-  "atomic world commit must use the state after authoritative claim mutation execution",
+  "atomic world commit must use the final authoritative state after Phase65B claim-relation mutation execution",
 );
 
 const memoryExecutionIndex =
@@ -931,6 +931,14 @@ const claimQueueIndex =
   loopSource.indexOf(
     "const subjectiveClaimMutationQueue =",
   );
+const claimExecutionIndex =
+  loopSource.indexOf(
+    "const subjectiveClaimMutationExecution =",
+  );
+const claimRelationExecutionIndex =
+  loopSource.indexOf(
+    "const subjectiveClaimRelationMutationExecution =",
+  );
 const commitIndex =
   loopSource.indexOf(
     "const committed = await commitWorldSimulationTurn",
@@ -940,7 +948,9 @@ assert.ok(memoryExecutionIndex >= 0);
 assert.ok(claimProposalIndex > memoryExecutionIndex);
 assert.ok(claimProjectionIndex > claimProposalIndex);
 assert.ok(claimQueueIndex > claimProjectionIndex);
-assert.ok(commitIndex > claimQueueIndex);
+assert.ok(claimExecutionIndex > claimQueueIndex);
+assert.ok(claimRelationExecutionIndex > claimExecutionIndex);
+assert.ok(commitIndex > claimRelationExecutionIndex);
 
 const runCharacterTurnIndex =
   loopSource.lastIndexOf(
