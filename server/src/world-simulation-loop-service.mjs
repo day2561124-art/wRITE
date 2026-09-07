@@ -52,6 +52,12 @@ import {
   worldSimulationAutobiographicalLifeEventVersion,
 } from "./world-simulation-autobiographical-life-event-service.mjs";
 import {
+  buildWorldSimulationPersonalSemanticMemoryContract,
+  buildWorldSimulationPersonalSemanticMemoryDerivations,
+  buildWorldSimulationPersonalSemanticMemoryResolverView,
+  worldSimulationPersonalSemanticMemoryVersion,
+} from "./world-simulation-personal-semantic-memory-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3087,6 +3093,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveEpisodeSegmentationContract(),
     autobiographical_life_event_organization:
       buildWorldSimulationAutobiographicalLifeEventOrganizationContract(),
+    personal_semantic_memory:
+      buildWorldSimulationPersonalSemanticMemoryContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -3161,6 +3169,68 @@ export function buildWorldSimulationLoopContract() {
       may_rewrite_subjective_episode:
         false,
       character_brain_direct_life_event_mutation_allowed:
+        false,
+    },
+
+    personal_semantic_memory_resolver_hook: {
+      owner:
+        "programmatic_personal_semantic_memory_resolver",
+      optional:
+        true,
+      option_name:
+        "personalSemanticMemoryResolver",
+      source_scope:
+        "current_turn_phase67b_trigger_plus_same_character_life_event_evidence",
+      current_turn_life_event_trigger_required:
+        true,
+      receives_world_state:
+        false,
+      receives_raw_world_event:
+        false,
+      receives_memory_content:
+        false,
+      receives_episode_content:
+        false,
+      receives_life_event_content:
+        false,
+      receives_structural_life_event_provenance:
+        true,
+      may_request_operations: [
+        "form",
+        "support",
+        "counterevidence",
+      ],
+      supported_categories: [
+        "recurring_event_pattern",
+        "autobiographical_fact",
+      ],
+      semanticization_requires_explicit_programmatic_decision:
+        true,
+      eager_semanticization:
+        false,
+      recurring_event_pattern_auto_promoted_by_count:
+        false,
+      trait_inference_allowed:
+        false,
+      role_identity_inference_allowed:
+        false,
+      value_inference_allowed:
+        false,
+      preference_inference_allowed:
+        false,
+      self_model_inference_allowed:
+        false,
+      epistemic_acceptance_authority:
+        false,
+      counterevidence_may_revise_belief:
+        false,
+      missing_hook_means_no_semanticization:
+        true,
+      may_assert_world_truth:
+        false,
+      may_assert_confidence_probability:
+        false,
+      character_brain_direct_personal_semantic_mutation_allowed:
         false,
     },
 
@@ -4964,6 +5034,86 @@ async function resolveAutobiographicalLifeEventOrganizationDecisions(
   };
 }
 
+async function resolvePersonalSemanticMemoryDecisions(
+  worldState,
+  preparedTurn,
+  sourceOrganizationEventIds,
+  options,
+) {
+  const resolver =
+    typeof options.personalSemanticMemoryResolver === "function"
+      ? options.personalSemanticMemoryResolver
+      : null;
+  const resolverView =
+    buildWorldSimulationPersonalSemanticMemoryResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: sourceOrganizationEventIds,
+    });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_semanticization: true,
+        current_turn_life_event_trigger_required: true,
+        eager_semanticization_used: false,
+        recurring_event_pattern_auto_promoted_by_count: false,
+        world_state_exposed_to_resolver: false,
+        raw_world_event_exposed_to_resolver: false,
+        memory_content_exposed_to_resolver: false,
+        episode_content_exposed_to_resolver: false,
+        life_event_content_exposed_to_resolver: false,
+        trait_inference_requested: false,
+        role_identity_inference_requested: false,
+        self_model_inference_requested: false,
+        epistemic_acceptance_requested: false,
+        confidence_probability_requested: false,
+        world_truth_judgment_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "personalSemanticMemoryResolver must return an array of source-backed semantic derivation decisions.",
+    );
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    resolver_view_hash: resolverView.resolver_view_hash,
+    source: "programmatic_personal_semantic_memory_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      current_turn_life_event_trigger_required: true,
+      eager_semanticization_used: false,
+      recurring_event_pattern_auto_promoted_by_count: false,
+      world_state_exposed_to_resolver: false,
+      raw_world_event_exposed_to_resolver: false,
+      memory_content_exposed_to_resolver: false,
+      episode_content_exposed_to_resolver: false,
+      life_event_content_exposed_to_resolver: false,
+      trait_inference_requested: false,
+      role_identity_inference_requested: false,
+      self_model_inference_requested: false,
+      epistemic_acceptance_requested: false,
+      confidence_probability_requested: false,
+      world_truth_judgment_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -5541,9 +5691,66 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  const personalSemanticSourceOrganizationEventIds =
+    autobiographicalLifeEventOrganization
+      .result
+      .organization_events_created
+      .map((event) => event.organization_event_id);
+
+  const personalSemanticDecisionResolution =
+    await resolvePersonalSemanticMemoryDecisions(
+      autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+      preparedTurn,
+      personalSemanticSourceOrganizationEventIds,
+      options,
+    );
+
+  const personalSemanticMemoryDerivation =
+    buildWorldSimulationPersonalSemanticMemoryDerivations({
+      world_state:
+        autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_organization_event_ids:
+        personalSemanticSourceOrganizationEventIds,
+      semantic_decisions:
+        personalSemanticDecisionResolution.decisions,
+    });
+
+  const personalSemanticMemoryMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:personal_semantic_memory`,
+      world_state_hash:
+        hashAgentRunValue(
+          autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        personalSemanticMemoryDerivation
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const personalSemanticMemoryMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+      preview_world_state:
+        personalSemanticMemoryDerivation
+          .result
+          .preview_world_state,
+      queue:
+        personalSemanticMemoryMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
-      autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+      personalSemanticMemoryMutationExecution.next_world_state,
       preparedTurn,
       subjectiveClaimSourceMemories,
       options,
@@ -5552,7 +5759,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
       world_state:
-        autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+        personalSemanticMemoryMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -5567,7 +5774,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_claim`,
       world_state_hash:
         hashAgentRunValue(
-          autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+          personalSemanticMemoryMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveClaimProjection
@@ -5579,7 +5786,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+        personalSemanticMemoryMutationExecution.next_world_state,
       preview_world_state:
         subjectiveClaimProjection
           .result
@@ -5852,6 +6059,25 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           autobiographicalLifeEventOrganizationMutationExecution.execution,
         ),
+
+      personal_semantic_memory_decision_resolution: {
+        version:
+          worldSimulationPersonalSemanticMemoryVersion,
+        decisions:
+          cloneJson(personalSemanticDecisionResolution.decisions),
+        resolver_view_hash:
+          personalSemanticDecisionResolution
+            .resolver_view
+            .resolver_view_hash,
+        audit:
+          cloneJson(personalSemanticDecisionResolution.audit),
+      },
+      personal_semantic_memory_derivation:
+        cloneJson(personalSemanticMemoryDerivation),
+      personal_semantic_memory_mutation_queue:
+        cloneJson(personalSemanticMemoryMutationQueue),
+      personal_semantic_memory_mutation_execution:
+        cloneJson(personalSemanticMemoryMutationExecution.execution),
 
       subjective_claim_proposal_resolution: {
         version:
@@ -6285,6 +6511,37 @@ export async function resolveWorldSimulationTurn(
         false,
       same_turn_character_brain_feedback_allowed:
         false,
+    },
+    personal_semantic_memory: {
+      version:
+        worldSimulationPersonalSemanticMemoryVersion,
+      resolver_used:
+        personalSemanticDecisionResolution.audit.resolver_used === true,
+      semantic_decision_count:
+        personalSemanticMemoryDerivation.result.semantic_decision_count,
+      created_derivation_event_count:
+        personalSemanticMemoryDerivation.result.derivation_events_created.length,
+      appended_history_reference_count:
+        personalSemanticMemoryDerivation.result.history_references_appended.length,
+      effective_personal_semantic_projection_hash:
+        personalSemanticMemoryDerivation
+          .result
+          .effective_personal_semantic_projection
+          .projection_hash,
+      mutation_count:
+        personalSemanticMemoryMutationQueue.mutation_count,
+      authoritative_executor:
+        personalSemanticMemoryMutationExecution.execution.version,
+      experience_near_only: true,
+      eager_semanticization_used: false,
+      recurring_event_pattern_auto_promoted_by_count: false,
+      trait_inference_modeled: false,
+      role_identity_modeled: false,
+      self_model_modeled: false,
+      belief_engine_duplicated: false,
+      world_truth_authority_claimed: false,
+      confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
     },
     subjective_claim_projection: {
       version:

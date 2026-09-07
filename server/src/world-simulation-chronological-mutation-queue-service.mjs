@@ -862,6 +862,15 @@ const phase67bAutobiographicalLifeEventOrganizationEventSchema =
 const phase67bAutobiographicalLifeEventOrganizationHistoryReferenceSchema =
   "phase67b-autobiographical-life-event-organization-history-ref-v1";
 
+const phase67cPersonalSemanticMemoryVersion =
+  "phase67c-personal-semantic-memory-v1";
+
+const phase67cPersonalSemanticDerivationEventSchema =
+  "phase67c-personal-semantic-derivation-event-v1";
+
+const phase67cPersonalSemanticDerivationHistoryReferenceSchema =
+  "phase67c-personal-semantic-derivation-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -3065,6 +3074,374 @@ function assertPhase67BAutobiographicalLifeEventMutation(
   }
 }
 
+function phase67cDerivationEventHash(event) {
+  const body = cloneJson(event);
+  delete body.derivation_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function phase67cSemanticDescriptor(value) {
+  const descriptor = object(value);
+  const qualifiers = array(descriptor.qualifiers);
+  if (
+    descriptor.subject_scope !== "self_autobiographical_experience"
+    || !String(descriptor.predicate ?? "").trim()
+    || !String(descriptor.object_ref ?? "").trim()
+    || String(descriptor.predicate).length > 160
+    || String(descriptor.object_ref).length > 320
+    || qualifiers.length > 16
+    || qualifiers.some((item) => !String(item ?? "").trim() || String(item).length > 160)
+  ) {
+    const error = new Error("Personal semantic descriptor is invalid.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_DESCRIPTOR_INVALID";
+    throw error;
+  }
+  const normalized = {
+    subject_scope: "self_autobiographical_experience",
+    predicate: String(descriptor.predicate).trim(),
+    object_ref: String(descriptor.object_ref).trim(),
+    qualifiers: qualifiers.map((item) => String(item).trim())
+      .sort((left, right) => left.localeCompare(right, "en")),
+  };
+  if (
+    new Set(normalized.qualifiers).size !== normalized.qualifiers.length
+    || !sameValue(normalized, descriptor)
+  ) {
+    const error = new Error("Personal semantic descriptor is not canonical.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_DESCRIPTOR_INVALID";
+    throw error;
+  }
+  return normalized;
+}
+
+function phase67cValidateSourceRefs(worldState, value, character) {
+  const normalizedCharacter = phase67aCharacterKey(character);
+  const refs = array(value).map((item) => ({
+    life_event_id: String(item?.life_event_id ?? "").trim(),
+    organization_event_id: String(item?.organization_event_id ?? "").trim(),
+    organization_event_hash: String(item?.organization_event_hash ?? "").trim(),
+  }));
+  if (!refs.length) {
+    const error = new Error("Personal semantic derivation requires LifeEvent evidence.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_SOURCE_REQUIRED";
+    throw error;
+  }
+  for (const ref of refs) {
+    const event = object(
+      object(worldState?.autobiographical_life_event_organization_events)[ref.organization_event_id],
+    );
+    if (
+      !ref.life_event_id
+      || !ref.organization_event_id
+      || !ref.organization_event_hash
+      || !Object.keys(event).length
+      || event.schema_version !== phase67bAutobiographicalLifeEventOrganizationEventSchema
+      || event.version !== phase67bAutobiographicalLifeEventVersion
+      || phase67bOrganizationEventHash(event) !== event.organization_event_hash
+      || event.organization_event_hash !== ref.organization_event_hash
+      || event.life_event_id !== ref.life_event_id
+      || phase67aCharacterKey(event.character) !== normalizedCharacter
+    ) {
+      const error = new Error("Personal semantic derivation does not pin canonical same-character Phase67B evidence.");
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_SOURCE_REF_MISMATCH";
+      throw error;
+    }
+  }
+  const sorted = [...refs].sort((left, right) => {
+    const life = left.life_event_id.localeCompare(right.life_event_id, "en");
+    if (life !== 0) return life;
+    return left.organization_event_id.localeCompare(right.organization_event_id, "en");
+  });
+  const keys = refs.map((item) =>
+    `${item.life_event_id}\u0000${item.organization_event_id}\u0000${item.organization_event_hash}`,
+  );
+  if (!sameValue(refs, sorted) || new Set(keys).size !== keys.length) {
+    const error = new Error("Personal semantic LifeEvent evidence must be unique and deterministically ordered.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_SOURCE_REF_INVALID";
+    throw error;
+  }
+  return refs;
+}
+
+function phase67cHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Personal semantic derivation history is append-only.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Personal semantic derivation history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function assertPhase67CPersonalSemanticMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "personal_semantic_derivation_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error("PersonalSemanticDerivationEvent fields are immutable after creation.");
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    if (getAtPath(worldState, worldPath) !== undefined && getAtPath(worldState, worldPath) !== null) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} is immutable and cannot be overwritten.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const next = mutation?.to;
+    if (
+      !isObject(next)
+      || next.schema_version !== phase67cPersonalSemanticDerivationEventSchema
+      || next.version !== phase67cPersonalSemanticMemoryVersion
+      || next.immutable !== true
+      || next.derivation_event_id !== eventId
+      || !String(next.derivation_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !["form", "support", "counterevidence"].includes(next.operation)
+      || !["recurring_event_pattern", "autobiographical_fact"].includes(next.semantic_category)
+      || !String(next.semantic_memory_id ?? "").trim()
+      || !String(next.semantic_key ?? "").trim()
+      || !String(next.semantic_descriptor_hash ?? "").trim()
+      || !String(next.resolver_view_hash ?? "").trim()
+      || next.status !== "personal_semantic_derivation_recorded"
+      || next.subjective_not_world_truth !== true
+      || next.world_truth_verified !== false
+      || next.epistemic_acceptance_decided !== false
+      || next.belief_engine_used !== false
+      || next.confidence !== null
+      || next.probability !== null
+      || next.memory_content_copied !== false
+      || next.episode_content_copied !== false
+      || next.life_event_content_copied !== false
+      || next.character_brain_direct_write !== false
+    ) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} creation payload is invalid.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    if (phase67cDerivationEventHash(next) !== next.derivation_event_hash) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:personal_semantic_memory`) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const descriptor = phase67cSemanticDescriptor(next.semantic_descriptor);
+    if (hashAgentRunValue(descriptor) !== next.semantic_descriptor_hash) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} descriptor hash mismatch.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_DESCRIPTOR_HASH_MISMATCH";
+      throw error;
+    }
+    const refs = phase67cValidateSourceRefs(worldState, next.source_life_event_refs, next.character);
+    const currentTurnTriggerPresent = refs.some((item) => {
+      const sourceEvent = object(
+        object(worldState?.autobiographical_life_event_organization_events)[
+          item.organization_event_id
+        ],
+      );
+      return sourceEvent.source_turn_id === next.source_turn_id;
+    });
+    if (!currentTurnTriggerPresent) {
+      const error = new Error(
+        `PersonalSemanticDerivationEvent ${eventId} is not anchored in a current-turn Phase67B LifeEvent update.`,
+      );
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_CURRENT_TURN_TRIGGER_REQUIRED";
+      throw error;
+    }
+    if (
+      next.operation === "form"
+      && next.semantic_category === "recurring_event_pattern"
+      && new Set(refs.map((item) => item.life_event_id)).size < 2
+    ) {
+      const error = new Error("Recurring personal semantic pattern requires at least two distinct LifeEvents and is never auto-promoted by count alone.");
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_RECURRING_PATTERN_DISTINCT_EVENTS_REQUIRED";
+      throw error;
+    }
+    const expectedSemanticId = `personal_semantic_memory_${hashAgentRunValue({
+      version: phase67cPersonalSemanticMemoryVersion,
+      character: phase67aCharacterKey(next.character),
+      semantic_category: next.semantic_category,
+      semantic_key: next.semantic_key,
+      semantic_descriptor_hash: next.semantic_descriptor_hash,
+    }).slice(0, 24)}`;
+    if (expectedSemanticId !== next.semantic_memory_id) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} failed semantic identity verification.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_IDENTITY_MISMATCH";
+      throw error;
+    }
+    let latestCharacterEvent = null;
+    let latestSemanticEvent = null;
+    for (const reference of array(worldState?.personal_semantic_derivation_history)) {
+      const prior = object(
+        object(worldState?.personal_semantic_derivation_events)[reference?.derivation_event_id],
+      );
+      if (!Object.keys(prior).length) continue;
+      if (phase67aCharacterKey(prior.character) === phase67aCharacterKey(next.character)) {
+        latestCharacterEvent = prior;
+      }
+      if (prior.semantic_memory_id === next.semantic_memory_id) latestSemanticEvent = prior;
+    }
+    if (
+      next.previous_derivation_event_id !== (latestCharacterEvent?.derivation_event_id ?? null)
+      || next.previous_derivation_event_hash !== (latestCharacterEvent?.derivation_event_hash ?? null)
+      || next.previous_semantic_event_id !== (latestSemanticEvent?.derivation_event_id ?? null)
+      || next.previous_semantic_event_hash !== (latestSemanticEvent?.derivation_event_hash ?? null)
+      || (next.operation === "form" && latestSemanticEvent !== null)
+      || (next.operation !== "form" && latestSemanticEvent === null)
+    ) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} breaks its append-only event chain.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_PREVIOUS_EVENT_MISMATCH";
+      throw error;
+    }
+    if (
+      latestSemanticEvent
+      && (
+        latestSemanticEvent.semantic_category !== next.semantic_category
+        || latestSemanticEvent.semantic_key !== next.semantic_key
+        || latestSemanticEvent.semantic_descriptor_hash !== next.semantic_descriptor_hash
+        || !sameValue(latestSemanticEvent.semantic_descriptor, next.semantic_descriptor)
+      )
+    ) {
+      const error = new Error(`Personal semantic memory ${next.semantic_memory_id} identity cannot be rewritten.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_IDENTITY_REWRITE_FORBIDDEN";
+      throw error;
+    }
+    const evidence = object(next.derivation_evidence);
+    const semantics = object(next.source_semantics);
+    if (
+      evidence.decision_source !== "programmatic_personal_semantic_memory_resolver"
+      || evidence.resolver_view_ref !== `phase67c_resolver_view:${next.resolver_view_hash}`
+      || evidence.eager_semanticization_used !== false
+      || evidence.recurrence_count_auto_promoted !== false
+      || evidence.numeric_confidence_threshold_used !== false
+      || evidence.freeform_llm_reflection_authority_used !== false
+      || evidence.same_character_life_event_evidence_only !== true
+      || evidence.current_turn_life_event_trigger_required !== true
+      || semantics.phase67b_life_event_evidence_is_authoritative_source !== true
+      || semantics.experience_near_personal_semantics_only !== true
+      || semantics.traits_modeled !== false
+      || semantics.role_identity_modeled !== false
+      || semantics.values_modeled !== false
+      || semantics.preferences_modeled !== false
+      || semantics.self_model_modeled !== false
+      || semantics.belief_revision_modeled !== false
+      || semantics.memory_content_copied !== false
+      || semantics.episode_content_copied !== false
+      || semantics.life_event_content_copied !== false
+    ) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} violates the Phase67C cognition boundary.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+    const expectedEventId = `personal_semantic_derivation_event_${hashAgentRunValue({
+      version: phase67cPersonalSemanticMemoryVersion,
+      character: phase67aCharacterKey(next.character),
+      source_turn_id: next.source_turn_id,
+      operation: next.operation,
+      semantic_memory_id: next.semantic_memory_id,
+      semantic_descriptor_hash: next.semantic_descriptor_hash,
+      source_life_event_refs: next.source_life_event_refs,
+      previous_derivation_event_hash: next.previous_derivation_event_hash,
+      previous_semantic_event_hash: next.previous_semantic_event_hash,
+    }).slice(0, 24)}`;
+    if (expectedEventId !== eventId) {
+      const error = new Error(`PersonalSemanticDerivationEvent ${eventId} failed deterministic event identity verification.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+    return;
+  }
+
+  if (worldPath[0] !== "personal_semantic_derivation_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Personal semantic derivation history may not be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase67cHistoryPrefix(oldHistory, newHistory);
+  const seenEventIds = new Set();
+  const latestByCharacter = new Map();
+  const latestBySemantic = new Map();
+  for (const reference of oldHistory) {
+    const eventId = String(reference?.derivation_event_id ?? "").trim();
+    const event = object(object(worldState?.personal_semantic_derivation_events)[eventId]);
+    if (!eventId || !Object.keys(event).length) continue;
+    seenEventIds.add(eventId);
+    latestByCharacter.set(phase67aCharacterKey(event.character), event);
+    latestBySemantic.set(event.semantic_memory_id, event);
+  }
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.derivation_event_id ?? "").trim();
+    if (
+      !isObject(reference)
+      || reference.schema_version !== phase67cPersonalSemanticDerivationHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.derivation_event_hash ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || !["form", "support", "counterevidence"].includes(reference.operation)
+      || !String(reference.semantic_memory_id ?? "").trim()
+      || reference.status !== "personal_semantic_derivation_recorded"
+      || seenEventIds.has(eventId)
+    ) {
+      const error = new Error(`Personal semantic derivation history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    const event = object(object(worldState?.personal_semantic_derivation_events)[eventId]);
+    if (!Object.keys(event).length || phase67cDerivationEventHash(event) !== event.derivation_event_hash) {
+      const error = new Error(`Personal semantic history cannot resolve canonical event ${eventId}.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+    const character = phase67aCharacterKey(event.character);
+    const previousCharacter = latestByCharacter.get(character) ?? null;
+    const previousSemantic = latestBySemantic.get(event.semantic_memory_id) ?? null;
+    if (
+      reference.derivation_event_hash !== event.derivation_event_hash
+      || reference.character !== event.character
+      || reference.source_turn_id !== event.source_turn_id
+      || reference.operation !== event.operation
+      || reference.semantic_memory_id !== event.semantic_memory_id
+      || reference.previous_derivation_event_id !== event.previous_derivation_event_id
+      || reference.previous_derivation_event_hash !== event.previous_derivation_event_hash
+      || reference.previous_semantic_event_id !== event.previous_semantic_event_id
+      || reference.previous_semantic_event_hash !== event.previous_semantic_event_hash
+      || event.previous_derivation_event_id !== (previousCharacter?.derivation_event_id ?? null)
+      || event.previous_derivation_event_hash !== (previousCharacter?.derivation_event_hash ?? null)
+      || event.previous_semantic_event_id !== (previousSemantic?.derivation_event_id ?? null)
+      || event.previous_semantic_event_hash !== (previousSemantic?.derivation_event_hash ?? null)
+      || (event.operation === "form" && previousSemantic !== null)
+      || (event.operation !== "form" && previousSemantic === null)
+    ) {
+      const error = new Error(`Personal semantic history reference ${eventId} breaks its canonical chain.`);
+      error.code = "WORLD_SIMULATION_PERSONAL_SEMANTIC_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+    seenEventIds.add(eventId);
+    latestByCharacter.set(character, event);
+    latestBySemantic.set(event.semantic_memory_id, event);
+  }
+}
+
 function assertPhase66ASubjectiveBeliefRevisionMutation(
   worldState,
   worldPath,
@@ -3503,6 +3880,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase67CPersonalSemanticMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -3587,6 +3970,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase67BAutobiographicalLifeEventMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase67CPersonalSemanticMutation(
         executed,
         worldPath,
         mutation,
@@ -3712,6 +4101,20 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase67b_per_character_life_event_hash_chain_enforced: true,
       direct_nested_autobiographical_life_event_history_mutation_rejected: true,
       phase67b_historical_life_event_organization_rewrite_rejected: true,
+      phase67c_personal_semantic_derivation_event_write_once_enforced: true,
+      phase67c_personal_semantic_derivation_event_content_address_verified: true,
+      phase67c_source_life_event_hash_pinning_enforced: true,
+      phase67c_current_turn_life_event_trigger_enforced: true,
+      phase67c_same_character_life_event_evidence_enforced: true,
+      phase67c_recurring_pattern_distinct_life_events_required: true,
+      phase67c_recurring_pattern_count_auto_promotion_rejected: true,
+      phase67c_personal_semantic_history_append_only_enforced: true,
+      phase67c_per_character_derivation_hash_chain_enforced: true,
+      phase67c_per_semantic_memory_hash_chain_enforced: true,
+      phase67c_semantic_identity_rewrite_rejected: true,
+      phase67c_counterevidence_preserved_without_belief_resolution: true,
+      direct_nested_personal_semantic_history_mutation_rejected: true,
+      phase67c_historical_personal_semantic_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
