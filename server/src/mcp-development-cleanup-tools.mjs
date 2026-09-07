@@ -6,12 +6,36 @@ import {
   listCleanupProposals,
   scanCleanupCandidates,
 } from "./cleanup-proposal-service.mjs";
+import {
+  confirmApprovalItem,
+  getApprovalItem,
+  listApprovalItems,
+  scanExternalBrainRetirementApprovals,
+} from "./approval-queue-service.mjs";
 import { assertDevJournalMutationAllowed } from "./mcp-development-journal-tools.mjs";
 
 export const DEV_CLEANUP_PROPOSAL_ID_PATTERN_SOURCE =
   "^cleanup_proposal_\\d{8}-\\d{6}-[a-f0-9]{8}$";
 export const DEV_CLEANUP_MAX_LIST_RESULTS = 50;
 export const DEV_CLEANUP_MAX_ITEM_PREVIEW = 100;
+export const DEV_RETIREMENT_APPROVAL_ID_PATTERN_SOURCE =
+  "^approval_item_\\d{8}-\\d{6}-[a-f0-9]{8}$";
+export const DEV_RETIREMENT_MAX_LIST_RESULTS = 100;
+export const DEV_RETIREMENT_MAX_CONFIRM_BATCH = 100;
+export const DEV_RETIREMENT_APPROVAL_STATUSES = Object.freeze([
+  "pending",
+  "deferred",
+  "resolved",
+  "rejected",
+  "blocked",
+  "confirmed",
+  "approved",
+  "completed",
+  "expired",
+  "invalidated",
+  "orphaned",
+  "archived",
+]);
 export const DEV_CLEANUP_STORAGE_ITEM_TYPES = Object.freeze([
   "archive",
   "external_brain_session",
@@ -257,5 +281,161 @@ export async function dev_cleanup_execute_proposal(input = {}) {
       deleted_file_count: item.deleted_file_count ?? null,
       deleted_logical_bytes: item.deleted_logical_bytes ?? null,
     })),
+  };
+}
+
+function isRetirementApproval(item = {}) {
+  return item.action_type === "retire_external_brain_session"
+    && item.target_type === "external_brain_session";
+}
+
+function compactRetirementApproval(item = {}) {
+  return {
+    approval_item_id: item.approval_item_id ?? null,
+    action_type: item.action_type ?? null,
+    target_type: item.target_type ?? null,
+    session_id: item.target_id ?? null,
+    status: item.status?.status ?? null,
+    risk_level: item.risk_level ?? null,
+    requires_user_confirmation: item.requires_user_confirmation === true,
+    requires_second_confirmation: item.requires_second_confirmation === true,
+    current_classification: item.current_classification ?? null,
+    last_activity_at: item.last_activity_at ?? null,
+    activity_age_days: Number.isFinite(item.activity_age_days) ? item.activity_age_days : null,
+    retirement_recommendation: item.retirement_recommendation ?? null,
+    retention_after_retirement_days: Number.isFinite(item.retention_after_retirement_days)
+      ? item.retention_after_retirement_days
+      : null,
+    suppressed: item.suppressed === true,
+  };
+}
+
+async function retirementApprovalItems() {
+  return (await listApprovalItems()).filter(isRetirementApproval);
+}
+
+export async function dev_external_brain_scan_retirement_approvals(input = {}) {
+  assertObjectKeys(
+    input,
+    "dev_external_brain_scan_retirement_approvals input",
+    new Set(["max_items"]),
+  );
+  await assertDevJournalMutationAllowed();
+  const maxItems = boundedInteger(input.max_items, "max_items", {
+    maximum: DEV_RETIREMENT_MAX_LIST_RESULTS,
+    fallback: 50,
+  });
+  const scan = await scanExternalBrainRetirementApprovals();
+  const approvals = await retirementApprovalItems();
+  const actionable = approvals.filter((item) => ["pending", "deferred"].includes(item.status?.status));
+  return {
+    live_retire_recommended_count: scan.live_retire_recommended_count,
+    suppressed_count: scan.suppressed_count,
+    diagnostic_count: scan.diagnostics?.length ?? 0,
+    retirement_approval_count: approvals.length,
+    actionable_count: actionable.length,
+    returned: Math.min(actionable.length, maxItems),
+    truncated: actionable.length > maxItems,
+    items: actionable.slice(0, maxItems).map(compactRetirementApproval),
+  };
+}
+
+export async function dev_external_brain_list_retirement_approvals(input = {}) {
+  assertObjectKeys(
+    input,
+    "dev_external_brain_list_retirement_approvals input",
+    new Set(["status", "offset", "limit"]),
+  );
+  if (input.status !== undefined && !DEV_RETIREMENT_APPROVAL_STATUSES.includes(input.status)) {
+    throw new Error(`status must be one of: ${DEV_RETIREMENT_APPROVAL_STATUSES.join(", ")}.`);
+  }
+  const offset = input.offset ?? 0;
+  if (!Number.isInteger(offset) || offset < 0 || offset > 100_000) {
+    throw new Error("offset must be an integer from 0 to 100000.");
+  }
+  const limit = boundedInteger(input.limit, "limit", {
+    maximum: DEV_RETIREMENT_MAX_LIST_RESULTS,
+    fallback: 50,
+  });
+  let approvals = await retirementApprovalItems();
+  if (input.status !== undefined) {
+    approvals = approvals.filter((item) => item.status?.status === input.status);
+  }
+  const page = approvals.slice(offset, offset + limit);
+  return {
+    total: approvals.length,
+    offset,
+    returned: page.length,
+    truncated: offset + page.length < approvals.length,
+    items: page.map(compactRetirementApproval),
+  };
+}
+
+export async function dev_external_brain_confirm_retirement_approvals(input = {}) {
+  assertObjectKeys(
+    input,
+    "dev_external_brain_confirm_retirement_approvals input",
+    new Set(["approval_item_ids", "confirm"]),
+  );
+  await assertDevJournalMutationAllowed();
+  if (input.confirm !== true) {
+    throw new Error("External-brain retirement confirmation requires confirm=true.");
+  }
+  if (!Array.isArray(input.approval_item_ids)
+    || input.approval_item_ids.length < 1
+    || input.approval_item_ids.length > DEV_RETIREMENT_MAX_CONFIRM_BATCH) {
+    throw new Error(`approval_item_ids must contain 1 to ${DEV_RETIREMENT_MAX_CONFIRM_BATCH} IDs.`);
+  }
+  if (new Set(input.approval_item_ids).size !== input.approval_item_ids.length) {
+    throw new Error("approval_item_ids must not contain duplicates.");
+  }
+
+  const preflight = [];
+  for (const approvalItemId of input.approval_item_ids) {
+    if (typeof approvalItemId !== "string") throw new Error("approval_item_ids must contain strings.");
+    const item = await getApprovalItem(approvalItemId);
+    if (!isRetirementApproval(item)) {
+      throw new Error(`Approval item is not an external-brain retirement request: ${approvalItemId}`);
+    }
+    if (!["pending", "deferred"].includes(item.status?.status)) {
+      throw new Error(`Retirement approval is not actionable (${item.status?.status ?? "unknown"}): ${approvalItemId}`);
+    }
+    preflight.push(item);
+  }
+
+  const results = [];
+  for (const item of preflight) {
+    try {
+      const confirmed = await confirmApprovalItem(item.approval_item_id, {
+        confirm: true,
+        approvedBy: "chatgpt_developer",
+      });
+      results.push({
+        approval_item_id: item.approval_item_id,
+        session_id: item.target_id,
+        success: true,
+        approval_status: confirmed.approval_item?.status?.status ?? null,
+        session_lifecycle_status: confirmed.result?.run?.session_lifecycle_status ?? null,
+        retired_at: confirmed.result?.run?.retired_at ?? null,
+        error: null,
+      });
+    } catch (error) {
+      results.push({
+        approval_item_id: item.approval_item_id,
+        session_id: item.target_id,
+        success: false,
+        approval_status: null,
+        session_lifecycle_status: null,
+        retired_at: null,
+        error: error.message,
+      });
+    }
+  }
+  return {
+    requested_count: input.approval_item_ids.length,
+    retired_count: results.filter((item) => item.success).length,
+    failed_count: results.filter((item) => !item.success).length,
+    production_cleanup_executed: false,
+    results,
   };
 }

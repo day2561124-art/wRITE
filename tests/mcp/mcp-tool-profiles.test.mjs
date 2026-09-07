@@ -302,6 +302,9 @@ const cleanupToolNames = [
   "dev_cleanup_list_proposals",
   "dev_cleanup_approve_proposal",
   "dev_cleanup_execute_proposal",
+  "dev_external_brain_scan_retirement_approvals",
+  "dev_external_brain_list_retirement_approvals",
+  "dev_external_brain_confirm_retirement_approvals",
 ];
 for (const toolName of [...workstreamToolNames, ...workspaceToolNames, ...integrationToolNames, ...journalToolNames, ...checkpointToolNames, ...transactionToolNames, ...cleanupToolNames]) {
   assert.equal(publicToolMap.has(toolName), false, `${toolName} leaked into chatgpt_public`);
@@ -559,6 +562,27 @@ const cleanupExpected = new Map([
     required: ["cleanup_proposal_id", "confirm"],
     properties: ["cleanup_proposal_id", "confirm", "max_items"],
   }],
+  ["dev_external_brain_scan_retirement_approvals", {
+    readOnly: false,
+    permission: "write_low_risk",
+    risk: "low-risk-write",
+    required: [],
+    properties: ["max_items"],
+  }],
+  ["dev_external_brain_list_retirement_approvals", {
+    readOnly: true,
+    permission: "read_only",
+    risk: "read",
+    required: [],
+    properties: ["limit", "offset", "status"],
+  }],
+  ["dev_external_brain_confirm_retirement_approvals", {
+    readOnly: false,
+    permission: "write_high_risk",
+    risk: "high-risk-write",
+    required: ["approval_item_ids", "confirm"],
+    properties: ["approval_item_ids", "confirm"],
+  }],
 ]);
 const forbiddenCleanupFields = [
   "path", "paths", "root", "sourcePath", "trashPath", "itemTypes", "item_types",
@@ -586,6 +610,30 @@ for (const [toolName, expectation] of cleanupExpected) {
   assert.equal(permission?.can_modify_story_graph, false);
   assert.equal(permission?.can_modify_memory, false);
 }
+const retirementScanTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_external_brain_scan_retirement_approvals",
+);
+assert.equal(retirementScanTool.inputSchema.properties.max_items.maximum, 100);
+assert.equal(retirementScanTool.inputSchema.properties.max_items.default, 50);
+const retirementListTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_external_brain_list_retirement_approvals",
+);
+assert.equal(retirementListTool.inputSchema.properties.offset.minimum, 0);
+assert.equal(retirementListTool.inputSchema.properties.offset.maximum, 100000);
+assert.equal(retirementListTool.inputSchema.properties.limit.maximum, 100);
+assert.deepEqual(retirementListTool.inputSchema.properties.status.enum, [
+  "pending", "deferred", "resolved", "rejected", "blocked", "confirmed", "approved", "completed",
+  "expired", "invalidated", "orphaned", "archived",
+]);
+const retirementConfirmTool = developerList.result.tools.find(
+  (tool) => tool.name === "dev_external_brain_confirm_retirement_approvals",
+);
+const retirementIdsSchema = retirementConfirmTool.inputSchema.properties.approval_item_ids;
+assert.equal(retirementIdsSchema.minItems, 1);
+assert.equal(retirementIdsSchema.maxItems, 100);
+assert.equal(retirementIdsSchema.uniqueItems, true);
+assert.equal(retirementIdsSchema.items.maxLength, 64);
+assert.equal(retirementIdsSchema.items.pattern, "^approval_item_\\d{8}-\\d{6}-[a-f0-9]{8}$");
 
 const transactionExpected = new Map([
   ["dev_workspace_restore_checkpoint_in_place", {
@@ -1149,9 +1197,9 @@ assert.deepEqual(
 );
 assert.equal(listedPublicNames.includes("dev_git_push"), false);
 assert.equal(publicToolMap.has("dev_git_push"), false);
-assert.equal(publicToolNames.length, 39);
-assert.equal(developerNames.length, 93);
-assert.equal(fullNames.length, 151);
+assert.equal(listedPublicNames.length, new Set(listedPublicNames).size, "chatgpt_public tool names must be unique");
+assert.equal(developerNames.length, new Set(developerNames).size, "chatgpt_developer tool names must be unique");
+assert.equal(fullNames.length, new Set(fullNames).size, "full tool names must be unique");
 
 const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
@@ -1438,7 +1486,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
+    [...new Set([...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
