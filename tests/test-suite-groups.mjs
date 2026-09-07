@@ -75,6 +75,10 @@ export const phase66BeliefRevisionSteps = Object.freeze([
   Object.freeze(["Phase 66D native belief chronology closure", Object.freeze(["tests/phase66/phase66d-native-belief-chronology-closure.test.mjs"])]),
 ]);
 
+export const phase67AutobiographicalMemorySteps = Object.freeze([
+  Object.freeze(["Phase 67A automatic subjective episode segmentation", Object.freeze(["tests/phase67/phase67a-subjective-episode-segmentation.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -85,6 +89,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase64RetrievalCognitionSteps,
   ...phase65BeliefCognitionSteps,
   ...phase66BeliefRevisionSteps,
+  ...phase67AutobiographicalMemorySteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -93,9 +98,11 @@ export const cognitionSteps = Object.freeze([
   ...phase64RetrievalCognitionSteps,
   ...phase65BeliefCognitionSteps,
   ...phase66BeliefRevisionSteps,
+  ...phase67AutobiographicalMemorySteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
+  ...phase67AutobiographicalMemorySteps,
 ]);

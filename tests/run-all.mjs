@@ -786,6 +786,7 @@ const steps = [
   ["Phase 66B effective subjective belief state projection", ["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"]],
   ["Phase 66C bounded subjective belief character exposure", ["tests/phase66/phase66c-subjective-belief-character-exposure.test.mjs"]],
   ["Phase 66D native belief chronology closure", ["tests/phase66/phase66d-native-belief-chronology-closure.test.mjs"]],
+  ["Phase 67A automatic subjective episode segmentation", ["tests/phase67/phase67a-subjective-episode-segmentation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

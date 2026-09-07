@@ -294,6 +294,12 @@ export async function commitWorldSimulationTurn(
             subjective_memory_formation: input.subjective_memory_formation ?? null,
             subjective_memory_mutation_queue: input.subjective_memory_mutation_queue ?? null,
             subjective_memory_mutation_execution: input.subjective_memory_mutation_execution ?? null,
+            subjective_episode_segmentation:
+              input.subjective_episode_segmentation ?? null,
+            subjective_episode_segmentation_mutation_queue:
+              input.subjective_episode_segmentation_mutation_queue ?? null,
+            subjective_episode_segmentation_mutation_execution:
+              input.subjective_episode_segmentation_mutation_execution ?? null,
             subjective_claim_proposal_resolution:
               input.subjective_claim_proposal_resolution ?? null,
             subjective_claim_projection:

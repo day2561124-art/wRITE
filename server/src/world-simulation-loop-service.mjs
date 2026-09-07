@@ -41,6 +41,11 @@ import {
   worldSimulationSubjectiveMemoryFormationVersion,
 } from "./world-simulation-subjective-memory-formation-service.mjs";
 import {
+  buildWorldSimulationSubjectiveEpisodeSegmentationContract,
+  buildWorldSimulationSubjectiveEpisodeSegmentations,
+  worldSimulationSubjectiveEpisodeSegmentationVersion,
+} from "./world-simulation-subjective-episode-segmentation-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3072,6 +3077,8 @@ export function buildWorldSimulationLoopContract() {
     illumination_visibility: buildWorldSimulationIlluminationVisibilityContract(),
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
+    subjective_episode_segmentation:
+      buildWorldSimulationSubjectiveEpisodeSegmentationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -5260,9 +5267,50 @@ export async function resolveWorldSimulationTurn(
       subjectiveMemoryFormation,
     );
 
+  const subjectiveEpisodeSegmentation =
+    buildWorldSimulationSubjectiveEpisodeSegmentations({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_memory_records:
+        subjectiveClaimSourceMemories,
+    });
+
+  const subjectiveEpisodeSegmentationMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:subjective_episode_segmentation`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveMemoryMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        subjectiveEpisodeSegmentation
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const subjectiveEpisodeSegmentationMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        subjectiveEpisodeSegmentation
+          .result
+          .preview_world_state,
+      queue:
+        subjectiveEpisodeSegmentationMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
-      subjectiveMemoryMutationExecution.next_world_state,
+      subjectiveEpisodeSegmentationMutationExecution.next_world_state,
       preparedTurn,
       subjectiveClaimSourceMemories,
       options,
@@ -5271,7 +5319,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
       world_state:
-        subjectiveMemoryMutationExecution.next_world_state,
+        subjectiveEpisodeSegmentationMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -5286,7 +5334,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_claim`,
       world_state_hash:
         hashAgentRunValue(
-          subjectiveMemoryMutationExecution.next_world_state,
+          subjectiveEpisodeSegmentationMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveClaimProjection
@@ -5298,7 +5346,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        subjectiveMemoryMutationExecution.next_world_state,
+        subjectiveEpisodeSegmentationMutationExecution.next_world_state,
       preview_world_state:
         subjectiveClaimProjection
           .result
@@ -5539,6 +5587,13 @@ export async function resolveWorldSimulationTurn(
         ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
+
+      subjective_episode_segmentation:
+        cloneJson(subjectiveEpisodeSegmentation),
+      subjective_episode_segmentation_mutation_queue:
+        cloneJson(subjectiveEpisodeSegmentationMutationQueue),
+      subjective_episode_segmentation_mutation_execution:
+        cloneJson(subjectiveEpisodeSegmentationMutationExecution.execution),
 
       subjective_claim_proposal_resolution: {
         version:
@@ -5904,6 +5959,26 @@ export async function resolveWorldSimulationTurn(
       created_memory_count: subjectiveMemoryFormation.result.created_memory_count,
       mutation_count: subjectiveMemoryMutationQueue.mutation_count,
       authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
+    },
+    subjective_episode_segmentation: {
+      version: worldSimulationSubjectiveEpisodeSegmentationVersion,
+      processed_source_memory_count:
+        subjectiveEpisodeSegmentation.result.processed_source_memory_count,
+      new_source_memory_count:
+        subjectiveEpisodeSegmentation.result.new_source_memory_count,
+      created_segmentation_event_count:
+        subjectiveEpisodeSegmentation.result.segmentation_events_created.length,
+      appended_history_reference_count:
+        subjectiveEpisodeSegmentation.result.history_references_appended.length,
+      effective_episode_projection_hash:
+        subjectiveEpisodeSegmentation.result.effective_episode_projection.projection_hash,
+      mutation_count:
+        subjectiveEpisodeSegmentationMutationQueue.mutation_count,
+      authoritative_executor:
+        subjectiveEpisodeSegmentationMutationExecution.execution.version,
+      phase63_memory_rewritten: false,
+      world_truth_authority_claimed: false,
+      same_turn_character_brain_feedback_allowed: false,
     },
     subjective_claim_projection: {
       version:

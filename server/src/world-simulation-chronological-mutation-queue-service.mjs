@@ -844,6 +844,15 @@ const phase66aSubjectiveBeliefRevisionEventSchema =
 const phase66aSubjectiveBeliefRevisionHistoryReferenceSchema =
   "phase66a-subjective-belief-revision-history-ref-v1";
 
+const phase67aSubjectiveEpisodeSegmentationVersion =
+  "phase67a-subjective-episode-segmentation-v1";
+
+const phase67aSubjectiveEpisodeSegmentationEventSchema =
+  "phase67a-subjective-episode-segmentation-event-v1";
+
+const phase67aSubjectiveEpisodeSegmentationHistoryReferenceSchema =
+  "phase67a-subjective-episode-segmentation-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -2119,6 +2128,391 @@ function assertPhase66ASourceResolutionDecision(decision, worldState) {
   return { claims, relations };
 }
 
+function assertPhase67ASegmentationHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+
+  if (newValues.length < oldValues.length) {
+    const error = new Error(
+      "Subjective episode segmentation history is append-only.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        "Subjective episode segmentation history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function phase67aCharacterKey(value) {
+  return String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("zh-Hant-TW");
+}
+
+function phase67aEventHash(event) {
+  const body = cloneJson(event);
+  delete body.segmentation_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function assertPhase67ASubjectiveEpisodeSegmentationMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "subjective_episode_segmentation_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "SubjectiveEpisodeSegmentationEvent fields are immutable after creation; only direct write-once event creation is allowed.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId = String(worldPath[1] ?? "");
+    const existing = getAtPath(worldState, worldPath);
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next = mutation?.to;
+    if (
+      !isObject(next)
+      || next.schema_version !== phase67aSubjectiveEpisodeSegmentationEventSchema
+      || next.version !== phase67aSubjectiveEpisodeSegmentationVersion
+      || next.immutable !== true
+      || String(next.segmentation_event_id ?? "") !== eventId
+      || !String(next.segmentation_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !String(next.subjective_episode_id ?? "").trim()
+      || !Array.isArray(next.source_memory_refs)
+      || next.source_memory_refs.length < 1
+      || ![
+        "start_new_episode",
+        "continue_episode",
+        "preserve_explicit_binding",
+      ].includes(next.resolution)
+      || next.status !== "subjective_episode_segmentation_recorded"
+      || next.subjective_not_world_truth !== true
+      || next.world_truth_verified !== false
+      || next.confidence !== null
+      || next.probability !== null
+      || next.memory_content_copied !== false
+      || next.world_event_identity_promoted !== false
+      || next.world_turn_identity_promoted !== false
+      || next.scene_identity_promoted !== false
+      || next.character_brain_direct_write !== false
+    ) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} creation payload is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    if (phase67aEventHash(next) !== next.segmentation_event_hash) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const expectedQueueTurnId =
+      `${next.source_turn_id}:subjective_episode_segmentation`;
+    if (String(queueTurnId ?? "") !== expectedQueueTurnId) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} must be executed by its exact source-turn segmentation queue.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+
+    const memoryIds = [];
+    let explicitEpisodeId = null;
+    for (const reference of next.source_memory_refs) {
+      const memoryId = String(reference?.memory_id ?? "").trim();
+      const memoryHash = String(reference?.memory_hash ?? "").trim();
+      if (!memoryId || !memoryHash || memoryIds.includes(memoryId)) {
+        const error = new Error(
+          `SubjectiveEpisodeSegmentationEvent ${eventId} has invalid or duplicate source memory references.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_SOURCE_INVALID";
+        throw error;
+      }
+
+      const memory = phase65aCharacterMemories(worldState, next.character)
+        .find((record) => phase65aMemoryId(record) === memoryId);
+      if (
+        !isObject(memory)
+        || hashAgentRunValue(memory) !== memoryHash
+        || memory.subjective_memory_not_world_truth !== true
+        || String(memory?.internal_provenance?.turn_id ?? "")
+          !== String(next.source_turn_id)
+      ) {
+        const error = new Error(
+          `SubjectiveEpisodeSegmentationEvent ${eventId} does not pin canonical current-turn subjective memory ${memoryId}.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_SOURCE_MEMORY_MISMATCH";
+        throw error;
+      }
+
+      const boundEpisode = String(
+        memory?.episodic_binding?.subjective_episode_id
+        ?? memory?.retrieval_cues?.subjective_episode_id
+        ?? "",
+      ).trim();
+      if (boundEpisode) {
+        if (explicitEpisodeId && explicitEpisodeId !== boundEpisode) {
+          const error = new Error(
+            `SubjectiveEpisodeSegmentationEvent ${eventId} mixes distinct explicit Phase63 episode bindings.`,
+          );
+          error.code =
+            "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EXPLICIT_BINDING_MISMATCH";
+          throw error;
+        }
+        explicitEpisodeId = boundEpisode;
+      }
+      memoryIds.push(memoryId);
+    }
+
+    const sortedMemoryIds = [...memoryIds].sort((a, b) => a.localeCompare(b, "en"));
+    if (!sameValue(sortedMemoryIds, memoryIds)) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} source memory references must use deterministic ordering.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_SOURCE_INVALID";
+      throw error;
+    }
+
+    if (
+      explicitEpisodeId
+      && (
+        next.resolution !== "preserve_explicit_binding"
+        || next.subjective_episode_id !== explicitEpisodeId
+      )
+    ) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} failed to preserve a canonical Phase63 explicit episode binding.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EXPLICIT_BINDING_REWRITE_FORBIDDEN";
+      throw error;
+    }
+
+    const sourceSemantics = object(next.source_semantics);
+    const evidence = object(next.segmentation_evidence);
+    if (
+      sourceSemantics.phase63_memory_records_are_authoritative_episode_evidence !== true
+      || sourceSemantics.memory_content_copied !== false
+      || sourceSemantics.world_event_identity_promoted !== false
+      || sourceSemantics.world_turn_identity_promoted !== false
+      || sourceSemantics.scene_identity_promoted !== false
+      || evidence.scene_change_is_universal_psychological_boundary !== false
+      || evidence.numeric_prediction_error_threshold_used !== false
+      || evidence.hidden_world_state_used !== false
+    ) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} violates the Phase67A cognition boundary.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+
+    const expectedEventId =
+      `subjective_episode_segmentation_event_${hashAgentRunValue({
+        version: phase67aSubjectiveEpisodeSegmentationVersion,
+        character: phase67aCharacterKey(next.character),
+        source_turn_id: next.source_turn_id,
+        source_memory_refs: next.source_memory_refs,
+        subjective_episode_id: next.subjective_episode_id,
+        resolution: next.resolution,
+        previous_segmentation_event_hash:
+          next.previous_segmentation_event_hash ?? null,
+      }).slice(0, 24)}`;
+    if (eventId !== expectedEventId) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} failed deterministic identity verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+    return;
+  }
+
+  if (worldPath[0] !== "subjective_episode_segmentation_history") return;
+
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Subjective episode segmentation history may not be mutated through direct nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  assertPhase67ASegmentationHistoryPrefix(oldHistory, newHistory);
+
+  const seenEventIds = new Set();
+  const seenMemoryKeys = new Set();
+  const latestByCharacter = new Map();
+
+  for (const reference of oldHistory) {
+    const eventId = String(reference?.segmentation_event_id ?? "").trim();
+    const character = String(reference?.character ?? "").trim();
+    if (eventId) seenEventIds.add(eventId);
+    for (const memoryId of array(reference?.source_memory_ids)) {
+      seenMemoryKeys.add(
+        `${phase67aCharacterKey(character)}:${String(memoryId ?? "").trim()}`,
+      );
+    }
+    if (eventId && character) {
+      const event = object(
+        object(worldState?.subjective_episode_segmentation_events)[eventId],
+      );
+      if (Object.keys(event).length) {
+        latestByCharacter.set(phase67aCharacterKey(character), event);
+      }
+    }
+  }
+
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.segmentation_event_id ?? "").trim();
+    const character = String(reference?.character ?? "").trim();
+    const sourceMemoryIds = array(reference?.source_memory_ids)
+      .map((value) => String(value ?? "").trim());
+
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase67aSubjectiveEpisodeSegmentationHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.segmentation_event_hash ?? "").trim()
+      || !character
+      || !String(reference.source_turn_id ?? "").trim()
+      || !String(reference.subjective_episode_id ?? "").trim()
+      || sourceMemoryIds.length < 1
+      || sourceMemoryIds.some((value) => !value)
+      || ![
+        "start_new_episode",
+        "continue_episode",
+        "preserve_explicit_binding",
+      ].includes(reference.resolution)
+      || reference.status !== "subjective_episode_segmentation_recorded"
+    ) {
+      const error = new Error(
+        `Subjective episode segmentation history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+
+    if (seenEventIds.has(eventId)) {
+      const error = new Error(
+        `Subjective episode segmentation history contains duplicate event ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_DUPLICATE_REFERENCE";
+      throw error;
+    }
+
+    for (const memoryId of sourceMemoryIds) {
+      const memoryKey = `${phase67aCharacterKey(character)}:${memoryId}`;
+      if (seenMemoryKeys.has(memoryKey)) {
+        const error = new Error(
+          `Subjective episode segmentation history duplicates source memory ${memoryId} for ${character}.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_MEMORY_DUPLICATE";
+        throw error;
+      }
+      seenMemoryKeys.add(memoryKey);
+    }
+
+    const event = object(
+      object(worldState?.subjective_episode_segmentation_events)[eventId],
+    );
+    if (!Object.keys(event).length) {
+      const error = new Error(
+        `Subjective episode segmentation history cannot resolve SubjectiveEpisodeSegmentationEvent ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+
+    if (phase67aEventHash(event) !== event.segmentation_event_hash) {
+      const error = new Error(
+        `SubjectiveEpisodeSegmentationEvent ${eventId} failed history-time hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const key = phase67aCharacterKey(character);
+    const previous = latestByCharacter.get(key) ?? null;
+    const eventMemoryIds = event.source_memory_refs.map((item) => item.memory_id);
+    if (
+      reference.segmentation_event_hash !== event.segmentation_event_hash
+      || reference.character !== event.character
+      || reference.source_turn_id !== event.source_turn_id
+      || reference.subjective_episode_id !== event.subjective_episode_id
+      || reference.resolution !== event.resolution
+      || !sameValue(sourceMemoryIds, eventMemoryIds)
+      || reference.previous_segmentation_event_id
+        !== event.previous_segmentation_event_id
+      || reference.previous_segmentation_event_hash
+        !== event.previous_segmentation_event_hash
+      || event.previous_segmentation_event_id
+        !== (previous?.segmentation_event_id ?? null)
+      || event.previous_segmentation_event_hash
+        !== (previous?.segmentation_event_hash ?? null)
+    ) {
+      const error = new Error(
+        `Subjective episode segmentation history reference ${eventId} does not match its canonical per-character chain.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_EPISODE_SEGMENTATION_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+
+    seenEventIds.add(eventId);
+    latestByCharacter.set(key, event);
+  }
+}
+
 function assertPhase66ASubjectiveBeliefRevisionMutation(
   worldState,
   worldPath,
@@ -2545,6 +2939,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase67ASubjectiveEpisodeSegmentationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -2617,6 +3017,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase66ASubjectiveBeliefRevisionMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase67ASubjectiveEpisodeSegmentationMutation(
         executed,
         worldPath,
         mutation,
@@ -2722,6 +3128,14 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase66a_per_character_revision_hash_chain_enforced: true,
       direct_nested_subjective_belief_revision_history_mutation_rejected: true,
       phase66a_historical_revision_rewrite_rejected: true,
+      phase67a_subjective_episode_segmentation_event_write_once_enforced: true,
+      phase67a_subjective_episode_segmentation_event_content_address_verified: true,
+      phase67a_source_subjective_memory_hash_pinning_enforced: true,
+      phase67a_explicit_phase63_episode_binding_preserved: true,
+      phase67a_subjective_episode_segmentation_history_append_only_enforced: true,
+      phase67a_per_character_segmentation_hash_chain_enforced: true,
+      direct_nested_subjective_episode_segmentation_history_mutation_rejected: true,
+      phase67a_historical_segmentation_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
