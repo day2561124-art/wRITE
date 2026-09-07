@@ -77,6 +77,14 @@ import {
   worldSimulationAutobiographicalSelfInterpretationVersion,
 } from "./world-simulation-autobiographical-self-interpretation-service.mjs";
 import {
+  buildWorldSimulationStructuredSelfModelAspects,
+  buildWorldSimulationStructuredSelfModelContract,
+  buildWorldSimulationStructuredSelfModelResolverView,
+  projectWorldSimulationStructuredSelfModelForCharacter,
+  structuredSelfModelCharacterProjectionVersion,
+  worldSimulationStructuredSelfModelVersion,
+} from "./world-simulation-structured-self-model-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3120,6 +3128,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationAutobiographicalSummaryProjectionContract(),
     autobiographical_self_interpretation:
       buildWorldSimulationAutobiographicalSelfInterpretationContract(),
+    structured_self_model:
+      buildWorldSimulationStructuredSelfModelContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -3389,6 +3399,40 @@ export function buildWorldSimulationLoopContract() {
         false,
       missing_hook_means_no_new_interpretation:
         true,
+    },
+
+    structured_self_model_resolver_hook: {
+      owner: "programmatic_structured_self_model_resolver",
+      optional: true,
+      option_name: "structuredSelfModelResolver",
+      source_scope: "current_turn_phase68a_interpretation_plus_same_character_interpretation_history",
+      current_turn_phase68a_trigger_required: true,
+      receives_world_state: false,
+      receives_raw_world_event: false,
+      receives_raw_memory_content: false,
+      receives_phase67_store: false,
+      receives_hidden_retrieval_graph: false,
+      may_request_operations: ["form"],
+      supported_aspect_types: [
+        "trait_tendency",
+        "value_orientation",
+        "preference",
+        "role_identity",
+        "capability_appraisal",
+      ],
+      formation_only: true,
+      revision_authority: false,
+      max_one_durable_event_per_character_per_turn: true,
+      last_write_wins_allowed: false,
+      forced_cross_domain_consistency_required: false,
+      may_assert_world_truth: false,
+      may_assert_self_model_accuracy: false,
+      may_assert_self_model_clarity: false,
+      may_assert_confidence_probability: false,
+      may_assert_numeric_personality_or_capability_score: false,
+      motivation_goal_selection_authority: false,
+      character_brain_direct_self_model_mutation_allowed: false,
+      missing_hook_means_no_new_aspect: true,
     },
 
     subjective_claim_resolver_hook: {
@@ -3819,6 +3863,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const subjectiveBeliefCharacterProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
+  const structuredSelfModelCharacterProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -4428,6 +4473,23 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(autobiographicalSelfInterpretationCharacterProjection.audit),
     });
 
+    // Phase68B exposes only committed prior-turn structured self-model aspects.
+    // New aspects are formed later during resolve, so the same Character Brain
+    // decision can never consume a self-model write that it indirectly caused.
+    const structuredSelfModelCharacterProjection =
+      projectWorldSimulationStructuredSelfModelForCharacter({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+      });
+
+    structuredSelfModelCharacterProjections.push({
+      character,
+      version: structuredSelfModelCharacterProjection.version,
+      character_view_hash: structuredSelfModelCharacterProjection.character_view_hash,
+      audit: cloneJson(structuredSelfModelCharacterProjection.audit),
+    });
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -4482,6 +4544,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       self_interpretation_context:
         cloneJson(
           autobiographicalSelfInterpretationCharacterProjection.character_view,
+        ),
+      self_model_context:
+        cloneJson(
+          structuredSelfModelCharacterProjection.character_view,
         ),
     };
     const actionCandidates = await capability(
@@ -4751,6 +4817,33 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         autobiographical_self_interpretation_freeform_life_story_generated:
           false,
 
+        structured_self_model_projection_installed:
+          true,
+
+        structured_self_model_projection_version:
+          structuredSelfModelCharacterProjectionVersion,
+
+        structured_self_model_source:
+          "same_character_committed_prior_turn_structured_self_model_history_only",
+
+        structured_self_model_same_turn_feedback_allowed:
+          false,
+
+        structured_self_model_source_ids_hashes_exposed:
+          false,
+
+        structured_self_model_world_truth_authority_exposed:
+          false,
+
+        structured_self_model_accuracy_clarity_authority_exposed:
+          false,
+
+        structured_self_model_numeric_scores_exposed:
+          false,
+
+        structured_self_model_motivation_goal_authority_exposed:
+          false,
+
         engine_visibility_target_ids_exposed: false,
         engine_sound_source_ids_exposed: false,
       },
@@ -4776,6 +4869,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(autobiographicalSummaryCharacterProjections),
     autobiographical_self_interpretation_character_projections:
       cloneJson(autobiographicalSelfInterpretationCharacterProjections),
+    structured_self_model_character_projections:
+      cloneJson(structuredSelfModelCharacterProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -4957,6 +5052,33 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         true,
 
       autobiographical_self_interpretation_self_model_not_forwarded_to_character_brain:
+        true,
+
+      structured_self_model_read_projection_installed:
+        true,
+
+      structured_self_model_character_projection_version:
+        structuredSelfModelCharacterProjectionVersion,
+
+      structured_self_model_committed_prior_turn_only:
+        true,
+
+      structured_self_model_same_turn_feedback_allowed:
+        false,
+
+      structured_self_model_source_ids_hashes_not_forwarded_to_character_brain:
+        true,
+
+      structured_self_model_world_truth_authority_not_forwarded_to_character_brain:
+        true,
+
+      structured_self_model_accuracy_clarity_authority_not_forwarded_to_character_brain:
+        true,
+
+      structured_self_model_numeric_scores_not_forwarded_to_character_brain:
+        true,
+
+      structured_self_model_motivation_goal_authority_not_forwarded_to_character_brain:
         true,
 
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
@@ -5592,6 +5714,84 @@ async function resolveAutobiographicalSelfInterpretationDecisions(
       belief_resolution_requested: false,
       confidence_probability_requested: false,
       world_truth_judgment_requested: false,
+    },
+  };
+}
+
+async function resolveStructuredSelfModelDecisions(
+  worldState,
+  preparedTurn,
+  options,
+) {
+  const resolver =
+    typeof options.structuredSelfModelResolver === "function"
+      ? options.structuredSelfModelResolver
+      : null;
+  const resolverView =
+    buildWorldSimulationStructuredSelfModelResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+    });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_new_aspect: true,
+        current_turn_phase68a_trigger_required: true,
+        same_character_phase68a_evidence_only: true,
+        formation_only: true,
+        revision_requested: false,
+        world_state_exposed_to_resolver: false,
+        raw_world_event_exposed_to_resolver: false,
+        raw_memory_content_exposed_to_resolver: false,
+        phase67_store_exposed_to_resolver: false,
+        hidden_retrieval_graph_exposed_to_resolver: false,
+        self_model_accuracy_requested: false,
+        self_model_clarity_requested: false,
+        confidence_probability_requested: false,
+        numeric_personality_capability_scores_requested: false,
+        motivation_goal_selection_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "structuredSelfModelResolver must return an array of source-backed aspect formation decisions.",
+    );
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    resolver_view_hash: resolverView.resolver_view_hash,
+    source: "programmatic_structured_self_model_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      current_turn_phase68a_trigger_required: true,
+      same_character_phase68a_evidence_only: true,
+      formation_only: true,
+      revision_requested: false,
+      world_state_exposed_to_resolver: false,
+      raw_world_event_exposed_to_resolver: false,
+      raw_memory_content_exposed_to_resolver: false,
+      phase67_store_exposed_to_resolver: false,
+      hidden_retrieval_graph_exposed_to_resolver: false,
+      self_model_accuracy_requested: false,
+      self_model_clarity_requested: false,
+      confidence_probability_requested: false,
+      numeric_personality_capability_scores_requested: false,
+      motivation_goal_selection_requested: false,
     },
   };
 }
@@ -6334,9 +6534,53 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  const structuredSelfModelDecisionResolution =
+    await resolveStructuredSelfModelDecisions(
+      autobiographicalSelfInterpretationMutationExecution.next_world_state,
+      preparedTurn,
+      options,
+    );
+
+  const structuredSelfModel =
+    buildWorldSimulationStructuredSelfModelAspects({
+      world_state:
+        autobiographicalSelfInterpretationMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      aspect_decisions:
+        structuredSelfModelDecisionResolution.decisions,
+    });
+
+  const structuredSelfModelMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:structured_self_model`,
+      world_state_hash:
+        hashAgentRunValue(
+          autobiographicalSelfInterpretationMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        structuredSelfModel.result.state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const structuredSelfModelMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        autobiographicalSelfInterpretationMutationExecution.next_world_state,
+      preview_world_state:
+        structuredSelfModel.result.preview_world_state,
+      queue:
+        structuredSelfModelMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
-      autobiographicalSelfInterpretationMutationExecution.next_world_state,
+      structuredSelfModelMutationExecution.next_world_state,
       preparedTurn,
       subjectiveClaimSourceMemories,
       options,
@@ -6345,7 +6589,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
       world_state:
-        autobiographicalSelfInterpretationMutationExecution.next_world_state,
+        structuredSelfModelMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -6360,7 +6604,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_claim`,
       world_state_hash:
         hashAgentRunValue(
-          autobiographicalSelfInterpretationMutationExecution.next_world_state,
+          structuredSelfModelMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveClaimProjection
@@ -6372,7 +6616,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        autobiographicalSelfInterpretationMutationExecution.next_world_state,
+        structuredSelfModelMutationExecution.next_world_state,
       preview_world_state:
         subjectiveClaimProjection
           .result
@@ -6702,6 +6946,20 @@ export async function resolveWorldSimulationTurn(
         cloneJson(autobiographicalSelfInterpretationMutationQueue),
       autobiographical_self_interpretation_mutation_execution:
         cloneJson(autobiographicalSelfInterpretationMutationExecution.execution),
+
+      structured_self_model_decision_resolution: {
+        version: worldSimulationStructuredSelfModelVersion,
+        decisions: cloneJson(structuredSelfModelDecisionResolution.decisions),
+        resolver_view_hash:
+          structuredSelfModelDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(structuredSelfModelDecisionResolution.audit),
+      },
+      structured_self_model:
+        cloneJson(structuredSelfModel),
+      structured_self_model_mutation_queue:
+        cloneJson(structuredSelfModelMutationQueue),
+      structured_self_model_mutation_execution:
+        cloneJson(structuredSelfModelMutationExecution.execution),
 
       subjective_claim_proposal_resolution: {
         version:
@@ -7228,6 +7486,30 @@ export async function resolveWorldSimulationTurn(
       self_model_modeled: false,
       trait_value_preference_role_capability_goal_inference_modeled: false,
       freeform_life_story_authority_used: false,
+      world_truth_authority_claimed: false,
+      confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+    },
+    structured_self_model: {
+      version: worldSimulationStructuredSelfModelVersion,
+      resolver_used: structuredSelfModelDecisionResolution.audit.resolver_used === true,
+      aspect_decision_count: structuredSelfModel.result.aspect_decision_count,
+      created_aspect_event_count: structuredSelfModel.result.aspect_events_created.length,
+      appended_history_reference_count: structuredSelfModel.result.history_references_appended.length,
+      effective_structured_self_model_projection_hash:
+        structuredSelfModel.result.effective_structured_self_model_projection.projection_hash,
+      mutation_count: structuredSelfModelMutationQueue.mutation_count,
+      authoritative_executor: structuredSelfModelMutationExecution.execution.version,
+      same_character_phase68a_evidence_only: true,
+      current_turn_phase68a_trigger_required: true,
+      formation_only: true,
+      revision_applied: false,
+      last_write_wins_applied: false,
+      forced_cross_domain_consistency_applied: false,
+      self_model_accuracy_claimed: false,
+      self_model_clarity_claimed: false,
+      numeric_personality_capability_scores_modeled: false,
+      motivation_goal_selection_modeled: false,
       world_truth_authority_claimed: false,
       confidence_probability_modeled: false,
       same_turn_character_brain_feedback_allowed: false,

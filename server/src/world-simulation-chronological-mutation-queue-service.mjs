@@ -4584,6 +4584,287 @@ function assertPhase68AAutobiographicalSelfInterpretationMutation(
   }
 }
 
+const phase68bStructuredSelfModelEventSchema =
+  "phase68b-structured-self-model-aspect-event-v1";
+const phase68bStructuredSelfModelHistorySchema =
+  "phase68b-structured-self-model-history-ref-v1";
+const phase68bStructuredSelfModelVersion =
+  "phase68b-structured-self-model-v1";
+const phase68bAspectRelations = new Map([
+  ["trait_tendency", "tends_toward"],
+  ["value_orientation", "values"],
+  ["preference", "prefers"],
+  ["role_identity", "identifies_as"],
+  ["capability_appraisal", "appraises_capability_as"],
+]);
+
+function phase68bAspectEventHash(event) {
+  const body = cloneJson(event);
+  delete body.aspect_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function phase68bInterpretationSource(worldState, reference) {
+  if (reference?.source_kind !== "phase68a_autobiographical_self_interpretation") {
+    const error = new Error("Phase68B accepts only canonical Phase68A interpretation sources.");
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_SOURCE_KIND_UNSUPPORTED";
+    throw error;
+  }
+  const eventId = String(reference?.source_event_id ?? "").trim();
+  const eventHash = String(reference?.source_event_hash ?? "").trim();
+  const event = object(object(worldState.autobiographical_self_interpretation_events)[eventId]);
+  if (
+    !eventId
+    || !eventHash
+    || !Object.keys(event).length
+    || event.interpretation_event_id !== eventId
+    || phase68aInterpretationEventHash(event) !== event.interpretation_event_hash
+    || event.interpretation_event_hash !== eventHash
+    || event.subjective_not_world_truth !== true
+    || event.world_truth_verified !== false
+  ) {
+    const error = new Error(`Phase68B source ${eventId || "<missing>"} is not canonical.`);
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_SOURCE_REF_MISMATCH";
+    throw error;
+  }
+  return event;
+}
+
+function phase68bHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Structured self-model history is append-only.");
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Structured self-model history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function phase68bReplayHistoryState(worldState, history) {
+  const latestByCharacter = new Map();
+  const seenEventIds = new Set();
+  const seenAspectIds = new Set();
+  for (const reference of array(history)) {
+    const eventId = String(reference?.aspect_event_id ?? "").trim();
+    const event = object(object(worldState.structured_self_model_aspect_events)[eventId]);
+    if (!eventId || !Object.keys(event).length) continue;
+    const key = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    if (!key) continue;
+    latestByCharacter.set(key, event);
+    seenEventIds.add(eventId);
+    if (String(event.aspect_id ?? "").trim()) seenAspectIds.add(event.aspect_id);
+  }
+  return { latestByCharacter, seenEventIds, seenAspectIds };
+}
+
+function assertPhase68BStructuredSelfModelMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "structured_self_model_aspect_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error("StructuredSelfModelAspectEvent fields are immutable after creation.");
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    if (getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} cannot be overwritten.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const next = mutation?.to;
+    const expectedRelation = phase68bAspectRelations.get(next?.aspect_type);
+    const descriptor = object(next?.descriptor);
+    if (
+      !isObject(next)
+      || next.schema_version !== phase68bStructuredSelfModelEventSchema
+      || next.version !== phase68bStructuredSelfModelVersion
+      || next.immutable !== true
+      || String(next.aspect_event_id ?? "") !== eventId
+      || !String(next.aspect_event_hash ?? "").trim()
+      || !String(next.aspect_id ?? "").trim()
+      || !String(next.aspect_key ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || next.operation !== "form"
+      || !expectedRelation
+      || descriptor.subject_scope !== "self"
+      || descriptor.relation !== expectedRelation
+      || !String(descriptor.domain ?? "").trim()
+      || !String(descriptor.object_ref ?? "").trim()
+      || !Array.isArray(descriptor.qualifiers)
+      || !Array.isArray(next.source_refs)
+      || next.source_refs.length < 1
+      || !String(next.resolver_view_hash ?? "").trim()
+      || next.subjective_not_world_truth !== true
+      || next.world_truth_verified !== false
+      || next.epistemic_belief !== false
+      || next.self_model_content !== true
+      || next.self_model_accuracy_claimed !== false
+      || next.self_model_clarity_claimed !== false
+      || next.motivation_goal_model !== false
+      || next.confidence !== null
+      || next.probability !== null
+      || next.personality_score !== null
+      || next.capability_score !== null
+      || next.freeform_profile_authority !== false
+      || next.character_brain_direct_write !== false
+      || next.status !== "structured_self_model_aspect_formed"
+    ) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} creation payload is invalid.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_INVALID";
+      throw error;
+    }
+    if (phase68bAspectEventHash(next) !== next.aspect_event_hash) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:structured_self_model`) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const sourceKeys = new Set();
+    let currentTurnTriggerFound = false;
+    for (const sourceRef of next.source_refs) {
+      const source = phase68bInterpretationSource(worldState, sourceRef);
+      if (
+        String(source.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")
+          !== String(next.character).trim().toLocaleLowerCase("zh-Hant-TW")
+      ) {
+        const error = new Error(`Phase68B source ${sourceRef.source_event_id} belongs to another character.`);
+        error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_CROSS_CHARACTER_SOURCE_FORBIDDEN";
+        throw error;
+      }
+      if (source.source_turn_id === next.source_turn_id) currentTurnTriggerFound = true;
+      const key = JSON.stringify([sourceRef.source_kind, sourceRef.source_event_id, sourceRef.source_event_hash]);
+      if (sourceKeys.has(key)) {
+        const error = new Error(`Phase68B event ${eventId} contains duplicate sources.`);
+        error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_SOURCE_REF_INVALID";
+        throw error;
+      }
+      sourceKeys.add(key);
+    }
+    if (!currentTurnTriggerFound) {
+      const error = new Error(`Phase68B event ${eventId} lacks a current-turn Phase68A trigger.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_CURRENT_TURN_TRIGGER_REQUIRED";
+      throw error;
+    }
+    const evidence = object(next.formation_evidence);
+    const semantics = object(next.source_semantics);
+    if (
+      evidence.resolver_view_ref !== `phase68b_resolver_view:${next.resolver_view_hash}`
+      || evidence.same_character_phase68a_evidence_only !== true
+      || evidence.current_turn_phase68a_trigger_required !== true
+      || evidence.formation_only !== true
+      || evidence.revision_applied !== false
+      || evidence.forced_cross_domain_consistency_applied !== false
+      || evidence.last_write_wins_applied !== false
+      || semantics.phase68a_interpretation_is_authoritative_source !== true
+      || semantics.phase68a_rewritten !== false
+      || semantics.world_truth_is_source !== false
+      || semantics.raw_memory_scanned !== false
+      || semantics.phase67_store_scanned !== false
+      || semantics.second_retrieval_engine_installed !== false
+      || semantics.hidden_semantic_graph_used !== false
+      || semantics.belief_resolution_modeled !== false
+      || semantics.self_model_revision_modeled !== false
+      || semantics.motivation_goal_selection_modeled !== false
+    ) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} violates the Phase68B boundary.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+    const replay = phase68bReplayHistoryState(worldState, worldState.structured_self_model_history);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (
+      next.previous_aspect_event_id !== (previous?.aspect_event_id ?? null)
+      || next.previous_aspect_event_hash !== (previous?.aspect_event_hash ?? null)
+      || replay.seenAspectIds.has(next.aspect_id)
+    ) {
+      const error = new Error(`StructuredSelfModelAspectEvent ${eventId} breaks its chain or reuses identity.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+
+  if (worldPath[0] !== "structured_self_model_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Structured self-model history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase68bHistoryPrefix(oldHistory, newHistory);
+  const replay = phase68bReplayHistoryState(worldState, oldHistory);
+  const latestByCharacter = new Map(replay.latestByCharacter);
+  const seenEventIds = new Set(replay.seenEventIds);
+  const seenAspectIds = new Set(replay.seenAspectIds);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.aspect_event_id ?? "").trim();
+    const event = object(object(worldState.structured_self_model_aspect_events)[eventId]);
+    if (
+      !isObject(reference)
+      || reference.schema_version !== phase68bStructuredSelfModelHistorySchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.aspect_event_hash ?? "").trim()
+      || !String(reference.aspect_id ?? "").trim()
+      || !String(reference.aspect_key ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || reference.operation !== "form"
+      || !phase68bAspectRelations.has(reference.aspect_type)
+      || reference.status !== "structured_self_model_aspect_formed"
+      || seenEventIds.has(eventId)
+      || seenAspectIds.has(reference.aspect_id)
+      || !Object.keys(event).length
+      || phase68bAspectEventHash(event) !== event.aspect_event_hash
+    ) {
+      const error = new Error(`Structured self-model history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    const key = String(event.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = latestByCharacter.get(key) ?? null;
+    if (
+      reference.aspect_event_hash !== event.aspect_event_hash
+      || reference.aspect_id !== event.aspect_id
+      || reference.aspect_key !== event.aspect_key
+      || reference.character !== event.character
+      || reference.source_turn_id !== event.source_turn_id
+      || reference.operation !== event.operation
+      || reference.aspect_type !== event.aspect_type
+      || reference.previous_aspect_event_id !== event.previous_aspect_event_id
+      || reference.previous_aspect_event_hash !== event.previous_aspect_event_hash
+      || event.previous_aspect_event_id !== (previous?.aspect_event_id ?? null)
+      || event.previous_aspect_event_hash !== (previous?.aspect_event_hash ?? null)
+    ) {
+      const error = new Error(`Structured self-model history reference ${eventId} breaks its canonical chain.`);
+      error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+    latestByCharacter.set(key, event);
+    seenEventIds.add(eventId);
+    seenAspectIds.add(event.aspect_id);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -4711,6 +4992,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase68BStructuredSelfModelMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -4813,6 +5100,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase68AAutobiographicalSelfInterpretationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase68BStructuredSelfModelMutation(
         executed,
         worldPath,
         mutation,
@@ -4982,6 +5275,18 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase68a_per_character_interpretation_hash_chain_enforced: true,
       direct_nested_self_interpretation_history_mutation_rejected: true,
       phase68a_historical_self_interpretation_rewrite_rejected: true,
+      phase68b_structured_self_model_event_write_once_enforced: true,
+      phase68b_structured_self_model_event_content_address_verified: true,
+      phase68b_phase68a_source_hash_pinning_enforced: true,
+      phase68b_same_character_source_evidence_enforced: true,
+      phase68b_current_turn_phase68a_trigger_enforced: true,
+      phase68b_typed_descriptor_relation_enforced: true,
+      phase68b_formation_only_enforced: true,
+      phase68b_numeric_personality_capability_scores_rejected: true,
+      phase68b_structured_self_model_history_append_only_enforced: true,
+      phase68b_per_character_structured_self_model_hash_chain_enforced: true,
+      direct_nested_structured_self_model_history_mutation_rejected: true,
+      phase68b_historical_structured_self_model_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

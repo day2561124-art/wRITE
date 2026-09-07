@@ -792,6 +792,7 @@ const steps = [
   ["Phase 67D autobiographical LifePeriod organization", ["tests/phase67/phase67d-autobiographical-life-period-organization.test.mjs"]],
   ["Phase 67E bounded autobiographical summary projection", ["tests/phase67/phase67e-bounded-autobiographical-summary.test.mjs"]],
   ["Phase 68A autobiographical self-interpretation foundation", ["tests/phase68/phase68a-self-interpretation-foundation.test.mjs"]],
+  ["Phase 68B structured self model", ["tests/phase68/phase68b-structured-self-model.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
