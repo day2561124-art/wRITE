@@ -85,6 +85,14 @@ import {
   worldSimulationStructuredSelfModelVersion,
 } from "./world-simulation-structured-self-model-service.mjs";
 import {
+  buildWorldSimulationStructuredSelfModelRevisionContract,
+  buildWorldSimulationStructuredSelfModelRevisionResolverView,
+  buildWorldSimulationStructuredSelfModelRevisions,
+  projectWorldSimulationRevisedStructuredSelfModelForCharacter,
+  revisedStructuredSelfModelCharacterProjectionVersion,
+  worldSimulationStructuredSelfModelRevisionVersion,
+} from "./world-simulation-structured-self-model-revision-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3130,6 +3138,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationAutobiographicalSelfInterpretationContract(),
     structured_self_model:
       buildWorldSimulationStructuredSelfModelContract(),
+    structured_self_model_revision:
+      buildWorldSimulationStructuredSelfModelRevisionContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -3433,6 +3443,37 @@ export function buildWorldSimulationLoopContract() {
       motivation_goal_selection_authority: false,
       character_brain_direct_self_model_mutation_allowed: false,
       missing_hook_means_no_new_aspect: true,
+    },
+
+    structured_self_model_revision_resolver_hook: {
+      owner: "programmatic_structured_self_model_revision_resolver",
+      optional: true,
+      option_name: "structuredSelfModelRevisionResolver",
+      source_scope: "current_turn_phase68a_or_phase68b_trigger_plus_active_same_character_self_model",
+      current_turn_phase68a_or_phase68b_trigger_required: true,
+      receives_world_state: false,
+      receives_raw_world_event: false,
+      receives_raw_memory_content: false,
+      receives_phase67_store: false,
+      receives_hidden_retrieval_graph: false,
+      may_request_operations: ["support", "challenge", "revise"],
+      explicit_target_aspect_ids_required: true,
+      support_preserves_active_state: true,
+      challenge_preserves_active_state: true,
+      revise_supersedes_named_active_targets_only: true,
+      replacement_receives_new_deterministic_identity: true,
+      unresolved_challenges_may_coexist: true,
+      max_one_durable_event_per_character_per_turn: true,
+      last_write_wins_allowed: false,
+      forced_global_coherence_required: false,
+      neighboring_aspect_auto_propagation_allowed: false,
+      may_assert_world_truth: false,
+      may_assert_self_model_accuracy: false,
+      may_assert_self_model_clarity: false,
+      may_assert_confidence_probability: false,
+      motivation_goal_selection_authority: false,
+      character_brain_direct_self_model_revision_allowed: false,
+      missing_hook_means_no_new_revision: true,
     },
 
     subjective_claim_resolver_hook: {
@@ -3864,6 +3905,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
   const structuredSelfModelCharacterProjections = [];
+  const revisedStructuredSelfModelCharacterProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -4490,6 +4532,24 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(structuredSelfModelCharacterProjection.audit),
     });
 
+    // Phase68C replays committed Phase68B formation plus prior committed
+    // revision history. It runs during prepare, so current-turn revision writes
+    // remain unavailable to the Character Brain that indirectly caused them.
+    const revisedStructuredSelfModelCharacterProjection =
+      projectWorldSimulationRevisedStructuredSelfModelForCharacter({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+      });
+
+    revisedStructuredSelfModelCharacterProjections.push({
+      character,
+      version: revisedStructuredSelfModelCharacterProjection.version,
+      character_view_hash:
+        revisedStructuredSelfModelCharacterProjection.character_view_hash,
+      audit: cloneJson(revisedStructuredSelfModelCharacterProjection.audit),
+    });
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -4547,7 +4607,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
       self_model_context:
         cloneJson(
-          structuredSelfModelCharacterProjection.character_view,
+          revisedStructuredSelfModelCharacterProjection.character_view,
         ),
     };
     const actionCandidates = await capability(
@@ -4871,6 +4931,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(autobiographicalSelfInterpretationCharacterProjections),
     structured_self_model_character_projections:
       cloneJson(structuredSelfModelCharacterProjections),
+    revised_structured_self_model_character_projections:
+      cloneJson(revisedStructuredSelfModelCharacterProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -5796,6 +5858,90 @@ async function resolveStructuredSelfModelDecisions(
   };
 }
 
+async function resolveStructuredSelfModelRevisionDecisions(
+  worldState,
+  preparedTurn,
+  options,
+) {
+  const resolver =
+    typeof options.structuredSelfModelRevisionResolver === "function"
+      ? options.structuredSelfModelRevisionResolver
+      : null;
+  const resolverView =
+    buildWorldSimulationStructuredSelfModelRevisionResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+    });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_new_revision: true,
+        current_turn_phase68a_or_phase68b_trigger_required: true,
+        same_character_evidence_and_targets_only: true,
+        explicit_targets_required: true,
+        support_preserves_active_state: true,
+        challenge_preserves_active_state: true,
+        revise_explicitly_supersedes_targets: true,
+        unresolved_challenges_may_coexist: true,
+        world_state_exposed_to_resolver: false,
+        raw_world_event_exposed_to_resolver: false,
+        raw_memory_content_exposed_to_resolver: false,
+        phase67_store_exposed_to_resolver: false,
+        hidden_retrieval_graph_exposed_to_resolver: false,
+        self_model_accuracy_requested: false,
+        self_model_clarity_requested: false,
+        confidence_probability_requested: false,
+        motivation_goal_selection_requested: false,
+        world_truth_judgment_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "structuredSelfModelRevisionResolver must return an array of source-backed revision decisions.",
+    );
+    error.code = "WORLD_SIMULATION_STRUCTURED_SELF_MODEL_REVISION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    resolver_view_hash: resolverView.resolver_view_hash,
+    source: "programmatic_structured_self_model_revision_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      current_turn_phase68a_or_phase68b_trigger_required: true,
+      same_character_evidence_and_targets_only: true,
+      explicit_targets_required: true,
+      support_preserves_active_state: true,
+      challenge_preserves_active_state: true,
+      revise_explicitly_supersedes_targets: true,
+      unresolved_challenges_may_coexist: true,
+      world_state_exposed_to_resolver: false,
+      raw_world_event_exposed_to_resolver: false,
+      raw_memory_content_exposed_to_resolver: false,
+      phase67_store_exposed_to_resolver: false,
+      hidden_retrieval_graph_exposed_to_resolver: false,
+      self_model_accuracy_requested: false,
+      self_model_clarity_requested: false,
+      confidence_probability_requested: false,
+      motivation_goal_selection_requested: false,
+      world_truth_judgment_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -6578,9 +6724,53 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  const structuredSelfModelRevisionDecisionResolution =
+    await resolveStructuredSelfModelRevisionDecisions(
+      structuredSelfModelMutationExecution.next_world_state,
+      preparedTurn,
+      options,
+    );
+
+  const structuredSelfModelRevision =
+    buildWorldSimulationStructuredSelfModelRevisions({
+      world_state:
+        structuredSelfModelMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      revision_decisions:
+        structuredSelfModelRevisionDecisionResolution.decisions,
+    });
+
+  const structuredSelfModelRevisionMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:structured_self_model_revision`,
+      world_state_hash:
+        hashAgentRunValue(
+          structuredSelfModelMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        structuredSelfModelRevision.result.state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const structuredSelfModelRevisionMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        structuredSelfModelMutationExecution.next_world_state,
+      preview_world_state:
+        structuredSelfModelRevision.result.preview_world_state,
+      queue:
+        structuredSelfModelRevisionMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
-      structuredSelfModelMutationExecution.next_world_state,
+      structuredSelfModelRevisionMutationExecution.next_world_state,
       preparedTurn,
       subjectiveClaimSourceMemories,
       options,
@@ -6589,7 +6779,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
       world_state:
-        structuredSelfModelMutationExecution.next_world_state,
+        structuredSelfModelRevisionMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -6604,7 +6794,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_claim`,
       world_state_hash:
         hashAgentRunValue(
-          structuredSelfModelMutationExecution.next_world_state,
+          structuredSelfModelRevisionMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveClaimProjection
@@ -6616,7 +6806,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        structuredSelfModelMutationExecution.next_world_state,
+        structuredSelfModelRevisionMutationExecution.next_world_state,
       preview_world_state:
         subjectiveClaimProjection
           .result
@@ -6960,6 +7150,20 @@ export async function resolveWorldSimulationTurn(
         cloneJson(structuredSelfModelMutationQueue),
       structured_self_model_mutation_execution:
         cloneJson(structuredSelfModelMutationExecution.execution),
+
+      structured_self_model_revision_decision_resolution: {
+        version: worldSimulationStructuredSelfModelRevisionVersion,
+        decisions: cloneJson(structuredSelfModelRevisionDecisionResolution.decisions),
+        resolver_view_hash:
+          structuredSelfModelRevisionDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(structuredSelfModelRevisionDecisionResolution.audit),
+      },
+      structured_self_model_revision:
+        cloneJson(structuredSelfModelRevision),
+      structured_self_model_revision_mutation_queue:
+        cloneJson(structuredSelfModelRevisionMutationQueue),
+      structured_self_model_revision_mutation_execution:
+        cloneJson(structuredSelfModelRevisionMutationExecution.execution),
 
       subjective_claim_proposal_resolution: {
         version:
@@ -7509,6 +7713,38 @@ export async function resolveWorldSimulationTurn(
       self_model_accuracy_claimed: false,
       self_model_clarity_claimed: false,
       numeric_personality_capability_scores_modeled: false,
+      motivation_goal_selection_modeled: false,
+      world_truth_authority_claimed: false,
+      confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+    },
+    structured_self_model_revision: {
+      version: worldSimulationStructuredSelfModelRevisionVersion,
+      resolver_used:
+        structuredSelfModelRevisionDecisionResolution.audit.resolver_used === true,
+      revision_decision_count:
+        structuredSelfModelRevision.result.revision_decision_count,
+      created_revision_event_count:
+        structuredSelfModelRevision.result.revision_events_created.length,
+      appended_history_reference_count:
+        structuredSelfModelRevision.result.history_references_appended.length,
+      effective_revised_structured_self_model_projection_hash:
+        structuredSelfModelRevision
+          .result
+          .effective_revised_structured_self_model_projection
+          .projection_hash,
+      mutation_count: structuredSelfModelRevisionMutationQueue.mutation_count,
+      authoritative_executor:
+        structuredSelfModelRevisionMutationExecution.execution.version,
+      support_preserves_active_state: true,
+      challenge_preserves_active_state: true,
+      revise_explicitly_supersedes_targets: true,
+      unresolved_challenges_may_coexist: true,
+      last_write_wins_applied: false,
+      forced_global_coherence_applied: false,
+      neighboring_aspect_propagation_applied: false,
+      self_model_accuracy_claimed: false,
+      self_model_clarity_claimed: false,
       motivation_goal_selection_modeled: false,
       world_truth_authority_claimed: false,
       confidence_probability_modeled: false,
