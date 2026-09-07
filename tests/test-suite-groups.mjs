@@ -72,6 +72,7 @@ export const phase66BeliefRevisionSteps = Object.freeze([
   Object.freeze(["Phase 66A append-only subjective belief revision events", Object.freeze(["tests/phase66/phase66a-subjective-belief-revision-event.test.mjs"])]),
   Object.freeze(["Phase 66B effective subjective belief state projection", Object.freeze(["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"])]),
   Object.freeze(["Phase 66C bounded subjective belief character exposure", Object.freeze(["tests/phase66/phase66c-subjective-belief-character-exposure.test.mjs"])]),
+  Object.freeze(["Phase 66D native belief chronology closure", Object.freeze(["tests/phase66/phase66d-native-belief-chronology-closure.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
