@@ -281,25 +281,66 @@ Examples of structural forms, not hard-coded semantics:
 "time training with person Y"
 ```
 
-## 9. Phase67E — Autobiographical Summary Projection
+## 9. Phase67E — Bounded Autobiographical Summary / Character Read Projection
 
-Autobiographical summaries should be reconstructable read projections, not new authoritative truth records.
+Phase67E is a read-only reconstruction layer over already committed Phase67B/C/D autobiographical organization. It does **not** create a new durable summary memory, summary event history, belief, narrative identity, or Self Model.
 
-A summary projection may be cached for performance only when it carries:
+The v1 shape is deliberately two-layered:
+
+```text
+Phase67B Effective LifeEvents
++
+Phase67C Effective Personal Semantics
++
+Phase67D Effective LifePeriods
+        |
+        v
+Engine-owned reconstructable autobiographical summary projection
+        |
+        v
+Consumer-specific bounded Character-facing autobiographical DTO
+```
+
+The engine projection may retain exact source IDs/hashes and drill-down references for replay/audit. The Character-facing DTO strips those engine identities and exposes only already materialized autobiographical structure such as:
+
+```text
+LifePeriod description / qualifiers / open-or-closed state
+linked Personal Semantic category / predicate / object / qualifiers
+Personal Semantic supported-or-contested state
+```
+
+Phase67E does not generate a freeform prose life story. In particular it must not infer or author:
+
+```text
+trait
+role identity
+value
+preference
+life meaning
+narrative identity
+Self Model
+new semantic propositions
+```
+
+`contested` Phase67C personal semantics may be exposed as contested autobiographical knowledge, but Phase67E may not resolve the disagreement. Epistemic acceptance/rejection remains owned by Phase65/66.
+
+Character-facing projection is bounded by transport limits. v1 may prefer open LifePeriods and then use source-history recency for deterministic transport, but this ordering is explicitly **not** psychological importance, salience, credibility, or truth ranking. No importance/salience score is invented.
+
+The projection is reconstructable and hashable from source histories. A future performance cache is legal only as a disposable optimization carrying at least:
 
 ```text
 projection_version
 character
 input_history_hash
-source_refs
+source_projection_hashes
 summary_hash
 ```
 
 A cache mismatch must trigger reconstruction rather than LWW reuse.
 
-Character-facing autobiography must be bounded, same-character, prior-committed-state only, and should expose psychologically meaningful structure rather than engine IDs/provenance.
+Phase67E runs during prepare from committed prior-turn state, before same-turn Phase67A-D writes. If same-turn autobiographical organization is already present for the character, the Character-facing projection must fail closed rather than leak retroactive cognition into the Character Brain decision.
 
-Newly produced organization in the current turn must not retroactively leak into the same Character Brain decision.
+Phase67E has no durable world-state mutation and therefore adds no Phase62K mutation path. It also adds no second retrieval engine: detailed episodic drill-down remains owned by the existing Phase63/64 retrieval substrate.
 
 ## 10. Error memory, belief revision, and narrative revision
 

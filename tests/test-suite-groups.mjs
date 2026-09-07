@@ -80,6 +80,7 @@ export const phase67AutobiographicalMemorySteps = Object.freeze([
   Object.freeze(["Phase 67B autobiographical LifeEvent organization", Object.freeze(["tests/phase67/phase67b-autobiographical-life-event-organization.test.mjs"])]),
   Object.freeze(["Phase 67C personal semantic memory", Object.freeze(["tests/phase67/phase67c-personal-semantic-memory.test.mjs"])]),
   Object.freeze(["Phase 67D autobiographical LifePeriod organization", Object.freeze(["tests/phase67/phase67d-autobiographical-life-period-organization.test.mjs"])]),
+  Object.freeze(["Phase 67E bounded autobiographical summary projection", Object.freeze(["tests/phase67/phase67e-bounded-autobiographical-summary.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

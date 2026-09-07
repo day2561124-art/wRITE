@@ -64,6 +64,11 @@ import {
   worldSimulationAutobiographicalLifePeriodVersion,
 } from "./world-simulation-autobiographical-life-period-service.mjs";
 import {
+  buildWorldSimulationAutobiographicalSummaryProjectionContract,
+  projectWorldSimulationAutobiographicalSummaryForCharacter,
+  worldSimulationAutobiographicalSummaryCharacterProjectionVersion,
+} from "./world-simulation-autobiographical-summary-projection-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3103,6 +3108,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationPersonalSemanticMemoryContract(),
     autobiographical_life_period_organization:
       buildWorldSimulationAutobiographicalLifePeriodContract(),
+    autobiographical_summary_read_projection:
+      buildWorldSimulationAutobiographicalSummaryProjectionContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -3730,6 +3737,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const currentMindTransitionProjections = [];
   const subjectiveCognitionProjections = [];
   const subjectiveBeliefCharacterProjections = [];
+  const autobiographicalSummaryCharacterProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -4301,6 +4309,25 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(subjectiveBeliefCharacterProjection.audit),
     });
 
+    // Phase67E reconstructs a bounded autobiographical overview from already
+    // committed Phase67B/C/D organization. It runs during prepare, before any
+    // same-turn autobiographical writes, so current-turn organization cannot
+    // retroactively influence the Character Brain or Action Proposer.
+    const autobiographicalSummaryCharacterProjection =
+      projectWorldSimulationAutobiographicalSummaryForCharacter({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+      });
+
+    autobiographicalSummaryCharacterProjections.push({
+      character,
+      version: autobiographicalSummaryCharacterProjection.version,
+      character_view_hash:
+        autobiographicalSummaryCharacterProjection.character_view_hash,
+      audit: cloneJson(autobiographicalSummaryCharacterProjection.audit),
+    });
+
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -4348,6 +4375,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           beliefs_truncated:
             subjectiveBeliefCharacterProjection.character_view.beliefs_truncated,
         }),
+      autobiographical_context:
+        cloneJson(
+          autobiographicalSummaryCharacterProjection.character_view,
+        ),
     };
     const actionCandidates = await capability(
       sessionId,
@@ -4562,6 +4593,33 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         subjective_belief_duplicate_claim_count_used_as_credibility:
           false,
 
+        autobiographical_summary_read_projection_installed:
+          true,
+
+        autobiographical_summary_character_projection_version:
+          worldSimulationAutobiographicalSummaryCharacterProjectionVersion,
+
+        autobiographical_summary_source:
+          "same_character_committed_prior_turn_phase67b_phase67c_phase67d_only",
+
+        autobiographical_summary_same_turn_feedback_allowed:
+          false,
+
+        autobiographical_summary_source_ids_hashes_exposed:
+          false,
+
+        autobiographical_summary_freeform_narrative_generated:
+          false,
+
+        autobiographical_summary_self_model_exposed:
+          false,
+
+        autobiographical_summary_world_truth_authority_exposed:
+          false,
+
+        autobiographical_summary_confidence_probability_exposed:
+          false,
+
         engine_visibility_target_ids_exposed: false,
         engine_sound_source_ids_exposed: false,
       },
@@ -4583,6 +4641,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     subjective_cognition_projections: cloneJson(subjectiveCognitionProjections),
     subjective_belief_character_projections:
       cloneJson(subjectiveBeliefCharacterProjections),
+    autobiographical_summary_character_projections:
+      cloneJson(autobiographicalSummaryCharacterProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -4716,6 +4776,30 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         true,
 
       subjective_belief_world_truth_authority_not_forwarded_to_character_brain:
+        true,
+
+      autobiographical_summary_read_projection_installed:
+        true,
+
+      autobiographical_summary_character_projection_version:
+        worldSimulationAutobiographicalSummaryCharacterProjectionVersion,
+
+      autobiographical_summary_committed_prior_turn_only:
+        true,
+
+      autobiographical_summary_same_turn_feedback_allowed:
+        false,
+
+      autobiographical_summary_source_ids_hashes_not_forwarded_to_character_brain:
+        true,
+
+      autobiographical_summary_freeform_narrative_not_generated:
+        true,
+
+      autobiographical_summary_self_model_not_forwarded_to_character_brain:
+        true,
+
+      autobiographical_summary_world_truth_authority_not_forwarded_to_character_brain:
         true,
 
       visibility_engine_target_ids_not_forwarded_to_character_brain: true,
