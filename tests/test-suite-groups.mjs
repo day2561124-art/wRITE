@@ -92,6 +92,7 @@ export const phase68SelfInterpretationSteps = Object.freeze([
 
 export const phase69GoalToPlanSteps = Object.freeze([
   Object.freeze(["Phase 69A goal-to-plan implementation intentions", Object.freeze(["tests/phase69/phase69a-goal-to-plan-implementation-intention.test.mjs"])]),
+  Object.freeze(["Phase 69B implementation-intention revision", Object.freeze(["tests/phase69/phase69b-implementation-intention-revision.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
