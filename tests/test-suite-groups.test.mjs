@@ -13,6 +13,7 @@ import {
   phase65BeliefCognitionSteps,
   phase66BeliefRevisionSteps,
   phase67AutobiographicalMemorySteps,
+  phase68SelfInterpretationSteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
@@ -35,7 +36,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(
-    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67)\/[^"]+\.test\.mjs"/g,
+    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68)\/[^"]+\.test\.mjs"/g,
   ),
 ].map((match) => match[0].slice(1, -1));
 
@@ -48,6 +49,7 @@ const phase64Paths = pathsFor(phase64RetrievalCognitionSteps);
 const phase65Paths = pathsFor(phase65BeliefCognitionSteps);
 const phase66Paths = pathsFor(phase66BeliefRevisionSteps);
 const phase67Paths = pathsFor(phase67AutobiographicalMemorySteps);
+const phase68Paths = pathsFor(phase68SelfInterpretationSteps);
 const phase62CognitionPaths = pathsFor(phase62CognitionIntegrationSteps);
 
 assertUnique("run-all active world-simulation inventory", activeRunAllPaths);
@@ -58,13 +60,13 @@ assertUnique("memory-retrieval runner", memoryPaths);
 assert.deepEqual(
   worldPaths,
   activeRunAllPaths,
-  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67 inventory in run-all.mjs.",
+  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67/68 inventory in run-all.mjs.",
 );
 
 assert.deepEqual(
   memoryPaths,
-  [...phase63Paths, ...phase64Paths, ...phase67Paths],
-  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, and Phase67 autobiographical memory.",
+  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths],
+  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, and Phase68 self interpretation.",
 );
 
 assert.deepEqual(
@@ -76,8 +78,9 @@ assert.deepEqual(
     ...phase65Paths,
     ...phase66Paths,
     ...phase67Paths,
+    ...phase68Paths,
   ],
-  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67 cognition.",
+  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68 cognition.",
 );
 
 assert.deepEqual(
@@ -89,7 +92,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/phase(?:62|63|64|65|66|67)\//,
+    /^tests\/phase(?:62|63|64|65|66|67|68)\//,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

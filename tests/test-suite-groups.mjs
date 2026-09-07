@@ -83,6 +83,10 @@ export const phase67AutobiographicalMemorySteps = Object.freeze([
   Object.freeze(["Phase 67E bounded autobiographical summary projection", Object.freeze(["tests/phase67/phase67e-bounded-autobiographical-summary.test.mjs"])]),
 ]);
 
+export const phase68SelfInterpretationSteps = Object.freeze([
+  Object.freeze(["Phase 68A autobiographical self-interpretation foundation", Object.freeze(["tests/phase68/phase68a-self-interpretation-foundation.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -94,6 +98,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase65BeliefCognitionSteps,
   ...phase66BeliefRevisionSteps,
   ...phase67AutobiographicalMemorySteps,
+  ...phase68SelfInterpretationSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -103,10 +108,12 @@ export const cognitionSteps = Object.freeze([
   ...phase65BeliefCognitionSteps,
   ...phase66BeliefRevisionSteps,
   ...phase67AutobiographicalMemorySteps,
+  ...phase68SelfInterpretationSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
   ...phase67AutobiographicalMemorySteps,
+  ...phase68SelfInterpretationSteps,
 ]);
