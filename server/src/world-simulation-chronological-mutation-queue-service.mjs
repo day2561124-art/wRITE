@@ -853,6 +853,15 @@ const phase67aSubjectiveEpisodeSegmentationEventSchema =
 const phase67aSubjectiveEpisodeSegmentationHistoryReferenceSchema =
   "phase67a-subjective-episode-segmentation-history-ref-v1";
 
+const phase67bAutobiographicalLifeEventVersion =
+  "phase67b-autobiographical-life-event-v1";
+
+const phase67bAutobiographicalLifeEventOrganizationEventSchema =
+  "phase67b-autobiographical-life-event-organization-event-v1";
+
+const phase67bAutobiographicalLifeEventOrganizationHistoryReferenceSchema =
+  "phase67b-autobiographical-life-event-organization-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -2513,6 +2522,549 @@ function assertPhase67ASubjectiveEpisodeSegmentationMutation(
   }
 }
 
+function assertPhase67BLifeEventHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Autobiographical LifeEvent organization history is append-only.");
+    error.code =
+      "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error(
+        "Autobiographical LifeEvent organization history changed an existing reference or order.",
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function phase67bOrganizationEventHash(event) {
+  const body = cloneJson(event);
+  delete body.organization_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function phase67bSegmentationEventHash(event) {
+  const body = cloneJson(event);
+  delete body.segmentation_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function phase67bEffectiveEpisodeRecord(worldState, character, subjectiveEpisodeId) {
+  const characterNormalized = phase67aCharacterKey(character);
+  let projectedCharacter = null;
+  let firstSourceTurnId = null;
+  let latestSourceTurnId = null;
+  let latestSegmentationEventId = null;
+  let explicitBindingPresent = false;
+  const sourceMemoryIds = new Set();
+  const segmentationEventIds = [];
+
+  for (const reference of array(worldState?.subjective_episode_segmentation_history)) {
+    if (
+      phase67aCharacterKey(reference?.character) !== characterNormalized
+      || String(reference?.subjective_episode_id ?? "") !== String(subjectiveEpisodeId)
+    ) {
+      continue;
+    }
+    const eventId = String(reference?.segmentation_event_id ?? "").trim();
+    const event = object(
+      object(worldState?.subjective_episode_segmentation_events)[eventId],
+    );
+    if (!Object.keys(event).length) continue;
+    projectedCharacter ??= event.character;
+    firstSourceTurnId ??= event.source_turn_id;
+    latestSourceTurnId = event.source_turn_id;
+    latestSegmentationEventId = event.segmentation_event_id;
+    explicitBindingPresent =
+      explicitBindingPresent
+      || event.resolution === "preserve_explicit_binding";
+    segmentationEventIds.push(event.segmentation_event_id);
+    for (const item of array(event.source_memory_refs)) {
+      const memoryId = String(item?.memory_id ?? "").trim();
+      if (memoryId) sourceMemoryIds.add(memoryId);
+    }
+  }
+
+  if (!projectedCharacter || !segmentationEventIds.length) return null;
+  return {
+    subjective_episode_id: subjectiveEpisodeId,
+    character: projectedCharacter,
+    source_memory_ids: [...sourceMemoryIds]
+      .sort((left, right) => left.localeCompare(right, "en")),
+    segmentation_event_ids: segmentationEventIds,
+    first_source_turn_id: firstSourceTurnId,
+    latest_source_turn_id: latestSourceTurnId,
+    latest_segmentation_event_id: latestSegmentationEventId,
+    explicit_binding_present: explicitBindingPresent,
+    subjective_not_world_truth: true,
+  };
+}
+
+function phase67bValidateEvidenceRefs(value) {
+  const supported = new Set([
+    "explicit_programmatic_binding",
+  ]);
+  const strong = new Set([
+    "explicit_programmatic_binding",
+  ]);
+  const refs = array(value);
+  const normalized = refs.map((item) => ({
+    kind: String(item?.kind ?? "").trim(),
+    source_ref: String(item?.source_ref ?? "").trim(),
+    source_hash: String(item?.source_hash ?? "").trim(),
+  }));
+  if (
+    normalized.some((item) =>
+      !supported.has(item.kind)
+      || !item.source_ref
+      || !item.source_hash)
+  ) {
+    const error = new Error("Autobiographical LifeEvent evidence references are invalid.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVIDENCE_INVALID";
+    throw error;
+  }
+  const sorted = [...normalized].sort((left, right) => {
+    const kind = left.kind.localeCompare(right.kind, "en");
+    if (kind !== 0) return kind;
+    const ref = left.source_ref.localeCompare(right.source_ref, "en");
+    if (ref !== 0) return ref;
+    return left.source_hash.localeCompare(right.source_hash, "en");
+  });
+  if (!sameValue(normalized, sorted)) {
+    const error = new Error("Autobiographical LifeEvent evidence references must use deterministic ordering.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVIDENCE_ORDER_INVALID";
+    throw error;
+  }
+  const keys = normalized.map((item) =>
+    `${item.kind}\u0000${item.source_ref}\u0000${item.source_hash}`,
+  );
+  if (new Set(keys).size !== keys.length) {
+    const error = new Error("Autobiographical LifeEvent evidence references contain duplicates.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVIDENCE_DUPLICATE";
+    throw error;
+  }
+  return {
+    refs: normalized,
+    strong_count: normalized.filter((item) => strong.has(item.kind)).length,
+  };
+}
+
+function assertPhase67BAutobiographicalLifeEventMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "autobiographical_life_event_organization_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error(
+        "AutobiographicalLifeEventOrganizationEvent fields are immutable after creation.",
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const eventId = String(worldPath[1] ?? "");
+    const existing = getAtPath(worldState, worldPath);
+    if (existing !== undefined && existing !== null) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} is immutable and cannot be overwritten.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    const next = mutation?.to;
+    if (
+      !isObject(next)
+      || next.schema_version
+        !== phase67bAutobiographicalLifeEventOrganizationEventSchema
+      || next.version !== phase67bAutobiographicalLifeEventVersion
+      || next.immutable !== true
+      || String(next.organization_event_id ?? "") !== eventId
+      || !String(next.organization_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !String(next.source_segmentation_event_id ?? "").trim()
+      || !String(next.source_segmentation_event_hash ?? "").trim()
+      || !String(next.subjective_episode_id ?? "").trim()
+      || !String(next.source_episode_hash ?? "").trim()
+      || !String(next.life_event_id ?? "").trim()
+      || !["start_new_life_event", "attach_to_open_life_event"].includes(next.resolution)
+      || next.status !== "autobiographical_life_event_organization_recorded"
+      || next.subjective_not_world_truth !== true
+      || next.world_truth_verified !== false
+      || next.confidence !== null
+      || next.probability !== null
+      || next.memory_content_copied !== false
+      || next.episode_content_copied !== false
+      || next.world_event_identity_promoted !== false
+      || next.world_turn_identity_promoted !== false
+      || next.subjective_episode_identity_promoted !== false
+      || next.character_brain_direct_write !== false
+    ) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} creation payload is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+
+    if (phase67bOrganizationEventHash(next) !== next.organization_event_hash) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} failed immutable hash verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+
+    const expectedQueueTurnId =
+      `${next.source_turn_id}:autobiographical_life_event`;
+    if (String(queueTurnId ?? "") !== expectedQueueTurnId) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} must use its exact source-turn queue.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+
+    const sourceEvent = object(
+      object(worldState?.subjective_episode_segmentation_events)[
+        next.source_segmentation_event_id
+      ],
+    );
+    if (
+      !Object.keys(sourceEvent).length
+      || sourceEvent.schema_version
+        !== phase67aSubjectiveEpisodeSegmentationEventSchema
+      || sourceEvent.version !== phase67aSubjectiveEpisodeSegmentationVersion
+      || phase67bSegmentationEventHash(sourceEvent)
+        !== sourceEvent.segmentation_event_hash
+      || sourceEvent.segmentation_event_hash
+        !== next.source_segmentation_event_hash
+      || sourceEvent.source_turn_id !== next.source_turn_id
+      || phase67aCharacterKey(sourceEvent.character)
+        !== phase67aCharacterKey(next.character)
+      || sourceEvent.subjective_episode_id !== next.subjective_episode_id
+    ) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} does not pin a canonical Phase67A source event.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_SOURCE_SEGMENTATION_MISMATCH";
+      throw error;
+    }
+
+    const sourceEpisode = phase67bEffectiveEpisodeRecord(
+      worldState,
+      next.character,
+      next.subjective_episode_id,
+    );
+    if (
+      !sourceEpisode
+      || hashAgentRunValue(sourceEpisode) !== next.source_episode_hash
+    ) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} does not pin the canonical effective subjective episode.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_SOURCE_EPISODE_HASH_MISMATCH";
+      throw error;
+    }
+
+    let previousEvent = null;
+    if (next.previous_organization_event_id || next.previous_organization_event_hash) {
+      previousEvent = object(
+        object(worldState?.autobiographical_life_event_organization_events)[
+          next.previous_organization_event_id
+        ],
+      );
+      if (
+        !Object.keys(previousEvent).length
+        || previousEvent.organization_event_hash
+          !== next.previous_organization_event_hash
+        || phase67bOrganizationEventHash(previousEvent)
+          !== previousEvent.organization_event_hash
+        || phase67aCharacterKey(previousEvent.character)
+          !== phase67aCharacterKey(next.character)
+      ) {
+        const error = new Error(
+          `AutobiographicalLifeEventOrganizationEvent ${eventId} has an invalid previous-event hash chain.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_PREVIOUS_EVENT_MISMATCH";
+        throw error;
+      }
+    } else if (
+      next.previous_organization_event_id !== null
+      || next.previous_organization_event_hash !== null
+    ) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} has a partial previous-event reference.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_PREVIOUS_EVENT_MISMATCH";
+      throw error;
+    }
+
+    const expectedPreviousOpen =
+      previousEvent?.resulting_open_life_event_id ?? null;
+    if (next.previous_open_life_event_id !== expectedPreviousOpen) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} does not preserve the previous open LifeEvent.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_OPEN_EVENT_MISMATCH";
+      throw error;
+    }
+
+    const evidence = object(next.organization_evidence);
+    const evidenceValidation = phase67bValidateEvidenceRefs(evidence.evidence_refs);
+    const semantics = object(next.source_semantics);
+    if (
+      evidence.temporal_contiguity_alone_is_sufficient !== false
+      || evidence.spatial_contiguity_alone_is_sufficient !== false
+      || evidence.hidden_world_state_used !== false
+      || evidence.numeric_similarity_threshold_used !== false
+      || evidence.llm_freeform_semantic_merge_used !== false
+      || semantics.phase67a_effective_subjective_episode_is_authoritative_source !== true
+      || semantics.episode_content_copied !== false
+      || semantics.memory_content_copied !== false
+      || semantics.repeated_event_category_modeled !== false
+      || semantics.personal_semantic_memory_modeled !== false
+      || semantics.one_primary_life_event_parent_per_episode !== true
+      || semantics.world_event_identity_promoted !== false
+      || semantics.world_turn_identity_promoted !== false
+      || semantics.subjective_episode_identity_promoted !== false
+    ) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} violates the Phase67B cognition boundary.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+
+    if (next.resolution === "attach_to_open_life_event") {
+      const resolverViewHash = String(evidence.resolver_view_hash ?? "").trim();
+      const expectedEvidence = resolverViewHash
+        ? [{
+          kind: "explicit_programmatic_binding",
+          source_ref: `phase67b_resolver_view:${resolverViewHash}`,
+          source_hash: resolverViewHash,
+        }]
+        : [];
+      if (
+        !expectedPreviousOpen
+        || next.life_event_id !== expectedPreviousOpen
+        || next.closes_previous_life_event_id !== null
+        || next.resulting_open_life_event_id !== expectedPreviousOpen
+        || evidenceValidation.strong_count !== 1
+        || !resolverViewHash
+        || !sameValue(evidenceValidation.refs, expectedEvidence)
+      ) {
+        const error = new Error(
+          `AutobiographicalLifeEventOrganizationEvent ${eventId} lacks verified explicit programmatic binding provenance for cross-episode attachment.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVIDENCE_PROVENANCE_MISMATCH";
+        throw error;
+      }
+    } else {
+      const expectedLifeEventId =
+        `autobiographical_life_event_${hashAgentRunValue({
+          version: phase67bAutobiographicalLifeEventVersion,
+          character: phase67aCharacterKey(next.character),
+          first_subjective_episode_id: next.subjective_episode_id,
+          previous_organization_event_hash:
+            next.previous_organization_event_hash ?? null,
+          identity_source: "phase67b_subjective_episode_lineage",
+        }).slice(0, 24)}`;
+      if (
+        next.life_event_id !== expectedLifeEventId
+        || next.closes_previous_life_event_id !== expectedPreviousOpen
+        || next.resulting_open_life_event_id !== next.life_event_id
+      ) {
+        const error = new Error(
+          `AutobiographicalLifeEventOrganizationEvent ${eventId} failed deterministic LifeEvent identity verification.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_IDENTITY_MISMATCH";
+        throw error;
+      }
+    }
+
+    const expectedEventId =
+      `autobiographical_life_event_organization_event_${hashAgentRunValue({
+        version: phase67bAutobiographicalLifeEventVersion,
+        character: phase67aCharacterKey(next.character),
+        source_turn_id: next.source_turn_id,
+        source_segmentation_event_id: next.source_segmentation_event_id,
+        source_segmentation_event_hash: next.source_segmentation_event_hash,
+        subjective_episode_id: next.subjective_episode_id,
+        source_episode_hash: next.source_episode_hash,
+        resolution: next.resolution,
+        life_event_id: next.life_event_id,
+        previous_organization_event_hash:
+          next.previous_organization_event_hash ?? null,
+      }).slice(0, 24)}`;
+    if (eventId !== expectedEventId) {
+      const error = new Error(
+        `AutobiographicalLifeEventOrganizationEvent ${eventId} failed deterministic event identity verification.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+    return;
+  }
+
+  if (worldPath[0] !== "autobiographical_life_event_organization_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error(
+      "Autobiographical LifeEvent organization history may not be mutated through nested paths.",
+    );
+    error.code =
+      "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  assertPhase67BLifeEventHistoryPrefix(oldHistory, newHistory);
+  const seenEventIds = new Set();
+  const seenEpisodeKeys = new Set();
+  const latestByCharacter = new Map();
+  const openByCharacter = new Map();
+
+  for (const reference of oldHistory) {
+    const eventId = String(reference?.organization_event_id ?? "").trim();
+    const character = String(reference?.character ?? "").trim();
+    const episodeId = String(reference?.subjective_episode_id ?? "").trim();
+    if (eventId) seenEventIds.add(eventId);
+    if (character && episodeId) {
+      seenEpisodeKeys.add(`${phase67aCharacterKey(character)}:${episodeId}`);
+    }
+    if (eventId && character) {
+      const event = object(
+        object(worldState?.autobiographical_life_event_organization_events)[eventId],
+      );
+      if (Object.keys(event).length) {
+        const key = phase67aCharacterKey(character);
+        latestByCharacter.set(key, event);
+        openByCharacter.set(key, event.resulting_open_life_event_id);
+      }
+    }
+  }
+
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.organization_event_id ?? "").trim();
+    const character = String(reference?.character ?? "").trim();
+    const episodeId = String(reference?.subjective_episode_id ?? "").trim();
+    const lifeEventId = String(reference?.life_event_id ?? "").trim();
+    if (
+      !isObject(reference)
+      || reference.schema_version
+        !== phase67bAutobiographicalLifeEventOrganizationHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.organization_event_hash ?? "").trim()
+      || !character
+      || !String(reference.source_turn_id ?? "").trim()
+      || !String(reference.source_segmentation_event_id ?? "").trim()
+      || !String(reference.source_segmentation_event_hash ?? "").trim()
+      || !episodeId
+      || !String(reference.source_episode_hash ?? "").trim()
+      || !lifeEventId
+      || !["start_new_life_event", "attach_to_open_life_event"].includes(reference.resolution)
+      || reference.status !== "autobiographical_life_event_organization_recorded"
+    ) {
+      const error = new Error(
+        `Autobiographical LifeEvent history reference at index ${index} is invalid.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    const episodeKey = `${phase67aCharacterKey(character)}:${episodeId}`;
+    if (seenEventIds.has(eventId) || seenEpisodeKeys.has(episodeKey)) {
+      const error = new Error(
+        `Autobiographical LifeEvent history duplicates an event or primary episode parent at index ${index}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_EPISODE_MULTI_PARENT_FORBIDDEN";
+      throw error;
+    }
+    const event = object(
+      object(worldState?.autobiographical_life_event_organization_events)[eventId],
+    );
+    if (
+      !Object.keys(event).length
+      || phase67bOrganizationEventHash(event) !== event.organization_event_hash
+    ) {
+      const error = new Error(
+        `Autobiographical LifeEvent history cannot resolve canonical event ${eventId}.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+    const key = phase67aCharacterKey(character);
+    const previous = latestByCharacter.get(key) ?? null;
+    const expectedOpen = openByCharacter.get(key) ?? null;
+    if (
+      reference.organization_event_hash !== event.organization_event_hash
+      || reference.character !== event.character
+      || reference.source_turn_id !== event.source_turn_id
+      || reference.source_segmentation_event_id !== event.source_segmentation_event_id
+      || reference.source_segmentation_event_hash !== event.source_segmentation_event_hash
+      || reference.subjective_episode_id !== event.subjective_episode_id
+      || reference.source_episode_hash !== event.source_episode_hash
+      || reference.life_event_id !== event.life_event_id
+      || reference.resolution !== event.resolution
+      || reference.previous_organization_event_id !== event.previous_organization_event_id
+      || reference.previous_organization_event_hash !== event.previous_organization_event_hash
+      || event.previous_organization_event_id
+        !== (previous?.organization_event_id ?? null)
+      || event.previous_organization_event_hash
+        !== (previous?.organization_event_hash ?? null)
+      || event.previous_open_life_event_id !== expectedOpen
+      || event.resulting_open_life_event_id !== event.life_event_id
+      || (
+        event.resolution === "attach_to_open_life_event"
+        && event.life_event_id !== expectedOpen
+      )
+      || (
+        event.resolution === "start_new_life_event"
+        && event.closes_previous_life_event_id !== expectedOpen
+      )
+    ) {
+      const error = new Error(
+        `Autobiographical LifeEvent history reference ${eventId} breaks its canonical per-character chain.`,
+      );
+      error.code =
+        "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_EVENT_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+    seenEventIds.add(eventId);
+    seenEpisodeKeys.add(episodeKey);
+    latestByCharacter.set(key, event);
+    openByCharacter.set(key, event.life_event_id);
+  }
+}
+
 function assertPhase66ASubjectiveBeliefRevisionMutation(
   worldState,
   worldPath,
@@ -2945,6 +3497,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase67BAutobiographicalLifeEventMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -3023,6 +3581,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase67ASubjectiveEpisodeSegmentationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase67BAutobiographicalLifeEventMutation(
         executed,
         worldPath,
         mutation,
@@ -3136,6 +3700,18 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase67a_per_character_segmentation_hash_chain_enforced: true,
       direct_nested_subjective_episode_segmentation_history_mutation_rejected: true,
       phase67a_historical_segmentation_rewrite_rejected: true,
+      phase67b_autobiographical_life_event_event_write_once_enforced: true,
+      phase67b_autobiographical_life_event_event_content_address_verified: true,
+      phase67b_source_segmentation_event_hash_pinning_enforced: true,
+      phase67b_source_effective_episode_hash_pinning_enforced: true,
+      phase67b_cross_episode_attach_strong_evidence_required: true,
+      phase67b_explicit_programmatic_binding_provenance_verified: true,
+      phase67b_unverifiable_goal_task_project_relationship_evidence_rejected: true,
+      phase67b_one_primary_life_event_parent_per_episode_enforced: true,
+      phase67b_autobiographical_life_event_history_append_only_enforced: true,
+      phase67b_per_character_life_event_hash_chain_enforced: true,
+      direct_nested_autobiographical_life_event_history_mutation_rejected: true,
+      phase67b_historical_life_event_organization_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
