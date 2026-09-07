@@ -795,6 +795,7 @@ const steps = [
   ["Phase 68B structured self model", ["tests/phase68/phase68b-structured-self-model.test.mjs"]],
   ["Phase 68C structured self-model revision", ["tests/phase68/phase68c-self-model-revision.test.mjs"]],
   ["Phase 68D motivation / goal integration", ["tests/phase68/phase68d-motivation-goal-integration.test.mjs"]],
+  ["Phase 69A goal-to-plan implementation intentions", ["tests/phase69/phase69a-goal-to-plan-implementation-intention.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
