@@ -99,6 +99,12 @@ import {
   worldSimulationGoalImplementationIntentionActivationVersion,
 } from "./world-simulation-goal-implementation-intention-activation-service.mjs";
 import {
+  buildWorldSimulationGoalImplementationIntentionExecutionFeedback,
+  buildWorldSimulationGoalImplementationIntentionExecutionFeedbackContract,
+  buildWorldSimulationGoalImplementationIntentionExecutionFeedbackResolverView,
+  worldSimulationGoalImplementationIntentionExecutionFeedbackVersion,
+} from "./world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3148,6 +3154,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationStructuredSelfModelRevisionContract(),
     implementation_intention_activation_guidance:
       buildWorldSimulationGoalImplementationIntentionActivationContract(),
+    implementation_intention_execution_feedback:
+      buildWorldSimulationGoalImplementationIntentionExecutionFeedbackContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -5997,6 +6005,83 @@ async function resolveStructuredSelfModelRevisionDecisions(
   };
 }
 
+async function resolveImplementationIntentionExecutionFeedbackDecisions(
+  priorCommittedWorldState,
+  preparedTurn,
+  selectedActionIntents,
+  actionOutcomes,
+  options,
+) {
+  const resolver =
+    typeof options.implementationIntentionExecutionFeedbackResolver === "function"
+      ? options.implementationIntentionExecutionFeedbackResolver
+      : null;
+  const resolverView =
+    buildWorldSimulationGoalImplementationIntentionExecutionFeedbackResolverView({
+      world_state: priorCommittedWorldState,
+      turn_id: preparedTurn.turn_id,
+      selected_action_intents: selectedActionIntents,
+      action_outcomes: actionOutcomes,
+      activation_by_character: {},
+    });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_execution_feedback: true,
+        prior_turn_committed_plan_state_only: true,
+        authoritative_action_outcome_evidence_only: true,
+        explicit_completion_required: true,
+        action_success_implies_plan_completion: false,
+        plan_completion_implies_goal_achievement: false,
+        goal_achievement_authority_claimed: false,
+        action_selection_authority_claimed: false,
+        world_state_exposed_to_resolver: false,
+        raw_memory_store_exposed_to_resolver: false,
+        hidden_retrieval_graph_exposed_to_resolver: false,
+        numeric_scoring_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "implementationIntentionExecutionFeedbackResolver must return an array of explicit plan-ref feedback decisions.",
+    );
+    error.code =
+      "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    source: "programmatic_implementation_intention_execution_feedback_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      prior_turn_committed_plan_state_only: true,
+      authoritative_action_outcome_evidence_only: true,
+      explicit_completion_required: true,
+      action_success_implies_plan_completion: false,
+      plan_completion_implies_goal_achievement: false,
+      goal_achievement_authority_claimed: false,
+      action_selection_authority_claimed: false,
+      world_state_exposed_to_resolver: false,
+      raw_memory_store_exposed_to_resolver: false,
+      hidden_retrieval_graph_exposed_to_resolver: false,
+      numeric_scoring_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -6971,6 +7056,58 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase69D consumes only the plan state committed before this turn, paired
+  // with this turn's authoritative causal outcome. Same-turn cognitive writes
+  // cannot become retroactive execution targets, and outcome labels never
+  // imply completion without an explicit resolver decision.
+  const implementationIntentionExecutionFeedbackDecisionResolution =
+    await resolveImplementationIntentionExecutionFeedbackDecisions(
+      snapshot.state,
+      preparedTurn,
+      selected,
+      array(causalResolution.action_outcomes),
+      options,
+    );
+
+  const implementationIntentionExecutionFeedback =
+    buildWorldSimulationGoalImplementationIntentionExecutionFeedback({
+      world_state:
+        subjectiveBeliefRevisionMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      feedback_decisions:
+        implementationIntentionExecutionFeedbackDecisionResolution.decisions,
+      resolver_view:
+        implementationIntentionExecutionFeedbackDecisionResolution.resolver_view,
+    });
+
+  const implementationIntentionExecutionFeedbackMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:goal_implementation_intention_execution_feedback`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveBeliefRevisionMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        implementationIntentionExecutionFeedback.result.state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const implementationIntentionExecutionFeedbackMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveBeliefRevisionMutationExecution.next_world_state,
+      preview_world_state:
+        implementationIntentionExecutionFeedback.result.preview_world_state,
+      queue:
+        implementationIntentionExecutionFeedbackMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7031,7 +7168,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state,
+      next_world_state: implementationIntentionExecutionFeedbackMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -7358,6 +7495,23 @@ export async function resolveWorldSimulationTurn(
         cloneJson(subjectiveBeliefRevisionMutationQueue),
       subjective_belief_revision_mutation_execution:
         cloneJson(subjectiveBeliefRevisionMutationExecution.execution),
+      goal_implementation_intention_execution_feedback_decision_resolution: {
+        version: worldSimulationGoalImplementationIntentionExecutionFeedbackVersion,
+        decisions:
+          cloneJson(implementationIntentionExecutionFeedbackDecisionResolution.decisions),
+        resolver_view_hash:
+          implementationIntentionExecutionFeedbackDecisionResolution
+            .resolver_view
+            .resolver_view_hash,
+        audit:
+          cloneJson(implementationIntentionExecutionFeedbackDecisionResolution.audit),
+      },
+      goal_implementation_intention_execution_feedback:
+        cloneJson(implementationIntentionExecutionFeedback),
+      goal_implementation_intention_execution_feedback_mutation_queue:
+        cloneJson(implementationIntentionExecutionFeedbackMutationQueue),
+      goal_implementation_intention_execution_feedback_mutation_execution:
+        cloneJson(implementationIntentionExecutionFeedbackMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -7933,6 +8087,33 @@ export async function resolveWorldSimulationTurn(
         false,
       confidence_probability_modeled:
         false,
+    },
+    goal_implementation_intention_execution_feedback: {
+      version:
+        worldSimulationGoalImplementationIntentionExecutionFeedbackVersion,
+      resolver_used:
+        implementationIntentionExecutionFeedbackDecisionResolution.audit.resolver_used === true,
+      feedback_decision_count:
+        implementationIntentionExecutionFeedback.result.feedback_decision_count,
+      created_feedback_event_count:
+        implementationIntentionExecutionFeedback.result.execution_feedback_events_created.length,
+      appended_history_reference_count:
+        implementationIntentionExecutionFeedback.result.history_references_appended.length,
+      effective_execution_projection_hash:
+        implementationIntentionExecutionFeedback.result.effective_execution_projection.projection_hash,
+      mutation_count:
+        implementationIntentionExecutionFeedbackMutationQueue.mutation_count,
+      authoritative_executor:
+        implementationIntentionExecutionFeedbackMutationExecution.execution.version,
+      prior_turn_committed_plan_state_only: true,
+      authoritative_action_outcome_evidence_only: true,
+      explicit_completion_required: true,
+      completed_plan_history_preserved: true,
+      action_success_implies_plan_completion: false,
+      plan_completion_implies_goal_achievement: false,
+      goal_achievement_authority_claimed: false,
+      action_selection_authority_claimed: false,
+      numeric_scoring_modeled: false,
     },
     committed_character_current_mind: {
       current_mind_contract_version:

@@ -724,7 +724,7 @@ assert.ok(revisionExecutionIndex > revisionIndex);
 assert.ok(commitIndex > revisionExecutionIndex);
 assert.ok(
   loopSource.includes(
-    "next_world_state: subjectiveBeliefRevisionMutationExecution.next_world_state",
+    "next_world_state: implementationIntentionExecutionFeedbackMutationExecution.next_world_state",
   ),
   "Phase66A final state must still come from the authoritative Phase62K executor",
 );

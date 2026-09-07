@@ -1,5 +1,9 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
-import { projectWorldSimulationRevisedGoalImplementationIntentionsForCharacter } from "./world-simulation-goal-implementation-intention-revision-service.mjs";
+import {
+  projectWorldSimulationEffectiveRevisedGoalImplementationIntentions,
+  projectWorldSimulationRevisedGoalImplementationIntentionsForCharacter,
+} from "./world-simulation-goal-implementation-intention-revision-service.mjs";
+import { projectWorldSimulationEffectiveGoalImplementationIntentionExecution } from "./world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
 
 export const worldSimulationGoalImplementationIntentionActivationVersion = "phase69c-goal-implementation-intention-activation-v1";
 export const goalImplementationIntentionActivationProjectionVersion = "phase69c-implementation-intention-activation-projection-v1";
@@ -80,27 +84,44 @@ export function buildWorldSimulationGoalImplementationIntentionActivationResolve
   const worldState = cloneJson(object(input.world_state));
   const character = boundedString(input.character, "character");
   const currentTurnId = boundedString(input.current_turn_id, "current_turn_id");
-  const boundedPlans = projectWorldSimulationRevisedGoalImplementationIntentionsForCharacter({
+  // Preserve Phase69B's prior-turn contamination guard, then rebuild the
+  // bounded plan list from the effective Phase69D execution projection so
+  // explicitly completed plans are prospectively inactive without deleting
+  // their historical cue-response association.
+  projectWorldSimulationRevisedGoalImplementationIntentionsForCharacter({
     world_state: worldState,
     character,
     current_turn_id: currentTurnId,
   });
+  const effectiveRevision = projectWorldSimulationEffectiveRevisedGoalImplementationIntentions({ world_state: worldState });
+  const effectiveExecution = projectWorldSimulationEffectiveGoalImplementationIntentionExecution({ world_state: worldState });
+  const revisionRecords = Object.entries(effectiveRevision.plans_by_character ?? {})
+    .find(([name]) => String(name).trim().toLocaleLowerCase("zh-Hant-TW") === character.toLocaleLowerCase("zh-Hant-TW"))?.[1] ?? {};
+  const executionRecords = Object.entries(effectiveExecution.plans_by_character ?? {})
+    .find(([name]) => String(name).trim().toLocaleLowerCase("zh-Hant-TW") === character.toLocaleLowerCase("zh-Hant-TW"))?.[1] ?? {};
   const currentContext = sanitizeBoundedContext(object(input.current_context));
-  const plans = array(boundedPlans.character_view?.implementation_intentions)
-    .slice(0, goalImplementationIntentionActivationMaxItems)
-    .map((plan, index) => ({
-      plan_ref: `phase69c_plan_${hashAgentRunValue({
-        version: worldSimulationGoalImplementationIntentionActivationVersion,
-        character: character.toLocaleLowerCase("zh-Hant-TW"),
-        current_turn_id: currentTurnId,
-        index,
-        plan,
-      }).slice(0, 24)}`,
-      if_cue: cloneJson(plan.if_cue),
-      then_response: cloneJson(plan.then_response),
-      reconsideration_state: plan.reconsideration_state,
-      subjective_prospective_plan: true,
-    }));
+  const eligiblePlans = Object.values(object(revisionRecords))
+    .filter((plan) => ["active", "challenged"].includes(plan.state))
+    .filter((plan) => executionRecords[plan.implementation_intention_id]?.completed !== true)
+    .sort((left, right) => Number(right.latest_history_index ?? 0) - Number(left.latest_history_index ?? 0)
+      || String(left.implementation_intention_id).localeCompare(String(right.implementation_intention_id), "en"))
+    .slice(0, goalImplementationIntentionActivationMaxItems);
+  const plans = eligiblePlans.map((plan, index) => ({
+    plan_ref: `phase69c_plan_${hashAgentRunValue({
+      version: worldSimulationGoalImplementationIntentionActivationVersion,
+      character: character.toLocaleLowerCase("zh-Hant-TW"),
+      current_turn_id: currentTurnId,
+      index,
+      implementation_intention_id: plan.implementation_intention_id,
+      cue_descriptor: plan.cue_descriptor,
+      response_descriptor: plan.response_descriptor,
+      reconsideration_state: plan.state,
+    }).slice(0, 24)}`,
+    if_cue: cloneJson(plan.cue_descriptor),
+    then_response: cloneJson(plan.response_descriptor),
+    reconsideration_state: plan.state,
+    subjective_prospective_plan: true,
+  }));
   const view = {
     version: worldSimulationGoalImplementationIntentionActivationVersion,
     character,

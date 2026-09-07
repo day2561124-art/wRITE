@@ -798,6 +798,7 @@ const steps = [
   ["Phase 69A goal-to-plan implementation intentions", ["tests/phase69/phase69a-goal-to-plan-implementation-intention.test.mjs"]],
   ["Phase 69B implementation-intention revision", ["tests/phase69/phase69b-implementation-intention-revision.test.mjs"]],
   ["Phase 69C plan-cue activation / action-proposal guidance", ["tests/phase69/phase69c-plan-cue-activation-action-guidance.test.mjs"]],
+  ["Phase 69D plan execution feedback / completion monitoring", ["tests/phase69/phase69d-plan-execution-feedback-completion.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

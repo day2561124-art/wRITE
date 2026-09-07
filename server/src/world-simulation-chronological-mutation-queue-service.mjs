@@ -5773,6 +5773,170 @@ function assertPhase69BGoalImplementationIntentionRevisionMutation(worldState, w
   }
 }
 
+const phase69dExecutionFeedbackEventSchema = "phase69d-goal-implementation-intention-execution-feedback-event-v1";
+const phase69dExecutionFeedbackHistorySchema = "phase69d-goal-implementation-intention-execution-feedback-history-ref-v1";
+const phase69dExecutionFeedbackVersion = "phase69d-goal-implementation-intention-execution-feedback-v1";
+const phase69dExecutionFeedbackOperations = new Set(["attempted", "fulfilled", "failed", "completed"]);
+function phase69dExecutionFeedbackEventHash(event) {
+  const body = cloneJson(event);
+  delete body.execution_feedback_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase69dHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Goal implementation-intention execution-feedback history is append-only.");
+    error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Goal implementation-intention execution-feedback history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase69dReplayFeedbackState(worldState) {
+  const latestByCharacter = new Map();
+  const completedPlans = new Set();
+  const seenEventIds = new Set();
+  for (const ref of array(worldState.goal_implementation_intention_execution_feedback_history)) {
+    const event = object(object(worldState.goal_implementation_intention_execution_feedback_events)[ref?.execution_feedback_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    if (!character) continue;
+    const planKey = `${character}\u0000${event.implementation_intention_id}`;
+    if (event.operation === "completed") completedPlans.add(planKey);
+    latestByCharacter.set(character, event);
+    seenEventIds.add(event.execution_feedback_event_id);
+  }
+  return { latestByCharacter, completedPlans, seenEventIds };
+}
+function assertPhase69DGoalImplementationIntentionExecutionFeedbackMutation(worldState, worldPath, mutation, queueTurnId = null) {
+  if (worldPath[0] === "goal_implementation_intention_execution_feedback_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("GoalImplementationIntentionExecutionFeedbackEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase69dExecutionFeedbackEventSchema
+        || next.version !== phase69dExecutionFeedbackVersion
+        || next.immutable !== true
+        || next.execution_feedback_event_id !== eventId
+        || !String(next.execution_feedback_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || !phase69dExecutionFeedbackOperations.has(next.operation)
+        || !String(next.implementation_intention_id ?? "").trim()
+        || !String(next.goal_id ?? "").trim()
+        || !String(next.plan_projection_hash ?? "").trim()
+        || !String(next.selected_action_evidence_hash ?? "").trim()
+        || !String(next.causal_outcome_evidence_hash ?? "").trim()
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.authoritative_action_outcome_evidence !== true
+        || next.plan_completion_is_explicit !== true
+        || next.action_success_implies_plan_completion !== false
+        || next.plan_completion_implies_goal_achievement !== false
+        || next.goal_achievement_authority !== false
+        || next.action_selection_authority !== false
+        || next.utility_score !== null
+        || next.priority_score !== null
+        || next.success_probability !== null
+        || next.confidence !== null
+        || next.character_brain_direct_write !== false
+        || next.status !== "goal_implementation_intention_execution_feedback_recorded") {
+      const error = new Error(`GoalImplementationIntentionExecutionFeedbackEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_EVENT_INVALID";
+      throw error;
+    }
+    if (phase69dExecutionFeedbackEventHash(next) !== next.execution_feedback_event_hash) {
+      const error = new Error(`GoalImplementationIntentionExecutionFeedbackEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:goal_implementation_intention_execution_feedback`) {
+      const error = new Error(`GoalImplementationIntentionExecutionFeedbackEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const planReplay = phase69bReplayRevisionState(worldState);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const planKey = `${character}\u0000${next.implementation_intention_id}`;
+    if (!["active", "challenged"].includes(planReplay.planState.get(planKey))
+        || planReplay.planGoal.get(planKey) !== next.goal_id) {
+      const error = new Error(`Phase69D target plan ${next.implementation_intention_id} is not an active same-character canonical plan.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_TARGET_INVALID";
+      throw error;
+    }
+    const replay = phase69dReplayFeedbackState(worldState);
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (replay.completedPlans.has(planKey)) {
+      const error = new Error(`Phase69D target plan ${next.implementation_intention_id} is already completed.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_AFTER_COMPLETION_FORBIDDEN";
+      throw error;
+    }
+    if (replay.seenEventIds.has(eventId)
+        || next.previous_execution_feedback_event_id !== (previous?.execution_feedback_event_id ?? null)
+        || next.previous_execution_feedback_event_hash !== (previous?.execution_feedback_event_hash ?? null)) {
+      const error = new Error(`GoalImplementationIntentionExecutionFeedbackEvent ${eventId} breaks its per-character chain.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "goal_implementation_intention_execution_feedback_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Goal implementation-intention execution-feedback history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase69dHistoryPrefix(oldHistory, newHistory);
+  const replay = phase69dReplayFeedbackState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.goal_implementation_intention_execution_feedback_events)[ref?.execution_feedback_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (!isObject(ref)
+        || ref.schema_version !== phase69dExecutionFeedbackHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.execution_feedback_event_id ?? "").trim()
+        || !String(ref.execution_feedback_event_hash ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || !phase69dExecutionFeedbackOperations.has(ref.operation)
+        || !String(ref.implementation_intention_id ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || ref.status !== "goal_implementation_intention_execution_feedback_recorded"
+        || replay.seenEventIds.has(ref.execution_feedback_event_id)
+        || !Object.keys(event).length
+        || phase69dExecutionFeedbackEventHash(event) !== event.execution_feedback_event_hash
+        || ref.execution_feedback_event_hash !== event.execution_feedback_event_hash
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.operation !== event.operation
+        || ref.implementation_intention_id !== event.implementation_intention_id
+        || ref.goal_id !== event.goal_id
+        || ref.previous_execution_feedback_event_id !== event.previous_execution_feedback_event_id
+        || ref.previous_execution_feedback_event_hash !== event.previous_execution_feedback_event_hash
+        || event.previous_execution_feedback_event_id !== (previous?.execution_feedback_event_id ?? null)
+        || event.previous_execution_feedback_event_hash !== (previous?.execution_feedback_event_hash ?? null)) {
+      const error = new Error(`Goal implementation-intention execution-feedback history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_EXECUTION_FEEDBACK_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.execution_feedback_event_id);
+    replay.latestByCharacter.set(character, event);
+    if (event.operation === "completed") replay.completedPlans.add(`${character}\u0000${event.implementation_intention_id}`);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -5930,6 +6094,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase69DGoalImplementationIntentionExecutionFeedbackMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -6062,6 +6232,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase69BGoalImplementationIntentionRevisionMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase69DGoalImplementationIntentionExecutionFeedbackMutation(
         executed,
         worldPath,
         mutation,
@@ -6281,6 +6457,19 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase69b_numeric_utility_priority_probability_feasibility_rejected: true,
       direct_nested_goal_implementation_intention_revision_history_mutation_rejected: true,
       phase69b_historical_goal_implementation_intention_revision_rewrite_rejected: true,
+      phase69d_goal_implementation_intention_execution_feedback_event_write_once_enforced: true,
+      phase69d_goal_implementation_intention_execution_feedback_event_content_address_verified: true,
+      phase69d_active_same_character_target_plan_enforced: true,
+      phase69d_authoritative_action_outcome_evidence_required: true,
+      phase69d_explicit_completion_deactivation_enforced: true,
+      phase69d_action_success_does_not_imply_plan_completion: true,
+      phase69d_plan_completion_does_not_imply_goal_achievement: true,
+      phase69d_feedback_after_completion_rejected: true,
+      phase69d_goal_implementation_intention_execution_feedback_history_append_only_enforced: true,
+      phase69d_per_character_execution_feedback_hash_chain_enforced: true,
+      phase69d_numeric_success_utility_priority_probability_confidence_rejected: true,
+      direct_nested_goal_implementation_intention_execution_feedback_history_mutation_rejected: true,
+      phase69d_historical_goal_implementation_intention_execution_feedback_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
