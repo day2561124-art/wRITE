@@ -4933,6 +4933,7 @@ function assertPhase68CStructuredSelfModelRevisionMutation(
   mutation,
   queueTurnId = null,
 ) {
+  assertPhase68DMotivationalGoalMutation(worldState, worldPath, mutation, queueTurnId);
   if (worldPath[0] === "structured_self_model_revision_events") {
     if (worldPath.length !== 2) {
       const error = new Error("StructuredSelfModelRevisionEvent fields are immutable after creation.");
@@ -5133,6 +5134,208 @@ function assertPhase68CStructuredSelfModelRevisionMutation(
     }
     seen.add(reference.revision_event_id);
     latestByCharacter.set(character, event);
+  }
+}
+
+const phase68dMotivationalGoalEventSchema = "phase68d-motivational-goal-event-v1";
+const phase68dMotivationalGoalHistorySchema = "phase68d-motivational-goal-history-ref-v1";
+const phase68dMotivationalGoalVersion = "phase68d-motivation-goal-integration-v1";
+const phase68dGoalOperations = new Set(["propose", "commit", "suspend", "abandon"]);
+const phase68dGoalKinds = new Set(["achieve_state", "maintain_state", "avoid_state", "restore_state"]);
+
+function phase68dGoalEventHash(event) {
+  const body = cloneJson(event);
+  delete body.goal_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase68dHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Motivational goal history is append-only.");
+    error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Motivational goal history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase68dReplayGoalState(worldState) {
+  const latestByCharacter = new Map();
+  const stateByCharacterGoal = new Map();
+  for (const reference of array(worldState.motivational_goal_history)) {
+    const event = object(object(worldState.motivational_goal_events)[reference?.goal_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const goalId = String(event.goal_id ?? "").trim();
+    if (!character || !goalId) continue;
+    latestByCharacter.set(character, event);
+    const key = `${character}\u0000${goalId}`;
+    const nextState = event.operation === "propose" ? "proposed"
+      : event.operation === "commit" ? "committed"
+        : event.operation === "suspend" ? "suspended"
+          : event.operation === "abandon" ? "abandoned" : null;
+    if (nextState) stateByCharacterGoal.set(key, nextState);
+  }
+  return { latestByCharacter, stateByCharacterGoal };
+}
+function phase68dCanonicalSource(worldState, sourceRef) {
+  const eventId = String(sourceRef?.source_event_id ?? "").trim();
+  const expectedHash = String(sourceRef?.source_event_hash ?? "").trim();
+  if (!eventId || !expectedHash) return null;
+  let event = null;
+  let actualHash = null;
+  if (sourceRef?.source_kind === "phase68a_autobiographical_self_interpretation_event") {
+    event = object(object(worldState.autobiographical_self_interpretation_events)[eventId]);
+    actualHash = Object.keys(event).length ? phase68aInterpretationEventHash(event) : null;
+  } else if (sourceRef?.source_kind === "phase68b_structured_self_model_aspect_event") {
+    event = object(object(worldState.structured_self_model_aspect_events)[eventId]);
+    actualHash = Object.keys(event).length ? phase68bAspectEventHash(event) : null;
+  } else if (sourceRef?.source_kind === "phase68c_structured_self_model_revision_event") {
+    event = object(object(worldState.structured_self_model_revision_events)[eventId]);
+    actualHash = Object.keys(event).length ? phase68cRevisionEventHash(event) : null;
+  } else if (sourceRef?.source_kind === "phase66_subjective_belief_revision_event") {
+    event = object(object(worldState.subjective_belief_revision_events)[eventId]);
+    if (Object.keys(event).length) {
+      const body = cloneJson(event);
+      delete body.belief_revision_event_hash;
+      actualHash = hashAgentRunValue(body);
+    }
+  }
+  if (!event || !Object.keys(event).length || actualHash !== expectedHash) return null;
+  return event;
+}
+function assertPhase68DMotivationalGoalMutation(worldState, worldPath, mutation, queueTurnId = null) {
+  if (worldPath[0] === "motivational_goal_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("MotivationalGoalEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase68dMotivationalGoalEventSchema
+        || next.version !== phase68dMotivationalGoalVersion
+        || next.immutable !== true
+        || next.goal_event_id !== eventId
+        || !String(next.goal_event_hash ?? "").trim()
+        || !String(next.goal_id ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || !phase68dGoalOperations.has(next.operation)
+        || !phase68dGoalKinds.has(next.goal_kind)
+        || !String(next.domain ?? "").trim()
+        || !isObject(next.target_descriptor)
+        || !Array.isArray(next.motivation_basis_refs)
+        || next.motivation_basis_refs.length < 1
+        || !Array.isArray(next.motivation_relations)
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.subjective_not_world_truth !== true
+        || next.world_truth_verified !== false
+        || next.proposed_is_not_committed !== true
+        || next.committed_goal_is_selected_action !== false
+        || next.action_plan_generated !== false
+        || next.utility_score !== null
+        || next.priority_score !== null
+        || next.success_probability !== null
+        || next.character_brain_direct_write !== false
+        || next.status !== "motivational_goal_event_recorded") {
+      const error = new Error(`MotivationalGoalEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_EVENT_INVALID";
+      throw error;
+    }
+    if (phase68dGoalEventHash(next) !== next.goal_event_hash) {
+      const error = new Error(`MotivationalGoalEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:motivation_goal_integration`) {
+      const error = new Error(`MotivationalGoalEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const replay = phase68dReplayGoalState(worldState);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (next.previous_goal_event_id !== (previous?.goal_event_id ?? null)
+        || next.previous_goal_event_hash !== (previous?.goal_event_hash ?? null)) {
+      const error = new Error(`MotivationalGoalEvent ${eventId} breaks its per-character chain.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    const stateKey = `${character}\u0000${next.goal_id}`;
+    const priorState = replay.stateByCharacterGoal.get(stateKey) ?? null;
+    const legal = next.operation === "propose" ? priorState === null
+      : next.operation === "commit" ? priorState === "proposed"
+        : next.operation === "suspend" ? priorState === "committed"
+          : ["proposed", "committed", "suspended"].includes(priorState);
+    if (!legal) {
+      const error = new Error(`Illegal Phase68D ${next.operation} transition for ${next.goal_id} from ${priorState ?? "none"}.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_STATE_TRANSITION_INVALID";
+      throw error;
+    }
+    const sourceKeys = new Set();
+    for (const ref of next.motivation_basis_refs) {
+      const sourceKey = JSON.stringify([ref?.source_kind, ref?.source_event_id, ref?.source_event_hash]);
+      const sourceEvent = phase68dCanonicalSource(worldState, ref);
+      const sourceCharacter = sourceEvent?.character ?? null;
+      if (!sourceCharacter || String(sourceCharacter).trim().toLocaleLowerCase("zh-Hant-TW") !== character || sourceKeys.has(sourceKey)) {
+        const error = new Error(`Phase68D motivation basis ${ref?.source_event_id ?? "<missing>"} is non-canonical, duplicate, or cross-character.`);
+        error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_SOURCE_REF_INVALID";
+        throw error;
+      }
+      sourceKeys.add(sourceKey);
+    }
+    return;
+  }
+  if (worldPath[0] !== "motivational_goal_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Motivational goal history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase68dHistoryPrefix(oldHistory, newHistory);
+  const seen = new Set(oldHistory.map((ref) => ref?.goal_event_id));
+  const replay = phase68dReplayGoalState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.motivational_goal_events)[ref?.goal_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (!isObject(ref)
+        || ref.schema_version !== phase68dMotivationalGoalHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.goal_event_id ?? "").trim()
+        || !String(ref.goal_event_hash ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || !phase68dGoalOperations.has(ref.operation)
+        || ref.status !== "motivational_goal_event_recorded"
+        || seen.has(ref.goal_event_id)
+        || !Object.keys(event).length
+        || phase68dGoalEventHash(event) !== event.goal_event_hash
+        || ref.goal_event_hash !== event.goal_event_hash
+        || ref.goal_id !== event.goal_id
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.operation !== event.operation
+        || ref.previous_goal_event_id !== event.previous_goal_event_id
+        || ref.previous_goal_event_hash !== event.previous_goal_event_hash
+        || event.previous_goal_event_id !== (previous?.goal_event_id ?? null)
+        || event.previous_goal_event_hash !== (previous?.goal_event_hash ?? null)) {
+      const error = new Error(`Motivational goal history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    seen.add(ref.goal_event_id);
+    replay.latestByCharacter.set(character, event);
   }
 }
 
@@ -5570,6 +5773,20 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase68b_per_character_structured_self_model_hash_chain_enforced: true,
       direct_nested_structured_self_model_history_mutation_rejected: true,
       phase68b_historical_structured_self_model_rewrite_rejected: true,
+      phase68c_structured_self_model_revision_event_write_once_enforced: true,
+      phase68c_structured_self_model_revision_history_append_only_enforced: true,
+      phase68c_explicit_support_challenge_revise_semantics_enforced: true,
+      phase68d_motivational_goal_event_write_once_enforced: true,
+      phase68d_motivational_goal_event_content_address_verified: true,
+      phase68d_motivational_goal_history_append_only_enforced: true,
+      phase68d_per_character_goal_hash_chain_enforced: true,
+      phase68d_explicit_goal_state_transition_enforced: true,
+      phase68d_same_character_motivation_basis_enforced: true,
+      phase68d_proposed_is_not_committed_enforced: true,
+      phase68d_action_plan_authority_rejected: true,
+      phase68d_numeric_utility_priority_probability_rejected: true,
+      direct_nested_motivational_goal_history_mutation_rejected: true,
+      phase68d_historical_motivational_goal_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

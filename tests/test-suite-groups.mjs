@@ -87,6 +87,7 @@ export const phase68SelfInterpretationSteps = Object.freeze([
   Object.freeze(["Phase 68A autobiographical self-interpretation foundation", Object.freeze(["tests/phase68/phase68a-self-interpretation-foundation.test.mjs"])]),
   Object.freeze(["Phase 68B structured self model", Object.freeze(["tests/phase68/phase68b-structured-self-model.test.mjs"])]),
   Object.freeze(["Phase 68C structured self-model revision", Object.freeze(["tests/phase68/phase68c-self-model-revision.test.mjs"])]),
+  Object.freeze(["Phase 68D motivation / goal integration", Object.freeze(["tests/phase68/phase68d-motivation-goal-integration.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
