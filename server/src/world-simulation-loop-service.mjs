@@ -93,6 +93,12 @@ import {
   worldSimulationStructuredSelfModelRevisionVersion,
 } from "./world-simulation-structured-self-model-revision-service.mjs";
 import {
+  buildWorldSimulationGoalImplementationIntentionActivationContract,
+  buildWorldSimulationGoalImplementationIntentionActivationResolverView,
+  projectWorldSimulationGoalImplementationIntentionActivation,
+  worldSimulationGoalImplementationIntentionActivationVersion,
+} from "./world-simulation-goal-implementation-intention-activation-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3140,6 +3146,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationStructuredSelfModelContract(),
     structured_self_model_revision:
       buildWorldSimulationStructuredSelfModelRevisionContract(),
+    implementation_intention_activation_guidance:
+      buildWorldSimulationGoalImplementationIntentionActivationContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -4610,6 +4618,53 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           revisedStructuredSelfModelCharacterProjection.character_view,
         ),
     };
+    // Phase69C activates only committed prior-turn Phase69A/69B plans against
+    // the bounded Character-facing context already assembled above. Activation
+    // is advisory to Action Proposer; it cannot select or execute an action.
+    const implementationIntentionActivationResolverView =
+      buildWorldSimulationGoalImplementationIntentionActivationResolverView({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+        current_context: {
+          perception: characterPerception,
+          attention: speculativeCurrentMind.character_facing_attention,
+          working_context: speculativeCurrentMind.working_context,
+          subjective_cognition: characterCognition.subjective_cognition,
+          self_interpretation_context: characterCognition.self_interpretation_context,
+          self_model_context: characterCognition.self_model_context,
+        },
+      });
+    const implementationIntentionActivationResolver =
+      typeof options.implementationIntentionCueActivationResolver === "function"
+        ? options.implementationIntentionCueActivationResolver
+        : null;
+    const rawActivatedPlanRefs = implementationIntentionActivationResolver
+      ? await implementationIntentionActivationResolver(
+        cloneJson(implementationIntentionActivationResolverView),
+      )
+      : [];
+    if (!Array.isArray(rawActivatedPlanRefs)) {
+      const error = new Error(
+        "implementationIntentionCueActivationResolver must return an array of opaque plan refs.",
+      );
+      error.code =
+        "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_ACTIVATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const implementationIntentionActivation =
+      projectWorldSimulationGoalImplementationIntentionActivation({
+        resolver_view: implementationIntentionActivationResolverView,
+        activated_plan_refs: rawActivatedPlanRefs,
+      });
+    characterCognition.implementation_intention_guidance = cloneJson({
+      source: "committed_prior_turn_cue_applicable_implementation_intentions",
+      implementation_intentions:
+        implementationIntentionActivation.implementation_intention_guidance,
+      advisory_only: true,
+      selected_action_authority: false,
+    });
+
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
