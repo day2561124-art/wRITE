@@ -8,7 +8,7 @@ import {
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
-export const affectedTestSelectorVersion = "affected-test-selector-v1";
+export const affectedTestSelectorVersion = "affected-test-selector-v2";
 
 function normalizeProjectPath(value) {
   return String(value ?? "")
@@ -31,6 +31,131 @@ const groupedTests = new Set([
   ...cognitionTests,
   ...memoryRetrievalTests,
 ]);
+
+const RUN_ALL_PATH = "tests/run-all.mjs";
+const STATIC_RUN_ALL_TEST_STEP_PATTERN = /^\s*\["[^"\r\n]+",\s*\["(tests\/[^"\r\n]+\.test\.mjs)"\]\],\s*$/u;
+
+export function classifyRunAllInventoryDiff(diffText) {
+  const addedTests = new Set();
+  const removedTests = new Set();
+
+  for (const line of String(diffText ?? "").split(/\r?\n/u)) {
+    if (
+      line === ""
+      || line.startsWith("diff --git ")
+      || line.startsWith("index ")
+      || line.startsWith("--- ")
+      || line.startsWith("+++ ")
+      || line.startsWith("@@ ")
+      || line === "\\ No newline at end of file"
+      || line.startsWith(" ")
+    ) {
+      continue;
+    }
+
+    if (!line.startsWith("+") && !line.startsWith("-")) continue;
+    const content = line.slice(1);
+    if (content.trim() === "") continue;
+
+    const match = content.match(STATIC_RUN_ALL_TEST_STEP_PATTERN);
+    if (!match) {
+      const resemblesInventory = content.includes("tests/") && content.includes(".test.mjs");
+      return {
+        safe: false,
+        classification: resemblesInventory
+          ? "RUN_ALL_UNCLASSIFIABLE_INVENTORY_CHANGE"
+          : "RUN_ALL_RUNNER_SEMANTICS_CHANGED",
+        fallback_reason: resemblesInventory
+          ? "RUN_ALL_UNCLASSIFIABLE_INVENTORY_CHANGE"
+          : "RUN_ALL_RUNNER_SEMANTICS_CHANGED",
+        added_tests: [...addedTests].sort(),
+        removed_tests: [...removedTests].sort(),
+      };
+    }
+
+    const testPath = normalizeProjectPath(match[1]);
+    if (line.startsWith("+")) addedTests.add(testPath);
+    else removedTests.add(testPath);
+  }
+
+  if (removedTests.size > 0) {
+    const removedTest = [...removedTests].sort()[0];
+    return {
+      safe: false,
+      classification: "RUN_ALL_INVENTORY_REMOVAL",
+      fallback_reason: `RUN_ALL_INVENTORY_REMOVAL:${removedTest}`,
+      added_tests: [...addedTests].sort(),
+      removed_tests: [...removedTests].sort(),
+    };
+  }
+
+  if (addedTests.size === 0) {
+    return {
+      safe: false,
+      classification: "RUN_ALL_NO_PROVABLE_INVENTORY_DELTA",
+      fallback_reason: "RUN_ALL_NO_PROVABLE_INVENTORY_DELTA",
+      added_tests: [],
+      removed_tests: [],
+    };
+  }
+
+  const unmappedTest = [...addedTests].sort().find((testPath) => !groupedTests.has(testPath));
+  if (unmappedTest) {
+    return {
+      safe: false,
+      classification: "RUN_ALL_INVENTORY_UNMAPPED_TEST",
+      fallback_reason: `RUN_ALL_INVENTORY_UNMAPPED_TEST:${unmappedTest}`,
+      added_tests: [...addedTests].sort(),
+      removed_tests: [],
+    };
+  }
+
+  return {
+    safe: true,
+    classification: "RUN_ALL_INVENTORY_ONLY",
+    fallback_reason: null,
+    added_tests: [...addedTests].sort(),
+    removed_tests: [],
+  };
+}
+
+function readRunAllWorkingTreeDiff(projectRoot) {
+  return new Promise((resolve, reject) => {
+    const executable = process.platform === "win32" ? "git.exe" : "git";
+    const child = spawn(executable, [
+      "--no-pager",
+      "-c",
+      "core.fsmonitor=false",
+      "diff",
+      "--no-ext-diff",
+      "--no-color",
+      "--unified=0",
+      "HEAD",
+      "--",
+      RUN_ALL_PATH,
+    ], {
+      cwd: projectRoot,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`git diff failed for ${RUN_ALL_PATH}: ${stderr.trim() || `exit ${code}`}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
 
 async function listMjsFiles(rootDir, relativeDir) {
   const absoluteDir = path.join(rootDir, ...relativeDir.split("/"));
@@ -137,7 +262,7 @@ function fallbackPlan(changedPaths, reason, affectedTests = []) {
   };
 }
 
-export async function selectAffectedTestPlan({ projectRoot, changedPaths }) {
+export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAllDiffText }) {
   const normalizedChangedPaths = new Set(
     (changedPaths ?? []).map(normalizeProjectPath).filter(Boolean),
   );
@@ -145,18 +270,38 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths }) {
     return fallbackPlan(normalizedChangedPaths, "NO_WORKING_TREE_CHANGES");
   }
 
+  const runAllInventoryTests = new Set();
   for (const changedPath of normalizedChangedPaths) {
     const eligibleProduction = changedPath.startsWith("server/src/world-simulation-")
       && changedPath.endsWith(".mjs");
     const eligibleGroupedTest = groupedTests.has(changedPath);
+    if (changedPath === RUN_ALL_PATH) {
+      let diffText = runAllDiffText;
+      if (diffText === undefined) {
+        try {
+          diffText = await readRunAllWorkingTreeDiff(projectRoot);
+        } catch {
+          return fallbackPlan(normalizedChangedPaths, "RUN_ALL_DIFF_UNAVAILABLE");
+        }
+      }
+      const classification = classifyRunAllInventoryDiff(diffText);
+      if (!classification.safe) {
+        return fallbackPlan(normalizedChangedPaths, classification.fallback_reason);
+      }
+      for (const testPath of classification.added_tests) {
+        runAllInventoryTests.add(testPath);
+      }
+      continue;
+    }
     if (!eligibleProduction && !eligibleGroupedTest) {
       return fallbackPlan(normalizedChangedPaths, `UNSCOPED_CHANGE:${changedPath}`);
     }
   }
 
   const reverseGraph = await buildReverseDependencyGraph(projectRoot);
-  const affectedTests = new Set();
+  const affectedTests = new Set(runAllInventoryTests);
   for (const changedPath of normalizedChangedPaths) {
+    if (changedPath === RUN_ALL_PATH) continue;
     if (groupedTests.has(changedPath)) affectedTests.add(changedPath);
     for (const testPath of collectAffectedTests(reverseGraph, changedPath)) {
       affectedTests.add(testPath);

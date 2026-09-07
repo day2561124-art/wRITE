@@ -70,8 +70,11 @@ function assertMcpSmokeTimeoutHardening(mcpSmokeText, mcpContractText) {
   }
 
   for (const token of [
-    "timed out after 300 seconds.",
-    "}, 300_000);",
+    "const defaultTestScriptTimeoutMs = 300_000;",
+    "const testScriptTimeoutOverrides = new Map([",
+    "const timeoutMs = testScriptTimeoutOverrides.get(scriptPath) ?? defaultTestScriptTimeoutMs;",
+    "timed out after ${Math.round(timeoutMs / 1000)} seconds.",
+    "}, timeoutMs);",
   ]) {
     assert(
       mcpContractText.includes(token),
@@ -80,14 +83,14 @@ function assertMcpSmokeTimeoutHardening(mcpSmokeText, mcpContractText) {
   }
 
   assert.equal(
-    mcpContractText.includes("timed out after 180 seconds."),
+    mcpContractText.includes("const defaultTestScriptTimeoutMs = 180_000;"),
     false,
-    "MCP contract timeout message regressed to 180 seconds.",
+    "MCP contract default timeout regressed to 180_000.",
   );
   assert.equal(
     mcpContractText.includes("}, 180_000);"),
     false,
-    "MCP contract timeout duration regressed to 180_000.",
+    "MCP contract fixed timeout duration regressed to 180_000.",
   );
 }
 

@@ -10,8 +10,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), "..");
 
-async function plan(changedPaths) {
-  return selectAffectedTestPlan({ projectRoot, changedPaths });
+async function plan(changedPaths, options = {}) {
+  return selectAffectedTestPlan({ projectRoot, changedPaths, ...options });
 }
 
 const noChanges = await plan([]);
@@ -75,6 +75,102 @@ const groupedTest = await plan([
 ]);
 assert.equal(groupedTest.suite, "cognition");
 assert.equal(groupedTest.focused, true);
+
+const runAllInventoryAppend = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "index 1111111..2222222 100644",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -785,0 +786 @@ const steps = [",
+      "+  [\"Phase 66B effective subjective belief state projection\", [\"tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs\"]],",
+    ].join("\n"),
+  },
+);
+assert.equal(runAllInventoryAppend.suite, "cognition", JSON.stringify(runAllInventoryAppend, null, 2));
+assert.equal(runAllInventoryAppend.focused, true);
+assert.equal(runAllInventoryAppend.fallback_reason, null);
+assert.equal(runAllInventoryAppend.certification_required, false);
+assert.deepEqual(
+  runAllInventoryAppend.selected_group_tests,
+  ["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"],
+);
+
+const runAllSemanticChange = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -829 +829 @@ function getTimeoutMs(label) {",
+      "-  return 360_000;",
+      "+  return 420_000;",
+    ].join("\n"),
+  },
+);
+assert.equal(runAllSemanticChange.suite, "all");
+assert.equal(runAllSemanticChange.focused, false);
+assert.equal(runAllSemanticChange.fallback_reason, "RUN_ALL_RUNNER_SEMANTICS_CHANGED");
+
+const runAllUnmappedInventory = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -785,0 +786 @@ const steps = [",
+      "+  [\"Phase 99 experimental test\", [\"tests/phase99/phase99-experimental.test.mjs\"]],",
+    ].join("\n"),
+  },
+);
+assert.equal(runAllUnmappedInventory.suite, "all");
+assert.equal(runAllUnmappedInventory.focused, false);
+assert.equal(
+  runAllUnmappedInventory.fallback_reason,
+  "RUN_ALL_INVENTORY_UNMAPPED_TEST:tests/phase99/phase99-experimental.test.mjs",
+);
+
+const runAllInventoryRemoval = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -786 +785,0 @@ const steps = [",
+      "-  [\"Phase 66B effective subjective belief state projection\", [\"tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs\"]],",
+    ].join("\n"),
+  },
+);
+assert.equal(runAllInventoryRemoval.suite, "all");
+assert.equal(runAllInventoryRemoval.focused, false);
+assert.equal(
+  runAllInventoryRemoval.fallback_reason,
+  "RUN_ALL_INVENTORY_REMOVAL:tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs",
+);
+
+const runAllDynamicInventory = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -785,0 +786 @@ const steps = [",
+      "+  [\"Phase 66B effective subjective belief state projection\", [resolveTest(\"tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs\")]],",
+    ].join("\n"),
+  },
+);
+assert.equal(runAllDynamicInventory.suite, "all");
+assert.equal(runAllDynamicInventory.focused, false);
+assert.equal(
+  runAllDynamicInventory.fallback_reason,
+  "RUN_ALL_UNCLASSIFIABLE_INVENTORY_CHANGE",
+);
 
 const crossCutting = await plan([
   "server/src/agent-run-service.mjs",

@@ -495,9 +495,16 @@ try {
   let activeLock = null;
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
-    activeLock = JSON.parse(await readFile(path.join(tempRoot, "concurrent.lock"), "utf8"));
+    try {
+      const lockText = await readFile(path.join(tempRoot, "concurrent.lock"), "utf8");
+      activeLock = JSON.parse(lockText);
+    } catch (error) {
+      if (error instanceof SyntaxError || error?.code === "ENOENT") continue;
+      throw error;
+    }
     if (Number.isInteger(activeLock.child_pid) && activeLock.child_pid > 0) break;
   }
+  assert(activeLock, "concurrent runner lock was not readable before polling deadline");
   assert.equal(activeLock.owner_pid, process.pid);
   assert.equal(Number.isInteger(activeLock.child_pid), true);
   assert.equal(activeLock.child_pid > 0, true);
