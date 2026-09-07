@@ -316,6 +316,14 @@ export async function commitWorldSimulationTurn(
               input.personal_semantic_memory_mutation_queue ?? null,
             personal_semantic_memory_mutation_execution:
               input.personal_semantic_memory_mutation_execution ?? null,
+            autobiographical_life_period_organization_decision_resolution:
+              input.autobiographical_life_period_organization_decision_resolution ?? null,
+            autobiographical_life_period_organization:
+              input.autobiographical_life_period_organization ?? null,
+            autobiographical_life_period_organization_mutation_queue:
+              input.autobiographical_life_period_organization_mutation_queue ?? null,
+            autobiographical_life_period_organization_mutation_execution:
+              input.autobiographical_life_period_organization_mutation_execution ?? null,
             subjective_claim_proposal_resolution:
               input.subjective_claim_proposal_resolution ?? null,
             subjective_claim_projection:

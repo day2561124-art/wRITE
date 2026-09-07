@@ -871,6 +871,15 @@ const phase67cPersonalSemanticDerivationEventSchema =
 const phase67cPersonalSemanticDerivationHistoryReferenceSchema =
   "phase67c-personal-semantic-derivation-history-ref-v1";
 
+const phase67dAutobiographicalLifePeriodVersion =
+  "phase67d-autobiographical-life-period-v1";
+
+const phase67dAutobiographicalLifePeriodOrganizationEventSchema =
+  "phase67d-autobiographical-life-period-organization-event-v1";
+
+const phase67dAutobiographicalLifePeriodOrganizationHistoryReferenceSchema =
+  "phase67d-autobiographical-life-period-organization-history-ref-v1";
+
 function phase65aCharacterMemories(worldState, character) {
   const direct =
     worldState?.memories?.[character];
@@ -3442,6 +3451,459 @@ function assertPhase67CPersonalSemanticMutation(
   }
 }
 
+function phase67dOrganizationEventHash(event) {
+  const body = cloneJson(event);
+  delete body.organization_event_hash;
+  return hashAgentRunValue(body);
+}
+
+function phase67dPeriodDescriptor(value) {
+  const descriptor = object(value);
+  const qualifiers = array(descriptor.qualifiers);
+  if (
+    descriptor.subject_scope !== "self_autobiographical_life"
+    || !String(descriptor.period_key ?? "").trim()
+    || String(descriptor.period_key).length > 240
+    || qualifiers.length > 16
+    || qualifiers.some((item) => !String(item ?? "").trim() || String(item).length > 160)
+  ) {
+    const error = new Error("Autobiographical LifePeriod descriptor is invalid.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_DESCRIPTOR_INVALID";
+    throw error;
+  }
+  const normalized = {
+    subject_scope: "self_autobiographical_life",
+    period_key: String(descriptor.period_key).trim(),
+    qualifiers: qualifiers.map((item) => String(item).trim())
+      .sort((left, right) => left.localeCompare(right, "en")),
+  };
+  if (
+    new Set(normalized.qualifiers).size !== normalized.qualifiers.length
+    || !sameValue(normalized, descriptor)
+  ) {
+    const error = new Error("Autobiographical LifePeriod descriptor is not canonical.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_DESCRIPTOR_INVALID";
+    throw error;
+  }
+  return normalized;
+}
+
+function phase67dValidateLifeEventRefs(worldState, value, character) {
+  const normalizedCharacter = phase67aCharacterKey(character);
+  const refs = array(value).map((item) => ({
+    life_event_id: String(item?.life_event_id ?? "").trim(),
+    organization_event_id: String(item?.organization_event_id ?? "").trim(),
+    organization_event_hash: String(item?.organization_event_hash ?? "").trim(),
+  }));
+  for (const ref of refs) {
+    const event = object(
+      object(worldState?.autobiographical_life_event_organization_events)[ref.organization_event_id],
+    );
+    if (
+      !ref.life_event_id
+      || !ref.organization_event_id
+      || !ref.organization_event_hash
+      || !Object.keys(event).length
+      || event.schema_version !== phase67bAutobiographicalLifeEventOrganizationEventSchema
+      || event.version !== phase67bAutobiographicalLifeEventVersion
+      || phase67bOrganizationEventHash(event) !== event.organization_event_hash
+      || event.organization_event_hash !== ref.organization_event_hash
+      || event.life_event_id !== ref.life_event_id
+      || phase67aCharacterKey(event.character) !== normalizedCharacter
+    ) {
+      const error = new Error("LifePeriod organization does not pin canonical same-character Phase67B evidence.");
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_SOURCE_REF_MISMATCH";
+      throw error;
+    }
+  }
+  const sorted = [...refs].sort((left, right) => {
+    const life = left.life_event_id.localeCompare(right.life_event_id, "en");
+    return life !== 0
+      ? life
+      : left.organization_event_id.localeCompare(right.organization_event_id, "en");
+  });
+  const keys = refs.map((item) =>
+    `${item.life_event_id}\u0000${item.organization_event_id}\u0000${item.organization_event_hash}`,
+  );
+  if (!sameValue(refs, sorted) || new Set(keys).size !== keys.length) {
+    const error = new Error("LifePeriod LifeEvent evidence must be unique and deterministically ordered.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_SOURCE_REF_INVALID";
+    throw error;
+  }
+  return refs;
+}
+
+function phase67dValidateSemanticRefs(worldState, value, character) {
+  const normalizedCharacter = phase67aCharacterKey(character);
+  const refs = array(value).map((item) => ({
+    semantic_memory_id: String(item?.semantic_memory_id ?? "").trim(),
+    derivation_event_id: String(item?.derivation_event_id ?? "").trim(),
+    derivation_event_hash: String(item?.derivation_event_hash ?? "").trim(),
+  }));
+  for (const ref of refs) {
+    const event = object(
+      object(worldState?.personal_semantic_derivation_events)[ref.derivation_event_id],
+    );
+    if (
+      !ref.semantic_memory_id
+      || !ref.derivation_event_id
+      || !ref.derivation_event_hash
+      || !Object.keys(event).length
+      || event.schema_version !== phase67cPersonalSemanticDerivationEventSchema
+      || event.version !== phase67cPersonalSemanticMemoryVersion
+      || phase67cDerivationEventHash(event) !== event.derivation_event_hash
+      || event.derivation_event_hash !== ref.derivation_event_hash
+      || event.semantic_memory_id !== ref.semantic_memory_id
+      || phase67aCharacterKey(event.character) !== normalizedCharacter
+    ) {
+      const error = new Error("LifePeriod organization does not pin canonical same-character Phase67C evidence.");
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_SEMANTIC_REF_MISMATCH";
+      throw error;
+    }
+  }
+  const sorted = [...refs].sort((left, right) => {
+    const semantic = left.semantic_memory_id.localeCompare(right.semantic_memory_id, "en");
+    return semantic !== 0
+      ? semantic
+      : left.derivation_event_id.localeCompare(right.derivation_event_id, "en");
+  });
+  const keys = refs.map((item) =>
+    `${item.semantic_memory_id}\u0000${item.derivation_event_id}\u0000${item.derivation_event_hash}`,
+  );
+  if (!sameValue(refs, sorted) || new Set(keys).size !== keys.length) {
+    const error = new Error("LifePeriod Personal Semantic evidence must be unique and deterministically ordered.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_SEMANTIC_REF_INVALID";
+    throw error;
+  }
+  return refs;
+}
+
+function phase67dHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Autobiographical LifePeriod organization history is append-only.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Autobiographical LifePeriod organization history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+
+function assertPhase67DAutobiographicalLifePeriodMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+) {
+  if (worldPath[0] === "autobiographical_life_period_organization_events") {
+    if (worldPath.length !== 2) {
+      const error = new Error("AutobiographicalLifePeriodOrganizationEvent fields are immutable after creation.");
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    if (getAtPath(worldState, worldPath) !== undefined && getAtPath(worldState, worldPath) !== null) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} is immutable and cannot be overwritten.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const next = mutation?.to;
+    if (
+      !isObject(next)
+      || next.schema_version !== phase67dAutobiographicalLifePeriodOrganizationEventSchema
+      || next.version !== phase67dAutobiographicalLifePeriodVersion
+      || next.immutable !== true
+      || next.organization_event_id !== eventId
+      || !String(next.organization_event_hash ?? "").trim()
+      || !String(next.character ?? "").trim()
+      || !String(next.source_turn_id ?? "").trim()
+      || !["start_period", "attach_life_event", "close_period"].includes(next.operation)
+      || !["explicit_programmatic_binding", "personal_semantic_support"].includes(next.evidence_kind)
+      || !String(next.life_period_id ?? "").trim()
+      || !String(next.period_descriptor_hash ?? "").trim()
+      || !String(next.resolver_view_hash ?? "").trim()
+      || next.status !== "autobiographical_life_period_organization_recorded"
+      || next.subjective_not_world_truth !== true
+      || next.world_truth_verified !== false
+      || next.confidence !== null
+      || next.probability !== null
+      || next.life_event_content_copied !== false
+      || next.personal_semantic_content_copied !== false
+      || next.memory_content_copied !== false
+      || next.character_brain_direct_write !== false
+    ) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} creation payload is invalid.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    if (phase67dOrganizationEventHash(next) !== next.organization_event_hash) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:autobiographical_life_period`) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const descriptor = phase67dPeriodDescriptor(next.period_descriptor);
+    if (hashAgentRunValue(descriptor) !== next.period_descriptor_hash) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} descriptor hash mismatch.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_DESCRIPTOR_HASH_MISMATCH";
+      throw error;
+    }
+    const lifeRefs = phase67dValidateLifeEventRefs(worldState, next.source_life_event_refs, next.character);
+    const semanticRefs = phase67dValidateSemanticRefs(worldState, next.source_personal_semantic_refs, next.character);
+    const currentTurnTrigger = lifeRefs.some((item) => {
+      const event = object(
+        object(worldState?.autobiographical_life_event_organization_events)[item.organization_event_id],
+      );
+      return event.source_turn_id === next.source_turn_id;
+    }) || semanticRefs.some((item) => {
+      const event = object(
+        object(worldState?.personal_semantic_derivation_events)[item.derivation_event_id],
+      );
+      return event.source_turn_id === next.source_turn_id;
+    });
+    if (!currentTurnTrigger) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} lacks a current-turn autobiographical trigger.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_CURRENT_TURN_TRIGGER_REQUIRED";
+      throw error;
+    }
+    if (
+      ["start_period", "attach_life_event"].includes(next.operation)
+      && !lifeRefs.length
+    ) {
+      const error = new Error(`${next.operation} requires at least one LifeEvent membership source.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_MEMBERSHIP_SOURCE_REQUIRED";
+      throw error;
+    }
+    if (next.evidence_kind === "personal_semantic_support" && !semanticRefs.length) {
+      const error = new Error("personal_semantic_support requires canonical Phase67C evidence.");
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_SEMANTIC_SUPPORT_REQUIRED";
+      throw error;
+    }
+    const previousCharacter = next.previous_organization_event_id
+      ? object(
+        object(worldState?.autobiographical_life_period_organization_events)[
+          next.previous_organization_event_id
+        ],
+      )
+      : null;
+    const previousPeriod = next.previous_period_event_id
+      ? object(
+        object(worldState?.autobiographical_life_period_organization_events)[
+          next.previous_period_event_id
+        ],
+      )
+      : null;
+    if (
+      (next.previous_organization_event_id === null) !== (next.previous_organization_event_hash === null)
+      || (next.previous_period_event_id === null) !== (next.previous_period_event_hash === null)
+      || (previousCharacter && Object.keys(previousCharacter).length > 0 && (
+        previousCharacter.organization_event_hash !== next.previous_organization_event_hash
+        || phase67aCharacterKey(previousCharacter.character) !== phase67aCharacterKey(next.character)
+      ))
+      || (previousPeriod && Object.keys(previousPeriod).length > 0 && (
+        previousPeriod.organization_event_hash !== next.previous_period_event_hash
+        || previousPeriod.life_period_id !== next.life_period_id
+      ))
+      // Same-timestamp LifePeriod events are committed atomically. A chained
+      // predecessor may sort later within the deterministic batch, so event
+      // creation cannot require it to have been written already. The history
+      // mutation runs after event-path writes and validates the complete
+      // per-character/per-period chain against all materialized events.
+      || (next.operation === "start_period" && next.previous_period_event_id !== null)
+      || (next.operation !== "start_period" && next.previous_period_event_id === null)
+      || previousPeriod?.operation === "close_period"
+    ) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} breaks its append-only chain.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_PREVIOUS_EVENT_MISMATCH";
+      throw error;
+    }
+    if (
+      previousPeriod
+      && (
+        previousPeriod.period_descriptor_hash !== next.period_descriptor_hash
+        || !sameValue(previousPeriod.period_descriptor, next.period_descriptor)
+      )
+    ) {
+      const error = new Error(`LifePeriod ${next.life_period_id} identity cannot be rewritten.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_IDENTITY_REWRITE_FORBIDDEN";
+      throw error;
+    }
+    if (next.operation === "start_period") {
+      const expectedPeriodId = `autobiographical_life_period_${hashAgentRunValue({
+        version: phase67dAutobiographicalLifePeriodVersion,
+        character: phase67aCharacterKey(next.character),
+        source_turn_id: next.source_turn_id,
+        period_descriptor_hash: next.period_descriptor_hash,
+        source_life_event_refs: next.source_life_event_refs,
+        source_personal_semantic_refs: next.source_personal_semantic_refs,
+      }).slice(0, 24)}`;
+      if (expectedPeriodId !== next.life_period_id) {
+        const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} failed period identity verification.`);
+        error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_IDENTITY_MISMATCH";
+        throw error;
+      }
+    }
+    const evidence = object(next.organization_evidence);
+    const semantics = object(next.source_semantics);
+    if (
+      evidence.decision_source !== "programmatic_autobiographical_life_period_organization_resolver"
+      || evidence.resolver_view_ref !== `phase67d_resolver_view:${next.resolver_view_hash}`
+      || evidence.temporal_adjacency_alone_used !== false
+      || evidence.calendar_bucket_used !== false
+      || evidence.fixed_duration_threshold_used !== false
+      || evidence.freeform_llm_period_authority_used !== false
+      || evidence.current_turn_autobiographical_trigger_required !== true
+      || evidence.overlapping_periods_allowed !== true
+      || evidence.many_to_many_life_event_membership !== true
+      || semantics.phase67b_life_event_evidence_allowed !== true
+      || semantics.phase67c_personal_semantic_evidence_allowed !== true
+      || semantics.temporal_proximity_is_supporting_only !== true
+      || semantics.calendar_bucket_is_membership_authority !== false
+      || semantics.cultural_life_script_assumption_used !== false
+      || semantics.one_primary_period_parent_per_life_event !== false
+      || semantics.life_event_content_copied !== false
+      || semantics.personal_semantic_content_copied !== false
+      || semantics.memory_content_copied !== false
+      || semantics.self_model_modeled !== false
+      || semantics.belief_revision_modeled !== false
+    ) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} violates the Phase67D cognition boundary.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_BOUNDARY_VIOLATION";
+      throw error;
+    }
+    if (
+      next.evidence_kind === "explicit_programmatic_binding"
+      && (
+        evidence.binding_source_ref !== `phase67d_resolver_view:${next.resolver_view_hash}`
+        || evidence.binding_source_hash !== next.resolver_view_hash
+      )
+    ) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} has invalid explicit binding provenance.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_BINDING_PROVENANCE_INVALID";
+      throw error;
+    }
+    const expectedEventId = `autobiographical_life_period_organization_event_${hashAgentRunValue({
+      version: phase67dAutobiographicalLifePeriodVersion,
+      character: phase67aCharacterKey(next.character),
+      source_turn_id: next.source_turn_id,
+      operation: next.operation,
+      life_period_id: next.life_period_id,
+      period_descriptor_hash: next.period_descriptor_hash,
+      source_life_event_refs: next.source_life_event_refs,
+      source_personal_semantic_refs: next.source_personal_semantic_refs,
+      previous_organization_event_hash: next.previous_organization_event_hash,
+      previous_period_event_hash: next.previous_period_event_hash,
+    }).slice(0, 24)}`;
+    if (expectedEventId !== eventId) {
+      const error = new Error(`AutobiographicalLifePeriodOrganizationEvent ${eventId} failed deterministic event identity verification.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_EVENT_IDENTITY_MISMATCH";
+      throw error;
+    }
+    return;
+  }
+
+  if (worldPath[0] !== "autobiographical_life_period_organization_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Autobiographical LifePeriod history may not be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase67dHistoryPrefix(oldHistory, newHistory);
+  const seenEventIds = new Set();
+  const latestByCharacter = new Map();
+  const latestByPeriod = new Map();
+  for (const reference of oldHistory) {
+    const eventId = String(reference?.organization_event_id ?? "").trim();
+    const event = object(
+      object(worldState?.autobiographical_life_period_organization_events)[eventId],
+    );
+    if (!eventId || !Object.keys(event).length) continue;
+    seenEventIds.add(eventId);
+    latestByCharacter.set(phase67aCharacterKey(event.character), event);
+    latestByPeriod.set(event.life_period_id, event);
+  }
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const reference = newHistory[index];
+    const eventId = String(reference?.organization_event_id ?? "").trim();
+    if (
+      !isObject(reference)
+      || reference.schema_version !== phase67dAutobiographicalLifePeriodOrganizationHistoryReferenceSchema
+      || reference.derived_index !== true
+      || !eventId
+      || !String(reference.organization_event_hash ?? "").trim()
+      || !String(reference.character ?? "").trim()
+      || !String(reference.source_turn_id ?? "").trim()
+      || !["start_period", "attach_life_event", "close_period"].includes(reference.operation)
+      || !String(reference.life_period_id ?? "").trim()
+      || reference.status !== "autobiographical_life_period_organization_recorded"
+      || seenEventIds.has(eventId)
+    ) {
+      const error = new Error(`Autobiographical LifePeriod history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    const event = object(
+      object(worldState?.autobiographical_life_period_organization_events)[eventId],
+    );
+    if (!Object.keys(event).length || phase67dOrganizationEventHash(event) !== event.organization_event_hash) {
+      const error = new Error(`Autobiographical LifePeriod history cannot resolve canonical event ${eventId}.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_REFERENCE_UNRESOLVED";
+      throw error;
+    }
+    const character = phase67aCharacterKey(event.character);
+    const previousCharacter = latestByCharacter.get(character) ?? null;
+    const previousPeriod = latestByPeriod.get(event.life_period_id) ?? null;
+    if (
+      reference.organization_event_hash !== event.organization_event_hash
+      || reference.character !== event.character
+      || reference.source_turn_id !== event.source_turn_id
+      || reference.operation !== event.operation
+      || reference.life_period_id !== event.life_period_id
+      || reference.previous_organization_event_id !== event.previous_organization_event_id
+      || reference.previous_organization_event_hash !== event.previous_organization_event_hash
+      || reference.previous_period_event_id !== event.previous_period_event_id
+      || reference.previous_period_event_hash !== event.previous_period_event_hash
+      || event.previous_organization_event_id !== (previousCharacter?.organization_event_id ?? null)
+      || event.previous_organization_event_hash !== (previousCharacter?.organization_event_hash ?? null)
+      || event.previous_period_event_id !== (previousPeriod?.organization_event_id ?? null)
+      || event.previous_period_event_hash !== (previousPeriod?.organization_event_hash ?? null)
+      || (event.operation === "start_period" && previousPeriod !== null)
+      || (event.operation !== "start_period" && previousPeriod === null)
+      || previousPeriod?.operation === "close_period"
+    ) {
+      const error = new Error(`Autobiographical LifePeriod history reference ${eventId} breaks its canonical chain.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_HISTORY_REFERENCE_MISMATCH";
+      throw error;
+    }
+    if (
+      previousPeriod
+      && (
+        previousPeriod.period_descriptor_hash !== event.period_descriptor_hash
+        || !sameValue(previousPeriod.period_descriptor, event.period_descriptor)
+      )
+    ) {
+      const error = new Error(`LifePeriod ${event.life_period_id} identity was rewritten.`);
+      error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_IDENTITY_REWRITE_FORBIDDEN";
+      throw error;
+    }
+    seenEventIds.add(eventId);
+    latestByCharacter.set(character, event);
+    latestByPeriod.set(event.life_period_id, event);
+  }
+}
+
 function assertPhase66ASubjectiveBeliefRevisionMutation(
   worldState,
   worldPath,
@@ -3886,6 +4348,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase67DAutobiographicalLifePeriodMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -3976,6 +4444,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase67CPersonalSemanticMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+      );
+      assertPhase67DAutobiographicalLifePeriodMutation(
         executed,
         worldPath,
         mutation,
@@ -4115,6 +4589,25 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase67c_counterevidence_preserved_without_belief_resolution: true,
       direct_nested_personal_semantic_history_mutation_rejected: true,
       phase67c_historical_personal_semantic_rewrite_rejected: true,
+      phase67d_autobiographical_life_period_event_write_once_enforced: true,
+      phase67d_autobiographical_life_period_event_content_address_verified: true,
+      phase67d_source_life_event_hash_pinning_enforced: true,
+      phase67d_source_personal_semantic_hash_pinning_enforced: true,
+      phase67d_current_turn_autobiographical_trigger_enforced: true,
+      phase67d_same_character_evidence_enforced: true,
+      phase67d_overlapping_periods_allowed: true,
+      phase67d_many_to_many_life_event_membership_enforced: true,
+      phase67d_temporal_adjacency_alone_rejected: true,
+      phase67d_calendar_bucket_membership_rejected: true,
+      phase67d_personal_semantic_support_provenance_verified: true,
+      phase67d_explicit_programmatic_binding_provenance_verified: true,
+      phase67d_life_period_history_append_only_enforced: true,
+      phase67d_per_character_life_period_hash_chain_enforced: true,
+      phase67d_per_period_hash_chain_enforced: true,
+      phase67d_closed_period_mutation_rejected: true,
+      phase67d_period_identity_rewrite_rejected: true,
+      direct_nested_autobiographical_life_period_history_mutation_rejected: true,
+      phase67d_historical_life_period_organization_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

@@ -58,6 +58,12 @@ import {
   worldSimulationPersonalSemanticMemoryVersion,
 } from "./world-simulation-personal-semantic-memory-service.mjs";
 import {
+  buildWorldSimulationAutobiographicalLifePeriodContract,
+  buildWorldSimulationAutobiographicalLifePeriodOrganizations,
+  buildWorldSimulationAutobiographicalLifePeriodResolverView,
+  worldSimulationAutobiographicalLifePeriodVersion,
+} from "./world-simulation-autobiographical-life-period-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3095,6 +3101,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationAutobiographicalLifeEventOrganizationContract(),
     personal_semantic_memory:
       buildWorldSimulationPersonalSemanticMemoryContract(),
+    autobiographical_life_period_organization:
+      buildWorldSimulationAutobiographicalLifePeriodContract(),
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
@@ -3231,6 +3239,68 @@ export function buildWorldSimulationLoopContract() {
       may_assert_confidence_probability:
         false,
       character_brain_direct_personal_semantic_mutation_allowed:
+        false,
+    },
+
+    autobiographical_life_period_organization_resolver_hook: {
+      owner:
+        "programmatic_autobiographical_life_period_organization_resolver",
+      optional:
+        true,
+      option_name:
+        "autobiographicalLifePeriodOrganizationResolver",
+      source_scope:
+        "current_turn_phase67b_phase67c_triggers_plus_same_character_autobiographical_evidence",
+      current_turn_autobiographical_trigger_required:
+        true,
+      receives_world_state:
+        false,
+      receives_raw_world_event:
+        false,
+      receives_memory_content:
+        false,
+      receives_life_event_content:
+        false,
+      receives_structural_life_event_provenance:
+        true,
+      receives_materialized_personal_semantic_evidence:
+        true,
+      may_request_operations: [
+        "start_period",
+        "attach_life_event",
+        "close_period",
+      ],
+      supported_evidence_kinds: [
+        "explicit_programmatic_binding",
+        "personal_semantic_support",
+      ],
+      overlapping_periods_allowed:
+        true,
+      many_to_many_life_event_membership:
+        true,
+      one_primary_period_parent_per_life_event:
+        false,
+      temporal_adjacency_alone_is_sufficient:
+        false,
+      calendar_bucket_is_sufficient:
+        false,
+      fixed_duration_threshold_modeled:
+        false,
+      cultural_life_script_assumption_allowed:
+        false,
+      freeform_llm_period_authority:
+        false,
+      missing_hook_means_no_period_organization:
+        true,
+      may_assert_world_truth:
+        false,
+      may_assert_confidence_probability:
+        false,
+      self_model_inference_allowed:
+        false,
+      belief_revision_authority:
+        false,
+      character_brain_direct_life_period_mutation_allowed:
         false,
     },
 
@@ -5114,6 +5184,92 @@ async function resolvePersonalSemanticMemoryDecisions(
   };
 }
 
+async function resolveAutobiographicalLifePeriodOrganizationDecisions(
+  worldState,
+  preparedTurn,
+  sourceOrganizationEventIds,
+  sourceSemanticDerivationEventIds,
+  options,
+) {
+  const resolver =
+    typeof options.autobiographicalLifePeriodOrganizationResolver === "function"
+      ? options.autobiographicalLifePeriodOrganizationResolver
+      : null;
+  const resolverView =
+    buildWorldSimulationAutobiographicalLifePeriodResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: sourceOrganizationEventIds,
+      source_semantic_derivation_event_ids: sourceSemanticDerivationEventIds,
+    });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_period_organization: true,
+        current_turn_autobiographical_trigger_required: true,
+        overlapping_periods_allowed: true,
+        many_to_many_life_event_membership: true,
+        temporal_adjacency_alone_used: false,
+        calendar_bucket_used: false,
+        fixed_duration_threshold_used: false,
+        world_state_exposed_to_resolver: false,
+        raw_world_event_exposed_to_resolver: false,
+        memory_content_exposed_to_resolver: false,
+        life_event_content_exposed_to_resolver: false,
+        freeform_llm_period_authority_used: false,
+        cultural_life_script_assumption_used: false,
+        self_model_inference_requested: false,
+        belief_revision_requested: false,
+        confidence_probability_requested: false,
+        world_truth_judgment_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "autobiographicalLifePeriodOrganizationResolver must return an array of source-backed LifePeriod organization decisions.",
+    );
+    error.code = "WORLD_SIMULATION_AUTOBIOGRAPHICAL_LIFE_PERIOD_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    resolver_view_hash: resolverView.resolver_view_hash,
+    source: "programmatic_autobiographical_life_period_organization_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      current_turn_autobiographical_trigger_required: true,
+      overlapping_periods_allowed: true,
+      many_to_many_life_event_membership: true,
+      temporal_adjacency_alone_used: false,
+      calendar_bucket_used: false,
+      fixed_duration_threshold_used: false,
+      world_state_exposed_to_resolver: false,
+      raw_world_event_exposed_to_resolver: false,
+      memory_content_exposed_to_resolver: false,
+      life_event_content_exposed_to_resolver: false,
+      freeform_llm_period_authority_used: false,
+      cultural_life_script_assumption_used: false,
+      self_model_inference_requested: false,
+      belief_revision_requested: false,
+      confidence_probability_requested: false,
+      world_truth_judgment_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -5748,9 +5904,69 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  const autobiographicalLifePeriodSourceSemanticDerivationEventIds =
+    personalSemanticMemoryDerivation
+      .result
+      .derivation_events_created
+      .map((event) => event.derivation_event_id);
+
+  const autobiographicalLifePeriodDecisionResolution =
+    await resolveAutobiographicalLifePeriodOrganizationDecisions(
+      personalSemanticMemoryMutationExecution.next_world_state,
+      preparedTurn,
+      personalSemanticSourceOrganizationEventIds,
+      autobiographicalLifePeriodSourceSemanticDerivationEventIds,
+      options,
+    );
+
+  const autobiographicalLifePeriodOrganization =
+    buildWorldSimulationAutobiographicalLifePeriodOrganizations({
+      world_state:
+        personalSemanticMemoryMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_organization_event_ids:
+        personalSemanticSourceOrganizationEventIds,
+      source_semantic_derivation_event_ids:
+        autobiographicalLifePeriodSourceSemanticDerivationEventIds,
+      organization_decisions:
+        autobiographicalLifePeriodDecisionResolution.decisions,
+    });
+
+  const autobiographicalLifePeriodMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:autobiographical_life_period`,
+      world_state_hash:
+        hashAgentRunValue(
+          personalSemanticMemoryMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        autobiographicalLifePeriodOrganization
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const autobiographicalLifePeriodMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        personalSemanticMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        autobiographicalLifePeriodOrganization
+          .result
+          .preview_world_state,
+      queue:
+        autobiographicalLifePeriodMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
-      personalSemanticMemoryMutationExecution.next_world_state,
+      autobiographicalLifePeriodMutationExecution.next_world_state,
       preparedTurn,
       subjectiveClaimSourceMemories,
       options,
@@ -5759,7 +5975,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
       world_state:
-        personalSemanticMemoryMutationExecution.next_world_state,
+        autobiographicalLifePeriodMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -5774,7 +5990,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_claim`,
       world_state_hash:
         hashAgentRunValue(
-          personalSemanticMemoryMutationExecution.next_world_state,
+          autobiographicalLifePeriodMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveClaimProjection
@@ -5786,7 +6002,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveClaimMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        personalSemanticMemoryMutationExecution.next_world_state,
+        autobiographicalLifePeriodMutationExecution.next_world_state,
       preview_world_state:
         subjectiveClaimProjection
           .result
@@ -6078,6 +6294,25 @@ export async function resolveWorldSimulationTurn(
         cloneJson(personalSemanticMemoryMutationQueue),
       personal_semantic_memory_mutation_execution:
         cloneJson(personalSemanticMemoryMutationExecution.execution),
+
+      autobiographical_life_period_organization_decision_resolution: {
+        version:
+          worldSimulationAutobiographicalLifePeriodVersion,
+        decisions:
+          cloneJson(autobiographicalLifePeriodDecisionResolution.decisions),
+        resolver_view_hash:
+          autobiographicalLifePeriodDecisionResolution
+            .resolver_view
+            .resolver_view_hash,
+        audit:
+          cloneJson(autobiographicalLifePeriodDecisionResolution.audit),
+      },
+      autobiographical_life_period_organization:
+        cloneJson(autobiographicalLifePeriodOrganization),
+      autobiographical_life_period_organization_mutation_queue:
+        cloneJson(autobiographicalLifePeriodMutationQueue),
+      autobiographical_life_period_organization_mutation_execution:
+        cloneJson(autobiographicalLifePeriodMutationExecution.execution),
 
       subjective_claim_proposal_resolution: {
         version:
@@ -6539,6 +6774,37 @@ export async function resolveWorldSimulationTurn(
       role_identity_modeled: false,
       self_model_modeled: false,
       belief_engine_duplicated: false,
+      world_truth_authority_claimed: false,
+      confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+    },
+    autobiographical_life_period_organization: {
+      version:
+        worldSimulationAutobiographicalLifePeriodVersion,
+      resolver_used:
+        autobiographicalLifePeriodDecisionResolution.audit.resolver_used === true,
+      organization_decision_count:
+        autobiographicalLifePeriodOrganization.result.organization_decision_count,
+      created_organization_event_count:
+        autobiographicalLifePeriodOrganization.result.organization_events_created.length,
+      appended_history_reference_count:
+        autobiographicalLifePeriodOrganization.result.history_references_appended.length,
+      effective_life_period_projection_hash:
+        autobiographicalLifePeriodOrganization
+          .result
+          .effective_life_period_projection
+          .projection_hash,
+      mutation_count:
+        autobiographicalLifePeriodMutationQueue.mutation_count,
+      authoritative_executor:
+        autobiographicalLifePeriodMutationExecution.execution.version,
+      overlapping_periods_allowed: true,
+      many_to_many_life_event_membership: true,
+      one_primary_period_parent_per_life_event: false,
+      temporal_adjacency_membership_authority: false,
+      calendar_bucket_membership_authority: false,
+      fixed_duration_threshold_modeled: false,
+      cultural_life_script_assumptions_used: false,
       world_truth_authority_claimed: false,
       confidence_probability_modeled: false,
       same_turn_character_brain_feedback_allowed: false,

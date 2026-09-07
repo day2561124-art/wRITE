@@ -789,6 +789,7 @@ const steps = [
   ["Phase 67A automatic subjective episode segmentation", ["tests/phase67/phase67a-subjective-episode-segmentation.test.mjs"]],
   ["Phase 67B autobiographical life event organization", ["tests/phase67/phase67b-autobiographical-life-event-organization.test.mjs"]],
   ["Phase 67C personal semantic memory", ["tests/phase67/phase67c-personal-semantic-memory.test.mjs"]],
+  ["Phase 67D autobiographical LifePeriod organization", ["tests/phase67/phase67d-autobiographical-life-period-organization.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
