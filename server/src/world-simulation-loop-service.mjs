@@ -128,6 +128,11 @@ import {
   worldSimulationAdaptiveReplanningVersion,
 } from "./world-simulation-adaptive-replanning-service.mjs";
 import {
+  buildWorldSimulationMeansFeasibilityEvents,
+  buildWorldSimulationMeansFeasibilityResolverView,
+  worldSimulationMeansFeasibilityVersion,
+} from "./world-simulation-means-feasibility-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -6455,6 +6460,83 @@ async function resolveAdaptiveReplanningDecisions(
   };
 }
 
+async function resolveMeansFeasibilityDecisions(
+  worldState,
+  preparedTurn,
+  selectedActionIntents,
+  causalResolution,
+  options,
+) {
+  const resolverView = buildWorldSimulationMeansFeasibilityResolverView({
+    world_state: worldState,
+    turn_id: preparedTurn.turn_id,
+    selected_action_intents: selectedActionIntents,
+    action_outcomes: array(causalResolution.action_outcomes),
+    state_transitions: array(causalResolution.state_transitions),
+  });
+  const evaluator = typeof options.meansFeasibilityEvaluator === "function"
+    ? options.meansFeasibilityEvaluator
+    : null;
+  if (!evaluator || resolverView.source_plans.length === 0) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        evaluator_used: false,
+        missing_evaluator_or_source_means_no_feasibility_event: true,
+        post_phase71_effective_plan_state_used: true,
+        bounded_current_turn_engine_evidence_catalog_only: true,
+        physical_executability_required_to_claim_feasible: true,
+        raw_world_state_exposed_to_evaluator: false,
+        raw_memory_store_exposed_to_evaluator: false,
+        hidden_retrieval_graph_exposed_to_evaluator: false,
+        alternative_means_generation_requested: false,
+        goal_state_mutation_requested: false,
+        plan_lifecycle_mutation_requested: false,
+        same_turn_replanning_requested: false,
+        character_knowledge_update_requested: false,
+        numeric_scoring_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await evaluator(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "meansFeasibilityEvaluator must return an array of explicit source-plan constraint decisions.",
+    );
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVALUATOR_INVALID_OUTPUT";
+    throw error;
+  }
+  return {
+    decisions: cloneJson(raw),
+    resolver_view: resolverView,
+    audit: {
+      evaluator_used: true,
+      input_context_hash: inputHash,
+      source_plan_count: resolverView.source_plans.length,
+      authoritative_evidence_count: resolverView.authoritative_evidence.length,
+      decision_count: raw.length,
+      post_phase71_effective_plan_state_used: true,
+      bounded_current_turn_engine_evidence_catalog_only: true,
+      complete_coverage_required_to_claim_feasible: true,
+      physical_executability_required_to_claim_feasible: true,
+      physical_executability_separate_from_authorization: true,
+      character_visible_evidence_explicit_subset_only: true,
+      raw_world_state_exposed_to_evaluator: false,
+      raw_memory_store_exposed_to_evaluator: false,
+      hidden_retrieval_graph_exposed_to_evaluator: false,
+      alternative_means_generation_requested: false,
+      goal_state_mutation_requested: false,
+      plan_lifecycle_mutation_requested: false,
+      same_turn_replanning_requested: false,
+      character_knowledge_update_requested: false,
+      numeric_scoring_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -7723,6 +7805,61 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase72 validates the executability of the effective post-Phase71 means
+  // against a bounded catalog of current-turn engine evidence. It separates
+  // physical affordance from authorization and does not mutate the goal/plan,
+  // invent another means, or feed hidden world truth directly into character cognition.
+  const meansFeasibilityDecisionResolution =
+    await resolveMeansFeasibilityDecisions(
+      adaptiveReplanningMutationExecution.next_world_state,
+      preparedTurn,
+      selected,
+      causalResolution,
+      options,
+    );
+
+  const meansFeasibility = buildWorldSimulationMeansFeasibilityEvents({
+    world_state:
+      adaptiveReplanningMutationExecution.next_world_state,
+    turn_id:
+      preparedTurn.turn_id,
+    feasibility_decisions:
+      meansFeasibilityDecisionResolution.decisions,
+    resolver_view:
+      meansFeasibilityDecisionResolution.resolver_view,
+  });
+
+  const meansFeasibilityMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:means_feasibility_capability_affordance`,
+      world_state_hash:
+        hashAgentRunValue(
+          adaptiveReplanningMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        meansFeasibility.result.state_transitions,
+      validation_context: {
+        means_feasibility_capability_affordance:
+          meansFeasibility.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const meansFeasibilityMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        adaptiveReplanningMutationExecution.next_world_state,
+      preview_world_state:
+        meansFeasibility.result.preview_world_state,
+      queue:
+        meansFeasibilityMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7783,7 +7920,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: adaptiveReplanningMutationExecution.next_world_state,
+      next_world_state: meansFeasibilityMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -8183,6 +8320,19 @@ export async function resolveWorldSimulationTurn(
         cloneJson(adaptiveReplanningMutationQueue),
       adaptive_replanning_mutation_execution:
         cloneJson(adaptiveReplanningMutationExecution.execution),
+      means_feasibility_decision_resolution: {
+        version: worldSimulationMeansFeasibilityVersion,
+        decisions: cloneJson(meansFeasibilityDecisionResolution.decisions),
+        resolver_view_hash:
+          meansFeasibilityDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(meansFeasibilityDecisionResolution.audit),
+      },
+      means_feasibility_capability_affordance:
+        cloneJson(meansFeasibility),
+      means_feasibility_mutation_queue:
+        cloneJson(meansFeasibilityMutationQueue),
+      means_feasibility_mutation_execution:
+        cloneJson(meansFeasibilityMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -8909,6 +9059,36 @@ export async function resolveWorldSimulationTurn(
       automatic_goal_abandonment_modeled: false,
       goal_unattainability_verification_modeled: false,
       goal_disengagement_reengagement_modeled: false,
+      arbitrary_world_state_search_modeled: false,
+      numeric_scoring_modeled: false,
+    },
+    means_feasibility_capability_affordance: {
+      version: worldSimulationMeansFeasibilityVersion,
+      evaluator_used:
+        meansFeasibilityDecisionResolution.audit.evaluator_used === true,
+      feasibility_decision_count:
+        meansFeasibility.result.feasibility_decision_count,
+      created_feasibility_event_count:
+        meansFeasibility.result.means_feasibility_events_created.length,
+      appended_history_reference_count:
+        meansFeasibility.result.history_references_appended.length,
+      effective_means_feasibility_projection_hash:
+        meansFeasibility.result.effective_means_feasibility_projection.projection_hash,
+      mutation_count:
+        meansFeasibilityMutationQueue.mutation_count,
+      authoritative_executor:
+        meansFeasibilityMutationExecution.execution.version,
+      post_phase71_effective_plan_state_used: true,
+      bounded_current_turn_engine_evidence_catalog_only: true,
+      complete_coverage_required_to_claim_feasible: true,
+      physical_executability_required_to_claim_feasible: true,
+      physical_executability_separate_from_authorization: true,
+      character_visible_evidence_explicit_subset_only: true,
+      world_truth_auto_updates_character_knowledge: false,
+      means_blocked_implies_goal_unattainable: false,
+      means_blocked_implies_plan_abandonment: false,
+      alternative_means_generation_modeled: false,
+      same_turn_replanning_modeled: false,
       arbitrary_world_state_search_modeled: false,
       numeric_scoring_modeled: false,
     },

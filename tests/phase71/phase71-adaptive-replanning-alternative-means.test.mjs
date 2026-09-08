@@ -719,7 +719,8 @@ const achievementIndex = loopSource.indexOf("const goalAchievementDecisionResolu
 const viabilityIndex = loopSource.indexOf("const goalViabilityDecisionResolution =", achievementIndex);
 const adjustmentIndex = loopSource.indexOf("const goalAdjustmentDecisionResolution =", viabilityIndex);
 const adaptiveIndex = loopSource.indexOf("const adaptiveReplanningDecisionResolution =", adjustmentIndex);
-const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", adaptiveIndex);
+const meansFeasibilityIndex = loopSource.indexOf("const meansFeasibilityDecisionResolution =", adaptiveIndex);
+const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", meansFeasibilityIndex);
 const postCommitIndex = loopSource.indexOf("let committedCurrentMindDelivery", commitIndex);
 assert.ok(
   feedbackIndex >= 0
@@ -727,14 +728,16 @@ assert.ok(
     && viabilityIndex > achievementIndex
     && adjustmentIndex > viabilityIndex
     && adaptiveIndex > adjustmentIndex
-    && commitIndex > adaptiveIndex
+    && meansFeasibilityIndex > adaptiveIndex
+    && commitIndex > meansFeasibilityIndex
     && postCommitIndex > commitIndex,
-  "Phase71 must run after Phase69D/70A/70B/70C and before atomic world commit.",
+  "Phase71 must run after Phase69D/70A/70B/70C and before downstream Phase72 and atomic world commit.",
 );
-assert.match(loopSource.slice(adaptiveIndex, commitIndex), /resolveAdaptiveReplanningDecisions\(\s*snapshot\.state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /adaptiveReplanningMutationExecution\.next_world_state/);
-assert.match(loopSource.slice(adaptiveIndex, commitIndex), /goal_implementation_intention_revision/);
-assert.match(loopSource.slice(adaptiveIndex, commitIndex), /adaptive_replanning_alternative_means/);
+assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /resolveAdaptiveReplanningDecisions\(\s*snapshot\.state/);
+assert.match(loopSource.slice(meansFeasibilityIndex, commitIndex), /adaptiveReplanningMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(commitIndex, postCommitIndex), /meansFeasibilityMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /goal_implementation_intention_revision/);
+assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /adaptive_replanning_alternative_means/);
 assert.doesNotMatch(
   loopSource.slice(adaptiveIndex, commitIndex),
   /expectedUtility|successProbability|reinforcementLearning|scanWorldState/i,

@@ -7501,6 +7501,416 @@ function assertPhase71AdaptiveReplanningMutation(
   }
 }
 
+const phase72MeansFeasibilityEventSchema =
+  "phase72-goal-implementation-intention-means-feasibility-event-v1";
+const phase72MeansFeasibilityHistorySchema =
+  "phase72-goal-implementation-intention-means-feasibility-history-ref-v1";
+const phase72MeansFeasibilityVersion =
+  "phase72-means-feasibility-capability-affordance-v1";
+const phase72ConstraintKinds = new Set(["capability", "resource", "environment", "permission"]);
+const phase72ConstraintStatuses = new Set(["satisfied", "unsatisfied", "unknown"]);
+const phase72PhysicalConstraintKinds = new Set(["capability", "resource", "environment"]);
+
+function phase72MeansFeasibilityEventHash(event) {
+  const body = cloneJson(event);
+  delete body.means_feasibility_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase72CharacterKey(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+}
+function phase72SameCharacter(left, right) {
+  return Boolean(phase72CharacterKey(left))
+    && phase72CharacterKey(left) === phase72CharacterKey(right);
+}
+function phase72CharacterRecords(container, character) {
+  const entry = Object.entries(object(container)).find(([name]) => phase72SameCharacter(name, character));
+  return object(entry?.[1]);
+}
+function phase72EvidenceCharacter(value) {
+  const evidence = object(value);
+  const raw = evidence.character ?? evidence.actor ?? evidence.character_name ?? null;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+function phase72DeriveStatuses(checks, coverageComplete) {
+  const unsatisfied = checks.filter((check) => check.constraint_status === "unsatisfied");
+  const unknown = checks.filter((check) => check.constraint_status === "unknown");
+  const physical = checks.filter((check) => phase72PhysicalConstraintKinds.has(check.constraint_kind));
+  const physicalExecutability = physical.some((check) => check.constraint_status === "unsatisfied")
+    ? "blocked"
+    : physical.length === 0 || physical.some((check) => check.constraint_status === "unknown")
+      ? "indeterminate"
+      : "executable";
+  const meansStatus = unsatisfied.length > 0
+    ? "blocked"
+    : coverageComplete === true
+        && unknown.length === 0
+        && checks.length > 0
+        && physicalExecutability !== "indeterminate"
+      ? "feasible"
+      : "indeterminate";
+  const permission = checks.filter((check) => check.constraint_kind === "permission");
+  const authorizationStatus = permission.some((check) => check.constraint_status === "unsatisfied")
+    ? "denied"
+    : permission.length === 0
+      ? "not_applicable"
+      : permission.some((check) => check.constraint_status === "unknown")
+        ? "indeterminate"
+        : "authorized";
+  return { meansStatus, physicalExecutability, authorizationStatus };
+}
+function phase72HistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Means-feasibility history is append-only.");
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Means-feasibility history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase72ReplayState(worldState) {
+  const latestByCharacter = new Map();
+  const seenEventIds = new Set();
+  const seenPlanTurns = new Set();
+  for (const ref of array(worldState.goal_implementation_intention_means_feasibility_history)) {
+    const event = object(object(worldState.goal_implementation_intention_means_feasibility_events)[ref?.means_feasibility_event_id]);
+    const character = phase72CharacterKey(event.character);
+    const planId = String(event.implementation_intention_id ?? "").trim();
+    const turnId = String(event.source_turn_id ?? "").trim();
+    if (!character || !planId || !turnId) continue;
+    latestByCharacter.set(character, event);
+    seenEventIds.add(event.means_feasibility_event_id);
+    seenPlanTurns.add(`${character}\u0000${planId}\u0000${turnId}`);
+  }
+  return { latestByCharacter, seenEventIds, seenPlanTurns };
+}
+function phase72ValidateContext(worldState, validationContext, event) {
+  const context = object(object(validationContext).means_feasibility_capability_affordance);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase72 means-feasibility mutation requires bounded authoritative validation context.");
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const contextBody = cloneJson(context);
+  const contextHash = String(contextBody.context_hash ?? "").trim();
+  delete contextBody.context_hash;
+  if (context.version !== phase72MeansFeasibilityVersion
+      || context.turn_id !== event.source_turn_id
+      || context.resolver_view_hash !== event.resolver_view_hash
+      || context.bounded_current_turn_engine_evidence_catalog !== true
+      || context.complete_coverage_required_to_claim_feasible !== true
+      || context.physical_executability_required_to_claim_feasible !== true
+      || context.character_visible_evidence_is_explicit_subset_only !== true
+      || context.raw_world_state_exposed !== false
+      || !contextHash
+      || hashAgentRunValue(contextBody) !== contextHash
+      || !Array.isArray(context.source_plans)
+      || !Array.isArray(context.authoritative_evidence)) {
+    const error = new Error("Phase72 authoritative validation context is invalid or stale.");
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const source = context.source_plans.find((entry) => entry?.source_plan_ref === event.source_plan_ref);
+  if (!isObject(source)
+      || !phase72SameCharacter(source.character, event.character)
+      || source.goal_id !== event.goal_id
+      || source.implementation_intention_id !== event.implementation_intention_id
+      || source.target_source_kind !== event.target_source_kind
+      || source.target_source_event_id !== event.target_source_event_id
+      || source.target_source_event_hash !== event.target_source_event_hash
+      || !sameValue(source.cue_descriptor, event.cue_descriptor)
+      || !sameValue(source.response_descriptor, event.response_descriptor)
+      || source.plan_projection_hash !== event.source_plan_projection_hash
+      || !["active", "challenged"].includes(source.plan_state)) {
+    const error = new Error(`Phase72 source ${event.source_plan_ref} is not a canonical member of the authoritative source catalog.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_SOURCE_OUT_OF_CONTEXT";
+    throw error;
+  }
+
+  const evidenceByRef = new Map();
+  for (const entry of context.authoritative_evidence) {
+    const evidenceRef = String(entry?.evidence_ref ?? "").trim();
+    const evidenceHash = String(entry?.evidence_hash ?? "").trim();
+    const evidenceIndex = Number(entry?.evidence_index);
+    const evidenceKind = String(entry?.evidence_kind ?? "").trim();
+    if (!isObject(entry)
+        || !["selected_action_intent", "action_outcome", "causal_state_transition"].includes(evidenceKind)
+        || !Number.isInteger(evidenceIndex)
+        || evidenceIndex < 0
+        || evidenceIndex > 63
+        || !evidenceRef
+        || !evidenceHash
+        || evidenceByRef.has(evidenceRef)
+        || hashAgentRunValue(entry.evidence) !== evidenceHash
+        || phase72EvidenceCharacter(entry.evidence) !== (entry.evidence_character ?? null)) {
+      const error = new Error("Phase72 authoritative evidence catalog contains an invalid entry.");
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    const expectedRef = `phase72_evidence_${hashAgentRunValue({
+      version: phase72MeansFeasibilityVersion,
+      turn_id: event.source_turn_id,
+      kind: evidenceKind,
+      index: evidenceIndex,
+      evidence_hash: evidenceHash,
+    }).slice(0, 24)}`;
+    if (expectedRef !== evidenceRef) {
+      const error = new Error(`Phase72 evidence ref ${evidenceRef} is not content-addressed to the current turn evidence catalog.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    evidenceByRef.set(evidenceRef, entry);
+  }
+  if (hashAgentRunValue(context.authoritative_evidence) !== event.authoritative_evidence_catalog_hash) {
+    const error = new Error(`Phase72 event ${event.means_feasibility_event_id} does not pin the authoritative evidence catalog.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVIDENCE_CATALOG_HASH_MISMATCH";
+    throw error;
+  }
+
+  const usedEvidenceRefs = new Set();
+  const checkKeys = new Set();
+  let previousCheckKey = null;
+  for (const check of event.constraint_checks) {
+    const constraintKind = String(check?.constraint_kind ?? "").trim();
+    const constraintCode = String(check?.constraint_code ?? "").trim();
+    const constraintStatus = String(check?.constraint_status ?? "").trim();
+    const evidenceRefs = array(check?.evidence_refs);
+    const checkKey = JSON.stringify([constraintKind, constraintCode, constraintStatus, evidenceRefs]);
+    const identityKey = `${constraintKind}\u0000${constraintCode}`;
+    if (!isObject(check)
+        || !phase72ConstraintKinds.has(constraintKind)
+        || !phase72ConstraintStatuses.has(constraintStatus)
+        || !constraintCode
+        || constraintCode.length > 160
+        || check.required_for_execution !== true
+        || evidenceRefs.length > 8
+        || new Set(evidenceRefs).size !== evidenceRefs.length
+        || (constraintStatus !== "unknown" && evidenceRefs.length < 1)
+        || checkKeys.has(identityKey)
+        || (previousCheckKey !== null && previousCheckKey.localeCompare(checkKey, "en") > 0)) {
+      const error = new Error(`Phase72 event ${event.means_feasibility_event_id} has an invalid or non-canonical constraint check.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_CONSTRAINT_INVALID";
+      throw error;
+    }
+    for (const evidenceRef of evidenceRefs) {
+      const canonical = evidenceByRef.get(evidenceRef);
+      if (!canonical) {
+        const error = new Error(`Phase72 constraint ${constraintCode} references evidence outside the authoritative context.`);
+        error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVIDENCE_OUT_OF_CONTEXT";
+        throw error;
+      }
+      if (String(canonical.evidence_character ?? "").trim()
+          && !phase72SameCharacter(canonical.evidence_character, event.character)) {
+        const error = new Error(`Phase72 constraint ${constraintCode} references explicit cross-character evidence.`);
+        error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_CROSS_CHARACTER_EVIDENCE_FORBIDDEN";
+        throw error;
+      }
+      usedEvidenceRefs.add(evidenceRef);
+    }
+    checkKeys.add(identityKey);
+    previousCheckKey = checkKey;
+  }
+  const visible = array(event.character_visible_evidence_refs);
+  if (visible.length > 16
+      || new Set(visible).size !== visible.length
+      || visible.some((ref) => !usedEvidenceRefs.has(ref))) {
+    const error = new Error(`Phase72 event ${event.means_feasibility_event_id} exposes non-selected engine evidence to the character-facing subset.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_CHARACTER_VISIBLE_EVIDENCE_INVALID";
+    throw error;
+  }
+  const derived = phase72DeriveStatuses(event.constraint_checks, event.coverage_complete === true);
+  if (derived.meansStatus !== event.means_status
+      || derived.physicalExecutability !== event.physical_executability
+      || derived.authorizationStatus !== event.authorization_status) {
+    const error = new Error(`Phase72 event ${event.means_feasibility_event_id} contains forged derived feasibility status.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_DERIVED_STATUS_INVALID";
+    throw error;
+  }
+
+  const execution = projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+    world_state: worldState,
+  });
+  const plan = phase72CharacterRecords(execution.plans_by_character, event.character)[event.implementation_intention_id];
+  if (!plan
+      || !["active", "challenged"].includes(plan.state)
+      || plan.completed === true
+      || plan.goal_id !== event.goal_id
+      || !sameValue(plan.cue_descriptor, event.cue_descriptor)
+      || !sameValue(plan.response_descriptor, event.response_descriptor)
+      || execution.projection_hash !== event.source_plan_projection_hash) {
+    const error = new Error(`Phase72 target plan ${event.implementation_intention_id} is no longer a canonical executable-plan candidate.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_SOURCE_INVALID";
+    throw error;
+  }
+  const provenanceEvent = {
+    ...event,
+    target_implementation_intention_id: event.implementation_intention_id,
+  };
+  if (!phase69bValidateTargetSource(worldState, provenanceEvent)) {
+    const error = new Error(`Phase72 event ${event.means_feasibility_event_id} does not pin canonical Phase69A/69B plan provenance.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_SOURCE_INVALID";
+    throw error;
+  }
+  const character = phase72CharacterKey(event.character);
+  const goalKey = `${character}\u0000${event.goal_id}`;
+  const goalReplay = phase68dReplayGoalState(worldState);
+  const adjustment = phase70cReplayAdjustmentState(worldState);
+  if (goalReplay.stateByCharacterGoal.get(goalKey) !== "committed"
+      || phase70aGoalAlreadyAchieved(worldState, event.character, event.goal_id)
+      || phase70bGoalAlreadyUnattainable(worldState, event.character, event.goal_id)
+      || adjustment.disengagedSources.has(goalKey)) {
+    const error = new Error(`Phase72 goal ${event.goal_id} is not a committed viable engaged goal.`);
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_GOAL_INVALID";
+    throw error;
+  }
+}
+function assertPhase72MeansFeasibilityMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "goal_implementation_intention_means_feasibility_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("MeansFeasibilityEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase72MeansFeasibilityEventSchema
+        || next.version !== phase72MeansFeasibilityVersion
+        || next.immutable !== true
+        || next.means_feasibility_event_id !== eventId
+        || !String(next.means_feasibility_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || next.operation !== "verify_means_feasibility"
+        || !String(next.goal_id ?? "").trim()
+        || !String(next.source_plan_ref ?? "").trim()
+        || !String(next.implementation_intention_id ?? "").trim()
+        || !phase69bTargetSourceKinds.has(next.target_source_kind)
+        || !String(next.target_source_event_id ?? "").trim()
+        || !String(next.target_source_event_hash ?? "").trim()
+        || !isObject(next.cue_descriptor)
+        || !isObject(next.response_descriptor)
+        || !String(next.source_plan_projection_hash ?? "").trim()
+        || !Array.isArray(next.constraint_checks)
+        || next.constraint_checks.length < 1
+        || next.constraint_checks.length > 24
+        || !["feasible", "blocked", "indeterminate"].includes(next.means_status)
+        || !["executable", "blocked", "indeterminate"].includes(next.physical_executability)
+        || !["authorized", "denied", "not_applicable", "indeterminate"].includes(next.authorization_status)
+        || !String(next.authoritative_evidence_catalog_hash ?? "").trim()
+        || !Array.isArray(next.character_visible_evidence_refs)
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.engine_authoritative_constraint_validation !== true
+        || next.world_truth_is_not_character_knowledge !== true
+        || next.character_knowledge_updated !== false
+        || next.character_visible_evidence_subset_only !== true
+        || next.means_blocked_implies_goal_unattainable !== false
+        || next.means_blocked_implies_plan_abandonment !== false
+        || next.alternative_means_generated !== false
+        || next.goal_state_mutated !== false
+        || next.plan_lifecycle_mutated !== false
+        || next.same_turn_replanning_triggered !== false
+        || next.arbitrary_world_state_search_used !== false
+        || next.utility_score !== null
+        || next.success_probability !== null
+        || next.feasibility_score !== null
+        || next.character_brain_direct_write !== false
+        || next.status !== "goal_implementation_intention_means_feasibility_recorded") {
+      const error = new Error(`MeansFeasibilityEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVENT_INVALID";
+      throw error;
+    }
+    if (phase72MeansFeasibilityEventHash(next) !== next.means_feasibility_event_hash) {
+      const error = new Error(`MeansFeasibilityEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:means_feasibility_capability_affordance`) {
+      const error = new Error(`MeansFeasibilityEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase72ValidateContext(worldState, validationContext, next);
+    const replay = phase72ReplayState(worldState);
+    const character = phase72CharacterKey(next.character);
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const planTurnKey = `${character}\u0000${next.implementation_intention_id}\u0000${next.source_turn_id}`;
+    if (replay.seenEventIds.has(eventId)
+        || replay.seenPlanTurns.has(planTurnKey)
+        || next.previous_means_feasibility_event_id !== (previous?.means_feasibility_event_id ?? null)
+        || next.previous_means_feasibility_event_hash !== (previous?.means_feasibility_event_hash ?? null)) {
+      const error = new Error(`MeansFeasibilityEvent ${eventId} duplicates a plan/turn evaluation or breaks its per-character chain.`);
+      error.code = replay.seenPlanTurns.has(planTurnKey)
+        ? "WORLD_SIMULATION_MEANS_FEASIBILITY_PER_PLAN_TURN_LIMIT"
+        : "WORLD_SIMULATION_MEANS_FEASIBILITY_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "goal_implementation_intention_means_feasibility_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Means-feasibility history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase72HistoryPrefix(oldHistory, newHistory);
+  const replay = phase72ReplayState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.goal_implementation_intention_means_feasibility_events)[ref?.means_feasibility_event_id]);
+    const character = phase72CharacterKey(event.character);
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const planTurnKey = `${character}\u0000${event.implementation_intention_id}\u0000${event.source_turn_id}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase72MeansFeasibilityHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.means_feasibility_event_id ?? "").trim()
+        || !String(ref.means_feasibility_event_hash ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || !String(ref.implementation_intention_id ?? "").trim()
+        || !["feasible", "blocked", "indeterminate"].includes(ref.means_status)
+        || ref.status !== "goal_implementation_intention_means_feasibility_recorded"
+        || replay.seenEventIds.has(ref.means_feasibility_event_id)
+        || replay.seenPlanTurns.has(planTurnKey)
+        || !Object.keys(event).length
+        || phase72MeansFeasibilityEventHash(event) !== event.means_feasibility_event_hash
+        || ref.means_feasibility_event_hash !== event.means_feasibility_event_hash
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.goal_id !== event.goal_id
+        || ref.implementation_intention_id !== event.implementation_intention_id
+        || ref.means_status !== event.means_status
+        || ref.previous_means_feasibility_event_id !== event.previous_means_feasibility_event_id
+        || ref.previous_means_feasibility_event_hash !== event.previous_means_feasibility_event_hash
+        || event.previous_means_feasibility_event_id !== (previous?.means_feasibility_event_id ?? null)
+        || event.previous_means_feasibility_event_hash !== (previous?.means_feasibility_event_hash ?? null)) {
+      const error = new Error(`Means-feasibility history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_MEANS_FEASIBILITY_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.means_feasibility_event_id);
+    replay.seenPlanTurns.add(planTurnKey);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -7692,6 +8102,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase72MeansFeasibilityMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -7857,6 +8274,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.validation_context,
       );
       assertPhase71AdaptiveReplanningMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase72MeansFeasibilityMutation(
         executed,
         worldPath,
         mutation,
@@ -8182,6 +8606,30 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase71_authoritative_queue_validator_invoked: true,
       direct_nested_adaptive_replanning_history_mutation_rejected: true,
       phase71_historical_adaptive_replanning_rewrite_rejected: true,
+      phase72_means_feasibility_event_write_once_enforced: true,
+      phase72_means_feasibility_event_content_address_verified: true,
+      phase72_canonical_active_same_character_plan_provenance_enforced: true,
+      phase72_committed_viable_engaged_source_goal_enforced: true,
+      phase72_authoritative_validation_context_required: true,
+      phase72_current_turn_engine_evidence_catalog_hash_verified: true,
+      phase72_selected_evidence_membership_verified: true,
+      phase72_cross_character_evidence_rejected: true,
+      phase72_typed_constraint_status_enforced: true,
+      phase72_complete_coverage_required_to_claim_feasible: true,
+      phase72_physical_executability_required_to_claim_feasible: true,
+      phase72_derived_means_physical_authorization_status_recomputed: true,
+      phase72_character_visible_evidence_subset_enforced: true,
+      phase72_world_truth_does_not_auto_update_character_knowledge: true,
+      phase72_means_blocked_does_not_imply_goal_unattainable: true,
+      phase72_means_blocked_does_not_imply_plan_abandonment: true,
+      phase72_alternative_means_generation_and_same_turn_replanning_rejected: true,
+      phase72_numeric_utility_probability_feasibility_score_rejected: true,
+      phase72_means_feasibility_history_append_only_enforced: true,
+      phase72_per_character_means_feasibility_hash_chain_enforced: true,
+      phase72_per_plan_per_turn_single_event_enforced: true,
+      phase72_authoritative_queue_validator_invoked: true,
+      direct_nested_means_feasibility_history_mutation_rejected: true,
+      phase72_historical_means_feasibility_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

@@ -107,6 +107,10 @@ export const phase71AdaptiveReplanningSteps = Object.freeze([
   Object.freeze(["Phase 71 adaptive replanning / alternative means", Object.freeze(["tests/phase71/phase71-adaptive-replanning-alternative-means.test.mjs"])]),
 ]);
 
+export const phase72MeansFeasibilitySteps = Object.freeze([
+  Object.freeze(["Phase 72 means feasibility / capability-affordance validation", Object.freeze(["tests/phase72/phase72-means-feasibility-capability-affordance.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -122,6 +126,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase69GoalToPlanSteps,
   ...phase70GoalLifecycleSteps,
   ...phase71AdaptiveReplanningSteps,
+  ...phase72MeansFeasibilitySteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -135,6 +140,7 @@ export const cognitionSteps = Object.freeze([
   ...phase69GoalToPlanSteps,
   ...phase70GoalLifecycleSteps,
   ...phase71AdaptiveReplanningSteps,
+  ...phase72MeansFeasibilitySteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -145,4 +151,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase69GoalToPlanSteps,
   ...phase70GoalLifecycleSteps,
   ...phase71AdaptiveReplanningSteps,
+  ...phase72MeansFeasibilitySteps,
 ]);

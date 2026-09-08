@@ -405,7 +405,7 @@ assert.ok(
   "Phase70A must run after causal adjudication and Phase69D feedback, before Phase70B and atomic commit.",
 );
 assert.match(loopSource.slice(achievementIndex, viabilityIndex), /snapshot\.state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /adaptiveReplanningMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(commitIndex, postCommitIndex), /meansFeasibilityMutationExecution\.next_world_state/);
 assert.doesNotMatch(loopSource.slice(achievementIndex, commitIndex), /result\s*===\s*["']success["']|includes\(["']success["']\)/i,
   "Loop must not infer achievement from success labels.");
 
