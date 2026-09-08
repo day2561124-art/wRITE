@@ -76,6 +76,7 @@ const groundingDimensionByKind = Object.freeze({
   known_context: "belief",
   uncertain_context: "belief",
   current_action: "commitment",
+  effective_action_commitment: "commitment",
   relationship_context: "relationship",
   decision_pressure: "pressure",
   emotion_context: "emotion",

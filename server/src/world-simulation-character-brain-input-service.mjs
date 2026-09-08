@@ -7,6 +7,9 @@ import {
 import {
   buildWorldSimulationSubjectiveCrossOptionPreferenceView,
 } from "./world-simulation-subjective-cross-option-preference-service.mjs";
+import {
+  worldSimulationEffectiveActionCommitmentCharacterExposureVersion,
+} from "./world-simulation-effective-action-commitment-character-exposure-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -184,6 +187,30 @@ export function buildWorldSimulationCharacterBrainInput(
         ?? {},
       ),
   };
+
+  const commitmentExposure =
+    options.effective_action_commitment_character_exposure;
+  if (commitmentExposure !== undefined && commitmentExposure !== null) {
+    if (!isObject(commitmentExposure)
+        || commitmentExposure.version
+          !== worldSimulationEffectiveActionCommitmentCharacterExposureVersion
+        || commitmentExposure.character !== input.character) {
+      const error = new Error(
+        "Character Brain input requires a same-character Phase75B commitment exposure.",
+      );
+      error.code = "WORLD_SIMULATION_EFFECTIVE_ACTION_COMMITMENT_CHARACTER_EXPOSURE_INVALID";
+      throw error;
+    }
+    input.cognition.effective_action_commitment = cloneJson({
+      status: commitmentExposure.status,
+      active_commitment: commitmentExposure.active_commitment,
+      has_active_commitment: commitmentExposure.has_active_commitment,
+      explicit_reject_all_cleared_prior_commitment:
+        commitmentExposure.explicit_reject_all_cleared_prior_commitment,
+      deliberation_boundary: commitmentExposure.deliberation_boundary,
+    });
+    input.boundaries.effective_action_commitment_character_exposure_v1_installed = true;
+  }
 
   if (typeof input.character === "string" && input.character.trim()) {
     input.subjective_action_deliberation =

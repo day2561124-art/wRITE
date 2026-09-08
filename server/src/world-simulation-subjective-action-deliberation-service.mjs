@@ -219,6 +219,11 @@ function buildCognitionGroundingCatalog(character, cognition) {
     ["relationship_context", "cognition.relationship_cognition", source.relationship_cognition],
     ["decision_pressure", "cognition.decision_pressures", source.decision_pressures],
     ["current_action", "cognition.current_action", source.current_action],
+    [
+      "effective_action_commitment",
+      "cognition.effective_action_commitment",
+      source.effective_action_commitment,
+    ],
     ["emotion_context", "cognition.emotion", source.emotion],
     ["working_memory_focus", "cognition.working_context.focus", working.focus],
     ["working_memory_active_context", "cognition.working_context.active_context", working.active_context],

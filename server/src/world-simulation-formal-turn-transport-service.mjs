@@ -17,8 +17,15 @@ import {
   beginWorldSimulationSession,
 } from "./world-simulation-session-service.mjs";
 import {
+  getWorldSimulationHistory,
   getWorldSimulationState,
 } from "./world-simulation-state-service.mjs";
+import {
+  projectWorldSimulationEffectiveActionCommitment,
+} from "./world-simulation-effective-action-commitment-projection-service.mjs";
+import {
+  buildWorldSimulationEffectiveActionCommitmentCharacterExposure,
+} from "./world-simulation-effective-action-commitment-character-exposure-service.mjs";
 
 export const worldSimulationFormalTurnTransportVersion =
   "phase62a-r1-step4b1-formal-turn-transport-core-v1";
@@ -255,9 +262,23 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
       loopOptions,
     );
 
-    const decisionInputs = prepared.decision_packets.map((packet) => ({
-      character_input: buildWorldSimulationCharacterBrainInput(packet),
-    }));
+    const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
+    const decisionInputs = prepared.decision_packets.map((packet) => {
+      const effectiveCommitment = projectWorldSimulationEffectiveActionCommitment({
+        world_history: worldHistory,
+        world_simulation_session_id: sessionId,
+        character: packet.character,
+      });
+      const commitmentExposure =
+        buildWorldSimulationEffectiveActionCommitmentCharacterExposure(
+          effectiveCommitment,
+        );
+      return {
+        character_input: buildWorldSimulationCharacterBrainInput(packet, {
+          effective_action_commitment_character_exposure: commitmentExposure,
+        }),
+      };
+    });
 
     const receipt = await broker.storePrepared({
       prepared_turn_handle: reservation.receipt.prepared_turn_handle,

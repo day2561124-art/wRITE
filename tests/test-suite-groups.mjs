@@ -126,6 +126,7 @@ export const phase74SubjectiveActionDeliberationSteps = Object.freeze([
 
 export const phase75ActionCommitmentSteps = Object.freeze([
   Object.freeze(["Phase 75A effective action commitment projection", Object.freeze(["tests/phase75/phase75a-effective-action-commitment-projection.test.mjs"])]),
+  Object.freeze(["Phase 75B bounded effective action commitment character exposure", Object.freeze(["tests/phase75/phase75b-effective-action-commitment-character-exposure.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
