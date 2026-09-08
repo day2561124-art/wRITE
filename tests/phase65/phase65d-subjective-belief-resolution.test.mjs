@@ -700,7 +700,7 @@ assert.ok(beliefResolutionIndex > relationExecutionIndex);
 assert.ok(commitIndex > beliefResolutionIndex);
 assert.ok(
   loopSource.includes(
-    "next_world_state: meansFeasibilityMutationExecution.next_world_state",
+    "next_world_state: visibleConstraintObservationMutationExecution.next_world_state",
   ),
   "Phase66A may extend the committed world state only through the authoritative Phase62K mutation executor",
 );

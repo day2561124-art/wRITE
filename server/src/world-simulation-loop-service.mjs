@@ -133,6 +133,13 @@ import {
   worldSimulationMeansFeasibilityVersion,
 } from "./world-simulation-means-feasibility-service.mjs";
 import {
+  buildWorldSimulationVisibleConstraintObservationContract,
+  buildWorldSimulationVisibleConstraintObservations,
+  projectWorldSimulationVisibleConstraintObservationsForCharacter,
+  visibleConstraintObservationCharacterProjectionVersion,
+  worldSimulationVisibleConstraintObservationVersion,
+} from "./world-simulation-visible-constraint-observation-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3163,6 +3170,8 @@ export function buildWorldSimulationLoopContract() {
     directional_height_visibility: buildWorldSimulationDirectionalHeightVisibilityContract(),
     illumination_visibility: buildWorldSimulationIlluminationVisibilityContract(),
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
+    visible_constraint_observation_bridge:
+      buildWorldSimulationVisibleConstraintObservationContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_episode_segmentation:
       buildWorldSimulationSubjectiveEpisodeSegmentationContract(),
@@ -3954,6 +3963,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const autobiographicalSelfInterpretationCharacterProjections = [];
   const structuredSelfModelCharacterProjections = [];
   const revisedStructuredSelfModelCharacterProjections = [];
+  const visibleConstraintObservationProjections = [];
   for (const character of participants) {
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
@@ -4071,6 +4081,30 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         information_boundary: perception.information_boundary ?? {},
       },
     );
+
+    // Phase73A projects only already-committed Phase72 evidence that was
+    // explicitly marked character-visible. Receipts are available for exactly
+    // the next committed state revision, so no Phase72 result can feed back
+    // into the same turn that produced it. The projection contributes only a
+    // bounded observation; subjective interpretation remains owned by the
+    // existing perception -> memory -> claim/belief pipeline.
+    const visibleConstraintObservationProjection =
+      projectWorldSimulationVisibleConstraintObservationsForCharacter({
+        world_state: worldState,
+        character,
+        state_revision: snapshot.revision,
+      });
+    characterPerception.other_senses = [
+      ...array(characterPerception.other_senses),
+      ...array(visibleConstraintObservationProjection.character_view.other_senses),
+    ];
+    visibleConstraintObservationProjections.push({
+      character,
+      version: visibleConstraintObservationProjection.version,
+      character_view_hash:
+        visibleConstraintObservationProjection.character_view_hash,
+      audit: cloneJson(visibleConstraintObservationProjection.audit),
+    });
 
     const memoryAccessibilityBaseInput = {
       world_state:
@@ -4778,6 +4812,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         directional_height_visibility_enforced: true,
         illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
         programmatic_audibility_enforced: audibilityQuery.result.audibility_enforced === true,
+        phase73a_visible_constraint_observation_installed: true,
+        phase73a_visible_constraint_observation_projection_version:
+          visibleConstraintObservationCharacterProjectionVersion,
+        phase73a_same_character_committed_prior_revision_only: true,
+        phase73a_actual_means_feasibility_verdict_exposed: false,
+        phase73a_world_truth_authority_exposed: false,
+        phase73a_same_turn_feedback_allowed: false,
         programmatic_memory_accessibility_enforced:
           memoryAccessibilityQuery
             .result
@@ -5028,6 +5069,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(structuredSelfModelCharacterProjections),
     revised_structured_self_model_character_projections:
       cloneJson(revisedStructuredSelfModelCharacterProjections),
+    visible_constraint_observation_projections:
+      cloneJson(visibleConstraintObservationProjections),
     visibility_queries: visibilityQueries,
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
@@ -5052,6 +5095,15 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       directional_height_visibility_query_version: worldSimulationDirectionalHeightVisibilityVersion,
       illumination_visibility_query_version: worldSimulationIlluminationVisibilityVersion,
       audibility_query_version: worldSimulationAudibilityQueryVersion,
+      visible_constraint_observation_version:
+        worldSimulationVisibleConstraintObservationVersion,
+      visible_constraint_observation_projection_version:
+        visibleConstraintObservationCharacterProjectionVersion,
+      visible_constraint_observation_committed_prior_revision_only: true,
+      visible_constraint_observation_same_character_only: true,
+      visible_constraint_observation_actual_means_verdict_not_forwarded: true,
+      visible_constraint_observation_world_truth_authority_not_forwarded: true,
+      visible_constraint_observation_same_turn_feedback_allowed: false,
       subjective_memory_formation_version: worldSimulationSubjectiveMemoryFormationVersion,
       subjective_memory_accessibility_version: worldSimulationMemoryAccessibilityVersion,
 
@@ -7860,6 +7912,53 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase73A publishes only the Phase72 evidence refs that Phase72 explicitly
+  // marked character-visible. The receipt is committed now but cannot enter
+  // perception until the next committed state revision, preventing same-turn
+  // feasibility verdicts from retroactively altering cognition or replanning.
+  const visibleConstraintObservation =
+    buildWorldSimulationVisibleConstraintObservations({
+      world_state:
+        meansFeasibilityMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_state_revision:
+        snapshot.revision,
+      means_feasibility_events:
+        meansFeasibility.result.means_feasibility_events_created,
+      phase72_authoritative_validation_context:
+        meansFeasibility.result.authoritative_validation_context,
+    });
+
+  const visibleConstraintObservationMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:visible_constraint_observation`,
+      world_state_hash:
+        hashAgentRunValue(meansFeasibilityMutationExecution.next_world_state),
+      state_transitions:
+        visibleConstraintObservation.result.state_transitions,
+      validation_context: {
+        visible_constraint_observation:
+          visibleConstraintObservation.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const visibleConstraintObservationMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        meansFeasibilityMutationExecution.next_world_state,
+      preview_world_state:
+        visibleConstraintObservation.result.preview_world_state,
+      queue:
+        visibleConstraintObservationMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7920,7 +8019,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: meansFeasibilityMutationExecution.next_world_state,
+      next_world_state: visibleConstraintObservationMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -8333,6 +8432,12 @@ export async function resolveWorldSimulationTurn(
         cloneJson(meansFeasibilityMutationQueue),
       means_feasibility_mutation_execution:
         cloneJson(meansFeasibilityMutationExecution.execution),
+      visible_constraint_observation:
+        cloneJson(visibleConstraintObservation),
+      visible_constraint_observation_mutation_queue:
+        cloneJson(visibleConstraintObservationMutationQueue),
+      visible_constraint_observation_mutation_execution:
+        cloneJson(visibleConstraintObservationMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -9091,6 +9196,28 @@ export async function resolveWorldSimulationTurn(
       same_turn_replanning_modeled: false,
       arbitrary_world_state_search_modeled: false,
       numeric_scoring_modeled: false,
+    },
+    visible_constraint_observation: {
+      version: worldSimulationVisibleConstraintObservationVersion,
+      created_observation_event_count:
+        visibleConstraintObservation.result.observation_events_created.length,
+      appended_history_reference_count:
+        visibleConstraintObservation.result.history_references_appended.length,
+      mutation_count:
+        visibleConstraintObservationMutationQueue.mutation_count,
+      authoritative_executor:
+        visibleConstraintObservationMutationExecution.execution.version,
+      phase72_character_visible_subset_only: true,
+      observer_scoped: true,
+      next_committed_revision_only: true,
+      actual_means_feasibility_verdict_exposed: false,
+      world_truth_authority_exposed: false,
+      direct_subjective_memory_write: false,
+      direct_subjective_claim_or_belief_write: false,
+      direct_current_mind_write: false,
+      same_turn_cognition_feedback_allowed: false,
+      same_turn_replanning_triggered: false,
+      cross_character_exposure_allowed: false,
     },
     committed_character_current_mind: {
       current_mind_contract_version:

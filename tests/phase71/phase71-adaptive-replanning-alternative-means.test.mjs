@@ -735,7 +735,7 @@ assert.ok(
 );
 assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /resolveAdaptiveReplanningDecisions\(\s*snapshot\.state/);
 assert.match(loopSource.slice(meansFeasibilityIndex, commitIndex), /adaptiveReplanningMutationExecution\.next_world_state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /meansFeasibilityMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(commitIndex, postCommitIndex), /visibleConstraintObservationMutationExecution\.next_world_state/);
 assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /goal_implementation_intention_revision/);
 assert.match(loopSource.slice(adaptiveIndex, meansFeasibilityIndex), /adaptive_replanning_alternative_means/);
 assert.doesNotMatch(

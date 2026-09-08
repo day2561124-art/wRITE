@@ -496,7 +496,7 @@ assert.match(
 );
 assert.match(
   loopSource.slice(commitIndex, postCommitIndex),
-  /meansFeasibilityMutationExecution\.next_world_state/,
+  /visibleConstraintObservationMutationExecution\.next_world_state/,
 );
 assert.doesNotMatch(
   loopSource.slice(feasibilityIndex, commitIndex),

@@ -7911,6 +7911,320 @@ function assertPhase72MeansFeasibilityMutation(
   }
 }
 
+const phase73aVisibleConstraintObservationEventSchema =
+  "phase73a-visible-constraint-observation-event-v1";
+const phase73aVisibleConstraintObservationHistorySchema =
+  "phase73a-visible-constraint-observation-history-ref-v1";
+const phase73aVisibleConstraintObservationVersion =
+  "phase73a-visible-constraint-observation-v1";
+const phase73aEvidenceKinds = new Set([
+  "selected_action_intent",
+  "action_outcome",
+  "causal_state_transition",
+]);
+const phase73aCharacterFacingPrivateKeys = new Set([
+  "world_state", "world_state_patch", "mutation", "mutation_path", "memory_store",
+  "hidden_retrieval_graph", "gpt_hidden_reasoning", "internal_chain_of_thought",
+  "means_status", "physical_executability", "authorization_status", "constraint_status",
+  "constraint_checks", "character_visible_evidence_refs", "authoritative_evidence_catalog_hash",
+  "resolver_view_hash", "context_hash",
+]);
+function phase73aObservationEventHash(event) {
+  const body = cloneJson(event);
+  delete body.observation_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase73aSanitizeCharacterFacingEvidence(value, depth = 0) {
+  if (depth > 8) return null;
+  if (Array.isArray(value)) {
+    return value.slice(0, 64).map((item) => phase73aSanitizeCharacterFacingEvidence(item, depth + 1));
+  }
+  if (!isObject(value)) {
+    if (typeof value === "string") return value.slice(0, 1200);
+    if (typeof value === "number" || typeof value === "boolean" || value == null) return value;
+    return null;
+  }
+  const clean = {};
+  for (const [key, child] of Object.entries(value).slice(0, 96)) {
+    const normalized = String(key).toLowerCase();
+    if (phase73aCharacterFacingPrivateKeys.has(normalized)
+        || normalized === "id"
+        || normalized.endsWith("_id")
+        || normalized.endsWith("_ids")
+        || normalized.startsWith("engine_")
+        || normalized.startsWith("internal_")) continue;
+    clean[key] = phase73aSanitizeCharacterFacingEvidence(child, depth + 1);
+  }
+  return clean;
+}
+function phase73aExpectedCharacterFacingObservation(evidence) {
+  return {
+    modality: "constraint_related",
+    evidence_kind: evidence.evidence_kind,
+    perceived_evidence: phase73aSanitizeCharacterFacingEvidence(evidence.evidence),
+    source: "character_visible_world_evidence",
+    world_truth_authority: false,
+    subjective_interpretation_required: true,
+    actual_means_feasibility_verdict_exposed: false,
+  };
+}
+function phase73aHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Visible-constraint observation history is append-only.");
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Visible-constraint observation history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase73aReplayState(worldState) {
+  const latestByCharacter = new Map();
+  const seenEventIds = new Set();
+  const seenSourceEvidence = new Set();
+  for (const ref of array(worldState.visible_constraint_observation_history)) {
+    const event = object(object(worldState.visible_constraint_observation_events)[ref?.observation_event_id]);
+    const character = phase72CharacterKey(event.character);
+    if (!character) continue;
+    latestByCharacter.set(character, event);
+    if (String(event.observation_event_id ?? "").trim()) seenEventIds.add(event.observation_event_id);
+    if (String(event.source_means_feasibility_event_id ?? "").trim()
+        && String(event.source_evidence_ref ?? "").trim()) {
+      seenSourceEvidence.add(`${character}\u0000${event.source_means_feasibility_event_id}\u0000${event.source_evidence_ref}`);
+    }
+  }
+  return { latestByCharacter, seenEventIds, seenSourceEvidence };
+}
+function phase73aValidateContext(worldState, validationContext, event) {
+  const context = object(object(validationContext).visible_constraint_observation);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase73A visible-constraint observation mutation requires authoritative validation context.");
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const body = cloneJson(context);
+  const contextHash = String(body.context_hash ?? "").trim();
+  delete body.context_hash;
+  const phase72Context = object(context.phase72_authoritative_validation_context);
+  const phase72Body = cloneJson(phase72Context);
+  const phase72ContextHash = String(phase72Body.context_hash ?? "").trim();
+  delete phase72Body.context_hash;
+  if (context.version !== phase73aVisibleConstraintObservationVersion
+      || context.turn_id !== event.source_turn_id
+      || context.source_state_revision !== event.source_state_revision
+      || context.deliver_at_state_revision !== event.deliver_at_state_revision
+      || context.deliver_at_state_revision !== context.source_state_revision + 1
+      || context.explicit_phase72_character_visible_subset_only !== true
+      || context.next_committed_revision_only !== true
+      || context.raw_world_state_exposed_to_character !== false
+      || context.actual_means_feasibility_verdict_exposed_to_character !== false
+      || !contextHash
+      || hashAgentRunValue(body) !== contextHash
+      || phase72Context.version !== phase72MeansFeasibilityVersion
+      || phase72Context.turn_id !== event.source_turn_id
+      || phase72Context.character_visible_evidence_is_explicit_subset_only !== true
+      || phase72Context.raw_world_state_exposed !== false
+      || !phase72ContextHash
+      || hashAgentRunValue(phase72Body) !== phase72ContextHash
+      || !Array.isArray(phase72Context.authoritative_evidence)) {
+    const error = new Error("Phase73A authoritative validation context is invalid or stale.");
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const source = object(
+    object(worldState.goal_implementation_intention_means_feasibility_events)[
+      event.source_means_feasibility_event_id
+    ],
+  );
+  const sourceRef = array(
+    worldState.goal_implementation_intention_means_feasibility_history,
+  ).find((ref) => ref?.means_feasibility_event_id === event.source_means_feasibility_event_id);
+  if (!Object.keys(source).length
+      || source.schema_version !== phase72MeansFeasibilityEventSchema
+      || source.version !== phase72MeansFeasibilityVersion
+      || source.immutable !== true
+      || source.operation !== "verify_means_feasibility"
+      || source.status !== "goal_implementation_intention_means_feasibility_recorded"
+      || source.character_visible_evidence_subset_only !== true
+      || source.world_truth_is_not_character_knowledge !== true
+      || source.character_knowledge_updated !== false
+      || source.character_brain_direct_write !== false
+      || phase72MeansFeasibilityEventHash(source) !== source.means_feasibility_event_hash
+      || source.means_feasibility_event_hash !== event.source_means_feasibility_event_hash
+      || !isObject(sourceRef)
+      || sourceRef.schema_version !== phase72MeansFeasibilityHistorySchema
+      || sourceRef.derived_index !== true
+      || sourceRef.means_feasibility_event_hash !== source.means_feasibility_event_hash
+      || sourceRef.character !== source.character
+      || sourceRef.source_turn_id !== source.source_turn_id
+      || sourceRef.goal_id !== source.goal_id
+      || sourceRef.implementation_intention_id !== source.implementation_intention_id
+      || sourceRef.means_status !== source.means_status
+      || sourceRef.status !== source.status
+      || !phase72SameCharacter(source.character, event.character)
+      || source.source_turn_id !== event.source_turn_id
+      || !array(source.character_visible_evidence_refs).includes(event.source_evidence_ref)
+      || hashAgentRunValue(phase72Context.authoritative_evidence) !== source.authoritative_evidence_catalog_hash
+      || source.authoritative_evidence_catalog_hash !== event.authoritative_evidence_catalog_hash) {
+    const error = new Error(`Phase73A observation ${event.observation_event_id} does not pin a canonical Phase72 source event.`);
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_SOURCE_EVENT_INVALID";
+    throw error;
+  }
+  const evidence = phase72Context.authoritative_evidence.find(
+    (entry) => entry?.evidence_ref === event.source_evidence_ref,
+  );
+  const evidenceCharacter = phase72EvidenceCharacter(evidence?.evidence);
+  if (!isObject(evidence)
+      || !phase73aEvidenceKinds.has(evidence.evidence_kind)
+      || evidence.evidence_hash !== event.source_evidence_hash
+      || evidence.evidence_kind !== event.source_evidence_kind
+      || hashAgentRunValue(evidence.evidence) !== evidence.evidence_hash
+      || evidenceCharacter !== (evidence.evidence_character ?? null)
+      || (String(evidence.evidence_character ?? "").trim()
+        && !phase72SameCharacter(evidence.evidence_character, event.character))) {
+    const error = new Error(`Phase73A observation ${event.observation_event_id} references invalid or cross-character evidence.`);
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_EVIDENCE_INVALID";
+    throw error;
+  }
+  if (!sameValue(
+    event.character_facing_observation,
+    phase73aExpectedCharacterFacingObservation(evidence),
+  )) {
+    const error = new Error(`Phase73A observation ${event.observation_event_id} contains a forged character-facing payload.`);
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_CHARACTER_PAYLOAD_INVALID";
+    throw error;
+  }
+}
+function assertPhase73AVisibleConstraintObservationMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "visible_constraint_observation_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("VisibleConstraintObservationEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase73aVisibleConstraintObservationEventSchema
+        || next.version !== phase73aVisibleConstraintObservationVersion
+        || next.immutable !== true
+        || next.observation_event_id !== eventId
+        || !String(next.observation_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || !Number.isSafeInteger(next.source_state_revision)
+        || next.source_state_revision < 0
+        || next.deliver_at_state_revision !== next.source_state_revision + 1
+        || next.operation !== "publish_visible_constraint_observation"
+        || !String(next.source_means_feasibility_event_id ?? "").trim()
+        || !String(next.source_means_feasibility_event_hash ?? "").trim()
+        || !String(next.source_evidence_ref ?? "").trim()
+        || !String(next.source_evidence_hash ?? "").trim()
+        || !phase73aEvidenceKinds.has(next.source_evidence_kind)
+        || !String(next.authoritative_evidence_catalog_hash ?? "").trim()
+        || next.perceptual_channel !== "other_senses"
+        || !isObject(next.character_facing_observation)
+        || next.explicit_phase72_character_visible_subset_only !== true
+        || next.next_committed_revision_only !== true
+        || next.actual_means_feasibility_verdict_exposed !== false
+        || next.world_truth_authority_exposed !== false
+        || next.direct_belief_write !== false
+        || next.direct_subjective_memory_write !== false
+        || next.direct_current_mind_write !== false
+        || next.same_turn_cognition_feedback_allowed !== false
+        || next.same_turn_replanning_triggered !== false
+        || next.cross_character_exposure_allowed !== false
+        || next.status !== "visible_constraint_observation_recorded") {
+      const error = new Error(`VisibleConstraintObservationEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_EVENT_INVALID";
+      throw error;
+    }
+    if (phase73aObservationEventHash(next) !== next.observation_event_hash) {
+      const error = new Error(`VisibleConstraintObservationEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:visible_constraint_observation`) {
+      const error = new Error(`VisibleConstraintObservationEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase73aValidateContext(worldState, validationContext, next);
+    const replay = phase73aReplayState(worldState);
+    const character = phase72CharacterKey(next.character);
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const sourceEvidenceKey = `${character}\u0000${next.source_means_feasibility_event_id}\u0000${next.source_evidence_ref}`;
+    if (replay.seenEventIds.has(eventId)
+        || replay.seenSourceEvidence.has(sourceEvidenceKey)
+        || next.previous_observation_event_id !== (previous?.observation_event_id ?? null)
+        || next.previous_observation_event_hash !== (previous?.observation_event_hash ?? null)) {
+      const error = new Error(`VisibleConstraintObservationEvent ${eventId} duplicates evidence or breaks its per-character chain.`);
+      error.code = replay.seenSourceEvidence.has(sourceEvidenceKey)
+        ? "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_DUPLICATE_SOURCE"
+        : "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "visible_constraint_observation_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Visible-constraint observation history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase73aHistoryPrefix(oldHistory, newHistory);
+  const replay = phase73aReplayState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.visible_constraint_observation_events)[ref?.observation_event_id]);
+    const character = phase72CharacterKey(event.character);
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const sourceEvidenceKey = `${character}\u0000${event.source_means_feasibility_event_id}\u0000${event.source_evidence_ref}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase73aVisibleConstraintObservationHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.observation_event_id ?? "").trim()
+        || !String(ref.observation_event_hash ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || ref.status !== "visible_constraint_observation_recorded"
+        || replay.seenEventIds.has(ref.observation_event_id)
+        || replay.seenSourceEvidence.has(sourceEvidenceKey)
+        || !Object.keys(event).length
+        || phase73aObservationEventHash(event) !== event.observation_event_hash
+        || ref.observation_event_hash !== event.observation_event_hash
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.source_means_feasibility_event_id !== event.source_means_feasibility_event_id
+        || ref.source_evidence_ref !== event.source_evidence_ref
+        || ref.deliver_at_state_revision !== event.deliver_at_state_revision
+        || ref.previous_observation_event_id !== event.previous_observation_event_id
+        || ref.previous_observation_event_hash !== event.previous_observation_event_hash
+        || event.previous_observation_event_id !== (previous?.observation_event_id ?? null)
+        || event.previous_observation_event_hash !== (previous?.observation_event_hash ?? null)) {
+      const error = new Error(`Visible-constraint observation history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_VISIBLE_CONSTRAINT_OBSERVATION_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.observation_event_id);
+    replay.seenSourceEvidence.add(sourceEvidenceKey);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -8109,6 +8423,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase73AVisibleConstraintObservationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -8281,6 +8602,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.validation_context,
       );
       assertPhase72MeansFeasibilityMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase73AVisibleConstraintObservationMutation(
         executed,
         worldPath,
         mutation,
@@ -8630,6 +8958,24 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase72_authoritative_queue_validator_invoked: true,
       direct_nested_means_feasibility_history_mutation_rejected: true,
       phase72_historical_means_feasibility_rewrite_rejected: true,
+      phase73a_visible_constraint_observation_event_write_once_enforced: true,
+      phase73a_visible_constraint_observation_event_content_address_verified: true,
+      phase73a_phase72_source_event_hash_pinning_enforced: true,
+      phase73a_phase72_character_visible_subset_membership_verified: true,
+      phase73a_cross_character_evidence_rejected: true,
+      phase73a_character_facing_payload_recomputed_from_canonical_evidence: true,
+      phase73a_actual_means_feasibility_verdict_exposure_rejected: true,
+      phase73a_world_truth_authority_exposure_rejected: true,
+      phase73a_next_committed_revision_delivery_enforced: true,
+      phase73a_same_turn_cognition_feedback_rejected: true,
+      phase73a_direct_memory_belief_current_mind_write_rejected: true,
+      phase73a_visible_constraint_observation_history_append_only_enforced: true,
+      phase73a_per_character_observation_hash_chain_enforced: true,
+      phase73a_duplicate_source_evidence_receipt_rejected: true,
+      phase73a_authoritative_validation_context_required: true,
+      phase73a_authoritative_queue_validator_invoked: true,
+      direct_nested_visible_constraint_observation_history_mutation_rejected: true,
+      phase73a_historical_visible_constraint_observation_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
