@@ -1,6 +1,9 @@
 import {
   buildWorldSimulationSubjectiveActionDeliberationView,
 } from "./world-simulation-subjective-action-deliberation-service.mjs";
+import {
+  buildWorldSimulationSubjectiveProspectiveConsequenceView,
+} from "./world-simulation-subjective-prospective-consequence-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -186,7 +189,15 @@ export function buildWorldSimulationCharacterBrainInput(
         cognition: input.cognition,
         candidate_action_intents: input.candidate_action_intents,
       });
+    input.subjective_prospective_consequence_simulation =
+      buildWorldSimulationSubjectiveProspectiveConsequenceView({
+        character: input.character,
+        cognition: input.cognition,
+        candidate_action_intents: input.candidate_action_intents,
+        subjective_action_deliberation: input.subjective_action_deliberation,
+      });
     input.boundaries.subjective_action_deliberation_grounding_v1_installed = true;
+    input.boundaries.subjective_prospective_consequence_simulation_v1_installed = true;
   }
 
   // Historical compatibility aliases are never allowed to bypass v3's
