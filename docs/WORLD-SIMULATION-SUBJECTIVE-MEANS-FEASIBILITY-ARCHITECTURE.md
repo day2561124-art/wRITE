@@ -256,6 +256,170 @@ Phase73B still does not implement:
 - Phase73C belief-grounded reconsideration trigger;
 - a complete skill/stat/resource progression system.
 
+## Phase73C — Belief-Grounded Means Reconsideration / Later-Turn Replanning
+
+Phase73C closes the subjective-feasibility loop without turning every belief change into an eager replan.
+
+Its question is:
+
+> Has this character's own **already committed** belief state made the currently intended means sufficiently inapplicable, from the character's perspective, to justify reconsidering that means on a later turn?
+
+### Research basis
+
+The design follows BDI / AgentSpeak intention-reconsideration and plan-context lessons:
+
+1. an agent should not reconsider an intention on every belief update, because excessive reconsideration destroys commitment and wastes progress;
+2. an agent should reconsider when its own belief state makes the intended plan's applicability/context conditions no longer hold;
+3. failure recovery and belief-triggered reconsideration are distinct but compatible reasons to reopen means choice;
+4. the trigger must remain epistemic: the character's belief may be wrong, while objective executability remains Phase72's authority.
+
+Phase73C therefore adds a second Phase71 eligibility basis rather than replacing Phase71's established repeated-failure route.
+
+### Durable semantic linkage, not a second belief store
+
+Phase73B's normalized decision retains machine-readable semantics such as:
+
+- `assessment`;
+- `target_means_ref`;
+- `goal_id`;
+- `implementation_intention_id`;
+- `interpretation_ref`.
+
+Phase65 then persists the ordinary subjective claim, while Phase66 owns whether that claim is currently active belief.
+
+Phase73C persists only an immutable semantic linkage:
+
+`Phase73B interpretation_ref <-> canonical Phase65 claim_event_id/hash`
+
+in:
+
+- `subjective_means_feasibility_linkage_events`;
+- `subjective_means_feasibility_linkage_history`.
+
+The linkage preserves task/means identity without copying belief commitment into a parallel database. It does not itself assert that the claim is currently believed.
+
+Each linkage is content-addressed, append-only, chained per character, and pins:
+
+- deterministic Phase73B interpretation identity;
+- the canonical represented means ref;
+- the canonical Phase65 claim hash/history membership;
+- assessment and proposition lineage;
+- the explicit fact that Phase66 remains belief authority.
+
+### Trigger projection
+
+The Phase73C trigger projector is read-only. For each linkage it requires the linked Phase65 claim to still appear as an **active effective Phase66 belief** for the same character.
+
+A Phase71 reconsideration trigger is emitted only when the active assessment set for one `(character, goal, implementation intention)` is unambiguously:
+
+- `perceived_blocked`.
+
+The following do **not** automatically trigger:
+
+- `uncertain` alone;
+- `perceived_feasible`;
+- blocked plus an active `uncertain` assessment;
+- blocked plus an active `perceived_feasible` assessment.
+
+Conflicting active assessments fail closed rather than causing eager replanning.
+
+No natural-language proposition parser is used to guess plan identity or feasibility semantics.
+
+### Temporal boundary
+
+Only prior committed cognition may trigger Phase71.
+
+Current-turn Phase73B interpretation, Phase65 claim, Phase66 belief revision, and Phase73C linkage may all be persisted during resolve, but Phase71 continues to build its eligibility catalog from `snapshot.state` captured before the turn.
+
+Therefore:
+
+`Turn N visible evidence -> Turn N interpretation/belief/linkage commit -> Turn N+1 Phase73C trigger -> Phase71 reconsideration`
+
+and never:
+
+`Turn N interpretation -> Turn N immediate replan`.
+
+### Phase71 dual eligibility
+
+Phase71 now admits a source means when either:
+
+1. the existing canonical repeated prior committed failure streak is present; **or**
+2. Phase73C projects one canonical prior committed `committed_subjective_means_block` trigger.
+
+The source records `eligibility_basis` as either:
+
+- `repeated_committed_failure`; or
+- `committed_subjective_means_block`.
+
+If both are available, the established repeated-failure basis remains the deterministic first choice. This preserves existing Phase71 semantics while adding the new epistemic route.
+
+For the subjective-block basis:
+
+- failure evidence may be empty;
+- the exact Phase73C trigger provenance is pinned;
+- alternative-means candidates still require bounded character-owned cognition grounding;
+- Phase69B still owns plan supersession/replacement identity;
+- goal commitment is preserved;
+- Phase71 still cannot assert objective feasibility.
+
+### Authoritative validation
+
+Phase62K independently revalidates both layers.
+
+For Phase73C linkage writes it verifies:
+
+1. authoritative validation-context hash;
+2. deterministic Phase73B interpretation identity;
+3. canonical represented target means;
+4. canonical Phase65 claim hash and history membership;
+5. exact claim evidence correspondence;
+6. immutable linkage-event content hash;
+7. append-only linkage history and per-character chain;
+8. no direct belief/plan/goal mutation and no same-turn replanning authority.
+
+For Phase71 events using `committed_subjective_means_block`, Phase62K reruns the Phase73C trigger projection from authoritative committed state and requires exact same-character/same-goal/same-means trigger provenance. A forged trigger ref or caller-rehashed validation context is insufficient.
+
+### End-to-end authority split
+
+The completed loop is:
+
+`Phase72 actual feasibility`
+`-> Phase73A observable evidence`
+`-> subjective memory`
+`-> Phase73B subjective interpretation`
+`-> Phase65 claim`
+`-> Phase66 active belief`
+`-> Phase73C later-turn reconsideration trigger`
+`-> Phase71 alternative means`
+`-> Phase69B plan revision`
+`-> Phase72 objective validation of the replacement means`
+
+Authority remains deliberately split:
+
+- Phase72: actual executability;
+- Phase73A: observer-scoped perceptual evidence;
+- Phase73B: character interpretation proposal;
+- Phase65/66: subjective claim/belief lifecycle;
+- Phase73C: later-turn reconsideration eligibility only;
+- Phase71: bounded alternative-means replanning;
+- Phase69B: plan lifecycle mutation.
+
+### Phase73C non-goals
+
+Phase73C does not implement:
+
+- world-truth synchronization of subjective belief;
+- eager replanning on arbitrary belief change;
+- uncertain-as-blocked coercion;
+- numeric confidence, utility, or success-probability thresholds;
+- natural-language parsing as plan-binding authority;
+- a parallel perceived-feasibility belief store;
+- direct goal abandonment/disengagement;
+- direct plan mutation;
+- same-turn cognition feedback;
+- objective feasibility verification of replacement means;
+- long-term self-efficacy or capability-learning dynamics.
+
 ## Follow-on
 
-Phase73C may allow later-turn Phase71 reconsideration eligibility to consume character-owned committed subjective awareness while preserving Phase71's existing bounded candidate-generation and Phase69B plan-revision authority.
+With Phase73A–73C complete, the immediate subjective-feasibility feedback loop is closed. Any subsequent phase should be selected from a fresh architecture review rather than extending Phase73 by default; plausible future topics include longer-horizon capability self-knowledge / self-efficacy learning and explicit skill/resource progression, but these are not part of Phase73C.

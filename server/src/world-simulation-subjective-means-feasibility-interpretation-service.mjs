@@ -82,15 +82,38 @@ function isConstraintObservationMemory(memoryView) {
     && content.actual_means_feasibility_verdict_exposed === false
     && optionalString(memoryView?.source_memory_ref);
 }
-function representedMeansRef(character, plan) {
+export function buildWorldSimulationSubjectiveMeansFeasibilityMeansRef(
+  character,
+  plan,
+) {
   return `phase73b_means_${hashAgentRunValue({
     version: worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
     character: characterKey(character),
-    goal_id: plan.goal_id,
-    implementation_intention_id: plan.implementation_intention_id,
-    cue_descriptor: plan.cue_descriptor,
-    response_descriptor: plan.response_descriptor,
+    goal_id: plan?.goal_id,
+    implementation_intention_id: plan?.implementation_intention_id,
+    cue_descriptor: plan?.cue_descriptor,
+    response_descriptor: plan?.response_descriptor,
   }).slice(0, 24)}`;
+}
+
+export function buildWorldSimulationSubjectiveMeansFeasibilityInterpretationIdentity(
+  input = {},
+) {
+  const identity = {
+    version: worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
+    turn_id: input.turn_id,
+    character: input.character,
+    target_means_ref: input.target_means_ref,
+    assessment: input.assessment,
+    proposition: input.proposition,
+    source_memory_refs: array(input.source_memory_refs).slice().sort(compareText),
+    grounding_refs: array(input.grounding_refs).slice().sort(compareText),
+  };
+  return deepFreeze({
+    ...identity,
+    interpretation_ref:
+      `phase73b_interpretation_${hashAgentRunValue(identity).slice(0, 24)}`,
+  });
 }
 function groundingRecord(base) {
   const hash = hashAgentRunValue({
@@ -140,7 +163,7 @@ function buildCharacterContext(worldState, character, constraintMemories) {
       && optionalString(plan?.implementation_intention_id)
       && optionalString(plan?.goal_id))
     .map((plan) => ({
-      means_ref: representedMeansRef(character, plan),
+      means_ref: buildWorldSimulationSubjectiveMeansFeasibilityMeansRef(character, plan),
       goal_id: plan.goal_id,
       implementation_intention_id: plan.implementation_intention_id,
       plan_state: plan.state,
@@ -374,19 +397,17 @@ function normalizeDecision(raw, index, resolverView) {
     throw error;
   }
 
-  const identity = {
-    version: worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
+  const identity = buildWorldSimulationSubjectiveMeansFeasibilityInterpretationIdentity({
     turn_id: resolverView.turn_id,
     character: context.character,
     target_means_ref: targetMeansRef,
     assessment,
     proposition,
-    source_memory_refs: memoryRefs.slice().sort(compareText),
-    grounding_refs: groundingRefs.slice().sort(compareText),
-  };
+    source_memory_refs: memoryRefs,
+    grounding_refs: groundingRefs,
+  });
   return {
     ...identity,
-    interpretation_ref: `phase73b_interpretation_${hashAgentRunValue(identity).slice(0, 24)}`,
     goal_id: means.goal_id,
     implementation_intention_id: means.implementation_intention_id,
   };

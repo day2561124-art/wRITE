@@ -15,6 +15,9 @@ import {
 import {
   projectWorldSimulationEffectiveSubjectiveBeliefs,
 } from "./world-simulation-effective-subjective-belief-projection-service.mjs";
+import {
+  projectWorldSimulationSubjectiveMeansReconsiderationTriggers,
+} from "./world-simulation-subjective-means-feasibility-reconsideration-service.mjs";
 
 export const worldSimulationAdaptiveReplanningVersion =
   "phase71-adaptive-replanning-alternative-means-v1";
@@ -221,6 +224,16 @@ function eligibleSourceRecords(worldState, turnId) {
   const execution = projectWorldSimulationEffectiveGoalImplementationIntentionExecution({ world_state: worldState });
   const adjustment = projectWorldSimulationEffectiveMotivationalGoalAdjustment({ world_state: worldState });
   const existing = validateReplanningHistory(worldState);
+  const subjectiveReconsideration = projectWorldSimulationSubjectiveMeansReconsiderationTriggers({
+    world_state: worldState,
+    current_turn_id: turnId,
+  });
+  const subjectiveByPlan = new Map(
+    array(subjectiveReconsideration.triggers).map((trigger) => [
+      `${characterKey(trigger.character)}\u0000${trigger.goal_id}\u0000${trigger.source_implementation_intention_id}`,
+      trigger,
+    ]),
+  );
   const sources = [];
   for (const [character, records] of Object.entries(execution.plans_by_character ?? {})) {
     const goals = findCharacterRecords(adjustment.goals_by_character, character);
@@ -242,15 +255,22 @@ function eligibleSourceRecords(worldState, turnId) {
         plan.goal_id,
         turnId,
       );
-      if (failures.length < minimumConsecutiveFailureTurns) continue;
-      const planSource = latestPlanSource(worldState, character, plan.implementation_intention_id);
-      if (!planSource) continue;
       const failureRefs = failures.map((event) => ({
         execution_feedback_event_id: event.execution_feedback_event_id,
         execution_feedback_event_hash: event.execution_feedback_event_hash,
         source_turn_id: event.source_turn_id,
         operation: event.operation,
       }));
+      const subjectiveTrigger = subjectiveByPlan.get(
+        `${characterKey(character)}\u0000${plan.goal_id}\u0000${plan.implementation_intention_id}`,
+      ) ?? null;
+      const hasRepeatedFailure = failures.length >= minimumConsecutiveFailureTurns;
+      if (!hasRepeatedFailure && !subjectiveTrigger) continue;
+      const eligibilityBasis = hasRepeatedFailure
+        ? "repeated_committed_failure"
+        : "committed_subjective_means_block";
+      const planSource = latestPlanSource(worldState, character, plan.implementation_intention_id);
+      if (!planSource) continue;
       const descriptor = {
         character,
         goal_id: plan.goal_id,
@@ -262,8 +282,19 @@ function eligibleSourceRecords(worldState, turnId) {
         target_source_kind: planSource.target_source_kind,
         target_source_event_id: planSource.target_source_event_id,
         target_source_event_hash: planSource.target_source_event_hash,
+        eligibility_basis: eligibilityBasis,
         consecutive_failure_count: failureRefs.length,
         failure_evidence_refs: failureRefs,
+        subjective_reconsideration_trigger_refs:
+          eligibilityBasis === "committed_subjective_means_block" && subjectiveTrigger
+            ? [{
+              trigger_ref: subjectiveTrigger.trigger_ref,
+              trigger_hash: subjectiveTrigger.trigger_hash,
+              trigger_kind: subjectiveTrigger.trigger_kind,
+              assessment: subjectiveTrigger.assessment,
+              active_blocked_linkage_refs: cloneJson(subjectiveTrigger.active_blocked_linkage_refs),
+            }]
+            : [],
       };
       sources.push({
         source_plan_ref: `phase71_source_${hashAgentRunValue({
@@ -547,6 +578,10 @@ export function buildWorldSimulationAdaptiveReplanningResolverView(input = {}) {
     single_action_failure_sufficient: false,
     single_plan_failure_event_sufficient: false,
     prior_committed_failure_evidence_only: true,
+    prior_committed_subjective_block_belief_may_also_trigger: true,
+    uncertain_subjective_assessment_auto_triggers: false,
+    perceived_feasible_subjective_assessment_auto_triggers: false,
+    same_turn_subjective_belief_feedback_allowed: false,
     new_goal_creation_requested: false,
     goal_state_mutation_requested: false,
     goal_unattainability_judgment_requested: false,
@@ -571,6 +606,9 @@ function authoritativeValidationContext(resolverView) {
     alternative_means_candidates: cloneJson(resolverView.alternative_means_candidates),
     minimum_consecutive_failure_turns: minimumConsecutiveFailureTurns,
     bounded_prior_committed_failure_catalog: true,
+    bounded_prior_committed_subjective_reconsideration_catalog: true,
+    subjective_block_belief_is_alternative_eligibility_basis: true,
+    same_turn_subjective_belief_feedback_allowed: false,
     bounded_character_means_grounding_catalog: true,
     bounded_candidate_membership_required: true,
     raw_world_state_exposed: false,
@@ -627,8 +665,11 @@ function adaptiveEventFor(decision, revisionEvent, previous, turnId, resolverVie
     target_source_kind: revisionEvent.target_source_kind,
     target_source_event_id: revisionEvent.target_source_event_id,
     target_source_event_hash: revisionEvent.target_source_event_hash,
+    eligibility_basis: source.eligibility_basis,
     failure_evidence_refs: cloneJson(source.failure_evidence_refs),
     consecutive_failure_count: source.failure_evidence_refs.length,
+    subjective_reconsideration_trigger_refs:
+      cloneJson(source.subjective_reconsideration_trigger_refs),
     alternative_means_candidate_ref: candidate.candidate_ref,
     alternative_means_candidate_hash: candidate.candidate_hash,
     candidate_kind: candidate.candidate_kind,
@@ -652,8 +693,13 @@ function adaptiveEventFor(decision, revisionEvent, previous, turnId, resolverVie
     goal_disengagement_asserted: false,
     single_action_failure_sufficient: false,
     single_plan_failure_event_sufficient: false,
-    repeated_prior_failure_required: true,
+    repeated_prior_failure_required:
+      source.eligibility_basis === "repeated_committed_failure",
+    committed_subjective_means_block_sufficient:
+      source.eligibility_basis === "committed_subjective_means_block",
     prior_committed_failure_evidence_only: true,
+    prior_committed_subjective_belief_only: true,
+    same_turn_subjective_belief_feedback_allowed: false,
     phase69b_revision_is_plan_lifecycle_authority: true,
     objective_feasibility_verified: false,
     arbitrary_world_state_search_used: false,
@@ -670,7 +716,10 @@ function adaptiveEventFor(decision, revisionEvent, previous, turnId, resolverVie
     source_turn_id: turnId,
     source_implementation_intention_id: source.source_implementation_intention_id,
     replacement_implementation_intention_id: revisionEvent.replacement_implementation_intention_id,
+    eligibility_basis: source.eligibility_basis,
     failure_evidence_refs: source.failure_evidence_refs,
+    subjective_reconsideration_trigger_refs:
+      source.subjective_reconsideration_trigger_refs,
     candidate_hash: candidate.candidate_hash,
     previous_adaptive_replanning_event_hash: previous?.adaptive_replanning_event_hash ?? null,
   }).slice(0, 24)}`;
@@ -711,9 +760,14 @@ export function buildWorldSimulationAdaptiveReplanningContract() {
     goal_commitment_preserved: true,
     phase69b_revision_owns_plan_supersession_and_replacement_identity: true,
     prior_committed_failure_evidence_only: true,
+    prior_committed_subjective_block_belief_is_alternative_trigger: true,
+    subjective_reconsideration_trigger_owner: "Phase73C",
+    uncertain_subjective_assessment_auto_triggers: false,
+    perceived_feasible_subjective_assessment_auto_triggers: false,
+    same_turn_subjective_belief_feedback_allowed: false,
     single_action_failure_sufficient: false,
     single_plan_failure_event_sufficient: false,
-    consecutive_distinct_turn_failures_required: true,
+    consecutive_distinct_turn_failures_required_for_failure_basis: true,
     candidate_generation_and_selection_separated: true,
     bounded_candidate_membership_required: true,
     bounded_character_means_grounding_catalog_required: true,
@@ -791,22 +845,56 @@ export function buildWorldSimulationAdaptiveReplanningEvents(input = {}) {
       error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_SOURCE_INVALID";
       throw error;
     }
-    const failures = trailingFailureEvidence(
-      worldState,
-      source.character,
-      source.source_implementation_intention_id,
-      source.goal_id,
-      turnId,
-    );
-    const actualRefs = failures.map((event) => ({
-      execution_feedback_event_id: event.execution_feedback_event_id,
-      execution_feedback_event_hash: event.execution_feedback_event_hash,
-      source_turn_id: event.source_turn_id,
-      operation: event.operation,
-    }));
-    if (failures.length < minimumConsecutiveFailureTurns || !sameValue(actualRefs, source.failure_evidence_refs)) {
-      const error = new Error(`Phase71 source plan ${source.source_implementation_intention_id} no longer has the exact canonical repeated-failure evidence.`);
-      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
+    if (source.eligibility_basis === "repeated_committed_failure") {
+      const failures = trailingFailureEvidence(
+        worldState,
+        source.character,
+        source.source_implementation_intention_id,
+        source.goal_id,
+        turnId,
+      );
+      const actualRefs = failures.map((event) => ({
+        execution_feedback_event_id: event.execution_feedback_event_id,
+        execution_feedback_event_hash: event.execution_feedback_event_hash,
+        source_turn_id: event.source_turn_id,
+        operation: event.operation,
+      }));
+      if (failures.length < minimumConsecutiveFailureTurns
+          || !sameValue(actualRefs, source.failure_evidence_refs)
+          || array(source.subjective_reconsideration_trigger_refs).length !== 0) {
+        const error = new Error(`Phase71 source plan ${source.source_implementation_intention_id} no longer has the exact canonical repeated-failure evidence.`);
+        error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
+        throw error;
+      }
+    } else if (source.eligibility_basis === "committed_subjective_means_block") {
+      const projection = projectWorldSimulationSubjectiveMeansReconsiderationTriggers({
+        world_state: worldState,
+        current_turn_id: turnId,
+      });
+      const trigger = array(projection.triggers).find((entry) =>
+        sameCharacter(entry.character, source.character)
+        && entry.goal_id === source.goal_id
+        && entry.source_implementation_intention_id === source.source_implementation_intention_id);
+      const expectedRefs = trigger
+        ? [{
+          trigger_ref: trigger.trigger_ref,
+          trigger_hash: trigger.trigger_hash,
+          trigger_kind: trigger.trigger_kind,
+          assessment: trigger.assessment,
+          active_blocked_linkage_refs: cloneJson(trigger.active_blocked_linkage_refs),
+        }]
+        : [];
+      if (!trigger
+          || source.failure_evidence_refs.length !== 0
+          || source.consecutive_failure_count !== 0
+          || !sameValue(expectedRefs, source.subjective_reconsideration_trigger_refs)) {
+        const error = new Error(`Phase71 source plan ${source.source_implementation_intention_id} no longer has the exact canonical prior-committed subjective block belief trigger.`);
+        error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_SUBJECTIVE_RECONSIDERATION_INVALID";
+        throw error;
+      }
+    } else {
+      const error = new Error(`Phase71 source plan ${source.source_implementation_intention_id} has an unsupported eligibility basis.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_ELIGIBILITY_BASIS_INVALID";
       throw error;
     }
   }
@@ -819,7 +907,9 @@ export function buildWorldSimulationAdaptiveReplanningEvents(input = {}) {
       target_implementation_intention_id: source.source_implementation_intention_id,
       replacement_cue_descriptor: cloneJson(candidate.replacement_cue_descriptor),
       replacement_response_descriptor: cloneJson(candidate.replacement_response_descriptor),
-      reason: `phase71_${candidate.candidate_kind}_after_repeated_committed_failure`,
+      reason: source.eligibility_basis === "committed_subjective_means_block"
+        ? `phase71_${candidate.candidate_kind}_after_committed_subjective_means_block`
+        : `phase71_${candidate.candidate_kind}_after_repeated_committed_failure`,
       source: "phase71_adaptive_replanning",
     })),
   });

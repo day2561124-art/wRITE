@@ -294,7 +294,25 @@ assert.equal(contract.authoritative_mutation_owner, "phase62k-authoritative-muta
 const queueContract = buildWorldSimulationChronologicalMutationQueueContract();
 assert.equal(queueContract.execution.phase71_adaptive_replanning_event_write_once_enforced, true);
 assert.equal(queueContract.execution.phase71_same_character_same_goal_phase69b_revision_provenance_enforced, true);
-assert.equal(queueContract.execution.phase71_prior_committed_consecutive_failure_evidence_required, true);
+assert.equal(
+  queueContract.execution
+    .phase71_prior_committed_consecutive_failure_evidence_required_for_failure_basis,
+  true,
+);
+assert.equal(
+  queueContract.execution
+    .phase71_prior_committed_subjective_means_block_is_alternative_eligibility_basis,
+  true,
+);
+assert.equal(
+  queueContract.execution.phase71_same_turn_subjective_belief_feedback_rejected,
+  true,
+);
+assert.equal(
+  queueContract.execution
+    .phase71_uncertain_or_perceived_feasible_subjective_assessment_auto_trigger_rejected,
+  true,
+);
 assert.equal(queueContract.execution.phase71_single_action_failure_replanning_rejected, true);
 assert.equal(queueContract.execution.phase71_bounded_candidate_membership_verified, true);
 assert.equal(queueContract.execution.phase71_bounded_character_means_grounding_catalog_verified, true);

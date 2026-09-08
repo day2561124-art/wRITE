@@ -145,6 +145,11 @@ import {
   worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
 } from "./world-simulation-subjective-means-feasibility-interpretation-service.mjs";
 import {
+  buildWorldSimulationSubjectiveMeansFeasibilityLinkages,
+  buildWorldSimulationSubjectiveMeansFeasibilityReconsiderationContract,
+  worldSimulationSubjectiveMeansFeasibilityReconsiderationVersion,
+} from "./world-simulation-subjective-means-feasibility-reconsideration-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -3177,6 +3182,8 @@ export function buildWorldSimulationLoopContract() {
     audibility_and_sound_propagation: buildWorldSimulationAudibilityQueryContract(),
     visible_constraint_observation_bridge:
       buildWorldSimulationVisibleConstraintObservationContract(),
+    subjective_means_feasibility_reconsideration:
+      buildWorldSimulationSubjectiveMeansFeasibilityReconsiderationContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
     subjective_episode_segmentation:
       buildWorldSimulationSubjectiveEpisodeSegmentationContract(),
@@ -7647,6 +7654,51 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase73C persists only the semantic lineage between the normalized
+  // Phase73B interpretation and its canonical Phase65 claim. Phase66 remains
+  // the sole authority over whether that claim is an active belief. This turn's
+  // linkage cannot affect Phase71 below because Phase71 reads snapshot.state.
+  const subjectiveMeansFeasibilityLinkage =
+    buildWorldSimulationSubjectiveMeansFeasibilityLinkages({
+      world_state:
+        subjectiveBeliefRevisionMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      interpretation_decisions:
+        subjectiveMeansFeasibilityInterpretationResolution.decisions,
+    });
+
+  const subjectiveMeansFeasibilityLinkageMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:subjective_means_feasibility_linkage`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveBeliefRevisionMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        subjectiveMeansFeasibilityLinkage.result.state_transitions,
+      validation_context: {
+        subjective_means_feasibility_reconsideration:
+          subjectiveMeansFeasibilityLinkage.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const subjectiveMeansFeasibilityLinkageMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveBeliefRevisionMutationExecution.next_world_state,
+      preview_world_state:
+        subjectiveMeansFeasibilityLinkage.result.preview_world_state,
+      queue:
+        subjectiveMeansFeasibilityLinkageMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   // Phase69D consumes only the plan state committed before this turn, paired
   // with this turn's authoritative causal outcome. Same-turn cognitive writes
   // cannot become retroactive execution targets, and outcome labels never
@@ -7663,7 +7715,7 @@ export async function resolveWorldSimulationTurn(
   const implementationIntentionExecutionFeedback =
     buildWorldSimulationGoalImplementationIntentionExecutionFeedback({
       world_state:
-        subjectiveBeliefRevisionMutationExecution.next_world_state,
+        subjectiveMeansFeasibilityLinkageMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       feedback_decisions:
@@ -7678,7 +7730,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:goal_implementation_intention_execution_feedback`,
       world_state_hash:
         hashAgentRunValue(
-          subjectiveBeliefRevisionMutationExecution.next_world_state,
+          subjectiveMeansFeasibilityLinkageMutationExecution.next_world_state,
         ),
       state_transitions:
         implementationIntentionExecutionFeedback.result.state_transitions,
@@ -7688,7 +7740,7 @@ export async function resolveWorldSimulationTurn(
   const implementationIntentionExecutionFeedbackMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        subjectiveBeliefRevisionMutationExecution.next_world_state,
+        subjectiveMeansFeasibilityLinkageMutationExecution.next_world_state,
       preview_world_state:
         implementationIntentionExecutionFeedback.result.preview_world_state,
       queue:
@@ -8448,6 +8500,12 @@ export async function resolveWorldSimulationTurn(
         cloneJson(subjectiveBeliefRevisionMutationQueue),
       subjective_belief_revision_mutation_execution:
         cloneJson(subjectiveBeliefRevisionMutationExecution.execution),
+      subjective_means_feasibility_reconsideration:
+        cloneJson(subjectiveMeansFeasibilityLinkage),
+      subjective_means_feasibility_reconsideration_mutation_queue:
+        cloneJson(subjectiveMeansFeasibilityLinkageMutationQueue),
+      subjective_means_feasibility_reconsideration_mutation_execution:
+        cloneJson(subjectiveMeansFeasibilityLinkageMutationExecution.execution),
       goal_implementation_intention_execution_feedback_decision_resolution: {
         version: worldSimulationGoalImplementationIntentionExecutionFeedbackVersion,
         decisions:
@@ -9143,6 +9201,27 @@ export async function resolveWorldSimulationTurn(
         false,
       confidence_probability_modeled:
         false,
+    },
+    subjective_means_feasibility_reconsideration: {
+      version:
+        worldSimulationSubjectiveMeansFeasibilityReconsiderationVersion,
+      created_linkage_event_count:
+        subjectiveMeansFeasibilityLinkage.result.linkage_events_created.length,
+      appended_history_reference_count:
+        subjectiveMeansFeasibilityLinkage.result.history_references_appended.length,
+      mutation_count:
+        subjectiveMeansFeasibilityLinkageMutationQueue.mutation_count,
+      authoritative_executor:
+        subjectiveMeansFeasibilityLinkageMutationExecution.execution.version,
+      semantic_linkage_only: true,
+      phase66_belief_authority_preserved: true,
+      prior_committed_only_for_phase71_trigger: true,
+      perceived_blocked_may_trigger_later_turn_reconsideration: true,
+      uncertain_auto_triggers_reconsideration: false,
+      perceived_feasible_auto_triggers_reconsideration: false,
+      direct_plan_or_goal_mutation: false,
+      same_turn_replanning_allowed: false,
+      objective_feasibility_verified: false,
     },
     goal_implementation_intention_execution_feedback: {
       version:

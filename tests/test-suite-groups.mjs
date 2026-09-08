@@ -114,6 +114,7 @@ export const phase72MeansFeasibilitySteps = Object.freeze([
 export const phase73VisibleConstraintObservationSteps = Object.freeze([
   Object.freeze(["Phase 73A visible constraint observation", Object.freeze(["tests/phase73/phase73-visible-constraint-observation.test.mjs"])]),
   Object.freeze(["Phase 73B subjective means feasibility interpretation", Object.freeze(["tests/phase73/phase73-subjective-means-feasibility-interpretation.test.mjs"])]),
+  Object.freeze(["Phase 73C belief-grounded means reconsideration", Object.freeze(["tests/phase73/phase73-belief-grounded-means-reconsideration.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

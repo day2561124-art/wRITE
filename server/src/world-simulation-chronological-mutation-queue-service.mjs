@@ -10,6 +10,13 @@ import {
 import {
   projectWorldSimulationEffectiveSubjectiveBeliefs,
 } from "./world-simulation-effective-subjective-belief-projection-service.mjs";
+import {
+  buildWorldSimulationSubjectiveMeansFeasibilityLinkages,
+  projectWorldSimulationSubjectiveMeansReconsiderationTriggers,
+  subjectiveMeansFeasibilityLinkageEventSchemaVersion,
+  subjectiveMeansFeasibilityLinkageHistoryReferenceSchemaVersion,
+  worldSimulationSubjectiveMeansFeasibilityReconsiderationVersion,
+} from "./world-simulation-subjective-means-feasibility-reconsideration-service.mjs";
 
 export const worldSimulationChronologicalMutationQueueVersion = "phase62j-chronological-mutation-queue-v1";
 export const worldSimulationMutationExecutorVersion = "phase62k-authoritative-mutation-executor-v1";
@@ -6943,8 +6950,14 @@ function phase71MatchesSourceCatalog(entry, event) {
     && entry.target_source_kind === event.target_source_kind
     && entry.target_source_event_id === event.target_source_event_id
     && entry.target_source_event_hash === event.target_source_event_hash
+    && entry.eligibility_basis === event.eligibility_basis
     && Array.isArray(entry.failure_evidence_refs)
-    && sameValue(entry.failure_evidence_refs, event.failure_evidence_refs);
+    && Array.isArray(entry.subjective_reconsideration_trigger_refs)
+    && sameValue(entry.failure_evidence_refs, event.failure_evidence_refs)
+    && sameValue(
+      entry.subjective_reconsideration_trigger_refs,
+      event.subjective_reconsideration_trigger_refs,
+    );
 }
 const phase71GroundingKinds = new Set([
   "current_implementation_intention",
@@ -7193,6 +7206,9 @@ function phase71ValidateAuthoritativeContext(worldState, validationContext, even
       || context.resolver_view_hash !== event.resolver_view_hash
       || context.minimum_consecutive_failure_turns !== 2
       || context.bounded_prior_committed_failure_catalog !== true
+      || context.bounded_prior_committed_subjective_reconsideration_catalog !== true
+      || context.subjective_block_belief_is_alternative_eligibility_basis !== true
+      || context.same_turn_subjective_belief_feedback_allowed !== false
       || context.bounded_character_means_grounding_catalog !== true
       || context.bounded_candidate_membership_required !== true
       || context.raw_world_state_exposed !== false
@@ -7327,9 +7343,11 @@ function assertPhase71AdaptiveReplanningMutation(
         || !phase69bTargetSourceKinds.has(next.target_source_kind)
         || !String(next.target_source_event_id ?? "").trim()
         || !String(next.target_source_event_hash ?? "").trim()
+        || !["repeated_committed_failure", "committed_subjective_means_block"].includes(next.eligibility_basis)
         || !Array.isArray(next.failure_evidence_refs)
-        || next.failure_evidence_refs.length < 2
         || next.failure_evidence_refs.length > 8
+        || !Array.isArray(next.subjective_reconsideration_trigger_refs)
+        || next.subjective_reconsideration_trigger_refs.length > 1
         || Number(next.consecutive_failure_count) !== next.failure_evidence_refs.length
         || !String(next.alternative_means_candidate_ref ?? "").trim()
         || !String(next.alternative_means_candidate_hash ?? "").trim()
@@ -7362,8 +7380,13 @@ function assertPhase71AdaptiveReplanningMutation(
         || next.goal_disengagement_asserted !== false
         || next.single_action_failure_sufficient !== false
         || next.single_plan_failure_event_sufficient !== false
-        || next.repeated_prior_failure_required !== true
+        || next.repeated_prior_failure_required
+          !== (next.eligibility_basis === "repeated_committed_failure")
+        || next.committed_subjective_means_block_sufficient
+          !== (next.eligibility_basis === "committed_subjective_means_block")
         || next.prior_committed_failure_evidence_only !== true
+        || next.prior_committed_subjective_belief_only !== true
+        || next.same_turn_subjective_belief_feedback_allowed !== false
         || next.phase69b_revision_is_plan_lifecycle_authority !== true
         || next.objective_feasibility_verified !== false
         || next.arbitrary_world_state_search_used !== false
@@ -7419,21 +7442,50 @@ function assertPhase71AdaptiveReplanningMutation(
       error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_RESULTING_REVISION_INVALID";
       throw error;
     }
-    const trailingFailures = phase71CanonicalPriorFailures(worldState, next);
-    const expectedRefs = trailingFailures.map((feedback) => ({
-      execution_feedback_event_id: feedback.execution_feedback_event_id,
-      execution_feedback_event_hash: feedback.execution_feedback_event_hash,
-      source_turn_id: feedback.source_turn_id,
-      operation: feedback.operation,
-    }));
-    const distinctTurns = new Set(trailingFailures.map((feedback) => feedback.source_turn_id));
-    if (trailingFailures.length < 2
-        || distinctTurns.size < 2
-        || !sameValue(expectedRefs, next.failure_evidence_refs)
-        || next.failure_evidence_refs.some((ref) => ref.operation !== "failed" || ref.source_turn_id === next.source_turn_id)) {
-      const error = new Error(`Phase71 event ${eventId} lacks the exact trailing prior committed failure streak.`);
-      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
-      throw error;
+    if (next.eligibility_basis === "repeated_committed_failure") {
+      const trailingFailures = phase71CanonicalPriorFailures(worldState, next);
+      const expectedRefs = trailingFailures.map((feedback) => ({
+        execution_feedback_event_id: feedback.execution_feedback_event_id,
+        execution_feedback_event_hash: feedback.execution_feedback_event_hash,
+        source_turn_id: feedback.source_turn_id,
+        operation: feedback.operation,
+      }));
+      const distinctTurns = new Set(trailingFailures.map((feedback) => feedback.source_turn_id));
+      if (trailingFailures.length < 2
+          || distinctTurns.size < 2
+          || !sameValue(expectedRefs, next.failure_evidence_refs)
+          || next.subjective_reconsideration_trigger_refs.length !== 0
+          || next.failure_evidence_refs.some((ref) => ref.operation !== "failed" || ref.source_turn_id === next.source_turn_id)) {
+        const error = new Error(`Phase71 event ${eventId} lacks the exact trailing prior committed failure streak.`);
+        error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
+        throw error;
+      }
+    } else {
+      const projection = projectWorldSimulationSubjectiveMeansReconsiderationTriggers({
+        world_state: worldState,
+        current_turn_id: next.source_turn_id,
+      });
+      const trigger = array(projection.triggers).find((entry) =>
+        phase71SameCharacter(entry.character, next.character)
+        && entry.goal_id === next.goal_id
+        && entry.source_implementation_intention_id === next.source_implementation_intention_id);
+      const expectedTriggerRefs = trigger
+        ? [{
+          trigger_ref: trigger.trigger_ref,
+          trigger_hash: trigger.trigger_hash,
+          trigger_kind: trigger.trigger_kind,
+          assessment: trigger.assessment,
+          active_blocked_linkage_refs: cloneJson(trigger.active_blocked_linkage_refs),
+        }]
+        : [];
+      if (!trigger
+          || next.failure_evidence_refs.length !== 0
+          || next.consecutive_failure_count !== 0
+          || !sameValue(expectedTriggerRefs, next.subjective_reconsideration_trigger_refs)) {
+        const error = new Error(`Phase71 event ${eventId} lacks the exact canonical prior-committed subjective means-block trigger.`);
+        error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_SUBJECTIVE_RECONSIDERATION_INVALID";
+        throw error;
+      }
     }
     const replay = phase71ReplayState(worldState);
     const sourceKey = `${character}\u0000${next.source_implementation_intention_id}`;
@@ -8225,6 +8277,243 @@ function assertPhase73AVisibleConstraintObservationMutation(
   }
 }
 
+function phase73cLinkageEventHash(event) {
+  const body = cloneJson(event);
+  delete body.linkage_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase73cHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Subjective-means linkage history is append-only.");
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Subjective-means linkage history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase73cValidationContext(validationContext, turnId) {
+  const context = object(
+    object(validationContext).subjective_means_feasibility_reconsideration,
+  );
+  if (!Object.keys(context).length) {
+    const error = new Error(
+      "Phase73C subjective-means linkage mutation requires authoritative validation context.",
+    );
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const body = cloneJson(context);
+  const contextHash = String(body.context_hash ?? "").trim();
+  delete body.context_hash;
+  if (context.version !== worldSimulationSubjectiveMeansFeasibilityReconsiderationVersion
+      || context.turn_id !== turnId
+      || !Array.isArray(context.interpretation_decisions)
+      || context.phase73b_interpretation_identity_recomputed !== true
+      || context.phase65_claim_membership_and_hash_verified !== true
+      || context.phase66_belief_authority_preserved !== true
+      || context.raw_world_state_exposed_to_interpreter !== false
+      || context.same_turn_replanning_allowed !== false
+      || !contextHash
+      || hashAgentRunValue(body) !== contextHash) {
+    const error = new Error(
+      "Phase73C subjective-means linkage validation context is invalid or stale.",
+    );
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  return context;
+}
+function phase73cCanonicalBuildForQueue(worldState, validationContext, turnId) {
+  const context = phase73cValidationContext(validationContext, turnId);
+  const baseline = cloneJson(worldState);
+  const history = array(baseline.subjective_means_feasibility_linkage_history);
+  const referencedIds = new Set(history.map((ref) => ref?.linkage_event_id).filter(Boolean));
+  const store = object(baseline.subjective_means_feasibility_linkage_events);
+  const pendingCurrentTurn = [];
+  for (const [eventId, raw] of Object.entries(store)) {
+    if (referencedIds.has(eventId)) continue;
+    if (raw?.source_turn_id !== turnId) continue;
+    pendingCurrentTurn.push(cloneJson(raw));
+    delete store[eventId];
+  }
+  if (Object.keys(store).length) {
+    baseline.subjective_means_feasibility_linkage_events = store;
+  } else {
+    delete baseline.subjective_means_feasibility_linkage_events;
+  }
+  const built = buildWorldSimulationSubjectiveMeansFeasibilityLinkages({
+    world_state: baseline,
+    turn_id: turnId,
+    interpretation_decisions: context.interpretation_decisions,
+  });
+  if (!sameValue(
+    built.result.authoritative_validation_context,
+    context,
+  )) {
+    const error = new Error(
+      "Phase73C queue recomputation produced a different authoritative context.",
+    );
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_VALIDATION_CONTEXT_MISMATCH";
+    throw error;
+  }
+  const expectedById = new Map(
+    array(built.result.linkage_events_created).map((event) => [event.linkage_event_id, event]),
+  );
+  for (const pending of pendingCurrentTurn) {
+    const expected = expectedById.get(pending?.linkage_event_id);
+    if (!expected || !sameValue(expected, pending)) {
+      const error = new Error(
+        `Phase73C current-turn unreferenced linkage ${pending?.linkage_event_id ?? "<missing>"} is not canonical.`,
+      );
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_PENDING_EVENT_INVALID";
+      throw error;
+    }
+  }
+  return {
+    context,
+    built,
+    expectedById,
+  };
+}
+function assertPhase73CSubjectiveMeansLinkageMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "subjective_means_feasibility_linkage_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("SubjectiveMeansFeasibilityLinkageEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== subjectiveMeansFeasibilityLinkageEventSchemaVersion
+        || next.version !== worldSimulationSubjectiveMeansFeasibilityReconsiderationVersion
+        || next.immutable !== true
+        || next.linkage_event_id !== eventId
+        || !String(next.linkage_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || next.operation !== "link_subjective_means_interpretation"
+        || !String(next.interpretation_ref ?? "").trim()
+        || !["perceived_feasible", "perceived_blocked", "uncertain"].includes(next.assessment)
+        || !String(next.target_means_ref ?? "").trim()
+        || !String(next.goal_id ?? "").trim()
+        || !String(next.implementation_intention_id ?? "").trim()
+        || !String(next.claim_event_id ?? "").trim()
+        || !String(next.claim_event_hash ?? "").trim()
+        || !String(next.proposition_hash ?? "").trim()
+        || !Array.isArray(next.source_memory_refs)
+        || next.phase73b_interpretation_identity_verified !== true
+        || next.phase65_claim_hash_pinned !== true
+        || next.phase66_belief_authority_preserved !== true
+        || next.subjective_not_world_truth !== true
+        || next.world_truth_verified !== false
+        || next.objective_feasibility_verified !== false
+        || next.direct_belief_write !== false
+        || next.direct_plan_mutation !== false
+        || next.direct_goal_mutation !== false
+        || next.same_turn_replanning_allowed !== false
+        || next.status !== "subjective_means_feasibility_linkage_recorded") {
+      const error = new Error(`SubjectiveMeansFeasibilityLinkageEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_EVENT_INVALID";
+      throw error;
+    }
+    if (phase73cLinkageEventHash(next) !== next.linkage_event_hash) {
+      const error = new Error(`SubjectiveMeansFeasibilityLinkageEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:subjective_means_feasibility_linkage`) {
+      const error = new Error(`SubjectiveMeansFeasibilityLinkageEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    const canonical = phase73cCanonicalBuildForQueue(
+      worldState,
+      validationContext,
+      next.source_turn_id,
+    );
+    const expected = canonical.expectedById.get(eventId);
+    if (!expected || !sameValue(expected, next)) {
+      const error = new Error(
+        `SubjectiveMeansFeasibilityLinkageEvent ${eventId} does not match canonical Phase73B/65 provenance recomputation.`,
+      );
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_EVENT_OUT_OF_CONTEXT";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "subjective_means_feasibility_linkage_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Subjective-means linkage history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase73cHistoryPrefix(oldHistory, newHistory);
+  const turnId = String(queueTurnId ?? "").endsWith(":subjective_means_feasibility_linkage")
+    ? String(queueTurnId).slice(0, -":subjective_means_feasibility_linkage".length)
+    : null;
+  if (!turnId) {
+    const error = new Error("Phase73C linkage history must use the exact linkage queue turn.");
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_QUEUE_TURN_MISMATCH";
+    throw error;
+  }
+  const canonical = phase73cCanonicalBuildForQueue(
+    worldState,
+    validationContext,
+    turnId,
+  );
+  const expected = [
+    ...oldHistory.map(cloneJson),
+    ...array(canonical.built.result.history_references_appended).map(cloneJson),
+  ];
+  if (!sameValue(newHistory, expected)) {
+    const error = new Error("Phase73C linkage history append does not match canonical recomputation.");
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HISTORY_REFERENCE_INVALID";
+    throw error;
+  }
+  for (const ref of array(canonical.built.result.history_references_appended)) {
+    const event = object(
+      object(worldState.subjective_means_feasibility_linkage_events)[ref?.linkage_event_id],
+    );
+    if (!Object.keys(event).length
+        || ref.schema_version !== subjectiveMeansFeasibilityLinkageHistoryReferenceSchemaVersion
+        || ref.derived_index !== true
+        || phase73cLinkageEventHash(event) !== event.linkage_event_hash
+        || ref.linkage_event_hash !== event.linkage_event_hash
+        || ref.interpretation_ref !== event.interpretation_ref
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.goal_id !== event.goal_id
+        || ref.implementation_intention_id !== event.implementation_intention_id
+        || ref.assessment !== event.assessment
+        || ref.claim_event_id !== event.claim_event_id
+        || ref.previous_linkage_event_id !== event.previous_linkage_event_id
+        || ref.previous_linkage_event_hash !== event.previous_linkage_event_hash
+        || ref.status !== event.status) {
+      const error = new Error(
+        `Phase73C linkage history reference ${ref?.linkage_event_id ?? "<missing>"} is invalid.`,
+      );
+      error.code = "WORLD_SIMULATION_SUBJECTIVE_MEANS_LINKAGE_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -8430,6 +8719,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase73CSubjectiveMeansLinkageMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -8609,6 +8905,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.validation_context,
       );
       assertPhase73AVisibleConstraintObservationMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase73CSubjectiveMeansLinkageMutation(
         executed,
         worldPath,
         mutation,
@@ -8915,7 +9218,10 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase71_adaptive_replanning_event_write_once_enforced: true,
       phase71_adaptive_replanning_event_content_address_verified: true,
       phase71_same_character_same_goal_phase69b_revision_provenance_enforced: true,
-      phase71_prior_committed_consecutive_failure_evidence_required: true,
+      phase71_prior_committed_consecutive_failure_evidence_required_for_failure_basis: true,
+      phase71_prior_committed_subjective_means_block_is_alternative_eligibility_basis: true,
+      phase71_same_turn_subjective_belief_feedback_rejected: true,
+      phase71_uncertain_or_perceived_feasible_subjective_assessment_auto_trigger_rejected: true,
       phase71_single_action_failure_replanning_rejected: true,
       phase71_single_plan_failure_event_replanning_rejected: true,
       phase71_source_goal_must_remain_committed_viable_and_engaged: true,
@@ -8976,6 +9282,20 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase73a_authoritative_queue_validator_invoked: true,
       direct_nested_visible_constraint_observation_history_mutation_rejected: true,
       phase73a_historical_visible_constraint_observation_rewrite_rejected: true,
+      phase73c_subjective_means_linkage_event_write_once_enforced: true,
+      phase73c_subjective_means_linkage_event_content_address_verified: true,
+      phase73c_phase73b_interpretation_identity_recomputed: true,
+      phase73c_phase65_claim_hash_and_history_membership_revalidated: true,
+      phase73c_phase66_belief_authority_preserved: true,
+      phase73c_subjective_means_linkage_history_append_only_enforced: true,
+      phase73c_per_character_linkage_hash_chain_enforced: true,
+      phase73c_same_turn_replanning_rejected: true,
+      phase73c_direct_belief_plan_goal_mutation_rejected: true,
+      phase73c_objective_feasibility_authority_rejected: true,
+      phase73c_authoritative_validation_context_required: true,
+      phase73c_authoritative_queue_validator_invoked: true,
+      direct_nested_subjective_means_feasibility_linkage_history_mutation_rejected: true,
+      phase73c_historical_subjective_means_linkage_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
