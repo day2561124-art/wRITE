@@ -124,6 +124,10 @@ export const phase74SubjectiveActionDeliberationSteps = Object.freeze([
   Object.freeze(["Phase 74D durable character decision commitment receipt", Object.freeze(["tests/phase74/phase74d-durable-character-decision-commitment-receipt.test.mjs"])]),
 ]);
 
+export const phase75ActionCommitmentSteps = Object.freeze([
+  Object.freeze(["Phase 75A effective action commitment projection", Object.freeze(["tests/phase75/phase75a-effective-action-commitment-projection.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -142,6 +146,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase72MeansFeasibilitySteps,
   ...phase73VisibleConstraintObservationSteps,
   ...phase74SubjectiveActionDeliberationSteps,
+  ...phase75ActionCommitmentSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -158,6 +163,7 @@ export const cognitionSteps = Object.freeze([
   ...phase72MeansFeasibilitySteps,
   ...phase73VisibleConstraintObservationSteps,
   ...phase74SubjectiveActionDeliberationSteps,
+  ...phase75ActionCommitmentSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([

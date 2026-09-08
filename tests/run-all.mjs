@@ -811,6 +811,7 @@ const steps = [
   ["Phase 74B subjective prospective consequence simulation", ["tests/phase74/phase74b-subjective-prospective-consequence-simulation.test.mjs"]],
   ["Phase 74C qualitative cross-option preference resolution", ["tests/phase74/phase74c-qualitative-cross-option-preference-resolution.test.mjs"]],
   ["Phase 74D durable character decision commitment receipt", ["tests/phase74/phase74d-durable-character-decision-commitment-receipt.test.mjs"]],
+  ["Phase 75A effective action commitment projection", ["tests/phase75/phase75a-effective-action-commitment-projection.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
