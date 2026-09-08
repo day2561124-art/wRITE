@@ -5,6 +5,11 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
+  buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
+  worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
+} from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
+import {
   adjudicateWorldSimulationCausality,
   buildWorldSimulationCausalRuleContract,
 } from "./world-simulation-causal-rule-engine.mjs";
@@ -3235,6 +3240,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveCognitionProjectionContract(),
     subjective_belief_character_projection:
       buildWorldSimulationSubjectiveBeliefCharacterProjectionContract(),
+    subjective_choice_commitment_receipt:
+      buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract(),
 
     autobiographical_life_event_organization_resolver_hook: {
       owner:
@@ -6911,6 +6918,16 @@ export async function resolveWorldSimulationTurn(
     ));
   }
 
+  const subjectiveChoiceCommitmentReceipts =
+    buildWorldSimulationSubjectiveChoiceCommitmentReceipts({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      decision_packets: preparedTurn.decision_packets,
+      selected_action_intents: selected,
+    });
+
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
   const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
@@ -8158,6 +8175,8 @@ export async function resolveWorldSimulationTurn(
       next_world_state: visibleConstraintObservationMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
+      subjective_choice_commitment_receipts:
+        cloneJson(subjectiveChoiceCommitmentReceipts),
       state_transitions: array(causalResolution.state_transitions),
       action_outcomes: array(causalResolution.action_outcomes),
       knowledge_transitions: array(causalResolution.knowledge_transitions),
@@ -8706,6 +8725,14 @@ export async function resolveWorldSimulationTurn(
     previous_state_hash: snapshot.state_hash,
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
+    subjective_choice_commitment_receipt: {
+      version: worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
+      receipt_count: subjectiveChoiceCommitmentReceipts.receipt_count,
+      receipt_bundle_hash: subjectiveChoiceCommitmentReceipts.receipt_bundle_hash,
+      established_only_with_successful_world_commit: true,
+      receipt_records_intent_not_outcome: true,
+      causal_outcome_authority_claimed: false,
+    },
     consistency,
 
     subjective_cognition_read_projection: {

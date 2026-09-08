@@ -11,6 +11,9 @@ import {
   assertNeuralSessionRunShape,
   neuralSessionModes,
 } from "./shared-neural-core-service.mjs";
+import {
+  assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle,
+} from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
 
 export const worldSimulationStateVersion = "phase62c-world-state-v1";
 
@@ -194,6 +197,18 @@ export async function commitWorldSimulationTurn(
   }
   const turnId = String(input.turn_id ?? "").trim();
   if (!turnId) throw new Error("turn_id is required for a world-state commit.");
+  if (input.subjective_choice_commitment_receipts !== undefined
+      && input.subjective_choice_commitment_receipts !== null) {
+    assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle(
+      input.subjective_choice_commitment_receipts,
+      {
+        world_simulation_session_id: sessionId,
+        turn_id: turnId,
+        state_revision: input.expected_revision,
+        world_state_hash: input.expected_state_hash,
+      },
+    );
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -260,6 +275,8 @@ export async function commitWorldSimulationTurn(
             next_state_hash: committedEnvelope.state_hash,
             event: input.event ?? null,
             selected_action_intents: input.selected_action_intents ?? [],
+            subjective_choice_commitment_receipts:
+              input.subjective_choice_commitment_receipts ?? null,
             state_transitions: input.state_transitions ?? [],
             action_outcomes: input.action_outcomes ?? [],
             knowledge_transitions: input.knowledge_transitions ?? [],
