@@ -392,18 +392,20 @@ const loopSource = fs.readFileSync(path.resolve(__dirname, "../../server/src/wor
 const causalIndex = loopSource.indexOf("const causalResolution = assertCausalResolution");
 const feedbackIndex = loopSource.indexOf("resolveImplementationIntentionExecutionFeedbackDecisions", causalIndex);
 const achievementIndex = loopSource.indexOf("resolveGoalAchievementDecisions", feedbackIndex);
-const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", achievementIndex);
+const viabilityIndex = loopSource.indexOf("resolveGoalViabilityDecisions", achievementIndex);
+const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", viabilityIndex);
 const postCommitIndex = loopSource.indexOf("let committedCurrentMindDelivery", commitIndex);
 assert.ok(
   causalIndex >= 0
     && feedbackIndex > causalIndex
     && achievementIndex > feedbackIndex
-    && commitIndex > achievementIndex
+    && viabilityIndex > achievementIndex
+    && commitIndex > viabilityIndex
     && postCommitIndex > commitIndex,
-  "Phase70A must run after causal adjudication and Phase69D feedback, but before atomic commit.",
+  "Phase70A must run after causal adjudication and Phase69D feedback, before Phase70B and atomic commit.",
 );
-assert.match(loopSource.slice(achievementIndex, commitIndex), /snapshot\.state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /goalAchievementMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(achievementIndex, viabilityIndex), /snapshot\.state/);
+assert.match(loopSource.slice(commitIndex, postCommitIndex), /goalUnattainabilityMutationExecution\.next_world_state/);
 assert.doesNotMatch(loopSource.slice(achievementIndex, commitIndex), /result\s*===\s*["']success["']|includes\(["']success["']\)/i,
   "Loop must not infer achievement from success labels.");
 

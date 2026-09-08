@@ -909,7 +909,7 @@ for (const sourceAnchor of [
   "buildWorldSimulationSubjectiveClaimConflictRevisionContract",
   "subjectiveClaimRelationResolver",
   "current_turn_claims_plus_same_character_prior_claims",
-  "next_world_state: goalAchievementMutationExecution.next_world_state",
+  "next_world_state: goalUnattainabilityMutationExecution.next_world_state",
   "const subjectiveBeliefRevisionMutationExecution =",
 ]) {
   assert.ok(

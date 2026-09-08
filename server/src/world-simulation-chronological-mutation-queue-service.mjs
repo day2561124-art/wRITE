@@ -5274,6 +5274,13 @@ function assertPhase68DMotivationalGoalMutation(worldState, worldPath, mutation,
       error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_ACHIEVED_TERMINAL";
       throw error;
     }
+    if (priorState !== null && phase70bGoalAlreadyUnattainable(worldState, next.character, next.goal_id)) {
+      const error = new Error(
+        `Phase68D goal ${next.goal_id} is explicitly unattainable and cannot accept legacy ${next.operation}; later goal-adjustment policy must use its own lifecycle layer.`,
+      );
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_UNATTAINABLE_TERMINAL";
+      throw error;
+    }
     const legal = next.operation === "propose" ? priorState === null
       : next.operation === "commit" ? priorState === "proposed"
         : next.operation === "suspend" ? priorState === "committed"
@@ -5393,7 +5400,8 @@ function phase69aCommittedGoalSource(worldState, event) {
   const replay = phase68dReplayGoalState(worldState);
   const key = `${String(event.character).trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${event.goal_id}`;
   return replay.stateByCharacterGoal.get(key) === "committed"
-    && !phase70aGoalAlreadyAchieved(worldState, event.character, event.goal_id);
+    && !phase70aGoalAlreadyAchieved(worldState, event.character, event.goal_id)
+    && !phase70bGoalAlreadyUnattainable(worldState, event.character, event.goal_id);
 }
 function assertPhase69AGoalImplementationIntentionMutation(worldState, worldPath, mutation, queueTurnId = null) {
   if (worldPath[0] === "goal_implementation_intention_events") {
@@ -6138,6 +6146,11 @@ function assertPhase70AGoalAchievementMutation(
       error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_TARGET_INVALID";
       throw error;
     }
+    if (phase70bGoalAlreadyUnattainable(worldState, next.character, next.goal_id)) {
+      const error = new Error(`Phase70A target goal ${next.goal_id} is already terminally unattainable in this world lineage.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_TARGET_UNATTAINABLE";
+      throw error;
+    }
     const evidenceRefs = new Set();
     let previousEvidenceKey = null;
     for (const evidence of next.achievement_evidence_refs) {
@@ -6217,6 +6230,317 @@ function assertPhase70AGoalAchievementMutation(
     }
     replay.seenEventIds.add(event.goal_achievement_event_id);
     replay.achievedGoals.add(goalKey);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
+const phase70bGoalUnattainabilityEventSchema = "phase70b-motivational-goal-unattainability-event-v1";
+const phase70bGoalUnattainabilityHistorySchema = "phase70b-motivational-goal-unattainability-history-ref-v1";
+const phase70bGoalViabilityVersion = "phase70b-goal-viability-unattainability-v1";
+const phase70bEligibleGoalKinds = new Set(["achieve_state", "restore_state"]);
+const phase70bEligibleGoalStates = new Set(["committed", "suspended"]);
+const phase70bEvidenceKinds = new Set(["causal_state_transition", "action_outcome", "knowledge_transition"]);
+const phase70bStructuralEvidenceKinds = new Set(["causal_state_transition", "knowledge_transition"]);
+const phase70bBasisKinds = new Set([
+  "irreversible_deadline_expiry",
+  "permanent_target_unavailability",
+  "irreversible_required_resource_loss",
+  "mutually_exclusive_world_transition",
+  "proven_goal_condition_unsatisfiable",
+]);
+
+function phase70bGoalUnattainabilityEventHash(event) {
+  const body = cloneJson(event);
+  delete body.goal_unattainability_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase70bHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Motivational goal unattainability history is append-only.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Motivational goal unattainability history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase70bReplayUnattainabilityState(worldState) {
+  const latestByCharacter = new Map();
+  const unattainableGoals = new Set();
+  const seenEventIds = new Set();
+  for (const ref of array(worldState.motivational_goal_unattainability_history)) {
+    const event = object(object(worldState.motivational_goal_unattainability_events)[ref?.goal_unattainability_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const goalId = String(event.goal_id ?? "").trim();
+    if (!character || !goalId) continue;
+    latestByCharacter.set(character, event);
+    unattainableGoals.add(`${character}\u0000${goalId}`);
+    if (String(event.goal_unattainability_event_id ?? "").trim()) {
+      seenEventIds.add(event.goal_unattainability_event_id);
+    }
+  }
+  return { latestByCharacter, unattainableGoals, seenEventIds };
+}
+function phase70bGoalAlreadyUnattainable(worldState, character, goalId) {
+  const key = `${String(character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${String(goalId ?? "").trim()}`;
+  return phase70bReplayUnattainabilityState(worldState).unattainableGoals.has(key);
+}
+function phase70bValidateAuthoritativeContext(validationContext, event) {
+  const context = object(object(validationContext).goal_viability_unattainability);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase70B unattainability mutation requires bounded authoritative validation context.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const contextBody = cloneJson(context);
+  const contextHash = String(contextBody.context_hash ?? "").trim();
+  delete contextBody.context_hash;
+  if (context.version !== phase70bGoalViabilityVersion
+      || context.turn_id !== event.source_turn_id
+      || context.resolver_view_hash !== event.resolver_view_hash
+      || context.goal_projection_hash !== event.goal_projection_hash
+      || context.bounded_current_turn_evidence_catalog !== true
+      || context.raw_world_state_exposed !== false
+      || !contextHash
+      || hashAgentRunValue(contextBody) !== contextHash
+      || !Array.isArray(context.authoritative_evidence)
+      || !Array.isArray(context.structural_evidence_kinds)) {
+    const error = new Error("Phase70B authoritative validation context is invalid or does not match the unattainability event.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const structuralKinds = new Set(context.structural_evidence_kinds);
+  if (structuralKinds.size !== phase70bStructuralEvidenceKinds.size
+      || [...phase70bStructuralEvidenceKinds].some((kind) => !structuralKinds.has(kind))) {
+    const error = new Error("Phase70B authoritative structural evidence kinds are invalid.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const catalogByRef = new Map();
+  for (const entry of context.authoritative_evidence) {
+    const evidenceRef = String(entry?.evidence_ref ?? "").trim();
+    const evidenceHash = String(entry?.evidence_hash ?? "").trim();
+    const evidenceIndex = Number(entry?.evidence_index);
+    if (!isObject(entry)
+        || !phase70bEvidenceKinds.has(entry.evidence_kind)
+        || !Number.isInteger(evidenceIndex)
+        || evidenceIndex < 0
+        || evidenceIndex > 63
+        || !evidenceRef
+        || !evidenceHash
+        || catalogByRef.has(evidenceRef)
+        || hashAgentRunValue(entry.evidence) !== evidenceHash) {
+      const error = new Error("Phase70B authoritative evidence catalog contains an invalid entry.");
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    const expectedRef = `phase70b_evidence_${hashAgentRunValue({
+      version: phase70bGoalViabilityVersion,
+      turn_id: event.source_turn_id,
+      kind: entry.evidence_kind,
+      index: evidenceIndex,
+      evidence_hash: evidenceHash,
+    }).slice(0, 24)}`;
+    if (expectedRef !== evidenceRef) {
+      const error = new Error(`Phase70B evidence ref ${evidenceRef} is not canonical for the current turn evidence catalog.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    catalogByRef.set(evidenceRef, entry);
+  }
+  let hasStructuralEvidence = false;
+  for (const selected of event.unattainability_evidence_refs) {
+    const canonical = catalogByRef.get(selected.evidence_ref);
+    if (!canonical
+        || canonical.evidence_kind !== selected.evidence_kind
+        || canonical.evidence_hash !== selected.evidence_hash) {
+      const error = new Error(`Phase70B selected evidence ${selected.evidence_ref} is not present in the authoritative current-turn catalog.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVIDENCE_OUT_OF_CONTEXT";
+      throw error;
+    }
+    if (phase70bStructuralEvidenceKinds.has(selected.evidence_kind)) hasStructuralEvidence = true;
+  }
+  if (!hasStructuralEvidence) {
+    const error = new Error("Phase70B unattainability requires structural authoritative state/knowledge evidence.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_STRUCTURAL_EVIDENCE_REQUIRED";
+    throw error;
+  }
+}
+function assertPhase70BGoalUnattainabilityMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "motivational_goal_unattainability_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("MotivationalGoalUnattainabilityEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase70bGoalUnattainabilityEventSchema
+        || next.version !== phase70bGoalViabilityVersion
+        || next.immutable !== true
+        || next.goal_unattainability_event_id !== eventId
+        || !String(next.goal_unattainability_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || next.operation !== "verify_unattainable"
+        || !String(next.goal_id ?? "").trim()
+        || !phase70bEligibleGoalKinds.has(next.goal_kind)
+        || !String(next.source_goal_event_id ?? "").trim()
+        || !String(next.source_goal_event_hash ?? "").trim()
+        || !String(next.goal_projection_hash ?? "").trim()
+        || !phase70bBasisKinds.has(next.unattainability_basis_kind)
+        || !Array.isArray(next.unattainability_evidence_refs)
+        || next.unattainability_evidence_refs.length < 1
+        || next.unattainability_evidence_refs.length > 16
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.explicit_unattainability_verification !== true
+        || next.structural_authoritative_evidence_required !== true
+        || next.action_failure_alone_sufficient !== false
+        || next.plan_failure_alone_sufficient !== false
+        || next.lack_of_progress_alone_sufficient !== false
+        || next.unattainability_is_abandonment !== false
+        || next.automatic_disengagement !== false
+        || next.automatic_reengagement !== false
+        || next.automatic_replanning !== false
+        || next.goal_state_mutated !== false
+        || next.world_state_scanned !== false
+        || next.numeric_scoring_modeled !== false
+        || next.character_brain_direct_write !== false
+        || next.status !== "motivational_goal_unattainability_recorded") {
+      const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVENT_INVALID";
+      throw error;
+    }
+    if (phase70bGoalUnattainabilityEventHash(next) !== next.goal_unattainability_event_hash) {
+      const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:goal_viability_unattainability`) {
+      const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase70bValidateAuthoritativeContext(validationContext, next);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const source = phase70aLatestCanonicalGoalSource(worldState, next.character, next.goal_id);
+    const replay68d = phase68dReplayGoalState(worldState);
+    const goalState = replay68d.stateByCharacterGoal.get(`${character}\u0000${next.goal_id}`);
+    if (!source
+        || source.goal_event_id !== next.source_goal_event_id
+        || source.goal_event_hash !== next.source_goal_event_hash
+        || source.goal_kind !== next.goal_kind
+        || !phase70bEligibleGoalStates.has(goalState)) {
+      const error = new Error(`Phase70B target goal ${next.goal_id} is not an eligible canonical same-character Phase68D goal.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_TARGET_INVALID";
+      throw error;
+    }
+    if (phase70aGoalAlreadyAchieved(worldState, next.character, next.goal_id)) {
+      const error = new Error(`Phase70B target goal ${next.goal_id} is already achieved.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_TARGET_ACHIEVED";
+      throw error;
+    }
+    const evidenceRefs = new Set();
+    let previousEvidenceKey = null;
+    let hasStructuralEvidence = false;
+    for (const evidence of next.unattainability_evidence_refs) {
+      const evidenceRef = String(evidence?.evidence_ref ?? "").trim();
+      const evidenceHash = String(evidence?.evidence_hash ?? "").trim();
+      const evidenceKey = JSON.stringify([evidence?.evidence_kind, evidenceRef, evidenceHash]);
+      if (!isObject(evidence)
+          || !phase70bEvidenceKinds.has(evidence.evidence_kind)
+          || !evidenceRef
+          || !evidenceHash
+          || evidenceRefs.has(evidenceRef)
+          || (previousEvidenceKey !== null && previousEvidenceKey.localeCompare(evidenceKey, "en") > 0)) {
+        const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} has invalid or non-canonical evidence refs.`);
+        error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVIDENCE_REF_INVALID";
+        throw error;
+      }
+      evidenceRefs.add(evidenceRef);
+      previousEvidenceKey = evidenceKey;
+      if (phase70bStructuralEvidenceKinds.has(evidence.evidence_kind)) hasStructuralEvidence = true;
+    }
+    if (!hasStructuralEvidence) {
+      const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} lacks structural authoritative evidence.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_STRUCTURAL_EVIDENCE_REQUIRED";
+      throw error;
+    }
+    const replay = phase70bReplayUnattainabilityState(worldState);
+    const goalKey = `${character}\u0000${next.goal_id}`;
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (replay.unattainableGoals.has(goalKey)
+        || replay.seenEventIds.has(eventId)
+        || next.previous_goal_unattainability_event_id !== (previous?.goal_unattainability_event_id ?? null)
+        || next.previous_goal_unattainability_event_hash !== (previous?.goal_unattainability_event_hash ?? null)) {
+      const error = new Error(`MotivationalGoalUnattainabilityEvent ${eventId} duplicates unattainability or breaks its per-character chain.`);
+      error.code = replay.unattainableGoals.has(goalKey)
+        ? "WORLD_SIMULATION_GOAL_UNATTAINABILITY_DUPLICATE_FORBIDDEN"
+        : "WORLD_SIMULATION_GOAL_UNATTAINABILITY_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "motivational_goal_unattainability_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Motivational goal unattainability history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase70bHistoryPrefix(oldHistory, newHistory);
+  const replay = phase70bReplayUnattainabilityState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.motivational_goal_unattainability_events)[ref?.goal_unattainability_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const goalKey = `${character}\u0000${event.goal_id}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase70bGoalUnattainabilityHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.goal_unattainability_event_id ?? "").trim()
+        || !String(ref.goal_unattainability_event_hash ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || ref.operation !== "verify_unattainable"
+        || !phase70bBasisKinds.has(ref.unattainability_basis_kind)
+        || ref.status !== "motivational_goal_unattainability_recorded"
+        || replay.seenEventIds.has(ref.goal_unattainability_event_id)
+        || replay.unattainableGoals.has(goalKey)
+        || !Object.keys(event).length
+        || phase70bGoalUnattainabilityEventHash(event) !== event.goal_unattainability_event_hash
+        || ref.goal_unattainability_event_hash !== event.goal_unattainability_event_hash
+        || ref.goal_id !== event.goal_id
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.operation !== event.operation
+        || ref.unattainability_basis_kind !== event.unattainability_basis_kind
+        || ref.previous_goal_unattainability_event_id !== event.previous_goal_unattainability_event_id
+        || ref.previous_goal_unattainability_event_hash !== event.previous_goal_unattainability_event_hash
+        || event.previous_goal_unattainability_event_id !== (previous?.goal_unattainability_event_id ?? null)
+        || event.previous_goal_unattainability_event_hash !== (previous?.goal_unattainability_event_hash ?? null)) {
+      const error = new Error(`Motivational goal unattainability history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_UNATTAINABILITY_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.goal_unattainability_event_id);
+    replay.unattainableGoals.add(goalKey);
     replay.latestByCharacter.set(character, event);
   }
 }
@@ -6391,6 +6715,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase70BGoalUnattainabilityMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -6535,6 +6866,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
       );
       assertPhase70AGoalAchievementMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase70BGoalUnattainabilityMutation(
         executed,
         worldPath,
         mutation,
@@ -6791,6 +7129,32 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       direct_nested_motivational_goal_achievement_history_mutation_rejected: true,
       phase70a_historical_goal_achievement_rewrite_rejected: true,
       phase70a_authoritative_queue_validator_invoked: true,
+      phase70b_goal_unattainability_event_write_once_enforced: true,
+      phase70b_goal_unattainability_event_content_address_verified: true,
+      phase70b_same_character_canonical_source_goal_enforced: true,
+      phase70b_committed_or_suspended_source_goal_state_enforced: true,
+      phase70b_achievement_or_restore_goal_kind_only_enforced: true,
+      phase70b_typed_unattainability_basis_enforced: true,
+      phase70b_authoritative_evidence_ref_required: true,
+      phase70b_structural_authoritative_evidence_required: true,
+      phase70b_action_outcome_only_is_insufficient: true,
+      phase70b_canonical_evidence_order_enforced: true,
+      phase70b_authoritative_validation_context_required: true,
+      phase70b_current_turn_evidence_catalog_hash_verified: true,
+      phase70b_selected_evidence_membership_verified: true,
+      phase70b_one_unattainability_event_per_goal_enforced: true,
+      phase70b_goal_unattainability_history_append_only_enforced: true,
+      phase70b_per_character_goal_unattainability_hash_chain_enforced: true,
+      phase70b_action_failure_does_not_imply_goal_unattainability: true,
+      phase70b_plan_failure_does_not_imply_goal_unattainability: true,
+      phase70b_lack_of_progress_does_not_imply_goal_unattainability: true,
+      phase70b_unattainability_does_not_imply_abandonment: true,
+      phase70b_automatic_disengagement_reengagement_replanning_rejected: true,
+      phase70b_achievement_unattainability_mutual_exclusion_enforced: true,
+      phase70b_numeric_scoring_rejected: true,
+      direct_nested_motivational_goal_unattainability_history_mutation_rejected: true,
+      phase70b_historical_goal_unattainability_rewrite_rejected: true,
+      phase70b_authoritative_queue_validator_invoked: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

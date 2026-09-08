@@ -910,7 +910,7 @@ assert.ok(
 );
 assert.ok(
   loopSource.includes(
-    "next_world_state: goalAchievementMutationExecution.next_world_state",
+    "next_world_state: goalUnattainabilityMutationExecution.next_world_state",
   ),
   "atomic world commit must use the final authoritative Phase62K state after all installed cognition mutations",
 );

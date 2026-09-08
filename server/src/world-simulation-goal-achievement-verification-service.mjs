@@ -74,6 +74,15 @@ function latestGoalEvent(worldState, character, goalId) {
   return null;
 }
 
+function goalAlreadyUnattainable(worldState, character, goalId) {
+  return array(worldState.motivational_goal_unattainability_history).some((ref) => (
+    ref?.operation === "verify_unattainable"
+    && ref?.status === "motivational_goal_unattainability_recorded"
+    && ref?.goal_id === goalId
+    && sameCharacter(ref?.character, character)
+  ));
+}
+
 function validatePersistedAchievementEvent(event, eventId) {
   if (!isObject(event)
       || event.schema_version !== motivationalGoalAchievementEventSchemaVersion
@@ -264,7 +273,10 @@ export function buildWorldSimulationGoalAchievementResolverView(input = {}) {
   const goals = [];
   for (const [character, records] of Object.entries(lifecycle.goals_by_character ?? {})) {
     for (const goal of Object.values(object(records))) {
-      if (goal.achieved === true || !eligibleGoalStates.includes(goal.state) || !eligibleGoalKinds.includes(goal.goal_kind)) continue;
+      if (goal.achieved === true
+          || goalAlreadyUnattainable(worldState, character, goal.goal_id)
+          || !eligibleGoalStates.includes(goal.state)
+          || !eligibleGoalKinds.includes(goal.goal_kind)) continue;
       const source = latestGoalEvent(worldState, character, goal.goal_id);
       if (!source) continue;
       const descriptor = {
@@ -522,6 +534,13 @@ export function buildWorldSimulationGoalAchievementEvents(input = {}) {
   const seenGoalKeys = new Set();
   for (const decision of decisions) {
     const key = `${characterKey(decision.character)}\u0000${decision.goal_id}`;
+    if (goalAlreadyUnattainable(worldState, decision.character, decision.goal_id)) {
+      const error = new Error(
+        `Phase70A goal ${decision.goal_id} is already terminally unattainable in this world lineage.`,
+      );
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_TARGET_UNATTAINABLE";
+      throw error;
+    }
     if (existing.achievedGoals.has(key) || seenGoalKeys.has(key)) {
       const error = new Error(`Phase70A goal ${decision.goal_id} may be achieved only once.`);
       error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_DUPLICATE_FORBIDDEN";
