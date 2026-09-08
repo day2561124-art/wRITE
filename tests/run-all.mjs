@@ -802,6 +802,7 @@ const steps = [
   ["Phase 70A explicit goal achievement verification", ["tests/phase70/phase70a-goal-achievement-verification.test.mjs"]],
   ["Phase 70B goal viability / unattainability evaluation", ["tests/phase70/phase70b-goal-viability-unattainability.test.mjs"]],
   ["Phase 70C goal disengagement / reengagement", ["tests/phase70/phase70c-goal-disengagement-reengagement.test.mjs"]],
+  ["Phase 71 adaptive replanning / alternative means", ["tests/phase71/phase71-adaptive-replanning-alternative-means.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

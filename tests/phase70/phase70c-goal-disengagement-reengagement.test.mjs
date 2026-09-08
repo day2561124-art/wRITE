@@ -386,28 +386,30 @@ const feedbackIndex = loopSource.indexOf("const implementationIntentionExecution
 const achievementIndex = loopSource.indexOf("const goalAchievementDecisionResolution =", feedbackIndex);
 const viabilityIndex = loopSource.indexOf("const goalViabilityDecisionResolution =", achievementIndex);
 const adjustmentIndex = loopSource.indexOf("const goalAdjustmentDecisionResolution =", viabilityIndex);
-const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", adjustmentIndex);
+const adaptiveIndex = loopSource.indexOf("const adaptiveReplanningDecisionResolution =", adjustmentIndex);
+const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", adaptiveIndex);
 const postCommitIndex = loopSource.indexOf("let committedCurrentMindDelivery", commitIndex);
 assert.ok(
   feedbackIndex >= 0
     && achievementIndex > feedbackIndex
     && viabilityIndex > achievementIndex
     && adjustmentIndex > viabilityIndex
-    && commitIndex > adjustmentIndex
+    && adaptiveIndex > adjustmentIndex
+    && commitIndex > adaptiveIndex
     && postCommitIndex > commitIndex,
-  "Phase70C must run after Phase69D/70A/70B and before atomic world commit.",
+  "Phase70C must run after Phase69D/70A/70B and hand its result to Phase71 before atomic world commit.",
 );
-assert.match(loopSource.slice(adjustmentIndex, commitIndex), /snapshot\.state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /goalAdjustmentMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(adjustmentIndex, adaptiveIndex), /snapshot\.state/);
+assert.match(loopSource.slice(adaptiveIndex, commitIndex), /goalAdjustmentMutationExecution\.next_world_state/);
 assert.doesNotMatch(
-  loopSource.slice(adjustmentIndex, commitIndex),
+  loopSource.slice(adjustmentIndex, adaptiveIndex),
   /result\s*===\s*["']failed["']|includes\(["']failed["']\)|result\s*===\s*["']failure["']/i,
   "World loop must not infer Phase70C disengagement from action failure labels.",
 );
 assert.doesNotMatch(
-  loopSource.slice(adjustmentIndex, commitIndex),
-  /goalReplanningResolver|alternativeMeansResolver|buildWorldSimulationGoalImplementationIntention|resolveImplementationIntentionRevision/i,
-  "Phase70C must not perform Phase71 replanning or alternative-means search.",
+  loopSource.slice(adjustmentIndex, adaptiveIndex),
+  /adaptiveReplanning|goalReplanningResolver|alternativeMeansResolver/i,
+  "Phase70C itself must not perform Phase71 replanning or alternative-means search.",
 );
 
 console.log("Phase70C goal disengagement / reengagement tests passed.");

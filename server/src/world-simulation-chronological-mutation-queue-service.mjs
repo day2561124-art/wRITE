@@ -1,6 +1,15 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import {
+  projectWorldSimulationEffectiveGoalImplementationIntentionExecution,
+} from "./world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
+import {
+  projectWorldSimulationEffectiveRevisedStructuredSelfModel,
+} from "./world-simulation-structured-self-model-revision-service.mjs";
+import {
+  projectWorldSimulationEffectiveSubjectiveBeliefs,
+} from "./world-simulation-effective-subjective-belief-projection-service.mjs";
 
 export const worldSimulationChronologicalMutationQueueVersion = "phase62j-chronological-mutation-queue-v1";
 export const worldSimulationMutationExecutorVersion = "phase62k-authoritative-mutation-executor-v1";
@@ -6884,6 +6893,614 @@ function assertPhase70CGoalAdjustmentMutation(
   }
 }
 
+const phase71AdaptiveReplanningEventSchema = "phase71-goal-implementation-intention-adaptive-replanning-event-v1";
+const phase71AdaptiveReplanningHistorySchema = "phase71-goal-implementation-intention-adaptive-replanning-history-ref-v1";
+const phase71AdaptiveReplanningVersion = "phase71-adaptive-replanning-alternative-means-v1";
+const phase71CandidateKinds = new Set(["repair_existing_means", "replace_means"]);
+
+function phase71AdaptiveReplanningEventHash(event) {
+  const body = cloneJson(event);
+  delete body.adaptive_replanning_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase71HistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Adaptive-replanning history is append-only.");
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Adaptive-replanning history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase71ReplayState(worldState) {
+  const latestByCharacter = new Map();
+  const replannedSources = new Set();
+  const seenEventIds = new Set();
+  for (const ref of array(worldState.goal_implementation_intention_adaptive_replanning_history)) {
+    const event = object(object(worldState.goal_implementation_intention_adaptive_replanning_events)[ref?.adaptive_replanning_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const sourcePlanId = String(event.source_implementation_intention_id ?? "").trim();
+    if (!character || !sourcePlanId) continue;
+    latestByCharacter.set(character, event);
+    replannedSources.add(`${character}\u0000${sourcePlanId}`);
+    if (String(event.adaptive_replanning_event_id ?? "").trim()) seenEventIds.add(event.adaptive_replanning_event_id);
+  }
+  return { latestByCharacter, replannedSources, seenEventIds };
+}
+function phase71MatchesSourceCatalog(entry, event) {
+  return isObject(entry)
+    && entry.source_plan_ref === event.source_plan_ref
+    && entry.character === event.character
+    && entry.goal_id === event.goal_id
+    && entry.source_implementation_intention_id === event.source_implementation_intention_id
+    && entry.target_source_kind === event.target_source_kind
+    && entry.target_source_event_id === event.target_source_event_id
+    && entry.target_source_event_hash === event.target_source_event_hash
+    && Array.isArray(entry.failure_evidence_refs)
+    && sameValue(entry.failure_evidence_refs, event.failure_evidence_refs);
+}
+const phase71GroundingKinds = new Set([
+  "current_implementation_intention",
+  "represented_same_goal_means",
+  "active_capability_appraisal",
+  "active_subjective_belief",
+]);
+function phase71CharacterKey(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+}
+function phase71SameCharacter(left, right) {
+  return phase71CharacterKey(left) === phase71CharacterKey(right);
+}
+function phase71CharacterRecords(container, character) {
+  const entry = Object.entries(object(container)).find(([name]) => phase71SameCharacter(name, character));
+  return object(entry?.[1]);
+}
+function phase71GroundingHash(grounding) {
+  const body = cloneJson(grounding);
+  delete body.grounding_ref;
+  delete body.grounding_hash;
+  return hashAgentRunValue({
+    version: phase71AdaptiveReplanningVersion,
+    grounding: body,
+  });
+}
+function phase71CandidateHash(candidate) {
+  const body = cloneJson(candidate);
+  delete body.candidate_ref;
+  delete body.candidate_hash;
+  return hashAgentRunValue({
+    version: phase71AdaptiveReplanningVersion,
+    ...body,
+  });
+}
+function phase71PlanSource(worldState, grounding) {
+  if (grounding.source_event_kind === "phase69a_goal_implementation_intention_event") {
+    const source = object(
+      object(worldState.goal_implementation_intention_events)[grounding.source_event_id],
+    );
+    const body = cloneJson(source);
+    delete body.implementation_intention_event_hash;
+    const referenced = array(worldState.goal_implementation_intention_history).some((ref) =>
+      ref?.implementation_intention_event_id === grounding.source_event_id
+      && ref?.implementation_intention_event_hash === grounding.source_event_hash);
+    if (!Object.keys(source).length
+        || source.immutable !== true
+        || source.implementation_intention_event_id !== grounding.source_event_id
+        || source.implementation_intention_event_hash !== grounding.source_event_hash
+        || hashAgentRunValue(body) !== source.implementation_intention_event_hash
+        || !referenced) {
+      const error = new Error(`Phase71 grounding ${grounding.grounding_ref} does not resolve canonical Phase69A plan provenance.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    return {
+      implementation_intention_id: source.implementation_intention_id,
+      character: source.character,
+      goal_id: source.goal_id,
+      cue_descriptor: cloneJson(source.cue_descriptor),
+      response_descriptor: cloneJson(source.response_descriptor),
+    };
+  }
+  if (grounding.source_event_kind === "phase69b_goal_implementation_intention_revision_event") {
+    const source = object(
+      object(worldState.goal_implementation_intention_revision_events)[grounding.source_event_id],
+    );
+    const body = cloneJson(source);
+    delete body.revision_event_hash;
+    const referenced = array(worldState.goal_implementation_intention_revision_history).some((ref) =>
+      ref?.revision_event_id === grounding.source_event_id
+      && ref?.revision_event_hash === grounding.source_event_hash);
+    if (!Object.keys(source).length
+        || source.immutable !== true
+        || source.operation !== "revise"
+        || source.revision_event_id !== grounding.source_event_id
+        || source.revision_event_hash !== grounding.source_event_hash
+        || hashAgentRunValue(body) !== source.revision_event_hash
+        || !referenced) {
+      const error = new Error(`Phase71 grounding ${grounding.grounding_ref} does not resolve canonical Phase69B replacement-plan provenance.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    return {
+      implementation_intention_id: source.replacement_implementation_intention_id,
+      character: source.character,
+      goal_id: source.goal_id,
+      cue_descriptor: cloneJson(source.replacement_cue_descriptor),
+      response_descriptor: cloneJson(source.replacement_response_descriptor),
+    };
+  }
+  return null;
+}
+function phase71ValidateMeansGrounding(worldState, grounding, event) {
+  if (!isObject(grounding)
+      || !String(grounding.grounding_ref ?? "").trim()
+      || !String(grounding.grounding_hash ?? "").trim()
+      || grounding.source_plan_ref !== event.source_plan_ref
+      || !phase71SameCharacter(grounding.character, event.character)
+      || grounding.goal_id !== event.goal_id
+      || !phase71GroundingKinds.has(grounding.grounding_kind)
+      || !String(grounding.source_event_kind ?? "").trim()
+      || !String(grounding.source_event_id ?? "").trim()
+      || !String(grounding.source_event_hash ?? "").trim()
+      || !isObject(grounding.character_view)) {
+    const error = new Error("Phase71 means-grounding record is malformed or crosses its source-plan boundary.");
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_INVALID";
+    throw error;
+  }
+  const groundingHash = phase71GroundingHash(grounding);
+  if (grounding.grounding_hash !== groundingHash
+      || grounding.grounding_ref !== `phase71_grounding_${groundingHash.slice(0, 24)}`) {
+    const error = new Error(`Phase71 grounding ${grounding.grounding_ref} failed content-address verification.`);
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_HASH_MISMATCH";
+    throw error;
+  }
+
+  if (["current_implementation_intention", "represented_same_goal_means"].includes(grounding.grounding_kind)) {
+    const sourcePlan = phase71PlanSource(worldState, grounding);
+    if (!sourcePlan
+        || !phase71SameCharacter(sourcePlan.character, event.character)
+        || sourcePlan.goal_id !== event.goal_id) {
+      const error = new Error(`Phase71 grounding ${grounding.grounding_ref} is not a same-character same-goal represented means source.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    const execution = projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+      world_state: worldState,
+    });
+    const projected = phase71CharacterRecords(
+      execution.plans_by_character,
+      event.character,
+    )[sourcePlan.implementation_intention_id];
+    if (!projected
+        || !sameValue(sourcePlan.cue_descriptor, projected.cue_descriptor)
+        || !sameValue(sourcePlan.response_descriptor, projected.response_descriptor)) {
+      const error = new Error(`Phase71 grounding ${grounding.grounding_ref} does not match the canonical projected represented means.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    if (grounding.grounding_kind === "current_implementation_intention") {
+      if (sourcePlan.implementation_intention_id !== event.source_implementation_intention_id
+          || !sameValue(grounding.character_view, {
+            cue_descriptor: cloneJson(sourcePlan.cue_descriptor),
+            response_descriptor: cloneJson(sourcePlan.response_descriptor),
+            represented_means_only: true,
+          })) {
+        const error = new Error(`Phase71 current-means grounding ${grounding.grounding_ref} does not pin the failed source plan.`);
+        error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+        throw error;
+      }
+      return;
+    }
+    if (sourcePlan.implementation_intention_id === event.source_implementation_intention_id
+        || !["active", "challenged", "suspended"].includes(projected.state)
+        || projected.completed === true
+        || !sameValue(grounding.character_view, {
+          cue_descriptor: cloneJson(projected.cue_descriptor),
+          response_descriptor: cloneJson(projected.response_descriptor),
+          reconsideration_state: projected.state,
+          represented_means_only: true,
+        })) {
+      const error = new Error(`Phase71 alternative represented-means grounding ${grounding.grounding_ref} is terminal, stale, or not an alternative.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    return;
+  }
+
+  if (grounding.grounding_kind === "active_capability_appraisal") {
+    const projection = projectWorldSimulationEffectiveRevisedStructuredSelfModel({
+      world_state: worldState,
+    });
+    const records = phase71CharacterRecords(projection.aspects_by_character, event.character);
+    const aspect = Object.values(records).find((record) =>
+      record?.state === "active"
+      && record?.aspect_type === "capability_appraisal"
+      && (
+        (grounding.source_event_kind === "phase68b_capability_appraisal"
+          && record?.established_by_aspect_event_id === grounding.source_event_id)
+        || (grounding.source_event_kind === "phase68c_capability_appraisal_revision"
+          && record?.established_by_revision_event_id === grounding.source_event_id)
+      ));
+    if (!aspect) {
+      const error = new Error(`Phase71 capability grounding ${grounding.grounding_ref} is not an active same-character capability appraisal.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    const persisted = grounding.source_event_kind === "phase68b_capability_appraisal"
+      ? object(object(worldState.structured_self_model_aspect_events)[grounding.source_event_id])
+      : object(object(worldState.structured_self_model_revision_events)[grounding.source_event_id]);
+    const hashField = grounding.source_event_kind === "phase68b_capability_appraisal"
+      ? "aspect_event_hash"
+      : "revision_event_hash";
+    const persistedBody = cloneJson(persisted);
+    delete persistedBody[hashField];
+    if (!Object.keys(persisted).length
+        || persisted[hashField] !== grounding.source_event_hash
+        || hashAgentRunValue(persistedBody) !== persisted[hashField]
+        || !sameValue(grounding.character_view, {
+          descriptor: cloneJson(aspect.descriptor),
+          subjective_not_world_truth: true,
+          self_model_accuracy_claimed: false,
+        })) {
+      const error = new Error(`Phase71 capability grounding ${grounding.grounding_ref} failed canonical source verification.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+      throw error;
+    }
+    return;
+  }
+
+  const beliefs = projectWorldSimulationEffectiveSubjectiveBeliefs({
+    world_state: worldState,
+    character: event.character,
+  });
+  const belief = array(beliefs?.projection?.active_beliefs).find((entry) =>
+    entry?.claim_event_id === grounding.source_event_id);
+  if (!belief
+      || grounding.source_event_kind !== "phase66b_active_subjective_belief"
+      || belief.claim_event_hash !== grounding.source_event_hash
+      || belief.latest_revision_event_id !== grounding.governance_event_id
+      || belief.latest_revision_event_hash !== grounding.governance_event_hash
+      || !sameValue(grounding.character_view, {
+        proposition: cloneJson(belief.proposition),
+        subjective_not_world_truth: true,
+      })) {
+    const error = new Error(`Phase71 subjective-belief grounding ${grounding.grounding_ref} is not an active canonical same-character belief.`);
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_SOURCE_INVALID";
+    throw error;
+  }
+}
+function phase71ValidateAuthoritativeContext(worldState, validationContext, event) {
+  const context = object(object(validationContext).adaptive_replanning_alternative_means);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase71 adaptive-replanning mutation requires bounded authoritative validation context.");
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const body = cloneJson(context);
+  const contextHash = String(body.context_hash ?? "").trim();
+  delete body.context_hash;
+  const groundingCatalog = array(context.means_grounding_catalog);
+  const groundingRefs = groundingCatalog.map((entry) => entry?.grounding_ref);
+  if (context.version !== phase71AdaptiveReplanningVersion
+      || context.turn_id !== event.source_turn_id
+      || context.resolver_view_hash !== event.resolver_view_hash
+      || context.minimum_consecutive_failure_turns !== 2
+      || context.bounded_prior_committed_failure_catalog !== true
+      || context.bounded_character_means_grounding_catalog !== true
+      || context.bounded_candidate_membership_required !== true
+      || context.raw_world_state_exposed !== false
+      || !contextHash
+      || hashAgentRunValue(body) !== contextHash
+      || !Array.isArray(context.eligible_source_plans)
+      || !Array.isArray(context.means_grounding_catalog)
+      || !Array.isArray(context.alternative_means_candidates)
+      || groundingRefs.some((ref) => !String(ref ?? "").trim())
+      || new Set(groundingRefs).size !== groundingRefs.length) {
+    const error = new Error("Phase71 authoritative validation context is invalid or stale.");
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const source = context.eligible_source_plans.find((entry) => entry?.source_plan_ref === event.source_plan_ref);
+  if (!phase71MatchesSourceCatalog(source, event)) {
+    const error = new Error(`Phase71 source ${event.source_plan_ref} is not a member of the authoritative resolver catalog.`);
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_SOURCE_OUT_OF_CONTEXT";
+    throw error;
+  }
+  const candidate = context.alternative_means_candidates.find(
+    (entry) => entry?.candidate_ref === event.alternative_means_candidate_ref,
+  );
+  const candidateHash = isObject(candidate) ? phase71CandidateHash(candidate) : null;
+  const meansGroundingRefs = array(candidate?.means_grounding_refs);
+  const meansGroundingKinds = array(candidate?.means_grounding_kinds);
+  if (!isObject(candidate)
+      || candidate.candidate_hash !== event.alternative_means_candidate_hash
+      || candidate.candidate_hash !== candidateHash
+      || candidate.candidate_ref !== `phase71_candidate_${candidateHash.slice(0, 24)}`
+      || candidate.source_plan_ref !== event.source_plan_ref
+      || candidate.character !== event.character
+      || candidate.goal_id !== event.goal_id
+      || candidate.source_implementation_intention_id !== event.source_implementation_intention_id
+      || candidate.candidate_kind !== event.candidate_kind
+      || !sameValue(candidate.replacement_cue_descriptor, event.replacement_cue_descriptor)
+      || !sameValue(candidate.replacement_response_descriptor, event.replacement_response_descriptor)
+      || !sameValue(meansGroundingRefs, event.means_grounding_refs)
+      || !sameValue(meansGroundingKinds, event.means_grounding_kinds)
+      || meansGroundingRefs.length < 1
+      || meansGroundingRefs.length > 8
+      || new Set(meansGroundingRefs).size !== meansGroundingRefs.length
+      || meansGroundingKinds.length < 1
+      || meansGroundingKinds.some((kind) => !phase71GroundingKinds.has(kind))
+      || candidate.candidate_source !== "programmatic_bounded_character_means_provider"
+      || candidate.bounded_source_view_only !== true
+      || candidate.character_cognition_grounded !== true
+      || candidate.arbitrary_world_state_search_used !== false
+      || candidate.objective_feasibility_verified !== false
+      || candidate.utility_score !== null
+      || candidate.success_probability !== null) {
+    const error = new Error(`Phase71 candidate ${event.alternative_means_candidate_ref} is not a canonical member of the bounded candidate catalog.`);
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_CANDIDATE_OUT_OF_CONTEXT";
+    throw error;
+  }
+  const selectedGroundings = meansGroundingRefs.map((groundingRef) => {
+    const grounding = groundingCatalog.find((entry) => entry?.grounding_ref === groundingRef);
+    if (!grounding
+        || grounding.source_plan_ref !== event.source_plan_ref
+        || !phase71SameCharacter(grounding.character, event.character)) {
+      const error = new Error(`Phase71 grounding ${groundingRef} is not a canonical member of this source plan's bounded grounding catalog.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GROUNDING_OUT_OF_CONTEXT";
+      throw error;
+    }
+    phase71ValidateMeansGrounding(worldState, grounding, event);
+    return grounding;
+  });
+  const canonicalKinds = [...new Set(selectedGroundings.map((grounding) => grounding.grounding_kind))]
+    .sort((left, right) => String(left).localeCompare(String(right), "en"));
+  if (!sameValue(canonicalKinds, meansGroundingKinds)
+      || (event.candidate_kind === "replace_means"
+        && selectedGroundings.every((grounding) => grounding.grounding_kind === "current_implementation_intention"))) {
+    const error = new Error(`Phase71 candidate ${event.alternative_means_candidate_ref} lacks sufficient canonical character-cognition grounding for replacement means.`);
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_REPLACEMENT_GROUNDING_INSUFFICIENT";
+    throw error;
+  }
+}
+function phase71CanonicalPriorFailures(worldState, event) {
+  const matched = [];
+  const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+  for (const ref of array(worldState.goal_implementation_intention_execution_feedback_history)) {
+    const feedback = object(object(worldState.goal_implementation_intention_execution_feedback_events)[ref?.execution_feedback_event_id]);
+    if (String(feedback.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW") !== character
+        || feedback.implementation_intention_id !== event.source_implementation_intention_id
+        || feedback.goal_id !== event.goal_id
+        || feedback.source_turn_id === event.source_turn_id) continue;
+    if (!Object.keys(feedback).length
+        || phase69dExecutionFeedbackEventHash(feedback) !== feedback.execution_feedback_event_hash
+        || ref.execution_feedback_event_hash !== feedback.execution_feedback_event_hash) {
+      const error = new Error(`Phase71 failure evidence ${ref?.execution_feedback_event_id ?? "<missing>"} is not canonical Phase69D history.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
+      throw error;
+    }
+    matched.push(feedback);
+  }
+  const trailing = [];
+  for (let index = matched.length - 1; index >= 0; index -= 1) {
+    const feedback = matched[index];
+    if (feedback.operation !== "failed") break;
+    trailing.unshift(feedback);
+    if (trailing.length >= 8) break;
+  }
+  return trailing;
+}
+function assertPhase71AdaptiveReplanningMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "goal_implementation_intention_adaptive_replanning_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("AdaptiveReplanningEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase71AdaptiveReplanningEventSchema
+        || next.version !== phase71AdaptiveReplanningVersion
+        || next.immutable !== true
+        || next.adaptive_replanning_event_id !== eventId
+        || !String(next.adaptive_replanning_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || next.operation !== "replan_same_goal"
+        || !String(next.goal_id ?? "").trim()
+        || !String(next.source_plan_ref ?? "").trim()
+        || !String(next.source_implementation_intention_id ?? "").trim()
+        || !phase69bTargetSourceKinds.has(next.target_source_kind)
+        || !String(next.target_source_event_id ?? "").trim()
+        || !String(next.target_source_event_hash ?? "").trim()
+        || !Array.isArray(next.failure_evidence_refs)
+        || next.failure_evidence_refs.length < 2
+        || next.failure_evidence_refs.length > 8
+        || Number(next.consecutive_failure_count) !== next.failure_evidence_refs.length
+        || !String(next.alternative_means_candidate_ref ?? "").trim()
+        || !String(next.alternative_means_candidate_hash ?? "").trim()
+        || !phase71CandidateKinds.has(next.candidate_kind)
+        || !isObject(next.replacement_cue_descriptor)
+        || !phase69aCueKinds.has(next.replacement_cue_descriptor.cue_kind)
+        || !String(next.replacement_cue_descriptor.label ?? "").trim()
+        || !isObject(next.replacement_response_descriptor)
+        || !phase69aResponseKinds.has(next.replacement_response_descriptor.response_kind)
+        || !String(next.replacement_response_descriptor.label ?? "").trim()
+        || !Array.isArray(next.means_grounding_refs)
+        || next.means_grounding_refs.length < 1
+        || next.means_grounding_refs.length > 8
+        || new Set(next.means_grounding_refs).size !== next.means_grounding_refs.length
+        || next.means_grounding_refs.some((ref) => !String(ref ?? "").trim())
+        || !Array.isArray(next.means_grounding_kinds)
+        || next.means_grounding_kinds.length < 1
+        || next.means_grounding_kinds.some((kind) => !phase71GroundingKinds.has(kind))
+        || next.character_cognition_grounded !== true
+        || next.bounded_character_means_grounding_catalog_only !== true
+        || next.replacement_means_not_invented_from_raw_world_state !== true
+        || !String(next.resulting_revision_event_id ?? "").trim()
+        || !String(next.resulting_revision_event_hash ?? "").trim()
+        || !String(next.replacement_implementation_intention_id ?? "").trim()
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.same_goal_preserved !== true
+        || next.new_goal_created !== false
+        || next.goal_state_mutated !== false
+        || next.goal_unattainability_asserted !== false
+        || next.goal_disengagement_asserted !== false
+        || next.single_action_failure_sufficient !== false
+        || next.single_plan_failure_event_sufficient !== false
+        || next.repeated_prior_failure_required !== true
+        || next.prior_committed_failure_evidence_only !== true
+        || next.phase69b_revision_is_plan_lifecycle_authority !== true
+        || next.objective_feasibility_verified !== false
+        || next.arbitrary_world_state_search_used !== false
+        || next.utility_score !== null
+        || next.priority_score !== null
+        || next.success_probability !== null
+        || next.feasibility_score !== null
+        || next.character_brain_direct_write !== false
+        || next.status !== "goal_implementation_intention_adaptive_replanning_recorded") {
+      const error = new Error(`AdaptiveReplanningEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_EVENT_INVALID";
+      throw error;
+    }
+    if (phase71AdaptiveReplanningEventHash(next) !== next.adaptive_replanning_event_hash) {
+      const error = new Error(`AdaptiveReplanningEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:adaptive_replanning_alternative_means`) {
+      const error = new Error(`AdaptiveReplanningEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase71ValidateAuthoritativeContext(worldState, validationContext, next);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const goalKey = `${character}\u0000${next.goal_id}`;
+    const replay68d = phase68dReplayGoalState(worldState);
+    const adjustment = phase70cReplayAdjustmentState(worldState);
+    if (replay68d.stateByCharacterGoal.get(goalKey) !== "committed"
+        || phase70aGoalAlreadyAchieved(worldState, next.character, next.goal_id)
+        || phase70bGoalAlreadyUnattainable(worldState, next.character, next.goal_id)
+        || adjustment.disengagedSources.has(goalKey)) {
+      const error = new Error(`Phase71 goal ${next.goal_id} is no longer a committed viable engaged goal.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_GOAL_INVALID";
+      throw error;
+    }
+    const revision = object(object(worldState.goal_implementation_intention_revision_events)[next.resulting_revision_event_id]);
+    if (!Object.keys(revision).length
+        || phase69bRevisionEventHash(revision) !== next.resulting_revision_event_hash
+        || revision.revision_event_hash !== next.resulting_revision_event_hash
+        || revision.operation !== "revise"
+        || String(revision.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW") !== character
+        || revision.goal_id !== next.goal_id
+        || revision.target_implementation_intention_id !== next.source_implementation_intention_id
+        || revision.target_source_kind !== next.target_source_kind
+        || revision.target_source_event_id !== next.target_source_event_id
+        || revision.target_source_event_hash !== next.target_source_event_hash
+        || revision.replacement_implementation_intention_id !== next.replacement_implementation_intention_id
+        || !sameValue(revision.replacement_cue_descriptor, next.replacement_cue_descriptor)
+        || !sameValue(revision.replacement_response_descriptor, next.replacement_response_descriptor)
+        || !phase69bValidateTargetSource(worldState, revision)) {
+      const error = new Error(`Phase71 event ${eventId} does not pin a canonical same-goal Phase69B revise event.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_RESULTING_REVISION_INVALID";
+      throw error;
+    }
+    const trailingFailures = phase71CanonicalPriorFailures(worldState, next);
+    const expectedRefs = trailingFailures.map((feedback) => ({
+      execution_feedback_event_id: feedback.execution_feedback_event_id,
+      execution_feedback_event_hash: feedback.execution_feedback_event_hash,
+      source_turn_id: feedback.source_turn_id,
+      operation: feedback.operation,
+    }));
+    const distinctTurns = new Set(trailingFailures.map((feedback) => feedback.source_turn_id));
+    if (trailingFailures.length < 2
+        || distinctTurns.size < 2
+        || !sameValue(expectedRefs, next.failure_evidence_refs)
+        || next.failure_evidence_refs.some((ref) => ref.operation !== "failed" || ref.source_turn_id === next.source_turn_id)) {
+      const error = new Error(`Phase71 event ${eventId} lacks the exact trailing prior committed failure streak.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_FAILURE_EVIDENCE_INVALID";
+      throw error;
+    }
+    const replay = phase71ReplayState(worldState);
+    const sourceKey = `${character}\u0000${next.source_implementation_intention_id}`;
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (replay.replannedSources.has(sourceKey)
+        || replay.seenEventIds.has(eventId)
+        || next.previous_adaptive_replanning_event_id !== (previous?.adaptive_replanning_event_id ?? null)
+        || next.previous_adaptive_replanning_event_hash !== (previous?.adaptive_replanning_event_hash ?? null)) {
+      const error = new Error(`AdaptiveReplanningEvent ${eventId} duplicates a source replan or breaks its per-character chain.`);
+      error.code = replay.replannedSources.has(sourceKey)
+        ? "WORLD_SIMULATION_ADAPTIVE_REPLANNING_SOURCE_ALREADY_REPLANNED"
+        : "WORLD_SIMULATION_ADAPTIVE_REPLANNING_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "goal_implementation_intention_adaptive_replanning_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Adaptive-replanning history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase71HistoryPrefix(oldHistory, newHistory);
+  const replay = phase71ReplayState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.goal_implementation_intention_adaptive_replanning_events)[ref?.adaptive_replanning_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const sourceKey = `${character}\u0000${event.source_implementation_intention_id}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase71AdaptiveReplanningHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.adaptive_replanning_event_id ?? "").trim()
+        || !String(ref.adaptive_replanning_event_hash ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || !String(ref.source_implementation_intention_id ?? "").trim()
+        || !String(ref.replacement_implementation_intention_id ?? "").trim()
+        || ref.status !== "goal_implementation_intention_adaptive_replanning_recorded"
+        || replay.seenEventIds.has(ref.adaptive_replanning_event_id)
+        || replay.replannedSources.has(sourceKey)
+        || !Object.keys(event).length
+        || phase71AdaptiveReplanningEventHash(event) !== event.adaptive_replanning_event_hash
+        || ref.adaptive_replanning_event_hash !== event.adaptive_replanning_event_hash
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.goal_id !== event.goal_id
+        || ref.source_implementation_intention_id !== event.source_implementation_intention_id
+        || ref.replacement_implementation_intention_id !== event.replacement_implementation_intention_id
+        || ref.previous_adaptive_replanning_event_id !== event.previous_adaptive_replanning_event_id
+        || ref.previous_adaptive_replanning_event_hash !== event.previous_adaptive_replanning_event_hash
+        || event.previous_adaptive_replanning_event_id !== (previous?.adaptive_replanning_event_id ?? null)
+        || event.previous_adaptive_replanning_event_hash !== (previous?.adaptive_replanning_event_hash ?? null)) {
+      const error = new Error(`Adaptive-replanning history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.adaptive_replanning_event_id);
+    replay.replannedSources.add(sourceKey);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -7068,6 +7685,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase71AdaptiveReplanningMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -7226,6 +7850,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.validation_context,
       );
       assertPhase70CGoalAdjustmentMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase71AdaptiveReplanningMutation(
         executed,
         worldPath,
         mutation,
@@ -7529,6 +8160,28 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       direct_nested_motivational_goal_adjustment_history_mutation_rejected: true,
       phase70c_historical_goal_adjustment_rewrite_rejected: true,
       phase70c_authoritative_queue_validator_invoked: true,
+      phase71_adaptive_replanning_event_write_once_enforced: true,
+      phase71_adaptive_replanning_event_content_address_verified: true,
+      phase71_same_character_same_goal_phase69b_revision_provenance_enforced: true,
+      phase71_prior_committed_consecutive_failure_evidence_required: true,
+      phase71_single_action_failure_replanning_rejected: true,
+      phase71_single_plan_failure_event_replanning_rejected: true,
+      phase71_source_goal_must_remain_committed_viable_and_engaged: true,
+      phase71_source_plan_replan_once_enforced: true,
+      phase71_bounded_candidate_membership_verified: true,
+      phase71_bounded_character_means_grounding_catalog_verified: true,
+      phase71_grounding_content_address_verified: true,
+      phase71_grounding_source_revalidated_against_committed_cognition: true,
+      phase71_cross_character_or_cross_source_grounding_rejected: true,
+      phase71_replace_means_requires_grounding_beyond_failed_current_means: true,
+      phase71_goal_creation_goal_state_mutation_and_disengagement_rejected: true,
+      phase71_arbitrary_world_scan_and_numeric_scoring_rejected: true,
+      phase71_adaptive_replanning_history_append_only_enforced: true,
+      phase71_per_character_adaptive_replanning_hash_chain_enforced: true,
+      phase71_authoritative_validation_context_required: true,
+      phase71_authoritative_queue_validator_invoked: true,
+      direct_nested_adaptive_replanning_history_mutation_rejected: true,
+      phase71_historical_adaptive_replanning_rewrite_rejected: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

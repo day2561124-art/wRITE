@@ -123,6 +123,11 @@ import {
   worldSimulationGoalDisengagementReengagementVersion,
 } from "./world-simulation-goal-disengagement-reengagement-service.mjs";
 import {
+  buildWorldSimulationAdaptiveReplanningEvents,
+  buildWorldSimulationAdaptiveReplanningResolverView,
+  worldSimulationAdaptiveReplanningVersion,
+} from "./world-simulation-adaptive-replanning-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -6348,6 +6353,108 @@ async function resolveGoalAdjustmentDecisions(
   };
 }
 
+async function resolveAdaptiveReplanningDecisions(
+  priorCommittedWorldState,
+  preparedTurn,
+  options,
+) {
+  const sourceView = buildWorldSimulationAdaptiveReplanningResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+    alternative_means_candidates: [],
+  });
+  const provider = typeof options.adaptiveReplanningCandidateProvider === "function"
+    ? options.adaptiveReplanningCandidateProvider
+    : null;
+  let rawCandidates = [];
+  let providerInputHash = null;
+  if (provider && sourceView.eligible_source_plans.length > 0) {
+    const providerInput = cloneJson(sourceView);
+    providerInputHash = hashAgentRunValue(providerInput);
+    const provided = await provider(cloneJson(providerInput));
+    if (!Array.isArray(provided)) {
+      const error = new Error(
+        "adaptiveReplanningCandidateProvider must return an array of bounded alternative-means candidates.",
+      );
+      error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_CANDIDATE_PROVIDER_INVALID_OUTPUT";
+      throw error;
+    }
+    rawCandidates = cloneJson(provided);
+  }
+  const resolverView = buildWorldSimulationAdaptiveReplanningResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+    alternative_means_candidates: rawCandidates,
+  });
+  const resolver = typeof options.adaptiveReplanningResolver === "function"
+    ? options.adaptiveReplanningResolver
+    : null;
+  if (!resolver || resolverView.alternative_means_candidates.length === 0) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        provider_used: Boolean(provider),
+        resolver_used: false,
+        provider_input_context_hash: providerInputHash,
+        missing_provider_or_resolver_means_no_adaptive_replanning: true,
+        prior_turn_committed_failure_evidence_only: true,
+        minimum_consecutive_failure_turns: 2,
+        single_action_failure_sufficient: false,
+        single_plan_failure_event_sufficient: false,
+        same_goal_preserved: true,
+        bounded_character_means_grounding_catalog_exposed_to_provider: true,
+        candidate_character_cognition_grounding_required: true,
+        replace_means_requires_grounding_beyond_failed_current_means: true,
+        provider_arbitrary_world_state_search_available: false,
+        world_state_exposed_to_provider_or_resolver: false,
+        raw_memory_store_exposed_to_provider_or_resolver: false,
+        hidden_retrieval_graph_exposed_to_provider_or_resolver: false,
+        numeric_scoring_requested: false,
+      },
+    };
+  }
+  const resolverInput = cloneJson(resolverView);
+  const resolverInputHash = hashAgentRunValue(resolverInput);
+  const raw = await resolver(cloneJson(resolverInput));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "adaptiveReplanningResolver must return an array of source-plan/candidate-ref selections.",
+    );
+    error.code = "WORLD_SIMULATION_ADAPTIVE_REPLANNING_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    source_plan_ref: decision?.source_plan_ref,
+    candidate_ref: decision?.candidate_ref,
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      provider_used: Boolean(provider),
+      resolver_used: true,
+      provider_input_context_hash: providerInputHash,
+      resolver_input_context_hash: resolverInputHash,
+      candidate_count: resolverView.alternative_means_candidates.length,
+      decision_count: decisions.length,
+      prior_turn_committed_failure_evidence_only: true,
+      minimum_consecutive_failure_turns: 2,
+      single_action_failure_sufficient: false,
+      single_plan_failure_event_sufficient: false,
+      same_goal_preserved: true,
+      bounded_character_means_grounding_catalog_exposed_to_provider: true,
+      candidate_character_cognition_grounding_required: true,
+      replace_means_requires_grounding_beyond_failed_current_means: true,
+      provider_arbitrary_world_state_search_available: false,
+      world_state_exposed_to_provider_or_resolver: false,
+      raw_memory_store_exposed_to_provider_or_resolver: false,
+      hidden_retrieval_graph_exposed_to_provider_or_resolver: false,
+      numeric_scoring_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -7535,6 +7642,87 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase71 keeps the same viable committed goal while replacing only a means
+  // that has a durable prior-turn failure streak. Candidate generation and
+  // choice are both bounded surfaces. The resolver never sees raw World State,
+  // and same-turn Phase69D failure cannot create the eligibility catalog.
+  const adaptiveReplanningDecisionResolution =
+    await resolveAdaptiveReplanningDecisions(
+      snapshot.state,
+      preparedTurn,
+      options,
+    );
+
+  const adaptiveReplanning = buildWorldSimulationAdaptiveReplanningEvents({
+    world_state:
+      goalAdjustmentMutationExecution.next_world_state,
+    turn_id:
+      preparedTurn.turn_id,
+    replanning_decisions:
+      adaptiveReplanningDecisionResolution.decisions,
+    resolver_view:
+      adaptiveReplanningDecisionResolution.resolver_view,
+  });
+
+  // The actual replacement remains a normal Phase69B revise event. Execute it
+  // under the sealed Phase69B queue contract first, then persist Phase71's
+  // execution-backed provenance in its own authoritative queue.
+  const adaptiveReplanningPhase69BMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:goal_implementation_intention_revision`,
+      world_state_hash:
+        hashAgentRunValue(goalAdjustmentMutationExecution.next_world_state),
+      state_transitions:
+        adaptiveReplanning.result.phase69b_revision_state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const adaptiveReplanningPhase69BMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        goalAdjustmentMutationExecution.next_world_state,
+      preview_world_state:
+        adaptiveReplanning.result.phase69b_preview_world_state,
+      queue:
+        adaptiveReplanningPhase69BMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const adaptiveReplanningMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:adaptive_replanning_alternative_means`,
+      world_state_hash:
+        hashAgentRunValue(
+          adaptiveReplanningPhase69BMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        adaptiveReplanning.result.state_transitions,
+      validation_context: {
+        adaptive_replanning_alternative_means:
+          adaptiveReplanning.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const adaptiveReplanningMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        adaptiveReplanningPhase69BMutationExecution.next_world_state,
+      preview_world_state:
+        adaptiveReplanning.result.preview_world_state,
+      queue:
+        adaptiveReplanningMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7595,7 +7783,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: goalAdjustmentMutationExecution.next_world_state,
+      next_world_state: adaptiveReplanningMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -7978,6 +8166,23 @@ export async function resolveWorldSimulationTurn(
         cloneJson(goalAdjustmentMutationQueue),
       goal_disengagement_reengagement_mutation_execution:
         cloneJson(goalAdjustmentMutationExecution.execution),
+      adaptive_replanning_decision_resolution: {
+        version: worldSimulationAdaptiveReplanningVersion,
+        decisions: cloneJson(adaptiveReplanningDecisionResolution.decisions),
+        resolver_view_hash:
+          adaptiveReplanningDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(adaptiveReplanningDecisionResolution.audit),
+      },
+      adaptive_replanning_alternative_means:
+        cloneJson(adaptiveReplanning),
+      adaptive_replanning_phase69b_mutation_queue:
+        cloneJson(adaptiveReplanningPhase69BMutationQueue),
+      adaptive_replanning_phase69b_mutation_execution:
+        cloneJson(adaptiveReplanningPhase69BMutationExecution.execution),
+      adaptive_replanning_mutation_queue:
+        cloneJson(adaptiveReplanningMutationQueue),
+      adaptive_replanning_mutation_execution:
+        cloneJson(adaptiveReplanningMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -8665,6 +8870,46 @@ export async function resolveWorldSimulationTurn(
       new_goal_creation_modeled: false,
       goal_commitment_creation_modeled: false,
       automatic_replanning: false,
+      numeric_scoring_modeled: false,
+    },
+    adaptive_replanning_alternative_means: {
+      version: worldSimulationAdaptiveReplanningVersion,
+      candidate_provider_used:
+        adaptiveReplanningDecisionResolution.audit.provider_used === true,
+      resolver_used:
+        adaptiveReplanningDecisionResolution.audit.resolver_used === true,
+      replanning_decision_count:
+        adaptiveReplanning.result.replanning_decision_count,
+      created_replanning_event_count:
+        adaptiveReplanning.result.adaptive_replanning_events_created.length,
+      created_phase69b_revision_event_count:
+        adaptiveReplanning.result.phase69b_revision_events_created.length,
+      appended_history_reference_count:
+        adaptiveReplanning.result.history_references_appended.length,
+      effective_adaptive_replanning_projection_hash:
+        adaptiveReplanning.result.effective_adaptive_replanning_projection.projection_hash,
+      phase69b_revision_mutation_count:
+        adaptiveReplanningPhase69BMutationQueue.mutation_count,
+      mutation_count:
+        adaptiveReplanningMutationQueue.mutation_count,
+      authoritative_executor:
+        adaptiveReplanningMutationExecution.execution.version,
+      same_goal_preserved: true,
+      phase69b_revision_owns_plan_lifecycle: true,
+      prior_turn_committed_failure_evidence_only: true,
+      minimum_consecutive_failure_turns: 2,
+      single_action_failure_sufficient: false,
+      single_plan_failure_event_sufficient: false,
+      bounded_candidate_membership_required: true,
+      bounded_character_means_grounding_catalog_required: true,
+      candidate_character_cognition_grounding_required: true,
+      replace_means_requires_grounding_beyond_failed_current_means: true,
+      provider_arbitrary_world_state_search_available: false,
+      new_goal_creation_modeled: false,
+      automatic_goal_abandonment_modeled: false,
+      goal_unattainability_verification_modeled: false,
+      goal_disengagement_reengagement_modeled: false,
+      arbitrary_world_state_search_modeled: false,
       numeric_scoring_modeled: false,
     },
     committed_character_current_mind: {
