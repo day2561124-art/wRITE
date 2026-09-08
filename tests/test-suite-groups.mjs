@@ -117,6 +117,10 @@ export const phase73VisibleConstraintObservationSteps = Object.freeze([
   Object.freeze(["Phase 73C belief-grounded means reconsideration", Object.freeze(["tests/phase73/phase73-belief-grounded-means-reconsideration.test.mjs"])]),
 ]);
 
+export const phase74SubjectiveActionDeliberationSteps = Object.freeze([
+  Object.freeze(["Phase 74A subjective action deliberation grounding", Object.freeze(["tests/phase74/phase74a-subjective-action-deliberation-grounding.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -134,6 +138,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase71AdaptiveReplanningSteps,
   ...phase72MeansFeasibilitySteps,
   ...phase73VisibleConstraintObservationSteps,
+  ...phase74SubjectiveActionDeliberationSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -149,6 +154,7 @@ export const cognitionSteps = Object.freeze([
   ...phase71AdaptiveReplanningSteps,
   ...phase72MeansFeasibilitySteps,
   ...phase73VisibleConstraintObservationSteps,
+  ...phase74SubjectiveActionDeliberationSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([

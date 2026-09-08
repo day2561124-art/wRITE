@@ -1,3 +1,7 @@
+import {
+  buildWorldSimulationSubjectiveActionDeliberationView,
+} from "./world-simulation-subjective-action-deliberation-service.mjs";
+
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
 
@@ -174,6 +178,16 @@ export function buildWorldSimulationCharacterBrainInput(
         ?? {},
       ),
   };
+
+  if (typeof input.character === "string" && input.character.trim()) {
+    input.subjective_action_deliberation =
+      buildWorldSimulationSubjectiveActionDeliberationView({
+        character: input.character,
+        cognition: input.cognition,
+        candidate_action_intents: input.candidate_action_intents,
+      });
+    input.boundaries.subjective_action_deliberation_grounding_v1_installed = true;
+  }
 
   // Historical compatibility aliases are never allowed to bypass v3's
   // single-semantic-exposure gate. Callers without the v3 packet boundary
