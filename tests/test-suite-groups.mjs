@@ -97,6 +97,10 @@ export const phase69GoalToPlanSteps = Object.freeze([
   Object.freeze(["Phase 69D plan execution feedback / completion monitoring", Object.freeze(["tests/phase69/phase69d-plan-execution-feedback-completion.test.mjs"])]),
 ]);
 
+export const phase70GoalLifecycleSteps = Object.freeze([
+  Object.freeze(["Phase 70A explicit goal achievement verification", Object.freeze(["tests/phase70/phase70a-goal-achievement-verification.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -110,6 +114,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase67AutobiographicalMemorySteps,
   ...phase68SelfInterpretationSteps,
   ...phase69GoalToPlanSteps,
+  ...phase70GoalLifecycleSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -121,6 +126,7 @@ export const cognitionSteps = Object.freeze([
   ...phase67AutobiographicalMemorySteps,
   ...phase68SelfInterpretationSteps,
   ...phase69GoalToPlanSteps,
+  ...phase70GoalLifecycleSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -129,4 +135,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase67AutobiographicalMemorySteps,
   ...phase68SelfInterpretationSteps,
   ...phase69GoalToPlanSteps,
+  ...phase70GoalLifecycleSteps,
 ]);

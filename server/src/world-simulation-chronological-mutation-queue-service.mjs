@@ -5269,6 +5269,11 @@ function assertPhase68DMotivationalGoalMutation(worldState, worldPath, mutation,
     }
     const stateKey = `${character}\u0000${next.goal_id}`;
     const priorState = replay.stateByCharacterGoal.get(stateKey) ?? null;
+    if (priorState !== null && phase70aGoalAlreadyAchieved(worldState, next.character, next.goal_id)) {
+      const error = new Error(`Phase68D goal ${next.goal_id} is terminally achieved and cannot accept ${next.operation}.`);
+      error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_ACHIEVED_TERMINAL";
+      throw error;
+    }
     const legal = next.operation === "propose" ? priorState === null
       : next.operation === "commit" ? priorState === "proposed"
         : next.operation === "suspend" ? priorState === "committed"
@@ -5387,7 +5392,8 @@ function phase69aCommittedGoalSource(worldState, event) {
       || phase68dGoalEventHash(source) !== event.source_goal_event_hash) return false;
   const replay = phase68dReplayGoalState(worldState);
   const key = `${String(event.character).trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${event.goal_id}`;
-  return replay.stateByCharacterGoal.get(key) === "committed";
+  return replay.stateByCharacterGoal.get(key) === "committed"
+    && !phase70aGoalAlreadyAchieved(worldState, event.character, event.goal_id);
 }
 function assertPhase69AGoalImplementationIntentionMutation(worldState, worldPath, mutation, queueTurnId = null) {
   if (worldPath[0] === "goal_implementation_intention_events") {
@@ -5937,6 +5943,284 @@ function assertPhase69DGoalImplementationIntentionExecutionFeedbackMutation(worl
   }
 }
 
+const phase70aGoalAchievementEventSchema = "phase70a-motivational-goal-achievement-event-v1";
+const phase70aGoalAchievementHistorySchema = "phase70a-motivational-goal-achievement-history-ref-v1";
+const phase70aGoalAchievementVersion = "phase70a-goal-achievement-verification-v1";
+const phase70aEligibleGoalKinds = new Set(["achieve_state", "restore_state"]);
+const phase70aEligibleGoalStates = new Set(["committed", "suspended"]);
+const phase70aEvidenceKinds = new Set(["causal_state_transition", "action_outcome", "knowledge_transition"]);
+
+function phase70aGoalAchievementEventHash(event) {
+  const body = cloneJson(event);
+  delete body.goal_achievement_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase70aHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Motivational goal achievement history is append-only.");
+    error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Motivational goal achievement history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase70aReplayAchievementState(worldState) {
+  const latestByCharacter = new Map();
+  const achievedGoals = new Set();
+  const seenEventIds = new Set();
+  for (const ref of array(worldState.motivational_goal_achievement_history)) {
+    const event = object(object(worldState.motivational_goal_achievement_events)[ref?.goal_achievement_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const goalId = String(event.goal_id ?? "").trim();
+    if (!character || !goalId) continue;
+    latestByCharacter.set(character, event);
+    achievedGoals.add(`${character}\u0000${goalId}`);
+    if (String(event.goal_achievement_event_id ?? "").trim()) seenEventIds.add(event.goal_achievement_event_id);
+  }
+  return { latestByCharacter, achievedGoals, seenEventIds };
+}
+function phase70aLatestCanonicalGoalSource(worldState, character, goalId) {
+  const normalizedCharacter = String(character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+  for (let index = array(worldState.motivational_goal_history).length - 1; index >= 0; index -= 1) {
+    const ref = array(worldState.motivational_goal_history)[index];
+    if (String(ref?.goal_id ?? "").trim() !== String(goalId ?? "").trim()
+        || String(ref?.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW") !== normalizedCharacter) continue;
+    const event = object(object(worldState.motivational_goal_events)[ref.goal_event_id]);
+    if (!Object.keys(event).length || phase68dGoalEventHash(event) !== event.goal_event_hash) return null;
+    return event;
+  }
+  return null;
+}
+function phase70aGoalAlreadyAchieved(worldState, character, goalId) {
+  const key = `${String(character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${String(goalId ?? "").trim()}`;
+  return phase70aReplayAchievementState(worldState).achievedGoals.has(key);
+}
+function phase70aValidateAuthoritativeContext(validationContext, event) {
+  const context = object(object(validationContext).goal_achievement_verification);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase70A achievement mutation requires bounded authoritative validation context.");
+    error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const contextBody = cloneJson(context);
+  const contextHash = String(contextBody.context_hash ?? "").trim();
+  delete contextBody.context_hash;
+  if (context.version !== phase70aGoalAchievementVersion
+      || context.turn_id !== event.source_turn_id
+      || context.resolver_view_hash !== event.resolver_view_hash
+      || context.goal_projection_hash !== event.goal_projection_hash
+      || context.bounded_current_turn_evidence_catalog !== true
+      || context.raw_world_state_exposed !== false
+      || !contextHash
+      || hashAgentRunValue(contextBody) !== contextHash
+      || !Array.isArray(context.authoritative_evidence)) {
+    const error = new Error("Phase70A authoritative validation context is invalid or does not match the achievement event.");
+    error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const catalogByRef = new Map();
+  for (const entry of context.authoritative_evidence) {
+    const evidenceRef = String(entry?.evidence_ref ?? "").trim();
+    const evidenceHash = String(entry?.evidence_hash ?? "").trim();
+    const evidenceIndex = Number(entry?.evidence_index);
+    if (!isObject(entry)
+        || !phase70aEvidenceKinds.has(entry.evidence_kind)
+        || !Number.isInteger(evidenceIndex)
+        || evidenceIndex < 0
+        || evidenceIndex > 63
+        || !evidenceRef
+        || !evidenceHash
+        || catalogByRef.has(evidenceRef)
+        || hashAgentRunValue(entry.evidence) !== evidenceHash) {
+      const error = new Error("Phase70A authoritative evidence catalog contains an invalid entry.");
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    const expectedRef = `phase70a_evidence_${hashAgentRunValue({
+      version: phase70aGoalAchievementVersion,
+      turn_id: event.source_turn_id,
+      kind: entry.evidence_kind,
+      index: evidenceIndex,
+      evidence_hash: evidenceHash,
+    }).slice(0, 24)}`;
+    if (expectedRef !== evidenceRef) {
+      const error = new Error(`Phase70A evidence ref ${evidenceRef} is not canonical for the current turn evidence catalog.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_VALIDATION_CONTEXT_INVALID";
+      throw error;
+    }
+    catalogByRef.set(evidenceRef, entry);
+  }
+  for (const selected of event.achievement_evidence_refs) {
+    const canonical = catalogByRef.get(selected.evidence_ref);
+    if (!canonical
+        || canonical.evidence_kind !== selected.evidence_kind
+        || canonical.evidence_hash !== selected.evidence_hash) {
+      const error = new Error(`Phase70A selected evidence ${selected.evidence_ref} is not present in the authoritative current-turn catalog.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVIDENCE_OUT_OF_CONTEXT";
+      throw error;
+    }
+  }
+}
+function assertPhase70AGoalAchievementMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "motivational_goal_achievement_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("MotivationalGoalAchievementEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase70aGoalAchievementEventSchema
+        || next.version !== phase70aGoalAchievementVersion
+        || next.immutable !== true
+        || next.goal_achievement_event_id !== eventId
+        || !String(next.goal_achievement_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || next.operation !== "achieve"
+        || !String(next.goal_id ?? "").trim()
+        || !phase70aEligibleGoalKinds.has(next.goal_kind)
+        || !String(next.source_goal_event_id ?? "").trim()
+        || !String(next.source_goal_event_hash ?? "").trim()
+        || !String(next.goal_projection_hash ?? "").trim()
+        || !Array.isArray(next.achievement_evidence_refs)
+        || next.achievement_evidence_refs.length < 1
+        || next.achievement_evidence_refs.length > 16
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.explicit_goal_condition_verification !== true
+        || next.action_success_implies_goal_achievement !== false
+        || next.plan_fulfillment_implies_goal_achievement !== false
+        || next.plan_completion_implies_goal_achievement !== false
+        || next.failure_or_unattainability_modeled !== false
+        || next.world_state_scanned !== false
+        || next.numeric_scoring_modeled !== false
+        || next.character_brain_direct_write !== false
+        || next.status !== "motivational_goal_achievement_recorded") {
+      const error = new Error(`MotivationalGoalAchievementEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVENT_INVALID";
+      throw error;
+    }
+    if (phase70aGoalAchievementEventHash(next) !== next.goal_achievement_event_hash) {
+      const error = new Error(`MotivationalGoalAchievementEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:goal_achievement_verification`) {
+      const error = new Error(`MotivationalGoalAchievementEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase70aValidateAuthoritativeContext(validationContext, next);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const source = phase70aLatestCanonicalGoalSource(worldState, next.character, next.goal_id);
+    const replay68d = phase68dReplayGoalState(worldState);
+    const goalState = replay68d.stateByCharacterGoal.get(`${character}\u0000${next.goal_id}`);
+    if (!source
+        || source.goal_event_id !== next.source_goal_event_id
+        || source.goal_event_hash !== next.source_goal_event_hash
+        || source.goal_kind !== next.goal_kind
+        || !phase70aEligibleGoalStates.has(goalState)) {
+      const error = new Error(`Phase70A target goal ${next.goal_id} is not an eligible canonical same-character Phase68D goal.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_TARGET_INVALID";
+      throw error;
+    }
+    const evidenceRefs = new Set();
+    let previousEvidenceKey = null;
+    for (const evidence of next.achievement_evidence_refs) {
+      const evidenceRef = String(evidence?.evidence_ref ?? "").trim();
+      const evidenceHash = String(evidence?.evidence_hash ?? "").trim();
+      const evidenceKey = JSON.stringify([evidence?.evidence_kind, evidenceRef, evidenceHash]);
+      if (!isObject(evidence)
+          || !phase70aEvidenceKinds.has(evidence.evidence_kind)
+          || !evidenceRef
+          || !evidenceHash
+          || evidenceRefs.has(evidenceRef)
+          || (previousEvidenceKey !== null && previousEvidenceKey.localeCompare(evidenceKey, "en") > 0)) {
+        const error = new Error(`MotivationalGoalAchievementEvent ${eventId} has invalid or non-canonical evidence refs.`);
+        error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVIDENCE_REF_INVALID";
+        throw error;
+      }
+      evidenceRefs.add(evidenceRef);
+      previousEvidenceKey = evidenceKey;
+    }
+    const replay = phase70aReplayAchievementState(worldState);
+    const goalKey = `${character}\u0000${next.goal_id}`;
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (replay.achievedGoals.has(goalKey)
+        || replay.seenEventIds.has(eventId)
+        || next.previous_goal_achievement_event_id !== (previous?.goal_achievement_event_id ?? null)
+        || next.previous_goal_achievement_event_hash !== (previous?.goal_achievement_event_hash ?? null)) {
+      const error = new Error(`MotivationalGoalAchievementEvent ${eventId} duplicates achievement or breaks its per-character chain.`);
+      error.code = replay.achievedGoals.has(goalKey)
+        ? "WORLD_SIMULATION_GOAL_ACHIEVEMENT_DUPLICATE_FORBIDDEN"
+        : "WORLD_SIMULATION_GOAL_ACHIEVEMENT_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    return;
+  }
+  if (worldPath[0] !== "motivational_goal_achievement_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Motivational goal achievement history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase70aHistoryPrefix(oldHistory, newHistory);
+  const replay = phase70aReplayAchievementState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.motivational_goal_achievement_events)[ref?.goal_achievement_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const goalKey = `${character}\u0000${event.goal_id}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase70aGoalAchievementHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.goal_achievement_event_id ?? "").trim()
+        || !String(ref.goal_achievement_event_hash ?? "").trim()
+        || !String(ref.goal_id ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || ref.operation !== "achieve"
+        || ref.status !== "motivational_goal_achievement_recorded"
+        || replay.seenEventIds.has(ref.goal_achievement_event_id)
+        || replay.achievedGoals.has(goalKey)
+        || !Object.keys(event).length
+        || phase70aGoalAchievementEventHash(event) !== event.goal_achievement_event_hash
+        || ref.goal_achievement_event_hash !== event.goal_achievement_event_hash
+        || ref.goal_id !== event.goal_id
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.operation !== event.operation
+        || ref.previous_goal_achievement_event_id !== event.previous_goal_achievement_event_id
+        || ref.previous_goal_achievement_event_hash !== event.previous_goal_achievement_event_hash
+        || event.previous_goal_achievement_event_id !== (previous?.goal_achievement_event_id ?? null)
+        || event.previous_goal_achievement_event_hash !== (previous?.goal_achievement_event_hash ?? null)) {
+      const error = new Error(`Motivational goal achievement history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    replay.seenEventIds.add(event.goal_achievement_event_id);
+    replay.achievedGoals.add(goalKey);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -6100,6 +6384,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         mutation,
         queue.turn_id,
       );
+      assertPhase70AGoalAchievementMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -6242,6 +6533,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         worldPath,
         mutation,
         queue.turn_id,
+      );
+      assertPhase70AGoalAchievementMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
       );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
@@ -6470,6 +6768,29 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       phase69d_numeric_success_utility_priority_probability_confidence_rejected: true,
       direct_nested_goal_implementation_intention_execution_feedback_history_mutation_rejected: true,
       phase69d_historical_goal_implementation_intention_execution_feedback_rewrite_rejected: true,
+      phase70a_goal_achievement_event_write_once_enforced: true,
+      phase70a_goal_achievement_event_content_address_verified: true,
+      phase70a_same_character_canonical_source_goal_enforced: true,
+      phase70a_committed_or_suspended_source_goal_state_enforced: true,
+      phase70a_achievement_or_restore_goal_kind_only_enforced: true,
+      phase70a_authoritative_evidence_ref_required: true,
+      phase70a_canonical_evidence_order_enforced: true,
+      phase70a_authoritative_validation_context_required: true,
+      phase70a_current_turn_evidence_catalog_hash_verified: true,
+      phase70a_selected_evidence_membership_verified: true,
+      phase70a_one_achievement_per_goal_enforced: true,
+      phase70a_goal_achievement_history_append_only_enforced: true,
+      phase70a_per_character_goal_achievement_hash_chain_enforced: true,
+      phase70a_action_success_does_not_imply_goal_achievement: true,
+      phase70a_plan_fulfillment_does_not_imply_goal_achievement: true,
+      phase70a_plan_completion_does_not_imply_goal_achievement: true,
+      phase70a_failure_unattainability_not_modeled: true,
+      phase70a_numeric_scoring_rejected: true,
+      phase70a_achieved_goal_is_terminal_for_phase68d_transitions: true,
+      phase70a_achieved_goal_rejected_as_phase69a_plan_source: true,
+      direct_nested_motivational_goal_achievement_history_mutation_rejected: true,
+      phase70a_historical_goal_achievement_rewrite_rejected: true,
+      phase70a_authoritative_queue_validator_invoked: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };
@@ -6496,13 +6817,18 @@ export function buildWorldSimulationChronologicalMutationQueue(input = {}) {
     final_projection: built.finalProjection,
     terminal_chain_hash: built.finalChainHash,
   };
-  queue.queue_hash = hashAgentRunValue({
+  if (isObject(input.validation_context) && Object.keys(input.validation_context).length) {
+    queue.validation_context = cloneJson(input.validation_context);
+  }
+  const queueHashInput = {
     version: queue.version,
     turn_id: queue.turn_id,
     mutation_count: queue.mutation_count,
     batch_count: queue.batch_count,
     terminal_chain_hash: queue.terminal_chain_hash,
     batches: queue.batches,
-  });
+  };
+  if (queue.validation_context) queueHashInput.validation_context = queue.validation_context;
+  queue.queue_hash = hashAgentRunValue(queueHashInput);
   return queue;
 }

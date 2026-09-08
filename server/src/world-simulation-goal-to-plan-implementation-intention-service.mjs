@@ -1,5 +1,6 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { projectWorldSimulationEffectiveMotivationalGoals } from "./world-simulation-motivation-goal-integration-service.mjs";
+import { projectWorldSimulationEffectiveMotivationalGoalLifecycle } from "./world-simulation-goal-achievement-verification-service.mjs";
 
 export const worldSimulationGoalImplementationIntentionVersion = "phase69a-goal-implementation-intention-v1";
 export const goalImplementationIntentionEventSchemaVersion = "phase69a-goal-implementation-intention-event-v1";
@@ -69,11 +70,11 @@ function normalizeCue(raw) { return normalizeDescriptor(raw, "cue_kind", support
 function normalizeResponse(raw) { return normalizeDescriptor(raw, "response_kind", supportedResponseKinds, "response_descriptor"); }
 
 function latestCommittedGoalSources(worldState) {
-  const projection = projectWorldSimulationEffectiveMotivationalGoals({ world_state: worldState });
+  const projection = projectWorldSimulationEffectiveMotivationalGoalLifecycle({ world_state: worldState });
   const result = [];
   for (const [character, records] of Object.entries(projection.goals_by_character ?? {})) {
     for (const record of Object.values(object(records))) {
-      if (record.state !== "committed") continue;
+      if (record.state !== "committed" || record.achieved === true) continue;
       const history = array(worldState.motivational_goal_history);
       let sourceEvent = null;
       for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -208,13 +209,13 @@ function validateHistory(worldState) {
 export function projectWorldSimulationEffectiveGoalImplementationIntentions(input = {}) {
   const worldState = cloneJson(object(input.world_state));
   const validated = validateHistory(worldState);
-  const goals = projectWorldSimulationEffectiveMotivationalGoals({ world_state: worldState });
+  const goals = projectWorldSimulationEffectiveMotivationalGoalLifecycle({ world_state: worldState });
   const plansByCharacter = {};
   validated.history.forEach((ref, historyIndex) => {
     const event = validated.events[ref.implementation_intention_event_id];
     plansByCharacter[event.character] ??= {};
     const goalRecord = object(object(goals.goals_by_character?.[event.character])[event.goal_id]);
-    const sourceGoalCommitted = goalRecord.state === "committed";
+    const sourceGoalCommitted = goalRecord.state === "committed" && goalRecord.achieved !== true;
     plansByCharacter[event.character][event.implementation_intention_id] = {
       implementation_intention_id: event.implementation_intention_id,
       character: event.character,

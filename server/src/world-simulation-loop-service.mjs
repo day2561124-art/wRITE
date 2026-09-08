@@ -105,6 +105,12 @@ import {
   worldSimulationGoalImplementationIntentionExecutionFeedbackVersion,
 } from "./world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
 import {
+  buildWorldSimulationGoalAchievementEvents,
+  buildWorldSimulationGoalAchievementResolverView,
+  buildWorldSimulationGoalAchievementVerificationContract,
+  worldSimulationGoalAchievementVerificationVersion,
+} from "./world-simulation-goal-achievement-verification-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -6082,6 +6088,82 @@ async function resolveImplementationIntentionExecutionFeedbackDecisions(
   };
 }
 
+async function resolveGoalAchievementDecisions(
+  priorCommittedWorldState,
+  preparedTurn,
+  causalResolution,
+  options,
+) {
+  const resolver =
+    typeof options.goalAchievementResolver === "function"
+      ? options.goalAchievementResolver
+      : null;
+  const resolverView = buildWorldSimulationGoalAchievementResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+    state_transitions: array(causalResolution.state_transitions),
+    action_outcomes: array(causalResolution.action_outcomes),
+    knowledge_transitions: array(causalResolution.knowledge_transitions),
+  });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_goal_achievement: true,
+        prior_turn_committed_goal_state_only: true,
+        authoritative_current_turn_evidence_only: true,
+        explicit_goal_condition_verification_required: true,
+        action_success_implies_goal_achievement: false,
+        plan_fulfillment_implies_goal_achievement: false,
+        plan_completion_implies_goal_achievement: false,
+        failure_or_unattainability_requested: false,
+        world_state_exposed_to_resolver: false,
+        raw_memory_store_exposed_to_resolver: false,
+        hidden_retrieval_graph_exposed_to_resolver: false,
+        numeric_scoring_requested: false,
+        replanning_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "goalAchievementResolver must return an array of explicit goal-ref achievement decisions.",
+    );
+    error.code = "WORLD_SIMULATION_GOAL_ACHIEVEMENT_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    source: "programmatic_goal_achievement_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      prior_turn_committed_goal_state_only: true,
+      authoritative_current_turn_evidence_only: true,
+      explicit_goal_condition_verification_required: true,
+      action_success_implies_goal_achievement: false,
+      plan_fulfillment_implies_goal_achievement: false,
+      plan_completion_implies_goal_achievement: false,
+      failure_or_unattainability_requested: false,
+      world_state_exposed_to_resolver: false,
+      raw_memory_store_exposed_to_resolver: false,
+      hidden_retrieval_graph_exposed_to_resolver: false,
+      numeric_scoring_requested: false,
+      replanning_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -7108,6 +7190,59 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase70A verifies goal-condition attainment only from the goal state that
+  // existed before this turn plus bounded authoritative causal evidence from
+  // this turn. Plan completion and action success never auto-promote a goal.
+  const goalAchievementDecisionResolution =
+    await resolveGoalAchievementDecisions(
+      snapshot.state,
+      preparedTurn,
+      causalResolution,
+      options,
+    );
+
+  const goalAchievement = buildWorldSimulationGoalAchievementEvents({
+    world_state:
+      implementationIntentionExecutionFeedbackMutationExecution.next_world_state,
+    turn_id:
+      preparedTurn.turn_id,
+    achievement_decisions:
+      goalAchievementDecisionResolution.decisions,
+    resolver_view:
+      goalAchievementDecisionResolution.resolver_view,
+  });
+
+  const goalAchievementMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:goal_achievement_verification`,
+      world_state_hash:
+        hashAgentRunValue(
+          implementationIntentionExecutionFeedbackMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        goalAchievement.result.state_transitions,
+      validation_context: {
+        goal_achievement_verification:
+          goalAchievement.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const goalAchievementMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        implementationIntentionExecutionFeedbackMutationExecution.next_world_state,
+      preview_world_state:
+        goalAchievement.result.preview_world_state,
+      queue:
+        goalAchievementMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7168,7 +7303,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: implementationIntentionExecutionFeedbackMutationExecution.next_world_state,
+      next_world_state: goalAchievementMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -7512,6 +7647,19 @@ export async function resolveWorldSimulationTurn(
         cloneJson(implementationIntentionExecutionFeedbackMutationQueue),
       goal_implementation_intention_execution_feedback_mutation_execution:
         cloneJson(implementationIntentionExecutionFeedbackMutationExecution.execution),
+      goal_achievement_decision_resolution: {
+        version: worldSimulationGoalAchievementVerificationVersion,
+        decisions: cloneJson(goalAchievementDecisionResolution.decisions),
+        resolver_view_hash:
+          goalAchievementDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(goalAchievementDecisionResolution.audit),
+      },
+      goal_achievement_verification:
+        cloneJson(goalAchievement),
+      goal_achievement_mutation_queue:
+        cloneJson(goalAchievementMutationQueue),
+      goal_achievement_mutation_execution:
+        cloneJson(goalAchievementMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -8113,6 +8261,31 @@ export async function resolveWorldSimulationTurn(
       plan_completion_implies_goal_achievement: false,
       goal_achievement_authority_claimed: false,
       action_selection_authority_claimed: false,
+      numeric_scoring_modeled: false,
+    },
+    goal_achievement_verification: {
+      version: worldSimulationGoalAchievementVerificationVersion,
+      resolver_used:
+        goalAchievementDecisionResolution.audit.resolver_used === true,
+      achievement_decision_count:
+        goalAchievement.result.achievement_decision_count,
+      created_achievement_event_count:
+        goalAchievement.result.achievement_events_created.length,
+      appended_history_reference_count:
+        goalAchievement.result.history_references_appended.length,
+      effective_goal_lifecycle_projection_hash:
+        goalAchievement.result.effective_goal_lifecycle_projection.projection_hash,
+      mutation_count:
+        goalAchievementMutationQueue.mutation_count,
+      authoritative_executor:
+        goalAchievementMutationExecution.execution.version,
+      prior_turn_committed_goal_state_only: true,
+      authoritative_current_turn_evidence_only: true,
+      explicit_goal_condition_verification_required: true,
+      action_success_implies_goal_achievement: false,
+      plan_fulfillment_implies_goal_achievement: false,
+      plan_completion_implies_goal_achievement: false,
+      failure_or_unattainability_modeled: false,
       numeric_scoring_modeled: false,
     },
     committed_character_current_mind: {
