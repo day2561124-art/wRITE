@@ -809,6 +809,7 @@ const steps = [
   ["Phase 73C belief-grounded means reconsideration", ["tests/phase73/phase73-belief-grounded-means-reconsideration.test.mjs"]],
   ["Phase 74A subjective action deliberation grounding", ["tests/phase74/phase74a-subjective-action-deliberation-grounding.test.mjs"]],
   ["Phase 74B subjective prospective consequence simulation", ["tests/phase74/phase74b-subjective-prospective-consequence-simulation.test.mjs"]],
+  ["Phase 74C qualitative cross-option preference resolution", ["tests/phase74/phase74c-qualitative-cross-option-preference-resolution.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

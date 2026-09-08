@@ -120,6 +120,7 @@ export const phase73VisibleConstraintObservationSteps = Object.freeze([
 export const phase74SubjectiveActionDeliberationSteps = Object.freeze([
   Object.freeze(["Phase 74A subjective action deliberation grounding", Object.freeze(["tests/phase74/phase74a-subjective-action-deliberation-grounding.test.mjs"])]),
   Object.freeze(["Phase 74B subjective prospective consequence simulation", Object.freeze(["tests/phase74/phase74b-subjective-prospective-consequence-simulation.test.mjs"])]),
+  Object.freeze(["Phase 74C qualitative cross-option preference resolution", Object.freeze(["tests/phase74/phase74c-qualitative-cross-option-preference-resolution.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
