@@ -386,19 +386,21 @@ const causalIndex = loopSource.indexOf("const causalResolution = assertCausalRes
 const feedbackIndex = loopSource.indexOf("resolveImplementationIntentionExecutionFeedbackDecisions", causalIndex);
 const achievementIndex = loopSource.indexOf("resolveGoalAchievementDecisions", feedbackIndex);
 const viabilityIndex = loopSource.indexOf("resolveGoalViabilityDecisions", achievementIndex);
-const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", viabilityIndex);
+const adjustmentIndex = loopSource.indexOf("resolveGoalAdjustmentDecisions", viabilityIndex);
+const commitIndex = loopSource.indexOf("commitWorldSimulationTurn", adjustmentIndex);
 const postCommitIndex = loopSource.indexOf("let committedCurrentMindDelivery", commitIndex);
 assert.ok(
   causalIndex >= 0
     && feedbackIndex > causalIndex
     && achievementIndex > feedbackIndex
     && viabilityIndex > achievementIndex
-    && commitIndex > viabilityIndex
+    && adjustmentIndex > viabilityIndex
+    && commitIndex > adjustmentIndex
     && postCommitIndex > commitIndex,
-  "Phase70B must run after causal adjudication, Phase69D, and Phase70A, but before atomic commit.",
+  "Phase70B must run after causal adjudication, Phase69D, and Phase70A, and before downstream Phase70C/atomic commit.",
 );
-assert.match(loopSource.slice(viabilityIndex, commitIndex), /snapshot\.state/);
-assert.match(loopSource.slice(commitIndex, postCommitIndex), /goalUnattainabilityMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(viabilityIndex, adjustmentIndex), /snapshot\.state/);
+assert.match(loopSource.slice(adjustmentIndex, commitIndex), /goalUnattainabilityMutationExecution\.next_world_state/);
 assert.doesNotMatch(
   loopSource.slice(viabilityIndex, commitIndex),
   /result\s*===\s*["']failed["']|includes\(["']failed["']\)|result\s*===\s*["']failure["']/i,

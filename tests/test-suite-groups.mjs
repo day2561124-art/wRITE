@@ -100,6 +100,7 @@ export const phase69GoalToPlanSteps = Object.freeze([
 export const phase70GoalLifecycleSteps = Object.freeze([
   Object.freeze(["Phase 70A explicit goal achievement verification", Object.freeze(["tests/phase70/phase70a-goal-achievement-verification.test.mjs"])]),
   Object.freeze(["Phase 70B goal viability / unattainability evaluation", Object.freeze(["tests/phase70/phase70b-goal-viability-unattainability.test.mjs"])]),
+  Object.freeze(["Phase 70C goal disengagement / reengagement", Object.freeze(["tests/phase70/phase70c-goal-disengagement-reengagement.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

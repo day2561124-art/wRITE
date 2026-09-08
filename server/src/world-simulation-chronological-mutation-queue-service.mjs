@@ -6545,6 +6545,345 @@ function assertPhase70BGoalUnattainabilityMutation(
   }
 }
 
+const phase70cGoalAdjustmentEventSchema = "phase70c-motivational-goal-adjustment-event-v1";
+const phase70cGoalAdjustmentHistorySchema = "phase70c-motivational-goal-adjustment-history-ref-v1";
+const phase70cGoalAdjustmentVersion = "phase70c-goal-disengagement-reengagement-v1";
+const phase70cOperations = new Set(["disengage_unattainable", "reengage_alternative"]);
+const phase70cSourceStates = new Set(["committed", "suspended"]);
+
+function phase70cGoalAdjustmentEventHash(event) {
+  const body = cloneJson(event);
+  delete body.goal_adjustment_event_hash;
+  return hashAgentRunValue(body);
+}
+function phase70cHistoryPrefix(oldHistory, newHistory) {
+  const oldValues = array(oldHistory);
+  const newValues = array(newHistory);
+  if (newValues.length < oldValues.length) {
+    const error = new Error("Motivational goal adjustment history is append-only.");
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_HISTORY_APPEND_ONLY_VIOLATION";
+    throw error;
+  }
+  for (let index = 0; index < oldValues.length; index += 1) {
+    if (!sameValue(oldValues[index], newValues[index])) {
+      const error = new Error("Motivational goal adjustment history changed an existing reference or order.");
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_HISTORY_APPEND_ONLY_VIOLATION";
+      throw error;
+    }
+  }
+}
+function phase70cReplayAdjustmentState(worldState) {
+  const latestByCharacter = new Map();
+  const disengagedSources = new Set();
+  const reengagedSources = new Set();
+  const disengagementEventBySource = new Map();
+  const seenEventIds = new Set();
+  for (const ref of array(worldState.motivational_goal_adjustment_history)) {
+    const event = object(object(worldState.motivational_goal_adjustment_events)[ref?.goal_adjustment_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const sourceGoalId = String(event.source_goal_id ?? "").trim();
+    if (!character || !sourceGoalId) continue;
+    const key = `${character}\u0000${sourceGoalId}`;
+    latestByCharacter.set(character, event);
+    if (event.operation === "disengage_unattainable") {
+      disengagedSources.add(key);
+      disengagementEventBySource.set(key, event);
+    } else if (event.operation === "reengage_alternative") {
+      reengagedSources.add(key);
+    }
+    if (String(event.goal_adjustment_event_id ?? "").trim()) seenEventIds.add(event.goal_adjustment_event_id);
+  }
+  return {
+    latestByCharacter,
+    disengagedSources,
+    reengagedSources,
+    disengagementEventBySource,
+    seenEventIds,
+  };
+}
+function phase70cUnattainabilityEvent(worldState, character, goalId) {
+  const key = `${String(character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${String(goalId ?? "").trim()}`;
+  for (const ref of array(worldState.motivational_goal_unattainability_history)) {
+    const event = object(object(worldState.motivational_goal_unattainability_events)[ref?.goal_unattainability_event_id]);
+    const eventKey = `${String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}\u0000${String(event.goal_id ?? "").trim()}`;
+    if (eventKey === key && event.status === "motivational_goal_unattainability_recorded") return event;
+  }
+  return null;
+}
+function phase70cMatchesSourceCatalogEntry(entry, event) {
+  return isObject(entry)
+    && entry.source_goal_ref === event.source_goal_ref
+    && entry.character === event.character
+    && entry.source_goal_id === event.source_goal_id
+    && entry.source_goal_kind === event.source_goal_kind
+    && entry.source_goal_event_id === event.source_goal_event_id
+    && entry.source_goal_event_hash === event.source_goal_event_hash
+    && entry.source_goal_unattainability_event_id === event.source_goal_unattainability_event_id
+    && entry.source_goal_unattainability_event_hash === event.source_goal_unattainability_event_hash
+    && entry.source_unattainability_basis_kind === event.source_unattainability_basis_kind
+    && entry.goal_viability_projection_hash === event.goal_viability_projection_hash;
+}
+function phase70cValidateAuthoritativeContext(validationContext, event) {
+  const context = object(object(validationContext).goal_disengagement_reengagement);
+  if (!Object.keys(context).length) {
+    const error = new Error("Phase70C adjustment mutation requires bounded authoritative validation context.");
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_VALIDATION_CONTEXT_REQUIRED";
+    throw error;
+  }
+  const contextBody = cloneJson(context);
+  const contextHash = String(contextBody.context_hash ?? "").trim();
+  delete contextBody.context_hash;
+  if (context.version !== phase70cGoalAdjustmentVersion
+      || context.turn_id !== event.source_turn_id
+      || context.resolver_view_hash !== event.resolver_view_hash
+      || context.goal_viability_projection_hash !== event.goal_viability_projection_hash
+      || context.bounded_prior_committed_goal_catalog !== true
+      || context.raw_world_state_exposed !== false
+      || !contextHash
+      || hashAgentRunValue(contextBody) !== contextHash
+      || !Array.isArray(context.disengage_candidates)
+      || !Array.isArray(context.reengage_sources)
+      || !Array.isArray(context.alternative_goals)) {
+    const error = new Error("Phase70C authoritative validation context is invalid or stale.");
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_VALIDATION_CONTEXT_INVALID";
+    throw error;
+  }
+  const sourceCatalog = event.operation === "disengage_unattainable"
+    ? context.disengage_candidates
+    : context.reengage_sources;
+  if (!sourceCatalog.some((entry) => phase70cMatchesSourceCatalogEntry(entry, event))) {
+    const error = new Error(`Phase70C source ${event.source_goal_ref} is not a member of the authoritative resolver catalog.`);
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_SOURCE_OUT_OF_CONTEXT";
+    throw error;
+  }
+  if (event.operation === "reengage_alternative") {
+    const target = context.alternative_goals.find(
+      (entry) => entry?.alternative_goal_ref === event.alternative_goal_ref,
+    );
+    if (!isObject(target)
+        || target.character !== event.character
+        || target.target_goal_id !== event.target_goal_id
+        || target.target_goal_event_id !== event.target_goal_event_id
+        || target.target_goal_event_hash !== event.target_goal_event_hash
+        || target.target_goal_id === event.source_goal_id) {
+      const error = new Error(`Phase70C alternative ${event.alternative_goal_ref} is not a member of the authoritative resolver catalog.`);
+      error.code = "WORLD_SIMULATION_GOAL_REENGAGEMENT_TARGET_OUT_OF_CONTEXT";
+      throw error;
+    }
+  }
+}
+function assertPhase70CGoalAdjustmentMutation(
+  worldState,
+  worldPath,
+  mutation,
+  queueTurnId = null,
+  validationContext = null,
+) {
+  if (worldPath[0] === "motivational_goal_adjustment_events") {
+    if (worldPath.length !== 2 || getAtPath(worldState, worldPath) !== undefined) {
+      const error = new Error("MotivationalGoalAdjustmentEvent is immutable and write-once.");
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_IMMUTABILITY_VIOLATION";
+      throw error;
+    }
+    const eventId = String(worldPath[1] ?? "");
+    const next = mutation?.to;
+    if (!isObject(next)
+        || next.schema_version !== phase70cGoalAdjustmentEventSchema
+        || next.version !== phase70cGoalAdjustmentVersion
+        || next.immutable !== true
+        || next.goal_adjustment_event_id !== eventId
+        || !String(next.goal_adjustment_event_hash ?? "").trim()
+        || !String(next.character ?? "").trim()
+        || !String(next.source_turn_id ?? "").trim()
+        || !phase70cOperations.has(next.operation)
+        || !String(next.source_goal_ref ?? "").trim()
+        || !String(next.source_goal_id ?? "").trim()
+        || !String(next.source_goal_kind ?? "").trim()
+        || !String(next.source_goal_event_id ?? "").trim()
+        || !String(next.source_goal_event_hash ?? "").trim()
+        || !String(next.source_goal_unattainability_event_id ?? "").trim()
+        || !String(next.source_goal_unattainability_event_hash ?? "").trim()
+        || !String(next.source_unattainability_basis_kind ?? "").trim()
+        || !String(next.goal_viability_projection_hash ?? "").trim()
+        || !String(next.resolver_view_hash ?? "").trim()
+        || next.explicit_goal_adjustment !== true
+        || next.unattainability_implies_disengagement !== false
+        || next.action_failure_implies_disengagement !== false
+        || next.plan_failure_implies_disengagement !== false
+        || next.lack_of_progress_implies_disengagement !== false
+        || next.same_goal_reengagement_allowed !== false
+        || next.new_goal_created !== false
+        || next.goal_commitment_created !== false
+        || next.goal_state_mutated !== false
+        || next.automatic_replanning !== false
+        || next.numeric_scoring_modeled !== false
+        || next.world_state_scanned !== false
+        || next.character_brain_direct_write !== false
+        || next.status !== "motivational_goal_adjustment_recorded") {
+      const error = new Error(`MotivationalGoalAdjustmentEvent ${eventId} payload is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_INVALID";
+      throw error;
+    }
+    if (next.operation === "disengage_unattainable") {
+      if (next.alternative_goal_ref !== null
+          || next.target_goal_id !== null
+          || next.target_goal_event_id !== null
+          || next.target_goal_event_hash !== null
+          || next.source_disengagement_event_id !== null
+          || next.source_disengagement_event_hash !== null) {
+        const error = new Error(`Phase70C disengagement event ${eventId} contains reengagement-only fields.`);
+        error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_INVALID";
+        throw error;
+      }
+    } else if (!String(next.alternative_goal_ref ?? "").trim()
+        || !String(next.target_goal_id ?? "").trim()
+        || !String(next.target_goal_event_id ?? "").trim()
+        || !String(next.target_goal_event_hash ?? "").trim()
+        || !String(next.source_disengagement_event_id ?? "").trim()
+        || !String(next.source_disengagement_event_hash ?? "").trim()
+        || next.target_goal_id === next.source_goal_id) {
+      const error = new Error(`Phase70C reengagement event ${eventId} lacks a distinct target or prior disengagement.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_INVALID";
+      throw error;
+    }
+    if (phase70cGoalAdjustmentEventHash(next) !== next.goal_adjustment_event_hash) {
+      const error = new Error(`MotivationalGoalAdjustmentEvent ${eventId} failed hash verification.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_HASH_MISMATCH";
+      throw error;
+    }
+    if (String(queueTurnId ?? "") !== `${next.source_turn_id}:goal_disengagement_reengagement`) {
+      const error = new Error(`MotivationalGoalAdjustmentEvent ${eventId} must use its exact source-turn queue.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_QUEUE_TURN_MISMATCH";
+      throw error;
+    }
+    phase70cValidateAuthoritativeContext(validationContext, next);
+    const character = String(next.character).trim().toLocaleLowerCase("zh-Hant-TW");
+    const source = phase70aLatestCanonicalGoalSource(worldState, next.character, next.source_goal_id);
+    const replay68d = phase68dReplayGoalState(worldState);
+    const sourceState = replay68d.stateByCharacterGoal.get(`${character}\u0000${next.source_goal_id}`);
+    const unattainability = phase70cUnattainabilityEvent(worldState, next.character, next.source_goal_id);
+    if (!source
+        || source.goal_event_id !== next.source_goal_event_id
+        || source.goal_event_hash !== next.source_goal_event_hash
+        || source.goal_kind !== next.source_goal_kind
+        || !phase70cSourceStates.has(sourceState)
+        || phase70aGoalAlreadyAchieved(worldState, next.character, next.source_goal_id)
+        || !unattainability
+        || unattainability.goal_unattainability_event_id !== next.source_goal_unattainability_event_id
+        || unattainability.goal_unattainability_event_hash !== next.source_goal_unattainability_event_hash
+        || unattainability.unattainability_basis_kind !== next.source_unattainability_basis_kind) {
+      const error = new Error(`Phase70C source goal ${next.source_goal_id} is not a canonical terminally unattainable goal.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_SOURCE_INVALID";
+      throw error;
+    }
+    const replay = phase70cReplayAdjustmentState(worldState);
+    const sourceKey = `${character}\u0000${next.source_goal_id}`;
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    if (replay.seenEventIds.has(eventId)
+        || next.previous_goal_adjustment_event_id !== (previous?.goal_adjustment_event_id ?? null)
+        || next.previous_goal_adjustment_event_hash !== (previous?.goal_adjustment_event_hash ?? null)) {
+      const error = new Error(`MotivationalGoalAdjustmentEvent ${eventId} breaks its per-character chain.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_EVENT_CHAIN_INVALID";
+      throw error;
+    }
+    if (next.operation === "disengage_unattainable") {
+      if (replay.disengagedSources.has(sourceKey)) {
+        const error = new Error(`Phase70C source goal ${next.source_goal_id} is already disengaged.`);
+        error.code = "WORLD_SIMULATION_GOAL_DISENGAGEMENT_DUPLICATE_FORBIDDEN";
+        throw error;
+      }
+    } else {
+      const disengagement = replay.disengagementEventBySource.get(sourceKey);
+      const target = phase70aLatestCanonicalGoalSource(worldState, next.character, next.target_goal_id);
+      const targetState = replay68d.stateByCharacterGoal.get(`${character}\u0000${next.target_goal_id}`);
+      if (!disengagement
+          || replay.reengagedSources.has(sourceKey)
+          || next.source_disengagement_event_id !== disengagement.goal_adjustment_event_id
+          || next.source_disengagement_event_hash !== disengagement.goal_adjustment_event_hash
+          || disengagement.source_turn_id === next.source_turn_id
+          || !target
+          || target.goal_event_id !== next.target_goal_event_id
+          || target.goal_event_hash !== next.target_goal_event_hash
+          || targetState !== "committed"
+          || next.target_goal_id === next.source_goal_id
+          || phase70aGoalAlreadyAchieved(worldState, next.character, next.target_goal_id)
+          || phase70bGoalAlreadyUnattainable(worldState, next.character, next.target_goal_id)) {
+        const error = new Error(`Phase70C reengagement for ${next.source_goal_id} does not target a valid prior-disengagement alternative.`);
+        error.code = "WORLD_SIMULATION_GOAL_REENGAGEMENT_TARGET_INVALID";
+        throw error;
+      }
+    }
+    return;
+  }
+  if (worldPath[0] !== "motivational_goal_adjustment_history") return;
+  if (worldPath.length !== 1) {
+    const error = new Error("Motivational goal adjustment history cannot be mutated through nested paths.");
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_HISTORY_DIRECT_MUTATION_FORBIDDEN";
+    throw error;
+  }
+  const oldHistory = array(getAtPath(worldState, worldPath));
+  const newHistory = array(mutation?.to);
+  phase70cHistoryPrefix(oldHistory, newHistory);
+  const replay = phase70cReplayAdjustmentState(worldState);
+  for (let index = oldHistory.length; index < newHistory.length; index += 1) {
+    const ref = newHistory[index];
+    const event = object(object(worldState.motivational_goal_adjustment_events)[ref?.goal_adjustment_event_id]);
+    const character = String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW");
+    const previous = replay.latestByCharacter.get(character) ?? null;
+    const sourceKey = `${character}\u0000${event.source_goal_id}`;
+    if (!isObject(ref)
+        || ref.schema_version !== phase70cGoalAdjustmentHistorySchema
+        || ref.derived_index !== true
+        || !String(ref.goal_adjustment_event_id ?? "").trim()
+        || !String(ref.goal_adjustment_event_hash ?? "").trim()
+        || !String(ref.character ?? "").trim()
+        || !String(ref.source_turn_id ?? "").trim()
+        || !phase70cOperations.has(ref.operation)
+        || !String(ref.source_goal_id ?? "").trim()
+        || ref.status !== "motivational_goal_adjustment_recorded"
+        || replay.seenEventIds.has(ref.goal_adjustment_event_id)
+        || !Object.keys(event).length
+        || phase70cGoalAdjustmentEventHash(event) !== event.goal_adjustment_event_hash
+        || ref.goal_adjustment_event_hash !== event.goal_adjustment_event_hash
+        || ref.character !== event.character
+        || ref.source_turn_id !== event.source_turn_id
+        || ref.operation !== event.operation
+        || ref.source_goal_id !== event.source_goal_id
+        || (ref.target_goal_id ?? null) !== (event.target_goal_id ?? null)
+        || ref.previous_goal_adjustment_event_id !== event.previous_goal_adjustment_event_id
+        || ref.previous_goal_adjustment_event_hash !== event.previous_goal_adjustment_event_hash
+        || event.previous_goal_adjustment_event_id !== (previous?.goal_adjustment_event_id ?? null)
+        || event.previous_goal_adjustment_event_hash !== (previous?.goal_adjustment_event_hash ?? null)) {
+      const error = new Error(`Motivational goal adjustment history reference at index ${index} is invalid.`);
+      error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_HISTORY_REFERENCE_INVALID";
+      throw error;
+    }
+    if (event.operation === "disengage_unattainable") {
+      if (replay.disengagedSources.has(sourceKey)) {
+        const error = new Error(`Phase70C source goal ${event.source_goal_id} was disengaged more than once.`);
+        error.code = "WORLD_SIMULATION_GOAL_DISENGAGEMENT_DUPLICATE_FORBIDDEN";
+        throw error;
+      }
+      replay.disengagedSources.add(sourceKey);
+      replay.disengagementEventBySource.set(sourceKey, event);
+    } else {
+      const disengagement = replay.disengagementEventBySource.get(sourceKey);
+      if (!disengagement
+          || replay.reengagedSources.has(sourceKey)
+          || event.source_disengagement_event_id !== disengagement.goal_adjustment_event_id
+          || event.source_disengagement_event_hash !== disengagement.goal_adjustment_event_hash
+          || event.source_turn_id === disengagement.source_turn_id) {
+        const error = new Error(`Phase70C reengagement history for ${event.source_goal_id} lacks a prior committed disengagement.`);
+        error.code = "WORLD_SIMULATION_GOAL_REENGAGEMENT_SOURCE_INVALID";
+        throw error;
+      }
+      replay.reengagedSources.add(sourceKey);
+    }
+    replay.seenEventIds.add(event.goal_adjustment_event_id);
+    replay.latestByCharacter.set(character, event);
+  }
+}
+
 function effectiveMutationBefore(root, worldPath, mutation) {
   const actual = getAtPath(root, worldPath);
   if (actual !== undefined) return actual;
@@ -6722,6 +7061,13 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.turn_id,
         queue.validation_context,
       );
+      assertPhase70CGoalAdjustmentMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
       setAtPath(executed, worldPath, mutation.to);
       applied.push({
         mutation_id: mutation.mutation_id,
@@ -6873,6 +7219,13 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         queue.validation_context,
       );
       assertPhase70BGoalUnattainabilityMutation(
+        executed,
+        worldPath,
+        mutation,
+        queue.turn_id,
+        queue.validation_context,
+      );
+      assertPhase70CGoalAdjustmentMutation(
         executed,
         worldPath,
         mutation,
@@ -7155,6 +7508,27 @@ export function buildWorldSimulationChronologicalMutationQueueContract() {
       direct_nested_motivational_goal_unattainability_history_mutation_rejected: true,
       phase70b_historical_goal_unattainability_rewrite_rejected: true,
       phase70b_authoritative_queue_validator_invoked: true,
+      phase70c_goal_adjustment_event_write_once_enforced: true,
+      phase70c_goal_adjustment_event_content_address_verified: true,
+      phase70c_same_character_canonical_source_goal_enforced: true,
+      phase70c_source_goal_unattainability_required: true,
+      phase70c_resolver_candidate_membership_verified: true,
+      phase70c_unattainability_does_not_imply_disengagement: true,
+      phase70c_action_plan_failure_or_lack_progress_does_not_imply_disengagement: true,
+      phase70c_disengagement_does_not_rewrite_phase68d_goal_state: true,
+      phase70c_reengagement_requires_prior_committed_disengagement: true,
+      phase70c_same_turn_disengage_reengage_rejected: true,
+      phase70c_same_goal_reengagement_rejected: true,
+      phase70c_alternative_goal_must_be_distinct_same_character_committed_and_viable: true,
+      phase70c_new_goal_creation_and_goal_commitment_rejected: true,
+      phase70c_replanning_rejected: true,
+      phase70c_goal_adjustment_history_append_only_enforced: true,
+      phase70c_per_character_goal_adjustment_hash_chain_enforced: true,
+      phase70c_authoritative_validation_context_required: true,
+      phase70c_numeric_scoring_rejected: true,
+      direct_nested_motivational_goal_adjustment_history_mutation_rejected: true,
+      phase70c_historical_goal_adjustment_rewrite_rejected: true,
+      phase70c_authoritative_queue_validator_invoked: true,
     },
     known_boundary: "Phase62K makes the chronological queue the sole writer of the final turn world state. Subsystems may mutate isolated preview drafts to compute causal proposals, but every committed change must be reproduced by queued mutations.",
   };

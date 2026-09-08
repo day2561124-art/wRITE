@@ -117,6 +117,12 @@ import {
   worldSimulationGoalViabilityUnattainabilityVersion,
 } from "./world-simulation-goal-viability-unattainability-service.mjs";
 import {
+  buildWorldSimulationGoalAdjustmentEvents,
+  buildWorldSimulationGoalAdjustmentResolverView,
+  buildWorldSimulationGoalDisengagementReengagementContract,
+  worldSimulationGoalDisengagementReengagementVersion,
+} from "./world-simulation-goal-disengagement-reengagement-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -6258,6 +6264,90 @@ async function resolveGoalViabilityDecisions(
   };
 }
 
+async function resolveGoalAdjustmentDecisions(
+  priorCommittedWorldState,
+  preparedTurn,
+  options,
+) {
+  const resolver =
+    typeof options.goalAdjustmentResolver === "function"
+      ? options.goalAdjustmentResolver
+      : null;
+  const resolverView = buildWorldSimulationGoalAdjustmentResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+  });
+  if (!resolver) {
+    return {
+      decisions: [],
+      resolver_view: resolverView,
+      audit: {
+        resolver_used: false,
+        missing_resolver_means_no_goal_adjustment: true,
+        prior_turn_committed_goal_state_only: true,
+        phase70b_unattainability_required_for_disengagement: true,
+        unattainability_implies_disengagement: false,
+        action_failure_implies_disengagement: false,
+        plan_failure_implies_disengagement: false,
+        lack_of_progress_implies_disengagement: false,
+        reengagement_requires_prior_committed_disengagement: true,
+        same_turn_disengage_reengage_allowed: false,
+        same_goal_reengagement_allowed: false,
+        alternative_goal_must_already_be_committed: true,
+        new_goal_creation_requested: false,
+        goal_commitment_creation_requested: false,
+        replanning_requested: false,
+        world_state_exposed_to_resolver: false,
+        raw_memory_store_exposed_to_resolver: false,
+        hidden_retrieval_graph_exposed_to_resolver: false,
+        implementation_plan_internals_exposed_to_resolver: false,
+        numeric_scoring_requested: false,
+      },
+    };
+  }
+  const inputSnapshot = cloneJson(resolverView);
+  const inputHash = hashAgentRunValue(inputSnapshot);
+  const raw = await resolver(cloneJson(inputSnapshot));
+  if (!Array.isArray(raw)) {
+    const error = new Error(
+      "goalAdjustmentResolver must return an array of explicit source-goal adjustment decisions.",
+    );
+    error.code = "WORLD_SIMULATION_GOAL_ADJUSTMENT_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const decisions = raw.map((decision) => ({
+    ...cloneJson(decision),
+    source: "programmatic_goal_adjustment_resolver",
+  }));
+  return {
+    decisions,
+    resolver_view: resolverView,
+    audit: {
+      resolver_used: true,
+      input_context_hash: inputHash,
+      decision_count: decisions.length,
+      prior_turn_committed_goal_state_only: true,
+      phase70b_unattainability_required_for_disengagement: true,
+      unattainability_implies_disengagement: false,
+      action_failure_implies_disengagement: false,
+      plan_failure_implies_disengagement: false,
+      lack_of_progress_implies_disengagement: false,
+      reengagement_requires_prior_committed_disengagement: true,
+      same_turn_disengage_reengage_allowed: false,
+      same_goal_reengagement_allowed: false,
+      alternative_goal_must_already_be_committed: true,
+      new_goal_creation_requested: false,
+      goal_commitment_creation_requested: false,
+      replanning_requested: false,
+      world_state_exposed_to_resolver: false,
+      raw_memory_store_exposed_to_resolver: false,
+      hidden_retrieval_graph_exposed_to_resolver: false,
+      implementation_plan_internals_exposed_to_resolver: false,
+      numeric_scoring_requested: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -7391,6 +7481,60 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase70C is a separate motivational reconsideration layer. Its resolver
+  // sees only the goal-adjustment state committed before this turn, so a new
+  // same-turn Phase70B unattainability certificate never auto-disengages the
+  // goal. Reengagement redirects only toward another already-committed goal;
+  // it does not revive the impossible source goal or perform replanning.
+  const goalAdjustmentDecisionResolution =
+    await resolveGoalAdjustmentDecisions(
+      snapshot.state,
+      preparedTurn,
+      options,
+    );
+
+  const goalAdjustment = buildWorldSimulationGoalAdjustmentEvents({
+    world_state:
+      goalUnattainabilityMutationExecution.next_world_state,
+    turn_id:
+      preparedTurn.turn_id,
+    adjustment_decisions:
+      goalAdjustmentDecisionResolution.decisions,
+    resolver_view:
+      goalAdjustmentDecisionResolution.resolver_view,
+  });
+
+  const goalAdjustmentMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:goal_disengagement_reengagement`,
+      world_state_hash:
+        hashAgentRunValue(
+          goalUnattainabilityMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        goalAdjustment.result.state_transitions,
+      validation_context: {
+        goal_disengagement_reengagement:
+          goalAdjustment.result.authoritative_validation_context,
+      },
+      elapsed_ms: 0,
+    });
+
+  const goalAdjustmentMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        goalUnattainabilityMutationExecution.next_world_state,
+      preview_world_state:
+        goalAdjustment.result.preview_world_state,
+      queue:
+        goalAdjustmentMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -7451,7 +7595,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: goalUnattainabilityMutationExecution.next_world_state,
+      next_world_state: goalAdjustmentMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       state_transitions: array(causalResolution.state_transitions),
@@ -7821,6 +7965,19 @@ export async function resolveWorldSimulationTurn(
         cloneJson(goalUnattainabilityMutationQueue),
       goal_viability_unattainability_mutation_execution:
         cloneJson(goalUnattainabilityMutationExecution.execution),
+      goal_adjustment_decision_resolution: {
+        version: worldSimulationGoalDisengagementReengagementVersion,
+        decisions: cloneJson(goalAdjustmentDecisionResolution.decisions),
+        resolver_view_hash:
+          goalAdjustmentDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(goalAdjustmentDecisionResolution.audit),
+      },
+      goal_disengagement_reengagement:
+        cloneJson(goalAdjustment),
+      goal_disengagement_reengagement_mutation_queue:
+        cloneJson(goalAdjustmentMutationQueue),
+      goal_disengagement_reengagement_mutation_execution:
+        cloneJson(goalAdjustmentMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       committed_character_experience_projection:
@@ -8476,6 +8633,37 @@ export async function resolveWorldSimulationTurn(
       unattainability_is_abandonment: false,
       automatic_disengagement: false,
       automatic_reengagement: false,
+      automatic_replanning: false,
+      numeric_scoring_modeled: false,
+    },
+    goal_disengagement_reengagement: {
+      version: worldSimulationGoalDisengagementReengagementVersion,
+      resolver_used:
+        goalAdjustmentDecisionResolution.audit.resolver_used === true,
+      adjustment_decision_count:
+        goalAdjustment.result.adjustment_decision_count,
+      created_adjustment_event_count:
+        goalAdjustment.result.adjustment_events_created.length,
+      appended_history_reference_count:
+        goalAdjustment.result.history_references_appended.length,
+      effective_goal_adjustment_projection_hash:
+        goalAdjustment.result.effective_goal_adjustment_projection.projection_hash,
+      mutation_count:
+        goalAdjustmentMutationQueue.mutation_count,
+      authoritative_executor:
+        goalAdjustmentMutationExecution.execution.version,
+      prior_turn_committed_goal_state_only: true,
+      phase70b_unattainability_required_for_disengagement: true,
+      unattainability_implies_disengagement: false,
+      action_failure_implies_disengagement: false,
+      plan_failure_implies_disengagement: false,
+      lack_of_progress_implies_disengagement: false,
+      reengagement_requires_prior_committed_disengagement: true,
+      same_turn_disengage_reengage_allowed: false,
+      same_goal_reengagement_allowed: false,
+      alternative_goal_must_already_be_committed: true,
+      new_goal_creation_modeled: false,
+      goal_commitment_creation_modeled: false,
       automatic_replanning: false,
       numeric_scoring_modeled: false,
     },
