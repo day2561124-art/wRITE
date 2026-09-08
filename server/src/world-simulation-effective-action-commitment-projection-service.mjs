@@ -3,6 +3,10 @@ import {
   assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
 } from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
+import {
+  buildWorldSimulationActionCommitmentLifecycleDecision,
+  worldSimulationActionCommitmentLifecycleDecisionVersion,
+} from "./world-simulation-action-commitment-lifecycle-decision-service.mjs";
 
 export const worldSimulationEffectiveActionCommitmentProjectionVersion =
   "phase75a-effective-action-commitment-projection-v1";
@@ -154,6 +158,9 @@ export function buildWorldSimulationEffectiveActionCommitmentProjectionContract(
     character_brain_exposure_installed: false,
     execution_application_installed: false,
     reconsideration_policy_installed: false,
+    lifecycle_decision_projection_version:
+      worldSimulationActionCommitmentLifecycleDecisionVersion,
+    explicit_commitment_lifecycle_decisions_installed: true,
     world_state_mutation_allowed: false,
     world_truth_authority_claimed: false,
     causal_outcome_authority_claimed: false,
@@ -179,6 +186,7 @@ export function projectWorldSimulationEffectiveActionCommitment(input = {}) {
   validateTurnChronology(turns);
 
   const replayed = [];
+  const lifecycleDecisions = [];
   let effective = null;
   let supersededCount = 0;
   let verifiedBundleCount = 0;
@@ -201,8 +209,18 @@ export function projectWorldSimulationEffectiveActionCommitment(input = {}) {
     const receipt = receiptForCharacter(bundle, character);
     if (!receipt) continue;
 
+    const lifecycleDecision = buildWorldSimulationActionCommitmentLifecycleDecision({
+      prior_active_commitment: effective,
+      current_choice_receipt: receipt,
+    });
+    lifecycleDecisions.push(lifecycleDecision);
+
     const entry = commitmentEntry(receipt, turn, replayed.length);
-    if (effective?.commitment_status === "active") supersededCount += 1;
+    if (lifecycleDecision.lifecycle_decision === "maintain" && effective?.commitment_ref) {
+      entry.commitment_ref = effective.commitment_ref;
+    }
+    if (effective?.commitment_status === "active"
+        && lifecycleDecision.lifecycle_decision !== "maintain") supersededCount += 1;
     replayed.push(entry);
     effective = entry.selection_kind === "candidate_action_intent" ? entry : null;
   }
@@ -213,8 +231,13 @@ export function projectWorldSimulationEffectiveActionCommitment(input = {}) {
     character,
     current_commitment: effective ? cloneJson(effective) : null,
     latest_decision: latestDecision ? cloneJson(latestDecision) : null,
+    lifecycle_decisions: cloneJson(lifecycleDecisions),
+    latest_lifecycle_decision: lifecycleDecisions.length
+      ? cloneJson(lifecycleDecisions[lifecycleDecisions.length - 1])
+      : null,
     has_active_commitment: Boolean(effective),
     replayed_character_receipt_count: replayed.length,
+    lifecycle_decision_count: lifecycleDecisions.length,
     superseded_active_commitment_count: supersededCount,
     verified_receipt_bundle_count: verifiedBundleCount,
     explicit_reject_all_cleared_commitment:
