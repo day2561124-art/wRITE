@@ -10,6 +10,9 @@ import {
 import {
   worldSimulationEffectiveActionCommitmentCharacterExposureVersion,
 } from "./world-simulation-effective-action-commitment-character-exposure-service.mjs";
+import {
+  buildWorldSimulationActionCommitmentReconsiderationEvidence,
+} from "./world-simulation-action-commitment-reconsideration-evidence-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -235,6 +238,19 @@ export function buildWorldSimulationCharacterBrainInput(
         subjective_prospective_consequence_simulation:
           input.subjective_prospective_consequence_simulation,
       });
+    if (isObject(input.cognition.effective_action_commitment)) {
+      input.action_commitment_reconsideration_evidence =
+        buildWorldSimulationActionCommitmentReconsiderationEvidence({
+          character: input.character,
+          cognition: input.cognition,
+          subjective_action_deliberation: input.subjective_action_deliberation,
+          subjective_prospective_consequence_simulation:
+            input.subjective_prospective_consequence_simulation,
+          subjective_cross_option_preference_resolution:
+            input.subjective_cross_option_preference_resolution,
+        });
+      input.boundaries.action_commitment_reconsideration_evidence_v1_installed = true;
+    }
     input.boundaries.subjective_action_deliberation_grounding_v1_installed = true;
     input.boundaries.subjective_prospective_consequence_simulation_v1_installed = true;
     input.boundaries.subjective_cross_option_preference_resolution_v1_installed = true;
