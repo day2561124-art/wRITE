@@ -140,6 +140,11 @@ import {
   worldSimulationVisibleConstraintObservationVersion,
 } from "./world-simulation-visible-constraint-observation-service.mjs";
 import {
+  buildWorldSimulationSubjectiveMeansFeasibilityClaimProposals,
+  buildWorldSimulationSubjectiveMeansFeasibilityResolverView,
+  worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
+} from "./world-simulation-subjective-means-feasibility-interpretation-service.mjs";
+import {
   buildWorldSimulationMemoryAccessibilityContract,
   queryWorldSimulationMemoryAccessibility,
   worldSimulationMemoryAccessibilityVersion,
@@ -4103,6 +4108,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       version: visibleConstraintObservationProjection.version,
       character_view_hash:
         visibleConstraintObservationProjection.character_view_hash,
+      observation_content_hashes: [
+        ...new Set(
+          array(visibleConstraintObservationProjection.character_view.other_senses)
+            .map((observation) => hashAgentRunValue(observation)),
+        ),
+      ].sort(),
       audit: cloneJson(visibleConstraintObservationProjection.audit),
     });
 
@@ -6589,6 +6600,61 @@ async function resolveMeansFeasibilityDecisions(
   };
 }
 
+async function resolveSubjectiveMeansFeasibilityInterpretations(
+  worldState,
+  preparedTurn,
+  sourceMemoryRecords,
+  options,
+) {
+  const resolverView =
+    buildWorldSimulationSubjectiveMeansFeasibilityResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+      source_memory_records: sourceMemoryRecords,
+      phase73a_observation_projections:
+        preparedTurn.visible_constraint_observation_projections ?? [],
+    });
+  const interpreter =
+    typeof options.subjectiveMeansFeasibilityInterpreter === "function"
+      ? options.subjectiveMeansFeasibilityInterpreter
+      : null;
+  let rawDecisions = [];
+  let inputHash = null;
+  if (interpreter && resolverView.character_contexts.length > 0) {
+    const inputSnapshot = cloneJson(resolverView);
+    inputHash = hashAgentRunValue(inputSnapshot);
+    const raw = await interpreter(cloneJson(inputSnapshot));
+    if (!Array.isArray(raw)) {
+      const error = new Error(
+        "subjectiveMeansFeasibilityInterpreter must return an array of bounded subjective feasibility interpretations.",
+      );
+      error.code =
+        "WORLD_SIMULATION_SUBJECTIVE_MEANS_FEASIBILITY_INTERPRETER_INVALID_OUTPUT";
+      throw error;
+    }
+    rawDecisions = cloneJson(raw);
+  }
+  const built =
+    buildWorldSimulationSubjectiveMeansFeasibilityClaimProposals({
+      resolver_view: resolverView,
+      interpretation_decisions: rawDecisions,
+    });
+  return {
+    ...built,
+    resolver_view: resolverView,
+    audit: {
+      ...cloneJson(built.audit),
+      interpreter_used: Boolean(interpreter && resolverView.character_contexts.length > 0),
+      input_context_hash: inputHash,
+      eligible_character_count: resolverView.character_contexts.length,
+      eligible_constraint_memory_count: resolverView.character_contexts
+        .reduce((sum, context) => sum + array(context.constraint_memories).length, 0),
+      missing_interpreter_means_no_automatic_constraint_claim: !interpreter,
+      same_turn_phase71_consumes_new_interpretation: false,
+    },
+  };
+}
+
 async function resolveSubjectiveClaimProposals(
   worldState,
   preparedTurn,
@@ -7415,6 +7481,19 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase73B interprets only current-turn subjective memories that carry the
+  // Phase73A constraint-observation guards. It may compare those memories with
+  // the same character's currently represented means and already-committed
+  // subjective cognition, but it never receives Phase72's objective verdict or
+  // source-plan binding. Its only output is an ordinary Phase65 claim proposal.
+  const subjectiveMeansFeasibilityInterpretationResolution =
+    await resolveSubjectiveMeansFeasibilityInterpretations(
+      structuredSelfModelRevisionMutationExecution.next_world_state,
+      preparedTurn,
+      subjectiveClaimSourceMemories,
+      options,
+    );
+
   const subjectiveClaimProposalResolution =
     await resolveSubjectiveClaimProposals(
       structuredSelfModelRevisionMutationExecution.next_world_state,
@@ -7422,6 +7501,11 @@ export async function resolveWorldSimulationTurn(
       subjectiveClaimSourceMemories,
       options,
     );
+
+  const subjectiveClaimProposals = [
+    ...subjectiveMeansFeasibilityInterpretationResolution.claim_proposals,
+    ...subjectiveClaimProposalResolution.proposals,
+  ];
 
   const subjectiveClaimProjection =
     buildWorldSimulationSubjectiveClaims({
@@ -7432,7 +7516,7 @@ export async function resolveWorldSimulationTurn(
       source_memory_records:
         subjectiveClaimSourceMemories,
       claim_proposals:
-        subjectiveClaimProposalResolution.proposals,
+        subjectiveClaimProposals,
     });
 
   const subjectiveClaimMutationQueue =
@@ -8208,6 +8292,24 @@ export async function resolveWorldSimulationTurn(
       structured_self_model_revision_mutation_execution:
         cloneJson(structuredSelfModelRevisionMutationExecution.execution),
 
+      subjective_means_feasibility_interpretation_resolution: {
+        version:
+          worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
+        decisions:
+          cloneJson(
+            subjectiveMeansFeasibilityInterpretationResolution.decisions,
+          ),
+        claim_proposals:
+          cloneJson(
+            subjectiveMeansFeasibilityInterpretationResolution.claim_proposals,
+          ),
+        resolver_view_hash:
+          subjectiveMeansFeasibilityInterpretationResolution.resolver_view.resolver_view_hash,
+        audit:
+          cloneJson(
+            subjectiveMeansFeasibilityInterpretationResolution.audit,
+          ),
+      },
       subjective_claim_proposal_resolution: {
         version:
           worldSimulationSubjectiveClaimProjectionVersion,
@@ -8884,6 +8986,34 @@ export async function resolveWorldSimulationTurn(
       world_truth_authority_claimed: false,
       confidence_probability_modeled: false,
       same_turn_character_brain_feedback_allowed: false,
+    },
+    subjective_means_feasibility_interpretation: {
+      version:
+        worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
+      interpreter_used:
+        subjectiveMeansFeasibilityInterpretationResolution.audit.interpreter_used === true,
+      eligible_character_count:
+        subjectiveMeansFeasibilityInterpretationResolution.audit.eligible_character_count,
+      eligible_constraint_memory_count:
+        subjectiveMeansFeasibilityInterpretationResolution.audit.eligible_constraint_memory_count,
+      interpretation_decision_count:
+        subjectiveMeansFeasibilityInterpretationResolution.decisions.length,
+      emitted_phase65_claim_proposal_count:
+        subjectiveMeansFeasibilityInterpretationResolution.claim_proposals.length,
+      task_and_situation_specific:
+        true,
+      phase72_actual_means_status_exposed:
+        false,
+      phase73a_source_means_binding_exposed:
+        false,
+      parallel_belief_store_created:
+        false,
+      direct_subjective_belief_write:
+        false,
+      same_turn_phase71_consumes_new_interpretation:
+        false,
+      numeric_confidence_probability_modeled:
+        false,
     },
     subjective_claim_projection: {
       version:

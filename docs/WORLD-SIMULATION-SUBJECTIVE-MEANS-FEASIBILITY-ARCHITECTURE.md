@@ -159,8 +159,103 @@ Phase73A does not implement:
 - utility/probability scoring
 - a complete skill/stat/resource progression system
 
+## Phase73B — Subjective Means Feasibility Interpretation / Constraint Belief Formation
+
+Phase73B installs the interpretation policy that Phase73A intentionally deferred.
+
+Its question is not whether the means is objectively executable. Phase72 already owns that authority. Phase73B asks:
+
+> Given what this character actually perceived, remembers, and currently believes about themself, how does this character interpret the feasibility of a currently represented means?
+
+### Research basis
+
+The policy follows four external architecture lessons:
+
+1. BDI / AgentSpeak plan applicability is evaluated against the agent's current belief base rather than omniscient world truth.
+2. Epistemic planning treats observation and belief revision as distinct from the hidden underlying world state.
+3. Self-efficacy is a task- and situation-specific perceived capability judgment that may disagree with actual capability.
+4. Metacognitive confidence can diverge from objective performance, so uncertainty must remain representable instead of being collapsed into a truth verdict.
+
+### Bounded input surface
+
+A Phase73B interpreter receives only characters that have a **current-turn newly formed subjective memory** whose content retains the Phase73A semantic guards:
+
+- `modality = constraint_related`
+- `source = character_visible_world_evidence`
+- `subjective_interpretation_required = true`
+- `world_truth_authority = false`
+- `actual_means_feasibility_verdict_exposed = false`
+
+For that same character it may additionally receive bounded character-owned cognition:
+
+- currently represented, nonterminal implementation intentions;
+- active `capability_appraisal` self-model aspects;
+- active subjective beliefs.
+
+Eligibility is pinned engine-side to the exact Phase73A observation contents projected during `prepareWorldSimulationTurn`. The prepare result retains only content hashes for this lineage check; Phase73B requires the new subjective memory's current-turn direct-perception provenance and content hash to match that same-character catalog. A generic `other_senses` item that merely copies the Phase73A semantic flags is therefore insufficient. The hash catalog itself is not forwarded to the interpreter.
+
+It does not receive:
+
+- raw World State;
+- Phase72 `means_status`;
+- Phase72 `physical_executability`;
+- Phase72 `authorization_status`;
+- hidden Phase72 evidence;
+- the authoritative Phase73A source-means binding;
+- another character's memories, beliefs, self-model, or plans.
+
+The source-means binding remains deliberately hidden. A character must interpret its perception against the means it actually represents; the engine may not tell it which plan the authoritative Phase72 evidence originally belonged to.
+
+### Subjective assessment vocabulary
+
+Phase73B permits three bounded interpretation labels for audit/policy purposes:
+
+- `perceived_feasible`
+- `perceived_blocked`
+- `uncertain`
+
+These labels are **not** world-truth values and are not persisted as a second belief database. A character may therefore perceive an apparent failure yet still interpret the means as feasible, or may perceive ambiguous evidence and remain uncertain.
+
+No numeric confidence, success probability, or objective-feasibility score is introduced in Phase73B v1.
+
+### Output authority
+
+The interpreter may emit only an ordinary Phase65-compatible claim proposal:
+
+- `proposal_ref`
+- `character`
+- `proposition`
+- supporting current-turn subjective-memory refs
+
+Phase73B does not create a new durable event store. The normal cognition stack remains authoritative:
+
+`Phase73B interpretation -> Phase65 SubjectiveClaimEvent -> Phase65B conflict relation -> Phase65D resolution -> Phase66 belief revision`
+
+Missing interpreter output means **no automatic constraint belief**. Perception never auto-promotes itself into belief.
+
+### Temporal boundary
+
+Phase73B runs in the cognition pipeline after current-turn subjective memory formation and before ordinary Phase65 claim persistence.
+
+The resulting claim/belief is still unavailable to same-turn Phase71. Phase71 continues to resolve from the prior committed `snapshot.state`, so Phase73B cannot retroactively trigger same-turn replanning.
+
+This preserves the intended loop:
+
+`Turn N observation -> Turn N subjective interpretation/claim commit -> Turn N+1 character-owned awareness -> later reconsideration`
+
+## Updated non-goals
+
+Phase73B still does not implement:
+
+- direct World Truth -> belief promotion;
+- a parallel perceived-feasibility belief store;
+- automatic truth synchronization with Phase72;
+- numeric self-efficacy/confidence scoring;
+- automatic goal or plan mutation;
+- same-turn Phase71 replanning;
+- Phase73C belief-grounded reconsideration trigger;
+- a complete skill/stat/resource progression system.
+
 ## Follow-on
 
-Phase73B may explicitly study how these observations become subjective constraint interpretations through the already-existing memory/claim/belief architecture.
-
-Phase73C may then allow later-turn Phase71 replanning to consume that character-owned subjective awareness, closing the loop without same-turn cognition churn.
+Phase73C may allow later-turn Phase71 reconsideration eligibility to consume character-owned committed subjective awareness while preserving Phase71's existing bounded candidate-generation and Phase69B plan-revision authority.

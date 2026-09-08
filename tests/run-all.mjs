@@ -805,6 +805,7 @@ const steps = [
   ["Phase 71 adaptive replanning / alternative means", ["tests/phase71/phase71-adaptive-replanning-alternative-means.test.mjs"]],
   ["Phase 72 means feasibility / capability-affordance validation", ["tests/phase72/phase72-means-feasibility-capability-affordance.test.mjs"]],
   ["Phase 73A visible constraint observation", ["tests/phase73/phase73-visible-constraint-observation.test.mjs"]],
+  ["Phase 73B subjective means feasibility interpretation", ["tests/phase73/phase73-subjective-means-feasibility-interpretation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
