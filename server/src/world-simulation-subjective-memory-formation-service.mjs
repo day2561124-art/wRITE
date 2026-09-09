@@ -89,6 +89,7 @@ function keyIsEngineIdentifier(key) {
   return normalized === "id"
     || normalized.endsWith("_id")
     || normalized.endsWith("_ids")
+    || normalized.startsWith("internal_")
     || strippedObservationKeys.has(normalized);
 }
 
@@ -460,7 +461,13 @@ function memoryRecordFor({
   if (sanitized === null || sanitized === undefined) return null;
   if (isObject(sanitized) && !Object.keys(sanitized).length) return null;
 
-  const memoryType = "episodic_direct_perception";
+  const postOutcomeActionExperience =
+    isObject(observation)
+    && nonEmptyString(observation.kind) === "post_outcome_action_experience";
+
+  const memoryType = postOutcomeActionExperience
+    ? "episodic_action_experience"
+    : "episodic_direct_perception";
   const contentHash = hashAgentRunValue({
     sense,
     content: sanitized,
@@ -498,7 +505,9 @@ function memoryRecordFor({
     // Subjectively meaningful source features only.
     // Engine lineage belongs in internal_provenance below.
     source: {
-      kind: "direct_perception",
+      kind: postOutcomeActionExperience
+        ? "post_outcome_subjective_experience"
+        : "direct_perception",
       sense,
     },
 
@@ -509,6 +518,22 @@ function memoryRecordFor({
       observation_hash: contentHash,
       formation_version:
         worldSimulationSubjectiveMemoryFormationVersion,
+      ...(postOutcomeActionExperience
+        ? {
+            post_outcome_subjective_perception_ref:
+              nonEmptyString(
+                observation.internal_post_outcome_subjective_perception_ref,
+              ),
+            post_outcome_subjective_perception_hash:
+              nonEmptyString(
+                observation.internal_post_outcome_subjective_perception_hash,
+              ),
+            post_outcome_bridge_version:
+              nonEmptyString(
+                observation.internal_post_outcome_bridge_version,
+              ),
+          }
+        : {}),
     },
 
     // Machine-readable retrieval cues may be consumed by Phase63B,
@@ -1011,7 +1036,7 @@ function solveSubjectiveMemoryFormation(context) {
       memories_become_retrievable_on_later_turns_not_retroactively_in_same_decision: true,
       active_memory_decay_modeled: false,
       consolidation_reconsolidation_modeled: false,
-      post_outcome_perception_capture_modeled: false,
+      post_outcome_perception_capture_modeled: true,
     },
   };
 }
@@ -1139,7 +1164,7 @@ export function buildWorldSimulationSubjectiveMemoryFormationContract() {
     final_memory_state_written_through_authoritative_mutation_executor: true,
     active_memory_decay_modeled: false,
     consolidation_reconsolidation_modeled: false,
-    post_outcome_perception_capture_modeled: false,
+    post_outcome_perception_capture_modeled: true,
     neural_module_direct_memory_mutation_allowed: false,
   };
 }

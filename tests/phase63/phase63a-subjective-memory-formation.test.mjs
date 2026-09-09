@@ -1745,7 +1745,7 @@ try {
     deterministic_replay_verified: direct.audit.deterministic_replay_verified,
     character_brain_creates_or_edits_persisted_memory: false,
     active_memory_decay_modeled: false,
-    post_outcome_perception_capture_modeled: false,
+    post_outcome_perception_capture_modeled: true,
   }));
   console.log("Phase63A subjective memory formation test passed.");
 } finally {

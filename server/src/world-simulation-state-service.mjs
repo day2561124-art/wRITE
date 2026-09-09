@@ -369,6 +369,14 @@ export async function commitWorldSimulationTurn(
               input.committed_character_current_mind_projection ?? null,
             post_outcome_subjective_perception_projection:
               input.post_outcome_subjective_perception_projection ?? null,
+            post_outcome_subjective_memory_bridge:
+              input.post_outcome_subjective_memory_bridge ?? null,
+            post_outcome_subjective_memory_formation:
+              input.post_outcome_subjective_memory_formation ?? null,
+            post_outcome_subjective_memory_mutation_queue:
+              input.post_outcome_subjective_memory_mutation_queue ?? null,
+            post_outcome_subjective_memory_mutation_execution:
+              input.post_outcome_subjective_memory_mutation_execution ?? null,
             committed_character_experience_projection:
               input.committed_character_experience_projection ?? null,
             trace_ids: input.trace_ids ?? [],

@@ -18,6 +18,10 @@ import {
   worldSimulationPostOutcomeSubjectivePerceptionVersion,
 } from "./world-simulation-post-outcome-subjective-perception-service.mjs";
 import {
+  bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
+  worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
+} from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -7037,6 +7041,28 @@ export async function resolveWorldSimulationTurn(
     };
   }
 
+  // Phase76A is computed as soon as the authoritative causal resolution has
+  // passed the hard consistency gate. It remains speculative evidence until
+  // the atomic world commit succeeds below.
+  const postOutcomeSubjectivePerceptionProjection =
+    projectWorldSimulationPostOutcomeSubjectivePerception({
+      turn_id: preparedTurn.turn_id,
+      selected_action_intents: selected,
+      action_outcomes: array(causalResolution.action_outcomes),
+      state_transitions: array(causalResolution.state_transitions),
+    });
+
+  // Phase76B consumes only the already-bounded Phase76A projection plus the
+  // acting character's own selected intent. It does not receive raw outcomes,
+  // state transitions, or World State and cannot write memory or belief itself.
+  const postOutcomeSubjectiveMemoryBridge =
+    bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory({
+      turn_id: preparedTurn.turn_id,
+      selected_action_intents: selected,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+
   const retrievalOccurredAt =
     array(preparedTurn.decision_packets)
       .map((packet) =>
@@ -7202,15 +7228,69 @@ export async function resolveWorldSimulationTurn(
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
   });
 
-  const subjectiveClaimSourceMemories =
-    subjectiveClaimSourceMemoryRecords(
-      subjectiveMemoryFormation,
+  // Phase76B uses the same sealed Phase63 formation semantics, but in a second
+  // bounded pass after the ordinary pre-action perception memories have been
+  // applied. The source packet contains only Phase76A subjective experience.
+  const postOutcomeSubjectiveMemoryFormation =
+    formWorldSimulationSubjectiveMemories({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      event:
+        preparedTurn.event,
+      decision_packets:
+        postOutcomeSubjectiveMemoryBridge.memory_formation_packets,
+      encoding_decisions: [],
+      episode_bindings: [],
+    });
+
+  const postOutcomeSubjectiveMemoryPreview =
+    applySubjectiveMemoryPreview(
+      subjectiveMemoryMutationExecution.next_world_state,
+      postOutcomeSubjectiveMemoryFormation.result,
     );
+
+  const postOutcomeSubjectiveMemoryMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:post_outcome_subjective_memory`,
+      world_state_hash:
+        hashAgentRunValue(
+          subjectiveMemoryMutationExecution.next_world_state,
+        ),
+      state_transitions:
+        postOutcomeSubjectiveMemoryFormation.result.memory_transitions,
+      elapsed_ms: 0,
+    });
+
+  const postOutcomeSubjectiveMemoryMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        subjectiveMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        postOutcomeSubjectiveMemoryPreview,
+      queue:
+        postOutcomeSubjectiveMemoryMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const subjectiveClaimSourceMemories = [
+    ...subjectiveClaimSourceMemoryRecords(
+      subjectiveMemoryFormation,
+    ),
+    ...subjectiveClaimSourceMemoryRecords(
+      postOutcomeSubjectiveMemoryFormation,
+    ),
+  ];
 
   const subjectiveEpisodeSegmentation =
     buildWorldSimulationSubjectiveEpisodeSegmentations({
       world_state:
-        subjectiveMemoryMutationExecution.next_world_state,
+        postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -7223,7 +7303,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_episode_segmentation`,
       world_state_hash:
         hashAgentRunValue(
-          subjectiveMemoryMutationExecution.next_world_state,
+          postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveEpisodeSegmentation
@@ -7235,7 +7315,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveEpisodeSegmentationMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        subjectiveMemoryMutationExecution.next_world_state,
+        postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
       preview_world_state:
         subjectiveEpisodeSegmentation
           .result
@@ -8213,20 +8293,8 @@ export async function resolveWorldSimulationTurn(
       prepared_turn: preparedTurn,
     });
 
-  // Phase76A separates the authoritative causal transition from what the
-  // acting character can safely experience after the action. Raw result labels,
-  // causal evidence, exact engine geometry, and other characters' private state
-  // are never auto-promoted into this subjective observation projection.
-  const postOutcomeSubjectivePerceptionProjection =
-    projectWorldSimulationPostOutcomeSubjectivePerception({
-      turn_id: preparedTurn.turn_id,
-      selected_action_intents: selected,
-      action_outcomes: array(causalResolution.action_outcomes),
-      state_transitions: array(causalResolution.state_transitions),
-    });
-
-  // This projection is only commit evidence at this point. No Character
-  // Experience Receipt exists until the atomic world commit below succeeds.
+  // Phase76A/76B evidence and all subjective memories remain speculative until
+  // this atomic commit succeeds. No Character Experience Receipt exists yet.
   const committedCharacterExperienceProjection =
     projectWorldSimulationCharacterExperienceEvidence({
       prepared_turn: preparedTurn,
@@ -8692,6 +8760,14 @@ export async function resolveWorldSimulationTurn(
         cloneJson(committedCharacterCurrentMindProjection),
       post_outcome_subjective_perception_projection:
         cloneJson(postOutcomeSubjectivePerceptionProjection),
+      post_outcome_subjective_memory_bridge:
+        cloneJson(postOutcomeSubjectiveMemoryBridge),
+      post_outcome_subjective_memory_formation:
+        cloneJson(postOutcomeSubjectiveMemoryFormation),
+      post_outcome_subjective_memory_mutation_queue:
+        cloneJson(postOutcomeSubjectiveMemoryMutationQueue),
+      post_outcome_subjective_memory_mutation_execution:
+        cloneJson(postOutcomeSubjectiveMemoryMutationExecution.execution),
       committed_character_experience_projection:
         cloneJson(committedCharacterExperienceProjection),
       trace_ids: traceIds,
@@ -8924,6 +9000,25 @@ export async function resolveWorldSimulationTurn(
       created_memory_count: subjectiveMemoryFormation.result.created_memory_count,
       mutation_count: subjectiveMemoryMutationQueue.mutation_count,
       authoritative_executor: subjectiveMemoryMutationExecution.execution.version,
+    },
+    post_outcome_subjective_memory: {
+      bridge_version:
+        worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
+      source_phase76a_projection_hash:
+        postOutcomeSubjectiveMemoryBridge.source_phase76a_projection_hash,
+      source_experience_count:
+        postOutcomeSubjectiveMemoryBridge.source_entries.length,
+      created_memory_count:
+        postOutcomeSubjectiveMemoryFormation.result.created_memory_count,
+      mutation_count:
+        postOutcomeSubjectiveMemoryMutationQueue.mutation_count,
+      authoritative_executor:
+        postOutcomeSubjectiveMemoryMutationExecution.execution.version,
+      existing_phase63_formation_reused: true,
+      existing_phase65_phase66_pipeline_reused: true,
+      raw_world_outcome_exposed_to_memory: false,
+      direct_subjective_claim_or_belief_write: false,
+      same_turn_character_brain_feedback_allowed: false,
     },
     subjective_episode_segmentation: {
       version: worldSimulationSubjectiveEpisodeSegmentationVersion,

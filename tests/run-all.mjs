@@ -820,6 +820,7 @@ const steps = [
   ["Phase 75G experience-grounded commitment reconsideration", ["tests/phase75/phase75g-experience-grounded-commitment-reconsideration.test.mjs"]],
   ["Phase 75H canonical committed execution experience wiring", ["tests/phase75/phase75h-canonical-committed-execution-experience-wiring.test.mjs"]],
   ["Phase 76A post-outcome subjective perception", ["tests/phase76/phase76a-post-outcome-subjective-perception.test.mjs"]],
+  ["Phase 76B post-outcome subjective memory bridge", ["tests/phase76/phase76b-post-outcome-subjective-memory-bridge.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
