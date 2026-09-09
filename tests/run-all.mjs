@@ -816,6 +816,7 @@ const steps = [
   ["Phase 75C action commitment reconsideration evidence", ["tests/phase75/phase75c-action-commitment-reconsideration-evidence.test.mjs"]],
   ["Phase 75D action commitment lifecycle decision", ["tests/phase75/phase75d-action-commitment-lifecycle-decision.test.mjs"]],
   ["Phase 75E action commitment execution feedback", ["tests/phase75/phase75e-action-commitment-execution-feedback.test.mjs"]],
+  ["Phase 75F subjective action execution experience", ["tests/phase75/phase75f-subjective-action-execution-experience.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

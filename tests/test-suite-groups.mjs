@@ -130,6 +130,7 @@ export const phase75ActionCommitmentSteps = Object.freeze([
   Object.freeze(["Phase 75C action commitment reconsideration evidence", Object.freeze(["tests/phase75/phase75c-action-commitment-reconsideration-evidence.test.mjs"])]),
   Object.freeze(["Phase 75D action commitment lifecycle decision", Object.freeze(["tests/phase75/phase75d-action-commitment-lifecycle-decision.test.mjs"])]),
   Object.freeze(["Phase 75E action commitment execution feedback", Object.freeze(["tests/phase75/phase75e-action-commitment-execution-feedback.test.mjs"])]),
+  Object.freeze(["Phase 75F subjective action execution experience", Object.freeze(["tests/phase75/phase75f-subjective-action-execution-experience.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

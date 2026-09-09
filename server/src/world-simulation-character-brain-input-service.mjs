@@ -13,6 +13,9 @@ import {
 import {
   buildWorldSimulationActionCommitmentReconsiderationEvidence,
 } from "./world-simulation-action-commitment-reconsideration-evidence-service.mjs";
+import {
+  worldSimulationActionCommitmentSubjectiveExecutionExperienceVersion,
+} from "./world-simulation-action-commitment-subjective-execution-experience-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -213,6 +216,36 @@ export function buildWorldSimulationCharacterBrainInput(
       deliberation_boundary: commitmentExposure.deliberation_boundary,
     });
     input.boundaries.effective_action_commitment_character_exposure_v1_installed = true;
+  }
+
+  const subjectiveExecutionExperience =
+    options.action_commitment_subjective_execution_experience;
+  if (subjectiveExecutionExperience !== undefined
+      && subjectiveExecutionExperience !== null) {
+    if (!isObject(subjectiveExecutionExperience)
+        || subjectiveExecutionExperience.version
+          !== worldSimulationActionCommitmentSubjectiveExecutionExperienceVersion
+        || subjectiveExecutionExperience.character !== input.character
+        || !isObject(subjectiveExecutionExperience.projection)) {
+      const error = new Error(
+        "Character Brain input requires a same-character Phase75F subjective execution experience.",
+      );
+      error.code = "WORLD_SIMULATION_ACTION_COMMITMENT_SUBJECTIVE_EXECUTION_EXPERIENCE_INVALID";
+      throw error;
+    }
+    input.cognition.action_commitment_execution_experience = cloneJson({
+      status: subjectiveExecutionExperience.projection.status,
+      active_commitment_ref:
+        subjectiveExecutionExperience.projection.active_commitment_ref,
+      action_id: subjectiveExecutionExperience.projection.action_id,
+      subjective_feedback_count:
+        subjectiveExecutionExperience.projection.subjective_feedback_count,
+      subjective_feedback:
+        subjectiveExecutionExperience.projection.subjective_feedback,
+      latest_subjective_feedback:
+        subjectiveExecutionExperience.projection.latest_subjective_feedback,
+    });
+    input.boundaries.action_commitment_subjective_execution_experience_v1_installed = true;
   }
 
   if (typeof input.character === "string" && input.character.trim()) {

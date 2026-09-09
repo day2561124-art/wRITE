@@ -26,6 +26,12 @@ import {
 import {
   buildWorldSimulationEffectiveActionCommitmentCharacterExposure,
 } from "./world-simulation-effective-action-commitment-character-exposure-service.mjs";
+import {
+  projectWorldSimulationActionCommitmentExecutionFeedback,
+} from "./world-simulation-action-commitment-execution-feedback-service.mjs";
+import {
+  projectWorldSimulationActionCommitmentSubjectiveExecutionExperience,
+} from "./world-simulation-action-commitment-subjective-execution-experience-service.mjs";
 
 export const worldSimulationFormalTurnTransportVersion =
   "phase62a-r1-step4b1-formal-turn-transport-core-v1";
@@ -273,9 +279,21 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
         buildWorldSimulationEffectiveActionCommitmentCharacterExposure(
           effectiveCommitment,
         );
+      const executionFeedback =
+        projectWorldSimulationActionCommitmentExecutionFeedback({
+          effective_action_commitment_projection: effectiveCommitment,
+          world_history: worldHistory,
+        });
+      const subjectiveExecutionExperience =
+        projectWorldSimulationActionCommitmentSubjectiveExecutionExperience({
+          execution_feedback_projection: executionFeedback,
+          world_history: worldHistory,
+        });
       return {
         character_input: buildWorldSimulationCharacterBrainInput(packet, {
           effective_action_commitment_character_exposure: commitmentExposure,
+          action_commitment_subjective_execution_experience:
+            subjectiveExecutionExperience,
         }),
       };
     });
