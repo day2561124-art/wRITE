@@ -95,6 +95,12 @@ import {
   worldSimulationExperientialMethodApplicationLineageVersion,
 } from "./world-simulation-experiential-method-application-lineage-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodOutcomeCreditContract,
+  buildWorldSimulationExperientialMethodOutcomeCreditResolverContext,
+  projectWorldSimulationExperientialMethodOutcomeCredit,
+  worldSimulationExperientialMethodOutcomeCreditVersion,
+} from "./world-simulation-experiential-method-outcome-credit-service.mjs";
+import {
   buildWorldSimulationAutobiographicalLifePeriodContract,
   buildWorldSimulationAutobiographicalLifePeriodOrganizations,
   buildWorldSimulationAutobiographicalLifePeriodResolverView,
@@ -3358,6 +3364,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
+    experiential_method_outcome_credit:
+      buildWorldSimulationExperientialMethodOutcomeCreditContract(),
 
     experiential_method_candidate_attribution_resolver_hook: {
       owner: "programmatic_experiential_method_candidate_attribution_resolver",
@@ -3385,6 +3393,37 @@ export function buildWorldSimulationLoopContract() {
       may_assert_world_truth: false,
       may_assert_confidence_probability_similarity_utility: false,
       missing_hook_means_no_candidate_attribution: true,
+    },
+
+    experiential_method_outcome_credit_resolver_hook: {
+      owner: "programmatic_experiential_method_outcome_credit_resolver",
+      optional: true,
+      option_name: "experientialMethodOutcomeCreditResolver",
+      source_scope:
+        "same_turn_phase76f_selected_application_plus_bounded_phase76b_subjective_outcome_and_verified_autobiographical_lineage",
+      receives_selected_phase76f_application_ref: true,
+      receives_bounded_method_skeleton: true,
+      receives_bounded_subjective_experience: true,
+      receives_raw_action_outcome: false,
+      receives_hidden_causal_evidence: false,
+      receives_world_state: false,
+      receives_source_semantic_identity: false,
+      receives_life_event_identity: false,
+      may_return_only_application_ref_assessment_pairs: true,
+      supported_assessments: [
+        "supports_prior_method",
+        "counterevidence_for_prior_method",
+        "ambiguous_no_revision",
+      ],
+      single_method_required_for_support_or_counterevidence: true,
+      performed_required_for_support_or_counterevidence: true,
+      exact_current_life_event_required_for_semantic_revision: true,
+      causal_credit_authority: false,
+      numeric_reward_q_value_authority: false,
+      semantic_memory_write_authority: false,
+      durable_semantic_revision_owner: "Phase67C",
+      direct_belief_plan_goal_current_mind_world_mutation_authority: false,
+      missing_hook_means_no_outcome_credit_assessment: true,
     },
 
     autobiographical_life_event_organization_resolver_hook: {
@@ -4684,14 +4723,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         resolver_view: experientialKnowledgeReentryResolverView,
         activated_semantic_refs: rawActivatedExperientialKnowledgeRefs,
       });
-    experientialKnowledgeReentryProjections.push({
-      character,
-      version: experientialKnowledgeReentry.version,
-      reentry_hash: experientialKnowledgeReentry.reentry_hash,
-      activated_count: experientialKnowledgeReentry.activated_semantics.length,
-      activated_semantics: cloneJson(experientialKnowledgeReentry.activated_semantics),
-      audit: cloneJson(experientialKnowledgeReentry.audit),
-    });
+    // Keep the full canonical engine-side projection so later post-outcome
+    // provenance can re-verify the exact Phase76D hash. Character-facing
+    // consumers still receive only character_view through the bounded cognition
+    // path; this prepared-turn copy is not a new character disclosure surface.
+    experientialKnowledgeReentryProjections.push(
+      cloneJson(experientialKnowledgeReentry),
+    );
 
     // Phase76E performs bounded analogical transfer over methods that Phase76D
     // already recalled. It maps relational method skeletons to canonical
@@ -4734,16 +4772,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         resolver_view: experientialMethodTransferResolverView,
         transfer_mappings: rawExperientialMethodTransferMappings,
       });
-    experientialMethodTransferProjections.push({
-      character,
-      version: experientialMethodTransfer.version,
-      transfer_hash: experientialMethodTransfer.transfer_hash,
-      transferred_method_count:
-        experientialMethodTransfer.transferred_method_mappings.length,
-      transferred_method_mappings:
-        cloneJson(experientialMethodTransfer.transferred_method_mappings),
-      audit: cloneJson(experientialMethodTransfer.audit),
-    });
+    // Phase76G later needs exact Phase76D→76E provenance verification after
+    // the action result exists. Preserve the full canonical engine-side
+    // transfer projection here without changing its bounded character view.
+    experientialMethodTransferProjections.push(
+      cloneJson(experientialMethodTransfer),
+    );
 
     // Character Runtime v2 owns the current situational workspace. This is a
     // speculative transition only: it cannot mutate committed Current Mind
@@ -7772,15 +7806,97 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
-  const autobiographicalLifePeriodSourceSemanticDerivationEventIds =
-    personalSemanticMemoryDerivation
+  // Phase76G evaluates only applications that Phase76F proved were actually
+  // selected. Its resolver sees bounded subjective post-outcome experience and
+  // method structure, never raw action outcomes or hidden causal evidence. The
+  // resulting assessment still cannot write semantic memory directly: support
+  // and counterevidence are emitted as ordinary Phase67C decisions below.
+  const experientialMethodOutcomeCreditResolverContext =
+    buildWorldSimulationExperientialMethodOutcomeCreditResolverContext({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      selected_application_receipts:
+        selectedExperientialMethodApplicationReceipts,
+      phase76b_memory_bridge: postOutcomeSubjectiveMemoryBridge,
+      source_memory_records: subjectiveClaimSourceMemories,
+      source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
+      experiential_knowledge_reentry_projections:
+        preparedTurn.experiential_knowledge_reentry_projections ?? [],
+      experiential_method_transfer_projections:
+        preparedTurn.experiential_method_transfer_projections ?? [],
+    });
+  const experientialMethodOutcomeCreditResolver =
+    typeof options.experientialMethodOutcomeCreditResolver === "function"
+      ? options.experientialMethodOutcomeCreditResolver
+      : null;
+  const rawExperientialMethodOutcomeCreditAssessments =
+    experientialMethodOutcomeCreditResolver
+      ? await experientialMethodOutcomeCreditResolver(
+        cloneJson(experientialMethodOutcomeCreditResolverContext.resolver_view),
+      )
+      : [];
+  if (!Array.isArray(rawExperientialMethodOutcomeCreditAssessments)) {
+    const error = new Error(
+      "experientialMethodOutcomeCreditResolver must return an array of application_ref/assessment pairs.",
+    );
+    error.code =
+      "WORLD_SIMULATION_EXPERIENTIAL_METHOD_OUTCOME_CREDIT_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const experientialMethodOutcomeCredit =
+    projectWorldSimulationExperientialMethodOutcomeCredit({
+      resolver_context: experientialMethodOutcomeCreditResolverContext,
+      assessment_decisions: rawExperientialMethodOutcomeCreditAssessments,
+    });
+
+  // Retain/revise remains Phase67C-owned. This is deliberately a second legal
+  // append-only Phase67C pass after the ordinary semantic resolver so the new
+  // method-outcome evidence cannot create a parallel semantic store or override
+  // generic semantic decisions. No exact current LifeEvent provenance means a
+  // Phase76G assessment may be recorded but this pass remains a no-op.
+  const experientialMethodSemanticRevision =
+    buildWorldSimulationPersonalSemanticMemoryDerivations({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
+      semantic_decisions: experientialMethodOutcomeCredit.semantic_decisions,
+    });
+  const experientialMethodSemanticRevisionMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:personal_semantic_memory`,
+      world_state_hash: hashAgentRunValue(
+        personalSemanticMemoryMutationExecution.next_world_state,
+      ),
+      state_transitions:
+        experientialMethodSemanticRevision.result.state_transitions,
+      elapsed_ms: 0,
+    });
+  const experientialMethodSemanticRevisionMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        experientialMethodSemanticRevision.result.preview_world_state,
+      queue: experientialMethodSemanticRevisionMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const autobiographicalLifePeriodSourceSemanticDerivationEventIds = [
+    ...personalSemanticMemoryDerivation
       .result
       .derivation_events_created
-      .map((event) => event.derivation_event_id);
+      .map((event) => event.derivation_event_id),
+    ...experientialMethodSemanticRevision
+      .result
+      .derivation_events_created
+      .map((event) => event.derivation_event_id),
+  ];
 
   const autobiographicalLifePeriodDecisionResolution =
     await resolveAutobiographicalLifePeriodOrganizationDecisions(
-      personalSemanticMemoryMutationExecution.next_world_state,
+      experientialMethodSemanticRevisionMutationExecution.next_world_state,
       preparedTurn,
       personalSemanticSourceOrganizationEventIds,
       autobiographicalLifePeriodSourceSemanticDerivationEventIds,
@@ -7790,7 +7906,7 @@ export async function resolveWorldSimulationTurn(
   const autobiographicalLifePeriodOrganization =
     buildWorldSimulationAutobiographicalLifePeriodOrganizations({
       world_state:
-        personalSemanticMemoryMutationExecution.next_world_state,
+        experientialMethodSemanticRevisionMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_organization_event_ids:
@@ -7807,7 +7923,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:autobiographical_life_period`,
       world_state_hash:
         hashAgentRunValue(
-          personalSemanticMemoryMutationExecution.next_world_state,
+          experientialMethodSemanticRevisionMutationExecution.next_world_state,
         ),
       state_transitions:
         autobiographicalLifePeriodOrganization
@@ -7819,7 +7935,7 @@ export async function resolveWorldSimulationTurn(
   const autobiographicalLifePeriodMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        personalSemanticMemoryMutationExecution.next_world_state,
+        experientialMethodSemanticRevisionMutationExecution.next_world_state,
       preview_world_state:
         autobiographicalLifePeriodOrganization
           .result
@@ -8772,6 +8888,20 @@ export async function resolveWorldSimulationTurn(
       personal_semantic_memory_mutation_execution:
         cloneJson(personalSemanticMemoryMutationExecution.execution),
 
+      experiential_method_outcome_credit_resolution: {
+        version: worldSimulationExperientialMethodOutcomeCreditVersion,
+        resolver_view_hash:
+          experientialMethodOutcomeCreditResolverContext.resolver_view.resolver_view_hash,
+        resolver_used: Boolean(experientialMethodOutcomeCreditResolver),
+        projection: cloneJson(experientialMethodOutcomeCredit),
+      },
+      experiential_method_semantic_revision:
+        cloneJson(experientialMethodSemanticRevision),
+      experiential_method_semantic_revision_mutation_queue:
+        cloneJson(experientialMethodSemanticRevisionMutationQueue),
+      experiential_method_semantic_revision_mutation_execution:
+        cloneJson(experientialMethodSemanticRevisionMutationExecution.execution),
+
       autobiographical_life_period_organization_decision_resolution: {
         version:
           worldSimulationAutobiographicalLifePeriodVersion,
@@ -9306,7 +9436,7 @@ export async function resolveWorldSimulationTurn(
         array(preparedTurn.experiential_knowledge_reentry_projections).length,
       activated_knowledge_count:
         array(preparedTurn.experiential_knowledge_reentry_projections)
-          .reduce((total, item) => total + Number(item?.activated_count ?? 0), 0),
+          .reduce((total, item) => total + array(item?.activated_semantics).length, 0),
       source_scope: "same_character_committed_prior_turn_phase67c_only",
       cue_dependent: true,
       current_mind_admission_output_gating_reused: true,
@@ -9326,7 +9456,7 @@ export async function resolveWorldSimulationTurn(
         array(preparedTurn.experiential_method_transfer_projections).length,
       transferred_method_count:
         array(preparedTurn.experiential_method_transfer_projections)
-          .reduce((total, item) => total + Number(item?.transferred_method_count ?? 0), 0),
+          .reduce((total, item) => total + array(item?.transferred_method_mappings).length, 0),
       source_scope: "same_turn_verified_phase76d_recalled_recurring_experience_only",
       relational_structure_transfer_only: true,
       current_context_cue_grounding_required: true,
@@ -9368,6 +9498,24 @@ export async function resolveWorldSimulationTurn(
       direct_action_selection: false,
       world_truth_authority_exposed: false,
       numeric_strength_confidence_probability_utility_modeled: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+
+    experiential_method_outcome_credit: {
+      version: worldSimulationExperientialMethodOutcomeCreditVersion,
+      resolver_used: Boolean(experientialMethodOutcomeCreditResolver),
+      assessment_count: experientialMethodOutcomeCredit.assessment_count,
+      semantic_revision_decision_count:
+        experientialMethodOutcomeCredit.semantic_decision_count,
+      projection_hash: experientialMethodOutcomeCredit.projection_hash,
+      source_phase76f_receipt_bundle_hash:
+        experientialMethodOutcomeCredit.source_phase76f_receipt_bundle_hash,
+      bounded_subjective_outcome_only: true,
+      durable_semantic_revision_owner: "Phase67C",
+      objective_causation_claimed: false,
+      numeric_credit_assigned: false,
+      success_failure_auto_credit_allowed: false,
+      same_turn_character_brain_feedback_allowed: false,
       persisted_only_with_successful_world_commit: true,
     },
 
@@ -9562,20 +9710,28 @@ export async function resolveWorldSimulationTurn(
       resolver_used:
         personalSemanticDecisionResolution.audit.resolver_used === true,
       semantic_decision_count:
+        personalSemanticMemoryDerivation.result.semantic_decision_count
+        + experientialMethodOutcomeCredit.semantic_decision_count,
+      ordinary_semantic_decision_count:
         personalSemanticMemoryDerivation.result.semantic_decision_count,
+      experiential_method_revision_decision_count:
+        experientialMethodOutcomeCredit.semantic_decision_count,
       created_derivation_event_count:
-        personalSemanticMemoryDerivation.result.derivation_events_created.length,
+        personalSemanticMemoryDerivation.result.derivation_events_created.length
+        + experientialMethodSemanticRevision.result.derivation_events_created.length,
       appended_history_reference_count:
-        personalSemanticMemoryDerivation.result.history_references_appended.length,
+        personalSemanticMemoryDerivation.result.history_references_appended.length
+        + experientialMethodSemanticRevision.result.history_references_appended.length,
       effective_personal_semantic_projection_hash:
-        personalSemanticMemoryDerivation
+        experientialMethodSemanticRevision
           .result
           .effective_personal_semantic_projection
           .projection_hash,
       mutation_count:
-        personalSemanticMemoryMutationQueue.mutation_count,
+        personalSemanticMemoryMutationQueue.mutation_count
+        + experientialMethodSemanticRevisionMutationQueue.mutation_count,
       authoritative_executor:
-        personalSemanticMemoryMutationExecution.execution.version,
+        experientialMethodSemanticRevisionMutationExecution.execution.version,
       experience_near_only: true,
       eager_semanticization_used: false,
       recurring_event_pattern_auto_promoted_by_count: false,

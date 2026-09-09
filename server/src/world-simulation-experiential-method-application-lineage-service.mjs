@@ -512,6 +512,116 @@ function verifyCandidateAttributionProjection(value) {
   return projection;
 }
 
+export function assertWorldSimulationSelectedExperientialMethodApplicationReceiptBundle(
+  value,
+  expected = {},
+) {
+  const bundle = cloneJson(value);
+  if (!isObject(bundle)
+      || bundle.version !== worldSimulationExperientialMethodApplicationLineageVersion
+      || !optionalString(bundle.world_simulation_session_id)
+      || !optionalString(bundle.turn_id)
+      || !Number.isInteger(bundle.state_revision)
+      || bundle.state_revision < 0
+      || !optionalString(bundle.world_state_hash)
+      || !optionalString(bundle.source_phase74d_receipt_bundle_hash)
+      || !Array.isArray(bundle.receipts)
+      || bundle.receipt_count !== bundle.receipts.length
+      || !optionalString(bundle.receipt_bundle_hash)) {
+    const error = new Error("Phase76F selected application receipt bundle is invalid.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_BUNDLE_INVALID";
+    throw error;
+  }
+  const body = cloneJson(bundle);
+  delete body.receipt_bundle_hash;
+  if (hashAgentRunValue(body) !== bundle.receipt_bundle_hash) {
+    const error = new Error("Phase76F selected application receipt bundle hash verification failed.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_BUNDLE_HASH_MISMATCH";
+    throw error;
+  }
+  for (const [key, label] of [
+    ["world_simulation_session_id", "world_simulation_session_id"],
+    ["turn_id", "turn_id"],
+    ["state_revision", "state_revision"],
+    ["world_state_hash", "world_state_hash"],
+  ]) {
+    if (Object.hasOwn(expected, key) && expected[key] !== bundle[key]) {
+      const error = new Error(`Phase76F selected application receipt bundle ${label} does not match expected lineage.`);
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_BUNDLE_LINEAGE_MISMATCH";
+      throw error;
+    }
+  }
+  const seenReceiptIds = new Set();
+  for (const receipt of bundle.receipts) {
+    if (!isObject(receipt)
+        || receipt.version !== worldSimulationExperientialMethodApplicationLineageVersion
+        || receipt.world_simulation_session_id !== bundle.world_simulation_session_id
+        || receipt.turn_id !== bundle.turn_id
+        || receipt.state_revision !== bundle.state_revision
+        || receipt.world_state_hash !== bundle.world_state_hash
+        || receipt.selection_kind !== "candidate_action_intent"
+        || !optionalString(receipt.character)
+        || !optionalString(receipt.action_id)
+        || !optionalString(receipt.action_ref)
+        || !optionalString(receipt.phase74d_choice_receipt_id)
+        || !optionalString(receipt.phase74d_choice_receipt_hash)
+        || !optionalString(receipt.source_phase76f_projection_hash)
+        || !optionalString(receipt.source_phase76e_transfer_hash)
+        || !Array.isArray(receipt.candidate_attribution_refs)
+        || !Array.isArray(receipt.applied_method_refs)
+        || receipt.candidate_attribution_refs.length < 1
+        || receipt.applied_method_refs.length < 1
+        || !optionalString(receipt.receipt_id)
+        || !optionalString(receipt.receipt_hash)
+        || receipt.selected_application_means_attributed_candidate_was_selected_only !== true
+        || receipt.method_caused_candidate_claimed !== false
+        || receipt.method_caused_selection_claimed !== false
+        || receipt.outcome_observed_by_this_receipt !== false
+        || receipt.action_outcome_credit_assigned !== false
+        || receipt.success_failure_learning_performed !== false
+        || receipt.retain_revise_decision_performed !== false
+        || receipt.world_truth_authority !== false
+        || receipt.causal_outcome_authority !== false) {
+      const error = new Error("Phase76F selected application receipt is invalid.");
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_INVALID";
+      throw error;
+    }
+    if (seenReceiptIds.has(receipt.receipt_id)
+        || new Set(receipt.candidate_attribution_refs).size !== receipt.candidate_attribution_refs.length
+        || new Set(receipt.applied_method_refs).size !== receipt.applied_method_refs.length) {
+      const error = new Error("Phase76F selected application receipt contains duplicate immutable identity refs.");
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_DUPLICATE";
+      throw error;
+    }
+    const identity = {
+      version: receipt.version,
+      world_simulation_session_id: receipt.world_simulation_session_id,
+      turn_id: receipt.turn_id,
+      state_revision: receipt.state_revision,
+      world_state_hash: receipt.world_state_hash,
+      character: receipt.character,
+      selection_kind: receipt.selection_kind,
+      action_id: receipt.action_id,
+      action_ref: receipt.action_ref,
+      phase74d_choice_receipt_id: receipt.phase74d_choice_receipt_id,
+      phase74d_choice_receipt_hash: receipt.phase74d_choice_receipt_hash,
+      source_phase76f_projection_hash: receipt.source_phase76f_projection_hash,
+      source_phase76e_transfer_hash: receipt.source_phase76e_transfer_hash,
+      candidate_attribution_refs: cloneJson(receipt.candidate_attribution_refs),
+      applied_method_refs: cloneJson(receipt.applied_method_refs),
+    };
+    const expectedHash = hashAgentRunValue(identity);
+    if (receipt.receipt_hash !== expectedHash
+        || receipt.receipt_id !== `phase76f_application_${expectedHash.slice(0, 24)}`) {
+      const error = new Error("Phase76F selected application receipt identity verification failed.");
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RECEIPT_HASH_MISMATCH";
+      throw error;
+    }
+    seenReceiptIds.add(receipt.receipt_id);
+  }
+  return Object.freeze(cloneJson(bundle));
+}
+
 export function buildWorldSimulationSelectedExperientialMethodApplicationReceipts(input = {}) {
   const worldSimulationSessionId = requiredString(
     input.world_simulation_session_id,

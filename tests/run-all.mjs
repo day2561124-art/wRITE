@@ -825,6 +825,7 @@ const steps = [
   ["Phase 76D cue-dependent experiential knowledge re-entry", ["tests/phase76/phase76d-experiential-knowledge-reentry.test.mjs"]],
   ["Phase 76E analogical experiential method transfer", ["tests/phase76/phase76e-experiential-method-transfer.test.mjs"]],
   ["Phase 76F experiential method application lineage", ["tests/phase76/phase76f-experiential-method-application-lineage.test.mjs"]],
+  ["Phase 76G experiential method outcome credit", ["tests/phase76/phase76g-experiential-method-outcome-credit.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
