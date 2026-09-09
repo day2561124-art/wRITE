@@ -138,6 +138,7 @@ export const phase75ActionCommitmentSteps = Object.freeze([
 export const phase76PostOutcomeSubjectiveExperienceSteps = Object.freeze([
   Object.freeze(["Phase 76A post-outcome subjective perception", Object.freeze(["tests/phase76/phase76a-post-outcome-subjective-perception.test.mjs"])]),
   Object.freeze(["Phase 76B post-outcome subjective memory bridge", Object.freeze(["tests/phase76/phase76b-post-outcome-subjective-memory-bridge.test.mjs"])]),
+  Object.freeze(["Phase 76C experience-grounded subjective learning", Object.freeze(["tests/phase76/phase76c-experience-grounded-subjective-learning.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

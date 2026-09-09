@@ -82,7 +82,7 @@ assert.deepEqual(
 assert.deepEqual(
   memoryPaths,
   [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths],
-  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, Phase68 self interpretation, Phase69 goal-to-plan cognition, Phase70 goal lifecycle cognition, Phase71 adaptive replanning cognition, Phase72 means-feasibility cognition, Phase73 visible-constraint observation cognition, and Phase76 post-outcome experience-memory bridging.",
+  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, Phase68 self interpretation, Phase69 goal-to-plan cognition, Phase70 goal lifecycle cognition, Phase71 adaptive replanning cognition, Phase72 means-feasibility cognition, Phase73 visible-constraint observation cognition, and Phase76 post-outcome experience-memory-learning cognition.",
 );
 
 assert.deepEqual(

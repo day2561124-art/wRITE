@@ -821,6 +821,7 @@ const steps = [
   ["Phase 75H canonical committed execution experience wiring", ["tests/phase75/phase75h-canonical-committed-execution-experience-wiring.test.mjs"]],
   ["Phase 76A post-outcome subjective perception", ["tests/phase76/phase76a-post-outcome-subjective-perception.test.mjs"]],
   ["Phase 76B post-outcome subjective memory bridge", ["tests/phase76/phase76b-post-outcome-subjective-memory-bridge.test.mjs"]],
+  ["Phase 76C experience-grounded subjective learning", ["tests/phase76/phase76c-experience-grounded-subjective-learning.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

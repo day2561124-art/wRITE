@@ -22,6 +22,11 @@ import {
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
 import {
+  buildWorldSimulationExperienceGroundedSubjectiveLearningClaimProposals,
+  buildWorldSimulationExperienceGroundedSubjectiveLearningResolverView,
+  worldSimulationExperienceGroundedSubjectiveLearningVersion,
+} from "./world-simulation-experience-grounded-subjective-learning-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -6675,6 +6680,61 @@ async function resolveMeansFeasibilityDecisions(
   };
 }
 
+async function resolveExperienceGroundedSubjectiveLearningInterpretations(
+  worldState,
+  preparedTurn,
+  sourceMemoryRecords,
+  phase76bMemoryBridge,
+  options,
+) {
+  const resolverView =
+    buildWorldSimulationExperienceGroundedSubjectiveLearningResolverView({
+      world_state: worldState,
+      turn_id: preparedTurn.turn_id,
+      source_memory_records: sourceMemoryRecords,
+      phase76b_memory_bridge: phase76bMemoryBridge,
+    });
+  const interpreter =
+    typeof options.experienceGroundedSubjectiveLearningInterpreter === "function"
+      ? options.experienceGroundedSubjectiveLearningInterpreter
+      : null;
+  let rawDecisions = [];
+  let inputHash = null;
+  if (interpreter && resolverView.character_contexts.length > 0) {
+    const inputSnapshot = cloneJson(resolverView);
+    inputHash = hashAgentRunValue(inputSnapshot);
+    const raw = await interpreter(cloneJson(inputSnapshot));
+    if (!Array.isArray(raw)) {
+      const error = new Error(
+        "experienceGroundedSubjectiveLearningInterpreter must return an array of bounded single-experience learning interpretations.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENCE_GROUNDED_LEARNING_INTERPRETER_INVALID_OUTPUT";
+      throw error;
+    }
+    rawDecisions = cloneJson(raw);
+  }
+  const built =
+    buildWorldSimulationExperienceGroundedSubjectiveLearningClaimProposals({
+      resolver_view: resolverView,
+      interpretation_decisions: rawDecisions,
+    });
+  return {
+    ...built,
+    resolver_view: resolverView,
+    audit: {
+      ...cloneJson(built.audit),
+      interpreter_used: Boolean(interpreter && resolverView.character_contexts.length > 0),
+      input_context_hash: inputHash,
+      eligible_character_count: resolverView.character_contexts.length,
+      eligible_experience_memory_count: resolverView.character_contexts
+        .reduce((sum, context) => sum + array(context.experiences).length, 0),
+      missing_interpreter_means_no_automatic_learning_claim: !interpreter,
+      same_turn_character_brain_consumes_new_learning: false,
+    },
+  };
+}
+
 async function resolveSubjectiveMeansFeasibilityInterpretations(
   worldState,
   preparedTurn,
@@ -7642,6 +7702,19 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase76C interprets only current-turn Phase76B action-experience memories.
+  // The interpreter selects a bounded, situation-specific assessment; the
+  // service owns the scoped proposition text and emits only ordinary Phase65
+  // claim proposals. It never receives raw outcomes or hidden causal truth.
+  const experienceGroundedSubjectiveLearningInterpretationResolution =
+    await resolveExperienceGroundedSubjectiveLearningInterpretations(
+      structuredSelfModelRevisionMutationExecution.next_world_state,
+      preparedTurn,
+      subjectiveClaimSourceMemories,
+      postOutcomeSubjectiveMemoryBridge,
+      options,
+    );
+
   // Phase73B interprets only current-turn subjective memories that carry the
   // Phase73A constraint-observation guards. It may compare those memories with
   // the same character's currently represented means and already-committed
@@ -7664,6 +7737,7 @@ export async function resolveWorldSimulationTurn(
     );
 
   const subjectiveClaimProposals = [
+    ...experienceGroundedSubjectiveLearningInterpretationResolution.claim_proposals,
     ...subjectiveMeansFeasibilityInterpretationResolution.claim_proposals,
     ...subjectiveClaimProposalResolution.proposals,
   ];
@@ -8502,6 +8576,26 @@ export async function resolveWorldSimulationTurn(
       structured_self_model_revision_mutation_execution:
         cloneJson(structuredSelfModelRevisionMutationExecution.execution),
 
+      experience_grounded_subjective_learning_interpretation_resolution: {
+        version:
+          worldSimulationExperienceGroundedSubjectiveLearningVersion,
+        decisions:
+          cloneJson(
+            experienceGroundedSubjectiveLearningInterpretationResolution.decisions,
+          ),
+        claim_proposals:
+          cloneJson(
+            experienceGroundedSubjectiveLearningInterpretationResolution.claim_proposals,
+          ),
+        resolver_view_hash:
+          experienceGroundedSubjectiveLearningInterpretationResolution
+            .resolver_view
+            .resolver_view_hash,
+        audit:
+          cloneJson(
+            experienceGroundedSubjectiveLearningInterpretationResolution.audit,
+          ),
+      },
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
@@ -9018,6 +9112,37 @@ export async function resolveWorldSimulationTurn(
       existing_phase65_phase66_pipeline_reused: true,
       raw_world_outcome_exposed_to_memory: false,
       direct_subjective_claim_or_belief_write: false,
+      same_turn_character_brain_feedback_allowed: false,
+    },
+    experience_grounded_subjective_learning: {
+      version:
+        worldSimulationExperienceGroundedSubjectiveLearningVersion,
+      interpreter_used:
+        experienceGroundedSubjectiveLearningInterpretationResolution
+          .audit
+          .interpreter_used === true,
+      eligible_character_count:
+        experienceGroundedSubjectiveLearningInterpretationResolution
+          .audit
+          .eligible_character_count,
+      eligible_experience_memory_count:
+        experienceGroundedSubjectiveLearningInterpretationResolution
+          .audit
+          .eligible_experience_memory_count,
+      interpretation_decision_count:
+        experienceGroundedSubjectiveLearningInterpretationResolution.decisions.length,
+      emitted_phase65_claim_proposal_count:
+        experienceGroundedSubjectiveLearningInterpretationResolution.claim_proposals.length,
+      single_experience_current_situation_scope: true,
+      proposition_text_engine_scoped: true,
+      multi_experience_generalization_applied: false,
+      global_trait_or_capability_inference_applied: false,
+      existing_phase65_phase66_pipeline_reused: true,
+      parallel_belief_store_created: false,
+      numeric_reward_or_q_value_modeled: false,
+      raw_world_outcome_exposed: false,
+      direct_subjective_belief_write: false,
+      direct_current_mind_write: false,
       same_turn_character_brain_feedback_allowed: false,
     },
     subjective_episode_segmentation: {
