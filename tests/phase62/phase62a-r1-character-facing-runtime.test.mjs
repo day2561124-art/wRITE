@@ -248,6 +248,36 @@ try {
     ),
   );
 
+  const actionCognition = {
+    ...directCognition.output.character_view,
+    subjective_cognition: {
+      beliefs: [{ proposition: "等待通知可能比擅自行動更合適" }],
+    },
+    autobiographical_context: {
+      summary: "過去曾因錯過通知而陷入麻煩",
+    },
+    self_interpretation_context: {
+      active_interpretations: [{ interpretation: "我傾向先確認再行動" }],
+    },
+    self_model_context: {
+      aspects: [{ aspect: "做事前會先確認風險" }],
+    },
+    implementation_intention_guidance: {
+      implementation_intentions: [{
+        if_cue: "收到明確通知",
+        then_response: "立刻前往集合地點",
+      }],
+      advisory_only: true,
+    },
+    experiential_method_guidance: {
+      transferred_methods: [{
+        method: "先確認可用訊號，再決定是否改變當前行動",
+      }],
+      advisory_only: true,
+    },
+    engine_only_scheduler_token: "must-not-cross-action-envelope",
+  };
+
   let actionEnvelope = null;
   const directActions = await useWorldSimulationCapability(
     "world_action_proposer",
@@ -260,7 +290,7 @@ try {
           { action_id: "b", intent: "喝水" },
           { action_id: "c", intent: "看窗外" },
         ],
-        cognition: directCognition.output.character_view,
+        cognition: actionCognition,
       },
     },
     {
@@ -277,6 +307,27 @@ try {
     },
   );
   assert.equal(actionEnvelope.capability_name, "world_action_proposer");
+  const actionCognitionContext =
+    actionEnvelope.authorized_inputs.protected_base.cognition_context;
+  for (const field of [
+    "subjective_cognition",
+    "autobiographical_context",
+    "self_interpretation_context",
+    "self_model_context",
+    "implementation_intention_guidance",
+    "experiential_method_guidance",
+  ]) {
+    assert.deepEqual(
+      actionCognitionContext[field],
+      actionCognition[field],
+      `Action Proposer R1 envelope must preserve bounded ${field}.`,
+    );
+  }
+  assert.equal(
+    Object.hasOwn(actionCognitionContext, "engine_only_scheduler_token"),
+    false,
+    "Action Proposer cognition projection must remain an explicit allowlist.",
+  );
   assert.deepEqual(
     directActions.output.candidate_action_intents.map((item) => item.action_id),
     ["a", "b", "c"],

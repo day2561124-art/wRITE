@@ -127,6 +127,14 @@ function boundedCognitionContext(cognition) {
     relationship_cognition: value.relationship_cognition ?? {},
     current_action: value.current_action ?? null,
     decision_pressures: value.decision_pressures ?? [],
+    subjective_cognition: value.subjective_cognition ?? null,
+    autobiographical_context: value.autobiographical_context ?? null,
+    self_interpretation_context: value.self_interpretation_context ?? null,
+    self_model_context: value.self_model_context ?? null,
+    implementation_intention_guidance:
+      value.implementation_intention_guidance ?? null,
+    experiential_method_guidance:
+      value.experiential_method_guidance ?? null,
     neural_extension: value.neural_extension ?? null,
   });
 }
