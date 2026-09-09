@@ -248,13 +248,29 @@ export function buildWorldSimulationExperientialMethodCandidateAttributionResolv
     candidate_action_intents: candidateActionIntents,
   });
   const methodGuidance = array(transferProjection.character_view.transferred_methods);
+  const boundedCognition = isObject(input.cognition) ? input.cognition : {};
+  const competitionGuidance = isObject(boundedCognition.experiential_method_guidance)
+    ? boundedCognition.experiential_method_guidance
+    : {};
+  const competitionResolvedGuidanceRefs = new Set(
+    array(competitionGuidance.transferred_methods)
+      .map((method) => optionalString(method?.transfer_ref))
+      .filter(Boolean),
+  );
+  const competitionGuidanceInstalled =
+    optionalString(competitionGuidance.source)
+      === "competition_resolved_cue_grounded_experiential_methods";
   const methodCatalog = array(transferProjection.transferred_method_mappings)
+    .filter((mapping) =>
+      !competitionGuidanceInstalled
+      || competitionResolvedGuidanceRefs.has(mapping.transfer_ref))
     .map((mapping) => ({
       transfer_ref: mapping.transfer_ref,
       mapping_kind: mapping.mapping_kind,
       method_skeleton: cloneJson(methodGuidance[mapping.transfer_index]?.method_skeleton ?? null),
       source_knowledge_status: mapping.source_knowledge_status,
       current_context_grounding_preserved: true,
+      competition_resolution_guidance_preserved: competitionGuidanceInstalled,
       subjective_not_world_truth: true,
     }))
     .sort((left, right) => compareText(left.transfer_ref, right.transfer_ref));

@@ -162,6 +162,7 @@ export const phase78ContextualSchemaRefinementSteps = Object.freeze([
 export const phase79ExperientialMethodCompetitionSteps = Object.freeze([
   Object.freeze(["Phase 79A experiential method competition evidence", Object.freeze(["tests/phase79/phase79a-experiential-method-competition.test.mjs"])]),
   Object.freeze(["Phase 79B qualitative experiential method competition resolution", Object.freeze(["tests/phase79/phase79b-experiential-method-competition-resolution.test.mjs"])]),
+  Object.freeze(["Phase 79C competition-resolved experiential method guidance integration", Object.freeze(["tests/phase79/phase79c-experiential-method-competition-guidance.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

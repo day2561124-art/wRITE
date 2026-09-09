@@ -158,6 +158,27 @@ assert.equal(
   "when_direct_route_blocked_seek_alternative_route",
 );
 const transferRef = resolverView.method_catalog[0].transfer_ref;
+const suppressedByCompetitionGuidance =
+  buildWorldSimulationExperientialMethodCandidateAttributionResolverView({
+    character,
+    current_turn_id: turnId,
+    experiential_method_transfer: phase76E,
+    cognition: {
+      ...cognition,
+      experiential_method_guidance: {
+        source: "competition_resolved_cue_grounded_experiential_methods",
+        transferred_methods: [],
+        advisory_only: true,
+        selected_action_authority: false,
+      },
+    },
+    candidate_action_intents: candidateActionIntents,
+  });
+assert.equal(
+  suppressedByCompetitionGuidance.method_catalog.length,
+  0,
+  "Phase76F must not allow a method suppressed by Phase79C guidance to regain attribution authority.",
+);
 const alternativeAction = resolverView.action_catalog.find(
   (entry) => entry.action_id === "search_alternative_passage",
 );
