@@ -132,6 +132,11 @@ import {
   worldSimulationExperientialMethodCompetitionGuidanceVersion,
 } from "./world-simulation-experiential-method-competition-guidance-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpasseDeliberationContract,
+  projectWorldSimulationExperientialMethodImpasseDeliberation,
+  worldSimulationExperientialMethodImpasseDeliberationVersion,
+} from "./world-simulation-experiential-method-impasse-deliberation-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3412,6 +3417,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodCompetitionResolutionContract(),
     experiential_method_competition_guidance:
       buildWorldSimulationExperientialMethodCompetitionGuidanceContract(),
+    experiential_method_impasse_deliberation:
+      buildWorldSimulationExperientialMethodImpasseDeliberationContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -4236,6 +4243,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodCompetitionProjections = [];
   const experientialMethodCompetitionResolutionProjections = [];
   const experientialMethodCompetitionGuidanceProjections = [];
+  const experientialMethodImpasseDeliberationProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
@@ -4907,6 +4915,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     experientialMethodCompetitionGuidanceProjections.push(
       cloneJson(experientialMethodCompetitionGuidance),
     );
+    // Phase79D materializes only bounded tie/conflict impasse substates from
+    // the exact Phase79B/79C lineage. It does not author a new preference or
+    // select an action; it exposes the retained methods and already-bounded
+    // current-context basis so downstream deliberation can seek discriminating
+    // evidence without arbitrary tie-breaking.
+    const experientialMethodImpasseDeliberation =
+      projectWorldSimulationExperientialMethodImpasseDeliberation({
+        experiential_method_competition_resolution:
+          experientialMethodCompetitionResolution,
+        experiential_method_competition_guidance:
+          experientialMethodCompetitionGuidance,
+      });
+    experientialMethodImpasseDeliberationProjections.push(
+      cloneJson(experientialMethodImpasseDeliberation),
+    );
 
     // Character Runtime v2 owns the current situational workspace. This is a
     // speculative transition only: it cannot mutate committed Current Mind
@@ -5135,6 +5158,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     characterCognition.experiential_method_guidance = cloneJson(
       experientialMethodCompetitionGuidance.character_view,
     );
+    characterCognition.experiential_method_impasse_deliberation = cloneJson({
+      source: "phase79d_bounded_experiential_method_impasse_substates",
+      impasse_contexts: experientialMethodImpasseDeliberation.impasse_contexts,
+      deliberation_required: experientialMethodImpasseDeliberation.deliberation_required,
+      new_preference_authority: false,
+      selected_action_authority: false,
+      semantic_revision_authority: false,
+    });
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5557,6 +5588,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodCompetitionResolutionProjections),
     experiential_method_competition_guidance_projections:
       cloneJson(experientialMethodCompetitionGuidanceProjections),
+    experiential_method_impasse_deliberation_projections:
+      cloneJson(experientialMethodImpasseDeliberationProjections),
     experiential_method_candidate_attribution_projections:
       cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
@@ -9409,6 +9442,8 @@ export async function resolveWorldSimulationTurn(
         ),
       experiential_method_competition_guidance_projections:
         cloneJson(preparedTurn.experiential_method_competition_guidance_projections ?? []),
+      experiential_method_impasse_deliberation_projections:
+        cloneJson(preparedTurn.experiential_method_impasse_deliberation_projections ?? []),
       experiential_method_candidate_attribution_projections:
         cloneJson(
           preparedTurn.experiential_method_candidate_attribution_projections ?? [],
