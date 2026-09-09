@@ -836,6 +836,7 @@ const steps = [
   ["Phase 78D cross-turn contextual specialization reuse and revision closure", ["tests/phase78/phase78d-contextual-specialization-reuse-revision-closure.test.mjs"]],
 
   ["Phase 79A experiential method competition evidence", ["tests/phase79/phase79a-experiential-method-competition.test.mjs"]],
+  ["Phase 79B qualitative experiential method competition resolution", ["tests/phase79/phase79b-experiential-method-competition-resolution.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
