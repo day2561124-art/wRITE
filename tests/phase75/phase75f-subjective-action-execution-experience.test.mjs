@@ -20,12 +20,55 @@ const outcome = {
   action_id: actionId,
   result: "objective_hidden_result_must_not_surface",
   causal_evidence: "hidden engine-only causal evidence",
-  character_experience: {
-    performed: true,
-    perceived_result: "感覺攻擊被擋住",
-  },
 };
 const outcomeHash = hashAgentRunValue(outcome);
+function committedExperienceProjection({ turnId, action, experiences }) {
+  const projection = {
+    experience_contract_version: "committed-character-experience-receipt-v1",
+    projection_version: "committed-character-experience-projection-v1",
+    historical_semantics_version: "committed-character-experience-projection-v1",
+    turn_id: turnId,
+    character_projections: [{
+      projection_slot: 0,
+      experience_sequence: 1,
+      world_lineage: "phase75f-session",
+      character_entity_id: "fixture-character",
+      canonical_name: character,
+      identity_source: "test_fixture_ephemeral_identity",
+      formal_identity: false,
+      character,
+      experience: {
+        roles: { participant: true, observer: false },
+        participation: {
+          selected_intent: { action_id: action, intent: "測試行動" },
+          experienced_action_outcomes: experiences,
+          selected_intent_is_not_outcome: true,
+        },
+        observation: { observed: [], audible: [], other_senses: [], information_boundary: {} },
+      },
+      boundaries: {
+        source_is_bounded_character_information: true,
+        raw_world_state_included: false,
+        hidden_causal_chain_included: false,
+        other_character_private_state_included: false,
+        exact_engine_geometry_included: false,
+        participant_intent_promoted_to_success: false,
+        objective_action_result_auto_exposed: false,
+        post_outcome_experience_requires_explicit_bounded_actor_evidence: true,
+      },
+    }],
+    boundaries: {
+      objective_world_history_remains_source_of_truth: true,
+      full_next_world_state_stored_here: false,
+      replay_uses_stored_historical_projection: true,
+      current_perception_engine_reinterpretation_required_for_replay: false,
+      character_brain_authors_projection: false,
+      character_brain_authors_receipt: false,
+    },
+  };
+  projection.projection_hash = hashAgentRunValue(projection);
+  return projection;
+}
 const history = {
   world_simulation_session_id: "phase75f-session",
   turns: [{
@@ -35,6 +78,15 @@ const history = {
     previous_state_hash: "a".repeat(64),
     next_state_hash: "b".repeat(64),
     action_outcomes: [outcome],
+    committed_character_experience_projection: committedExperienceProjection({
+      turnId: "phase75f-turn-001",
+      action: actionId,
+      experiences: [{
+        action_id: actionId,
+        performed: true,
+        perceived_result: "感覺攻擊被擋住",
+      }],
+    }),
   }],
 };
 const executionFeedback = {

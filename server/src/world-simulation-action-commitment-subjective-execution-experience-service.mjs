@@ -36,11 +36,63 @@ function safeCharacterExperience(raw) {
   if (!isObject(raw)) return null;
   const performed = typeof raw.performed === "boolean" ? raw.performed : null;
   const perceivedResult = text(raw.perceived_result);
-  if (performed === null && !perceivedResult) return null;
+  const perceivedStatus = text(raw.perceived_status);
+  if (performed === null && !perceivedResult && !perceivedStatus) return null;
   return {
     performed,
     perceived_result: perceivedResult,
+    perceived_status: perceivedStatus,
   };
+}
+
+function verifyCommittedExperienceProjection(turn) {
+  const projection = turn?.committed_character_experience_projection;
+  if (!isObject(projection)) return null;
+  const projectionHash = text(projection.projection_hash);
+  if (projection.projection_version !== "committed-character-experience-projection-v1"
+      || projection.experience_contract_version !== "committed-character-experience-receipt-v1"
+      || !projectionHash
+      || text(projection.turn_id) !== text(turn?.turn_id)) {
+    fail(
+      "WORLD_SIMULATION_ACTION_COMMITMENT_SUBJECTIVE_EXECUTION_EXPERIENCE_PROJECTION_INVALID",
+      "Phase75F committed character experience projection is missing valid turn lineage.",
+    );
+  }
+  const body = cloneJson(projection);
+  delete body.projection_hash;
+  if (hashAgentRunValue(body) !== projectionHash) {
+    fail(
+      "WORLD_SIMULATION_ACTION_COMMITMENT_SUBJECTIVE_EXECUTION_EXPERIENCE_PROJECTION_HASH_MISMATCH",
+      "Phase75F committed character experience projection failed hash verification.",
+    );
+  }
+  return projection;
+}
+
+function committedExperiencesForCharacterAction(turn, character, actionId) {
+  const projection = verifyCommittedExperienceProjection(turn);
+  if (!projection) return [];
+  const characterProjections = array(projection.character_projections)
+    .filter((item) => characterKey(item?.character) === characterKey(character));
+  if (characterProjections.length > 1) {
+    fail(
+      "WORLD_SIMULATION_ACTION_COMMITMENT_SUBJECTIVE_EXECUTION_EXPERIENCE_DUPLICATE_CHARACTER",
+      `Phase75F found duplicate committed character experience projections for ${character}.`,
+    );
+  }
+  const characterProjection = characterProjections[0];
+  if (!isObject(characterProjection)) return [];
+  const participation = characterProjection.experience?.participation;
+  if (!isObject(participation)) return [];
+  const selectedActionId = text(participation.selected_intent?.action_id);
+  if (!selectedActionId || selectedActionId !== actionId) return [];
+  return array(participation.experienced_action_outcomes)
+    .map((experience, experienceIndex) => ({
+      experience: safeCharacterExperience(experience),
+      experience_index: experienceIndex,
+      action_id: text(experience?.action_id),
+    }))
+    .filter((item) => item.experience && item.action_id === actionId);
 }
 
 export function buildWorldSimulationActionCommitmentSubjectiveExecutionExperienceContract() {
@@ -50,7 +102,7 @@ export function buildWorldSimulationActionCommitmentSubjectiveExecutionExperienc
     status: "bounded_subjective_action_execution_experience_mediation_installed",
     authoritative_feedback_source_version:
       worldSimulationActionCommitmentExecutionFeedbackVersion,
-    subjective_source: "committed_action_outcome_character_experience",
+    subjective_source: "committed_character_experience_projection_experienced_action_outcomes",
     authoritative_result_label_not_exposed: true,
     raw_action_outcome_not_exposed: true,
     causal_evidence_not_exposed: true,
@@ -149,27 +201,40 @@ export function projectWorldSimulationActionCommitmentSubjectiveExecutionExperie
       );
     }
 
-    const experience = safeCharacterExperience(outcome.character_experience);
-    if (!experience) continue;
-    const identity = {
-      version: worldSimulationActionCommitmentSubjectiveExecutionExperienceVersion,
+    const committedExperiences = committedExperiencesForCharacterAction(
+      turn,
       character,
-      active_commitment_ref: feedbackResult.projection.active_commitment_ref,
-      action_id: actionId,
-      source_feedback_ref: feedback.feedback_ref,
-      source_turn_id: sourceTurnId,
-      performed: experience.performed,
-      perceived_result: experience.perceived_result,
-    };
-    const experienceHash = hashAgentRunValue(identity);
-    subjectiveFeedback.push({
-      subjective_feedback_ref: `phase75f_subjective_feedback_${experienceHash.slice(0, 24)}`,
-      subjective_feedback_hash: experienceHash,
-      ...identity,
-      source_is_character_experience_not_world_result: true,
-      world_result_label_exposed: false,
-      causal_evidence_exposed: false,
-    });
+      actionId,
+    );
+    for (const committedExperience of committedExperiences) {
+      const duplicate = subjectiveFeedback.some((item) => (
+        item.source_turn_id === sourceTurnId
+        && item.source_experience_index === committedExperience.experience_index
+      ));
+      if (duplicate) continue;
+      const experience = committedExperience.experience;
+      const identity = {
+        version: worldSimulationActionCommitmentSubjectiveExecutionExperienceVersion,
+        character,
+        active_commitment_ref: feedbackResult.projection.active_commitment_ref,
+        action_id: actionId,
+        source_feedback_ref: feedback.feedback_ref,
+        source_turn_id: sourceTurnId,
+        source_experience_index: committedExperience.experience_index,
+        performed: experience.performed,
+        perceived_result: experience.perceived_result,
+        perceived_status: experience.perceived_status,
+      };
+      const experienceHash = hashAgentRunValue(identity);
+      subjectiveFeedback.push({
+        subjective_feedback_ref: `phase75f_subjective_feedback_${experienceHash.slice(0, 24)}`,
+        subjective_feedback_hash: experienceHash,
+        ...identity,
+        source_is_committed_character_experience_not_world_result: true,
+        world_result_label_exposed: false,
+        causal_evidence_exposed: false,
+      });
+    }
   }
 
   const body = {
