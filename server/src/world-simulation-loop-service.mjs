@@ -14,6 +14,10 @@ import {
   buildWorldSimulationCausalRuleContract,
 } from "./world-simulation-causal-rule-engine.mjs";
 import {
+  projectWorldSimulationPostOutcomeSubjectivePerception,
+  worldSimulationPostOutcomeSubjectivePerceptionVersion,
+} from "./world-simulation-post-outcome-subjective-perception-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -1680,6 +1684,47 @@ function boundedOwnActionOutcome(outcome, selectedActionId) {
   return Object.keys(projected).length > 1 ? projected : null;
 }
 
+function boundedPostOutcomeSubjectiveExperience(
+  projection,
+  character,
+  selectedActionId,
+) {
+  const source = object(projection);
+  if (source.version !== worldSimulationPostOutcomeSubjectivePerceptionVersion) return null;
+  const projectionHash = typeof source.projection_hash === "string"
+    ? source.projection_hash.trim()
+    : "";
+  if (!projectionHash) return null;
+  const body = cloneJson(source);
+  delete body.projection_hash;
+  if (hashAgentRunValue(body) !== projectionHash) {
+    const error = new Error(
+      "Post-outcome subjective perception projection hash verification failed.",
+    );
+    error.code = "WORLD_SIMULATION_POST_OUTCOME_SUBJECTIVE_PERCEPTION_HASH_MISMATCH";
+    throw error;
+  }
+  const matches = array(source.character_experiences).filter((entry) => (
+    sameCharacterName(entry?.character, character)
+    && String(entry?.action_id ?? "") === String(selectedActionId ?? "")
+  ));
+  if (matches.length > 1) {
+    const error = new Error(
+      `Post-outcome subjective perception contains duplicate action experience for ${character}.`,
+    );
+    error.code = "WORLD_SIMULATION_POST_OUTCOME_SUBJECTIVE_PERCEPTION_DUPLICATE_ACTION";
+    throw error;
+  }
+  const experience = object(matches[0]?.experience);
+  const projected = { action_id: selectedActionId ?? null };
+  for (const key of ["performed", "perceived_result", "perceived_status"]) {
+    if (!Object.hasOwn(experience, key)) continue;
+    const value = safeCharacterOutcomeScalar(experience[key]);
+    if (value !== null) projected[key] = value;
+  }
+  return Object.keys(projected).length > 1 ? projected : null;
+}
+
 function verifyCharacterExperienceProjectionEnvelope(projection) {
   if (!isObject(projection)) {
     throw new Error("Committed Character Experience projection must be an object.");
@@ -1741,6 +1786,9 @@ export function projectWorldSimulationCharacterExperienceEvidence(input = {}) {
   const preparedTurn = object(input.prepared_turn);
   const selected = array(input.selected_action_intents);
   const actionOutcomes = array(input.action_outcomes);
+  const postOutcomeSubjectivePerception = object(
+    input.post_outcome_subjective_perception_projection,
+  );
   const runtimeIdentities = array(input.runtime_identities);
   const characterProjections = array(preparedTurn.decision_packets).map((packet, projectionSlot) => {
     const character = nonEmptyString(packet?.character, "decision packet character");
@@ -1769,11 +1817,20 @@ export function projectWorldSimulationCharacterExperienceEvidence(input = {}) {
     const ownSelection = selected.find((item) => sameCharacterName(item?.character, character)) ?? null;
     const participated = ownSelection?.selection === "candidate_action_intent";
     const observation = boundedCharacterExperienceObservation(packet?.perception);
+    const projectedPostOutcomeExperience = participated
+      ? boundedPostOutcomeSubjectiveExperience(
+          postOutcomeSubjectivePerception,
+          character,
+          ownSelection.action_id ?? null,
+        )
+      : null;
     const ownActionOutcomes = participated
-      ? actionOutcomes
-        .filter((outcome) => sameCharacterName(outcome?.actor, character))
-        .map((outcome) => boundedOwnActionOutcome(outcome, ownSelection.action_id ?? null))
-        .filter(Boolean)
+      ? projectedPostOutcomeExperience
+        ? [projectedPostOutcomeExperience]
+        : actionOutcomes
+          .filter((outcome) => sameCharacterName(outcome?.actor, character))
+          .map((outcome) => boundedOwnActionOutcome(outcome, ownSelection.action_id ?? null))
+          .filter(Boolean)
       : [];
     const observedSomething = observation.observed.length > 0
       || observation.audible.length > 0
@@ -8156,6 +8213,18 @@ export async function resolveWorldSimulationTurn(
       prepared_turn: preparedTurn,
     });
 
+  // Phase76A separates the authoritative causal transition from what the
+  // acting character can safely experience after the action. Raw result labels,
+  // causal evidence, exact engine geometry, and other characters' private state
+  // are never auto-promoted into this subjective observation projection.
+  const postOutcomeSubjectivePerceptionProjection =
+    projectWorldSimulationPostOutcomeSubjectivePerception({
+      turn_id: preparedTurn.turn_id,
+      selected_action_intents: selected,
+      action_outcomes: array(causalResolution.action_outcomes),
+      state_transitions: array(causalResolution.state_transitions),
+    });
+
   // This projection is only commit evidence at this point. No Character
   // Experience Receipt exists until the atomic world commit below succeeds.
   const committedCharacterExperienceProjection =
@@ -8163,6 +8232,8 @@ export async function resolveWorldSimulationTurn(
       prepared_turn: preparedTurn,
       selected_action_intents: selected,
       action_outcomes: array(causalResolution.action_outcomes),
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
       runtime_identities: committedCharacterRuntimeIdentities,
     });
 
@@ -8619,6 +8690,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(visibleConstraintObservationMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
+      post_outcome_subjective_perception_projection:
+        cloneJson(postOutcomeSubjectivePerceptionProjection),
       committed_character_experience_projection:
         cloneJson(committedCharacterExperienceProjection),
       trace_ids: traceIds,

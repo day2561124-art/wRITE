@@ -135,6 +135,10 @@ export const phase75ActionCommitmentSteps = Object.freeze([
   Object.freeze(["Phase 75H canonical committed execution experience wiring", Object.freeze(["tests/phase75/phase75h-canonical-committed-execution-experience-wiring.test.mjs"])]),
 ]);
 
+export const phase76PostOutcomeSubjectiveExperienceSteps = Object.freeze([
+  Object.freeze(["Phase 76A post-outcome subjective perception", Object.freeze(["tests/phase76/phase76a-post-outcome-subjective-perception.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -154,6 +158,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase73VisibleConstraintObservationSteps,
   ...phase74SubjectiveActionDeliberationSteps,
   ...phase75ActionCommitmentSteps,
+  ...phase76PostOutcomeSubjectiveExperienceSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -171,6 +176,7 @@ export const cognitionSteps = Object.freeze([
   ...phase73VisibleConstraintObservationSteps,
   ...phase74SubjectiveActionDeliberationSteps,
   ...phase75ActionCommitmentSteps,
+  ...phase76PostOutcomeSubjectiveExperienceSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([

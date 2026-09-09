@@ -367,6 +367,8 @@ export async function commitWorldSimulationTurn(
               input.subjective_belief_revision_mutation_execution ?? null,
             committed_character_current_mind_projection:
               input.committed_character_current_mind_projection ?? null,
+            post_outcome_subjective_perception_projection:
+              input.post_outcome_subjective_perception_projection ?? null,
             committed_character_experience_projection:
               input.committed_character_experience_projection ?? null,
             trace_ids: input.trace_ids ?? [],
