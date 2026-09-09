@@ -220,6 +220,11 @@ function buildCognitionGroundingCatalog(character, cognition) {
     ["decision_pressure", "cognition.decision_pressures", source.decision_pressures],
     ["current_action", "cognition.current_action", source.current_action],
     [
+      "experiential_method_guidance",
+      "cognition.experiential_method_guidance",
+      source.experiential_method_guidance,
+    ],
+    [
       "effective_action_commitment",
       "cognition.effective_action_commitment",
       source.effective_action_commitment,
@@ -250,6 +255,8 @@ export function buildWorldSimulationSubjectiveActionDeliberationContract() {
     action_outcome_owner: "causal_simulator",
     qualitative_grounding_only: true,
     plan_commitment_may_constrain_later_deliberation: true,
+    experiential_method_guidance_may_ground_deliberation: true,
+    experiential_method_guidance_remains_advisory: true,
     explicit_impasse_or_reject_all_preserved: true,
     deterministic_action_winner_computed: false,
     subjective_prospective_consequence_simulation_modeled: false,

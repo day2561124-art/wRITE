@@ -82,6 +82,12 @@ import {
   worldSimulationExperientialKnowledgeReentryVersion,
 } from "./world-simulation-experiential-knowledge-reentry-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodTransferContract,
+  buildWorldSimulationExperientialMethodTransferResolverView,
+  projectWorldSimulationExperientialMethodTransfer,
+  worldSimulationExperientialMethodTransferVersion,
+} from "./world-simulation-experiential-method-transfer-service.mjs";
+import {
   buildWorldSimulationAutobiographicalLifePeriodContract,
   buildWorldSimulationAutobiographicalLifePeriodOrganizations,
   buildWorldSimulationAutobiographicalLifePeriodResolverView,
@@ -4080,6 +4086,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const subjectiveCognitionProjections = [];
   const subjectiveBeliefCharacterProjections = [];
   const experientialKnowledgeReentryProjections = [];
+  const experientialMethodTransferProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
   const structuredSelfModelCharacterProjections = [];
@@ -4648,6 +4655,58 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(experientialKnowledgeReentry.audit),
     });
 
+    // Phase76E performs bounded analogical transfer over methods that Phase76D
+    // already recalled. It maps relational method skeletons to canonical
+    // current-context cue refs only; it cannot author a concrete action, plan,
+    // belief, or world mutation. The resulting guidance is attached to the
+    // character cognition below, where the existing Action Proposer and Phase74
+    // deliberation remain responsible for adapting it to current choices.
+    const experientialMethodTransferResolverView =
+      buildWorldSimulationExperientialMethodTransferResolverView({
+        character,
+        current_turn_id: turnId,
+        experiential_knowledge_reentry: experientialKnowledgeReentry,
+        current_context: {
+          perception: characterPerception,
+          current_action: characterState.current_action ?? null,
+          goals: characterState.goals ?? [],
+          current_goals: characterState.current_goals ?? [],
+          current_goal: characterState.current_goal ?? null,
+        },
+      });
+    const experientialMethodTransferResolver =
+      typeof options.experientialMethodTransferResolver === "function"
+        ? options.experientialMethodTransferResolver
+        : null;
+    const rawExperientialMethodTransferMappings = experientialMethodTransferResolver
+      ? await experientialMethodTransferResolver(
+        cloneJson(experientialMethodTransferResolverView),
+      )
+      : [];
+    if (!Array.isArray(rawExperientialMethodTransferMappings)) {
+      const error = new Error(
+        "experientialMethodTransferResolver must return an array of canonical transfer mappings.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_TRANSFER_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const experientialMethodTransfer =
+      projectWorldSimulationExperientialMethodTransfer({
+        resolver_view: experientialMethodTransferResolverView,
+        transfer_mappings: rawExperientialMethodTransferMappings,
+      });
+    experientialMethodTransferProjections.push({
+      character,
+      version: experientialMethodTransfer.version,
+      transfer_hash: experientialMethodTransfer.transfer_hash,
+      transferred_method_count:
+        experientialMethodTransfer.transferred_method_mappings.length,
+      transferred_method_mappings:
+        cloneJson(experientialMethodTransfer.transferred_method_mappings),
+      audit: cloneJson(experientialMethodTransfer.audit),
+    });
+
     // Character Runtime v2 owns the current situational workspace. This is a
     // speculative transition only: it cannot mutate committed Current Mind
     // before the atomic world commit succeeds.
@@ -4872,6 +4931,16 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           revisedStructuredSelfModelCharacterProjection.character_view,
         ),
     };
+    characterCognition.experiential_method_guidance = cloneJson({
+      source: experientialMethodTransfer.character_view.source,
+      transferred_methods:
+        experientialMethodTransfer.character_view.transferred_methods,
+      advisory_only: true,
+      selected_action_authority: false,
+      action_candidate_generation_owner: "existing_world_action_proposer",
+      current_context_revalidation_required: true,
+      adaptation_before_use_required: true,
+    });
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5243,6 +5312,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(subjectiveBeliefCharacterProjections),
     experiential_knowledge_reentry_projections:
       cloneJson(experientialKnowledgeReentryProjections),
+    experiential_method_transfer_projections:
+      cloneJson(experientialMethodTransferProjections),
     autobiographical_summary_character_projections:
       cloneJson(autobiographicalSummaryCharacterProjections),
     autobiographical_self_interpretation_character_projections:
@@ -8689,6 +8760,8 @@ export async function resolveWorldSimulationTurn(
       },
       experiential_knowledge_reentry_projections:
         cloneJson(preparedTurn.experiential_knowledge_reentry_projections ?? []),
+      experiential_method_transfer_projections:
+        cloneJson(preparedTurn.experiential_method_transfer_projections ?? []),
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
@@ -9139,6 +9212,29 @@ export async function resolveWorldSimulationTurn(
       direct_subjective_belief_write: false,
       world_truth_authority_exposed: false,
       confidence_probability_modeled: false,
+    },
+
+    experiential_method_transfer: {
+      version: worldSimulationExperientialMethodTransferVersion,
+      character_projection_count:
+        array(preparedTurn.experiential_method_transfer_projections).length,
+      transferred_method_count:
+        array(preparedTurn.experiential_method_transfer_projections)
+          .reduce((total, item) => total + Number(item?.transferred_method_count ?? 0), 0),
+      source_scope: "same_turn_verified_phase76d_recalled_recurring_experience_only",
+      relational_structure_transfer_only: true,
+      current_context_cue_grounding_required: true,
+      action_proposer_guidance_installed: true,
+      phase74_deliberation_grounding_reused: true,
+      exact_case_replay_required: false,
+      exact_action_replay_allowed: false,
+      current_context_revalidation_required: true,
+      adaptation_before_use_required: true,
+      direct_action_selection: false,
+      direct_plan_or_goal_mutation: false,
+      direct_subjective_belief_write: false,
+      world_truth_authority_exposed: false,
+      numeric_similarity_confidence_probability_utility_modeled: false,
     },
 
     subjective_memory_encoding_decisions:

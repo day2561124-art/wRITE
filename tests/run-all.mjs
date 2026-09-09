@@ -823,6 +823,7 @@ const steps = [
   ["Phase 76B post-outcome subjective memory bridge", ["tests/phase76/phase76b-post-outcome-subjective-memory-bridge.test.mjs"]],
   ["Phase 76C experience-grounded subjective learning", ["tests/phase76/phase76c-experience-grounded-subjective-learning.test.mjs"]],
   ["Phase 76D cue-dependent experiential knowledge re-entry", ["tests/phase76/phase76d-experiential-knowledge-reentry.test.mjs"]],
+  ["Phase 76E analogical experiential method transfer", ["tests/phase76/phase76e-experiential-method-transfer.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
