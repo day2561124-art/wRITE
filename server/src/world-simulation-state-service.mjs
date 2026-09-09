@@ -343,6 +343,8 @@ export async function commitWorldSimulationTurn(
               input.autobiographical_life_period_organization_mutation_execution ?? null,
             experience_grounded_subjective_learning_interpretation_resolution:
               input.experience_grounded_subjective_learning_interpretation_resolution ?? null,
+            experiential_knowledge_reentry_projections:
+              input.experiential_knowledge_reentry_projections ?? null,
             subjective_claim_proposal_resolution:
               input.subjective_claim_proposal_resolution ?? null,
             subjective_claim_projection:

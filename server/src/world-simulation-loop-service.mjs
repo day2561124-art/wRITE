@@ -76,6 +76,12 @@ import {
   worldSimulationPersonalSemanticMemoryVersion,
 } from "./world-simulation-personal-semantic-memory-service.mjs";
 import {
+  buildWorldSimulationExperientialKnowledgeReentryContract,
+  buildWorldSimulationExperientialKnowledgeReentryResolverView,
+  projectWorldSimulationExperientialKnowledgeReentry,
+  worldSimulationExperientialKnowledgeReentryVersion,
+} from "./world-simulation-experiential-knowledge-reentry-service.mjs";
+import {
   buildWorldSimulationAutobiographicalLifePeriodContract,
   buildWorldSimulationAutobiographicalLifePeriodOrganizations,
   buildWorldSimulationAutobiographicalLifePeriodResolverView,
@@ -550,7 +556,9 @@ function currentMindCharacterItem(candidate) {
     ? "committed_experience"
     : candidate.source_kind === "recovered_memory"
       ? "recovered_memory"
-      : null;
+      : candidate.source_kind === "experiential_knowledge"
+        ? "recalled_experiential_knowledge"
+        : null;
   const recollectionContext = candidate.source_kind === "recovered_memory"
     ? sanitizeCurrentMindCharacterValue(candidate.character_context ?? {})
     : {};
@@ -986,6 +994,7 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
   const simulationTime = input.simulation_time ?? null;
   const perception = object(input.perception);
   const recoveredMemories = array(input.recovered_memories);
+  const experientialKnowledge = array(input.experiential_knowledge);
   const compatibilityState = object(input.compatibility_state);
   const recentExperienceReceipts = array(input.recent_experience_receipts);
   const legacyAttentionBootstrap = Number(priorState.current_mind_sequence ?? 0) === 0
@@ -1056,6 +1065,31 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       }),
       rawEvidence: isObject(memory) ? memory : {},
       characterContext,
+    }));
+  });
+
+  experientialKnowledge.forEach((knowledge, knowledgeIndex) => {
+    if (!isObject(knowledge)) return;
+    const content = knowledge.content ?? knowledge;
+    const reentryOccurrenceHash = hashAgentRunValue({
+      turn_id: input.turn_id ?? null,
+      reentry_index: knowledgeIndex,
+      content: sanitizeCurrentMindCharacterValue(content),
+    });
+    addCandidate(currentMindCandidate({
+      sourceKind: "experiential_knowledge",
+      content,
+      activationOrder,
+      currentMindSequence,
+      simulationTime,
+      sourceRef: currentMindSourceRef("experiential_knowledge", content, {
+        reentry_index: knowledgeIndex,
+        reentry_occurrence_hash: reentryOccurrenceHash,
+      }),
+      rawEvidence: {
+        goal_relevance: "medium",
+        cue_retrieved: true,
+      },
     }));
   });
 
@@ -1378,6 +1412,7 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
   const sourceSnapshot = {
     perception: sanitizeCurrentMindValue(perception),
     recovered_memories: sanitizeCurrentMindValue(recoveredMemories),
+    experiential_knowledge: sanitizeCurrentMindValue(experientialKnowledge),
     current_action: sanitizeCurrentMindValue(input.current_action ?? null),
     compatibility_attention: sanitizeCurrentMindValue(legacyAttentionBootstrap),
     compatibility_expectation: sanitizeCurrentMindValue(legacyExpectationBootstrap),
@@ -4044,6 +4079,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const currentMindTransitionProjections = [];
   const subjectiveCognitionProjections = [];
   const subjectiveBeliefCharacterProjections = [];
+  const experientialKnowledgeReentryProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
   const structuredSelfModelCharacterProjections = [];
@@ -4561,6 +4597,57 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         },
       );
 
+    // Phase76D re-enters only already committed, same-character Phase67C
+    // personal semantic knowledge. The resolver sees bounded current cues plus
+    // an opaque canonical candidate catalog and may only select refs; it cannot
+    // author remembered content or choose an action. Selected knowledge still
+    // has to pass the ordinary Current Mind admission/output gates below.
+    const experientialKnowledgeReentryResolverView =
+      buildWorldSimulationExperientialKnowledgeReentryResolverView({
+        world_state: worldState,
+        character,
+        current_turn_id: turnId,
+        current_context: {
+          perception: characterPerception,
+          recovered_memories: recoveredMemories,
+          current_action: characterState.current_action ?? null,
+          goals: characterState.goals ?? [],
+          current_goals: characterState.current_goals ?? [],
+          current_goal: characterState.current_goal ?? null,
+        },
+      });
+    const experientialKnowledgeReentryResolver =
+      typeof options.experientialKnowledgeReentryResolver === "function"
+        ? options.experientialKnowledgeReentryResolver
+        : null;
+    const rawActivatedExperientialKnowledgeRefs =
+      experientialKnowledgeReentryResolver
+        ? await experientialKnowledgeReentryResolver(
+          cloneJson(experientialKnowledgeReentryResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawActivatedExperientialKnowledgeRefs)) {
+      const error = new Error(
+        "experientialKnowledgeReentryResolver must return an array of opaque personal semantic refs.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENTIAL_KNOWLEDGE_REENTRY_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const experientialKnowledgeReentry =
+      projectWorldSimulationExperientialKnowledgeReentry({
+        resolver_view: experientialKnowledgeReentryResolverView,
+        activated_semantic_refs: rawActivatedExperientialKnowledgeRefs,
+      });
+    experientialKnowledgeReentryProjections.push({
+      character,
+      version: experientialKnowledgeReentry.version,
+      reentry_hash: experientialKnowledgeReentry.reentry_hash,
+      activated_count: experientialKnowledgeReentry.activated_semantics.length,
+      activated_semantics: cloneJson(experientialKnowledgeReentry.activated_semantics),
+      audit: cloneJson(experientialKnowledgeReentry.audit),
+    });
+
     // Character Runtime v2 owns the current situational workspace. This is a
     // speculative transition only: it cannot mutate committed Current Mind
     // before the atomic world commit succeeds.
@@ -4576,6 +4663,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             ?? null,
           perception: characterPerception,
           recovered_memories: recoveredMemories,
+          experiential_knowledge:
+            experientialKnowledgeReentry.character_view.experiential_knowledge,
           current_action:
             characterState.current_action
             ?? null,
@@ -5152,6 +5241,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     subjective_cognition_projections: cloneJson(subjectiveCognitionProjections),
     subjective_belief_character_projections:
       cloneJson(subjectiveBeliefCharacterProjections),
+    experiential_knowledge_reentry_projections:
+      cloneJson(experientialKnowledgeReentryProjections),
     autobiographical_summary_character_projections:
       cloneJson(autobiographicalSummaryCharacterProjections),
     autobiographical_self_interpretation_character_projections:
@@ -8596,6 +8687,8 @@ export async function resolveWorldSimulationTurn(
             experienceGroundedSubjectiveLearningInterpretationResolution.audit,
           ),
       },
+      experiential_knowledge_reentry_projections:
+        cloneJson(preparedTurn.experiential_knowledge_reentry_projections ?? []),
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
@@ -9026,6 +9119,26 @@ export async function resolveWorldSimulationTurn(
         false,
       duplicate_active_claim_count_used_as_credibility:
         false,
+    },
+
+    experiential_knowledge_reentry: {
+      version: worldSimulationExperientialKnowledgeReentryVersion,
+      character_projection_count:
+        array(preparedTurn.experiential_knowledge_reentry_projections).length,
+      activated_knowledge_count:
+        array(preparedTurn.experiential_knowledge_reentry_projections)
+          .reduce((total, item) => total + Number(item?.activated_count ?? 0), 0),
+      source_scope: "same_character_committed_prior_turn_phase67c_only",
+      cue_dependent: true,
+      current_mind_admission_output_gating_reused: true,
+      resolver_authors_semantic_content: false,
+      exact_case_replay_required: false,
+      current_context_revalidation_required: true,
+      direct_action_selection: false,
+      direct_plan_or_goal_mutation: false,
+      direct_subjective_belief_write: false,
+      world_truth_authority_exposed: false,
+      confidence_probability_modeled: false,
     },
 
     subjective_memory_encoding_decisions:
