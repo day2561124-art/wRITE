@@ -145,6 +145,10 @@ export const phase76PostOutcomeSubjectiveExperienceSteps = Object.freeze([
   Object.freeze(["Phase 76G experiential method outcome credit", Object.freeze(["tests/phase76/phase76g-experiential-method-outcome-credit.test.mjs"])]),
 ]);
 
+export const phase77MultiExperienceSchemaInductionSteps = Object.freeze([
+  Object.freeze(["Phase 77A multi-experience schema evidence assembly", Object.freeze(["tests/phase77/phase77a-multi-experience-schema-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -165,6 +169,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase74SubjectiveActionDeliberationSteps,
   ...phase75ActionCommitmentSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
+  ...phase77MultiExperienceSchemaInductionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -183,6 +188,7 @@ export const cognitionSteps = Object.freeze([
   ...phase74SubjectiveActionDeliberationSteps,
   ...phase75ActionCommitmentSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
+  ...phase77MultiExperienceSchemaInductionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -196,4 +202,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase72MeansFeasibilitySteps,
   ...phase73VisibleConstraintObservationSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
+  ...phase77MultiExperienceSchemaInductionSteps,
 ]);

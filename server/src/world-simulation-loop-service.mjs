@@ -27,6 +27,10 @@ import {
   worldSimulationExperienceGroundedSubjectiveLearningVersion,
 } from "./world-simulation-experience-grounded-subjective-learning-service.mjs";
 import {
+  buildWorldSimulationMultiExperienceSchemaEvidenceView,
+  worldSimulationMultiExperienceSchemaEvidenceVersion,
+} from "./world-simulation-multi-experience-schema-evidence-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -7755,6 +7759,21 @@ export async function resolveWorldSimulationTurn(
       .organization_events_created
       .map((event) => event.organization_event_id);
 
+  // Phase77A assembles bounded same-character multi-LifeEvent evidence after
+  // canonical Phase67B organization is materialized, but before Phase67C owns
+  // any durable semantic decision. It preserves episode specificity, exposes
+  // only subjective post-outcome action experience to the future aligner, and
+  // never promotes recurrence count into a schema on its own.
+  const multiExperienceSchemaEvidence =
+    buildWorldSimulationMultiExperienceSchemaEvidenceView({
+      world_state:
+        autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
+      turn_id:
+        preparedTurn.turn_id,
+      source_organization_event_ids:
+        personalSemanticSourceOrganizationEventIds,
+    });
+
   const personalSemanticDecisionResolution =
     await resolvePersonalSemanticMemoryDecisions(
       autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
@@ -8868,6 +8887,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           autobiographicalLifeEventOrganizationMutationExecution.execution,
         ),
+      multi_experience_schema_evidence:
+        cloneJson(multiExperienceSchemaEvidence),
 
       personal_semantic_memory_decision_resolution: {
         version:
@@ -9703,6 +9724,26 @@ export async function resolveWorldSimulationTurn(
         false,
       same_turn_character_brain_feedback_allowed:
         false,
+    },
+    multi_experience_schema_evidence: {
+      version: worldSimulationMultiExperienceSchemaEvidenceVersion,
+      ready_character_count: multiExperienceSchemaEvidence.ready_character_count,
+      character_context_count:
+        multiExperienceSchemaEvidence.resolver_view.character_contexts.length,
+      evidence_item_count: multiExperienceSchemaEvidence.internal_lineage.length,
+      evidence_view_hash: multiExperienceSchemaEvidence.evidence_view_hash,
+      current_turn_phase67b_anchor_required: true,
+      same_character_only: true,
+      individual_episode_specificity_preserved: true,
+      relational_alignment_performed: false,
+      schema_induction_performed: false,
+      recurrence_count_auto_promotes_schema: false,
+      phase67c_durable_semantic_owner: true,
+      internal_lineage_exposed_to_future_aligner: false,
+      world_truth_authority_claimed: false,
+      numeric_similarity_confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
     },
     personal_semantic_memory: {
       version:
