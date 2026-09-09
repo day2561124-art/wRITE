@@ -88,6 +88,13 @@ import {
   worldSimulationExperientialMethodTransferVersion,
 } from "./world-simulation-experiential-method-transfer-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodApplicationLineageContract,
+  buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
+  buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
+  projectWorldSimulationExperientialMethodCandidateAttribution,
+  worldSimulationExperientialMethodApplicationLineageVersion,
+} from "./world-simulation-experiential-method-application-lineage-service.mjs";
+import {
   buildWorldSimulationAutobiographicalLifePeriodContract,
   buildWorldSimulationAutobiographicalLifePeriodOrganizations,
   buildWorldSimulationAutobiographicalLifePeriodResolverView,
@@ -3349,6 +3356,36 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSubjectiveBeliefCharacterProjectionContract(),
     subjective_choice_commitment_receipt:
       buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract(),
+    experiential_method_application_lineage:
+      buildWorldSimulationExperientialMethodApplicationLineageContract(),
+
+    experiential_method_candidate_attribution_resolver_hook: {
+      owner: "programmatic_experiential_method_candidate_attribution_resolver",
+      optional: true,
+      option_name: "experientialMethodCandidateAttributionResolver",
+      source_scope:
+        "same_turn_verified_phase76e_transfer_plus_existing_action_proposer_candidates",
+      receives_phase76e_transfer_refs: true,
+      receives_bounded_phase76e_method_skeletons: true,
+      receives_phase74a_action_refs: true,
+      receives_bounded_action_candidate_semantics: true,
+      receives_selected_action: false,
+      receives_action_outcome: false,
+      receives_world_state: false,
+      receives_raw_world_event: false,
+      receives_hidden_causal_evidence: false,
+      may_return_only_transfer_ref_action_ref_pairs: true,
+      many_to_many_attribution_allowed: true,
+      may_author_method_content: false,
+      may_author_action_content: false,
+      action_selection_authority: false,
+      causal_credit_authority: false,
+      success_failure_learning_authority: false,
+      retain_revise_authority: false,
+      may_assert_world_truth: false,
+      may_assert_confidence_probability_similarity_utility: false,
+      missing_hook_means_no_candidate_attribution: true,
+    },
 
     autobiographical_life_event_organization_resolver_hook: {
       owner:
@@ -4087,6 +4124,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const subjectiveBeliefCharacterProjections = [];
   const experientialKnowledgeReentryProjections = [];
   const experientialMethodTransferProjections = [];
+  const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
   const structuredSelfModelCharacterProjections = [];
@@ -5004,6 +5042,49 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       actionCandidates.character_view
       ?? actionCandidates,
     );
+
+    // Phase76F records an explicit provenance edge from a Phase76E transferred
+    // method to an already-existing Action Proposer candidate. The resolver may
+    // only select canonical transfer_ref/action_ref pairs; it cannot author a
+    // method, action, selection, outcome, or causal credit. This projection is
+    // engine-side provenance and does not alter the character-facing candidate
+    // universe or bias the final Character Brain choice surface.
+    const experientialMethodCandidateAttributionResolverView =
+      buildWorldSimulationExperientialMethodCandidateAttributionResolverView({
+        character,
+        current_turn_id: turnId,
+        experiential_method_transfer: experientialMethodTransfer,
+        cognition: characterCognition,
+        candidate_action_intents:
+          characterActionCandidates.candidate_action_intents ?? [],
+      });
+    const experientialMethodCandidateAttributionResolver =
+      typeof options.experientialMethodCandidateAttributionResolver === "function"
+        ? options.experientialMethodCandidateAttributionResolver
+        : null;
+    const rawExperientialMethodCandidateAttributions =
+      experientialMethodCandidateAttributionResolver
+        ? await experientialMethodCandidateAttributionResolver(
+          cloneJson(experientialMethodCandidateAttributionResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawExperientialMethodCandidateAttributions)) {
+      const error = new Error(
+        "experientialMethodCandidateAttributionResolver must return an array of transfer_ref/action_ref pairs.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_APPLICATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const experientialMethodCandidateAttribution =
+      projectWorldSimulationExperientialMethodCandidateAttribution({
+        resolver_view: experientialMethodCandidateAttributionResolverView,
+        candidate_attributions: rawExperientialMethodCandidateAttributions,
+      });
+    experientialMethodCandidateAttributionProjections.push(
+      cloneJson(experientialMethodCandidateAttribution),
+    );
+
     decisionPackets.push({
       character,
 
@@ -5314,6 +5395,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialKnowledgeReentryProjections),
     experiential_method_transfer_projections:
       cloneJson(experientialMethodTransferProjections),
+    experiential_method_candidate_attribution_projections:
+      cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
       cloneJson(autobiographicalSummaryCharacterProjections),
     autobiographical_self_interpretation_character_projections:
@@ -7211,6 +7294,23 @@ export async function resolveWorldSimulationTurn(
       selected_action_intents: selected,
     });
 
+  // Phase76F closes the pre-outcome provenance chain only after the Character
+  // Brain has made a canonical Phase74D choice. A receipt is created only when
+  // the selected action_ref already had an explicit method->candidate
+  // attribution in the prepared turn. This still says nothing about whether
+  // the method caused the choice or whether the eventual action succeeds.
+  const selectedExperientialMethodApplicationReceipts =
+    buildWorldSimulationSelectedExperientialMethodApplicationReceipts({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      candidate_attribution_projections:
+        preparedTurn.experiential_method_candidate_attribution_projections ?? [],
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+    });
+
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
   const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
@@ -8762,6 +8862,12 @@ export async function resolveWorldSimulationTurn(
         cloneJson(preparedTurn.experiential_knowledge_reentry_projections ?? []),
       experiential_method_transfer_projections:
         cloneJson(preparedTurn.experiential_method_transfer_projections ?? []),
+      experiential_method_candidate_attribution_projections:
+        cloneJson(
+          preparedTurn.experiential_method_candidate_attribution_projections ?? [],
+        ),
+      selected_experiential_method_application_receipts:
+        cloneJson(selectedExperientialMethodApplicationReceipts),
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
@@ -9235,6 +9341,34 @@ export async function resolveWorldSimulationTurn(
       direct_subjective_belief_write: false,
       world_truth_authority_exposed: false,
       numeric_similarity_confidence_probability_utility_modeled: false,
+    },
+
+    experiential_method_application_lineage: {
+      version: worldSimulationExperientialMethodApplicationLineageVersion,
+      character_projection_count:
+        array(preparedTurn.experiential_method_candidate_attribution_projections).length,
+      candidate_attribution_count:
+        array(preparedTurn.experiential_method_candidate_attribution_projections)
+          .reduce(
+            (total, item) => total + Number(item?.candidate_attribution_count ?? 0),
+            0,
+          ),
+      selected_application_receipt_count:
+        selectedExperientialMethodApplicationReceipts.receipt_count,
+      source_phase74d_receipt_bundle_hash:
+        selectedExperientialMethodApplicationReceipts.source_phase74d_receipt_bundle_hash,
+      explicit_method_to_candidate_lineage: true,
+      selected_application_requires_matching_phase74d_action_ref: true,
+      candidate_attribution_is_causal_credit: false,
+      method_caused_selection_claimed: false,
+      outcome_consumed: false,
+      action_outcome_credit_assigned: false,
+      success_failure_learning_performed: false,
+      retain_revise_policy_modeled: false,
+      direct_action_selection: false,
+      world_truth_authority_exposed: false,
+      numeric_strength_confidence_probability_utility_modeled: false,
+      persisted_only_with_successful_world_commit: true,
     },
 
     subjective_memory_encoding_decisions:
