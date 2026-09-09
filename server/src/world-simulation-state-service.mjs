@@ -371,6 +371,8 @@ export async function commitWorldSimulationTurn(
               input.experiential_method_semantic_revision_mutation_queue ?? null,
             experiential_method_semantic_revision_mutation_execution:
               input.experiential_method_semantic_revision_mutation_execution ?? null,
+            contextual_schema_refinement_evidence:
+              input.contextual_schema_refinement_evidence ?? null,
             subjective_claim_proposal_resolution:
               input.subjective_claim_proposal_resolution ?? null,
             subjective_claim_projection:

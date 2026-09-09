@@ -152,6 +152,10 @@ export const phase77MultiExperienceSchemaInductionSteps = Object.freeze([
   Object.freeze(["Phase 77D cross-turn relational schema reuse and revision closure", Object.freeze(["tests/phase77/phase77d-relational-schema-reuse-revision-closure.test.mjs"])]),
 ]);
 
+export const phase78ContextualSchemaRefinementSteps = Object.freeze([
+  Object.freeze(["Phase 78A contextual schema refinement evidence", Object.freeze(["tests/phase78/phase78a-contextual-schema-refinement-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -173,6 +177,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase75ActionCommitmentSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
+  ...phase78ContextualSchemaRefinementSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -192,6 +197,7 @@ export const cognitionSteps = Object.freeze([
   ...phase75ActionCommitmentSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
+  ...phase78ContextualSchemaRefinementSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -206,4 +212,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase73VisibleConstraintObservationSteps,
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
+  ...phase78ContextualSchemaRefinementSteps,
 ]);

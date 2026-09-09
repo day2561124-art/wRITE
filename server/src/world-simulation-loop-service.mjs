@@ -41,6 +41,10 @@ import {
   worldSimulationRelationalSchemaPromotionVersion,
 } from "./world-simulation-relational-schema-promotion-service.mjs";
 import {
+  buildWorldSimulationContextualSchemaRefinementEvidenceView,
+  worldSimulationContextualSchemaRefinementEvidenceVersion,
+} from "./world-simulation-contextual-schema-refinement-evidence-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -8014,6 +8018,18 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase78A observes the fully legal Phase67C semantic state only after the
+  // Phase76G retain/revise pass has been materialized. It assembles bounded
+  // support-vs-counterexample evidence for newly contested recurring schemas;
+  // it does not author a refinement or feed anything back into this turn's
+  // Character Brain.
+  const contextualSchemaRefinementEvidence =
+    buildWorldSimulationContextualSchemaRefinementEvidenceView({
+      world_state: experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
+    });
+
   const autobiographicalLifePeriodSourceSemanticDerivationEventIds = [
     ...personalSemanticMemoryDerivation
       .result
@@ -9058,6 +9074,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(experientialMethodSemanticRevisionMutationQueue),
       experiential_method_semantic_revision_mutation_execution:
         cloneJson(experientialMethodSemanticRevisionMutationExecution.execution),
+      contextual_schema_refinement_evidence:
+        cloneJson(contextualSchemaRefinementEvidence),
 
       autobiographical_life_period_organization_decision_resolution: {
         version:
@@ -9672,6 +9690,26 @@ export async function resolveWorldSimulationTurn(
       objective_causation_claimed: false,
       numeric_credit_assigned: false,
       success_failure_auto_credit_allowed: false,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+
+    contextual_schema_refinement_evidence: {
+      version: worldSimulationContextualSchemaRefinementEvidenceVersion,
+      refinement_candidate_count:
+        contextualSchemaRefinementEvidence.refinement_candidate_count,
+      evidence_hash: contextualSchemaRefinementEvidence.evidence_hash,
+      source_phase67c_projection_hash:
+        contextualSchemaRefinementEvidence.source_phase67c_projection_hash,
+      source_phase77a_evidence_view_hash:
+        contextualSchemaRefinementEvidence.source_phase77a_evidence_view_hash,
+      contested_recurring_event_pattern_only: true,
+      current_turn_counterevidence_required: true,
+      support_and_counterexample_evidence_separated: true,
+      semantic_rewrite_performed: false,
+      specialized_schema_authored: false,
+      durable_semantic_write_performed: false,
+      future_refinement_owner: "Phase78B",
       same_turn_character_brain_feedback_allowed: false,
       persisted_only_with_successful_world_commit: true,
     },
