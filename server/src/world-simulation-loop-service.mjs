@@ -137,6 +137,11 @@ import {
   worldSimulationExperientialMethodImpasseDeliberationVersion,
 } from "./world-simulation-experiential-method-impasse-deliberation-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpasseDiscriminatingEvidenceContract,
+  projectWorldSimulationExperientialMethodImpasseDiscriminatingEvidence,
+  worldSimulationExperientialMethodImpasseDiscriminatingEvidenceVersion,
+} from "./world-simulation-experiential-method-impasse-discriminating-evidence-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3419,6 +3424,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodCompetitionGuidanceContract(),
     experiential_method_impasse_deliberation:
       buildWorldSimulationExperientialMethodImpasseDeliberationContract(),
+    experiential_method_impasse_discriminating_evidence:
+      buildWorldSimulationExperientialMethodImpasseDiscriminatingEvidenceContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -4244,6 +4251,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodCompetitionResolutionProjections = [];
   const experientialMethodCompetitionGuidanceProjections = [];
   const experientialMethodImpasseDeliberationProjections = [];
+  const experientialMethodImpasseDiscriminatingEvidenceProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
@@ -5166,6 +5174,37 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       selected_action_authority: false,
       semantic_revision_authority: false,
     });
+    // Phase79E exposes only already-character-visible current context as a
+    // bounded cue catalog beside each Phase79D tie/conflict impasse. It does
+    // not decide a preference; downstream qualitative re-resolution may use
+    // these cues instead of inventing an arbitrary tie-break.
+    const experientialMethodImpasseDiscriminatingEvidence =
+      projectWorldSimulationExperientialMethodImpasseDiscriminatingEvidence({
+        experiential_method_impasse_deliberation:
+          experientialMethodImpasseDeliberation,
+        current_context: {
+          perception: characterPerception,
+          attention: speculativeCurrentMind.character_facing_attention,
+          working_context: speculativeCurrentMind.working_context,
+          subjective_cognition: characterCognition.subjective_cognition,
+          self_interpretation_context: characterCognition.self_interpretation_context,
+          self_model_context: characterCognition.self_model_context,
+        },
+      });
+    experientialMethodImpasseDiscriminatingEvidenceProjections.push(
+      cloneJson(experientialMethodImpasseDiscriminatingEvidence),
+    );
+    characterCognition.experiential_method_impasse_discriminating_evidence =
+      cloneJson({
+        source: "phase79e_current_context_discriminating_evidence_candidates",
+        impasse_evidence_contexts:
+          experientialMethodImpasseDiscriminatingEvidence.impasse_evidence_contexts,
+        deliberation_evidence_available:
+          experientialMethodImpasseDiscriminatingEvidence.deliberation_evidence_available,
+        preference_authority: false,
+        selected_action_authority: false,
+        semantic_revision_authority: false,
+      });
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5590,6 +5629,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodCompetitionGuidanceProjections),
     experiential_method_impasse_deliberation_projections:
       cloneJson(experientialMethodImpasseDeliberationProjections),
+    experiential_method_impasse_discriminating_evidence_projections:
+      cloneJson(experientialMethodImpasseDiscriminatingEvidenceProjections),
     experiential_method_candidate_attribution_projections:
       cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
@@ -9444,6 +9485,10 @@ export async function resolveWorldSimulationTurn(
         cloneJson(preparedTurn.experiential_method_competition_guidance_projections ?? []),
       experiential_method_impasse_deliberation_projections:
         cloneJson(preparedTurn.experiential_method_impasse_deliberation_projections ?? []),
+      experiential_method_impasse_discriminating_evidence_projections:
+        cloneJson(
+          preparedTurn.experiential_method_impasse_discriminating_evidence_projections ?? [],
+        ),
       experiential_method_candidate_attribution_projections:
         cloneJson(
           preparedTurn.experiential_method_candidate_attribution_projections ?? [],
