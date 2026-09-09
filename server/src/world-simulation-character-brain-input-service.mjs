@@ -16,6 +16,9 @@ import {
 import {
   worldSimulationActionCommitmentSubjectiveExecutionExperienceVersion,
 } from "./world-simulation-action-commitment-subjective-execution-experience-service.mjs";
+import {
+  buildWorldSimulationActionCommitmentExperienceGroundedReconsideration,
+} from "./world-simulation-action-commitment-experience-grounded-reconsideration-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -233,17 +236,21 @@ export function buildWorldSimulationCharacterBrainInput(
       error.code = "WORLD_SIMULATION_ACTION_COMMITMENT_SUBJECTIVE_EXECUTION_EXPERIENCE_INVALID";
       throw error;
     }
+    const subjectiveFeedback = array(
+      subjectiveExecutionExperience.projection.subjective_feedback,
+    );
     input.cognition.action_commitment_execution_experience = cloneJson({
-      status: subjectiveExecutionExperience.projection.status,
+      status: subjectiveFeedback.length
+        ? "subjective_execution_feedback_available"
+        : "no_subjective_execution_feedback",
       active_commitment_ref:
         subjectiveExecutionExperience.projection.active_commitment_ref,
       action_id: subjectiveExecutionExperience.projection.action_id,
-      subjective_feedback_count:
-        subjectiveExecutionExperience.projection.subjective_feedback_count,
-      subjective_feedback:
-        subjectiveExecutionExperience.projection.subjective_feedback,
-      latest_subjective_feedback:
-        subjectiveExecutionExperience.projection.latest_subjective_feedback,
+      subjective_feedback_count: subjectiveFeedback.length,
+      subjective_feedback: subjectiveFeedback,
+      latest_subjective_feedback: subjectiveFeedback.length
+        ? subjectiveFeedback[subjectiveFeedback.length - 1]
+        : null,
     });
     input.boundaries.action_commitment_subjective_execution_experience_v1_installed = true;
   }
@@ -283,6 +290,15 @@ export function buildWorldSimulationCharacterBrainInput(
             input.subjective_cross_option_preference_resolution,
         });
       input.boundaries.action_commitment_reconsideration_evidence_v1_installed = true;
+      input.action_commitment_experience_grounded_reconsideration =
+        buildWorldSimulationActionCommitmentExperienceGroundedReconsideration({
+          character: input.character,
+          base_reconsideration_evidence:
+            input.action_commitment_reconsideration_evidence,
+          subjective_execution_experience:
+            input.cognition.action_commitment_execution_experience ?? {},
+        });
+      input.boundaries.action_commitment_experience_grounded_reconsideration_v1_installed = true;
     }
     input.boundaries.subjective_action_deliberation_grounding_v1_installed = true;
     input.boundaries.subjective_prospective_consequence_simulation_v1_installed = true;

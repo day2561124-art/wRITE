@@ -116,6 +116,30 @@ assert.equal(
 );
 assert.equal(hiddenProjection.projection.subjective_feedback_count, 0);
 assert.equal(JSON.stringify(hiddenProjection).includes("engine_knows_success"), false);
+const hiddenBrainInput = buildWorldSimulationCharacterBrainInput({
+  character,
+  cognition: {},
+  candidate_action_intents: [],
+  boundaries: {},
+}, {
+  action_commitment_subjective_execution_experience: hiddenProjection,
+});
+assert.equal(
+  hiddenBrainInput.cognition.action_commitment_execution_experience.status,
+  "no_subjective_execution_feedback",
+);
+assert.equal(
+  JSON.stringify(hiddenBrainInput.cognition.action_commitment_execution_experience)
+    .includes("authoritative_execution_observed_but_not_subjectively_available"),
+  false,
+);
+assert.equal(
+  Object.hasOwn(
+    hiddenBrainInput.cognition.action_commitment_execution_experience,
+    "authoritative_feedback_count",
+  ),
+  false,
+);
 
 const brainInput = buildWorldSimulationCharacterBrainInput({
   character,
