@@ -829,6 +829,7 @@ const steps = [
   ["Phase 77A multi-experience schema evidence assembly", ["tests/phase77/phase77a-multi-experience-schema-evidence.test.mjs"]],
   ["Phase 77B relational schema induction", ["tests/phase77/phase77b-relational-schema-induction.test.mjs"]],
   ["Phase 77C relational schema durable semantic promotion", ["tests/phase77/phase77c-relational-schema-promotion.test.mjs"]],
+  ["Phase 77D cross-turn relational schema reuse and revision closure", ["tests/phase77/phase77d-relational-schema-reuse-revision-closure.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
