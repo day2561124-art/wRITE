@@ -827,6 +827,7 @@ const steps = [
   ["Phase 76F experiential method application lineage", ["tests/phase76/phase76f-experiential-method-application-lineage.test.mjs"]],
   ["Phase 76G experiential method outcome credit", ["tests/phase76/phase76g-experiential-method-outcome-credit.test.mjs"]],
   ["Phase 77A multi-experience schema evidence assembly", ["tests/phase77/phase77a-multi-experience-schema-evidence.test.mjs"]],
+  ["Phase 77B relational schema induction", ["tests/phase77/phase77b-relational-schema-induction.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

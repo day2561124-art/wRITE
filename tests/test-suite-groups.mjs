@@ -147,6 +147,7 @@ export const phase76PostOutcomeSubjectiveExperienceSteps = Object.freeze([
 
 export const phase77MultiExperienceSchemaInductionSteps = Object.freeze([
   Object.freeze(["Phase 77A multi-experience schema evidence assembly", Object.freeze(["tests/phase77/phase77a-multi-experience-schema-evidence.test.mjs"])]),
+  Object.freeze(["Phase 77B relational schema induction", Object.freeze(["tests/phase77/phase77b-relational-schema-induction.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

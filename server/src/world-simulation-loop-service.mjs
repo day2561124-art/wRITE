@@ -31,6 +31,11 @@ import {
   worldSimulationMultiExperienceSchemaEvidenceVersion,
 } from "./world-simulation-multi-experience-schema-evidence-service.mjs";
 import {
+  buildWorldSimulationRelationalSchemaInductionResolverView,
+  projectWorldSimulationRelationalSchemaInduction,
+  worldSimulationRelationalSchemaInductionVersion,
+} from "./world-simulation-relational-schema-induction-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -7774,6 +7779,38 @@ export async function resolveWorldSimulationTurn(
         personalSemanticSourceOrganizationEventIds,
     });
 
+  // Phase77B performs bounded relational alignment over the exact Phase77A
+  // projection. The resolver may author only a reviewable schema descriptor and
+  // must ground every selected case in both action and perceived result. No
+  // proposal is promoted into durable personal semantic memory in this phase.
+  const relationalSchemaInductionResolverView =
+    buildWorldSimulationRelationalSchemaInductionResolverView({
+      multi_experience_schema_evidence: multiExperienceSchemaEvidence,
+    });
+  const relationalSchemaInductionResolver =
+    typeof options.relationalSchemaInductionResolver === "function"
+      ? options.relationalSchemaInductionResolver
+      : null;
+  const rawRelationalSchemaProposals =
+    relationalSchemaInductionResolver
+      ? await relationalSchemaInductionResolver(
+        cloneJson(relationalSchemaInductionResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawRelationalSchemaProposals)) {
+    const error = new Error(
+      "relationalSchemaInductionResolver must return an array of bounded relational schema proposals.",
+    );
+    error.code = "WORLD_SIMULATION_RELATIONAL_SCHEMA_INDUCTION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const relationalSchemaInduction =
+    projectWorldSimulationRelationalSchemaInduction({
+      multi_experience_schema_evidence: multiExperienceSchemaEvidence,
+      resolver_view_hash: relationalSchemaInductionResolverView.resolver_view_hash,
+      schema_proposals: rawRelationalSchemaProposals,
+    });
+
   const personalSemanticDecisionResolution =
     await resolvePersonalSemanticMemoryDecisions(
       autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
@@ -8889,6 +8926,13 @@ export async function resolveWorldSimulationTurn(
         ),
       multi_experience_schema_evidence:
         cloneJson(multiExperienceSchemaEvidence),
+      relational_schema_induction: {
+        version: worldSimulationRelationalSchemaInductionVersion,
+        resolver_used: Boolean(relationalSchemaInductionResolver),
+        resolver_view_hash:
+          relationalSchemaInductionResolverView.resolver_view_hash,
+        projection: cloneJson(relationalSchemaInduction),
+      },
 
       personal_semantic_memory_decision_resolution: {
         version:
@@ -9740,6 +9784,30 @@ export async function resolveWorldSimulationTurn(
       recurrence_count_auto_promotes_schema: false,
       phase67c_durable_semantic_owner: true,
       internal_lineage_exposed_to_future_aligner: false,
+      world_truth_authority_claimed: false,
+      numeric_similarity_confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+    relational_schema_induction: {
+      version: worldSimulationRelationalSchemaInductionVersion,
+      resolver_used: Boolean(relationalSchemaInductionResolver),
+      proposal_count: relationalSchemaInduction.proposal_count,
+      projection_hash: relationalSchemaInduction.projection_hash,
+      source_phase77a_evidence_view_hash:
+        relationalSchemaInduction.source_phase77a_evidence_view_hash,
+      same_character_only: true,
+      current_anchor_and_prior_evidence_required: true,
+      one_to_one_evidence_mapping_required: true,
+      exact_experience_index_required: true,
+      parallel_connectivity_required: true,
+      systematicity_action_result_grounding_required: true,
+      proposal_only: true,
+      durable_semantic_write_performed: false,
+      phase67c_durable_semantic_owner: true,
+      phase77c_promotion_owner: true,
+      recurrence_count_auto_promotes_schema: false,
+      surface_similarity_alone_is_sufficient: false,
       world_truth_authority_claimed: false,
       numeric_similarity_confidence_probability_modeled: false,
       same_turn_character_brain_feedback_allowed: false,

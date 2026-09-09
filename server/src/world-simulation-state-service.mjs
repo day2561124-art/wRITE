@@ -327,6 +327,8 @@ export async function commitWorldSimulationTurn(
               input.autobiographical_life_event_organization_mutation_execution ?? null,
             multi_experience_schema_evidence:
               input.multi_experience_schema_evidence ?? null,
+            relational_schema_induction:
+              input.relational_schema_induction ?? null,
             personal_semantic_memory_decision_resolution:
               input.personal_semantic_memory_decision_resolution ?? null,
             personal_semantic_memory_derivation:
