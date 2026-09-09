@@ -159,6 +159,10 @@ export const phase78ContextualSchemaRefinementSteps = Object.freeze([
   Object.freeze(["Phase 78D cross-turn contextual specialization reuse and revision closure", Object.freeze(["tests/phase78/phase78d-contextual-specialization-reuse-revision-closure.test.mjs"])]),
 ]);
 
+export const phase79ExperientialMethodCompetitionSteps = Object.freeze([
+  Object.freeze(["Phase 79A experiential method competition evidence", Object.freeze(["tests/phase79/phase79a-experiential-method-competition.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -181,6 +185,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
+  ...phase79ExperientialMethodCompetitionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -201,6 +206,7 @@ export const cognitionSteps = Object.freeze([
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
+  ...phase79ExperientialMethodCompetitionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -216,4 +222,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase76PostOutcomeSubjectiveExperienceSteps,
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
+  ...phase79ExperientialMethodCompetitionSteps,
 ]);
