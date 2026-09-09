@@ -833,6 +833,7 @@ const steps = [
   ["Phase 78A contextual schema refinement evidence", ["tests/phase78/phase78a-contextual-schema-refinement-evidence.test.mjs"]],
   ["Phase 78B bounded contextual schema specialization proposals", ["tests/phase78/phase78b-contextual-schema-specialization.test.mjs"]],
   ["Phase 78C contextual schema specialization admission and retention", ["tests/phase78/phase78c-contextual-schema-specialization-admission.test.mjs"]],
+  ["Phase 78D cross-turn contextual specialization reuse and revision closure", ["tests/phase78/phase78d-contextual-specialization-reuse-revision-closure.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
