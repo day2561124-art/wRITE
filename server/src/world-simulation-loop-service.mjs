@@ -45,6 +45,11 @@ import {
   worldSimulationContextualSchemaRefinementEvidenceVersion,
 } from "./world-simulation-contextual-schema-refinement-evidence-service.mjs";
 import {
+  buildWorldSimulationContextualSchemaSpecializationResolverView,
+  projectWorldSimulationContextualSchemaSpecialization,
+  worldSimulationContextualSchemaSpecializationVersion,
+} from "./world-simulation-contextual-schema-specialization-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -8030,6 +8035,38 @@ export async function resolveWorldSimulationTurn(
       source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
     });
 
+  // Phase78B consumes only the exact bounded Phase78A projection. The resolver
+  // may propose additive narrowing qualifiers grounded in both support and
+  // counterexample evidence, but it cannot rewrite the contested source schema,
+  // emit a Phase67C semantic decision, or affect the same-turn Character Brain.
+  const contextualSchemaSpecializationResolverView =
+    buildWorldSimulationContextualSchemaSpecializationResolverView({
+      contextual_schema_refinement_evidence: contextualSchemaRefinementEvidence,
+    });
+  const contextualSchemaSpecializationResolver =
+    typeof options.contextualSchemaSpecializationResolver === "function"
+      ? options.contextualSchemaSpecializationResolver
+      : null;
+  const rawContextualSchemaSpecializationProposals =
+    contextualSchemaSpecializationResolver
+      ? await contextualSchemaSpecializationResolver(
+        cloneJson(contextualSchemaSpecializationResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawContextualSchemaSpecializationProposals)) {
+    const error = new Error(
+      "contextualSchemaSpecializationResolver must return an array of bounded specialization proposals.",
+    );
+    error.code = "WORLD_SIMULATION_CONTEXTUAL_SCHEMA_SPECIALIZATION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const contextualSchemaSpecialization =
+    projectWorldSimulationContextualSchemaSpecialization({
+      contextual_schema_refinement_evidence: contextualSchemaRefinementEvidence,
+      resolver_view_hash: contextualSchemaSpecializationResolverView.resolver_view_hash,
+      specialization_proposals: rawContextualSchemaSpecializationProposals,
+    });
+
   const autobiographicalLifePeriodSourceSemanticDerivationEventIds = [
     ...personalSemanticMemoryDerivation
       .result
@@ -9076,6 +9113,13 @@ export async function resolveWorldSimulationTurn(
         cloneJson(experientialMethodSemanticRevisionMutationExecution.execution),
       contextual_schema_refinement_evidence:
         cloneJson(contextualSchemaRefinementEvidence),
+      contextual_schema_specialization_resolution: {
+        version: worldSimulationContextualSchemaSpecializationVersion,
+        resolver_used: Boolean(contextualSchemaSpecializationResolver),
+        resolver_view_hash:
+          contextualSchemaSpecializationResolverView.resolver_view_hash,
+        projection: cloneJson(contextualSchemaSpecialization),
+      },
 
       autobiographical_life_period_organization_decision_resolution: {
         version:

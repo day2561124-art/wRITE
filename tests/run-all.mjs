@@ -831,6 +831,7 @@ const steps = [
   ["Phase 77C relational schema durable semantic promotion", ["tests/phase77/phase77c-relational-schema-promotion.test.mjs"]],
   ["Phase 77D cross-turn relational schema reuse and revision closure", ["tests/phase77/phase77d-relational-schema-reuse-revision-closure.test.mjs"]],
   ["Phase 78A contextual schema refinement evidence", ["tests/phase78/phase78a-contextual-schema-refinement-evidence.test.mjs"]],
+  ["Phase 78B bounded contextual schema specialization proposals", ["tests/phase78/phase78b-contextual-schema-specialization.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

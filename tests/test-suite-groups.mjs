@@ -154,6 +154,7 @@ export const phase77MultiExperienceSchemaInductionSteps = Object.freeze([
 
 export const phase78ContextualSchemaRefinementSteps = Object.freeze([
   Object.freeze(["Phase 78A contextual schema refinement evidence", Object.freeze(["tests/phase78/phase78a-contextual-schema-refinement-evidence.test.mjs"])]),
+  Object.freeze(["Phase 78B bounded contextual schema specialization proposals", Object.freeze(["tests/phase78/phase78b-contextual-schema-specialization.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
