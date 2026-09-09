@@ -50,6 +50,11 @@ import {
   worldSimulationContextualSchemaSpecializationVersion,
 } from "./world-simulation-contextual-schema-specialization-service.mjs";
 import {
+  buildWorldSimulationContextualSchemaSpecializationAdmissionResolverView,
+  projectWorldSimulationContextualSchemaSpecializationAdmission,
+  worldSimulationContextualSchemaSpecializationAdmissionVersion,
+} from "./world-simulation-contextual-schema-specialization-admission-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -8067,6 +8072,72 @@ export async function resolveWorldSimulationTurn(
       specialization_proposals: rawContextualSchemaSpecializationProposals,
     });
 
+  // Phase78C is the explicit retain/admission boundary for Phase78B proposals.
+  // The resolver may only admit or skip an exact specialization proposal. The
+  // service verifies the still-contested Phase67C source and the exact Phase78A
+  // evidence lineage, then emits only ordinary Phase67C form/support decisions.
+  // The contested source semantic is never rewritten or resolved here.
+  const contextualSchemaSpecializationAdmissionResolverView =
+    buildWorldSimulationContextualSchemaSpecializationAdmissionResolverView({
+      contextual_schema_refinement_evidence: contextualSchemaRefinementEvidence,
+      contextual_schema_specialization: contextualSchemaSpecialization,
+    });
+  const contextualSchemaSpecializationAdmissionResolver =
+    typeof options.contextualSchemaSpecializationAdmissionResolver === "function"
+      ? options.contextualSchemaSpecializationAdmissionResolver
+      : null;
+  const rawContextualSchemaSpecializationAdmissionDecisions =
+    contextualSchemaSpecializationAdmissionResolver
+      ? await contextualSchemaSpecializationAdmissionResolver(
+        cloneJson(contextualSchemaSpecializationAdmissionResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawContextualSchemaSpecializationAdmissionDecisions)) {
+    const error = new Error(
+      "contextualSchemaSpecializationAdmissionResolver must return an array of admit/skip decisions.",
+    );
+    error.code =
+      "WORLD_SIMULATION_CONTEXTUAL_SCHEMA_SPECIALIZATION_ADMISSION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const contextualSchemaSpecializationAdmission =
+    projectWorldSimulationContextualSchemaSpecializationAdmission({
+      world_state: experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      contextual_schema_refinement_evidence: contextualSchemaRefinementEvidence,
+      contextual_schema_specialization: contextualSchemaSpecialization,
+      resolver_view_hash:
+        contextualSchemaSpecializationAdmissionResolverView.resolver_view_hash,
+      admission_decisions: rawContextualSchemaSpecializationAdmissionDecisions,
+    });
+  const contextualSchemaSpecializationSemanticRetention =
+    buildWorldSimulationPersonalSemanticMemoryDerivations({
+      world_state: experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
+      semantic_decisions: contextualSchemaSpecializationAdmission.semantic_decisions,
+    });
+  const contextualSchemaSpecializationSemanticRetentionMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:personal_semantic_memory`,
+      world_state_hash: hashAgentRunValue(
+        experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      ),
+      state_transitions:
+        contextualSchemaSpecializationSemanticRetention.result.state_transitions,
+      elapsed_ms: 0,
+    });
+  const contextualSchemaSpecializationSemanticRetentionMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      preview_world_state:
+        contextualSchemaSpecializationSemanticRetention.result.preview_world_state,
+      queue: contextualSchemaSpecializationSemanticRetentionMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   const autobiographicalLifePeriodSourceSemanticDerivationEventIds = [
     ...personalSemanticMemoryDerivation
       .result
@@ -8080,11 +8151,15 @@ export async function resolveWorldSimulationTurn(
       .result
       .derivation_events_created
       .map((event) => event.derivation_event_id),
+    ...contextualSchemaSpecializationSemanticRetention
+      .result
+      .derivation_events_created
+      .map((event) => event.derivation_event_id),
   ];
 
   const autobiographicalLifePeriodDecisionResolution =
     await resolveAutobiographicalLifePeriodOrganizationDecisions(
-      experientialMethodSemanticRevisionMutationExecution.next_world_state,
+      contextualSchemaSpecializationSemanticRetentionMutationExecution.next_world_state,
       preparedTurn,
       personalSemanticSourceOrganizationEventIds,
       autobiographicalLifePeriodSourceSemanticDerivationEventIds,
@@ -8094,7 +8169,7 @@ export async function resolveWorldSimulationTurn(
   const autobiographicalLifePeriodOrganization =
     buildWorldSimulationAutobiographicalLifePeriodOrganizations({
       world_state:
-        experientialMethodSemanticRevisionMutationExecution.next_world_state,
+        contextualSchemaSpecializationSemanticRetentionMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_organization_event_ids:
@@ -8111,7 +8186,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:autobiographical_life_period`,
       world_state_hash:
         hashAgentRunValue(
-          experientialMethodSemanticRevisionMutationExecution.next_world_state,
+          contextualSchemaSpecializationSemanticRetentionMutationExecution.next_world_state,
         ),
       state_transitions:
         autobiographicalLifePeriodOrganization
@@ -8123,7 +8198,7 @@ export async function resolveWorldSimulationTurn(
   const autobiographicalLifePeriodMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        experientialMethodSemanticRevisionMutationExecution.next_world_state,
+        contextualSchemaSpecializationSemanticRetentionMutationExecution.next_world_state,
       preview_world_state:
         autobiographicalLifePeriodOrganization
           .result
@@ -9120,6 +9195,21 @@ export async function resolveWorldSimulationTurn(
           contextualSchemaSpecializationResolverView.resolver_view_hash,
         projection: cloneJson(contextualSchemaSpecialization),
       },
+      contextual_schema_specialization_admission_resolution: {
+        version: worldSimulationContextualSchemaSpecializationAdmissionVersion,
+        resolver_used: Boolean(contextualSchemaSpecializationAdmissionResolver),
+        resolver_view_hash:
+          contextualSchemaSpecializationAdmissionResolverView.resolver_view_hash,
+        projection: cloneJson(contextualSchemaSpecializationAdmission),
+      },
+      contextual_schema_specialization_semantic_retention:
+        cloneJson(contextualSchemaSpecializationSemanticRetention),
+      contextual_schema_specialization_semantic_retention_mutation_queue:
+        cloneJson(contextualSchemaSpecializationSemanticRetentionMutationQueue),
+      contextual_schema_specialization_semantic_retention_mutation_execution:
+        cloneJson(
+          contextualSchemaSpecializationSemanticRetentionMutationExecution.execution,
+        ),
 
       autobiographical_life_period_organization_decision_resolution: {
         version:
@@ -9757,6 +9847,42 @@ export async function resolveWorldSimulationTurn(
       same_turn_character_brain_feedback_allowed: false,
       persisted_only_with_successful_world_commit: true,
     },
+    contextual_schema_specialization: {
+      version: worldSimulationContextualSchemaSpecializationVersion,
+      resolver_used: Boolean(contextualSchemaSpecializationResolver),
+      proposal_count: contextualSchemaSpecialization.proposal_count,
+      projection_hash: contextualSchemaSpecialization.projection_hash,
+      source_phase78a_evidence_hash:
+        contextualSchemaSpecialization.source_phase78a_evidence_hash,
+      additive_narrowing_qualifiers_only: true,
+      source_contested_state_preserved: true,
+      proposal_only: true,
+      durable_semantic_write_performed: false,
+      phase67c_durable_semantic_owner: true,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+    contextual_schema_specialization_admission: {
+      version: worldSimulationContextualSchemaSpecializationAdmissionVersion,
+      resolver_used: Boolean(contextualSchemaSpecializationAdmissionResolver),
+      admission_decision_count:
+        contextualSchemaSpecializationAdmission.admission_decision_count,
+      emitted_phase67c_semantic_decision_count:
+        contextualSchemaSpecializationAdmission.emitted_phase67c_semantic_decision_count,
+      projection_hash: contextualSchemaSpecializationAdmission.projection_hash,
+      source_phase78a_evidence_hash:
+        contextualSchemaSpecializationAdmission.source_phase78a_evidence_hash,
+      source_phase78b_projection_hash:
+        contextualSchemaSpecializationAdmission.source_phase78b_projection_hash,
+      explicit_admission_required: true,
+      source_contested_state_preserved: true,
+      source_history_rewrite_performed: false,
+      strict_narrowing_required: true,
+      phase67c_durable_semantic_owner: true,
+      direct_durable_semantic_write_performed: false,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
 
     subjective_memory_encoding_decisions:
       cloneJson(
@@ -10016,32 +10142,38 @@ export async function resolveWorldSimulationTurn(
       semantic_decision_count:
         personalSemanticMemoryDerivation.result.semantic_decision_count
         + relationalSchemaPromotion.emitted_phase67c_semantic_decision_count
-        + experientialMethodOutcomeCredit.semantic_decision_count,
+        + experientialMethodOutcomeCredit.semantic_decision_count
+        + contextualSchemaSpecializationAdmission.emitted_phase67c_semantic_decision_count,
       ordinary_semantic_decision_count:
         personalSemanticMemoryDerivation.result.semantic_decision_count,
       relational_schema_promotion_decision_count:
         relationalSchemaPromotion.emitted_phase67c_semantic_decision_count,
       experiential_method_revision_decision_count:
         experientialMethodOutcomeCredit.semantic_decision_count,
+      contextual_schema_specialization_admission_decision_count:
+        contextualSchemaSpecializationAdmission.emitted_phase67c_semantic_decision_count,
       created_derivation_event_count:
         personalSemanticMemoryDerivation.result.derivation_events_created.length
         + relationalSchemaSemanticPromotion.result.derivation_events_created.length
-        + experientialMethodSemanticRevision.result.derivation_events_created.length,
+        + experientialMethodSemanticRevision.result.derivation_events_created.length
+        + contextualSchemaSpecializationSemanticRetention.result.derivation_events_created.length,
       appended_history_reference_count:
         personalSemanticMemoryDerivation.result.history_references_appended.length
         + relationalSchemaSemanticPromotion.result.history_references_appended.length
-        + experientialMethodSemanticRevision.result.history_references_appended.length,
+        + experientialMethodSemanticRevision.result.history_references_appended.length
+        + contextualSchemaSpecializationSemanticRetention.result.history_references_appended.length,
       effective_personal_semantic_projection_hash:
-        experientialMethodSemanticRevision
+        contextualSchemaSpecializationSemanticRetention
           .result
           .effective_personal_semantic_projection
           .projection_hash,
       mutation_count:
         personalSemanticMemoryMutationQueue.mutation_count
         + relationalSchemaSemanticPromotionMutationQueue.mutation_count
-        + experientialMethodSemanticRevisionMutationQueue.mutation_count,
+        + experientialMethodSemanticRevisionMutationQueue.mutation_count
+        + contextualSchemaSpecializationSemanticRetentionMutationQueue.mutation_count,
       authoritative_executor:
-        experientialMethodSemanticRevisionMutationExecution.execution.version,
+        contextualSchemaSpecializationSemanticRetentionMutationExecution.execution.version,
       experience_near_only: true,
       eager_semanticization_used: false,
       recurring_event_pattern_auto_promoted_by_count: false,

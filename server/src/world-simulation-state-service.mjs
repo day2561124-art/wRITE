@@ -375,6 +375,14 @@ export async function commitWorldSimulationTurn(
               input.contextual_schema_refinement_evidence ?? null,
             contextual_schema_specialization_resolution:
               input.contextual_schema_specialization_resolution ?? null,
+            contextual_schema_specialization_admission_resolution:
+              input.contextual_schema_specialization_admission_resolution ?? null,
+            contextual_schema_specialization_semantic_retention:
+              input.contextual_schema_specialization_semantic_retention ?? null,
+            contextual_schema_specialization_semantic_retention_mutation_queue:
+              input.contextual_schema_specialization_semantic_retention_mutation_queue ?? null,
+            contextual_schema_specialization_semantic_retention_mutation_execution:
+              input.contextual_schema_specialization_semantic_retention_mutation_execution ?? null,
             subjective_claim_proposal_resolution:
               input.subjective_claim_proposal_resolution ?? null,
             subjective_claim_projection:
