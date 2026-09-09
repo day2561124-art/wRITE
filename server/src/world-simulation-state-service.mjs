@@ -329,6 +329,14 @@ export async function commitWorldSimulationTurn(
               input.multi_experience_schema_evidence ?? null,
             relational_schema_induction:
               input.relational_schema_induction ?? null,
+            relational_schema_promotion_resolution:
+              input.relational_schema_promotion_resolution ?? null,
+            relational_schema_semantic_promotion:
+              input.relational_schema_semantic_promotion ?? null,
+            relational_schema_semantic_promotion_mutation_queue:
+              input.relational_schema_semantic_promotion_mutation_queue ?? null,
+            relational_schema_semantic_promotion_mutation_execution:
+              input.relational_schema_semantic_promotion_mutation_execution ?? null,
             personal_semantic_memory_decision_resolution:
               input.personal_semantic_memory_decision_resolution ?? null,
             personal_semantic_memory_derivation:

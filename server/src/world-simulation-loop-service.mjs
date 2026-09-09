@@ -36,6 +36,11 @@ import {
   worldSimulationRelationalSchemaInductionVersion,
 } from "./world-simulation-relational-schema-induction-service.mjs";
 import {
+  buildWorldSimulationRelationalSchemaPromotionResolverView,
+  projectWorldSimulationRelationalSchemaPromotion,
+  worldSimulationRelationalSchemaPromotionVersion,
+} from "./world-simulation-relational-schema-promotion-service.mjs";
+import {
   runWorldSimulationNativeCapability,
 } from "./world-simulation-neural-service.mjs";
 import {
@@ -7811,6 +7816,34 @@ export async function resolveWorldSimulationTurn(
       schema_proposals: rawRelationalSchemaProposals,
     });
 
+  // Phase77C is an admission boundary, not another semantic-memory authority.
+  // The promoter sees only bounded Phase77B schema candidates and may return
+  // promote/skip decisions. It cannot author schema text, choose a semantic
+  // identity, or write World State. The legal Phase67C form/support operation is
+  // derived later, after the ordinary Phase67C pass has had first opportunity to
+  // establish an exact semantic identity for this turn.
+  const relationalSchemaPromotionResolverView =
+    buildWorldSimulationRelationalSchemaPromotionResolverView({
+      relational_schema_induction: relationalSchemaInduction,
+    });
+  const relationalSchemaPromotionResolver =
+    typeof options.relationalSchemaPromotionResolver === "function"
+      ? options.relationalSchemaPromotionResolver
+      : null;
+  const rawRelationalSchemaPromotionDecisions =
+    relationalSchemaPromotionResolver
+      ? await relationalSchemaPromotionResolver(
+        cloneJson(relationalSchemaPromotionResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawRelationalSchemaPromotionDecisions)) {
+    const error = new Error(
+      "relationalSchemaPromotionResolver must return an array of explicit Phase77B proposal promotion decisions.",
+    );
+    error.code = "WORLD_SIMULATION_RELATIONAL_SCHEMA_PROMOTION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+
   const personalSemanticDecisionResolution =
     await resolvePersonalSemanticMemoryDecisions(
       autobiographicalLifeEventOrganizationMutationExecution.next_world_state,
@@ -7862,6 +7895,47 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase77C now resolves its previously explicit admission decisions against
+  // the post-ordinary-Phase67C semantic state. Exact descriptor identity may
+  // become support; otherwise a new recurring-event pattern may be formed. No
+  // fuzzy merge, descriptor rewriting, or direct durable write is permitted.
+  const relationalSchemaPromotion =
+    projectWorldSimulationRelationalSchemaPromotion({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      relational_schema_induction: relationalSchemaInduction,
+      resolver_view_hash: relationalSchemaPromotionResolverView.resolver_view_hash,
+      promotion_decisions: rawRelationalSchemaPromotionDecisions,
+    });
+
+  const relationalSchemaSemanticPromotion =
+    buildWorldSimulationPersonalSemanticMemoryDerivations({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
+      semantic_decisions: relationalSchemaPromotion.semantic_decisions,
+    });
+  const relationalSchemaSemanticPromotionMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:personal_semantic_memory`,
+      world_state_hash: hashAgentRunValue(
+        personalSemanticMemoryMutationExecution.next_world_state,
+      ),
+      state_transitions:
+        relationalSchemaSemanticPromotion.result.state_transitions,
+      elapsed_ms: 0,
+    });
+  const relationalSchemaSemanticPromotionMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      preview_world_state:
+        relationalSchemaSemanticPromotion.result.preview_world_state,
+      queue: relationalSchemaSemanticPromotionMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
   // Phase76G evaluates only applications that Phase76F proved were actually
   // selected. Its resolver sees bounded subjective post-outcome experience and
   // method structure, never raw action outcomes or hidden causal evidence. The
@@ -7869,7 +7943,7 @@ export async function resolveWorldSimulationTurn(
   // and counterevidence are emitted as ordinary Phase67C decisions below.
   const experientialMethodOutcomeCreditResolverContext =
     buildWorldSimulationExperientialMethodOutcomeCreditResolverContext({
-      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      world_state: relationalSchemaSemanticPromotionMutationExecution.next_world_state,
       turn_id: preparedTurn.turn_id,
       selected_application_receipts:
         selectedExperientialMethodApplicationReceipts,
@@ -7905,14 +7979,15 @@ export async function resolveWorldSimulationTurn(
       assessment_decisions: rawExperientialMethodOutcomeCreditAssessments,
     });
 
-  // Retain/revise remains Phase67C-owned. This is deliberately a second legal
-  // append-only Phase67C pass after the ordinary semantic resolver so the new
-  // method-outcome evidence cannot create a parallel semantic store or override
-  // generic semantic decisions. No exact current LifeEvent provenance means a
-  // Phase76G assessment may be recorded but this pass remains a no-op.
+  // Retain/revise remains Phase67C-owned. This is deliberately a later legal
+  // append-only Phase67C pass after both the ordinary semantic resolver and the
+  // Phase77C schema-admission pass, so method-outcome evidence cannot create a
+  // parallel semantic store or override either earlier legal decision. No exact
+  // current LifeEvent provenance means a Phase76G assessment may be recorded
+  // but this pass remains a no-op.
   const experientialMethodSemanticRevision =
     buildWorldSimulationPersonalSemanticMemoryDerivations({
-      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      world_state: relationalSchemaSemanticPromotionMutationExecution.next_world_state,
       turn_id: preparedTurn.turn_id,
       source_organization_event_ids: personalSemanticSourceOrganizationEventIds,
       semantic_decisions: experientialMethodOutcomeCredit.semantic_decisions,
@@ -7921,7 +7996,7 @@ export async function resolveWorldSimulationTurn(
     buildWorldSimulationChronologicalMutationQueue({
       turn_id: `${preparedTurn.turn_id}:personal_semantic_memory`,
       world_state_hash: hashAgentRunValue(
-        personalSemanticMemoryMutationExecution.next_world_state,
+        relationalSchemaSemanticPromotionMutationExecution.next_world_state,
       ),
       state_transitions:
         experientialMethodSemanticRevision.result.state_transitions,
@@ -7929,7 +8004,7 @@ export async function resolveWorldSimulationTurn(
     });
   const experientialMethodSemanticRevisionMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
-      world_state: personalSemanticMemoryMutationExecution.next_world_state,
+      world_state: relationalSchemaSemanticPromotionMutationExecution.next_world_state,
       preview_world_state:
         experientialMethodSemanticRevision.result.preview_world_state,
       queue: experientialMethodSemanticRevisionMutationQueue,
@@ -7941,6 +8016,10 @@ export async function resolveWorldSimulationTurn(
 
   const autobiographicalLifePeriodSourceSemanticDerivationEventIds = [
     ...personalSemanticMemoryDerivation
+      .result
+      .derivation_events_created
+      .map((event) => event.derivation_event_id),
+    ...relationalSchemaSemanticPromotion
       .result
       .derivation_events_created
       .map((event) => event.derivation_event_id),
@@ -8933,6 +9012,19 @@ export async function resolveWorldSimulationTurn(
           relationalSchemaInductionResolverView.resolver_view_hash,
         projection: cloneJson(relationalSchemaInduction),
       },
+      relational_schema_promotion_resolution: {
+        version: worldSimulationRelationalSchemaPromotionVersion,
+        resolver_used: Boolean(relationalSchemaPromotionResolver),
+        resolver_view_hash:
+          relationalSchemaPromotionResolverView.resolver_view_hash,
+        projection: cloneJson(relationalSchemaPromotion),
+      },
+      relational_schema_semantic_promotion:
+        cloneJson(relationalSchemaSemanticPromotion),
+      relational_schema_semantic_promotion_mutation_queue:
+        cloneJson(relationalSchemaSemanticPromotionMutationQueue),
+      relational_schema_semantic_promotion_mutation_execution:
+        cloneJson(relationalSchemaSemanticPromotionMutationExecution.execution),
 
       personal_semantic_memory_decision_resolution: {
         version:
@@ -9813,6 +9905,27 @@ export async function resolveWorldSimulationTurn(
       same_turn_character_brain_feedback_allowed: false,
       persisted_only_with_successful_world_commit: true,
     },
+    relational_schema_promotion: {
+      version: worldSimulationRelationalSchemaPromotionVersion,
+      resolver_used: Boolean(relationalSchemaPromotionResolver),
+      promotion_decision_count: relationalSchemaPromotion.promotion_decision_count,
+      emitted_phase67c_semantic_decision_count:
+        relationalSchemaPromotion.emitted_phase67c_semantic_decision_count,
+      projection_hash: relationalSchemaPromotion.projection_hash,
+      source_phase77b_projection_hash:
+        relationalSchemaPromotion.source_phase77b_projection_hash,
+      explicit_programmatic_promotion_required: true,
+      descriptor_truncation_or_rewrite_used: false,
+      exact_existing_descriptor_match_may_support: true,
+      fuzzy_similarity_auto_merge_used: false,
+      recurrence_count_auto_promoted: false,
+      phase67c_durable_semantic_owner_preserved: true,
+      direct_durable_semantic_write_performed: false,
+      world_truth_authority_claimed: false,
+      numeric_similarity_confidence_probability_modeled: false,
+      same_turn_character_brain_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
     personal_semantic_memory: {
       version:
         worldSimulationPersonalSemanticMemoryVersion,
@@ -9820,16 +9933,21 @@ export async function resolveWorldSimulationTurn(
         personalSemanticDecisionResolution.audit.resolver_used === true,
       semantic_decision_count:
         personalSemanticMemoryDerivation.result.semantic_decision_count
+        + relationalSchemaPromotion.emitted_phase67c_semantic_decision_count
         + experientialMethodOutcomeCredit.semantic_decision_count,
       ordinary_semantic_decision_count:
         personalSemanticMemoryDerivation.result.semantic_decision_count,
+      relational_schema_promotion_decision_count:
+        relationalSchemaPromotion.emitted_phase67c_semantic_decision_count,
       experiential_method_revision_decision_count:
         experientialMethodOutcomeCredit.semantic_decision_count,
       created_derivation_event_count:
         personalSemanticMemoryDerivation.result.derivation_events_created.length
+        + relationalSchemaSemanticPromotion.result.derivation_events_created.length
         + experientialMethodSemanticRevision.result.derivation_events_created.length,
       appended_history_reference_count:
         personalSemanticMemoryDerivation.result.history_references_appended.length
+        + relationalSchemaSemanticPromotion.result.history_references_appended.length
         + experientialMethodSemanticRevision.result.history_references_appended.length,
       effective_personal_semantic_projection_hash:
         experientialMethodSemanticRevision
@@ -9838,6 +9956,7 @@ export async function resolveWorldSimulationTurn(
           .projection_hash,
       mutation_count:
         personalSemanticMemoryMutationQueue.mutation_count
+        + relationalSchemaSemanticPromotionMutationQueue.mutation_count
         + experientialMethodSemanticRevisionMutationQueue.mutation_count,
       authoritative_executor:
         experientialMethodSemanticRevisionMutationExecution.execution.version,
