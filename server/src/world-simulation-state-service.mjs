@@ -379,6 +379,8 @@ export async function commitWorldSimulationTurn(
               input.experiential_method_impasse_resolution_application_lineage ?? null,
             experiential_method_outcome_credit_resolution:
               input.experiential_method_outcome_credit_resolution ?? null,
+            experiential_method_impasse_resolution_outcome_evidence:
+              input.experiential_method_impasse_resolution_outcome_evidence ?? null,
             experiential_method_semantic_revision:
               input.experiential_method_semantic_revision ?? null,
             experiential_method_semantic_revision_mutation_queue:

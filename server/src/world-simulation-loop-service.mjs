@@ -152,6 +152,10 @@ import {
   buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineageContract,
 } from "./world-simulation-experiential-method-impasse-resolution-application-lineage-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidence,
+  buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract,
+} from "./world-simulation-experiential-method-impasse-resolution-outcome-evidence-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3440,6 +3444,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseReresolutionContract(),
     experiential_method_impasse_resolution_application_lineage:
       buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineageContract(),
+    experiential_method_impasse_resolution_outcome_evidence:
+      buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -8319,6 +8325,24 @@ export async function resolveWorldSimulationTurn(
       assessment_decisions: rawExperientialMethodOutcomeCreditAssessments,
     });
 
+  // Phase79H closes the outcome-side provenance edge for an impasse resolution
+  // without turning a single selected-method outcome into a comparative claim.
+  // It joins only canonical Phase79G resolution->application lineage with the
+  // exact Phase76G subjective assessment for that same Phase76F application.
+  // No alternative method was executed here, so superiority, resolution success,
+  // and durable preference retention all remain deliberately unclaimed.
+  const experientialMethodImpasseResolutionOutcomeEvidence =
+    buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidence({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      impasse_resolution_application_lineage:
+        experientialMethodImpasseResolutionApplicationLineage,
+      experiential_method_outcome_credit:
+        experientialMethodOutcomeCredit,
+    });
+
   // Retain/revise remains Phase67C-owned. This is deliberately a later legal
   // append-only Phase67C pass after both the ordinary semantic resolver and the
   // Phase77C schema-admission pass, so method-outcome evidence cannot create a
@@ -9506,6 +9530,8 @@ export async function resolveWorldSimulationTurn(
         resolver_used: Boolean(experientialMethodOutcomeCreditResolver),
         projection: cloneJson(experientialMethodOutcomeCredit),
       },
+      experiential_method_impasse_resolution_outcome_evidence:
+        cloneJson(experientialMethodImpasseResolutionOutcomeEvidence),
       experiential_method_semantic_revision:
         cloneJson(experientialMethodSemanticRevision),
       experiential_method_semantic_revision_mutation_queue:
