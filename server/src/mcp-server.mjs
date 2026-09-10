@@ -98,6 +98,7 @@ import {
 import {
   chatgpt_bridge_begin_world_simulation_session,
   chatgpt_bridge_prepare_world_turn,
+  chatgpt_bridge_submit_world_character_deliberation,
   chatgpt_bridge_submit_world_character_action,
   chatgpt_bridge_resolve_world_turn,
   chatgpt_bridge_use_world_scene_causal_analyzer,
@@ -3172,8 +3173,103 @@ const toolDefinitions = [
     handler: async (args) => jsonContent(await chatgpt_bridge_prepare_world_turn(args)),
   },
   {
+    name: "chatgpt_bridge_submit_world_character_deliberation",
+    description: "[low-risk-write] Submit one current Phase79M Character Brain experiential-deliberation response. The current decision declares exactly which stage-specific response field is accepted (Phase76D recall refs, Phase76E transfer mappings, Phase79B qualitative preferences, or Phase79F/J evidence-backed preference revisions). The server validates every ref against the bounded decision, then reprepares the same uncommitted world snapshot. It cannot select an action, author world truth, or provide numeric utility/confidence/probability/reward.",
+    risk: "low-risk-write",
+    inputSchema: baseSchema({
+      prepared_turn_handle: {
+        type: "string",
+        pattern: "^world_prepared_turn_[0-9]{8}-[0-9]{6}-[a-f0-9]{12}$",
+      },
+      decision_handle: {
+        type: "string",
+        pattern: "^world_decision_[a-f0-9]{32}$",
+      },
+      deliberation_response: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          activated_semantic_refs: {
+            type: "array",
+            maxItems: 64,
+            uniqueItems: true,
+            items: { type: "string" },
+          },
+          transfer_mappings: {
+            type: "array",
+            maxItems: 64,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                transfer_ref: { type: "string" },
+                mapping_kind: { type: "string" },
+                current_cue_refs: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 8,
+                  uniqueItems: true,
+                  items: { type: "string" },
+                },
+              },
+              required: ["transfer_ref", "mapping_kind", "current_cue_refs"],
+            },
+          },
+          preference_decisions: {
+            type: "array",
+            maxItems: 64,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                competition_ref: { type: "string" },
+                preference: {
+                  type: "string",
+                  enum: ["left_preferred", "right_preferred", "indifferent", "unresolved"],
+                },
+              },
+              required: ["competition_ref", "preference"],
+            },
+          },
+          preference_revisions: {
+            type: "array",
+            maxItems: 64,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                impasse_ref: { type: "string" },
+                competition_ref: { type: "string" },
+                preference: {
+                  type: "string",
+                  enum: ["left_preferred", "right_preferred", "indifferent"],
+                },
+                evidence_cue_refs: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 8,
+                  uniqueItems: true,
+                  items: { type: "string" },
+                },
+                precedent_refs: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 8,
+                  uniqueItems: true,
+                  items: { type: "string" },
+                },
+              },
+              required: ["impasse_ref", "competition_ref", "preference"],
+            },
+          },
+        },
+      },
+    }, ["prepared_turn_handle", "decision_handle", "deliberation_response"]),
+    handler: async (args) => jsonContent(await chatgpt_bridge_submit_world_character_deliberation(args)),
+  },
+  {
     name: "chatgpt_bridge_submit_world_character_action",
-    description: "[low-risk-write] Submit exactly one current character decision to the parent-process prepared-turn broker. Accepts only the opaque prepared/decision handles and either one existing action_id or reject_all=true. It cannot author an action object, outcome, state transition, or commit decision.",
+    description: "[low-risk-write] Submit exactly one current action-selection decision to the parent-process prepared-turn broker. Accepts only the opaque prepared/decision handles and either one existing action_id or reject_all=true. It cannot be used during Phase79M impasse deliberation and cannot author an action object, outcome, state transition, or commit decision.",
     risk: "low-risk-write",
     inputSchema: baseSchema({
       prepared_turn_handle: {
@@ -4392,6 +4488,7 @@ const chatgptPublicToolNames = new Set([
   "chatgpt_bridge_get_workbench_status",
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_deliberation",
   "chatgpt_bridge_submit_world_character_action",
   "chatgpt_bridge_resolve_world_turn",
   "chatgpt_bridge_get_current_inputs",
@@ -4661,6 +4758,7 @@ const permissionSources = {
   chatgpt_bridge_get_workbench_status: ["workflow_records", "active_engine", "compressed_rules"],
   chatgpt_bridge_begin_world_simulation_session: ["user_input", "agent_run_records", "world_simulation_state"],
   chatgpt_bridge_prepare_world_turn: ["user_input", "agent_run_records", "world_simulation_state", "neural_trace_records", "prepared_turn_ephemeral_broker"],
+  chatgpt_bridge_submit_world_character_deliberation: ["user_input", "world_simulation_state", "prepared_turn_ephemeral_broker"],
   chatgpt_bridge_submit_world_character_action: ["user_input", "world_simulation_state", "prepared_turn_ephemeral_broker"],
   chatgpt_bridge_resolve_world_turn: ["user_input", "world_simulation_state", "world_simulation_history", "neural_trace_records", "prepared_turn_ephemeral_broker"],
   chatgpt_bridge_use_world_scene_causal_analyzer: ["user_input", "agent_run_records", "neural_trace_records"],

@@ -11,6 +11,7 @@ const allowedOperations = new Set([
   "prepared_turn_get_receipt",
   "prepared_turn_get_active",
   "prepared_turn_submit_decision",
+  "prepared_turn_submit_deliberation",
   "prepared_turn_take_for_resolution",
   "prepared_turn_complete_resolution",
   "prepared_turn_abort_resolution",
@@ -104,6 +105,7 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       prepared_turn_handle: payload.prepared_turn_handle,
       prepared_turn: payload.prepared_turn,
       decision_inputs: payload.decision_inputs,
+      decision_round_kind: payload.decision_round_kind,
     }),
     abortPreparation: (payload) => request("prepared_turn_abort_preparation", {
       prepared_turn_handle: payload.prepared_turn_handle,
@@ -117,6 +119,11 @@ export function createWorldSimulationPreparedTurnBrokerIpcClient(options = {}) {
       ...(payload.reject_all === true
         ? { reject_all: true }
         : { action_id: payload.action_id }),
+    }),
+    submitDeliberation: (payload) => request("prepared_turn_submit_deliberation", {
+      prepared_turn_handle: payload.prepared_turn_handle,
+      decision_handle: payload.decision_handle,
+      deliberation_response: payload.deliberation_response,
     }),
     takeForResolution: (payload) => request("prepared_turn_take_for_resolution", {
       prepared_turn_handle: payload.prepared_turn_handle,
@@ -160,6 +167,10 @@ export function attachWorldSimulationPreparedTurnBrokerIpc(
     prepared_turn_get_receipt: (payload) => broker.getReceipt(payload),
     prepared_turn_get_active: (payload) => broker.getActiveReceipt(payload),
     prepared_turn_submit_decision: (payload) => broker.submitDecision(payload),
+    prepared_turn_submit_deliberation: (payload) => broker.submitDeliberation({
+      ...payload,
+      preparer_owner_id: ownerId,
+    }),
     prepared_turn_take_for_resolution: (payload) => broker.takeForResolution({
       ...payload,
       resolver_owner_id: ownerId,

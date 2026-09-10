@@ -6,6 +6,7 @@ import {
   prepareFormalWorldSimulationTurn,
   resolveFormalWorldSimulationTurn,
   submitFormalWorldSimulationCharacterAction,
+  submitFormalWorldSimulationCharacterDeliberation,
 } from "./world-simulation-formal-turn-transport-service.mjs";
 import {
   createWorldSimulationPreparedTurnBrokerIpcClient,
@@ -134,6 +135,11 @@ function formalTurnTool(toolName, invoke) {
 export const chatgpt_bridge_prepare_world_turn = formalTurnTool(
   "chatgpt_bridge_prepare_world_turn",
   prepareFormalWorldSimulationTurn,
+);
+
+export const chatgpt_bridge_submit_world_character_deliberation = formalTurnTool(
+  "chatgpt_bridge_submit_world_character_deliberation",
+  submitFormalWorldSimulationCharacterDeliberation,
 );
 
 export const chatgpt_bridge_submit_world_character_action = formalTurnTool(

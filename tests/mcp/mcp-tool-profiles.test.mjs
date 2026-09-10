@@ -33,6 +33,7 @@ const publicToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_prepare_world_turn",
   "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_submit_world_character_deliberation",
   "chatgpt_bridge_resolve_world_turn",
   "chatgpt_bridge_get_current_inputs",
   "chatgpt_bridge_build_writing_context",
@@ -1205,6 +1206,7 @@ const formalWorldPublicNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_prepare_world_turn",
   "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_submit_world_character_deliberation",
   "chatgpt_bridge_resolve_world_turn",
 ];
 const legacyWorldCapabilityNames = [
@@ -1233,6 +1235,10 @@ assert.deepEqual(
 assert.deepEqual(
   Object.keys(publicToolMap.get("chatgpt_bridge_submit_world_character_action")?.inputSchema?.properties ?? {}).sort(),
   ["action_id", "decision_handle", "prepared_turn_handle", "reject_all"],
+);
+assert.deepEqual(
+  Object.keys(publicToolMap.get("chatgpt_bridge_submit_world_character_deliberation")?.inputSchema?.properties ?? {}).sort(),
+  ["decision_handle", "deliberation_response", "prepared_turn_handle"],
 );
 assert.deepEqual(
   Object.keys(publicToolMap.get("chatgpt_bridge_resolve_world_turn")?.inputSchema?.properties ?? {}).sort(),

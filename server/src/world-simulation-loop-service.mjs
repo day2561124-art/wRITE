@@ -4329,15 +4329,20 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const currentMindTransitionProjections = [];
   const subjectiveCognitionProjections = [];
   const subjectiveBeliefCharacterProjections = [];
+  const experientialKnowledgeReentryResolverViews = [];
   const experientialKnowledgeReentryProjections = [];
+  const experientialMethodTransferResolverViews = [];
   const experientialMethodTransferProjections = [];
   const experientialMethodCompetitionProjections = [];
+  const experientialMethodCompetitionResolutionResolverViews = [];
   const experientialMethodCompetitionResolutionProjections = [];
   const experientialMethodCompetitionGuidanceProjections = [];
   const experientialMethodImpasseDeliberationProjections = [];
   const experientialMethodImpasseDiscriminatingEvidenceProjections = [];
+  const experientialMethodImpasseReresolutionResolverViews = [];
   const experientialMethodImpasseReresolutionProjections = [];
   const experientialMethodImpassePrecedentReentryProjections = [];
+  const experientialMethodImpassePrecedentReresolutionResolverViews = [];
   const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
@@ -4876,6 +4881,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           current_goal: characterState.current_goal ?? null,
         },
       });
+    experientialKnowledgeReentryResolverViews.push(
+      cloneJson(experientialKnowledgeReentryResolverView),
+    );
     const experientialKnowledgeReentryResolver =
       typeof options.experientialKnowledgeReentryResolver === "function"
         ? options.experientialKnowledgeReentryResolver
@@ -4926,6 +4934,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           current_goal: characterState.current_goal ?? null,
         },
       });
+    experientialMethodTransferResolverViews.push(
+      cloneJson(experientialMethodTransferResolverView),
+    );
     const experientialMethodTransferResolver =
       typeof options.experientialMethodTransferResolver === "function"
         ? options.experientialMethodTransferResolver
@@ -4975,6 +4986,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         experiential_method_competition: experientialMethodCompetition,
         experiential_method_transfer_projections: [experientialMethodTransfer],
       });
+    experientialMethodCompetitionResolutionResolverViews.push(
+      cloneJson(experientialMethodCompetitionResolutionResolverView),
+    );
     const experientialMethodCompetitionResolver =
       typeof options.experientialMethodCompetitionResolver === "function"
         ? options.experientialMethodCompetitionResolver
@@ -5310,6 +5324,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         source_phase79e_discriminating_evidence:
           experientialMethodImpasseDiscriminatingEvidence,
       });
+    // Phase79M keeps the exact bounded resolver view in the ephemeral
+    // PreparedTurn so formal Character Brain transport can run a Soar-style
+    // deliberation substate before action selection. The view is not committed
+    // as world truth and remains subject to Phase79F canonical validation on
+    // same-snapshot repreparation.
+    experientialMethodImpasseReresolutionResolverViews.push(
+      cloneJson(experientialMethodImpasseReresolutionResolverView),
+    );
     const experientialMethodImpasseReresolutionResolver =
       typeof options.experientialMethodImpasseReresolutionResolver === "function"
         ? options.experientialMethodImpasseReresolutionResolver
@@ -5426,6 +5448,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         source_phase79i_precedent_reentry:
           experientialMethodImpassePrecedentReentry,
       });
+    // Phase79M also keeps the exact precedent-grounded resolver view in the
+    // ephemeral PreparedTurn. Formal transport may ask the same Character Brain
+    // for one bounded precedent-reuse deliberation round, then replay only the
+    // validated qualitative refs against this exact view on repreparation.
+    experientialMethodImpassePrecedentReresolutionResolverViews.push(
+      cloneJson(experientialMethodImpassePrecedentReresolutionResolverView),
+    );
     const experientialMethodImpassePrecedentReresolutionResolver =
       typeof options.experientialMethodImpassePrecedentReresolutionResolver === "function"
         ? options.experientialMethodImpassePrecedentReresolutionResolver
@@ -5928,12 +5957,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     subjective_cognition_projections: cloneJson(subjectiveCognitionProjections),
     subjective_belief_character_projections:
       cloneJson(subjectiveBeliefCharacterProjections),
+    experiential_knowledge_reentry_resolver_views:
+      cloneJson(experientialKnowledgeReentryResolverViews),
     experiential_knowledge_reentry_projections:
       cloneJson(experientialKnowledgeReentryProjections),
+    experiential_method_transfer_resolver_views:
+      cloneJson(experientialMethodTransferResolverViews),
     experiential_method_transfer_projections:
       cloneJson(experientialMethodTransferProjections),
     experiential_method_competition_projections:
       cloneJson(experientialMethodCompetitionProjections),
+    experiential_method_competition_resolution_resolver_views:
+      cloneJson(experientialMethodCompetitionResolutionResolverViews),
     experiential_method_competition_resolution_projections:
       cloneJson(experientialMethodCompetitionResolutionProjections),
     experiential_method_competition_guidance_projections:
@@ -5942,10 +5977,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpasseDeliberationProjections),
     experiential_method_impasse_discriminating_evidence_projections:
       cloneJson(experientialMethodImpasseDiscriminatingEvidenceProjections),
+    experiential_method_impasse_reresolution_resolver_views:
+      cloneJson(experientialMethodImpasseReresolutionResolverViews),
     experiential_method_impasse_reresolution_projections:
       cloneJson(experientialMethodImpasseReresolutionProjections),
     experiential_method_impasse_precedent_reentry_projections:
       cloneJson(experientialMethodImpassePrecedentReentryProjections),
+    experiential_method_impasse_precedent_reresolution_resolver_views:
+      cloneJson(experientialMethodImpassePrecedentReresolutionResolverViews),
     experiential_method_impasse_precedent_reresolution_projections:
       cloneJson(experientialMethodImpassePrecedentReresolutionProjections),
     experiential_method_candidate_attribution_projections:

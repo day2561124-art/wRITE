@@ -11,6 +11,7 @@ export const worldSimulationMcpBoundaryVersion =
 export const worldSimulationFormalPublicToolNames = Object.freeze([
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_prepare_world_turn",
+  "chatgpt_bridge_submit_world_character_deliberation",
   "chatgpt_bridge_submit_world_character_action",
   "chatgpt_bridge_resolve_world_turn",
 ]);

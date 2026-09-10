@@ -3,6 +3,10 @@ import { randomBytes } from "node:crypto";
 import {
   hashCanonicalValue,
 } from "./canonical-json-hash-service.mjs";
+import {
+  buildWorldSimulationFormalImpasseStoredSubmission,
+  worldSimulationFormalImpasseDecisionKinds,
+} from "./world-simulation-formal-experiential-deliberation-contract.mjs";
 
 export const worldSimulationPreparedTurnBrokerVersion =
   "phase62a-r1-step4b1-prepared-turn-broker-v1";
@@ -123,6 +127,7 @@ function publicDecision(record) {
   return {
     decision_index: record.current_decision_index,
     decision_handle: decision.decision_handle,
+    decision_kind: decision.decision_kind,
     character_input: cloneJson(decision.character_input),
   };
 }
@@ -140,9 +145,12 @@ function publicReceipt(record) {
     invalidated_at: record.invalidated_at ?? null,
     lifecycle_status: record.lifecycle_status,
     status: record.lifecycle_status,
+    decision_round_kind: record.decision_round_kind ?? null,
     decision_count: record.decisions.length,
     submitted_decision_count:
       record.decisions.filter((decision) => decision.status === "submitted").length,
+    deliberation_submission_count:
+      record.deliberation_submission_count ?? 0,
     ready_to_resolve: record.lifecycle_status === "ready_to_resolve",
     current_decision: publicDecision(record),
     payload_reference_active: Boolean(record.prepared_turn),
@@ -184,9 +192,11 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
 
   function releasePayload(record) {
     delete record.prepared_turn;
+    delete record.deliberation_submissions;
     for (const decision of record.decisions) {
       delete decision.character_input;
       delete decision.candidate_action_ids;
+      delete decision.resolver_binding;
     }
     record.preparer_owner_id = null;
     record.resolution_token = null;
@@ -248,8 +258,11 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       world_state_hash: worldStateHash,
       prepared_turn_hash: null,
       prepared_turn: null,
+      decision_round_kind: null,
       decisions: [],
       current_decision_index: 0,
+      deliberation_submissions: [],
+      deliberation_submission_count: 0,
       lifecycle_status: "preparing",
       created_at: new Date().toISOString(),
       broker_storage_scope: brokerStorageScope,
@@ -305,6 +318,19 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         "prepared_turn session/revision/hash binding does not match the preparation reservation.",
       );
     }
+    const decisionRoundKind = requiredString(
+      input.decision_round_kind
+        ?? worldSimulationFormalImpasseDecisionKinds.ACTION,
+      "decision_round_kind",
+      "WORLD_SIMULATION_PREPARED_TURN_DECISION_KIND_INVALID",
+    );
+    if (!Object.values(worldSimulationFormalImpasseDecisionKinds)
+      .includes(decisionRoundKind)) {
+      fail(
+        "WORLD_SIMULATION_PREPARED_TURN_DECISION_KIND_INVALID",
+        "decision_round_kind is not a supported formal decision stage.",
+      );
+    }
 
     const preparedTurn = cloneJson(input.prepared_turn);
     const characters = new Set();
@@ -327,7 +353,22 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         );
       }
       characters.add(character);
-      const candidates = Array.isArray(item.character_input.candidate_action_intents)
+      const decisionKind = requiredString(
+        item.decision_kind
+          ?? worldSimulationFormalImpasseDecisionKinds.ACTION,
+        `decision_inputs[${index}].decision_kind`,
+        "WORLD_SIMULATION_PREPARED_TURN_DECISION_KIND_INVALID",
+      );
+      if (decisionKind !== decisionRoundKind) {
+        fail(
+          "WORLD_SIMULATION_PREPARED_TURN_DECISION_KIND_INVALID",
+          "All decisions in one prepared round must share the same decision kind.",
+        );
+      }
+      const actionRound =
+        decisionKind === worldSimulationFormalImpasseDecisionKinds.ACTION;
+      const candidates = actionRound
+        && Array.isArray(item.character_input.candidate_action_intents)
         ? item.character_input.candidate_action_intents
         : [];
       const candidateActionIds = candidates.map((candidate, candidateIndex) => requiredString(
@@ -335,12 +376,23 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         `decision_inputs[${index}].candidate_action_intents[${candidateIndex}].action_id`,
         "WORLD_SIMULATION_PREPARED_TURN_ACTION_ID_INVALID",
       ));
+      const resolverBinding = actionRound
+        ? null
+        : cloneJson(item.resolver_binding);
+      if (!actionRound && !isObject(resolverBinding)) {
+        fail(
+          "WORLD_SIMULATION_PREPARED_TURN_DECISION_INVALID",
+          "Impasse-deliberation decisions require an engine-owned resolver binding.",
+        );
+      }
       return {
         decision_handle: `world_decision_${randomBytes(16).toString("hex")}`,
         decision_index: index,
+        decision_kind: decisionKind,
         character,
         character_input: cloneJson(item.character_input),
         candidate_action_ids: [...new Set(candidateActionIds)],
+        resolver_binding: resolverBinding,
         status: "pending",
         selection: null,
         submitted_at: null,
@@ -349,6 +401,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
 
     record.prepared_turn_hash = hashCanonicalValue(preparedTurn);
     record.prepared_turn = preparedTurn;
+    record.decision_round_kind = decisionRoundKind;
     record.decisions = decisions;
     record.current_decision_index = 0;
     record.lifecycle_status = "prepared";
@@ -404,6 +457,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         preparer_owner_id: ownerId,
         prepared_turn: input.prepared_turn,
         decision_inputs: input.decision_inputs,
+        decision_round_kind: input.decision_round_kind,
       });
     } catch (error) {
       try {
@@ -453,6 +507,13 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
         "Only the current pending character decision may be submitted.",
       );
     }
+    if (record.decision_round_kind !== worldSimulationFormalImpasseDecisionKinds.ACTION
+        || expected.decision_kind !== worldSimulationFormalImpasseDecisionKinds.ACTION) {
+      fail(
+        "WORLD_SIMULATION_ACTION_SUBMISSION_DURING_IMPASSE_DELIBERATION",
+        "Action selection cannot be submitted while the current Character Brain decision is an impasse-deliberation substate.",
+      );
+    }
 
     const rejectAll = input.reject_all === true;
     const actionId = typeof input.action_id === "string"
@@ -483,12 +544,91 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     return publicReceipt(record);
   }
 
+  function submitDeliberation(input = {}) {
+    const record = recordForHandle(input.prepared_turn_handle);
+    if (record.lifecycle_status !== "prepared") {
+      fail(
+        "WORLD_SIMULATION_PREPARED_TURN_NOT_ACCEPTING_DECISIONS",
+        "prepared_turn_handle is not accepting character decisions.",
+      );
+    }
+    const expected = record.decisions[record.current_decision_index];
+    const decisionHandle = requiredDecisionHandle(input.decision_handle);
+    if (!expected || expected.decision_handle !== decisionHandle || expected.status !== "pending") {
+      fail(
+        "WORLD_SIMULATION_DECISION_ORDER_VIOLATION",
+        "Only the current pending character decision may be submitted.",
+      );
+    }
+    const deliberationKinds = new Set([
+      worldSimulationFormalImpasseDecisionKinds.PHASE76D,
+      worldSimulationFormalImpasseDecisionKinds.PHASE76E,
+      worldSimulationFormalImpasseDecisionKinds.PHASE79B,
+      worldSimulationFormalImpasseDecisionKinds.PHASE79F,
+      worldSimulationFormalImpasseDecisionKinds.PHASE79J,
+    ]);
+    if (!deliberationKinds.has(record.decision_round_kind)
+        || expected.decision_kind !== record.decision_round_kind) {
+      fail(
+        "WORLD_SIMULATION_IMPASSE_DELIBERATION_SUBMISSION_DURING_ACTION_SELECTION",
+        "Impasse deliberation cannot be submitted while the current Character Brain decision is action selection.",
+      );
+    }
+    const ownerId = requiredString(
+      input.preparer_owner_id,
+      "preparer_owner_id",
+      "WORLD_SIMULATION_PREPARER_OWNER_INVALID",
+    );
+    const storedSubmission = buildWorldSimulationFormalImpasseStoredSubmission({
+      resolver_binding: expected.resolver_binding,
+      character_input: expected.character_input,
+      deliberation_response: input.deliberation_response,
+      preference_revisions: input.preference_revisions,
+    });
+    if (record.deliberation_submissions.some((entry) =>
+      entry.decision_kind === storedSubmission.decision_kind
+        && entry.character === storedSubmission.character)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_IMPASSE_DELIBERATION_DUPLICATE_SUBMISSION",
+        "Only one impasse-deliberation submission per stage and character is accepted.",
+      );
+    }
+
+    record.deliberation_submissions.push(cloneJson(storedSubmission));
+    record.deliberation_submission_count += 1;
+    expected.status = "submitted";
+    expected.selection = "impasse_deliberation_submitted";
+    expected.submitted_at = new Date().toISOString();
+    record.current_decision_index += 1;
+
+    const repreparationRequired =
+      record.current_decision_index >= record.decisions.length;
+    if (repreparationRequired) {
+      record.lifecycle_status = "preparing";
+      record.preparer_owner_id = ownerId;
+      record.decision_round_kind = null;
+      record.decisions = [];
+      record.current_decision_index = 0;
+    }
+    return {
+      receipt: publicReceipt(record),
+      repreparation_required: repreparationRequired,
+      deliberation_submissions: cloneJson(record.deliberation_submissions),
+    };
+  }
+
   function takeForResolution(input = {}) {
     const record = recordForHandle(input.prepared_turn_handle);
     if (record.lifecycle_status !== "ready_to_resolve") {
       fail(
         "WORLD_SIMULATION_PREPARED_TURN_NOT_READY",
         "prepared_turn_handle is not ready for one-shot resolution.",
+      );
+    }
+    if (record.decision_round_kind !== worldSimulationFormalImpasseDecisionKinds.ACTION) {
+      fail(
+        "WORLD_SIMULATION_PREPARED_TURN_NOT_READY",
+        "Only a completed action-selection round may enter world resolution.",
       );
     }
     const ownerId = requiredString(
@@ -602,6 +742,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
     getReceipt,
     getActiveReceipt,
     submitDecision,
+    submitDeliberation,
     takeForResolution,
     completeResolution,
     abortResolution,

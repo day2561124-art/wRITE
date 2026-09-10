@@ -334,6 +334,7 @@ try {
     [
       "chatgpt_bridge_begin_world_simulation_session",
       "chatgpt_bridge_prepare_world_turn",
+      "chatgpt_bridge_submit_world_character_deliberation",
       "chatgpt_bridge_submit_world_character_action",
       "chatgpt_bridge_resolve_world_turn",
     ],
@@ -457,6 +458,34 @@ try {
     ["world_simulation_session_id"],
   );
 
+  const deliberationSubmitSchema =
+    publicToolMap.get(
+      "chatgpt_bridge_submit_world_character_deliberation",
+    )?.inputSchema
+    ?? {};
+  assert.deepEqual(
+    Object.keys(deliberationSubmitSchema.properties ?? {}).sort(),
+    [
+      "decision_handle",
+      "deliberation_response",
+      "prepared_turn_handle",
+    ],
+  );
+  assert.deepEqual(
+    Object.keys(
+      deliberationSubmitSchema.properties
+        ?.deliberation_response
+        ?.properties
+      ?? {},
+    ).sort(),
+    [
+      "activated_semantic_refs",
+      "preference_decisions",
+      "preference_revisions",
+      "transfer_mappings",
+    ],
+  );
+
   const submitSchema =
     publicToolMap.get(
       "chatgpt_bridge_submit_world_character_action",
@@ -493,6 +522,10 @@ try {
     assert.equal(
       Object.hasOwn(
         prepareSchema.properties ?? {},
+        forbidden,
+      )
+      || Object.hasOwn(
+        deliberationSubmitSchema.properties ?? {},
         forbidden,
       )
       || Object.hasOwn(

@@ -32,6 +32,12 @@ import {
 import {
   projectWorldSimulationActionCommitmentSubjectiveExecutionExperience,
 } from "./world-simulation-action-commitment-subjective-execution-experience-service.mjs";
+import {
+  buildWorldSimulationFormalImpasseDeliberationContract,
+  buildWorldSimulationFormalImpasseDeliberationRound,
+  buildWorldSimulationFormalImpasseResolverReplay,
+  worldSimulationFormalImpasseDecisionKinds,
+} from "./world-simulation-formal-experiential-deliberation-service.mjs";
 
 export const worldSimulationFormalTurnTransportVersion =
   "phase62a-r1-step4b1-formal-turn-transport-core-v1";
@@ -52,6 +58,22 @@ function formalLoopOptions(options = {}) {
   return options.fixtureRoot
     ? { fixtureRoot: options.fixtureRoot }
     : {};
+}
+
+function formalReplayLoopOptions(options = {}, priorSubmissions = []) {
+  const base = formalLoopOptions(options);
+  if (!Array.isArray(priorSubmissions) || priorSubmissions.length === 0) {
+    return base;
+  }
+  // Phase79M is the only formal-mainline resolver exception: these closures
+  // are minted by the trusted transport from broker-held, already validated
+  // Character Brain submissions. No caller callback or neural adapter is
+  // forwarded, and every replay is bound to the exact canonical resolver-view
+  // hash that produced the deliberation task.
+  return {
+    ...base,
+    ...buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions),
+  };
 }
 
 function preparedTurnBroker(options = {}) {
@@ -83,8 +105,11 @@ function preparationSurface(receipt, reused) {
     prepared_turn_handle: receipt.prepared_turn_handle,
     world_simulation_session_id: receipt.world_simulation_session_id,
     lifecycle_status: receipt.lifecycle_status,
+    decision_round_kind: receipt.decision_round_kind ?? null,
     decision_count: receipt.decision_count,
     submitted_decision_count: receipt.submitted_decision_count,
+    deliberation_submission_count:
+      receipt.deliberation_submission_count ?? 0,
     ready_to_resolve: receipt.ready_to_resolve,
     reused_existing_prepared_turn: reused === true,
     current_decision: receipt.current_decision,
@@ -95,6 +120,9 @@ function preparationSurface(receipt, reused) {
       all_character_packets_exposed_together: false,
       one_active_prepared_turn_per_world_session: true,
       decision_order_server_enforced: true,
+      phase79m_impasse_deliberation_rounds_supported: true,
+      impasse_deliberation_and_action_submission_separated: true,
+      same_snapshot_impasse_repreparation_enforced: true,
       caller_authors_candidate_action: false,
       caller_decides_causal_outcome: false,
       caller_decides_commit_gate: false,
@@ -149,12 +177,79 @@ async function assertReceiptFresh(receipt, options) {
   return snapshot;
 }
 
+async function buildFormalActionDecisionInputs(prepared, sessionId, loopOptions) {
+  const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
+  return prepared.decision_packets.map((packet) => {
+    const effectiveCommitment = projectWorldSimulationEffectiveActionCommitment({
+      world_history: worldHistory,
+      world_simulation_session_id: sessionId,
+      character: packet.character,
+    });
+    const commitmentExposure =
+      buildWorldSimulationEffectiveActionCommitmentCharacterExposure(
+        effectiveCommitment,
+      );
+    const executionFeedback =
+      projectWorldSimulationActionCommitmentExecutionFeedback({
+        effective_action_commitment_projection: effectiveCommitment,
+        world_history: worldHistory,
+      });
+    const subjectiveExecutionExperience =
+      projectWorldSimulationActionCommitmentSubjectiveExecutionExperience({
+        execution_feedback_projection: executionFeedback,
+        world_history: worldHistory,
+      });
+    return {
+      decision_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
+      character_input: buildWorldSimulationCharacterBrainInput(packet, {
+        effective_action_commitment_character_exposure: commitmentExposure,
+        action_commitment_subjective_execution_experience:
+          subjectiveExecutionExperience,
+      }),
+    };
+  });
+}
+
+async function prepareFormalDecisionRound(
+  sessionId,
+  options,
+  priorSubmissions = [],
+) {
+  const loopOptions = formalReplayLoopOptions(options, priorSubmissions);
+  const prepared = await prepareWorldSimulationTurn(
+    { world_simulation_session_id: sessionId },
+    loopOptions,
+  );
+  const impasseRound = buildWorldSimulationFormalImpasseDeliberationRound({
+    prepared_turn: prepared,
+    prior_submissions: priorSubmissions,
+  });
+  if (impasseRound) {
+    return {
+      prepared,
+      decision_round_kind: impasseRound.decision_round_kind,
+      decision_inputs: impasseRound.decision_inputs,
+    };
+  }
+  return {
+    prepared,
+    decision_round_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
+    decision_inputs: await buildFormalActionDecisionInputs(
+      prepared,
+      sessionId,
+      loopOptions,
+    ),
+  };
+}
+
 export function buildWorldSimulationFormalTurnTransportContract() {
   return {
     version: worldSimulationFormalTurnTransportVersion,
     prepared_turn_broker_version: worldSimulationPreparedTurnBrokerVersion,
     character_brain_input_version: worldSimulationCharacterBrainInputVersion,
-    phase: "Phase62A-R1 Step 4B-1",
+    formal_impasse_deliberation:
+      buildWorldSimulationFormalImpasseDeliberationContract(),
+    phase: "Phase62A-R1 Step 4B-1 + Phase79M",
     bootstrap: {
       initial_world_state_supported_at_session_begin: true,
       repeated_world_state_initialization_allowed: false,
@@ -178,6 +273,10 @@ export function buildWorldSimulationFormalTurnTransportContract() {
     },
     authority: {
       caller_may_submit_action_id_only: true,
+      caller_may_submit_bounded_impasse_preference_revisions: true,
+      impasse_preference_submission_requires_current_decision_handle: true,
+      impasse_preference_submission_replayed_by_server_owned_closure_only: true,
+      action_selection_may_not_supply_impasse_preference: true,
       caller_may_submit_action_object: false,
       caller_may_submit_selected_actions_map: false,
       caller_may_submit_next_world_state: false,
@@ -261,48 +360,18 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
   }
 
   try {
-    const prepared = await prepareWorldSimulationTurn(
-      {
-        world_simulation_session_id: sessionId,
-      },
-      loopOptions,
+    const decisionRound = await prepareFormalDecisionRound(
+      sessionId,
+      options,
+      [],
     );
-
-    const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
-    const decisionInputs = prepared.decision_packets.map((packet) => {
-      const effectiveCommitment = projectWorldSimulationEffectiveActionCommitment({
-        world_history: worldHistory,
-        world_simulation_session_id: sessionId,
-        character: packet.character,
-      });
-      const commitmentExposure =
-        buildWorldSimulationEffectiveActionCommitmentCharacterExposure(
-          effectiveCommitment,
-        );
-      const executionFeedback =
-        projectWorldSimulationActionCommitmentExecutionFeedback({
-          effective_action_commitment_projection: effectiveCommitment,
-          world_history: worldHistory,
-        });
-      const subjectiveExecutionExperience =
-        projectWorldSimulationActionCommitmentSubjectiveExecutionExperience({
-          execution_feedback_projection: executionFeedback,
-          world_history: worldHistory,
-        });
-      return {
-        character_input: buildWorldSimulationCharacterBrainInput(packet, {
-          effective_action_commitment_character_exposure: commitmentExposure,
-          action_commitment_subjective_execution_experience:
-            subjectiveExecutionExperience,
-        }),
-      };
-    });
 
     const receipt = await broker.storePrepared({
       prepared_turn_handle: reservation.receipt.prepared_turn_handle,
       preparer_owner_id: formalResolverOwnerId,
-      prepared_turn: prepared,
-      decision_inputs: decisionInputs,
+      prepared_turn: decisionRound.prepared,
+      decision_inputs: decisionRound.decision_inputs,
+      decision_round_kind: decisionRound.decision_round_kind,
     });
 
     return preparationSurface(receipt, false);
@@ -312,6 +381,72 @@ export async function prepareFormalWorldSimulationTurn(input = {}, options = {})
         prepared_turn_handle: reservation.receipt.prepared_turn_handle,
         preparer_owner_id: formalResolverOwnerId,
         reason: error?.code ?? "formal_preparation_failed",
+      });
+    } catch {}
+    throw error;
+  }
+}
+
+export async function submitFormalWorldSimulationCharacterDeliberation(
+  input = {},
+  options = {},
+) {
+  const handle = requiredString(
+    input.prepared_turn_handle,
+    "prepared_turn_handle",
+    "WORLD_SIMULATION_FORMAL_PREPARED_TURN_HANDLE_REQUIRED",
+  );
+  const broker = preparedTurnBroker(options);
+  const before = await broker.getReceipt({
+    prepared_turn_handle: handle,
+  });
+  await assertReceiptFresh(before, options);
+
+  const decisionHandle = requiredString(
+    input.decision_handle,
+    "decision_handle",
+    "WORLD_SIMULATION_FORMAL_DECISION_HANDLE_REQUIRED",
+  );
+  if (!input.deliberation_response
+      || typeof input.deliberation_response !== "object"
+      || Array.isArray(input.deliberation_response)) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+      "deliberation_response must be one stage-specific bounded response object.",
+    );
+  }
+
+  const submitted = await broker.submitDeliberation({
+    prepared_turn_handle: handle,
+    decision_handle: decisionHandle,
+    deliberation_response: input.deliberation_response,
+    preparer_owner_id: formalResolverOwnerId,
+  });
+
+  if (submitted.repreparation_required !== true) {
+    return preparationSurface(submitted.receipt, false);
+  }
+
+  try {
+    const decisionRound = await prepareFormalDecisionRound(
+      before.world_simulation_session_id,
+      options,
+      submitted.deliberation_submissions,
+    );
+    const receipt = await broker.storePrepared({
+      prepared_turn_handle: handle,
+      preparer_owner_id: formalResolverOwnerId,
+      prepared_turn: decisionRound.prepared,
+      decision_inputs: decisionRound.decision_inputs,
+      decision_round_kind: decisionRound.decision_round_kind,
+    });
+    return preparationSurface(receipt, false);
+  } catch (error) {
+    try {
+      await broker.abortPreparation({
+        prepared_turn_handle: handle,
+        preparer_owner_id: formalResolverOwnerId,
+        reason: error?.code ?? "formal_impasse_repreparation_failed",
       });
     } catch {}
     throw error;
