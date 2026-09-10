@@ -171,6 +171,11 @@ import {
   worldSimulationAnalogicalExperienceAdaptationVersion,
 } from "./world-simulation-analogical-experience-adaptation-service.mjs";
 import {
+  buildWorldSimulationAnalogicalExperienceRevalidationContract,
+  projectWorldSimulationAnalogicalExperienceRevalidation,
+  worldSimulationAnalogicalExperienceRevalidationVersion,
+} from "./world-simulation-analogical-experience-revalidation-service.mjs";
+import {
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract,
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView,
   projectWorldSimulationExperientialMethodImpassePrecedentReresolution,
@@ -3472,6 +3477,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationAnalogicalExperienceCandidateContract(),
     analogical_experience_adaptation:
       buildWorldSimulationAnalogicalExperienceAdaptationContract(),
+    analogical_experience_revalidation:
+      buildWorldSimulationAnalogicalExperienceRevalidationContract(),
     experiential_method_impasse_precedent_reresolution:
       buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract(),
     experiential_method_application_lineage:
@@ -4360,6 +4367,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const analogicalExperienceCandidateProjections = [];
   const analogicalExperienceAdaptationResolverViews = [];
   const analogicalExperienceAdaptationProjections = [];
+  const analogicalExperienceRevalidationProjections = [];
   const experientialMethodImpassePrecedentReresolutionResolverViews = [];
   const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
@@ -5510,6 +5518,31 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       analogicalExperienceAdaptation.character_view,
     );
 
+    // Phase80C is the deterministic revise/revalidation boundary after the
+    // Phase80B adaptation decision. It resolves every selected current cue ref
+    // against the exact same-turn Phase79E catalog and re-verifies the current
+    // corresponding method against Phase79D before exposing usable guidance.
+    // No new resolver is introduced here: the engine only compiles current
+    // canonical method semantics plus current visible cue content into bounded
+    // advisory guidance for the existing Action Proposer.
+    const analogicalExperienceRevalidation =
+      projectWorldSimulationAnalogicalExperienceRevalidation({
+        source_phase79d_impasse_deliberation:
+          experientialMethodImpasseDeliberation,
+        source_phase79e_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+        source_phase80a_projection:
+          analogicalExperienceCandidate,
+        source_phase80b_adaptation:
+          analogicalExperienceAdaptation,
+      });
+    analogicalExperienceRevalidationProjections.push(
+      cloneJson(analogicalExperienceRevalidation),
+    );
+    characterCognition.analogical_experience_revalidation = cloneJson(
+      analogicalExperienceRevalidation.character_view,
+    );
+
     // Phase79J gives prior evaluated precedents one bounded chance to help the
     // unresolved impasse substate produce new qualitative preferences. Only
     // Phase79I precedents whose historical resolution cues all exactly match
@@ -6066,6 +6099,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(analogicalExperienceAdaptationResolverViews),
     analogical_experience_adaptation_projections:
       cloneJson(analogicalExperienceAdaptationProjections),
+    analogical_experience_revalidation_projections:
+      cloneJson(analogicalExperienceRevalidationProjections),
     experiential_method_impasse_precedent_reresolution_resolver_views:
       cloneJson(experientialMethodImpassePrecedentReresolutionResolverViews),
     experiential_method_impasse_precedent_reresolution_projections:

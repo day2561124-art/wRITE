@@ -850,6 +850,7 @@ const steps = [
   ["Phase 79M native qualitative impasse deliberation", ["tests/phase79/phase79m-native-qualitative-impasse-deliberation.test.mjs"]],
   ["Phase 80A difference-aware structural analogy candidate", ["tests/phase80/phase80a-difference-aware-structural-analogy-candidate.test.mjs"]],
   ["Phase 80B bounded analogical adaptation deliberation", ["tests/phase80/phase80b-bounded-analogical-adaptation-deliberation.test.mjs"]],
+  ["Phase 80C adapted analogy current-context revalidation", ["tests/phase80/phase80c-adapted-analogy-current-context-revalidation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
