@@ -156,6 +156,10 @@ import {
   buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract,
 } from "./world-simulation-experiential-method-impasse-resolution-outcome-evidence-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpassePrecedentReentryContract,
+  projectWorldSimulationExperientialMethodImpassePrecedentReentry,
+} from "./world-simulation-experiential-method-impasse-precedent-reentry-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3446,6 +3450,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineageContract(),
     experiential_method_impasse_resolution_outcome_evidence:
       buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract(),
+    experiential_method_impasse_precedent_reentry:
+      buildWorldSimulationExperientialMethodImpassePrecedentReentryContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -4243,6 +4249,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   );
   await assertWorldSimulationSession(sessionId, options);
   const snapshot = await getWorldSimulationState(sessionId, options);
+  const worldHistory = await getWorldSimulationHistory(sessionId, options);
   const worldState = snapshot.state;
   const event = currentEvent(worldState, input.event_id ?? null);
   const sceneState = currentScene(worldState, event);
@@ -4295,6 +4302,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodImpasseDeliberationProjections = [];
   const experientialMethodImpasseDiscriminatingEvidenceProjections = [];
   const experientialMethodImpasseReresolutionProjections = [];
+  const experientialMethodImpassePrecedentReentryProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
@@ -5343,6 +5351,30 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     characterCognition.experiential_method_impasse_reresolution =
       cloneJson(experientialMethodImpasseReresolution.character_view);
 
+    // Phase79I reconstructs same-character prior committed impasse-resolution
+    // precedents only for impasses that remain unresolved after the current
+    // Phase79F pass. Cross-turn identity is exact normalized method-skeleton
+    // equality; historical resolution cues are compared to current Phase79E
+    // cues by exact kind+content only. This stays engine-side in Phase79I so a
+    // precedent cannot bypass Phase79F and silently become an action choice or
+    // comparative preference.
+    const experientialMethodImpassePrecedentReentry =
+      projectWorldSimulationExperientialMethodImpassePrecedentReentry({
+        world_simulation_session_id: sessionId,
+        character,
+        current_turn_id: turnId,
+        current_state_revision: snapshot.revision,
+        current_world_state_hash: snapshot.state_hash,
+        world_history: worldHistory,
+        current_impasse_deliberation: experientialMethodImpasseDeliberation,
+        current_impasse_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+        current_impasse_reresolution: experientialMethodImpasseReresolution,
+      });
+    experientialMethodImpassePrecedentReentryProjections.push(
+      cloneJson(experientialMethodImpassePrecedentReentry),
+    );
+
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5771,6 +5803,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpasseDiscriminatingEvidenceProjections),
     experiential_method_impasse_reresolution_projections:
       cloneJson(experientialMethodImpasseReresolutionProjections),
+    experiential_method_impasse_precedent_reentry_projections:
+      cloneJson(experientialMethodImpassePrecedentReentryProjections),
     experiential_method_candidate_attribution_projections:
       cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
@@ -9670,6 +9704,10 @@ export async function resolveWorldSimulationTurn(
       experiential_method_impasse_reresolution_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_reresolution_projections ?? [],
+        ),
+      experiential_method_impasse_precedent_reentry_projections:
+        cloneJson(
+          preparedTurn.experiential_method_impasse_precedent_reentry_projections ?? [],
         ),
       experiential_method_candidate_attribution_projections:
         cloneJson(

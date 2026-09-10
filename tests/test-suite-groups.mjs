@@ -168,6 +168,7 @@ export const phase79ExperientialMethodCompetitionSteps = Object.freeze([
   Object.freeze(["Phase 79F experiential method impasse re-resolution", Object.freeze(["tests/phase79/phase79f-experiential-method-impasse-reresolution.test.mjs"])]),
   Object.freeze(["Phase 79G experiential method impasse resolution application lineage", Object.freeze(["tests/phase79/phase79g-experiential-method-impasse-resolution-application-lineage.test.mjs"])]),
   Object.freeze(["Phase 79H experiential method impasse resolution outcome evidence", Object.freeze(["tests/phase79/phase79h-experiential-method-impasse-resolution-outcome-evidence.test.mjs"])]),
+  Object.freeze(["Phase 79I experiential method impasse precedent re-entry evidence", Object.freeze(["tests/phase79/phase79i-experiential-method-impasse-precedent-reentry.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
