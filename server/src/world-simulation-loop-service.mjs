@@ -160,6 +160,11 @@ import {
   projectWorldSimulationExperientialMethodImpassePrecedentReentry,
 } from "./world-simulation-experiential-method-impasse-precedent-reentry-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract,
+  buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView,
+  projectWorldSimulationExperientialMethodImpassePrecedentReresolution,
+} from "./world-simulation-experiential-method-impasse-precedent-reresolution-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3452,6 +3457,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract(),
     experiential_method_impasse_precedent_reentry:
       buildWorldSimulationExperientialMethodImpassePrecedentReentryContract(),
+    experiential_method_impasse_precedent_reresolution:
+      buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -3497,6 +3504,34 @@ export function buildWorldSimulationLoopContract() {
       semantic_revision_authority: false,
       numeric_utility_authority: false,
       missing_hook_preserves_impasse: true,
+    },
+
+    experiential_method_impasse_precedent_reresolution_resolver_hook: {
+      owner: "programmatic_experiential_method_impasse_precedent_reresolution_resolver",
+      optional: true,
+      option_name: "experientialMethodImpassePrecedentReresolutionResolver",
+      source_scope: "phase79f_remaining_impasses_plus_phase79i_exact_full_cue_match_precedents",
+      receives_existing_impasse_competition_refs: true,
+      receives_bounded_current_method_skeletons: true,
+      receives_exact_match_precedent_refs: true,
+      receives_precedent_outcome_assessment: true,
+      receives_raw_world_history: false,
+      receives_historical_transfer_refs_as_current_identity: false,
+      receives_selected_action: false,
+      receives_current_action_outcome: false,
+      receives_world_state: false,
+      receives_hidden_causal_evidence: false,
+      may_return_only_impasse_ref_competition_ref_preference_precedent_ref_records: true,
+      supported_preferences: ["left_preferred", "right_preferred", "indifferent"],
+      nonempty_eligible_precedent_refs_required: true,
+      directional_preference_requires_directionally_relevant_nonambiguous_precedent: true,
+      automatic_majority_or_recency_voting_allowed: false,
+      fuzzy_similarity_allowed: false,
+      action_selection_authority: false,
+      semantic_revision_authority: false,
+      numeric_utility_authority: false,
+      comparative_truth_authority: false,
+      missing_hook_preserves_phase79f_impasse: true,
     },
 
     experiential_method_candidate_attribution_resolver_hook: {
@@ -4303,6 +4338,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodImpasseDiscriminatingEvidenceProjections = [];
   const experientialMethodImpasseReresolutionProjections = [];
   const experientialMethodImpassePrecedentReentryProjections = [];
+  const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
@@ -5375,6 +5411,111 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpassePrecedentReentry),
     );
 
+    // Phase79J gives prior evaluated precedents one bounded chance to help the
+    // unresolved impasse substate produce new qualitative preferences. Only
+    // Phase79I precedents whose historical resolution cues all exactly match
+    // current context enter the resolver view. The resolver cannot see raw
+    // history/world truth and cannot select an action; its output is replayed
+    // through the existing Phase79B decision kernel and Phase79C compiler.
+    const experientialMethodImpassePrecedentReresolutionResolverView =
+      buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView({
+        source_phase79b_resolver_view:
+          experientialMethodCompetitionResolutionResolverView,
+        source_phase79f_reresolution:
+          experientialMethodImpasseReresolution,
+        source_phase79i_precedent_reentry:
+          experientialMethodImpassePrecedentReentry,
+      });
+    const experientialMethodImpassePrecedentReresolutionResolver =
+      typeof options.experientialMethodImpassePrecedentReresolutionResolver === "function"
+        ? options.experientialMethodImpassePrecedentReresolutionResolver
+        : null;
+    const rawExperientialMethodImpassePrecedentPreferenceRevisions =
+      experientialMethodImpassePrecedentReresolutionResolver
+        ? await experientialMethodImpassePrecedentReresolutionResolver(
+          cloneJson(experientialMethodImpassePrecedentReresolutionResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawExperientialMethodImpassePrecedentPreferenceRevisions)) {
+      const error = new Error(
+        "experientialMethodImpassePrecedentReresolutionResolver must return an array of precedent-grounded qualitative preference revisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_RERESOLUTION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const experientialMethodImpassePrecedentReresolution =
+      projectWorldSimulationExperientialMethodImpassePrecedentReresolution({
+        resolver_view:
+          experientialMethodImpassePrecedentReresolutionResolverView,
+        source_phase79b_resolver_view:
+          experientialMethodCompetitionResolutionResolverView,
+        source_phase79f_reresolution:
+          experientialMethodImpasseReresolution,
+        source_phase79i_precedent_reentry:
+          experientialMethodImpassePrecedentReentry,
+        preference_revisions:
+          rawExperientialMethodImpassePrecedentPreferenceRevisions,
+      });
+    experientialMethodImpassePrecedentReresolutionProjections.push(
+      cloneJson(experientialMethodImpassePrecedentReresolution),
+    );
+    const precedentEffectiveExperientialMethodCompetitionGuidance =
+      projectWorldSimulationExperientialMethodCompetitionGuidance({
+        experiential_method_transfer: experientialMethodTransfer,
+        experiential_method_competition_resolution:
+          experientialMethodImpassePrecedentReresolution.effective_competition_resolution,
+      });
+    experientialMethodCompetitionGuidanceProjections[
+      experientialMethodCompetitionGuidanceProjections.length - 1
+    ] = cloneJson(precedentEffectiveExperientialMethodCompetitionGuidance);
+    characterCognition.experiential_method_guidance = cloneJson(
+      precedentEffectiveExperientialMethodCompetitionGuidance.character_view,
+    );
+    const remainingExperientialMethodImpasseRefsAfterPrecedent = new Set(
+      experientialMethodImpassePrecedentReresolution.remaining_impasse_refs,
+    );
+    characterCognition.experiential_method_impasse_deliberation = cloneJson({
+      source: "phase79j_remaining_experiential_method_impasses",
+      impasse_contexts: experientialMethodImpasseDeliberation.impasse_contexts
+        .filter((context) => remainingExperientialMethodImpasseRefsAfterPrecedent.has(context.impasse_ref)),
+      deliberation_required:
+        experientialMethodImpassePrecedentReresolution.remaining_impasse_count > 0,
+      new_preference_authority: false,
+      selected_action_authority: false,
+      semantic_revision_authority: false,
+    });
+    characterCognition.experiential_method_impasse_discriminating_evidence =
+      cloneJson({
+        source: "phase79j_remaining_impasse_discriminating_evidence",
+        impasse_evidence_contexts:
+          experientialMethodImpasseDiscriminatingEvidence.impasse_evidence_contexts
+            .filter((context) => remainingExperientialMethodImpasseRefsAfterPrecedent.has(context.impasse_ref)),
+        deliberation_evidence_available:
+          experientialMethodImpassePrecedentReresolution.remaining_impasse_count > 0
+          && experientialMethodImpasseDiscriminatingEvidence.deliberation_evidence_available,
+        preference_authority: false,
+        selected_action_authority: false,
+        semantic_revision_authority: false,
+      });
+    const phase79jResultByImpasseRef = new Map(
+      experientialMethodImpassePrecedentReresolution.character_view.impasse_results
+        .map((result) => [result.impasse_ref, result]),
+    );
+    characterCognition.experiential_method_impasse_reresolution = cloneJson({
+      source: "phase79j_precedent_grounded_experiential_method_impasse_reresolution",
+      impasse_results: experientialMethodImpasseReresolution.character_view.impasse_results
+        .map((result) => phase79jResultByImpasseRef.get(result.impasse_ref) ?? result),
+      deliberation_required:
+        experientialMethodImpassePrecedentReresolution.remaining_impasse_count > 0,
+      precedent_refs_exposed: false,
+      historical_outcome_details_exposed: false,
+      advisory_only: true,
+      selected_action_authority: false,
+      semantic_revision_authority: false,
+      world_truth_authority: false,
+    });
+
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5805,6 +5946,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpasseReresolutionProjections),
     experiential_method_impasse_precedent_reentry_projections:
       cloneJson(experientialMethodImpassePrecedentReentryProjections),
+    experiential_method_impasse_precedent_reresolution_projections:
+      cloneJson(experientialMethodImpassePrecedentReresolutionProjections),
     experiential_method_candidate_attribution_projections:
       cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
@@ -9708,6 +9851,10 @@ export async function resolveWorldSimulationTurn(
       experiential_method_impasse_precedent_reentry_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reentry_projections ?? [],
+        ),
+      experiential_method_impasse_precedent_reresolution_projections:
+        cloneJson(
+          preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
         ),
       experiential_method_candidate_attribution_projections:
         cloneJson(
