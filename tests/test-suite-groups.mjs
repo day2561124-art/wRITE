@@ -182,6 +182,7 @@ export const phase80AnalogicalExperienceAdaptationSteps = Object.freeze([
   Object.freeze(["Phase 80D adapted analogy selected-application lineage", Object.freeze(["tests/phase80/phase80d-adapted-analogy-selected-application-lineage.test.mjs"])]),
   Object.freeze(["Phase 80E adapted analogy subjective outcome evidence", Object.freeze(["tests/phase80/phase80e-adapted-analogy-subjective-outcome-evidence.test.mjs"])]),
   Object.freeze(["Phase 80F adapted analogy retention capsule", Object.freeze(["tests/phase80/phase80f-adapted-analogy-retention-capsule.test.mjs"])]),
+  Object.freeze(["Phase 80G retained adapted analogy cross-turn re-entry", Object.freeze(["tests/phase80/phase80g-retained-adapted-analogy-reentry.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

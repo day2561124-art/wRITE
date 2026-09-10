@@ -389,6 +389,8 @@ export async function commitWorldSimulationTurn(
               input.analogical_experience_outcome_evidence ?? null,
             analogical_experience_retention_capsules:
               input.analogical_experience_retention_capsules ?? null,
+            analogical_experience_retention_reentry_projections:
+              input.analogical_experience_retention_reentry_projections ?? null,
             experiential_method_outcome_credit_resolution:
               input.experiential_method_outcome_credit_resolution ?? null,
             experiential_method_impasse_resolution_outcome_evidence:
