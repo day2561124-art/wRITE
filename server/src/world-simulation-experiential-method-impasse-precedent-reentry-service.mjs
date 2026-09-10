@@ -10,6 +10,13 @@ import {
 export const worldSimulationExperientialMethodImpassePrecedentReentryVersion =
   "phase79i-experiential-method-impasse-precedent-reentry-v1";
 
+// Keep the accepted Phase79J history tag local. Importing the Phase79J module
+// here would create the cycle Phase79I -> Phase79J -> Phase79I. Historical
+// projections are still verified by exact self-hash plus their Phase79F/79I
+// source lineage below.
+const phase79JPrecedentReresolutionVersion =
+  "phase79j-experiential-method-impasse-precedent-reresolution-v1";
+
 const maximumHistoryTurnsScanned = 128;
 const maximumPrecedentCount = 32;
 const maximumSelectedCueCountPerPrecedent = 16;
@@ -254,6 +261,87 @@ function verifyHistoricalPhase79F(value, turnId, character, phase79DHash, phase7
   }
   return projection;
 }
+function verifyHistoricalPhase79J(
+  value,
+  turnId,
+  character,
+  phase79FHash,
+  phase79IHash,
+) {
+  const projection = verifyHashedProjection(value, {
+    version: phase79JPrecedentReresolutionVersion,
+    hashField: "reresolution_hash",
+    label: "historical Phase79J precedent re-resolution projection",
+    code: "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID",
+  });
+  if (projection.current_turn_id !== turnId
+      || !sameCharacter(projection.character, character)
+      || projection.source_phase79f_reresolution_hash !== phase79FHash
+      || projection.source_phase79i_precedent_reentry_hash !== phase79IHash
+      || !Array.isArray(projection.preference_revision_records)
+      || projection.preference_revision_count !== projection.preference_revision_records.length
+      || !Array.isArray(projection.impasse_results)
+      || !Array.isArray(projection.resolved_impasse_refs)
+      || projection.resolved_impasse_count !== projection.resolved_impasse_refs.length
+      || !Array.isArray(projection.remaining_impasse_refs)
+      || projection.remaining_impasse_count !== projection.remaining_impasse_refs.length
+      || projection.audit?.exact_phase79b_phase79f_phase79i_lineage_verified !== true
+      || projection.audit?.phase79f_remaining_impasses_only !== true
+      || projection.audit?.exact_full_cue_match_precedents_only !== true
+      || projection.audit?.fuzzy_similarity_used !== false
+      || projection.audit?.numeric_success_rate_confidence_probability_utility_reward_modeled !== false
+      || projection.audit?.action_selection_performed !== false
+      || projection.audit?.semantic_revision_performed !== false
+      || projection.audit?.world_truth_authority_claimed !== false) {
+    const error = new Error("Phase79I historical Phase79J source lineage or authority boundary is invalid.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID";
+    throw error;
+  }
+  const topLevelRevisionHashes = projection.preference_revision_records
+    .map((revision) => hashAgentRunValue(revision)).sort(compareText);
+  const appliedRevisionHashes = [];
+  const resolvedRefs = [];
+  const remainingRefs = [];
+  const seenImpasseRefs = new Set();
+  for (const [index, result] of projection.impasse_results.entries()) {
+    if (!isObject(result)
+        || !optionalString(result.impasse_ref)
+        || seenImpasseRefs.has(result.impasse_ref)
+        || !optionalString(result.resolution_status)
+        || !Array.isArray(result.applied_precedent_revisions)
+        || typeof result.resolved !== "boolean") {
+      const error = new Error(`Phase79I historical Phase79J impasse result ${index} is structurally invalid.`);
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID";
+      throw error;
+    }
+    seenImpasseRefs.add(result.impasse_ref);
+    const expectedResolved = !["tie_impasse", "conflict_impasse"].includes(result.resolution_status);
+    if (result.resolved !== expectedResolved) {
+      const error = new Error(`Phase79I historical Phase79J impasse result ${result.impasse_ref} has inconsistent resolution state.`);
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID";
+      throw error;
+    }
+    if (result.resolved) resolvedRefs.push(result.impasse_ref);
+    else remainingRefs.push(result.impasse_ref);
+    for (const revision of result.applied_precedent_revisions) {
+      if (!isObject(revision) || revision.impasse_ref !== result.impasse_ref) {
+        const error = new Error(`Phase79I historical Phase79J applied revision is inconsistent with impasse ${result.impasse_ref}.`);
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID";
+        throw error;
+      }
+      appliedRevisionHashes.push(hashAgentRunValue(revision));
+    }
+  }
+  if (!sameStringArray(topLevelRevisionHashes, appliedRevisionHashes)
+      || !sameStringArray(projection.resolved_impasse_refs, resolvedRefs)
+      || !sameStringArray(projection.remaining_impasse_refs, remainingRefs)) {
+    const error = new Error("Phase79I historical Phase79J top-level revision/result summaries are inconsistent.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID";
+    throw error;
+  }
+  return projection;
+}
+
 function selectedHistoricalCues(phase79FResult, phase79EContext) {
   const selectedRefs = [...new Set(array(phase79FResult?.applied_preference_revisions)
     .flatMap((revision) => array(revision?.evidence_cue_refs))
@@ -283,6 +371,112 @@ function selectedHistoricalCues(phase79FResult, phase79EContext) {
     };
   });
 }
+
+function selectedHistoricalPrecedentCues(phase79JResult, phase79IProjection, phase79EContext) {
+  const selectedPrecedentRefs = [...new Set(array(phase79JResult?.applied_precedent_revisions)
+    .flatMap((revision) => array(revision?.precedent_refs))
+    .map((ref) => requiredString(
+      ref,
+      "historical Phase79J precedent_ref",
+      240,
+      "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID",
+    )))].sort(compareText);
+  if (selectedPrecedentRefs.length === 0) {
+    const error = new Error("Phase79I historical Phase79J resolved impasse must cite at least one canonical Phase79I precedent.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID";
+    throw error;
+  }
+  const precedentByRef = new Map(array(phase79IProjection?.precedent_cases)
+    .map((precedent) => [precedent?.precedent_ref, precedent]));
+  const phase79ECues = array(phase79EContext?.current_context_cue_catalog);
+  const cueByRef = new Map(phase79ECues.map((cue) => [cue?.cue_ref, cue]));
+  if (cueByRef.size !== phase79ECues.length) {
+    const error = new Error("Phase79I historical Phase79J Phase79E cue refs must be unique.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+    throw error;
+  }
+  const selectedCueRefs = new Set();
+  for (const precedentRef of selectedPrecedentRefs) {
+    const precedent = precedentByRef.get(precedentRef);
+    if (!precedent
+        || precedent.current_impasse_ref !== phase79JResult.impasse_ref
+        || precedent.all_historical_resolution_cues_exactly_match_current_context !== true) {
+      const error = new Error(`Phase79I historical Phase79J precedent ${precedentRef} is not an exact-match source for its resolved impasse.`);
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+      throw error;
+    }
+    const historicalCues = array(precedent.historical_selected_cues);
+    const historicalCueByRef = new Map();
+    for (const [index, cue] of historicalCues.entries()) {
+      const ref = requiredString(
+        cue?.historical_cue_ref,
+        "historical Phase79J source historical_cue_ref",
+        240,
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID",
+      );
+      const identity = cueIdentity(cue, `historical_phase79j_source_cues[${index}]`);
+      if (historicalCueByRef.has(ref) || cue?.cue_content_hash !== identity.cue_content_hash) {
+        const error = new Error(`Phase79I historical Phase79J precedent ${precedentRef} contains an invalid historical cue identity.`);
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+        throw error;
+      }
+      historicalCueByRef.set(ref, identity);
+    }
+    const matchedHistoricalCueRefs = new Set();
+    for (const match of array(precedent.exact_current_cue_matches)) {
+      const historicalCueRef = requiredString(
+        match?.historical_cue_ref,
+        "historical Phase79J matched historical_cue_ref",
+        240,
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID",
+      );
+      const currentCueRef = requiredString(
+        match?.current_cue_ref,
+        "historical Phase79J matched current_cue_ref",
+        240,
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID",
+      );
+      const sourceCue = historicalCueByRef.get(historicalCueRef);
+      const currentCue = cueByRef.get(currentCueRef);
+      if (match?.exact_cue_kind_and_content_match !== true
+          || !sourceCue
+          || !currentCue
+          || match?.historical_cue_kind !== sourceCue.cue_kind
+          || match?.historical_cue_content_hash !== sourceCue.cue_content_hash) {
+        const error = new Error(`Phase79I historical Phase79J precedent ${precedentRef} contains a non-canonical cue match.`);
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+        throw error;
+      }
+      const currentCueIdentity = cueIdentity(currentCue, `historical_phase79j_current_cue[${currentCueRef}]`);
+      if (currentCueIdentity.cue_kind !== sourceCue.cue_kind
+          || currentCueIdentity.cue_content_hash !== sourceCue.cue_content_hash) {
+        const error = new Error(`Phase79I historical Phase79J precedent ${precedentRef} cue match disagrees with its Phase79E current context.`);
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+        throw error;
+      }
+      matchedHistoricalCueRefs.add(historicalCueRef);
+      selectedCueRefs.add(currentCueRef);
+    }
+    if (historicalCueByRef.size === 0
+        || historicalCueByRef.size !== matchedHistoricalCueRefs.size
+        || [...historicalCueByRef.keys()].some((ref) => !matchedHistoricalCueRefs.has(ref))) {
+      const error = new Error(`Phase79I historical Phase79J precedent ${precedentRef} does not preserve exact full-cue matching.`);
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_MISMATCH";
+      throw error;
+    }
+  }
+  const selectedRefs = [...selectedCueRefs].sort(compareText);
+  if (selectedRefs.length === 0 || selectedRefs.length > maximumSelectedCueCountPerPrecedent) {
+    const error = new Error("Phase79I historical Phase79J selected current-context cue set must be non-empty and bounded.");
+    error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_CUE_INVALID";
+    throw error;
+  }
+  return selectedRefs.map((ref, index) => ({
+    historical_cue_ref: ref,
+    ...cueIdentity(cueByRef.get(ref), `historical_phase79j_selected_cues[${index}]`),
+  }));
+}
+
 function currentCueMap(currentPhase79EContext) {
   const map = new Map();
   for (const [index, cue] of array(currentPhase79EContext?.current_context_cue_catalog).entries()) {
@@ -312,6 +506,10 @@ export function buildWorldSimulationExperientialMethodImpassePrecedentReentryCon
     status: "prior_committed_impasse_resolution_precedent_reentry_evidence_installed",
     source_history_owner: "WorldSimulationHistory",
     source_chain: ["Phase79D", "Phase79E", "Phase79F", "Phase79H"],
+    supported_historical_resolution_sources: ["Phase79F", "Phase79J"],
+    phase79j_history_requires_exact_phase79f_ancestor: true,
+    phase79j_history_requires_exact_phase79i_source: true,
+    phase79j_selected_precedent_current_cues_reconstructed: true,
     current_remaining_impasse_source: "Phase79F",
     same_character_prior_committed_turns_only: true,
     current_and_historical_method_identity: "exact_normalized_method_skeleton_set",
@@ -404,6 +602,27 @@ export function assertWorldSimulationExperientialMethodImpassePrecedentReentryPr
     }
     if (precedent.precedent_kind !== precedentKind(precedent.method_outcome_assessment)) {
       const error = new Error("Phase79I precedent kind does not match its historical outcome assessment.");
+      error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_CASE_INVALID";
+      throw error;
+    }
+    const resolutionSourceOwner = optionalString(precedent.resolution_source_owner) ?? "Phase79F";
+    if (resolutionSourceOwner === "Phase79F") {
+      if (Object.hasOwn(precedent, "resolution_source_owner")
+          || Object.hasOwn(precedent, "source_phase79i_precedent_reentry_hash")
+          || Object.hasOwn(precedent, "source_phase79j_reresolution_hash")) {
+        const error = new Error("Phase79I legacy Phase79F precedent may not carry Phase79J provenance fields.");
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_CASE_INVALID";
+        throw error;
+      }
+    } else if (resolutionSourceOwner === "Phase79J") {
+      if (!optionalString(precedent.source_phase79i_precedent_reentry_hash)
+          || !optionalString(precedent.source_phase79j_reresolution_hash)) {
+        const error = new Error("Phase79I Phase79J-derived precedent requires exact Phase79I/79J source hashes.");
+        error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_CASE_INVALID";
+        throw error;
+      }
+    } else {
+      const error = new Error(`Phase79I unsupported historical resolution source ${resolutionSourceOwner}.`);
       error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_CASE_INVALID";
       throw error;
     }
@@ -500,14 +719,196 @@ export function projectWorldSimulationExperientialMethodImpassePrecedentReentry(
     }
     for (const outcomeEvidence of phase79H.evidence_records) {
       if (!sameCharacter(outcomeEvidence.character, character)) continue;
-      // Phase79K can preserve a Phase79J-resolved method through selected
-      // application and subjective outcome evidence, but Phase79I's sealed
-      // historical reconstruction below still knows how to recover resolution
-      // cues only from a Phase79F-resolved impasse. Never misattribute a
-      // Phase79J resolution outcome to its necessarily-unresolved Phase79F
-      // ancestor. A later retention closure may add explicit Phase79J history
-      // reconstruction without weakening this Phase79F path.
-      if (outcomeEvidence.resolution_source_owner === "Phase79J") continue;
+      // Phase79L retains a Phase79J-resolved selected-method outcome only by
+      // reconstructing the exact historical dependency chain. The Phase79F
+      // ancestor must still be the unresolved source impasse; the historical
+      // Phase79I projection must be the exact source cited by Phase79J; and the
+      // retained cues are the historical turn's own Phase79E current-context
+      // cues that the cited precedents matched. This never treats the older
+      // precedent's conclusion as current or world truth.
+      if (outcomeEvidence.resolution_source_owner === "Phase79J") {
+        const phase79FRaw = array(turn.experiential_method_impasse_reresolution_projections)
+          .find((projection) => projection?.reresolution_hash === outcomeEvidence.phase79f_reresolution_hash);
+        if (!phase79FRaw) {
+          const error = new Error("Phase79I historical Phase79J outcome cannot resolve its exact Phase79F ancestor.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const phase79F = verifyHashedProjection(phase79FRaw, {
+          version: worldSimulationExperientialMethodImpasseReresolutionVersion,
+          hashField: "reresolution_hash",
+          label: "historical Phase79F ancestor projection",
+          code: "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79F_INVALID",
+        });
+        const phase79DRaw = array(turn.experiential_method_impasse_deliberation_projections)
+          .find((projection) => projection?.impasse_hash === phase79F.source_phase79d_impasse_hash);
+        const phase79ERaw = array(turn.experiential_method_impasse_discriminating_evidence_projections)
+          .find((projection) => projection?.evidence_hash === phase79F.source_phase79e_evidence_hash);
+        if (!phase79DRaw || !phase79ERaw) {
+          const error = new Error("Phase79I historical Phase79J ancestor cannot resolve exact Phase79D/79E sources.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const phase79D = verifyHistoricalPhase79D(phase79DRaw, turn.turn_id, character);
+        const phase79E = verifyHistoricalPhase79E(
+          phase79ERaw,
+          turn.turn_id,
+          character,
+          phase79D.impasse_hash,
+        );
+        verifyHistoricalPhase79F(
+          phase79F,
+          turn.turn_id,
+          character,
+          phase79D.impasse_hash,
+          phase79E.evidence_hash,
+        );
+        const phase79JRaw = array(turn.experiential_method_impasse_precedent_reresolution_projections)
+          .find((projection) => projection?.reresolution_hash === outcomeEvidence.phase79j_reresolution_hash);
+        if (!phase79JRaw) {
+          const error = new Error("Phase79I historical Phase79H cannot resolve its exact Phase79J resolution source.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const phase79JCandidate = verifyHashedProjection(phase79JRaw, {
+          version: phase79JPrecedentReresolutionVersion,
+          hashField: "reresolution_hash",
+          label: "historical Phase79J precedent re-resolution projection",
+          code: "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID",
+        });
+        const sourcePhase79IHash = requiredString(
+          phase79JCandidate.source_phase79i_precedent_reentry_hash,
+          "historical Phase79J source_phase79i_precedent_reentry_hash",
+          128,
+          "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_PHASE79J_INVALID",
+        );
+        const phase79IRaw = array(turn.experiential_method_impasse_precedent_reentry_projections)
+          .find((projection) => projection?.projection_hash === sourcePhase79IHash);
+        if (!phase79IRaw) {
+          const error = new Error("Phase79I historical Phase79J cannot resolve its exact source Phase79I projection.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const phase79I = assertWorldSimulationExperientialMethodImpassePrecedentReentryProjection(
+          phase79IRaw,
+          {
+            world_simulation_session_id: worldSimulationSessionId,
+            character,
+            current_turn_id: turn.turn_id,
+            current_state_revision: turn.revision_from,
+            current_world_state_hash: turn.previous_state_hash,
+          },
+        );
+        if (phase79I.source_phase79f_reresolution_hash !== phase79F.reresolution_hash
+            || !array(phase79I.remaining_impasse_refs).includes(outcomeEvidence.impasse_ref)) {
+          const error = new Error("Phase79I historical Phase79J source Phase79I does not descend from the exact unresolved Phase79F impasse.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const phase79J = verifyHistoricalPhase79J(
+          phase79JCandidate,
+          turn.turn_id,
+          character,
+          phase79F.reresolution_hash,
+          phase79I.projection_hash,
+        );
+        const historicalImpasse = array(phase79D.impasse_contexts)
+          .find((context) => context?.impasse_ref === outcomeEvidence.impasse_ref);
+        const historicalEvidence = array(phase79E.impasse_evidence_contexts)
+          .find((context) => context?.impasse_ref === outcomeEvidence.impasse_ref);
+        const phase79FResult = array(phase79F.impasse_results)
+          .find((result) => result?.impasse_ref === outcomeEvidence.impasse_ref);
+        const historicalResult = array(phase79J.impasse_results)
+          .find((result) => result?.impasse_ref === outcomeEvidence.impasse_ref);
+        if (!historicalImpasse || !historicalEvidence || !phase79FResult || !historicalResult
+            || phase79FResult.resolved === true
+            || !["tie_impasse", "conflict_impasse"].includes(phase79FResult.resolution_status)
+            || phase79FResult.resolution_status !== historicalResult.prior_impasse_type
+            || historicalResult.resolved !== true
+            || historicalResult.resolution_status !== "resolved_dominant"
+            || historicalResult.dominant_method_ref !== outcomeEvidence.dominant_method_ref) {
+          const error = new Error("Phase79I historical Phase79J impasse/outcome lineage is inconsistent.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const historicalMethodSet = methodSet(
+          historicalImpasse,
+          `historical_phase79j_impasse[${outcomeEvidence.impasse_ref}]`,
+        );
+        const historicalDominant = historicalMethodSet.methods
+          .find((method) => method.transfer_ref === outcomeEvidence.dominant_method_ref);
+        if (!historicalDominant) {
+          const error = new Error("Phase79I historical Phase79J dominant method is absent from the historical impasse method set.");
+          error.code = "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_PRECEDENT_REENTRY_HISTORY_LINEAGE_MISMATCH";
+          throw error;
+        }
+        const historicalCues = selectedHistoricalPrecedentCues(
+          historicalResult,
+          phase79I,
+          historicalEvidence,
+        );
+
+        for (const currentContext of currentContexts) {
+          if (!sameStringArray(
+            currentContext.method_set.method_skeleton_hashes,
+            historicalMethodSet.method_skeleton_hashes,
+          )) continue;
+          const currentCorresponding = currentContext.method_set.methods
+            .find((method) => method.method_skeleton_hash === historicalDominant.method_skeleton_hash);
+          if (!currentCorresponding) continue;
+          const cueMatches = historicalCues.flatMap((cue) =>
+            array(currentContext.cue_map.get(cue.cue_content_hash)).map((currentCueRef) => ({
+              historical_cue_ref: cue.historical_cue_ref,
+              historical_cue_kind: cue.cue_kind,
+              historical_cue_content_hash: cue.cue_content_hash,
+              current_cue_ref: currentCueRef,
+              exact_cue_kind_and_content_match: true,
+            })));
+          const identity = {
+            version: worldSimulationExperientialMethodImpassePrecedentReentryVersion,
+            current_impasse_ref: currentContext.impasse_ref,
+            source_turn_id: turn.turn_id,
+            source_revision_to: turn.revision_to,
+            historical_impasse_ref: outcomeEvidence.impasse_ref,
+            resolution_source_owner: "Phase79J",
+            source_phase79d_impasse_hash: phase79D.impasse_hash,
+            source_phase79e_evidence_hash: phase79E.evidence_hash,
+            source_phase79f_reresolution_hash: phase79F.reresolution_hash,
+            source_phase79i_precedent_reentry_hash: phase79I.projection_hash,
+            source_phase79j_reresolution_hash: phase79J.reresolution_hash,
+            source_phase79h_projection_hash: phase79H.projection_hash,
+            source_phase79h_evidence_ref: outcomeEvidence.evidence_ref,
+            method_set_hash: historicalMethodSet.method_set_hash,
+            historical_dominant_method_skeleton_hash: historicalDominant.method_skeleton_hash,
+            current_corresponding_method_ref: currentCorresponding.transfer_ref,
+            current_corresponding_method_skeleton_hash: currentCorresponding.method_skeleton_hash,
+            method_outcome_assessment: outcomeEvidence.method_outcome_assessment,
+            precedent_kind: precedentKind(outcomeEvidence.method_outcome_assessment),
+            historical_selected_cues: historicalCues.map((cue) => ({
+              historical_cue_ref: cue.historical_cue_ref,
+              cue_kind: cue.cue_kind,
+              content: cloneJson(cue.content),
+              cue_content_hash: cue.cue_content_hash,
+            })),
+            exact_current_cue_match_count: cueMatches.length,
+            exact_current_cue_matches: cueMatches,
+            all_historical_resolution_cues_exactly_match_current_context:
+              historicalCues.length > 0
+              && new Set(cueMatches.map((match) => match.historical_cue_ref)).size === historicalCues.length,
+          };
+          const precedentHash = hashAgentRunValue(identity);
+          precedents.push({
+            precedent_ref: `phase79i_precedent_${precedentHash.slice(0, 24)}`,
+            precedent_hash: precedentHash,
+            ...identity,
+            comparative_preference_validated: false,
+            automatic_current_preference_selected: false,
+            counterfactual_superiority_inferred: false,
+            world_truth_authority: false,
+          });
+        }
+        continue;
+      }
       const phase79FRaw = array(turn.experiential_method_impasse_reresolution_projections)
         .find((projection) => projection?.reresolution_hash === outcomeEvidence.phase79f_reresolution_hash);
       if (!phase79FRaw) {

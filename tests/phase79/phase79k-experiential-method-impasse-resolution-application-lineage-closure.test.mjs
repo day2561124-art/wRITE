@@ -473,16 +473,20 @@ assert.match(
   loopSource,
   /experiential_method_impasse_resolution_application_lineage:\s*cloneJson\(experientialMethodImpasseResolutionApplicationLineage\)/,
 );
-const phase79JHistoryGuardIndex = reentrySource.indexOf(
-  'if (outcomeEvidence.resolution_source_owner === "Phase79J") continue;',
+const phase79JHistoryClosureIndex = reentrySource.indexOf(
+  'if (outcomeEvidence.resolution_source_owner === "Phase79J") {',
 );
-const historicalPhase79FLookupIndex = reentrySource.indexOf(
-  "const phase79FRaw = array(turn.experiential_method_impasse_reresolution_projections)",
-  phase79JHistoryGuardIndex,
+const historicalPhase79JLookupIndex = reentrySource.indexOf(
+  "const phase79JRaw = array(turn.experiential_method_impasse_precedent_reresolution_projections)",
+  phase79JHistoryClosureIndex,
 );
 assert.ok(
-  phase79JHistoryGuardIndex >= 0
-    && historicalPhase79FLookupIndex > phase79JHistoryGuardIndex,
+  phase79JHistoryClosureIndex >= 0
+    && historicalPhase79JLookupIndex > phase79JHistoryClosureIndex,
+);
+assert.doesNotMatch(
+  reentrySource,
+  /if \(outcomeEvidence\.resolution_source_owner === "Phase79J"\) continue;/,
 );
 
 console.log("Phase79K Phase79J resolution application lineage closure tests passed.");
