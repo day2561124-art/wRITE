@@ -853,6 +853,7 @@ const steps = [
   ["Phase 80C adapted analogy current-context revalidation", ["tests/phase80/phase80c-adapted-analogy-current-context-revalidation.test.mjs"]],
   ["Phase 80D adapted analogy selected-application lineage", ["tests/phase80/phase80d-adapted-analogy-selected-application-lineage.test.mjs"]],
   ["Phase 80E adapted analogy subjective outcome evidence", ["tests/phase80/phase80e-adapted-analogy-subjective-outcome-evidence.test.mjs"]],
+  ["Phase 80F adapted analogy retention capsule", ["tests/phase80/phase80f-adapted-analogy-retention-capsule.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
