@@ -840,6 +840,7 @@ const steps = [
   ["Phase 79C competition-resolved experiential method guidance integration", ["tests/phase79/phase79c-experiential-method-competition-guidance.test.mjs"]],
   ["Phase 79D experiential method impasse deliberation evidence", ["tests/phase79/phase79d-experiential-method-impasse-deliberation.test.mjs"]],
   ["Phase 79E experiential method impasse discriminating evidence", ["tests/phase79/phase79e-experiential-method-impasse-discriminating-evidence.test.mjs"]],
+  ["Phase 79F experiential method impasse re-resolution", ["tests/phase79/phase79f-experiential-method-impasse-reresolution.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

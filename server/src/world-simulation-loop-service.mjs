@@ -142,6 +142,12 @@ import {
   worldSimulationExperientialMethodImpasseDiscriminatingEvidenceVersion,
 } from "./world-simulation-experiential-method-impasse-discriminating-evidence-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpasseReresolutionContract,
+  buildWorldSimulationExperientialMethodImpasseReresolutionResolverView,
+  projectWorldSimulationExperientialMethodImpasseReresolution,
+  worldSimulationExperientialMethodImpasseReresolutionVersion,
+} from "./world-simulation-experiential-method-impasse-reresolution-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3426,6 +3432,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseDeliberationContract(),
     experiential_method_impasse_discriminating_evidence:
       buildWorldSimulationExperientialMethodImpasseDiscriminatingEvidenceContract(),
+    experiential_method_impasse_reresolution:
+      buildWorldSimulationExperientialMethodImpasseReresolutionContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -3449,6 +3457,28 @@ export function buildWorldSimulationLoopContract() {
       semantic_revision_authority: false,
       numeric_utility_authority: false,
       missing_hook_preserves_competition_as_impasse: true,
+    },
+
+    experiential_method_impasse_reresolution_resolver_hook: {
+      owner: "programmatic_experiential_method_impasse_reresolution_resolver",
+      optional: true,
+      option_name: "experientialMethodImpasseReresolutionResolver",
+      source_scope: "same_turn_verified_phase79d_impasse_plus_phase79e_bounded_discriminating_evidence",
+      receives_existing_impasse_competition_refs: true,
+      receives_bounded_retained_method_skeletons: true,
+      receives_phase79e_cue_refs_and_content: true,
+      receives_original_phase79b_engine_resolver_view: false,
+      receives_selected_action: false,
+      receives_action_outcome: false,
+      receives_world_state: false,
+      receives_hidden_causal_evidence: false,
+      may_return_only_impasse_ref_competition_ref_preference_evidence_ref_records: true,
+      supported_preferences: ["left_preferred", "right_preferred", "indifferent"],
+      evidence_cue_ref_required: true,
+      action_selection_authority: false,
+      semantic_revision_authority: false,
+      numeric_utility_authority: false,
+      missing_hook_preserves_impasse: true,
     },
 
     experiential_method_candidate_attribution_resolver_hook: {
@@ -4252,6 +4282,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodCompetitionGuidanceProjections = [];
   const experientialMethodImpasseDeliberationProjections = [];
   const experientialMethodImpasseDiscriminatingEvidenceProjections = [];
+  const experientialMethodImpasseReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
   const autobiographicalSummaryCharacterProjections = [];
   const autobiographicalSelfInterpretationCharacterProjections = [];
@@ -5205,6 +5236,101 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         selected_action_authority: false,
         semantic_revision_authority: false,
       });
+
+    // Phase79F lets the impasse substate return evidence-backed qualitative
+    // preference results to the existing Phase79B decision kernel. The hook
+    // sees only the bounded Phase79D/79E surface; engine-owned Phase79B source
+    // state is used only after the hook returns. The resulting Phase79B
+    // projection is then compiled through the existing Phase79C guidance path
+    // so Action Proposer receives one effective method-guidance surface.
+    const experientialMethodImpasseReresolutionResolverView =
+      buildWorldSimulationExperientialMethodImpasseReresolutionResolverView({
+        source_phase79b_resolver_view:
+          experientialMethodCompetitionResolutionResolverView,
+        source_phase79b_resolution:
+          experientialMethodCompetitionResolution,
+        source_phase79d_impasse_deliberation:
+          experientialMethodImpasseDeliberation,
+        source_phase79e_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+      });
+    const experientialMethodImpasseReresolutionResolver =
+      typeof options.experientialMethodImpasseReresolutionResolver === "function"
+        ? options.experientialMethodImpasseReresolutionResolver
+        : null;
+    const rawExperientialMethodImpassePreferenceRevisions =
+      experientialMethodImpasseReresolutionResolver
+        ? await experientialMethodImpasseReresolutionResolver(
+          cloneJson(experientialMethodImpasseReresolutionResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawExperientialMethodImpassePreferenceRevisions)) {
+      const error = new Error(
+        "experientialMethodImpasseReresolutionResolver must return an array of evidence-backed preference revisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_EXPERIENTIAL_METHOD_IMPASSE_RERESOLUTION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const experientialMethodImpasseReresolution =
+      projectWorldSimulationExperientialMethodImpasseReresolution({
+        resolver_view:
+          experientialMethodImpasseReresolutionResolverView,
+        source_phase79b_resolver_view:
+          experientialMethodCompetitionResolutionResolverView,
+        source_phase79b_resolution:
+          experientialMethodCompetitionResolution,
+        source_phase79d_impasse_deliberation:
+          experientialMethodImpasseDeliberation,
+        source_phase79e_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+        preference_revisions:
+          rawExperientialMethodImpassePreferenceRevisions,
+      });
+    experientialMethodImpasseReresolutionProjections.push(
+      cloneJson(experientialMethodImpasseReresolution),
+    );
+    const effectiveExperientialMethodCompetitionGuidance =
+      projectWorldSimulationExperientialMethodCompetitionGuidance({
+        experiential_method_transfer: experientialMethodTransfer,
+        experiential_method_competition_resolution:
+          experientialMethodImpasseReresolution.effective_competition_resolution,
+      });
+    experientialMethodCompetitionGuidanceProjections[
+      experientialMethodCompetitionGuidanceProjections.length - 1
+    ] = cloneJson(effectiveExperientialMethodCompetitionGuidance);
+    characterCognition.experiential_method_guidance = cloneJson(
+      effectiveExperientialMethodCompetitionGuidance.character_view,
+    );
+    const remainingExperientialMethodImpasseRefs = new Set(
+      experientialMethodImpasseReresolution.remaining_impasse_refs,
+    );
+    characterCognition.experiential_method_impasse_deliberation = cloneJson({
+      source: "phase79f_remaining_experiential_method_impasses",
+      impasse_contexts: experientialMethodImpasseDeliberation.impasse_contexts
+        .filter((context) => remainingExperientialMethodImpasseRefs.has(context.impasse_ref)),
+      deliberation_required:
+        experientialMethodImpasseReresolution.remaining_impasse_count > 0,
+      new_preference_authority: false,
+      selected_action_authority: false,
+      semantic_revision_authority: false,
+    });
+    characterCognition.experiential_method_impasse_discriminating_evidence =
+      cloneJson({
+        source: "phase79f_remaining_impasse_discriminating_evidence",
+        impasse_evidence_contexts:
+          experientialMethodImpasseDiscriminatingEvidence.impasse_evidence_contexts
+            .filter((context) => remainingExperientialMethodImpasseRefs.has(context.impasse_ref)),
+        deliberation_evidence_available:
+          experientialMethodImpasseReresolution.remaining_impasse_count > 0
+          && experientialMethodImpasseDiscriminatingEvidence.deliberation_evidence_available,
+        preference_authority: false,
+        selected_action_authority: false,
+        semantic_revision_authority: false,
+      });
+    characterCognition.experiential_method_impasse_reresolution =
+      cloneJson(experientialMethodImpasseReresolution.character_view);
+
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -5631,6 +5757,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpasseDeliberationProjections),
     experiential_method_impasse_discriminating_evidence_projections:
       cloneJson(experientialMethodImpasseDiscriminatingEvidenceProjections),
+    experiential_method_impasse_reresolution_projections:
+      cloneJson(experientialMethodImpasseReresolutionProjections),
     experiential_method_candidate_attribution_projections:
       cloneJson(experientialMethodCandidateAttributionProjections),
     autobiographical_summary_character_projections:
@@ -9488,6 +9616,10 @@ export async function resolveWorldSimulationTurn(
       experiential_method_impasse_discriminating_evidence_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_discriminating_evidence_projections ?? [],
+        ),
+      experiential_method_impasse_reresolution_projections:
+        cloneJson(
+          preparedTurn.experiential_method_impasse_reresolution_projections ?? [],
         ),
       experiential_method_candidate_attribution_projections:
         cloneJson(
