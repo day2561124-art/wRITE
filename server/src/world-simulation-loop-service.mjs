@@ -148,6 +148,10 @@ import {
   worldSimulationExperientialMethodImpasseReresolutionVersion,
 } from "./world-simulation-experiential-method-impasse-reresolution-service.mjs";
 import {
+  buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineage,
+  buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineageContract,
+} from "./world-simulation-experiential-method-impasse-resolution-application-lineage-service.mjs";
+import {
   buildWorldSimulationExperientialMethodApplicationLineageContract,
   buildWorldSimulationExperientialMethodCandidateAttributionResolverView,
   buildWorldSimulationSelectedExperientialMethodApplicationReceipts,
@@ -3434,6 +3438,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseDiscriminatingEvidenceContract(),
     experiential_method_impasse_reresolution:
       buildWorldSimulationExperientialMethodImpasseReresolutionContract(),
+    experiential_method_impasse_resolution_application_lineage:
+      buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineageContract(),
     experiential_method_application_lineage:
       buildWorldSimulationExperientialMethodApplicationLineageContract(),
     experiential_method_outcome_credit:
@@ -7675,6 +7681,24 @@ export async function resolveWorldSimulationTurn(
         subjectiveChoiceCommitmentReceipts,
     });
 
+  // Phase79G records only the exact provenance edge between a Phase79F
+  // resolved dominant experiential method and a Phase76F selected application
+  // that actually contains that same transfer ref. This is pre-outcome lineage:
+  // it neither claims that the re-resolution caused the Character's choice nor
+  // consumes causal outcome evidence, and it is persisted only with the final
+  // successful atomic world-turn commit below.
+  const experientialMethodImpasseResolutionApplicationLineage =
+    buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineage({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      impasse_reresolution_projections:
+        preparedTurn.experiential_method_impasse_reresolution_projections ?? [],
+      selected_application_receipts:
+        selectedExperientialMethodApplicationReceipts,
+    });
+
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
   const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
@@ -9627,6 +9651,8 @@ export async function resolveWorldSimulationTurn(
         ),
       selected_experiential_method_application_receipts:
         cloneJson(selectedExperientialMethodApplicationReceipts),
+      experiential_method_impasse_resolution_application_lineage:
+        cloneJson(experientialMethodImpasseResolutionApplicationLineage),
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
