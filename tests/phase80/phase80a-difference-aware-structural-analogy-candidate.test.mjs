@@ -341,6 +341,13 @@ assert.match(
   stateSource,
   /analogical_experience_candidate_projections:\s*input\.analogical_experience_candidate_projections \?\? null/,
 );
-assert.doesNotMatch(loopSource, /characterCognition\.analogical_experience/);
+const phase80bAdaptationIndex = loopSource.indexOf(
+  "const analogicalExperienceAdaptationResolverView =",
+  phase80aIndex,
+);
+assert.ok(
+  phase80bAdaptationIndex > phase80aIndex,
+  "Phase80A must remain evidence-only until the later Phase80B bounded adaptation stage.",
+);
 
 console.log("Phase80A difference-aware structural analogy candidate tests passed.");

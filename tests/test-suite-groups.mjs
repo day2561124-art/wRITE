@@ -177,6 +177,7 @@ export const phase79ExperientialMethodCompetitionSteps = Object.freeze([
 
 export const phase80AnalogicalExperienceAdaptationSteps = Object.freeze([
   Object.freeze(["Phase 80A difference-aware structural analogy candidate", Object.freeze(["tests/phase80/phase80a-difference-aware-structural-analogy-candidate.test.mjs"])]),
+  Object.freeze(["Phase 80B bounded analogical adaptation deliberation", Object.freeze(["tests/phase80/phase80b-bounded-analogical-adaptation-deliberation.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

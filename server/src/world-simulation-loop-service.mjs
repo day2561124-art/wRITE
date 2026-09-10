@@ -165,6 +165,12 @@ import {
   worldSimulationAnalogicalExperienceCandidateVersion,
 } from "./world-simulation-analogical-experience-candidate-service.mjs";
 import {
+  buildWorldSimulationAnalogicalExperienceAdaptationContract,
+  buildWorldSimulationAnalogicalExperienceAdaptationResolverView,
+  projectWorldSimulationAnalogicalExperienceAdaptation,
+  worldSimulationAnalogicalExperienceAdaptationVersion,
+} from "./world-simulation-analogical-experience-adaptation-service.mjs";
+import {
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract,
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView,
   projectWorldSimulationExperientialMethodImpassePrecedentReresolution,
@@ -3464,6 +3470,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpassePrecedentReentryContract(),
     analogical_experience_candidate:
       buildWorldSimulationAnalogicalExperienceCandidateContract(),
+    analogical_experience_adaptation:
+      buildWorldSimulationAnalogicalExperienceAdaptationContract(),
     experiential_method_impasse_precedent_reresolution:
       buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract(),
     experiential_method_application_lineage:
@@ -4350,6 +4358,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodImpasseReresolutionProjections = [];
   const experientialMethodImpassePrecedentReentryProjections = [];
   const analogicalExperienceCandidateProjections = [];
+  const analogicalExperienceAdaptationResolverViews = [];
+  const analogicalExperienceAdaptationProjections = [];
   const experientialMethodImpassePrecedentReresolutionResolverViews = [];
   const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
@@ -5457,6 +5467,49 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(analogicalExperienceCandidate),
     );
 
+    // Phase80B exposes only Phase80A near-miss structural analogies through a
+    // bounded Character Brain deliberation surface. The resolver may select
+    // cue refs that describe how the prior method context must be adapted, but
+    // cannot rewrite the method, select a preference/action, or assert world
+    // truth. Formal transport persists the exact resolver view and replays only
+    // validated adaptation decisions on same-snapshot repreparation.
+    const analogicalExperienceAdaptationResolverView =
+      buildWorldSimulationAnalogicalExperienceAdaptationResolverView({
+        source_phase80a_projection: analogicalExperienceCandidate,
+      });
+    analogicalExperienceAdaptationResolverViews.push(
+      cloneJson(analogicalExperienceAdaptationResolverView),
+    );
+    const analogicalExperienceAdaptationResolver =
+      typeof options.analogicalExperienceAdaptationResolver === "function"
+        ? options.analogicalExperienceAdaptationResolver
+        : null;
+    const rawAnalogicalExperienceAdaptationDecisions =
+      analogicalExperienceAdaptationResolver
+        ? await analogicalExperienceAdaptationResolver(
+          cloneJson(analogicalExperienceAdaptationResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawAnalogicalExperienceAdaptationDecisions)) {
+      const error = new Error(
+        "analogicalExperienceAdaptationResolver must return an array of bounded adaptation decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_ANALOGICAL_EXPERIENCE_ADAPTATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const analogicalExperienceAdaptation =
+      projectWorldSimulationAnalogicalExperienceAdaptation({
+        resolver_view: analogicalExperienceAdaptationResolverView,
+        adaptation_decisions: rawAnalogicalExperienceAdaptationDecisions,
+      });
+    analogicalExperienceAdaptationProjections.push(
+      cloneJson(analogicalExperienceAdaptation),
+    );
+    characterCognition.analogical_experience_adaptation = cloneJson(
+      analogicalExperienceAdaptation.character_view,
+    );
+
     // Phase79J gives prior evaluated precedents one bounded chance to help the
     // unresolved impasse substate produce new qualitative preferences. Only
     // Phase79I precedents whose historical resolution cues all exactly match
@@ -6009,6 +6062,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpassePrecedentReentryProjections),
     analogical_experience_candidate_projections:
       cloneJson(analogicalExperienceCandidateProjections),
+    analogical_experience_adaptation_resolver_views:
+      cloneJson(analogicalExperienceAdaptationResolverViews),
+    analogical_experience_adaptation_projections:
+      cloneJson(analogicalExperienceAdaptationProjections),
     experiential_method_impasse_precedent_reresolution_resolver_views:
       cloneJson(experientialMethodImpassePrecedentReresolutionResolverViews),
     experiential_method_impasse_precedent_reresolution_projections:

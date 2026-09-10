@@ -13,6 +13,9 @@ import {
 import {
   worldSimulationExperientialMethodImpassePrecedentReresolutionVersion,
 } from "./world-simulation-experiential-method-impasse-precedent-reresolution-service.mjs";
+import {
+  worldSimulationAnalogicalExperienceAdaptationVersion,
+} from "./world-simulation-analogical-experience-adaptation-service.mjs";
 
 import {
   worldSimulationFormalImpasseDecisionKinds,
@@ -80,6 +83,8 @@ function stageLabel(kind) {
       return "Phase79F";
     case worldSimulationFormalImpasseDecisionKinds.PHASE79J:
       return "Phase79J";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
+      return "Phase80B";
     default:
       return null;
   }
@@ -97,6 +102,8 @@ function expectedVersion(kind) {
       return worldSimulationExperientialMethodImpasseReresolutionVersion;
     case worldSimulationFormalImpasseDecisionKinds.PHASE79J:
       return worldSimulationExperientialMethodImpassePrecedentReresolutionVersion;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
+      return worldSimulationAnalogicalExperienceAdaptationVersion;
     default:
       return null;
   }
@@ -113,6 +120,8 @@ function responseField(kind) {
     case worldSimulationFormalImpasseDecisionKinds.PHASE79F:
     case worldSimulationFormalImpasseDecisionKinds.PHASE79J:
       return "preference_revisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
+      return "adaptation_decisions";
     default:
       return null;
   }
@@ -146,6 +155,13 @@ function assertResolverView(raw, kind) {
     fail(
       "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
       `Phase79M ${stageLabel(kind)} resolver view requires impasse_contexts.`,
+    );
+  }
+  if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE80B
+      && !Array.isArray(raw.analogy_candidates)) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
+      "Phase79M Phase80B resolver view requires analogy_candidates.",
     );
   }
   return cloneJson(raw);
@@ -256,6 +272,13 @@ function publicCharacterInput(view, kind, character = view.character) {
           cloneJson(array(view.selection_contract?.supported_preferences)),
       },
     };
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE80B) {
+    task = {
+      purpose:
+        "Adapt only the bounded near-miss structural analogy by selecting which aligned current cues remain relevant, which historical difference cues must be dropped, and which current additional cues must be incorporated. Do not author a method, preference, or action.",
+      analogy_candidates: cloneJson(array(view.analogy_candidates)),
+      response_contract: cloneJson(view.response_contract ?? {}),
+    };
   } else {
     const evidenceField = kind === worldSimulationFormalImpasseDecisionKinds.PHASE79F
       ? "evidence_cue_refs"
@@ -321,6 +344,8 @@ function eligible(view, kind, character = view.character) {
       return array(view.impasse_contexts).some((context) =>
         array(context?.eligible_precedents).length > 0
           && array(context?.competition_pairs).length > 0);
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
+      return array(view.analogy_candidates).length > 0;
     default:
       return false;
   }
@@ -365,6 +390,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
       "Phase76E",
       "Phase79B",
       "Phase79F",
+      "Phase80B",
       "Phase79J",
       "action_selection",
     ],
@@ -372,6 +398,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
     phase76e_method_transfer_supported: true,
     phase79b_qualitative_competition_supported: true,
     phase79f_current_context_deliberation_supported: true,
+    phase80b_analogical_adaptation_deliberation_supported: true,
     phase79j_precedent_deliberation_supported: true,
     same_snapshot_repreparation_required: true,
     same_character_only: true,
@@ -405,6 +432,8 @@ export function buildWorldSimulationFormalImpasseDeliberationRound(input = {}) {
       preparedTurn.experiential_method_competition_resolution_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE79F,
       preparedTurn.experiential_method_impasse_reresolution_resolver_views],
+    [worldSimulationFormalImpasseDecisionKinds.PHASE80B,
+      preparedTurn.analogical_experience_adaptation_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE79J,
       preparedTurn.experiential_method_impasse_precedent_reresolution_resolver_views],
   ];
@@ -493,5 +522,7 @@ export function buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE79F),
     experientialMethodImpassePrecedentReresolutionResolver:
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE79J),
+    analogicalExperienceAdaptationResolver:
+      singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE80B),
   };
 }
