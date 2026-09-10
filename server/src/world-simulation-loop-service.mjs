@@ -176,6 +176,11 @@ import {
   worldSimulationAnalogicalExperienceRevalidationVersion,
 } from "./world-simulation-analogical-experience-revalidation-service.mjs";
 import {
+  buildWorldSimulationAnalogicalExperienceApplicationLineage,
+  buildWorldSimulationAnalogicalExperienceApplicationLineageContract,
+  worldSimulationAnalogicalExperienceApplicationLineageVersion,
+} from "./world-simulation-analogical-experience-application-lineage-service.mjs";
+import {
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract,
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView,
   projectWorldSimulationExperientialMethodImpassePrecedentReresolution,
@@ -8043,6 +8048,24 @@ export async function resolveWorldSimulationTurn(
         selectedExperientialMethodApplicationReceipts,
     });
 
+  // Phase80D closes only the provenance edge between a Phase80C method that was
+  // revalidated against the current context and a Phase76F application receipt
+  // that proves the same current corresponding method participated in the
+  // selected candidate. This remains pre-outcome lineage: adaptation is not
+  // treated as the cause of candidate generation or action selection, and no
+  // outcome credit, retain/revise decision, or semantic mutation occurs here.
+  const analogicalExperienceApplicationLineage =
+    buildWorldSimulationAnalogicalExperienceApplicationLineage({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      analogical_experience_revalidation_projections:
+        preparedTurn.analogical_experience_revalidation_projections ?? [],
+      selected_application_receipts:
+        selectedExperientialMethodApplicationReceipts,
+    });
+
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
   const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
@@ -10029,6 +10052,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(selectedExperientialMethodApplicationReceipts),
       experiential_method_impasse_resolution_application_lineage:
         cloneJson(experientialMethodImpasseResolutionApplicationLineage),
+      analogical_experience_application_lineage:
+        cloneJson(analogicalExperienceApplicationLineage),
       subjective_means_feasibility_interpretation_resolution: {
         version:
           worldSimulationSubjectiveMeansFeasibilityInterpretationVersion,
@@ -10529,6 +10554,24 @@ export async function resolveWorldSimulationTurn(
       direct_action_selection: false,
       world_truth_authority_exposed: false,
       numeric_strength_confidence_probability_utility_modeled: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+
+    analogical_experience_application_lineage: {
+      version: worldSimulationAnalogicalExperienceApplicationLineageVersion,
+      contract: buildWorldSimulationAnalogicalExperienceApplicationLineageContract(),
+      receipt_count: analogicalExperienceApplicationLineage.receipt_count,
+      receipt_bundle_hash: analogicalExperienceApplicationLineage.receipt_bundle_hash,
+      source_phase76f_receipt_bundle_hash:
+        analogicalExperienceApplicationLineage.source_phase76f_receipt_bundle_hash,
+      source_phase80c_projection_hashes:
+        cloneJson(analogicalExperienceApplicationLineage.source_phase80c_projection_hashes),
+      selected_application_method_identity_must_match_revalidated_method: true,
+      action_outcome_consumed: false,
+      outcome_credit_assigned: false,
+      retain_revise_decision_performed: false,
+      direct_action_selection: false,
+      world_truth_authority_exposed: false,
       persisted_only_with_successful_world_commit: true,
     },
 
