@@ -175,6 +175,10 @@ export const phase79ExperientialMethodCompetitionSteps = Object.freeze([
   Object.freeze(["Phase 79M native qualitative experiential deliberation", Object.freeze(["tests/phase79/phase79m-native-qualitative-impasse-deliberation.test.mjs"])]),
 ]);
 
+export const phase80AnalogicalExperienceAdaptationSteps = Object.freeze([
+  Object.freeze(["Phase 80A difference-aware structural analogy candidate", Object.freeze(["tests/phase80/phase80a-difference-aware-structural-analogy-candidate.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -198,6 +202,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
   ...phase79ExperientialMethodCompetitionSteps,
+  ...phase80AnalogicalExperienceAdaptationSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -219,6 +224,7 @@ export const cognitionSteps = Object.freeze([
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
   ...phase79ExperientialMethodCompetitionSteps,
+  ...phase80AnalogicalExperienceAdaptationSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -235,4 +241,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase77MultiExperienceSchemaInductionSteps,
   ...phase78ContextualSchemaRefinementSteps,
   ...phase79ExperientialMethodCompetitionSteps,
+  ...phase80AnalogicalExperienceAdaptationSteps,
 ]);

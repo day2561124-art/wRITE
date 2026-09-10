@@ -160,6 +160,11 @@ import {
   projectWorldSimulationExperientialMethodImpassePrecedentReentry,
 } from "./world-simulation-experiential-method-impasse-precedent-reentry-service.mjs";
 import {
+  buildWorldSimulationAnalogicalExperienceCandidateContract,
+  projectWorldSimulationAnalogicalExperienceCandidates,
+  worldSimulationAnalogicalExperienceCandidateVersion,
+} from "./world-simulation-analogical-experience-candidate-service.mjs";
+import {
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract,
   buildWorldSimulationExperientialMethodImpassePrecedentReresolutionResolverView,
   projectWorldSimulationExperientialMethodImpassePrecedentReresolution,
@@ -3457,6 +3462,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceContract(),
     experiential_method_impasse_precedent_reentry:
       buildWorldSimulationExperientialMethodImpassePrecedentReentryContract(),
+    analogical_experience_candidate:
+      buildWorldSimulationAnalogicalExperienceCandidateContract(),
     experiential_method_impasse_precedent_reresolution:
       buildWorldSimulationExperientialMethodImpassePrecedentReresolutionContract(),
     experiential_method_application_lineage:
@@ -4342,6 +4349,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const experientialMethodImpasseReresolutionResolverViews = [];
   const experientialMethodImpasseReresolutionProjections = [];
   const experientialMethodImpassePrecedentReentryProjections = [];
+  const analogicalExperienceCandidateProjections = [];
   const experientialMethodImpassePrecedentReresolutionResolverViews = [];
   const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
@@ -5433,6 +5441,22 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpassePrecedentReentry),
     );
 
+    // Phase80A turns only Phase79I near-miss precedents into deterministic,
+    // difference-aware structural analogy candidates. Exact full-cue matches
+    // remain Phase79J-owned. These candidates expose aligned cues plus explicit
+    // historical/current context differences and require downstream adaptation;
+    // they do not select a preference or action and are not fed to Character Brain.
+    const analogicalExperienceCandidate =
+      projectWorldSimulationAnalogicalExperienceCandidates({
+        source_phase79e_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+        source_phase79i_precedent_reentry:
+          experientialMethodImpassePrecedentReentry,
+      });
+    analogicalExperienceCandidateProjections.push(
+      cloneJson(analogicalExperienceCandidate),
+    );
+
     // Phase79J gives prior evaluated precedents one bounded chance to help the
     // unresolved impasse substate produce new qualitative preferences. Only
     // Phase79I precedents whose historical resolution cues all exactly match
@@ -5983,6 +6007,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(experientialMethodImpasseReresolutionProjections),
     experiential_method_impasse_precedent_reentry_projections:
       cloneJson(experientialMethodImpassePrecedentReentryProjections),
+    analogical_experience_candidate_projections:
+      cloneJson(analogicalExperienceCandidateProjections),
     experiential_method_impasse_precedent_reresolution_resolver_views:
       cloneJson(experientialMethodImpassePrecedentReresolutionResolverViews),
     experiential_method_impasse_precedent_reresolution_projections:
@@ -9894,6 +9920,10 @@ export async function resolveWorldSimulationTurn(
       experiential_method_impasse_precedent_reentry_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reentry_projections ?? [],
+        ),
+      analogical_experience_candidate_projections:
+        cloneJson(
+          preparedTurn.analogical_experience_candidate_projections ?? [],
         ),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(

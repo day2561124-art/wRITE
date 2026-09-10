@@ -373,6 +373,8 @@ export async function commitWorldSimulationTurn(
               input.experiential_method_impasse_reresolution_projections ?? null,
             experiential_method_impasse_precedent_reentry_projections:
               input.experiential_method_impasse_precedent_reentry_projections ?? null,
+            analogical_experience_candidate_projections:
+              input.analogical_experience_candidate_projections ?? null,
             experiential_method_impasse_precedent_reresolution_projections:
               input.experiential_method_impasse_precedent_reresolution_projections ?? null,
             experiential_method_candidate_attribution_projections:
