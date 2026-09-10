@@ -845,6 +845,7 @@ const steps = [
   ["Phase 79H experiential method impasse resolution outcome evidence", ["tests/phase79/phase79h-experiential-method-impasse-resolution-outcome-evidence.test.mjs"]],
   ["Phase 79I experiential method impasse precedent re-entry evidence", ["tests/phase79/phase79i-experiential-method-impasse-precedent-reentry.test.mjs"]],
   ["Phase 79J experiential method impasse precedent re-resolution", ["tests/phase79/phase79j-experiential-method-impasse-precedent-reresolution.test.mjs"]],
+  ["Phase 79K Phase79J resolution application lineage closure", ["tests/phase79/phase79k-experiential-method-impasse-resolution-application-lineage-closure.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

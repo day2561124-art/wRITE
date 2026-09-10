@@ -7864,12 +7864,14 @@ export async function resolveWorldSimulationTurn(
         subjectiveChoiceCommitmentReceipts,
     });
 
-  // Phase79G records only the exact provenance edge between a Phase79F
-  // resolved dominant experiential method and a Phase76F selected application
-  // that actually contains that same transfer ref. This is pre-outcome lineage:
-  // it neither claims that the re-resolution caused the Character's choice nor
-  // consumes causal outcome evidence, and it is persisted only with the final
-  // successful atomic world-turn commit below.
+  // Phase79G records only the exact provenance edge between a canonical
+  // Phase79F or Phase79J resolved dominant experiential method and a Phase76F
+  // selected application that actually contains that same transfer ref. A
+  // Phase79J edge also preserves its exact unresolved Phase79F ancestor instead
+  // of pretending that ancestor resolved the impasse. This is pre-outcome
+  // lineage: it neither claims that re-resolution caused the Character's choice
+  // nor consumes causal outcome evidence, and it is persisted only with the
+  // final successful atomic world-turn commit below.
   const experientialMethodImpasseResolutionApplicationLineage =
     buildWorldSimulationExperientialMethodImpasseResolutionApplicationLineage({
       world_simulation_session_id: sessionId,
@@ -7878,6 +7880,8 @@ export async function resolveWorldSimulationTurn(
       world_state_hash: snapshot.state_hash,
       impasse_reresolution_projections:
         preparedTurn.experiential_method_impasse_reresolution_projections ?? [],
+      impasse_precedent_reresolution_projections:
+        preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
       selected_application_receipts:
         selectedExperientialMethodApplicationReceipts,
     });

@@ -173,6 +173,8 @@ export function buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEv
     exact_phase79g_receipt_bundle_hash_required: true,
     exact_phase76g_projection_hash_required: true,
     exact_phase76f_receipt_identity_join_required: true,
+    phase79g_resolution_source_provenance_preserved: true,
+    phase79j_resolution_hash_preserved_when_present: true,
     only_phase79g_proven_resolution_applications_observed: true,
     only_explicit_phase76g_assessments_observed: true,
     comparative_preference_validated: false,
@@ -234,6 +236,7 @@ export function assertWorldSimulationExperientialMethodImpasseResolutionOutcomeE
   }
   const seenRefs = new Set();
   for (const record of projection.evidence_records) {
+    const resolutionSourceOwner = optionalString(record?.resolution_source_owner) ?? "Phase79F";
     if (!isObject(record)
         || record.version !== worldSimulationExperientialMethodImpasseResolutionOutcomeEvidenceVersion
         || record.world_simulation_session_id !== projection.world_simulation_session_id
@@ -244,6 +247,12 @@ export function assertWorldSimulationExperientialMethodImpasseResolutionOutcomeE
         || !optionalString(record.phase79g_lineage_receipt_id)
         || !optionalString(record.phase79g_lineage_receipt_hash)
         || !optionalString(record.phase79f_reresolution_hash)
+        || !["Phase79F", "Phase79J"].includes(resolutionSourceOwner)
+        || (resolutionSourceOwner === "Phase79F"
+          && (Object.hasOwn(record, "resolution_source_owner")
+            || Object.hasOwn(record, "phase79j_reresolution_hash")))
+        || (resolutionSourceOwner === "Phase79J"
+          && !optionalString(record.phase79j_reresolution_hash))
         || !optionalString(record.impasse_ref)
         || !["tie_impasse", "conflict_impasse"].includes(record.prior_impasse_type)
         || record.resolution_status !== "resolved_dominant"
@@ -284,6 +293,12 @@ export function assertWorldSimulationExperientialMethodImpasseResolutionOutcomeE
       phase79g_lineage_receipt_id: record.phase79g_lineage_receipt_id,
       phase79g_lineage_receipt_hash: record.phase79g_lineage_receipt_hash,
       phase79f_reresolution_hash: record.phase79f_reresolution_hash,
+      ...(resolutionSourceOwner === "Phase79J"
+        ? {
+          resolution_source_owner: "Phase79J",
+          phase79j_reresolution_hash: record.phase79j_reresolution_hash,
+        }
+        : {}),
       impasse_ref: record.impasse_ref,
       prior_impasse_type: record.prior_impasse_type,
       resolution_status: record.resolution_status,
@@ -346,6 +361,7 @@ export function buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEv
   );
   const evidenceRecords = [];
   for (const lineage of lineageBundle.receipts) {
+    const resolutionSourceOwner = optionalString(lineage.resolution_source_owner) ?? "Phase79F";
     const assessment = assessmentByReceiptId.get(lineage.phase76f_application_receipt_id);
     if (!assessment) continue;
     if (assessment.phase76f_application_receipt_hash !== lineage.phase76f_application_receipt_hash
@@ -365,6 +381,12 @@ export function buildWorldSimulationExperientialMethodImpasseResolutionOutcomeEv
       phase79g_lineage_receipt_id: lineage.receipt_id,
       phase79g_lineage_receipt_hash: lineage.receipt_hash,
       phase79f_reresolution_hash: lineage.phase79f_reresolution_hash,
+      ...(resolutionSourceOwner === "Phase79J"
+        ? {
+          resolution_source_owner: "Phase79J",
+          phase79j_reresolution_hash: lineage.phase79j_reresolution_hash,
+        }
+        : {}),
       impasse_ref: lineage.impasse_ref,
       prior_impasse_type: lineage.prior_impasse_type,
       resolution_status: lineage.resolution_status,

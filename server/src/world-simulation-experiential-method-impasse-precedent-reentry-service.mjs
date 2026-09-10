@@ -500,6 +500,14 @@ export function projectWorldSimulationExperientialMethodImpassePrecedentReentry(
     }
     for (const outcomeEvidence of phase79H.evidence_records) {
       if (!sameCharacter(outcomeEvidence.character, character)) continue;
+      // Phase79K can preserve a Phase79J-resolved method through selected
+      // application and subjective outcome evidence, but Phase79I's sealed
+      // historical reconstruction below still knows how to recover resolution
+      // cues only from a Phase79F-resolved impasse. Never misattribute a
+      // Phase79J resolution outcome to its necessarily-unresolved Phase79F
+      // ancestor. A later retention closure may add explicit Phase79J history
+      // reconstruction without weakening this Phase79F path.
+      if (outcomeEvidence.resolution_source_owner === "Phase79J") continue;
       const phase79FRaw = array(turn.experiential_method_impasse_reresolution_projections)
         .find((projection) => projection?.reresolution_hash === outcomeEvidence.phase79f_reresolution_hash);
       if (!phase79FRaw) {
