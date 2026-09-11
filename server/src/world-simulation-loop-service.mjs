@@ -51,6 +51,9 @@ import {
   buildWorldSimulationCounterfactualSelectedActionOutcomeEvidence,
 } from "./world-simulation-counterfactual-selected-action-outcome-evidence-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceRetentionCapsules,
+} from "./world-simulation-counterfactual-linked-experience-retention-capsule-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8380,6 +8383,26 @@ export async function resolveWorldSimulationTurn(
         postOutcomeSubjectivePerceptionProjection,
     });
 
+  // Phase81H retains the exact current-context evidence that linked a prior
+  // counterfactual reflection to this turn's actually selected action and
+  // bounded subjective outcome. It stores hash-level cue signatures and keeps
+  // imagined historical alternatives separate from current experienced outcome;
+  // it performs no usefulness/effectiveness interpretation and cannot re-enter
+  // cognition in this same turn.
+  const counterfactualLinkedExperienceRetention =
+    buildWorldSimulationCounterfactualLinkedExperienceRetentionCapsules({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      counterfactual_selected_action_outcome_evidence:
+        counterfactualSelectedActionOutcomeEvidence,
+      counterfactual_reflection_reentry_projections:
+        counterfactualReflectionReentryProjections,
+      counterfactual_preparative_revalidation_projections:
+        counterfactualPreparativeRevalidationProjections,
+    });
+
   // Phase81A reopens only alternatives that actually existed in the exact
   // Phase74 decision-time workspace, after Phase76A has established what the
   // acting character subjectively experienced. The resolver never receives raw
@@ -10422,6 +10445,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualPreparativeSelectedActionLineage),
       counterfactual_selected_action_outcome_evidence:
         cloneJson(counterfactualSelectedActionOutcomeEvidence),
+      counterfactual_linked_experience_retention:
+        cloneJson(counterfactualLinkedExperienceRetention),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
