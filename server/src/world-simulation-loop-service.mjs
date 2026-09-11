@@ -28,6 +28,10 @@ import {
   worldSimulationPostOutcomeCounterfactualAppraisalVersion,
 } from "./world-simulation-post-outcome-counterfactual-appraisal-service.mjs";
 import {
+  buildWorldSimulationPostOutcomeCounterfactualReflectionRetention,
+  worldSimulationPostOutcomeCounterfactualReflectionRetentionVersion,
+} from "./world-simulation-post-outcome-counterfactual-reflection-retention-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8318,6 +8322,23 @@ export async function resolveWorldSimulationTurn(
       appraisal_decisions: rawPostOutcomeCounterfactualAppraisalDecisions,
     });
 
+  // Phase81C deterministically retains only the bounded context needed to
+  // distinguish an actually experienced subjective outcome from an imagined
+  // decision-time alternative in a later turn. It performs no new appraisal,
+  // does not enter ordinary episodic memory, and cannot re-enter cognition in
+  // this same turn. Future cue-dependent reuse remains a separate phase.
+  const postOutcomeCounterfactualReflectionRetention =
+    buildWorldSimulationPostOutcomeCounterfactualReflectionRetention({
+      counterfactual_alternative_resolver_view:
+        postOutcomeCounterfactualAlternativeResolverView,
+      post_outcome_counterfactual_alternative_evidence:
+        postOutcomeCounterfactualAlternativeEvidence,
+      counterfactual_appraisal_resolver_view:
+        postOutcomeCounterfactualAppraisalResolverView,
+      post_outcome_counterfactual_appraisal:
+        postOutcomeCounterfactualAppraisal,
+    });
+
   // Phase76B consumes only the already-bounded Phase76A projection plus the
   // acting character's own selected intent. It does not receive raw outcomes,
   // state transitions, or World State and cannot write memory or belief itself.
@@ -10513,6 +10534,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(postOutcomeCounterfactualAlternativeEvidence),
       post_outcome_counterfactual_appraisal:
         cloneJson(postOutcomeCounterfactualAppraisal),
+      post_outcome_counterfactual_reflection_retention:
+        cloneJson(postOutcomeCounterfactualReflectionRetention),
       post_outcome_subjective_memory_bridge:
         cloneJson(postOutcomeSubjectiveMemoryBridge),
       post_outcome_subjective_memory_formation:
@@ -10960,6 +10983,23 @@ export async function resolveWorldSimulationTurn(
       automatic_preference_action_belief_revision: false,
       semantic_revision_performed: false,
       same_turn_action_selection_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+    post_outcome_counterfactual_reflection_retention: {
+      version: worldSimulationPostOutcomeCounterfactualReflectionRetentionVersion,
+      capsule_count:
+        postOutcomeCounterfactualReflectionRetention.capsule_count,
+      projection_hash:
+        postOutcomeCounterfactualReflectionRetention.projection_hash,
+      exact_phase81a_phase81b_lineage_verified: true,
+      actual_and_imagined_sources_explicitly_separated: true,
+      counterfactual_capsule_is_episodic_fact_memory: false,
+      unchosen_outcome_observed: false,
+      preparative_orientation_is_candidate_not_policy: true,
+      automatic_preference_action_belief_revision: false,
+      semantic_revision_performed: false,
+      subjective_memory_rewrite_performed: false,
+      same_turn_reentry_allowed: false,
       persisted_only_with_successful_world_commit: true,
     },
     post_outcome_subjective_memory: {
