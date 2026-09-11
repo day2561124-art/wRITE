@@ -859,6 +859,7 @@ const steps = [
   ["Phase 81A post-outcome counterfactual alternative evidence", ["tests/phase81/phase81a-post-outcome-counterfactual-alternative-evidence.test.mjs"]],
   ["Phase 81B post-outcome counterfactual appraisal", ["tests/phase81/phase81b-post-outcome-counterfactual-appraisal.test.mjs"]],
   ["Phase 81C counterfactual reflection retention capsule", ["tests/phase81/phase81c-counterfactual-reflection-retention-capsule.test.mjs"]],
+  ["Phase 81D counterfactual reflection cross-turn re-entry", ["tests/phase81/phase81d-counterfactual-reflection-reentry.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
