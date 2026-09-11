@@ -12,6 +12,9 @@ import {
   projectWorldSimulationCounterfactualPreparativeRevalidation,
 } from "./world-simulation-counterfactual-preparative-revalidation-service.mjs";
 import {
+  projectWorldSimulationCounterfactualLinkedExperienceReentry,
+} from "./world-simulation-counterfactual-linked-experience-reentry-service.mjs";
+import {
   prepareWorldSimulationTurn,
   resolveWorldSimulationTurn,
 } from "./world-simulation-loop-service.mjs";
@@ -192,6 +195,7 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
   const decisionInputs = [];
   const counterfactualReflectionReentryProjections = [];
+  const counterfactualLinkedExperienceReentryProjections = [];
   const counterfactualPreparativeRevalidationResolverViews = [];
   const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
@@ -219,6 +223,26 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       action_commitment_subjective_execution_experience:
         subjectiveExecutionExperience,
     });
+
+    // Phase81I re-enters only prior committed Phase81H linked-experience cases
+    // that share exact canonical Phase74A action-candidate cues with this final
+    // formal Character Brain input. The full projection stays engine-side and
+    // performs no usefulness, preference, or action-selection interpretation.
+    const linkedExperienceReentry =
+      projectWorldSimulationCounterfactualLinkedExperienceReentry({
+        world_simulation_session_id: sessionId,
+        character: characterInput.character,
+        current_turn_id: prepared.turn_id,
+        current_state_revision: prepared.state_revision,
+        current_world_state_hash: prepared.world_state_hash,
+        current_cognition: characterInput.cognition,
+        current_candidate_action_intents: characterInput.candidate_action_intents,
+        source_phase74a_deliberation: characterInput.subjective_action_deliberation,
+        world_history: worldHistory,
+      });
+    counterfactualLinkedExperienceReentryProjections.push(
+      cloneJson(linkedExperienceReentry),
+    );
 
     // Phase81D-R1 is derived from the final formal Character Brain input after
     // Phase75 overlays have been applied and Phase74A has been rebuilt. This
@@ -290,6 +314,8 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     decision_inputs: decisionInputs,
     counterfactual_reflection_reentry_projections:
       counterfactualReflectionReentryProjections,
+    counterfactual_linked_experience_reentry_projections:
+      counterfactualLinkedExperienceReentryProjections,
     counterfactual_preparative_revalidation_resolver_views:
       counterfactualPreparativeRevalidationResolverViews,
     counterfactual_preparative_revalidation_projections:
@@ -327,6 +353,8 @@ async function prepareFormalDecisionRound(
     ...prepared,
     counterfactual_reflection_reentry_projections:
       cloneJson(actionBundle.counterfactual_reflection_reentry_projections),
+    counterfactual_linked_experience_reentry_projections:
+      cloneJson(actionBundle.counterfactual_linked_experience_reentry_projections),
     counterfactual_preparative_revalidation_resolver_views:
       cloneJson(actionBundle.counterfactual_preparative_revalidation_resolver_views),
     counterfactual_preparative_revalidation_projections:
@@ -629,6 +657,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
         ...loopOptions,
         counterfactualReflectionReentryProjections:
           acquisition.prepared_turn.counterfactual_reflection_reentry_projections ?? [],
+        counterfactualLinkedExperienceReentryProjections:
+          acquisition.prepared_turn.counterfactual_linked_experience_reentry_projections ?? [],
         counterfactualPreparativeRevalidationProjections:
           acquisition.prepared_turn.counterfactual_preparative_revalidation_projections ?? [],
       },

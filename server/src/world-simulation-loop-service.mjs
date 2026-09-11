@@ -54,6 +54,10 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceRetentionCapsules,
 } from "./world-simulation-counterfactual-linked-experience-retention-capsule-service.mjs";
 import {
+  assertWorldSimulationCounterfactualLinkedExperienceReentryProjection,
+  projectWorldSimulationCounterfactualLinkedExperienceReentry,
+} from "./world-simulation-counterfactual-linked-experience-reentry-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8201,6 +8205,52 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase81I is engine-side cross-turn retrieval evidence created against the
+  // exact final Phase74A candidate universe before action selection. Resolve
+  // accepts only the same-snapshot per-character projections that direct/formal
+  // runtime already created; it never recomputes retrieval after the choice.
+  const counterfactualLinkedExperienceReentryProjections = [];
+  const counterfactualLinkedExperienceReentryInputProvided = Object.hasOwn(
+    options,
+    "counterfactualLinkedExperienceReentryProjections",
+  );
+  const seenCounterfactualLinkedExperienceCharacters = new Set();
+  const counterfactualLinkedExperienceCanonicalHistory =
+    counterfactualLinkedExperienceReentryInputProvided
+      ? await getWorldSimulationHistory(sessionId, options)
+      : null;
+  for (const rawProjection of array(options.counterfactualLinkedExperienceReentryProjections)) {
+    const projection = assertWorldSimulationCounterfactualLinkedExperienceReentryProjection(
+      rawProjection,
+      {
+        world_simulation_session_id: sessionId,
+        current_turn_id: preparedTurn.turn_id,
+        current_state_revision: snapshot.revision,
+        current_world_state_hash: snapshot.state_hash,
+        world_history: counterfactualLinkedExperienceCanonicalHistory,
+      },
+    );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualLinkedExperienceCharacters.has(projection.character)) {
+      const error = new Error(
+        "Phase81I re-entry projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REENTRY_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualLinkedExperienceCharacters.add(projection.character);
+    counterfactualLinkedExperienceReentryProjections.push(cloneJson(projection));
+  }
+  if (counterfactualLinkedExperienceReentryInputProvided
+      && seenCounterfactualLinkedExperienceCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81I internal input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REENTRY_INCOMPLETE";
+    throw error;
+  }
+
   const causalAdjudicator = typeof options.causalAdjudicator === "function"
     ? options.causalAdjudicator
     : adjudicateWorldSimulationCausality;
@@ -10439,6 +10489,8 @@ export async function resolveWorldSimulationTurn(
         ),
       counterfactual_reflection_reentry_projections:
         cloneJson(counterfactualReflectionReentryProjections),
+      counterfactual_linked_experience_reentry_projections:
+        cloneJson(counterfactualLinkedExperienceReentryProjections),
       counterfactual_preparative_revalidation_projections:
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:
@@ -12051,6 +12103,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     options,
   );
   const counterfactualReflectionReentryProjections = [];
+  const counterfactualLinkedExperienceReentryProjections = [];
   const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
     // Single-source Character Brain ingress projector. Runtime identity and
@@ -12062,6 +12115,26 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       {
         include_legacy_retrieved_memories_alias: true,
       },
+    );
+
+    // Phase81I retrieves prior committed Phase81H linked-experience cases only
+    // after the final candidate universe and canonical Phase74A view exist. The
+    // projection remains engine-side in this phase and therefore cannot itself
+    // choose, prefer, or reinterpret any current action.
+    const counterfactualLinkedExperienceReentry =
+      projectWorldSimulationCounterfactualLinkedExperienceReentry({
+        world_simulation_session_id: prepared.world_simulation_session_id,
+        character: brainInput.character,
+        current_turn_id: prepared.turn_id,
+        current_state_revision: prepared.state_revision,
+        current_world_state_hash: prepared.world_state_hash,
+        current_cognition: brainInput.cognition,
+        current_candidate_action_intents: brainInput.candidate_action_intents,
+        source_phase74a_deliberation: brainInput.subjective_action_deliberation,
+        world_history: worldHistory,
+      });
+    counterfactualLinkedExperienceReentryProjections.push(
+      cloneJson(counterfactualLinkedExperienceReentry),
     );
 
     // Phase81D-R1 runs only after the final candidate universe and canonical
@@ -12148,6 +12221,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       ...options,
       characterRuntimeManager,
       counterfactualReflectionReentryProjections,
+      counterfactualLinkedExperienceReentryProjections,
       counterfactualPreparativeRevalidationProjections,
     },
   );
