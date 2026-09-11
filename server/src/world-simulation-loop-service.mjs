@@ -63,6 +63,9 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReuse,
 } from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceSelectedActionLineage,
+} from "./world-simulation-counterfactual-linked-experience-selected-action-lineage-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8356,6 +8359,26 @@ export async function resolveWorldSimulationTurn(
         subjectiveChoiceCommitmentReceipts,
     });
 
+  // Phase81K closes only the deterministic provenance edge between a Phase81J
+  // linked-experience reuse intent that was actually present during this action
+  // deliberation and the exact Phase74D action then selected. The receipt records
+  // selection relation only; it does not claim the reuse intent caused the choice,
+  // and it consumes no outcome/effectiveness/learning signal.
+  const counterfactualLinkedExperienceSelectedActionLineage =
+    buildWorldSimulationCounterfactualLinkedExperienceSelectedActionLineage({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceCanonicalHistory ?? [],
+      counterfactual_linked_experience_reentry_projections:
+        counterfactualLinkedExperienceReentryProjections,
+      counterfactual_linked_experience_reuse_projections:
+        counterfactualLinkedExperienceReuseProjections,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+    });
+
   // Phase76F closes the pre-outcome provenance chain only after the Character
   // Brain has made a canonical Phase74D choice. A receipt is created only when
   // the selected action_ref already had an explicit method->candidate
@@ -10554,6 +10577,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReentryProjections),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
+      counterfactual_linked_experience_selected_action_lineage:
+        cloneJson(counterfactualLinkedExperienceSelectedActionLineage),
       counterfactual_preparative_revalidation_projections:
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:
