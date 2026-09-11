@@ -58,6 +58,11 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReentry,
 } from "./world-simulation-counterfactual-linked-experience-reentry-service.mjs";
 import {
+  assertWorldSimulationCounterfactualLinkedExperienceReuseProjection,
+  buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceReuse,
+} from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8251,6 +8256,62 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase81J is accepted only as the exact same-turn deliberative reuse
+  // projection derived from the canonical Phase81I evidence above. Resolve
+  // rechecks the Phase81I source against committed World History so a caller
+  // cannot tamper with historical outcome/content and simply recompute hashes.
+  const counterfactualLinkedExperienceByCharacter = new Map(
+    counterfactualLinkedExperienceReentryProjections.map((projection) => [
+      projection.character,
+      projection,
+    ]),
+  );
+  const counterfactualLinkedExperienceReuseProjections = [];
+  const counterfactualLinkedExperienceReuseInputProvided = Object.hasOwn(
+    options,
+    "counterfactualLinkedExperienceReuseProjections",
+  );
+  const seenCounterfactualLinkedExperienceReuseCharacters = new Set();
+  for (const rawProjection of array(options.counterfactualLinkedExperienceReuseProjections)) {
+    const rawCharacter = rawProjection?.character;
+    const sourcePhase81I = counterfactualLinkedExperienceByCharacter.get(rawCharacter);
+    if (!sourcePhase81I) {
+      const error = new Error(
+        "Phase81J projection requires the exact same-character Phase81I projection from this prepared turn.",
+      );
+      error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REUSE_LINEAGE_INVALID";
+      throw error;
+    }
+    const projection = assertWorldSimulationCounterfactualLinkedExperienceReuseProjection(
+      rawProjection,
+      {
+        source_phase81i_projection: sourcePhase81I,
+        expected_source: {
+          world_history: counterfactualLinkedExperienceCanonicalHistory,
+        },
+      },
+    );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualLinkedExperienceReuseCharacters.has(projection.character)) {
+      const error = new Error(
+        "Phase81J projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REUSE_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualLinkedExperienceReuseCharacters.add(projection.character);
+    counterfactualLinkedExperienceReuseProjections.push(cloneJson(projection));
+  }
+  if (counterfactualLinkedExperienceReuseInputProvided
+      && seenCounterfactualLinkedExperienceReuseCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81J internal input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REUSE_INCOMPLETE";
+    throw error;
+  }
+
   const causalAdjudicator = typeof options.causalAdjudicator === "function"
     ? options.causalAdjudicator
     : adjudicateWorldSimulationCausality;
@@ -10491,6 +10552,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualReflectionReentryProjections),
       counterfactual_linked_experience_reentry_projections:
         cloneJson(counterfactualLinkedExperienceReentryProjections),
+      counterfactual_linked_experience_reuse_projections:
+        cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_preparative_revalidation_projections:
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:
@@ -12104,6 +12167,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   );
   const counterfactualReflectionReentryProjections = [];
   const counterfactualLinkedExperienceReentryProjections = [];
+  const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
     // Single-source Character Brain ingress projector. Runtime identity and
@@ -12204,6 +12268,53 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     brainInput.boundaries.counterfactual_preparative_revalidation_action_authority = false;
     brainInput.boundaries.counterfactual_preparative_revalidation_world_truth_authority = false;
 
+    // Phase81J decides only whether/how a canonical Phase81I linked-experience
+    // case should enter current deliberation as advisory evidence. It requires
+    // action-defining exact current support and cannot infer effectiveness.
+    const counterfactualLinkedExperienceReuseResolverView =
+      buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView({
+        source_phase81i_projection: counterfactualLinkedExperienceReentry,
+        expected_source: { world_history: worldHistory },
+      });
+    const counterfactualLinkedExperienceReuseResolver =
+      typeof options.counterfactualLinkedExperienceReuseResolver === "function"
+        ? options.counterfactualLinkedExperienceReuseResolver
+        : null;
+    const rawCounterfactualLinkedExperienceReuseDecisions =
+      counterfactualLinkedExperienceReuseResolver
+        && counterfactualLinkedExperienceReuseResolverView.linked_experience_candidates.length > 0
+        ? await counterfactualLinkedExperienceReuseResolver(
+          cloneJson(counterfactualLinkedExperienceReuseResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawCounterfactualLinkedExperienceReuseDecisions)) {
+      const error = new Error(
+        "counterfactualLinkedExperienceReuseResolver must return an array of bounded Phase81J decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REUSE_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const counterfactualLinkedExperienceReuseProjection =
+      projectWorldSimulationCounterfactualLinkedExperienceReuse({
+        source_phase81i_projection: counterfactualLinkedExperienceReentry,
+        expected_source: { world_history: worldHistory },
+        resolver_view: counterfactualLinkedExperienceReuseResolverView,
+        linked_experience_reuse_decisions:
+          rawCounterfactualLinkedExperienceReuseDecisions,
+      });
+    counterfactualLinkedExperienceReuseProjections.push(
+      cloneJson(counterfactualLinkedExperienceReuseProjection),
+    );
+    brainInput.counterfactual_linked_experience_reuse = cloneJson(
+      counterfactualLinkedExperienceReuseProjection.character_view,
+    );
+    brainInput.boundaries.counterfactual_linked_experience_reuse_installed = true;
+    brainInput.boundaries.counterfactual_linked_experience_reuse_advisory_only = true;
+    brainInput.boundaries.counterfactual_linked_experience_reuse_effectiveness_authority = false;
+    brainInput.boundaries.counterfactual_linked_experience_reuse_action_authority = false;
+    brainInput.boundaries.counterfactual_linked_experience_reuse_world_truth_authority = false;
+
     selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
       {
         world_simulation_session_id: prepared.world_simulation_session_id,
@@ -12222,6 +12333,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       characterRuntimeManager,
       counterfactualReflectionReentryProjections,
       counterfactualLinkedExperienceReentryProjections,
+      counterfactualLinkedExperienceReuseProjections,
       counterfactualPreparativeRevalidationProjections,
     },
   );

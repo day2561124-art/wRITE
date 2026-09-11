@@ -15,6 +15,10 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReentry,
 } from "./world-simulation-counterfactual-linked-experience-reentry-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceReuse,
+} from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
+import {
   prepareWorldSimulationTurn,
   resolveWorldSimulationTurn,
 } from "./world-simulation-loop-service.mjs";
@@ -196,6 +200,8 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const decisionInputs = [];
   const counterfactualReflectionReentryProjections = [];
   const counterfactualLinkedExperienceReentryProjections = [];
+  const counterfactualLinkedExperienceReuseResolverViews = [];
+  const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationResolverViews = [];
   const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
@@ -305,6 +311,51 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     characterInput.boundaries.counterfactual_preparative_revalidation_action_authority = false;
     characterInput.boundaries.counterfactual_preparative_revalidation_world_truth_authority = false;
 
+    // Phase81J follows the earlier Phase81E deliberation round and decides only
+    // whether/how a canonical Phase81I linked-experience case should enter the
+    // current action deliberation as advisory evidence. The historical subjective
+    // outcome remains evidence only and never becomes effectiveness/world truth.
+    const linkedExperienceReuseResolverView =
+      buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView({
+        source_phase81i_projection: linkedExperienceReentry,
+        expected_source: { world_history: worldHistory },
+      });
+    counterfactualLinkedExperienceReuseResolverViews.push(
+      cloneJson(linkedExperienceReuseResolverView),
+    );
+    const linkedExperienceReuseResolver =
+      typeof loopOptions.counterfactualLinkedExperienceReuseResolver === "function"
+        ? loopOptions.counterfactualLinkedExperienceReuseResolver
+        : null;
+    const rawLinkedExperienceReuseDecisions = linkedExperienceReuseResolver
+      && linkedExperienceReuseResolverView.linked_experience_candidates.length > 0
+      ? await linkedExperienceReuseResolver(cloneJson(linkedExperienceReuseResolverView))
+      : [];
+    if (!Array.isArray(rawLinkedExperienceReuseDecisions)) {
+      fail(
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_EXPERIENCE_REUSE_RESOLVER_INVALID_OUTPUT",
+        "counterfactualLinkedExperienceReuseResolver must return an array of bounded Phase81J decisions.",
+      );
+    }
+    const linkedExperienceReuseProjection =
+      projectWorldSimulationCounterfactualLinkedExperienceReuse({
+        source_phase81i_projection: linkedExperienceReentry,
+        expected_source: { world_history: worldHistory },
+        resolver_view: linkedExperienceReuseResolverView,
+        linked_experience_reuse_decisions: rawLinkedExperienceReuseDecisions,
+      });
+    counterfactualLinkedExperienceReuseProjections.push(
+      cloneJson(linkedExperienceReuseProjection),
+    );
+    characterInput.counterfactual_linked_experience_reuse = cloneJson(
+      linkedExperienceReuseProjection.character_view,
+    );
+    characterInput.boundaries.counterfactual_linked_experience_reuse_installed = true;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_advisory_only = true;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_effectiveness_authority = false;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_action_authority = false;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_world_truth_authority = false;
+
     decisionInputs.push({
       decision_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
       character_input: characterInput,
@@ -316,6 +367,10 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       counterfactualReflectionReentryProjections,
     counterfactual_linked_experience_reentry_projections:
       counterfactualLinkedExperienceReentryProjections,
+    counterfactual_linked_experience_reuse_resolver_views:
+      counterfactualLinkedExperienceReuseResolverViews,
+    counterfactual_linked_experience_reuse_projections:
+      counterfactualLinkedExperienceReuseProjections,
     counterfactual_preparative_revalidation_resolver_views:
       counterfactualPreparativeRevalidationResolverViews,
     counterfactual_preparative_revalidation_projections:
@@ -355,6 +410,10 @@ async function prepareFormalDecisionRound(
       cloneJson(actionBundle.counterfactual_reflection_reentry_projections),
     counterfactual_linked_experience_reentry_projections:
       cloneJson(actionBundle.counterfactual_linked_experience_reentry_projections),
+    counterfactual_linked_experience_reuse_resolver_views:
+      cloneJson(actionBundle.counterfactual_linked_experience_reuse_resolver_views),
+    counterfactual_linked_experience_reuse_projections:
+      cloneJson(actionBundle.counterfactual_linked_experience_reuse_projections),
     counterfactual_preparative_revalidation_resolver_views:
       cloneJson(actionBundle.counterfactual_preparative_revalidation_resolver_views),
     counterfactual_preparative_revalidation_projections:
@@ -659,6 +718,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
           acquisition.prepared_turn.counterfactual_reflection_reentry_projections ?? [],
         counterfactualLinkedExperienceReentryProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reentry_projections ?? [],
+        counterfactualLinkedExperienceReuseProjections:
+          acquisition.prepared_turn.counterfactual_linked_experience_reuse_projections ?? [],
         counterfactualPreparativeRevalidationProjections:
           acquisition.prepared_turn.counterfactual_preparative_revalidation_projections ?? [],
       },

@@ -22,6 +22,9 @@ import {
 import {
   worldSimulationCounterfactualPreparativeRevalidationVersion,
 } from "./world-simulation-counterfactual-preparative-revalidation-service.mjs";
+import {
+  worldSimulationCounterfactualLinkedExperienceReuseVersion,
+} from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
 
 import {
   worldSimulationFormalImpasseDecisionKinds,
@@ -95,6 +98,8 @@ function stageLabel(kind) {
       return "Phase80H";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81E:
       return "Phase81E";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
+      return "Phase81J";
     default:
       return null;
   }
@@ -118,6 +123,8 @@ function expectedVersion(kind) {
       return worldSimulationAnalogicalExperienceRetentionReuseVersion;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81E:
       return worldSimulationCounterfactualPreparativeRevalidationVersion;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
+      return worldSimulationCounterfactualLinkedExperienceReuseVersion;
     default:
       return null;
   }
@@ -140,6 +147,8 @@ function responseField(kind) {
       return "reuse_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81E:
       return "preparative_revalidation_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
+      return "linked_experience_reuse_decisions";
     default:
       return null;
   }
@@ -194,6 +203,13 @@ function assertResolverView(raw, kind) {
     fail(
       "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
       "Phase81E resolver view requires preparative_revalidation_candidates.",
+    );
+  }
+  if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE81J
+      && !Array.isArray(raw.linked_experience_candidates)) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
+      "Phase81J resolver view requires linked_experience_candidates.",
     );
   }
   return cloneJson(raw);
@@ -327,6 +343,14 @@ function publicCharacterInput(view, kind, character = view.character) {
         cloneJson(array(view.preparative_revalidation_candidates)),
       response_contract: cloneJson(view.response_contract ?? {}),
     };
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE81J) {
+    task = {
+      purpose:
+        "Decide only whether and how to reuse a bounded prior counterfactual-linked experience as current deliberative evidence. Retain at least one action-defining exact current cue and explicitly address context differences. Prior subjective outcome is evidence only; do not judge effectiveness, choose or prefer an action, rewrite belief or memory, or claim counterfactual world truth.",
+      linked_experience_candidates:
+        cloneJson(array(view.linked_experience_candidates)),
+      response_contract: cloneJson(view.response_contract ?? {}),
+    };
   } else {
     const evidenceField = kind === worldSimulationFormalImpasseDecisionKinds.PHASE79F
       ? "evidence_cue_refs"
@@ -398,6 +422,8 @@ function eligible(view, kind, character = view.character) {
       return array(view.retained_analogy_candidates).length > 0;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81E:
       return array(view.preparative_revalidation_candidates).length > 0;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
+      return array(view.linked_experience_candidates).length > 0;
     default:
       return false;
   }
@@ -446,6 +472,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
       "Phase79J",
       "Phase80H",
       "Phase81E",
+      "Phase81J",
       "action_selection",
     ],
     phase76d_experiential_reentry_supported: true,
@@ -456,6 +483,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
     phase79j_precedent_deliberation_supported: true,
     phase80h_retained_adapted_analogy_reuse_deliberation_supported: true,
     phase81e_counterfactual_preparative_revalidation_supported: true,
+    phase81j_counterfactual_linked_experience_reuse_supported: true,
     same_snapshot_repreparation_required: true,
     same_character_only: true,
     resolver_view_hash_bound_engine_side: true,
@@ -496,6 +524,8 @@ export function buildWorldSimulationFormalImpasseDeliberationRound(input = {}) {
       preparedTurn.analogical_experience_retention_reuse_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE81E,
       preparedTurn.counterfactual_preparative_revalidation_resolver_views],
+    [worldSimulationFormalImpasseDecisionKinds.PHASE81J,
+      preparedTurn.counterfactual_linked_experience_reuse_resolver_views],
   ];
   for (const [kind, views] of stages) {
     const decisionInputs = decisionInputsForViews(views, kind, completed);
@@ -588,5 +618,7 @@ export function buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE80H),
     counterfactualPreparativeRevalidationResolver:
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE81E),
+    counterfactualLinkedExperienceReuseResolver:
+      singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE81J),
   };
 }
