@@ -193,10 +193,11 @@ export const phase81CounterfactualExperienceSteps = Object.freeze([
   Object.freeze(["Phase 81D counterfactual reflection cross-turn re-entry", Object.freeze(["tests/phase81/phase81d-counterfactual-reflection-reentry.test.mjs"])]),
   Object.freeze(["Phase 81D-R1 native counterfactual reflection adoption", Object.freeze(["tests/phase81/phase81d-r1-native-counterfactual-reflection-adoption.test.mjs"])]),
   Object.freeze(["Phase 81E current-context counterfactual preparative revalidation", Object.freeze(["tests/phase81/phase81e-counterfactual-preparative-revalidation.test.mjs"])]),
+  Object.freeze(["Phase 81F counterfactual advisory-to-selected-action lineage", Object.freeze(["tests/phase81/phase81f-counterfactual-preparative-selected-action-lineage.test.mjs"])]),
 ]);
 
 export const phase81CounterfactualReflectionReentrySteps = Object.freeze(
-  phase81CounterfactualExperienceSteps.slice(3, 6),
+  phase81CounterfactualExperienceSteps.slice(3, 7),
 );
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
