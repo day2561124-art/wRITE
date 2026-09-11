@@ -186,6 +186,10 @@ export const phase80AnalogicalExperienceAdaptationSteps = Object.freeze([
   Object.freeze(["Phase 80H retained adapted analogy reuse deliberation", Object.freeze(["tests/phase80/phase80h-retained-adapted-analogy-reuse-deliberation.test.mjs"])]),
 ]);
 
+export const phase81CounterfactualExperienceSteps = Object.freeze([
+  Object.freeze(["Phase 81A post-outcome counterfactual alternative evidence", Object.freeze(["tests/phase81/phase81a-post-outcome-counterfactual-alternative-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -210,6 +214,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase78ContextualSchemaRefinementSteps,
   ...phase79ExperientialMethodCompetitionSteps,
   ...phase80AnalogicalExperienceAdaptationSteps,
+  ...phase81CounterfactualExperienceSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -232,6 +237,7 @@ export const cognitionSteps = Object.freeze([
   ...phase78ContextualSchemaRefinementSteps,
   ...phase79ExperientialMethodCompetitionSteps,
   ...phase80AnalogicalExperienceAdaptationSteps,
+  ...phase81CounterfactualExperienceSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
