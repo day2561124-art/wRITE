@@ -72,6 +72,9 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeRetentionCapsules,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-retention-capsule-service.mjs";
 import {
+  assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentryProjection,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-reentry-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8265,6 +8268,58 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase81N is a second-generation cross-turn retrieval surface. It is
+  // accepted only when formal/direct preparation produced exactly one same-
+  // snapshot projection per current character from canonical committed Phase81M
+  // history. It remains engine-side candidate evidence and never selects action.
+  const counterfactualLinkedExperienceReuseOutcomeReentryProjections = [];
+  const counterfactualLinkedExperienceReuseOutcomeReentryInputProvided = Object.hasOwn(
+    options,
+    "counterfactualLinkedExperienceReuseOutcomeReentryProjections",
+  );
+  const seenCounterfactualLinkedExperienceReuseOutcomeReentryCharacters = new Set();
+  const counterfactualLinkedExperienceReuseOutcomeCanonicalHistory =
+    counterfactualLinkedExperienceReuseOutcomeReentryInputProvided
+      ? (counterfactualLinkedExperienceCanonicalHistory
+        ?? await getWorldSimulationHistory(sessionId, options))
+      : counterfactualLinkedExperienceCanonicalHistory;
+  for (const rawProjection of array(
+    options.counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+  )) {
+    const projection =
+      assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentryProjection(
+        rawProjection,
+        {
+          world_simulation_session_id: sessionId,
+          current_turn_id: preparedTurn.turn_id,
+          current_state_revision: snapshot.revision,
+          current_world_state_hash: snapshot.state_hash,
+          world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory,
+        },
+      );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualLinkedExperienceReuseOutcomeReentryCharacters
+          .has(projection.character)) {
+      const error = new Error(
+        "Phase81N re-entry projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_REENTRY_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualLinkedExperienceReuseOutcomeReentryCharacters.add(projection.character);
+    counterfactualLinkedExperienceReuseOutcomeReentryProjections.push(cloneJson(projection));
+  }
+  if (counterfactualLinkedExperienceReuseOutcomeReentryInputProvided
+      && seenCounterfactualLinkedExperienceReuseOutcomeReentryCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81N internal input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code = "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_REENTRY_INCOMPLETE";
+    throw error;
+  }
+
   // Phase81J is accepted only as the exact same-turn deliberative reuse
   // projection derived from the canonical Phase81I evidence above. Resolve
   // rechecks the Phase81I source against committed World History so a caller
@@ -10634,6 +10689,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualReflectionReentryProjections),
       counterfactual_linked_experience_reentry_projections:
         cloneJson(counterfactualLinkedExperienceReentryProjections),
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        cloneJson(counterfactualLinkedExperienceReuseOutcomeReentryProjections),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:

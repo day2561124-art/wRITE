@@ -15,6 +15,9 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReentry,
 } from "./world-simulation-counterfactual-linked-experience-reentry-service.mjs";
 import {
+  projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentry,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-reentry-service.mjs";
+import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView,
   projectWorldSimulationCounterfactualLinkedExperienceReuse,
 } from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
@@ -200,6 +203,7 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const decisionInputs = [];
   const counterfactualReflectionReentryProjections = [];
   const counterfactualLinkedExperienceReentryProjections = [];
+  const counterfactualLinkedExperienceReuseOutcomeReentryProjections = [];
   const counterfactualLinkedExperienceReuseResolverViews = [];
   const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationResolverViews = [];
@@ -248,6 +252,26 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       });
     counterfactualLinkedExperienceReentryProjections.push(
       cloneJson(linkedExperienceReentry),
+    );
+
+    // Phase81N retrieves only prior committed Phase81M reuse-outcome capsules
+    // whose retained action-defining cue signatures exactly overlap a current
+    // canonical Phase74A candidate. Both prior subjective outcomes remain
+    // source-distinct candidate evidence; recurrence does not imply effectiveness.
+    const linkedExperienceReuseOutcomeReentry =
+      projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentry({
+        world_simulation_session_id: sessionId,
+        character: characterInput.character,
+        current_turn_id: prepared.turn_id,
+        current_state_revision: prepared.state_revision,
+        current_world_state_hash: prepared.world_state_hash,
+        current_cognition: characterInput.cognition,
+        current_candidate_action_intents: characterInput.candidate_action_intents,
+        source_phase74a_deliberation: characterInput.subjective_action_deliberation,
+        world_history: worldHistory,
+      });
+    counterfactualLinkedExperienceReuseOutcomeReentryProjections.push(
+      cloneJson(linkedExperienceReuseOutcomeReentry),
     );
 
     // Phase81D-R1 is derived from the final formal Character Brain input after
@@ -367,6 +391,8 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       counterfactualReflectionReentryProjections,
     counterfactual_linked_experience_reentry_projections:
       counterfactualLinkedExperienceReentryProjections,
+    counterfactual_linked_experience_reuse_outcome_reentry_projections:
+      counterfactualLinkedExperienceReuseOutcomeReentryProjections,
     counterfactual_linked_experience_reuse_resolver_views:
       counterfactualLinkedExperienceReuseResolverViews,
     counterfactual_linked_experience_reuse_projections:
@@ -410,6 +436,8 @@ async function prepareFormalDecisionRound(
       cloneJson(actionBundle.counterfactual_reflection_reentry_projections),
     counterfactual_linked_experience_reentry_projections:
       cloneJson(actionBundle.counterfactual_linked_experience_reentry_projections),
+    counterfactual_linked_experience_reuse_outcome_reentry_projections:
+      cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_reentry_projections),
     counterfactual_linked_experience_reuse_resolver_views:
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_resolver_views),
     counterfactual_linked_experience_reuse_projections:
@@ -718,6 +746,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
           acquisition.prepared_turn.counterfactual_reflection_reentry_projections ?? [],
         counterfactualLinkedExperienceReentryProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reentry_projections ?? [],
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections:
+          acquisition.prepared_turn.counterfactual_linked_experience_reuse_outcome_reentry_projections ?? [],
         counterfactualLinkedExperienceReuseProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_projections ?? [],
         counterfactualPreparativeRevalidationProjections:
