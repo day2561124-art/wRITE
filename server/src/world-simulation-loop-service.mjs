@@ -32,6 +32,13 @@ import {
   worldSimulationPostOutcomeCounterfactualReflectionRetentionVersion,
 } from "./world-simulation-post-outcome-counterfactual-reflection-retention-service.mjs";
 import {
+  assertWorldSimulationCounterfactualReflectionReentryProjection,
+  worldSimulationCounterfactualReflectionReentryVersion,
+} from "./world-simulation-counterfactual-reflection-reentry-service.mjs";
+import {
+  adoptWorldSimulationCounterfactualReflectionReentry,
+} from "./world-simulation-counterfactual-reflection-reentry-adoption-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8080,6 +8087,52 @@ export async function resolveWorldSimulationTurn(
     stale.code = "WORLD_SIMULATION_PREPARED_TURN_STALE";
     throw stale;
   }
+
+  // Phase81D-R1 full re-entry projections are engine-side evidence created only
+  // after the final Character Brain Phase74A view exists. Resolve accepts them
+  // through this internal option so direct and formal transports can persist
+  // exactly what was shown as a sanitized reminder without letting callers
+  // smuggle unrelated character/history lineage into the committed turn.
+  const counterfactualReflectionReentryProjections = [];
+  const counterfactualReflectionReentryInputProvided = Object.hasOwn(
+    options,
+    "counterfactualReflectionReentryProjections",
+  );
+  const allowedCounterfactualReflectionCharacters = new Set(
+    array(preparedTurn.decision_packets).map((packet) => packet?.character).filter(Boolean),
+  );
+  const seenCounterfactualReflectionCharacters = new Set();
+  for (const rawProjection of array(options.counterfactualReflectionReentryProjections)) {
+    const projection = assertWorldSimulationCounterfactualReflectionReentryProjection(
+      rawProjection,
+      {
+        world_simulation_session_id: sessionId,
+        current_turn_id: preparedTurn.turn_id,
+        current_state_revision: snapshot.revision,
+        current_world_state_hash: snapshot.state_hash,
+      },
+    );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualReflectionCharacters.has(projection.character)) {
+      const error = new Error(
+        "Phase81D-R1 re-entry projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code = "WORLD_SIMULATION_COUNTERFACTUAL_REFLECTION_REENTRY_ADOPTION_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualReflectionCharacters.add(projection.character);
+    counterfactualReflectionReentryProjections.push(cloneJson(projection));
+  }
+  if (counterfactualReflectionReentryInputProvided
+      && seenCounterfactualReflectionCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81D-R1 internal adoption input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code = "WORLD_SIMULATION_COUNTERFACTUAL_REFLECTION_REENTRY_ADOPTION_INCOMPLETE";
+    throw error;
+  }
+
   const causalAdjudicator = typeof options.causalAdjudicator === "function"
     ? options.causalAdjudicator
     : adjudicateWorldSimulationCausality;
@@ -10258,6 +10311,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           preparedTurn.analogical_experience_retention_reuse_projections ?? [],
         ),
+      counterfactual_reflection_reentry_projections:
+        cloneJson(counterfactualReflectionReentryProjections),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
@@ -10659,6 +10714,26 @@ export async function resolveWorldSimulationTurn(
       causal_outcome_authority_claimed: false,
     },
     consistency,
+
+    counterfactual_reflection_reentry: {
+      version: worldSimulationCounterfactualReflectionReentryVersion,
+      character_projection_count: counterfactualReflectionReentryProjections.length,
+      reentry_candidate_count:
+        counterfactualReflectionReentryProjections.reduce(
+          (total, projection) => total + Number(projection?.reentry_candidate_count ?? 0),
+          0,
+        ),
+      source_scope: "same_character_prior_committed_phase81c_only",
+      action_proposer_candidates_preexist_reentry: true,
+      exact_final_phase74a_deliberation_required: true,
+      character_brain_exposure_installed: true,
+      full_engine_projection_exposed_to_character_brain: false,
+      advisory_only: true,
+      automatic_preference_action_belief_revision: false,
+      semantic_revision_performed: false,
+      world_truth_authority_exposed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
 
     subjective_cognition_read_projection: {
       version:
@@ -11813,6 +11888,11 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     );
   }
   const selections = {};
+  const worldHistory = await getWorldSimulationHistory(
+    prepared.world_simulation_session_id,
+    options,
+  );
+  const counterfactualReflectionReentryProjections = [];
   for (const packet of prepared.decision_packets) {
     // Single-source Character Brain ingress projector. Runtime identity and
     // world-lineage metadata remain engine-side and are never added here.
@@ -11824,6 +11904,31 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         include_legacy_retrieved_memories_alias: true,
       },
     );
+
+    // Phase81D-R1 runs only after the final candidate universe and canonical
+    // Phase74A view have been built. The full projection remains engine-side;
+    // Character Brain receives only the sanitized reminder DTO, so prior
+    // imagined alternatives can inform deliberation without becoming current
+    // cognition, world truth, or an engine-lineage disclosure surface.
+    const counterfactualReflectionReentryAdoption =
+      adoptWorldSimulationCounterfactualReflectionReentry({
+        world_simulation_session_id: prepared.world_simulation_session_id,
+        current_turn_id: prepared.turn_id,
+        current_state_revision: prepared.state_revision,
+        current_world_state_hash: prepared.world_state_hash,
+        world_history: worldHistory,
+        character_input: brainInput,
+      });
+    counterfactualReflectionReentryProjections.push(
+      cloneJson(counterfactualReflectionReentryAdoption.projection),
+    );
+    brainInput.counterfactual_reflection_reentry = cloneJson(
+      counterfactualReflectionReentryAdoption.character_view,
+    );
+    brainInput.boundaries.counterfactual_reflection_reentry_native_adoption_installed = true;
+    brainInput.boundaries.counterfactual_reflection_reentry_engine_lineage_exposed = false;
+    brainInput.boundaries.counterfactual_reflection_reentry_advisory_only = true;
+
     selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
       {
         world_simulation_session_id: prepared.world_simulation_session_id,
@@ -11840,6 +11945,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     {
       ...options,
       characterRuntimeManager,
+      counterfactualReflectionReentryProjections,
     },
   );
 }

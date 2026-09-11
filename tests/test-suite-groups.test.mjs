@@ -27,6 +27,7 @@ import {
   phase79ExperientialMethodCompetitionSteps,
   phase80AnalogicalExperienceAdaptationSteps,
   phase81CounterfactualExperienceSteps,
+  phase81CounterfactualReflectionReentrySteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
@@ -76,6 +77,9 @@ const phase78Paths = pathsFor(phase78ContextualSchemaRefinementSteps);
 const phase79Paths = pathsFor(phase79ExperientialMethodCompetitionSteps);
 const phase80Paths = pathsFor(phase80AnalogicalExperienceAdaptationSteps);
 const phase81Paths = pathsFor(phase81CounterfactualExperienceSteps);
+const phase81CounterfactualReflectionReentryPaths = pathsFor(
+  phase81CounterfactualReflectionReentrySteps,
+);
 const phase62CognitionPaths = pathsFor(phase62CognitionIntegrationSteps);
 
 assertUnique("run-all active world-simulation inventory", activeRunAllPaths);
@@ -91,8 +95,8 @@ assert.deepEqual(
 
 assert.deepEqual(
   memoryPaths,
-  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths],
-  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, Phase68 self interpretation, Phase69 goal-to-plan cognition, Phase70 goal lifecycle cognition, Phase71 adaptive replanning cognition, Phase72 means-feasibility cognition, Phase73 visible-constraint observation cognition, Phase76 post-outcome experience-memory-learning cognition, Phase77 multi-experience schema induction cognition, Phase78 contextual schema refinement cognition, Phase79 experiential method competition cognition, and Phase80 analogical experience adaptation cognition.",
+  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths],
+  "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, Phase68 self interpretation, Phase69 goal-to-plan cognition, Phase70 goal lifecycle cognition, Phase71 adaptive replanning cognition, Phase72 means-feasibility cognition, Phase73 visible-constraint observation cognition, Phase76 post-outcome experience-memory-learning cognition, Phase77 multi-experience schema induction cognition, Phase78 contextual schema refinement cognition, Phase79 experiential method competition cognition, Phase80 analogical experience adaptation cognition, and the Phase81D counterfactual reflection re-entry path.",
 );
 
 assert.deepEqual(

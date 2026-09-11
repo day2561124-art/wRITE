@@ -5,6 +5,9 @@ import {
   worldSimulationCharacterBrainInputVersion,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  adoptWorldSimulationCounterfactualReflectionReentry,
+} from "./world-simulation-counterfactual-reflection-reentry-adoption-service.mjs";
+import {
   prepareWorldSimulationTurn,
   resolveWorldSimulationTurn,
 } from "./world-simulation-loop-service.mjs";
@@ -93,6 +96,10 @@ function requiredString(value, label, code) {
   return text;
 }
 
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
 function sameSnapshot(receipt, snapshot) {
   return receipt?.state_revision === snapshot?.revision
     && receipt?.world_state_hash === snapshot?.state_hash;
@@ -177,9 +184,11 @@ async function assertReceiptFresh(receipt, options) {
   return snapshot;
 }
 
-async function buildFormalActionDecisionInputs(prepared, sessionId, loopOptions) {
+async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions) {
   const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
-  return prepared.decision_packets.map((packet) => {
+  const decisionInputs = [];
+  const counterfactualReflectionReentryProjections = [];
+  for (const packet of prepared.decision_packets) {
     const effectiveCommitment = projectWorldSimulationEffectiveActionCommitment({
       world_history: worldHistory,
       world_simulation_session_id: sessionId,
@@ -199,15 +208,41 @@ async function buildFormalActionDecisionInputs(prepared, sessionId, loopOptions)
         execution_feedback_projection: executionFeedback,
         world_history: worldHistory,
       });
-    return {
+    const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
+      effective_action_commitment_character_exposure: commitmentExposure,
+      action_commitment_subjective_execution_experience:
+        subjectiveExecutionExperience,
+    });
+
+    // Phase81D-R1 is derived from the final formal Character Brain input after
+    // Phase75 overlays have been applied and Phase74A has been rebuilt. This
+    // preserves the exact-current-deliberation lineage instead of validating a
+    // weaker pre-overlay Phase74A hash. Only the sanitized reminder DTO crosses
+    // the character boundary; the full projection stays with trusted transport.
+    const adoption = adoptWorldSimulationCounterfactualReflectionReentry({
+      world_simulation_session_id: sessionId,
+      current_turn_id: prepared.turn_id,
+      current_state_revision: prepared.state_revision,
+      current_world_state_hash: prepared.world_state_hash,
+      world_history: worldHistory,
+      character_input: characterInput,
+    });
+    counterfactualReflectionReentryProjections.push(cloneJson(adoption.projection));
+    characterInput.counterfactual_reflection_reentry = cloneJson(adoption.character_view);
+    characterInput.boundaries.counterfactual_reflection_reentry_native_adoption_installed = true;
+    characterInput.boundaries.counterfactual_reflection_reentry_engine_lineage_exposed = false;
+    characterInput.boundaries.counterfactual_reflection_reentry_advisory_only = true;
+
+    decisionInputs.push({
       decision_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
-      character_input: buildWorldSimulationCharacterBrainInput(packet, {
-        effective_action_commitment_character_exposure: commitmentExposure,
-        action_commitment_subjective_execution_experience:
-          subjectiveExecutionExperience,
-      }),
-    };
-  });
+      character_input: characterInput,
+    });
+  }
+  return {
+    decision_inputs: decisionInputs,
+    counterfactual_reflection_reentry_projections:
+      counterfactualReflectionReentryProjections,
+  };
 }
 
 async function prepareFormalDecisionRound(
@@ -231,14 +266,15 @@ async function prepareFormalDecisionRound(
       decision_inputs: impasseRound.decision_inputs,
     };
   }
+  const actionBundle = await buildFormalActionDecisionBundle(
+    prepared,
+    sessionId,
+    loopOptions,
+  );
   return {
     prepared,
     decision_round_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
-    decision_inputs: await buildFormalActionDecisionInputs(
-      prepared,
-      sessionId,
-      loopOptions,
-    ),
+    decision_inputs: actionBundle.decision_inputs,
   };
 }
 
@@ -508,10 +544,20 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
   });
 
   try {
+    const loopOptions = formalLoopOptions(options);
+    const actionBundle = await buildFormalActionDecisionBundle(
+      acquisition.prepared_turn,
+      acquisition.prepared_turn.world_simulation_session_id,
+      loopOptions,
+    );
     const result = await resolveWorldSimulationTurn(
       acquisition.prepared_turn,
       acquisition.selected_actions,
-      formalLoopOptions(options),
+      {
+        ...loopOptions,
+        counterfactualReflectionReentryProjections:
+          actionBundle.counterfactual_reflection_reentry_projections,
+      },
     );
     const receipt = await broker.completeResolution({
       prepared_turn_handle: handle,
