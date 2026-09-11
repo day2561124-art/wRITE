@@ -66,6 +66,9 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceSelectedActionLineage,
 } from "./world-simulation-counterfactual-linked-experience-selected-action-lineage-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeEvidence,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-evidence-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8499,6 +8502,32 @@ export async function resolveWorldSimulationTurn(
       state_transitions: array(causalResolution.state_transitions),
     });
 
+  // Phase81L joins only the exact Phase81K reuse-intent selected-action lineage
+  // with the bounded Phase76A subjective outcome for that same character/action.
+  // It records what the character actually experienced after selecting an action
+  // that matched a Phase81J reuse intent, while revalidating the full canonical
+  // Phase81I/81J/74D/history chain. It does not infer reuse effectiveness,
+  // success/failure, historical counterfactual truth, causal credit, or any
+  // belief/preference/memory/world-state revision.
+  const counterfactualLinkedExperienceReuseOutcomeEvidence =
+    buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeEvidence({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceCanonicalHistory ?? [],
+      counterfactual_linked_experience_selected_action_lineage:
+        counterfactualLinkedExperienceSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reentry_projections:
+        counterfactualLinkedExperienceReentryProjections,
+      counterfactual_linked_experience_reuse_projections:
+        counterfactualLinkedExperienceReuseProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+
   // Phase81G joins only the exact Phase81F selected-action lineage with the
   // bounded Phase76A subjective outcome for that same character/action. It
   // records what was actually experienced after the linked action was selected,
@@ -10579,6 +10608,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:
         cloneJson(counterfactualLinkedExperienceSelectedActionLineage),
+      counterfactual_linked_experience_reuse_outcome_evidence:
+        cloneJson(counterfactualLinkedExperienceReuseOutcomeEvidence),
       counterfactual_preparative_revalidation_projections:
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:
