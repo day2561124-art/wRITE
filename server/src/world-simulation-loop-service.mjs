@@ -69,6 +69,9 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeEvidence,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-evidence-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeRetentionCapsules,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-retention-capsule-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8528,6 +8531,33 @@ export async function resolveWorldSimulationTurn(
         postOutcomeSubjectivePerceptionProjection,
     });
 
+  // Phase81M retains the exact current-context case produced by a successful
+  // Phase81J reuse intent after Phase81L has attached the bounded subjective
+  // outcome. Prior linked-case experience and the current outcome remain
+  // source-distinct; the capsule does not compare them for effectiveness,
+  // success/failure, causal credit, or any durable cognitive revision. It is
+  // append-only future evidence and cannot re-enter cognition in this turn.
+  const counterfactualLinkedExperienceReuseOutcomeRetention =
+    buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeRetentionCapsules({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceCanonicalHistory ?? [],
+      counterfactual_linked_experience_reuse_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeEvidence,
+      counterfactual_linked_experience_selected_action_lineage:
+        counterfactualLinkedExperienceSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reentry_projections:
+        counterfactualLinkedExperienceReentryProjections,
+      counterfactual_linked_experience_reuse_projections:
+        counterfactualLinkedExperienceReuseProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+
   // Phase81G joins only the exact Phase81F selected-action lineage with the
   // bounded Phase76A subjective outcome for that same character/action. It
   // records what was actually experienced after the linked action was selected,
@@ -10610,6 +10640,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceSelectedActionLineage),
       counterfactual_linked_experience_reuse_outcome_evidence:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeEvidence),
+      counterfactual_linked_experience_reuse_outcome_retention:
+        cloneJson(counterfactualLinkedExperienceReuseOutcomeRetention),
       counterfactual_preparative_revalidation_projections:
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:

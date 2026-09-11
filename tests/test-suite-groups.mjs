@@ -200,10 +200,11 @@ export const phase81CounterfactualExperienceSteps = Object.freeze([
   Object.freeze(["Phase 81J retained counterfactual-linked experience reuse deliberation", Object.freeze(["tests/phase81/phase81j-counterfactual-linked-experience-reuse-deliberation.test.mjs"])]),
   Object.freeze(["Phase 81K counterfactual-linked reuse intent selected-action lineage", Object.freeze(["tests/phase81/phase81k-counterfactual-linked-experience-selected-action-lineage.test.mjs"])]),
   Object.freeze(["Phase 81L reused counterfactual-linked selected-action subjective outcome evidence", Object.freeze(["tests/phase81/phase81l-counterfactual-linked-experience-reuse-outcome-evidence.test.mjs"])]),
+  Object.freeze(["Phase 81M counterfactual-linked reuse outcome retention capsule", Object.freeze(["tests/phase81/phase81m-counterfactual-linked-experience-reuse-outcome-retention-capsule.test.mjs"])]),
 ]);
 
 export const phase81CounterfactualReflectionReentrySteps = Object.freeze(
-  phase81CounterfactualExperienceSteps.slice(3, 13),
+  phase81CounterfactualExperienceSteps.slice(3, 14),
 );
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
