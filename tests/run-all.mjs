@@ -872,6 +872,7 @@ const steps = [
   ["Phase 81M counterfactual-linked reuse outcome retention capsule", ["tests/phase81/phase81m-counterfactual-linked-experience-reuse-outcome-retention-capsule.test.mjs"]],
   ["Phase 81N retained reuse-outcome cross-turn re-entry", ["tests/phase81/phase81n-counterfactual-linked-experience-reuse-outcome-reentry.test.mjs"]],
   ["Phase 81O retained reuse-outcome deliberative reuse", ["tests/phase81/phase81o-counterfactual-linked-experience-reuse-outcome-deliberation.test.mjs"]],
+  ["Phase 81P reuse-outcome deliberation selected-action lineage", ["tests/phase81/phase81p-counterfactual-linked-experience-reuse-outcome-selected-action-lineage.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

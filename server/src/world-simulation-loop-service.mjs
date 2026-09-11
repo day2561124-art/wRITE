@@ -78,6 +78,9 @@ import {
   assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationProjection,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-deliberation-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-selected-action-lineage-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8512,6 +8515,26 @@ export async function resolveWorldSimulationTurn(
         subjectiveChoiceCommitmentReceipts,
     });
 
+  // Phase81P closes only the deterministic provenance edge between a Phase81O
+  // second-generation deliberative reuse intent present during this turn and
+  // the exact Phase74D action then selected. Full Phase81N/81O canonical-history
+  // lineage is revalidated; this records selection relation only and never
+  // claims the reuse intent caused choice or establishes outcome/effectiveness.
+  const counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage =
+    buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeSelectedActionLineage({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+    });
+
   // Phase76F closes the pre-outcome provenance chain only after the Character
   // Brain has made a canonical Phase74D choice. A receipt is created only when
   // the selected action_ref already had an explicit method->candidate
@@ -10765,6 +10788,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReuseOutcomeReentryProjections),
       counterfactual_linked_experience_reuse_outcome_deliberation_projections:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeDeliberationProjections),
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        cloneJson(counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:
