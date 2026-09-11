@@ -445,6 +445,8 @@ export async function commitWorldSimulationTurn(
               input.post_outcome_subjective_perception_projection ?? null,
             post_outcome_counterfactual_alternative_evidence:
               input.post_outcome_counterfactual_alternative_evidence ?? null,
+            post_outcome_counterfactual_appraisal:
+              input.post_outcome_counterfactual_appraisal ?? null,
             post_outcome_subjective_memory_bridge:
               input.post_outcome_subjective_memory_bridge ?? null,
             post_outcome_subjective_memory_formation:

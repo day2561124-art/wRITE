@@ -23,6 +23,11 @@ import {
   worldSimulationPostOutcomeCounterfactualAlternativeEvidenceVersion,
 } from "./world-simulation-post-outcome-counterfactual-alternative-evidence-service.mjs";
 import {
+  buildWorldSimulationPostOutcomeCounterfactualAppraisalResolverView,
+  projectWorldSimulationPostOutcomeCounterfactualAppraisal,
+  worldSimulationPostOutcomeCounterfactualAppraisalVersion,
+} from "./world-simulation-post-outcome-counterfactual-appraisal-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8269,6 +8274,50 @@ export async function resolveWorldSimulationTurn(
         rawPostOutcomeCounterfactualAlternativeDecisions,
     });
 
+  // Phase81B lets Character Brain appraise only the bounded Phase81A evidence.
+  // Regret-like and relief-like labels remain subjective counterfactual
+  // appraisals because the forgone outcome was never observed. A preparative
+  // orientation is only a candidate for later learning; it cannot revise the
+  // completed choice, beliefs, preferences, semantic memory, or World State.
+  const postOutcomeCounterfactualAppraisalResolverView =
+    buildWorldSimulationPostOutcomeCounterfactualAppraisalResolverView({
+      counterfactual_alternative_resolver_view:
+        postOutcomeCounterfactualAlternativeResolverView,
+      post_outcome_counterfactual_alternative_evidence:
+        postOutcomeCounterfactualAlternativeEvidence,
+    });
+  const postOutcomeCounterfactualAppraisalResolver =
+    typeof options.postOutcomeCounterfactualAppraisalResolver === "function"
+      ? options.postOutcomeCounterfactualAppraisalResolver
+      : null;
+  const postOutcomeCounterfactualAppraisalResolverInvoked = Boolean(
+    postOutcomeCounterfactualAppraisalResolver
+      && postOutcomeCounterfactualAppraisalResolverView.appraisal_context_count > 0,
+  );
+  const rawPostOutcomeCounterfactualAppraisalDecisions =
+    postOutcomeCounterfactualAppraisalResolverInvoked
+      ? await postOutcomeCounterfactualAppraisalResolver(
+        cloneJson(postOutcomeCounterfactualAppraisalResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawPostOutcomeCounterfactualAppraisalDecisions)) {
+    const error = new Error(
+      "postOutcomeCounterfactualAppraisalResolver must return an array of bounded Phase81B appraisal decisions.",
+    );
+    error.code =
+      "WORLD_SIMULATION_POST_OUTCOME_COUNTERFACTUAL_APPRAISAL_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const postOutcomeCounterfactualAppraisal =
+    projectWorldSimulationPostOutcomeCounterfactualAppraisal({
+      counterfactual_alternative_resolver_view:
+        postOutcomeCounterfactualAlternativeResolverView,
+      post_outcome_counterfactual_alternative_evidence:
+        postOutcomeCounterfactualAlternativeEvidence,
+      resolver_view: postOutcomeCounterfactualAppraisalResolverView,
+      appraisal_decisions: rawPostOutcomeCounterfactualAppraisalDecisions,
+    });
+
   // Phase76B consumes only the already-bounded Phase76A projection plus the
   // acting character's own selected intent. It does not receive raw outcomes,
   // state transitions, or World State and cannot write memory or belief itself.
@@ -10462,6 +10511,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(postOutcomeSubjectivePerceptionProjection),
       post_outcome_counterfactual_alternative_evidence:
         cloneJson(postOutcomeCounterfactualAlternativeEvidence),
+      post_outcome_counterfactual_appraisal:
+        cloneJson(postOutcomeCounterfactualAppraisal),
       post_outcome_subjective_memory_bridge:
         cloneJson(postOutcomeSubjectiveMemoryBridge),
       post_outcome_subjective_memory_formation:
@@ -10889,6 +10940,24 @@ export async function resolveWorldSimulationTurn(
       causal_superiority_claimed: false,
       numeric_regret_utility_reward_q_value_probability_modeled: false,
       automatic_preference_or_action_revision: false,
+      semantic_revision_performed: false,
+      same_turn_action_selection_feedback_allowed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+    post_outcome_counterfactual_appraisal: {
+      version: worldSimulationPostOutcomeCounterfactualAppraisalVersion,
+      resolver_used: postOutcomeCounterfactualAppraisalResolverInvoked,
+      eligible_context_count:
+        postOutcomeCounterfactualAppraisalResolverView.appraisal_context_count,
+      appraisal_count:
+        postOutcomeCounterfactualAppraisal.counterfactual_appraisal_count,
+      projection_hash: postOutcomeCounterfactualAppraisal.projection_hash,
+      source_phase81a_only: true,
+      unchosen_outcome_observed: false,
+      regret_relief_are_subjective_appraisal_not_objective_forgone_outcome_fact: true,
+      causal_self_blame_inferred: false,
+      numeric_emotion_regret_relief_utility_reward_q_value_probability_modeled: false,
+      automatic_preference_action_belief_revision: false,
       semantic_revision_performed: false,
       same_turn_action_selection_feedback_allowed: false,
       persisted_only_with_successful_world_commit: true,

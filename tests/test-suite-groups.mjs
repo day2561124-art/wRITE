@@ -188,6 +188,7 @@ export const phase80AnalogicalExperienceAdaptationSteps = Object.freeze([
 
 export const phase81CounterfactualExperienceSteps = Object.freeze([
   Object.freeze(["Phase 81A post-outcome counterfactual alternative evidence", Object.freeze(["tests/phase81/phase81a-post-outcome-counterfactual-alternative-evidence.test.mjs"])]),
+  Object.freeze(["Phase 81B post-outcome counterfactual appraisal", Object.freeze(["tests/phase81/phase81b-post-outcome-counterfactual-appraisal.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
