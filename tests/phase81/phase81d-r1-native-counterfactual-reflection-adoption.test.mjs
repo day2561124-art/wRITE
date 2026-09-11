@@ -306,7 +306,11 @@ assert.match(transportSource, /adoptWorldSimulationCounterfactualReflectionReent
 assert.match(transportSource, /characterInput\.counterfactual_reflection_reentry\s*=\s*cloneJson/);
 assert.match(
   transportSource,
-  /counterfactualReflectionReentryProjections:\s*\n\s*actionBundle\.counterfactual_reflection_reentry_projections/,
+  /counterfactualReflectionReentryProjections:\s*\n\s*acquisition\.prepared_turn\.counterfactual_reflection_reentry_projections \?\? \[\]/,
+);
+assert.match(
+  transportSource,
+  /same-snapshot Phase81D\/81E[\s\S]*rather than recomputing cognition after[\s\S]*action submission/,
 );
 assert.match(
   stateSource,

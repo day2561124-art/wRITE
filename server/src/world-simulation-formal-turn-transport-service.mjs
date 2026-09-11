@@ -8,6 +8,10 @@ import {
   adoptWorldSimulationCounterfactualReflectionReentry,
 } from "./world-simulation-counterfactual-reflection-reentry-adoption-service.mjs";
 import {
+  buildWorldSimulationCounterfactualPreparativeRevalidationResolverView,
+  projectWorldSimulationCounterfactualPreparativeRevalidation,
+} from "./world-simulation-counterfactual-preparative-revalidation-service.mjs";
+import {
   prepareWorldSimulationTurn,
   resolveWorldSimulationTurn,
 } from "./world-simulation-loop-service.mjs";
@@ -188,6 +192,8 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
   const decisionInputs = [];
   const counterfactualReflectionReentryProjections = [];
+  const counterfactualPreparativeRevalidationResolverViews = [];
+  const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
     const effectiveCommitment = projectWorldSimulationEffectiveActionCommitment({
       world_history: worldHistory,
@@ -233,6 +239,48 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     characterInput.boundaries.counterfactual_reflection_reentry_engine_lineage_exposed = false;
     characterInput.boundaries.counterfactual_reflection_reentry_advisory_only = true;
 
+    // Phase81E sits strictly after Phase81D reminder construction and before
+    // action selection. The resolver receives only the bounded reminder-derived
+    // current-context applicability surface; it may return refs-only relevance
+    // judgments and can never choose or prefer an action.
+    const preparativeResolverView =
+      buildWorldSimulationCounterfactualPreparativeRevalidationResolverView({
+        source_phase81d_projection: adoption.projection,
+      });
+    counterfactualPreparativeRevalidationResolverViews.push(
+      cloneJson(preparativeResolverView),
+    );
+    const preparativeResolver =
+      typeof loopOptions.counterfactualPreparativeRevalidationResolver === "function"
+        ? loopOptions.counterfactualPreparativeRevalidationResolver
+        : null;
+    const rawPreparativeDecisions = preparativeResolver
+      && preparativeResolverView.preparative_revalidation_candidates.length > 0
+      ? await preparativeResolver(cloneJson(preparativeResolverView))
+      : [];
+    if (!Array.isArray(rawPreparativeDecisions)) {
+      fail(
+        "WORLD_SIMULATION_COUNTERFACTUAL_PREPARATIVE_REVALIDATION_RESOLVER_INVALID_OUTPUT",
+        "counterfactualPreparativeRevalidationResolver must return an array of bounded Phase81E decisions.",
+      );
+    }
+    const preparativeProjection =
+      projectWorldSimulationCounterfactualPreparativeRevalidation({
+        source_phase81d_projection: adoption.projection,
+        resolver_view: preparativeResolverView,
+        preparative_revalidation_decisions: rawPreparativeDecisions,
+      });
+    counterfactualPreparativeRevalidationProjections.push(
+      cloneJson(preparativeProjection),
+    );
+    characterInput.counterfactual_preparative_revalidation = cloneJson(
+      preparativeProjection.character_view,
+    );
+    characterInput.boundaries.counterfactual_preparative_revalidation_installed = true;
+    characterInput.boundaries.counterfactual_preparative_revalidation_advisory_only = true;
+    characterInput.boundaries.counterfactual_preparative_revalidation_action_authority = false;
+    characterInput.boundaries.counterfactual_preparative_revalidation_world_truth_authority = false;
+
     decisionInputs.push({
       decision_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
       character_input: characterInput,
@@ -242,6 +290,10 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     decision_inputs: decisionInputs,
     counterfactual_reflection_reentry_projections:
       counterfactualReflectionReentryProjections,
+    counterfactual_preparative_revalidation_resolver_views:
+      counterfactualPreparativeRevalidationResolverViews,
+    counterfactual_preparative_revalidation_projections:
+      counterfactualPreparativeRevalidationProjections,
   };
 }
 
@@ -271,8 +323,28 @@ async function prepareFormalDecisionRound(
     sessionId,
     loopOptions,
   );
+  const preparedWithPreActionDeliberation = {
+    ...prepared,
+    counterfactual_reflection_reentry_projections:
+      cloneJson(actionBundle.counterfactual_reflection_reentry_projections),
+    counterfactual_preparative_revalidation_resolver_views:
+      cloneJson(actionBundle.counterfactual_preparative_revalidation_resolver_views),
+    counterfactual_preparative_revalidation_projections:
+      cloneJson(actionBundle.counterfactual_preparative_revalidation_projections),
+  };
+  const preparativeRound = buildWorldSimulationFormalImpasseDeliberationRound({
+    prepared_turn: preparedWithPreActionDeliberation,
+    prior_submissions: priorSubmissions,
+  });
+  if (preparativeRound) {
+    return {
+      prepared: preparedWithPreActionDeliberation,
+      decision_round_kind: preparativeRound.decision_round_kind,
+      decision_inputs: preparativeRound.decision_inputs,
+    };
+  }
   return {
-    prepared,
+    prepared: preparedWithPreActionDeliberation,
     decision_round_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
     decision_inputs: actionBundle.decision_inputs,
   };
@@ -310,6 +382,7 @@ export function buildWorldSimulationFormalTurnTransportContract() {
     authority: {
       caller_may_submit_action_id_only: true,
       caller_may_submit_bounded_impasse_preference_revisions: true,
+      caller_may_submit_bounded_counterfactual_preparative_revalidation: true,
       impasse_preference_submission_requires_current_decision_handle: true,
       impasse_preference_submission_replayed_by_server_owned_closure_only: true,
       action_selection_may_not_supply_impasse_preference: true,
@@ -545,18 +618,19 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
 
   try {
     const loopOptions = formalLoopOptions(options);
-    const actionBundle = await buildFormalActionDecisionBundle(
-      acquisition.prepared_turn,
-      acquisition.prepared_turn.world_simulation_session_id,
-      loopOptions,
-    );
+    // The final ACTION round already contains the same-snapshot Phase81D/81E
+    // projections that shaped the Character Brain surface. Resolve consumes
+    // those exact ephemeral projections rather than recomputing cognition after
+    // action submission.
     const result = await resolveWorldSimulationTurn(
       acquisition.prepared_turn,
       acquisition.selected_actions,
       {
         ...loopOptions,
         counterfactualReflectionReentryProjections:
-          actionBundle.counterfactual_reflection_reentry_projections,
+          acquisition.prepared_turn.counterfactual_reflection_reentry_projections ?? [],
+        counterfactualPreparativeRevalidationProjections:
+          acquisition.prepared_turn.counterfactual_preparative_revalidation_projections ?? [],
       },
     );
     const receipt = await broker.completeResolution({

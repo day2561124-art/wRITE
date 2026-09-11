@@ -39,6 +39,12 @@ import {
   adoptWorldSimulationCounterfactualReflectionReentry,
 } from "./world-simulation-counterfactual-reflection-reentry-adoption-service.mjs";
 import {
+  assertWorldSimulationCounterfactualPreparativeRevalidationProjection,
+  buildWorldSimulationCounterfactualPreparativeRevalidationResolverView,
+  projectWorldSimulationCounterfactualPreparativeRevalidation,
+  worldSimulationCounterfactualPreparativeRevalidationVersion,
+} from "./world-simulation-counterfactual-preparative-revalidation-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8133,6 +8139,59 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase81E is accepted only as the exact per-character deliberative
+  // revalidation of the Phase81D projection that shaped this same prepared
+  // action surface. It remains advisory evidence and has no causal authority.
+  const counterfactualReflectionByCharacter = new Map(
+    counterfactualReflectionReentryProjections.map((projection) => [
+      projection.character,
+      projection,
+    ]),
+  );
+  const counterfactualPreparativeRevalidationProjections = [];
+  const counterfactualPreparativeRevalidationInputProvided = Object.hasOwn(
+    options,
+    "counterfactualPreparativeRevalidationProjections",
+  );
+  const seenCounterfactualPreparativeCharacters = new Set();
+  for (const rawProjection of array(options.counterfactualPreparativeRevalidationProjections)) {
+    const rawCharacter = rawProjection?.character;
+    const sourcePhase81D = counterfactualReflectionByCharacter.get(rawCharacter);
+    if (!sourcePhase81D) {
+      const error = new Error(
+        "Phase81E projection requires the exact same-character Phase81D projection from this prepared turn.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_PREPARATIVE_REVALIDATION_ADOPTION_LINEAGE_INVALID";
+      throw error;
+    }
+    const projection = assertWorldSimulationCounterfactualPreparativeRevalidationProjection(
+      rawProjection,
+      { source_phase81d_projection: sourcePhase81D },
+    );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualPreparativeCharacters.has(projection.character)) {
+      const error = new Error(
+        "Phase81E projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_PREPARATIVE_REVALIDATION_ADOPTION_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualPreparativeCharacters.add(projection.character);
+    counterfactualPreparativeRevalidationProjections.push(cloneJson(projection));
+  }
+  if (counterfactualPreparativeRevalidationInputProvided
+      && seenCounterfactualPreparativeCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81E internal adoption input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code =
+      "WORLD_SIMULATION_COUNTERFACTUAL_PREPARATIVE_REVALIDATION_ADOPTION_INCOMPLETE";
+    throw error;
+  }
+
   const causalAdjudicator = typeof options.causalAdjudicator === "function"
     ? options.causalAdjudicator
     : adjudicateWorldSimulationCausality;
@@ -10313,6 +10372,8 @@ export async function resolveWorldSimulationTurn(
         ),
       counterfactual_reflection_reentry_projections:
         cloneJson(counterfactualReflectionReentryProjections),
+      counterfactual_preparative_revalidation_projections:
+        cloneJson(counterfactualPreparativeRevalidationProjections),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
@@ -10730,6 +10791,30 @@ export async function resolveWorldSimulationTurn(
       full_engine_projection_exposed_to_character_brain: false,
       advisory_only: true,
       automatic_preference_action_belief_revision: false,
+      semantic_revision_performed: false,
+      world_truth_authority_exposed: false,
+      persisted_only_with_successful_world_commit: true,
+    },
+
+    counterfactual_preparative_revalidation: {
+      version: worldSimulationCounterfactualPreparativeRevalidationVersion,
+      character_projection_count:
+        counterfactualPreparativeRevalidationProjections.length,
+      revalidation_judgment_count:
+        counterfactualPreparativeRevalidationProjections.reduce(
+          (total, projection) => total + Number(projection?.revalidation_judgment_count ?? 0),
+          0,
+        ),
+      source_scope: "same_turn_exact_phase81d_reentry_only",
+      applicability_is_subjective_deliberative_relevance_not_world_truth: true,
+      exact_current_cue_support_required: true,
+      changed_context_difference_handling_required: true,
+      no_preparative_takeaway_excluded: true,
+      character_brain_exposure_installed: true,
+      advisory_only: true,
+      preference_revision_performed: false,
+      action_selection_performed: false,
+      belief_revision_performed: false,
       semantic_revision_performed: false,
       world_truth_authority_exposed: false,
       persisted_only_with_successful_world_commit: true,
@@ -11893,6 +11978,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     options,
   );
   const counterfactualReflectionReentryProjections = [];
+  const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
     // Single-source Character Brain ingress projector. Runtime identity and
     // world-lineage metadata remain engine-side and are never added here.
@@ -11929,6 +12015,49 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     brainInput.boundaries.counterfactual_reflection_reentry_engine_lineage_exposed = false;
     brainInput.boundaries.counterfactual_reflection_reentry_advisory_only = true;
 
+    // Phase81E revalidates only the remembered preparative takeaway against
+    // the exact current Phase74A-derived cue context. This is a bounded
+    // relevance judgment before action selection, never an action preference.
+    const counterfactualPreparativeResolverView =
+      buildWorldSimulationCounterfactualPreparativeRevalidationResolverView({
+        source_phase81d_projection: counterfactualReflectionReentryAdoption.projection,
+      });
+    const counterfactualPreparativeResolver =
+      typeof options.counterfactualPreparativeRevalidationResolver === "function"
+        ? options.counterfactualPreparativeRevalidationResolver
+        : null;
+    const rawCounterfactualPreparativeDecisions =
+      counterfactualPreparativeResolver
+        && counterfactualPreparativeResolverView.preparative_revalidation_candidates.length > 0
+        ? await counterfactualPreparativeResolver(
+          cloneJson(counterfactualPreparativeResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawCounterfactualPreparativeDecisions)) {
+      const error = new Error(
+        "counterfactualPreparativeRevalidationResolver must return an array of bounded Phase81E decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_PREPARATIVE_REVALIDATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const counterfactualPreparativeProjection =
+      projectWorldSimulationCounterfactualPreparativeRevalidation({
+        source_phase81d_projection: counterfactualReflectionReentryAdoption.projection,
+        resolver_view: counterfactualPreparativeResolverView,
+        preparative_revalidation_decisions: rawCounterfactualPreparativeDecisions,
+      });
+    counterfactualPreparativeRevalidationProjections.push(
+      cloneJson(counterfactualPreparativeProjection),
+    );
+    brainInput.counterfactual_preparative_revalidation = cloneJson(
+      counterfactualPreparativeProjection.character_view,
+    );
+    brainInput.boundaries.counterfactual_preparative_revalidation_installed = true;
+    brainInput.boundaries.counterfactual_preparative_revalidation_advisory_only = true;
+    brainInput.boundaries.counterfactual_preparative_revalidation_action_authority = false;
+    brainInput.boundaries.counterfactual_preparative_revalidation_world_truth_authority = false;
+
     selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
       {
         world_simulation_session_id: prepared.world_simulation_session_id,
@@ -11946,6 +12075,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       ...options,
       characterRuntimeManager,
       counterfactualReflectionReentryProjections,
+      counterfactualPreparativeRevalidationProjections,
     },
   );
 }

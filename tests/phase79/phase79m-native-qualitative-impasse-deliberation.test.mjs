@@ -134,6 +134,7 @@ assert.deepEqual(contract.stage_order, [
   "Phase80B",
   "Phase79J",
   "Phase80H",
+  "Phase81E",
   "action_selection",
 ]);
 assert.equal(contract.phase76d_experiential_reentry_supported, true);
@@ -142,6 +143,7 @@ assert.equal(contract.phase79b_qualitative_competition_supported, true);
 assert.equal(contract.phase79f_current_context_deliberation_supported, true);
 assert.equal(contract.phase80b_analogical_adaptation_deliberation_supported, true);
 assert.equal(contract.phase79j_precedent_deliberation_supported, true);
+assert.equal(contract.phase81e_counterfactual_preparative_revalidation_supported, true);
 assert.equal(contract.neural_adapter_required, false);
 assert.equal(contract.caller_runtime_callback_forwarded, false);
 assert.equal(contract.raw_world_state_exposed, false);
