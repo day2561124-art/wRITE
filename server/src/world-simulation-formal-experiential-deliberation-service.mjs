@@ -16,6 +16,9 @@ import {
 import {
   worldSimulationAnalogicalExperienceAdaptationVersion,
 } from "./world-simulation-analogical-experience-adaptation-service.mjs";
+import {
+  worldSimulationAnalogicalExperienceRetentionReuseVersion,
+} from "./world-simulation-analogical-experience-retention-reuse-service.mjs";
 
 import {
   worldSimulationFormalImpasseDecisionKinds,
@@ -85,6 +88,8 @@ function stageLabel(kind) {
       return "Phase79J";
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return "Phase80B";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return "Phase80H";
     default:
       return null;
   }
@@ -104,6 +109,8 @@ function expectedVersion(kind) {
       return worldSimulationExperientialMethodImpassePrecedentReresolutionVersion;
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return worldSimulationAnalogicalExperienceAdaptationVersion;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return worldSimulationAnalogicalExperienceRetentionReuseVersion;
     default:
       return null;
   }
@@ -122,6 +129,8 @@ function responseField(kind) {
       return "preference_revisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return "adaptation_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return "reuse_decisions";
     default:
       return null;
   }
@@ -162,6 +171,13 @@ function assertResolverView(raw, kind) {
     fail(
       "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
       "Phase79M Phase80B resolver view requires analogy_candidates.",
+    );
+  }
+  if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE80H
+      && !Array.isArray(raw.retained_analogy_candidates)) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
+      "Phase79M Phase80H resolver view requires retained_analogy_candidates.",
     );
   }
   return cloneJson(raw);
@@ -279,6 +295,14 @@ function publicCharacterInput(view, kind, character = view.character) {
       analogy_candidates: cloneJson(array(view.analogy_candidates)),
       response_contract: cloneJson(view.response_contract ?? {}),
     };
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE80H) {
+    task = {
+      purpose:
+        "Decide whether and how to reuse only the bounded retained adapted analogy in the current context. Select matched current cues to retain and explicitly address retained/current differences. Historical subjective outcome is evidence only; do not author a method, preference, or action.",
+      retained_analogy_candidates:
+        cloneJson(array(view.retained_analogy_candidates)),
+      response_contract: cloneJson(view.response_contract ?? {}),
+    };
   } else {
     const evidenceField = kind === worldSimulationFormalImpasseDecisionKinds.PHASE79F
       ? "evidence_cue_refs"
@@ -346,6 +370,8 @@ function eligible(view, kind, character = view.character) {
           && array(context?.competition_pairs).length > 0);
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return array(view.analogy_candidates).length > 0;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return array(view.retained_analogy_candidates).length > 0;
     default:
       return false;
   }
@@ -392,6 +418,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
       "Phase79F",
       "Phase80B",
       "Phase79J",
+      "Phase80H",
       "action_selection",
     ],
     phase76d_experiential_reentry_supported: true,
@@ -400,6 +427,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
     phase79f_current_context_deliberation_supported: true,
     phase80b_analogical_adaptation_deliberation_supported: true,
     phase79j_precedent_deliberation_supported: true,
+    phase80h_retained_adapted_analogy_reuse_deliberation_supported: true,
     same_snapshot_repreparation_required: true,
     same_character_only: true,
     resolver_view_hash_bound_engine_side: true,
@@ -436,6 +464,8 @@ export function buildWorldSimulationFormalImpasseDeliberationRound(input = {}) {
       preparedTurn.analogical_experience_adaptation_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE79J,
       preparedTurn.experiential_method_impasse_precedent_reresolution_resolver_views],
+    [worldSimulationFormalImpasseDecisionKinds.PHASE80H,
+      preparedTurn.analogical_experience_retention_reuse_resolver_views],
   ];
   for (const [kind, views] of stages) {
     const decisionInputs = decisionInputsForViews(views, kind, completed);
@@ -524,5 +554,7 @@ export function buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE79J),
     analogicalExperienceAdaptationResolver:
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE80B),
+    analogicalExperienceRetentionReuseResolver:
+      singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE80H),
   };
 }

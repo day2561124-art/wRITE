@@ -176,6 +176,13 @@ import {
   worldSimulationAnalogicalExperienceRevalidationVersion,
 } from "./world-simulation-analogical-experience-revalidation-service.mjs";
 import {
+  projectWorldSimulationAnalogicalExperienceRetentionReentry,
+} from "./world-simulation-analogical-experience-retention-reentry-service.mjs";
+import {
+  buildWorldSimulationAnalogicalExperienceRetentionReuseResolverView,
+  projectWorldSimulationAnalogicalExperienceRetentionReuse,
+} from "./world-simulation-analogical-experience-retention-reuse-service.mjs";
+import {
   buildWorldSimulationAnalogicalExperienceApplicationLineage,
   buildWorldSimulationAnalogicalExperienceApplicationLineageContract,
   worldSimulationAnalogicalExperienceApplicationLineageVersion,
@@ -4373,6 +4380,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const analogicalExperienceAdaptationResolverViews = [];
   const analogicalExperienceAdaptationProjections = [];
   const analogicalExperienceRevalidationProjections = [];
+  const analogicalExperienceRetentionReentryProjections = [];
+  const analogicalExperienceRetentionReuseResolverViews = [];
+  const analogicalExperienceRetentionReuseProjections = [];
   const experientialMethodImpassePrecedentReresolutionResolverViews = [];
   const experientialMethodImpassePrecedentReresolutionProjections = [];
   const experientialMethodCandidateAttributionProjections = [];
@@ -5660,6 +5670,71 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       world_truth_authority: false,
     });
 
+    // Phase80G re-enters only already-committed same-character Phase80F
+    // retention capsules whose method skeleton and at least one bounded current
+    // cue exactly match this turn's canonical Phase79D/79E context. This closes
+    // the previously standalone Phase80G projector into the native prepare path
+    // without changing Phase80G's sealed matching or authority semantics.
+    const analogicalExperienceRetentionReentry =
+      projectWorldSimulationAnalogicalExperienceRetentionReentry({
+        world_simulation_session_id: sessionId,
+        character,
+        current_turn_id: turnId,
+        current_state_revision: snapshot.revision,
+        current_world_state_hash: snapshot.state_hash,
+        source_phase79d_impasse_deliberation:
+          experientialMethodImpasseDeliberation,
+        source_phase79e_discriminating_evidence:
+          experientialMethodImpasseDiscriminatingEvidence,
+        world_history: worldHistory,
+      });
+    analogicalExperienceRetentionReentryProjections.push(
+      cloneJson(analogicalExperienceRetentionReentry),
+    );
+
+    // Phase80H is the explicit reuse deliberation boundary for Phase80G. The
+    // Character Brain may retain matched current cue refs and explicitly handle
+    // retained/current context differences, but it cannot rewrite the method,
+    // choose a preference/action, or assert that a historical outcome is current
+    // world truth. Its output remains advisory and requires later revalidation.
+    const analogicalExperienceRetentionReuseResolverView =
+      buildWorldSimulationAnalogicalExperienceRetentionReuseResolverView({
+        source_phase80g_projection: analogicalExperienceRetentionReentry,
+      });
+    analogicalExperienceRetentionReuseResolverViews.push(
+      cloneJson(analogicalExperienceRetentionReuseResolverView),
+    );
+    const analogicalExperienceRetentionReuseResolver =
+      typeof options.analogicalExperienceRetentionReuseResolver === "function"
+        ? options.analogicalExperienceRetentionReuseResolver
+        : null;
+    const rawAnalogicalExperienceRetentionReuseDecisions =
+      analogicalExperienceRetentionReuseResolver
+        ? await analogicalExperienceRetentionReuseResolver(
+          cloneJson(analogicalExperienceRetentionReuseResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawAnalogicalExperienceRetentionReuseDecisions)) {
+      const error = new Error(
+        "analogicalExperienceRetentionReuseResolver must return an array of bounded reuse decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_ANALOGICAL_EXPERIENCE_RETENTION_REUSE_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const analogicalExperienceRetentionReuse =
+      projectWorldSimulationAnalogicalExperienceRetentionReuse({
+        source_phase80g_projection: analogicalExperienceRetentionReentry,
+        resolver_view: analogicalExperienceRetentionReuseResolverView,
+        reuse_decisions: rawAnalogicalExperienceRetentionReuseDecisions,
+      });
+    analogicalExperienceRetentionReuseProjections.push(
+      cloneJson(analogicalExperienceRetentionReuse),
+    );
+    characterCognition.analogical_experience_retention_reuse = cloneJson(
+      analogicalExperienceRetentionReuse.character_view,
+    );
+
     // Phase69C activates only committed prior-turn Phase69A/69B plans against
     // the bounded Character-facing context already assembled above. Activation
     // is advisory to Action Proposer; it cannot select or execute an action.
@@ -6106,6 +6181,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(analogicalExperienceAdaptationProjections),
     analogical_experience_revalidation_projections:
       cloneJson(analogicalExperienceRevalidationProjections),
+    analogical_experience_retention_reentry_projections:
+      cloneJson(analogicalExperienceRetentionReentryProjections),
+    analogical_experience_retention_reuse_resolver_views:
+      cloneJson(analogicalExperienceRetentionReuseResolverViews),
+    analogical_experience_retention_reuse_projections:
+      cloneJson(analogicalExperienceRetentionReuseProjections),
     experiential_method_impasse_precedent_reresolution_resolver_views:
       cloneJson(experientialMethodImpassePrecedentReresolutionResolverViews),
     experiential_method_impasse_precedent_reresolution_projections:
@@ -10039,6 +10120,14 @@ export async function resolveWorldSimulationTurn(
       analogical_experience_candidate_projections:
         cloneJson(
           preparedTurn.analogical_experience_candidate_projections ?? [],
+        ),
+      analogical_experience_retention_reentry_projections:
+        cloneJson(
+          preparedTurn.analogical_experience_retention_reentry_projections ?? [],
+        ),
+      analogical_experience_retention_reuse_projections:
+        cloneJson(
+          preparedTurn.analogical_experience_retention_reuse_projections ?? [],
         ),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(

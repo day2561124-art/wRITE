@@ -133,6 +133,7 @@ assert.deepEqual(contract.stage_order, [
   "Phase79F",
   "Phase80B",
   "Phase79J",
+  "Phase80H",
   "action_selection",
 ]);
 assert.equal(contract.phase76d_experiential_reentry_supported, true);

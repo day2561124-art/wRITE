@@ -8,6 +8,7 @@ export const worldSimulationFormalImpasseDecisionKinds = Object.freeze({
   PHASE79F: "experiential_method_impasse_reresolution",
   PHASE79J: "experiential_method_impasse_precedent_reresolution",
   PHASE80B: "analogical_experience_adaptation",
+  PHASE80H: "retained_analogical_experience_reuse",
   ACTION: "action_selection",
 });
 
@@ -64,6 +65,8 @@ function stageLabel(kind) {
       return "Phase79J";
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return "Phase80B";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return "Phase80H";
     default:
       return null;
   }
@@ -82,6 +85,8 @@ function responseField(kind) {
       return "preference_revisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       return "adaptation_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      return "reuse_decisions";
     default:
       return null;
   }
@@ -317,6 +322,114 @@ function normalizePhase80B(task, values) {
   });
 }
 
+function normalizePhase80H(task, values) {
+  const candidates = array(task.retained_analogy_candidates);
+  const candidateByRef = new Map(
+    candidates.map((candidate) => [text(candidate?.reentry_candidate_ref), candidate]),
+  );
+  const maxDecisions = Number.isSafeInteger(task.response_contract?.maximum_reuse_decision_count)
+    ? task.response_contract.maximum_reuse_decision_count
+    : candidates.length;
+  const maxRefs = Number.isSafeInteger(task.response_contract?.maximum_reference_items_per_kind)
+    ? task.response_contract.maximum_reference_items_per_kind
+    : worldSimulationFormalImpasseMaximumReferenceItems;
+  if (values.length > maxDecisions) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+      "Phase79M Phase80H reuse selection exceeds the canonical limit.",
+    );
+  }
+  const seen = new Set();
+  const normalizeRefs = (raw, allowed, label) => {
+    if (!Array.isArray(raw)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        `Phase79M Phase80H ${label} must be an explicit bounded array of refs.`,
+      );
+    }
+    const refs = raw.map(text);
+    if (refs.length > maxRefs
+        || refs.some((ref) => !ref)
+        || new Set(refs).size !== refs.length
+        || refs.some((ref) => !allowed.has(ref))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+        `Phase79M Phase80H ${label} contains duplicate or out-of-view refs.`,
+      );
+    }
+    return [...refs].sort();
+  };
+  return values.map((raw, index) => {
+    if (!isObject(raw)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        `Phase79M Phase80H reuse_decisions[${index}] must be an object.`,
+      );
+    }
+    const allowedKeys = new Set([
+      "reentry_candidate_ref",
+      "retain_matched_current_cue_refs",
+      "drop_unmatched_retained_cue_refs",
+      "incorporate_current_additional_cue_refs",
+    ]);
+    if (Object.keys(raw).some((key) => !allowedKeys.has(key))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_AUTHORITY_FIELD_FORBIDDEN",
+        "Phase79M Phase80H reuse decision contains fields outside the bounded response contract.",
+      );
+    }
+    const candidateRef = text(raw.reentry_candidate_ref);
+    const candidate = candidateByRef.get(candidateRef);
+    if (!candidateRef || !candidate || seen.has(candidateRef)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+        "Phase79M Phase80H reuse decision references an unknown or duplicate retained analogy candidate.",
+      );
+    }
+    seen.add(candidateRef);
+    const matched = new Set(array(candidate.exact_current_cue_matches)
+      .map((match) => text(match?.current_cue_ref)).filter(Boolean));
+    const unmatched = new Set(array(candidate.unmatched_retained_context_cues)
+      .map((cue) => text(cue?.retained_cue_ref)).filter(Boolean));
+    const additional = new Set(array(candidate.current_additional_context_cues)
+      .map((cue) => text(cue?.current_cue_ref)).filter(Boolean));
+    const retain = normalizeRefs(
+      raw.retain_matched_current_cue_refs,
+      matched,
+      "retain_matched_current_cue_refs",
+    );
+    const drop = normalizeRefs(
+      raw.drop_unmatched_retained_cue_refs,
+      unmatched,
+      "drop_unmatched_retained_cue_refs",
+    );
+    const incorporate = normalizeRefs(
+      raw.incorporate_current_additional_cue_refs,
+      additional,
+      "incorporate_current_additional_cue_refs",
+    );
+    if (candidate.current_context_difference_present === true) {
+      if (drop.length === 0 && incorporate.length === 0) {
+        fail(
+          "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+          "Phase79M Phase80H changed-context reuse must address at least one difference.",
+        );
+      }
+    } else if (retain.length === 0) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        "Phase79M Phase80H exact-context reuse must retain at least one matched current cue.",
+      );
+    }
+    return {
+      reentry_candidate_ref: candidateRef,
+      retain_matched_current_cue_refs: retain,
+      drop_unmatched_retained_cue_refs: drop,
+      incorporate_current_additional_cue_refs: incorporate,
+    };
+  });
+}
+
 function normalizeImpasse(task, kind, values) {
   const contexts = array(task.impasse_contexts);
   const contextByRef = new Map(contexts.map((context) => [context.impasse_ref, context]));
@@ -404,6 +517,9 @@ export function validateWorldSimulationFormalImpasseDeliberationSubmission(input
       break;
     case worldSimulationFormalImpasseDecisionKinds.PHASE80B:
       normalized = normalizePhase80B(envelope.task, envelope.values);
+      break;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE80H:
+      normalized = normalizePhase80H(envelope.task, envelope.values);
       break;
     default:
       fail(

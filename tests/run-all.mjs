@@ -855,6 +855,7 @@ const steps = [
   ["Phase 80E adapted analogy subjective outcome evidence", ["tests/phase80/phase80e-adapted-analogy-subjective-outcome-evidence.test.mjs"]],
   ["Phase 80F adapted analogy retention capsule", ["tests/phase80/phase80f-adapted-analogy-retention-capsule.test.mjs"]],
   ["Phase 80G retained adapted analogy cross-turn re-entry", ["tests/phase80/phase80g-retained-adapted-analogy-reentry.test.mjs"]],
+  ["Phase 80H retained adapted analogy reuse deliberation", ["tests/phase80/phase80h-retained-adapted-analogy-reuse-deliberation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
