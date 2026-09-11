@@ -48,6 +48,9 @@ import {
   buildWorldSimulationCounterfactualPreparativeSelectedActionLineage,
 } from "./world-simulation-counterfactual-preparative-selected-action-lineage-service.mjs";
 import {
+  buildWorldSimulationCounterfactualSelectedActionOutcomeEvidence,
+} from "./world-simulation-counterfactual-selected-action-outcome-evidence-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8359,6 +8362,24 @@ export async function resolveWorldSimulationTurn(
       state_transitions: array(causalResolution.state_transitions),
     });
 
+  // Phase81G joins only the exact Phase81F selected-action lineage with the
+  // bounded Phase76A subjective outcome for that same character/action. It
+  // records what was actually experienced after the linked action was selected,
+  // but does not reinterpret the experience as success/failure, validate the
+  // historical imagined alternative, infer advisory effectiveness, or assign
+  // causal/outcome credit. Any later interpretation remains a separate phase.
+  const counterfactualSelectedActionOutcomeEvidence =
+    buildWorldSimulationCounterfactualSelectedActionOutcomeEvidence({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      counterfactual_preparative_selected_action_lineage:
+        counterfactualPreparativeSelectedActionLineage,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+
   // Phase81A reopens only alternatives that actually existed in the exact
   // Phase74 decision-time workspace, after Phase76A has established what the
   // acting character subjectively experienced. The resolver never receives raw
@@ -10399,6 +10420,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualPreparativeRevalidationProjections),
       counterfactual_preparative_selected_action_lineage:
         cloneJson(counterfactualPreparativeSelectedActionLineage),
+      counterfactual_selected_action_outcome_evidence:
+        cloneJson(counterfactualSelectedActionOutcomeEvidence),
       experiential_method_impasse_precedent_reresolution_projections:
         cloneJson(
           preparedTurn.experiential_method_impasse_precedent_reresolution_projections ?? [],
