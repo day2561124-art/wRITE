@@ -75,6 +75,9 @@ import {
   assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentryProjection,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-reentry-service.mjs";
 import {
+  assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationProjection,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-deliberation-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8320,6 +8323,75 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase81O is accepted only as the exact same-turn Character Brain reuse
+  // decision over the canonical Phase81N candidate surface above. Resolve
+  // revalidates the full Phase81N -> Phase81M committed-history lineage so a
+  // locally rehashed projection cannot smuggle altered prior outcomes, cue
+  // support, or effectiveness authority into the selected-action turn.
+  const counterfactualLinkedExperienceReuseOutcomeReentryByCharacter = new Map(
+    counterfactualLinkedExperienceReuseOutcomeReentryProjections.map((projection) => [
+      projection.character,
+      projection,
+    ]),
+  );
+  const counterfactualLinkedExperienceReuseOutcomeDeliberationProjections = [];
+  const counterfactualLinkedExperienceReuseOutcomeDeliberationInputProvided = Object.hasOwn(
+    options,
+    "counterfactualLinkedExperienceReuseOutcomeDeliberationProjections",
+  );
+  const seenCounterfactualLinkedExperienceReuseOutcomeDeliberationCharacters = new Set();
+  for (const rawProjection of array(
+    options.counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+  )) {
+    const rawCharacter = rawProjection?.character;
+    const sourcePhase81N =
+      counterfactualLinkedExperienceReuseOutcomeReentryByCharacter.get(rawCharacter);
+    if (!sourcePhase81N) {
+      const error = new Error(
+        "Phase81O projection requires the exact same-character Phase81N projection from this prepared turn.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_DELIBERATION_LINEAGE_INVALID";
+      throw error;
+    }
+    const projection =
+      assertWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationProjection(
+        rawProjection,
+        {
+          source_phase81n_projection: sourcePhase81N,
+          expected_source: {
+            world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory,
+          },
+        },
+      );
+    if (!allowedCounterfactualReflectionCharacters.has(projection.character)
+        || seenCounterfactualLinkedExperienceReuseOutcomeDeliberationCharacters
+          .has(projection.character)) {
+      const error = new Error(
+        "Phase81O projections must map one-to-one to current prepared-turn characters.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_DELIBERATION_LINEAGE_INVALID";
+      throw error;
+    }
+    seenCounterfactualLinkedExperienceReuseOutcomeDeliberationCharacters.add(
+      projection.character,
+    );
+    counterfactualLinkedExperienceReuseOutcomeDeliberationProjections.push(
+      cloneJson(projection),
+    );
+  }
+  if (counterfactualLinkedExperienceReuseOutcomeDeliberationInputProvided
+      && seenCounterfactualLinkedExperienceReuseOutcomeDeliberationCharacters.size
+        !== allowedCounterfactualReflectionCharacters.size) {
+    const error = new Error(
+      "Phase81O internal input must provide exactly one projection for every current prepared-turn character.",
+    );
+    error.code =
+      "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_DELIBERATION_INCOMPLETE";
+    throw error;
+  }
+
   // Phase81J is accepted only as the exact same-turn deliberative reuse
   // projection derived from the canonical Phase81I evidence above. Resolve
   // rechecks the Phase81I source against committed World History so a caller
@@ -10691,6 +10763,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReentryProjections),
       counterfactual_linked_experience_reuse_outcome_reentry_projections:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeReentryProjections),
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        cloneJson(counterfactualLinkedExperienceReuseOutcomeDeliberationProjections),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:

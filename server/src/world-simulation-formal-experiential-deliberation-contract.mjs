@@ -11,6 +11,7 @@ export const worldSimulationFormalImpasseDecisionKinds = Object.freeze({
   PHASE80H: "retained_analogical_experience_reuse",
   PHASE81E: "counterfactual_preparative_revalidation",
   PHASE81J: "counterfactual_linked_experience_reuse",
+  PHASE81O: "counterfactual_linked_reuse_outcome_deliberation",
   ACTION: "action_selection",
 });
 
@@ -73,6 +74,8 @@ function stageLabel(kind) {
       return "Phase81E";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
       return "Phase81J";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
+      return "Phase81O";
     default:
       return null;
   }
@@ -97,6 +100,8 @@ function responseField(kind) {
       return "preparative_revalidation_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
       return "linked_experience_reuse_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
+      return "reuse_outcome_deliberation_decisions";
     default:
       return null;
   }
@@ -695,6 +700,129 @@ function normalizePhase81J(task, values) {
   });
 }
 
+function normalizePhase81O(task, values) {
+  const candidates = array(task.reuse_outcome_candidates);
+  const candidateByRef = new Map(
+    candidates.map((candidate) => [text(candidate?.reentry_candidate_ref), candidate]),
+  );
+  const maxDecisions = Number.isSafeInteger(task.response_contract?.maximum_reuse_decision_count)
+    ? task.response_contract.maximum_reuse_decision_count
+    : candidates.length;
+  const maxRefs = Number.isSafeInteger(task.response_contract?.maximum_reference_items_per_kind)
+    ? task.response_contract.maximum_reference_items_per_kind
+    : worldSimulationFormalImpasseMaximumReferenceItems;
+  if (values.length > maxDecisions) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+      "Phase81O reuse-outcome deliberation selection exceeds the canonical limit.",
+    );
+  }
+  const seen = new Set();
+  const normalizeRefs = (raw, allowed, label) => {
+    if (!Array.isArray(raw)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        `Phase81O ${label} must be an explicit bounded array of refs.`,
+      );
+    }
+    const refs = raw.map(text);
+    if (refs.length > maxRefs
+        || refs.some((ref) => !ref)
+        || new Set(refs).size !== refs.length
+        || refs.some((ref) => !allowed.has(ref))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+        `Phase81O ${label} contains duplicate or out-of-view refs.`,
+      );
+    }
+    return [...refs].sort();
+  };
+  return values.map((raw, index) => {
+    if (!isObject(raw)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        `Phase81O reuse_outcome_deliberation_decisions[${index}] must be an object.`,
+      );
+    }
+    const allowedKeys = new Set([
+      "reentry_candidate_ref",
+      "retain_matched_current_cue_refs",
+      "drop_unmatched_retained_cue_refs",
+      "incorporate_current_additional_cue_refs",
+    ]);
+    if (Object.keys(raw).some((key) => !allowedKeys.has(key))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_AUTHORITY_FIELD_FORBIDDEN",
+        "Phase81O decision contains fields outside the bounded refs-only response contract.",
+      );
+    }
+    const candidateRef = text(raw.reentry_candidate_ref);
+    const candidate = candidateByRef.get(candidateRef);
+    if (!candidateRef || !candidate || seen.has(candidateRef)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+        "Phase81O decision references an unknown or duplicate reuse-outcome candidate.",
+      );
+    }
+    seen.add(candidateRef);
+    const matchedEntries = array(candidate.exact_current_cue_matches);
+    const matched = new Set(
+      matchedEntries.map((match) => text(match?.current_cue_ref)).filter(Boolean),
+    );
+    const actionDefiningMatched = new Set(
+      matchedEntries
+        .filter((match) => match?.action_defining === true)
+        .map((match) => text(match?.current_cue_ref))
+        .filter(Boolean),
+    );
+    const unmatched = new Set(
+      array(candidate.unmatched_retained_context_signatures)
+        .map((cue) => text(cue?.retained_cue_ref))
+        .filter(Boolean),
+    );
+    const currentAdditions = new Set(
+      array(candidate.current_additional_candidate_cues)
+        .map((cue) => text(cue?.current_cue_ref))
+        .filter(Boolean),
+    );
+    const retain = normalizeRefs(
+      raw.retain_matched_current_cue_refs,
+      matched,
+      "retain_matched_current_cue_refs",
+    );
+    const drop = normalizeRefs(
+      raw.drop_unmatched_retained_cue_refs,
+      unmatched,
+      "drop_unmatched_retained_cue_refs",
+    );
+    const incorporate = normalizeRefs(
+      raw.incorporate_current_additional_cue_refs,
+      currentAdditions,
+      "incorporate_current_additional_cue_refs",
+    );
+    if (!retain.some((ref) => actionDefiningMatched.has(ref))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        "Phase81O reuse requires at least one action-defining exact current cue.",
+      );
+    }
+    if (candidate.current_context_difference_present === true
+        && drop.length === 0
+        && incorporate.length === 0) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        "Phase81O changed-context reuse must explicitly address at least one difference.",
+      );
+    }
+    return {
+      reentry_candidate_ref: candidateRef,
+      retain_matched_current_cue_refs: retain,
+      drop_unmatched_retained_cue_refs: drop,
+      incorporate_current_additional_cue_refs: incorporate,
+    };
+  });
+}
+
 function normalizeImpasse(task, kind, values) {
   const contexts = array(task.impasse_contexts);
   const contextByRef = new Map(contexts.map((context) => [context.impasse_ref, context]));
@@ -791,6 +919,9 @@ export function validateWorldSimulationFormalImpasseDeliberationSubmission(input
       break;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81J:
       normalized = normalizePhase81J(envelope.task, envelope.values);
+      break;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
+      normalized = normalizePhase81O(envelope.task, envelope.values);
       break;
     default:
       fail(

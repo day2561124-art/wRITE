@@ -455,6 +455,8 @@ export async function commitWorldSimulationTurn(
               input.counterfactual_linked_experience_reentry_projections ?? null,
             counterfactual_linked_experience_reuse_outcome_reentry_projections:
               input.counterfactual_linked_experience_reuse_outcome_reentry_projections ?? null,
+            counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+              input.counterfactual_linked_experience_reuse_outcome_deliberation_projections ?? null,
             counterfactual_linked_experience_reuse_projections:
               input.counterfactual_linked_experience_reuse_projections ?? null,
             counterfactual_linked_experience_selected_action_lineage:

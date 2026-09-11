@@ -18,6 +18,10 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeReentry,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-reentry-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberation,
+} from "./world-simulation-counterfactual-linked-experience-reuse-outcome-deliberation-service.mjs";
+import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView,
   projectWorldSimulationCounterfactualLinkedExperienceReuse,
 } from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
@@ -204,6 +208,8 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const counterfactualReflectionReentryProjections = [];
   const counterfactualLinkedExperienceReentryProjections = [];
   const counterfactualLinkedExperienceReuseOutcomeReentryProjections = [];
+  const counterfactualLinkedExperienceReuseOutcomeDeliberationResolverViews = [];
+  const counterfactualLinkedExperienceReuseOutcomeDeliberationProjections = [];
   const counterfactualLinkedExperienceReuseResolverViews = [];
   const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationResolverViews = [];
@@ -380,6 +386,52 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     characterInput.boundaries.counterfactual_linked_experience_reuse_action_authority = false;
     characterInput.boundaries.counterfactual_linked_experience_reuse_world_truth_authority = false;
 
+    // Phase81O follows Phase81N retrieval as a separate CBR-style reuse/adaptation
+    // decision. The Character Brain may decide only which exact current support to
+    // retain and how to address context differences. The two prior subjective
+    // outcomes remain source-distinct case evidence and never become effectiveness
+    // proof, preference authority, or action selection.
+    const reuseOutcomeDeliberationResolverView =
+      buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationResolverView({
+        source_phase81n_projection: linkedExperienceReuseOutcomeReentry,
+        expected_source: { world_history: worldHistory },
+      });
+    counterfactualLinkedExperienceReuseOutcomeDeliberationResolverViews.push(
+      cloneJson(reuseOutcomeDeliberationResolverView),
+    );
+    const reuseOutcomeDeliberationResolver =
+      typeof loopOptions.counterfactualLinkedExperienceReuseOutcomeDeliberationResolver === "function"
+        ? loopOptions.counterfactualLinkedExperienceReuseOutcomeDeliberationResolver
+        : null;
+    const rawReuseOutcomeDeliberationDecisions = reuseOutcomeDeliberationResolver
+      && reuseOutcomeDeliberationResolverView.reuse_outcome_candidates.length > 0
+      ? await reuseOutcomeDeliberationResolver(cloneJson(reuseOutcomeDeliberationResolverView))
+      : [];
+    if (!Array.isArray(rawReuseOutcomeDeliberationDecisions)) {
+      fail(
+        "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_REUSE_OUTCOME_DELIBERATION_RESOLVER_INVALID_OUTPUT",
+        "counterfactualLinkedExperienceReuseOutcomeDeliberationResolver must return an array of bounded Phase81O decisions.",
+      );
+    }
+    const reuseOutcomeDeliberationProjection =
+      projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberation({
+        source_phase81n_projection: linkedExperienceReuseOutcomeReentry,
+        expected_source: { world_history: worldHistory },
+        resolver_view: reuseOutcomeDeliberationResolverView,
+        reuse_outcome_deliberation_decisions: rawReuseOutcomeDeliberationDecisions,
+      });
+    counterfactualLinkedExperienceReuseOutcomeDeliberationProjections.push(
+      cloneJson(reuseOutcomeDeliberationProjection),
+    );
+    characterInput.counterfactual_linked_experience_reuse_outcome_deliberation = cloneJson(
+      reuseOutcomeDeliberationProjection.character_view,
+    );
+    characterInput.boundaries.counterfactual_linked_experience_reuse_outcome_deliberation_installed = true;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_outcome_deliberation_advisory_only = true;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_outcome_deliberation_effectiveness_authority = false;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_outcome_deliberation_action_authority = false;
+    characterInput.boundaries.counterfactual_linked_experience_reuse_outcome_deliberation_world_truth_authority = false;
+
     decisionInputs.push({
       decision_kind: worldSimulationFormalImpasseDecisionKinds.ACTION,
       character_input: characterInput,
@@ -393,6 +445,10 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       counterfactualLinkedExperienceReentryProjections,
     counterfactual_linked_experience_reuse_outcome_reentry_projections:
       counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+    counterfactual_linked_experience_reuse_outcome_deliberation_resolver_views:
+      counterfactualLinkedExperienceReuseOutcomeDeliberationResolverViews,
+    counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+      counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
     counterfactual_linked_experience_reuse_resolver_views:
       counterfactualLinkedExperienceReuseResolverViews,
     counterfactual_linked_experience_reuse_projections:
@@ -438,6 +494,10 @@ async function prepareFormalDecisionRound(
       cloneJson(actionBundle.counterfactual_linked_experience_reentry_projections),
     counterfactual_linked_experience_reuse_outcome_reentry_projections:
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_reentry_projections),
+    counterfactual_linked_experience_reuse_outcome_deliberation_resolver_views:
+      cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_deliberation_resolver_views),
+    counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+      cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_deliberation_projections),
     counterfactual_linked_experience_reuse_resolver_views:
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_resolver_views),
     counterfactual_linked_experience_reuse_projections:
@@ -748,6 +808,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
           acquisition.prepared_turn.counterfactual_linked_experience_reentry_projections ?? [],
         counterfactualLinkedExperienceReuseOutcomeReentryProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_outcome_reentry_projections ?? [],
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections:
+          acquisition.prepared_turn.counterfactual_linked_experience_reuse_outcome_deliberation_projections ?? [],
         counterfactualLinkedExperienceReuseProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_projections ?? [],
         counterfactualPreparativeRevalidationProjections:
