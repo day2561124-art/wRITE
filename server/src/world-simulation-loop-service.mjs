@@ -402,6 +402,11 @@ import {
   projectWorldSimulationRetrievalPracticeActivation,
 } from "./world-simulation-retrieval-practice-activation-projection-service.mjs";
 import {
+  buildWorldSimulationRetrievalInducedForgettingAccessibilityProjectionContract,
+  projectWorldSimulationRetrievalInducedForgettingAccessibility,
+  worldSimulationRetrievalInducedForgettingAccessibilityProjectionVersion,
+} from "./world-simulation-retrieval-induced-forgetting-accessibility-projection-service.mjs";
+import {
   buildWorldSimulationBaseLevelActivationProjectionContract,
   projectWorldSimulationBaseLevelActivation,
 } from "./world-simulation-base-level-activation-projection-service.mjs";
@@ -3542,6 +3547,8 @@ export function buildWorldSimulationLoopContract() {
     subjective_memory_accessibility: buildWorldSimulationMemoryAccessibilityContract(),
     retrieval_practice_activation_projection:
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
+    retrieval_induced_forgetting_accessibility_projection:
+      buildWorldSimulationRetrievalInducedForgettingAccessibilityProjectionContract(),
     base_level_activation_projection:
       buildWorldSimulationBaseLevelActivationProjectionContract(),
     query_relative_cue_diagnostic_evidence_projection:
@@ -4642,7 +4649,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(visibleConstraintObservationProjection.audit),
     });
 
-    const memoryAccessibilityBaseInput = {
+    const memoryAccessibilityCueProbeInput = {
       world_state:
         cloneJson(
           worldState,
@@ -4681,6 +4688,49 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
     };
 
+    // Phase83B consumes only already-committed Phase83A suppression-candidate
+    // consequences. A read-only Phase63B cue probe provides the exact canonical
+    // current cue identities; the authoritative Phase63B candidate freeze still
+    // occurs only after Phase83B has projected its reversible search ordering.
+    // No memory content, membership, storage strength, retrieval strength, or
+    // durable memory order is changed. Same-turn consequences cannot apply, and
+    // a later successful retrieval-practice trace shields the candidate.
+    const memoryAccessibilityCueProbe =
+      queryWorldSimulationMemoryAccessibility(
+        memoryAccessibilityCueProbeInput,
+      );
+    const retrievalInducedForgettingAccessibilityProjection =
+      projectWorldSimulationRetrievalInducedForgettingAccessibility({
+        world_state:
+          worldState,
+        character,
+        current_turn_id:
+          turnId,
+        as_of:
+          worldState.simulation_time
+          ?? event.simulation_time
+          ?? null,
+        memory_records:
+            retrievalMemoryRecords,
+        current_active_cues:
+          memoryAccessibilityCueProbe
+            .result
+            .active_retrieval_cues,
+        retrieval_practice_activation_projection:
+          retrievalPracticeActivationProjection,
+      });
+    const retrievalMemoryRecordsAfterRif =
+      retrievalInducedForgettingAccessibilityProjection
+        .projected_memory_records;
+
+    const memoryAccessibilityBaseInput = {
+      ...memoryAccessibilityCueProbeInput,
+      memory_records:
+        cloneJson(
+          retrievalMemoryRecordsAfterRif,
+        ),
+    };
+
     const memoryAccessibilityQuery =
       queryWorldSimulationMemoryAccessibility(
         memoryAccessibilityBaseInput,
@@ -4707,6 +4757,16 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(
           cueDiagnosticEvidenceProjection.audit,
         ),
+      retrieval_induced_forgetting_accessibility_projection: {
+        version:
+          worldSimulationRetrievalInducedForgettingAccessibilityProjectionVersion,
+        projection_id:
+          retrievalInducedForgettingAccessibilityProjection.projection_id,
+        audit:
+          cloneJson(
+            retrievalInducedForgettingAccessibilityProjection.audit,
+          ),
+      },
     });
     const memoryProjectionPolicy =
       memoryProjectionPolicyFor(
@@ -4746,7 +4806,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityQuery
               .memory_accessibility_version,
           memory_records:
-            retrievalMemoryRecords,
+            retrievalMemoryRecordsAfterRif,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
@@ -4764,7 +4824,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           query:
             memoryRetrievalQuery,
           memory_records:
-            retrievalMemoryRecords,
+            retrievalMemoryRecordsAfterRif,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:

@@ -225,6 +225,7 @@ export const phase82LongitudinalExperienceLearningSteps = Object.freeze([
 
 export const phase83RetrievalCompetitionConsequenceSteps = Object.freeze([
   Object.freeze(["Phase 83A bounded retrieval-induced forgetting consequence evidence", Object.freeze(["tests/phase83/phase83a-retrieval-induced-forgetting-consequence.test.mjs"])]),
+  Object.freeze(["Phase 83B bounded delayed retrieval-induced accessibility suppression projection", Object.freeze(["tests/phase83/phase83b-retrieval-induced-forgetting-accessibility-projection.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
