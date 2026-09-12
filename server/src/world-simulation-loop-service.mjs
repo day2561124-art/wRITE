@@ -432,6 +432,11 @@ import {
   worldSimulationMemoryPlasticityVersion,
 } from "./world-simulation-memory-plasticity-service.mjs";
 import {
+  buildWorldSimulationRetrievalInducedForgettingConsequenceContract,
+  buildWorldSimulationRetrievalInducedForgettingConsequences,
+  worldSimulationRetrievalInducedForgettingConsequenceVersion,
+} from "./world-simulation-retrieval-induced-forgetting-consequence-service.mjs";
+import {
   buildWorldSimulationSubjectiveClaimProjectionContract,
   buildWorldSimulationSubjectiveClaimResolverView,
   buildWorldSimulationSubjectiveClaims,
@@ -4195,6 +4200,9 @@ export function buildWorldSimulationLoopContract() {
 
       retrieval_event_persistence_version:
         worldSimulationMemoryRetrievalPersistenceVersion,
+
+      retrieval_induced_forgetting_consequence_evidence:
+        buildWorldSimulationRetrievalInducedForgettingConsequenceContract(),
 
       same_cycle_retrieval_history_feedback_allowed:
         false,
@@ -9373,6 +9381,57 @@ export async function resolveWorldSimulationTurn(
     subjectiveMemoryRetrievalMutationExecution
       .next_world_state;
 
+  // Phase83A observes only authoritative current-turn RetrievalEvents after
+  // Phase63C persistence has completed. It may retain an append-only bounded
+  // suppression-candidate consequence only when same-query Phase64A-R4C
+  // evidence proves an unrecovered competitor was dominated by a witness that
+  // was actually recovered. This is evidence for a possible future-accessibility
+  // consequence only: it does not weaken, delete, rewrite, or suppress memory in
+  // this turn, and it makes no inhibition-vs-interference mechanism claim.
+  const retrievalInducedForgettingConsequence =
+    buildWorldSimulationRetrievalInducedForgettingConsequences({
+      world_state:
+        retrievalPersistedWorldState,
+      turn_id:
+        preparedTurn.turn_id,
+      memory_retrieval_processes:
+        preparedTurn.memory_retrieval_processes
+        ?? [],
+    });
+
+  const retrievalInducedForgettingConsequenceMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:retrieval_induced_forgetting_consequence`,
+      world_state_hash:
+        hashAgentRunValue(retrievalPersistedWorldState),
+      state_transitions:
+        retrievalInducedForgettingConsequence
+          .result
+          .state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const retrievalInducedForgettingConsequenceMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        retrievalPersistedWorldState,
+      preview_world_state:
+        retrievalInducedForgettingConsequence
+          .result
+          .preview_world_state,
+      queue:
+        retrievalInducedForgettingConsequenceMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const retrievalConsequencePersistedWorldState =
+    retrievalInducedForgettingConsequenceMutationExecution
+      .next_world_state;
+
   const subjectiveMemoryPlasticitySourceEventIds = [
     ...subjectiveMemoryRetrievalPersistence
       .result
@@ -9386,7 +9445,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveMemoryPlasticity =
     buildWorldSimulationMemoryPlasticity({
       world_state:
-        retrievalPersistedWorldState,
+        retrievalConsequencePersistedWorldState,
       retrieval_event_ids:
         subjectiveMemoryPlasticitySourceEventIds,
     });
@@ -9397,7 +9456,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:memory_plasticity`,
       world_state_hash:
         hashAgentRunValue(
-          retrievalPersistedWorldState,
+          retrievalConsequencePersistedWorldState,
         ),
       state_transitions:
         subjectiveMemoryPlasticity
@@ -9409,7 +9468,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveMemoryPlasticityMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        retrievalPersistedWorldState,
+        retrievalConsequencePersistedWorldState,
       preview_world_state:
         subjectiveMemoryPlasticity
           .result
@@ -10961,6 +11020,18 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           subjectiveMemoryRetrievalMutationExecution.execution,
         ),
+      retrieval_induced_forgetting_consequence:
+        cloneJson(
+          retrievalInducedForgettingConsequence,
+        ),
+      retrieval_induced_forgetting_consequence_mutation_queue:
+        cloneJson(
+          retrievalInducedForgettingConsequenceMutationQueue,
+        ),
+      retrieval_induced_forgetting_consequence_mutation_execution:
+        cloneJson(
+          retrievalInducedForgettingConsequenceMutationExecution.execution,
+        ),
 
       subjective_memory_plasticity:
         cloneJson(
@@ -11954,6 +12025,39 @@ export async function resolveWorldSimulationTurn(
         subjectiveMemoryRetrievalMutationExecution
           .execution
           .version,
+    },
+
+    retrieval_induced_forgetting_consequence: {
+      version:
+        worldSimulationRetrievalInducedForgettingConsequenceVersion,
+      created_consequence_event_count:
+        retrievalInducedForgettingConsequence
+          .result
+          .consequence_events_created
+          .length,
+      appended_history_reference_count:
+        retrievalInducedForgettingConsequence
+          .result
+          .appended_history_references
+          .length,
+      mutation_count:
+        retrievalInducedForgettingConsequenceMutationQueue
+          .mutation_count,
+      authoritative_executor:
+        retrievalInducedForgettingConsequenceMutationExecution
+          .execution
+          .version,
+      actual_selective_retrieval_required: true,
+      recovered_dominator_required: true,
+      unrecovered_dominated_competitor_required: true,
+      future_accessibility_changed: false,
+      storage_strength_changed: false,
+      retrieval_strength_changed: false,
+      memory_content_rewritten: false,
+      memory_deleted: false,
+      numeric_inhibition_strength_modeled: false,
+      same_turn_feedback_allowed: false,
+      downstream_accessibility_effect_requires_separate_phase: true,
     },
 
     subjective_memory_plasticity: {
