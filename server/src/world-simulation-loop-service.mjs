@@ -110,6 +110,9 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseSelectedActionOutcomeEvidence,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-case-selected-action-outcome-evidence-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceRetainedLongitudinalCaseOutcomeEvidence,
+} from "./world-simulation-counterfactual-linked-experience-retained-longitudinal-case-outcome-evidence-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8821,6 +8824,36 @@ export async function resolveWorldSimulationTurn(
       })
       : null;
 
+  // Phase82I assembles the current canonical Phase82H subjective outcome with
+  // prior committed Phase82H outcomes for the exact same retained longitudinal
+  // case identity. Every historical Phase82H source is replayed against its own
+  // prior-history prefix. This is evidence assembly only: no effectiveness,
+  // success/failure, reward/Q, causal credit, or cognitive/world revision occurs.
+  const counterfactualLinkedExperienceRetainedLongitudinalCaseOutcomeEvidence =
+    counterfactualLinkedExperienceLongitudinalCaseSelectedActionOutcomeEvidence
+      ? buildWorldSimulationCounterfactualLinkedExperienceRetainedLongitudinalCaseOutcomeEvidence({
+        world_simulation_session_id: sessionId,
+        turn_id: preparedTurn.turn_id,
+        state_revision: snapshot.revision,
+        world_state_hash: snapshot.state_hash,
+        world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+        current_phase82h_outcome_evidence:
+          counterfactualLinkedExperienceLongitudinalCaseSelectedActionOutcomeEvidence,
+        counterfactual_linked_experience_longitudinal_case_selected_action_lineage:
+          counterfactualLinkedExperienceLongitudinalCaseSelectedActionLineage,
+        subjective_choice_commitment_receipts:
+          subjectiveChoiceCommitmentReceipts,
+        counterfactual_linked_experience_longitudinal_case_reentry:
+          counterfactualLinkedExperienceLongitudinalCaseReentry,
+        counterfactual_linked_experience_longitudinal_case_deliberative_reuse_projections:
+          counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseProjections,
+        counterfactual_linked_experience_reuse_outcome_reentry_projections:
+          counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+        post_outcome_subjective_perception_projection:
+          postOutcomeSubjectivePerceptionProjection,
+      })
+      : null;
+
   // Phase81Q joins only the exact Phase81P second-generation reuse selected-action
   // lineage with the bounded Phase76A subjective outcome for the same character
   // and action. The full Phase81N/81O/74D/history source chain is revalidated.
@@ -11200,6 +11233,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceLongitudinalCaseSelectedActionLineage),
       counterfactual_linked_experience_longitudinal_case_selected_action_outcome_evidence:
         cloneJson(counterfactualLinkedExperienceLongitudinalCaseSelectedActionOutcomeEvidence),
+      counterfactual_linked_experience_retained_longitudinal_case_outcome_evidence:
+        cloneJson(counterfactualLinkedExperienceRetainedLongitudinalCaseOutcomeEvidence),
       counterfactual_linked_experience_reuse_outcome_deliberation_projections:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeDeliberationProjections),
       counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
