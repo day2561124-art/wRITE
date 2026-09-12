@@ -969,6 +969,12 @@ async function main() {
   const fixtureDir = await mkdtemp(path.join(tempParent, "mcp-tunnel-"));
   const { fakeScript } = await createFakeCloudflared(fixtureDir);
   const argsLog = path.join(fixtureDir, "fake-args.log");
+  const longMutexLogDir = path.join(fixtureDir, `mutex-${"x".repeat(140)}`);
+  const longMutexStatus = runTunnel(["-Status", "-LogDirectory", longMutexLogDir], 1);
+  assert(
+    longMutexStatus.stdout.includes("Tunnel status:") && !longMutexStatus.stderr.includes("260"),
+    `Long launcher identity failed before status evaluation. stdout=${longMutexStatus.stdout} stderr=${longMutexStatus.stderr}`,
+  );
   // A TCP listener is not MCP. Never stop it or start a tunnel to it.
   const foreign = await listenOnFreePort();
   const foreignPort = foreign.address().port;

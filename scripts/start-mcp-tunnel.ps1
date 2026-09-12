@@ -363,8 +363,14 @@ function Complete-TunnelAttempt {
   Write-TunnelEvent "action=registered attempt=$($Attempt.State.attemptId) pid=$($Attempt.Process.Id) protocol=$actualProtocol fallback=$($Attempt.State.fallback) url=$($Registration.BaseUrl)"
 }
 
-$mutexKey = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Root|$LogDir")).Replace("/", "_")
-$launchMutex = New-Object System.Threading.Mutex($false, "Local\WriterMcp-$mutexKey")
+$mutexIdentity = [Text.Encoding]::UTF8.GetBytes("$Root|$LogDir")
+$mutexHasher = [System.Security.Cryptography.SHA256]::Create()
+try {
+  $mutexHash = -join ($mutexHasher.ComputeHash($mutexIdentity) | ForEach-Object { $_.ToString("x2") })
+} finally {
+  $mutexHasher.Dispose()
+}
+$launchMutex = New-Object System.Threading.Mutex($false, "Local\WriterMcp-$mutexHash")
 $hasMutex = $false
 Push-Location $Root
 try {
