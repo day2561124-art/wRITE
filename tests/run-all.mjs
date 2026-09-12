@@ -875,6 +875,7 @@ const steps = [
   ["Phase 81P reuse-outcome deliberation selected-action lineage", ["tests/phase81/phase81p-counterfactual-linked-experience-reuse-outcome-selected-action-lineage.test.mjs"]],
   ["Phase 81Q reuse-outcome selected-action subjective outcome evidence", ["tests/phase81/phase81q-counterfactual-linked-experience-reuse-outcome-selected-action-outcome-evidence.test.mjs"]],
   ["Phase 82A bounded longitudinal reuse-outcome evidence assembly", ["tests/phase82/phase82a-counterfactual-linked-experience-longitudinal-reuse-outcome-evidence.test.mjs"]],
+  ["Phase 82B bounded longitudinal reuse-outcome variation evidence", ["tests/phase82/phase82b-counterfactual-linked-experience-longitudinal-reuse-outcome-variation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
