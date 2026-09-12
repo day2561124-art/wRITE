@@ -98,6 +98,9 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmission,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-revise-retain-admission-service.mjs";
 import {
+  projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseReentry,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-case-reentry-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8343,6 +8346,25 @@ export async function resolveWorldSimulationTurn(
     throw error;
   }
 
+  // Phase82E re-enters only longitudinal case evidence that a prior committed
+  // Phase82D explicitly admitted for future use. Historical admission/appraisal
+  // lineage is revalidated against World History, while present relevance must
+  // already exist as exact cue-bounded Phase81N evidence for the same Phase81M
+  // capsule and reuse intent. This is candidate evidence only: it cannot select
+  // an action, infer effectiveness/success, or mutate belief/memory/world state.
+  const counterfactualLinkedExperienceLongitudinalCaseReentry =
+    counterfactualLinkedExperienceReuseOutcomeReentryProjections.length > 0
+      ? projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseReentry({
+        world_simulation_session_id: sessionId,
+        current_turn_id: preparedTurn.turn_id,
+        current_state_revision: snapshot.revision,
+        current_world_state_hash: snapshot.state_hash,
+        world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory,
+        counterfactual_linked_experience_reuse_outcome_reentry_projections:
+          counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      })
+      : null;
+
   // Phase81O is accepted only as the exact same-turn Character Brain reuse
   // decision over the canonical Phase81N candidate surface above. Resolve
   // revalidates the full Phase81N -> Phase81M committed-history lineage so a
@@ -11043,6 +11065,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReentryProjections),
       counterfactual_linked_experience_reuse_outcome_reentry_projections:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeReentryProjections),
+      counterfactual_linked_experience_longitudinal_case_reentry:
+        cloneJson(counterfactualLinkedExperienceLongitudinalCaseReentry),
       counterfactual_linked_experience_reuse_outcome_deliberation_projections:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeDeliberationProjections),
       counterfactual_linked_experience_reuse_outcome_selected_action_lineage:

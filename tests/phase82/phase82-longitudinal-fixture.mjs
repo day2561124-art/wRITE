@@ -230,7 +230,7 @@ function phase76A(turnId, actionId, perceivedResult, perceivedStatus, includeSta
   return projection;
 }
 
-function buildReuseTurn(history, { turnId, revision, worldStateHash, result, status, includeStatus = true }) {
+export function buildPhase82ReuseTurn(history, { turnId, revision, worldStateHash, result, status, includeStatus = true }) {
   const candidates = [{ action_id: `covered_advance_${turnId}`, intent: "advance using cover", movement: { mode: "advance", cover: "left_wall" }, known_costs: ["higher_attention"], duration_s: 5, target: { label: "doorway" } }];
   const cognition = { goals: [{ summary: "reach ally safely" }], working_context: { focus: "safe approach" } };
   const phase74A = buildWorldSimulationSubjectiveActionDeliberationView({ character: phase82FixtureCharacter, cognition, candidate_action_intents: candidates });
@@ -283,7 +283,7 @@ function buildReuseTurn(history, { turnId, revision, worldStateHash, result, sta
   return { phase81N, phase81O, phase81P, choices, outcome, phase81Q };
 }
 
-function committedTurn(turnId, revision, worldStateHash, built) {
+export function buildPhase82CommittedReuseTurn(turnId, revision, worldStateHash, built) {
   return {
     turn_id: turnId, revision_from: revision, revision_to: revision + 1,
     previous_state_hash: worldStateHash, next_state_hash: `next_${worldStateHash}`,
@@ -327,13 +327,13 @@ export function buildPhase82LongitudinalScenario({ mode = "variation", includeSt
   const firstTurnId = "turn_phase82_fixture_reuse_1";
   const firstRevision = 107;
   const firstWorldStateHash = "world_state_hash_phase82_fixture_reuse_1";
-  const first = buildReuseTurn(history1, { turnId: firstTurnId, revision: firstRevision, worldStateHash: firstWorldStateHash, result: "reached_cover", status: "stable", includeStatus });
+  const first = buildPhase82ReuseTurn(history1, { turnId: firstTurnId, revision: firstRevision, worldStateHash: firstWorldStateHash, result: "reached_cover", status: "stable", includeStatus });
   const history2 = clone(history1);
-  history2.turns.push(committedTurn(firstTurnId, firstRevision, firstWorldStateHash, first));
+  history2.turns.push(buildPhase82CommittedReuseTurn(firstTurnId, firstRevision, firstWorldStateHash, first));
   const secondTurnId = "turn_phase82_fixture_reuse_2";
   const secondRevision = 113;
   const secondWorldStateHash = "world_state_hash_phase82_fixture_reuse_2";
-  const second = buildReuseTurn(history2, { turnId: secondTurnId, revision: secondRevision, worldStateHash: secondWorldStateHash, result: mode === "exact" ? "reached_cover" : "paused_before_cover", status: mode === "exact" ? "stable" : "uncertain", includeStatus });
+  const second = buildPhase82ReuseTurn(history2, { turnId: secondTurnId, revision: secondRevision, worldStateHash: secondWorldStateHash, result: mode === "exact" ? "reached_cover" : "paused_before_cover", status: mode === "exact" ? "stable" : "uncertain", includeStatus });
   const phase82a = build82A(history2, secondTurnId, secondRevision, secondWorldStateHash, second);
   const phase82b = build82B(history2, secondTurnId, secondRevision, secondWorldStateHash, second, phase82a);
   return {

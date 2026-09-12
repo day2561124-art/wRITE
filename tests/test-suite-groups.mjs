@@ -216,6 +216,7 @@ export const phase82LongitudinalExperienceLearningSteps = Object.freeze([
   Object.freeze(["Phase 82B bounded longitudinal reuse-outcome variation evidence", Object.freeze(["tests/phase82/phase82b-counterfactual-linked-experience-longitudinal-reuse-outcome-variation.test.mjs"])]),
   Object.freeze(["Phase 82C bounded longitudinal reuse-outcome qualitative appraisal", Object.freeze(["tests/phase82/phase82c-counterfactual-linked-experience-longitudinal-reuse-outcome-appraisal.test.mjs"])]),
   Object.freeze(["Phase 82D bounded longitudinal reuse-outcome revise-retain admission", Object.freeze(["tests/phase82/phase82d-counterfactual-linked-experience-longitudinal-reuse-outcome-revise-retain-admission.test.mjs"])]),
+  Object.freeze(["Phase 82E retained longitudinal case evidence cross-turn re-entry", Object.freeze(["tests/phase82/phase82e-counterfactual-linked-experience-longitudinal-case-reentry.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
