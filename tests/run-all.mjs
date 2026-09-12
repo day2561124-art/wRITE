@@ -881,6 +881,7 @@ const steps = [
   ["Phase 82E retained longitudinal case evidence cross-turn re-entry", ["tests/phase82/phase82e-counterfactual-linked-experience-longitudinal-case-reentry.test.mjs"]],
   ["Phase 82F retained longitudinal case deliberative reuse", ["tests/phase82/phase82f-counterfactual-linked-experience-longitudinal-case-deliberative-reuse.test.mjs"]],
   ["Phase 82G longitudinal case activation selected-action lineage", ["tests/phase82/phase82g-counterfactual-linked-experience-longitudinal-case-selected-action-lineage.test.mjs"]],
+  ["Phase 82H longitudinal case selected-action subjective outcome evidence", ["tests/phase82/phase82h-counterfactual-linked-experience-longitudinal-case-selected-action-outcome-evidence.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
