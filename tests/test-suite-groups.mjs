@@ -223,6 +223,10 @@ export const phase82LongitudinalExperienceLearningSteps = Object.freeze([
   Object.freeze(["Phase 82I retained longitudinal case outcome evidence assembly", Object.freeze(["tests/phase82/phase82i-counterfactual-linked-experience-retained-longitudinal-case-outcome-evidence.test.mjs"])]),
 ]);
 
+export const phase83RetrievalCompetitionConsequenceSteps = Object.freeze([
+  Object.freeze(["Phase 83A bounded retrieval-induced forgetting consequence evidence", Object.freeze(["tests/phase83/phase83a-retrieval-induced-forgetting-consequence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -249,6 +253,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualExperienceSteps,
   ...phase82LongitudinalExperienceLearningSteps,
+  ...phase83RetrievalCompetitionConsequenceSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -273,6 +278,7 @@ export const cognitionSteps = Object.freeze([
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualExperienceSteps,
   ...phase82LongitudinalExperienceLearningSteps,
+  ...phase83RetrievalCompetitionConsequenceSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -292,4 +298,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualReflectionReentrySteps,
   ...phase82LongitudinalExperienceLearningSteps,
+  ...phase83RetrievalCompetitionConsequenceSteps,
 ]);
