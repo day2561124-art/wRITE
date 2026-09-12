@@ -90,6 +90,10 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-variation-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-appraisal-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8745,6 +8749,83 @@ export async function resolveWorldSimulationTurn(
         postOutcomeSubjectivePerceptionProjection,
     });
 
+  // Phase82C lets Character Brain qualitatively appraise only the exact bounded
+  // Phase82B longitudinal structural evidence. Recurrent or varying subjective
+  // outcomes remain source-distinct evidence, never an effectiveness/success
+  // score. The appraisal may only orient later learning; revise/retain, causal
+  // credit, semantic revision, and same-turn action feedback remain deferred.
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView =
+    buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      longitudinal_reuse_outcome_evidence:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+      longitudinal_reuse_outcome_variation:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
+      current_phase81q_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver =
+    typeof options.counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver === "function"
+      ? options.counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver
+      : null;
+  const rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalDecisions =
+    counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver
+      && counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView.appraisal_context_count > 0
+      ? await counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver(
+        cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalDecisions)) {
+    const error = new Error(
+      "counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolver must return an array of bounded Phase82C appraisal decisions.",
+    );
+    error.code =
+      "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_LONGITUDINAL_REUSE_OUTCOME_APPRAISAL_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal =
+    projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      longitudinal_reuse_outcome_evidence:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+      longitudinal_reuse_outcome_variation:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
+      current_phase81q_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+      resolver_view:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalResolverView,
+      appraisal_decisions:
+        rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalDecisions,
+    });
+
   // Phase81L joins only the exact Phase81K reuse-intent selected-action lineage
   // with the bounded Phase76A subjective outcome for that same character/action.
   // It records what the character actually experienced after selecting an action
@@ -10886,6 +10967,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence),
       counterfactual_linked_experience_longitudinal_reuse_outcome_variation:
         cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation),
+      counterfactual_linked_experience_longitudinal_reuse_outcome_appraisal:
+        cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:
