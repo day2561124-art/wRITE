@@ -22,6 +22,13 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberation,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-deliberation-service.mjs";
 import {
+  projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseReentry,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-case-reentry-service.mjs";
+import {
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuse,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-case-deliberative-reuse-service.mjs";
+import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseResolverView,
   projectWorldSimulationCounterfactualLinkedExperienceReuse,
 } from "./world-simulation-counterfactual-linked-experience-reuse-service.mjs";
@@ -210,6 +217,9 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
   const counterfactualLinkedExperienceReuseOutcomeReentryProjections = [];
   const counterfactualLinkedExperienceReuseOutcomeDeliberationResolverViews = [];
   const counterfactualLinkedExperienceReuseOutcomeDeliberationProjections = [];
+  let counterfactualLinkedExperienceLongitudinalCaseReentry = null;
+  const counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolverViews = [];
+  const counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseProjections = [];
   const counterfactualLinkedExperienceReuseResolverViews = [];
   const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationResolverViews = [];
@@ -437,6 +447,76 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       character_input: characterInput,
     });
   }
+
+  // Phase82E is an aggregate cross-turn retrieval surface because one retained
+  // source turn may be relevant to more than one current character. Build it
+  // only after every current Phase81N projection exists, then let Phase82F make
+  // one bounded same-character activation decision per formal Character Brain.
+  counterfactualLinkedExperienceLongitudinalCaseReentry =
+    counterfactualLinkedExperienceReuseOutcomeReentryProjections.length > 0
+      ? projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseReentry({
+        world_simulation_session_id: sessionId,
+        current_turn_id: prepared.turn_id,
+        current_state_revision: prepared.state_revision,
+        current_world_state_hash: prepared.world_state_hash,
+        world_history: worldHistory,
+        counterfactual_linked_experience_reuse_outcome_reentry_projections:
+          counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      })
+      : null;
+  if (counterfactualLinkedExperienceLongitudinalCaseReentry) {
+    const expectedSource = {
+      world_history: worldHistory,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+    };
+    for (const decisionInput of decisionInputs) {
+      const characterInput = decisionInput.character_input;
+      const resolverView =
+        buildWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolverView({
+          character: characterInput.character,
+          source_phase82e_projection:
+            counterfactualLinkedExperienceLongitudinalCaseReentry,
+          expected_source: expectedSource,
+        });
+      counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolverViews.push(
+        cloneJson(resolverView),
+      );
+      const resolver =
+        typeof loopOptions.counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolver
+          === "function"
+          ? loopOptions.counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolver
+          : null;
+      const activatedRefs = resolver && resolverView.longitudinal_case_candidates.length > 0
+        ? await resolver(cloneJson(resolverView))
+        : [];
+      if (!Array.isArray(activatedRefs)) {
+        fail(
+          "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_LONGITUDINAL_CASE_REUSE_RESOLVER_INVALID_OUTPUT",
+          "counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolver must return an array of bounded Phase82F refs.",
+        );
+      }
+      const projection =
+        projectWorldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuse({
+          character: characterInput.character,
+          source_phase82e_projection:
+            counterfactualLinkedExperienceLongitudinalCaseReentry,
+          expected_source: expectedSource,
+          resolver_view: resolverView,
+          activated_longitudinal_case_refs: activatedRefs,
+        });
+      counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseProjections.push(
+        cloneJson(projection),
+      );
+      characterInput.counterfactual_linked_experience_longitudinal_case_deliberative_reuse =
+        cloneJson(projection.character_view);
+      characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_installed = true;
+      characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_advisory_only = true;
+      characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_action_authority = false;
+      characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_effectiveness_authority = false;
+      characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_world_truth_authority = false;
+    }
+  }
   return {
     decision_inputs: decisionInputs,
     counterfactual_reflection_reentry_projections:
@@ -449,6 +529,12 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       counterfactualLinkedExperienceReuseOutcomeDeliberationResolverViews,
     counterfactual_linked_experience_reuse_outcome_deliberation_projections:
       counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+    counterfactual_linked_experience_longitudinal_case_reentry:
+      counterfactualLinkedExperienceLongitudinalCaseReentry,
+    counterfactual_linked_experience_longitudinal_case_deliberative_reuse_resolver_views:
+      counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolverViews,
+    counterfactual_linked_experience_longitudinal_case_deliberative_reuse_projections:
+      counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseProjections,
     counterfactual_linked_experience_reuse_resolver_views:
       counterfactualLinkedExperienceReuseResolverViews,
     counterfactual_linked_experience_reuse_projections:
@@ -498,6 +584,12 @@ async function prepareFormalDecisionRound(
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_deliberation_resolver_views),
     counterfactual_linked_experience_reuse_outcome_deliberation_projections:
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_outcome_deliberation_projections),
+    counterfactual_linked_experience_longitudinal_case_reentry:
+      cloneJson(actionBundle.counterfactual_linked_experience_longitudinal_case_reentry),
+    counterfactual_linked_experience_longitudinal_case_deliberative_reuse_resolver_views:
+      cloneJson(actionBundle.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_resolver_views),
+    counterfactual_linked_experience_longitudinal_case_deliberative_reuse_projections:
+      cloneJson(actionBundle.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_projections),
     counterfactual_linked_experience_reuse_resolver_views:
       cloneJson(actionBundle.counterfactual_linked_experience_reuse_resolver_views),
     counterfactual_linked_experience_reuse_projections:
@@ -558,6 +650,7 @@ export function buildWorldSimulationFormalTurnTransportContract() {
       caller_may_submit_action_id_only: true,
       caller_may_submit_bounded_impasse_preference_revisions: true,
       caller_may_submit_bounded_counterfactual_preparative_revalidation: true,
+      caller_may_submit_bounded_longitudinal_case_deliberative_reuse: true,
       impasse_preference_submission_requires_current_decision_handle: true,
       impasse_preference_submission_replayed_by_server_owned_closure_only: true,
       action_selection_may_not_supply_impasse_preference: true,
@@ -810,6 +903,8 @@ export async function resolveFormalWorldSimulationTurn(input = {}, options = {})
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_outcome_reentry_projections ?? [],
         counterfactualLinkedExperienceReuseOutcomeDeliberationProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_outcome_deliberation_projections ?? [],
+        counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseProjections:
+          acquisition.prepared_turn.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_projections ?? [],
         counterfactualLinkedExperienceReuseProjections:
           acquisition.prepared_turn.counterfactual_linked_experience_reuse_projections ?? [],
         counterfactualPreparativeRevalidationProjections:

@@ -12,6 +12,7 @@ export const worldSimulationFormalImpasseDecisionKinds = Object.freeze({
   PHASE81E: "counterfactual_preparative_revalidation",
   PHASE81J: "counterfactual_linked_experience_reuse",
   PHASE81O: "counterfactual_linked_reuse_outcome_deliberation",
+  PHASE82F: "counterfactual_linked_longitudinal_case_deliberative_reuse",
   ACTION: "action_selection",
 });
 
@@ -76,6 +77,8 @@ function stageLabel(kind) {
       return "Phase81J";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return "Phase81O";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return "Phase82F";
     default:
       return null;
   }
@@ -102,6 +105,8 @@ function responseField(kind) {
       return "linked_experience_reuse_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return "reuse_outcome_deliberation_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return "activated_longitudinal_case_refs";
     default:
       return null;
   }
@@ -823,6 +828,32 @@ function normalizePhase81O(task, values) {
   });
 }
 
+function normalizePhase82F(task, values) {
+  const candidates = array(task.longitudinal_case_candidates);
+  const allowed = new Set(
+    candidates.map((candidate) => text(candidate?.reentry_candidate_ref)).filter(Boolean),
+  );
+  const limit = Number.isSafeInteger(task.response_contract?.maximum_activation_count)
+    ? task.response_contract.maximum_activation_count
+    : allowed.size;
+  if (values.length > limit) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+      "Phase82F longitudinal-case activation exceeds the canonical limit.",
+    );
+  }
+  const refs = values.map((value) => text(isObject(value) ? value.reentry_candidate_ref : value));
+  if (refs.some((ref) => !ref)
+      || new Set(refs).size !== refs.length
+      || refs.some((ref) => !allowed.has(ref))) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+      "Phase82F may activate only unique opaque refs from the current bounded resolver view.",
+    );
+  }
+  return [...refs].sort();
+}
+
 function normalizeImpasse(task, kind, values) {
   const contexts = array(task.impasse_contexts);
   const contextByRef = new Map(contexts.map((context) => [context.impasse_ref, context]));
@@ -922,6 +953,9 @@ export function validateWorldSimulationFormalImpasseDeliberationSubmission(input
       break;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       normalized = normalizePhase81O(envelope.task, envelope.values);
+      break;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      normalized = normalizePhase82F(envelope.task, envelope.values);
       break;
     default:
       fail(

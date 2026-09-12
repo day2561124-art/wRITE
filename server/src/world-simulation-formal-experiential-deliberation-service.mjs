@@ -28,6 +28,9 @@ import {
 import {
   worldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationVersion,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-deliberation-service.mjs";
+import {
+  worldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseVersion,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-case-deliberative-reuse-service.mjs";
 
 import {
   worldSimulationFormalImpasseDecisionKinds,
@@ -105,6 +108,8 @@ function stageLabel(kind) {
       return "Phase81J";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return "Phase81O";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return "Phase82F";
     default:
       return null;
   }
@@ -132,6 +137,8 @@ function expectedVersion(kind) {
       return worldSimulationCounterfactualLinkedExperienceReuseVersion;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return worldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationVersion;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return worldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseVersion;
     default:
       return null;
   }
@@ -158,6 +165,8 @@ function responseField(kind) {
       return "linked_experience_reuse_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return "reuse_outcome_deliberation_decisions";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return "activated_longitudinal_case_refs";
     default:
       return null;
   }
@@ -226,6 +235,13 @@ function assertResolverView(raw, kind) {
     fail(
       "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
       "Phase81O resolver view requires reuse_outcome_candidates.",
+    );
+  }
+  if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE82F
+      && !Array.isArray(raw.longitudinal_case_candidates)) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
+      "Phase82F resolver view requires longitudinal_case_candidates.",
     );
   }
   return cloneJson(raw);
@@ -375,6 +391,14 @@ function publicCharacterInput(view, kind, character = view.character) {
         cloneJson(array(view.reuse_outcome_candidates)),
       response_contract: cloneJson(view.response_contract ?? {}),
     };
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE82F) {
+    task = {
+      purpose:
+        "Select only retained longitudinal case evidence that should enter the current action deliberation as advisory evidence. Every candidate has already passed prior Phase82D retain admission and current Phase81N exact-cue re-entry. Activation is not an effectiveness, success, preference, or action judgment; returning none is valid.",
+      longitudinal_case_candidates:
+        cloneJson(array(view.longitudinal_case_candidates)),
+      response_contract: cloneJson(view.response_contract ?? {}),
+    };
   } else {
     const evidenceField = kind === worldSimulationFormalImpasseDecisionKinds.PHASE79F
       ? "evidence_cue_refs"
@@ -450,6 +474,8 @@ function eligible(view, kind, character = view.character) {
       return array(view.linked_experience_candidates).length > 0;
     case worldSimulationFormalImpasseDecisionKinds.PHASE81O:
       return array(view.reuse_outcome_candidates).length > 0;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
+      return array(view.longitudinal_case_candidates).length > 0;
     default:
       return false;
   }
@@ -500,6 +526,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
       "Phase81E",
       "Phase81J",
       "Phase81O",
+      "Phase82F",
       "action_selection",
     ],
     phase76d_experiential_reentry_supported: true,
@@ -512,6 +539,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
     phase81e_counterfactual_preparative_revalidation_supported: true,
     phase81j_counterfactual_linked_experience_reuse_supported: true,
     phase81o_counterfactual_linked_reuse_outcome_deliberation_supported: true,
+    phase82f_retained_longitudinal_case_deliberative_reuse_supported: true,
     same_snapshot_repreparation_required: true,
     same_character_only: true,
     resolver_view_hash_bound_engine_side: true,
@@ -556,6 +584,8 @@ export function buildWorldSimulationFormalImpasseDeliberationRound(input = {}) {
       preparedTurn.counterfactual_linked_experience_reuse_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE81O,
       preparedTurn.counterfactual_linked_experience_reuse_outcome_deliberation_resolver_views],
+    [worldSimulationFormalImpasseDecisionKinds.PHASE82F,
+      preparedTurn.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_resolver_views],
   ];
   for (const [kind, views] of stages) {
     const decisionInputs = decisionInputsForViews(views, kind, completed);
@@ -652,5 +682,7 @@ export function buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE81J),
     counterfactualLinkedExperienceReuseOutcomeDeliberationResolver:
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE81O),
+    counterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseResolver:
+      singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE82F),
   };
 }
