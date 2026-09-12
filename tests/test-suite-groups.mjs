@@ -211,6 +211,10 @@ export const phase81CounterfactualReflectionReentrySteps = Object.freeze(
   phase81CounterfactualExperienceSteps.slice(3, 18),
 );
 
+export const phase82LongitudinalExperienceLearningSteps = Object.freeze([
+  Object.freeze(["Phase 82A bounded longitudinal reuse-outcome evidence assembly", Object.freeze(["tests/phase82/phase82a-counterfactual-linked-experience-longitudinal-reuse-outcome-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -236,6 +240,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase79ExperientialMethodCompetitionSteps,
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualExperienceSteps,
+  ...phase82LongitudinalExperienceLearningSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -259,6 +264,7 @@ export const cognitionSteps = Object.freeze([
   ...phase79ExperientialMethodCompetitionSteps,
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualExperienceSteps,
+  ...phase82LongitudinalExperienceLearningSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -277,4 +283,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase79ExperientialMethodCompetitionSteps,
   ...phase80AnalogicalExperienceAdaptationSteps,
   ...phase81CounterfactualReflectionReentrySteps,
+  ...phase82LongitudinalExperienceLearningSteps,
 ]);

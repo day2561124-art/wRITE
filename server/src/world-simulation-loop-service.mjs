@@ -84,6 +84,9 @@ import {
   buildWorldSimulationCounterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
 } from "./world-simulation-counterfactual-linked-experience-reuse-outcome-selected-action-outcome-evidence-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-evidence-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8682,6 +8685,34 @@ export async function resolveWorldSimulationTurn(
         postOutcomeSubjectivePerceptionProjection,
     });
 
+  // Phase82A stops the single-case reuse loop from recursively cloning itself.
+  // It assembles the current canonical Phase81Q subjective outcome together with
+  // prior committed Phase81Q outcomes that share the same character and root
+  // Phase81M reuse case. Every historical Q is revalidated against its own
+  // P/N/O/74D/Phase76A sources and prior-history prefix. This remains evidence
+  // assembly only: no effectiveness, success/failure, reward, causal credit, or
+  // durable cognitive rule is inferred here.
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence =
+    buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      current_phase81q_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+
   // Phase81L joins only the exact Phase81K reuse-intent selected-action lineage
   // with the bounded Phase76A subjective outcome for that same character/action.
   // It records what the character actually experienced after selecting an action
@@ -10819,6 +10850,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage),
       counterfactual_linked_experience_reuse_outcome_selected_action_outcome_evidence:
         cloneJson(counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence),
+      counterfactual_linked_experience_longitudinal_reuse_outcome_evidence:
+        cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:
