@@ -407,6 +407,11 @@ import {
   worldSimulationRetrievalInducedForgettingAccessibilityProjectionVersion,
 } from "./world-simulation-retrieval-induced-forgetting-accessibility-projection-service.mjs";
 import {
+  buildWorldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionContract,
+  projectWorldSimulationRetrievalInducedForgettingReexposureRecovery,
+  worldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionVersion,
+} from "./world-simulation-retrieval-induced-forgetting-reexposure-recovery-projection-service.mjs";
+import {
   buildWorldSimulationBaseLevelActivationProjectionContract,
   projectWorldSimulationBaseLevelActivation,
 } from "./world-simulation-base-level-activation-projection-service.mjs";
@@ -3549,6 +3554,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationRetrievalPracticeActivationProjectionContract(),
     retrieval_induced_forgetting_accessibility_projection:
       buildWorldSimulationRetrievalInducedForgettingAccessibilityProjectionContract(),
+    retrieval_induced_forgetting_reexposure_recovery_projection:
+      buildWorldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionContract(),
     base_level_activation_projection:
       buildWorldSimulationBaseLevelActivationProjectionContract(),
     query_relative_cue_diagnostic_evidence_projection:
@@ -4719,15 +4726,36 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         retrieval_practice_activation_projection:
           retrievalPracticeActivationProjection,
       });
-    const retrievalMemoryRecordsAfterRif =
-      retrievalInducedForgettingAccessibilityProjection
+    // Phase83C keeps Phase83B's delayed accessibility consequence reversible
+    // when committed prior-turn evidence shows an exact re-encoding of the same
+    // subjective observation after the latest applicable suppression event.
+    // Elapsed time alone never clears suppression; the projection changes only
+    // the ephemeral search order that enters the authoritative Phase63B freeze.
+    const retrievalInducedForgettingReexposureRecoveryProjection =
+      projectWorldSimulationRetrievalInducedForgettingReexposureRecovery({
+        world_state:
+          worldState,
+        character,
+        current_turn_id:
+          turnId,
+        as_of:
+          worldState.simulation_time
+          ?? event.simulation_time
+          ?? null,
+        memory_records:
+          retrievalMemoryRecords,
+        phase83b_projection:
+          retrievalInducedForgettingAccessibilityProjection,
+      });
+    const retrievalMemoryRecordsAfterRifRecovery =
+      retrievalInducedForgettingReexposureRecoveryProjection
         .projected_memory_records;
 
     const memoryAccessibilityBaseInput = {
       ...memoryAccessibilityCueProbeInput,
       memory_records:
         cloneJson(
-          retrievalMemoryRecordsAfterRif,
+          retrievalMemoryRecordsAfterRifRecovery,
         ),
     };
 
@@ -4765,6 +4793,16 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         audit:
           cloneJson(
             retrievalInducedForgettingAccessibilityProjection.audit,
+          ),
+      },
+      retrieval_induced_forgetting_reexposure_recovery_projection: {
+        version:
+          worldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionVersion,
+        projection_id:
+          retrievalInducedForgettingReexposureRecoveryProjection.projection_id,
+        audit:
+          cloneJson(
+            retrievalInducedForgettingReexposureRecoveryProjection.audit,
           ),
       },
     });
@@ -4806,7 +4844,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             memoryAccessibilityQuery
               .memory_accessibility_version,
           memory_records:
-            retrievalMemoryRecordsAfterRif,
+            retrievalMemoryRecordsAfterRifRecovery,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:
@@ -4824,7 +4862,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           query:
             memoryRetrievalQuery,
           memory_records:
-            retrievalMemoryRecordsAfterRif,
+            retrievalMemoryRecordsAfterRifRecovery,
           accessibility_base_input:
             memoryAccessibilityBaseInput,
           initial_accessibility_query:

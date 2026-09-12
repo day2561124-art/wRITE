@@ -888,6 +888,7 @@ const steps = [
   ["Phase 82I retained longitudinal case outcome evidence assembly", ["tests/phase82/phase82i-counterfactual-linked-experience-retained-longitudinal-case-outcome-evidence.test.mjs"]],
   ["Phase 83A bounded retrieval-induced forgetting consequence evidence", ["tests/phase83/phase83a-retrieval-induced-forgetting-consequence.test.mjs"]],
   ["Phase 83B bounded delayed retrieval-induced accessibility suppression projection", ["tests/phase83/phase83b-retrieval-induced-forgetting-accessibility-projection.test.mjs"]],
+  ["Phase 83C exact post-consequence re-encoding recovery projection", ["tests/phase83/phase83c-retrieval-induced-forgetting-reexposure-recovery-projection.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
