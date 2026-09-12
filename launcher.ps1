@@ -1,4 +1,4 @@
-param(
+﻿param(
   [switch]$StartUi,
   [switch]$StopUi,
   [switch]$OpenUi,
@@ -309,6 +309,29 @@ function New-DesktopShortcut {
 }
 
 
+function Invoke-McpTunnelLauncher {
+  param([string]$ScriptPath, [switch]$QueryStatus)
+  New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+  $stamp = [Guid]::NewGuid().ToString("N")
+  $out = Join-Path $LogDir "mcp-launcher.$stamp.stdout.log"
+  $err = Join-Path $LogDir "mcp-launcher.$stamp.stderr.log"
+  $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$ScriptPath`"")
+  if ($QueryStatus) { $arguments += "-Status" }
+  $runner = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments `
+    -WorkingDirectory $Root -WindowStyle Hidden `
+    -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+  # Retain the Windows process handle so ExitCode remains available after exit.
+  $runner.Handle | Out-Null
+  # Wait for the script itself, not its long-lived Node/cloudflared descendants.
+  while (-not $runner.WaitForExit(500)) { }
+  $runner.Refresh()
+  $exitCode = $runner.ExitCode
+  if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out | ForEach-Object { Write-Host $_ } }
+  if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err | ForEach-Object { Write-Host $_ -ForegroundColor Yellow } }
+  $runner.Dispose()
+  return ($exitCode -eq 0)
+}
+
 function Start-McpTunnel {
   $script = Join-Path $Root "scripts\start-mcp-tunnel.ps1"
   if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
@@ -316,8 +339,7 @@ function Start-McpTunnel {
     return $false
   }
 
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $script
-  return ($LASTEXITCODE -eq 0)
+  return (Invoke-McpTunnelLauncher $script)
 }
 
 function Show-McpTunnelStatus {
@@ -327,8 +349,7 @@ function Show-McpTunnelStatus {
     return $false
   }
 
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Status
-  return ($LASTEXITCODE -eq 0)
+  return (Invoke-McpTunnelLauncher $script -QueryStatus)
 }
 
 function Show-AllStatus {

@@ -175,7 +175,12 @@ if (process.argv[2] === "--worker") {
   const before = process.env.JOURNAL_WORKER_BEFORE ?? "AAA";
   const expected = process.env.JOURNAL_WORKER_EXPECTED ?? "BBB";
   const targetPath = process.env.JOURNAL_WORKER_PATH ?? "fixture.txt";
-  const started = await service.begin({
+  const started = await service.begin(mode === "start-only-targetless" ? {
+    operation_type: "diff_check",
+    tool_name: "dev_git_diff_check",
+    workspace_id: workspaceId,
+    targets: [],
+  } : {
     operation_type: "filesystem_patch",
     tool_name: "dev_apply_patch",
     workspace_id: workspaceId,
@@ -370,6 +375,31 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
     const status = await service.status();
     assert.equal(status.health, "degraded");
     assert.equal(status.reconciliation_required, true);
+  } finally { await clean(fixture); }
+}
+
+// Crash recovery D: targetless read-only evidence never needs a vanished workspace to reconcile.
+{
+  const fixture = await tempFixture("recover-targetless-missing-workspace");
+  try {
+    const operationId = await runWorker(fixture.storageRoot, "start-only-targetless");
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    let resolverCalls = 0;
+    const recovered = await service.reconcileDangling({
+      contextResolver: async () => {
+        resolverCalls += 1;
+        throw new Error("Unknown workspace");
+      },
+    });
+    assert.equal(resolverCalls, 0);
+    assert.equal(recovered.dangling_operations.length, 0);
+    const operation = await service.getOperation({ operation_id: operationId });
+    assert.equal(operation.outcome, "operation_recovered");
+    assert.equal(operation.events[1].result.outcome, "no_effect_observed");
+    assert.equal(operation.events[1].reconciles_event_id, operation.events[0].journal_event_id);
+    const status = await service.status();
+    assert.equal(status.health, "healthy");
+    assert.equal(status.reconciliation_required, false);
   } finally { await clean(fixture); }
 }
 

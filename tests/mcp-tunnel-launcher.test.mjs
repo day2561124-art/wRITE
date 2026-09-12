@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
@@ -40,7 +40,7 @@ function runTunnel(args, expectedStatus, env = {}) {
       cwd: rootDir,
       env: childEnvironment(env),
       encoding: "utf8",
-      timeout: 20_000,
+      timeout: 45_000,
       windowsHide: true,
     },
   );
@@ -71,7 +71,7 @@ function runTunnelStart(args, expectedStatus, env = {}) {
     const timer = setTimeout(() => {
       terminateProcessTree(child);
       reject(new Error(`Tunnel launcher timed out. stdout=${stdout} stderr=${stderr}`));
-    }, 20_000);
+    }, 45_000);
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -120,6 +120,20 @@ setInterval(() => {}, 1000);
 `,
     "utf8",
   );
+  const preload = path.join(fixtureDir, "fake-tunnel-fetch.mjs");
+  await writeFile(preload, `const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : input);
+  if (url.hostname.endsWith('.trycloudflare.com')) {
+    const origin = process.env.FAKE_MCP_ORIGIN;
+    if (!origin) throw new Error('Missing test tunnel origin');
+    const mapped = new URL(url.pathname + url.search, origin);
+    input = input instanceof Request ? new Request(mapped, input) : mapped;
+  }
+  return realFetch(input, init);
+};
+`, "utf8");
+  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --import=${JSON.stringify(pathToFileURL(preload).href)}`;
   return { fakeScript };
 }
 
@@ -157,7 +171,7 @@ async function stopManagedTunnel(logDir) {
 }
 
 async function listenOnFreePort() {
-  const server = createServer((_socket) => {});
+  const server = createServer((socket) => { socket.on("error", () => {}); socket.resume(); });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -231,7 +245,7 @@ async function spawnMcpHttpServerOnAvailablePort({ env, onStderr, maxAttempts = 
     let attemptStderr = "";
     const serverProcess = spawn(
       process.execPath,
-      ["server/src/mcp-http-server.mjs", "--port", String(port)],
+      [path.join(rootDir, "server/src/mcp-http-server.mjs"), "--port", String(port)],
       {
         cwd: rootDir,
         env,
@@ -806,6 +820,7 @@ async function verifyLauncherMcpProfile({
   const preferredPort = 8787;
   const port = await isPortAvailable(preferredPort) ? preferredPort : await freePort();
   const logDir = path.join(fixtureDir, `${label}-profile-logs`);
+  process.env.FAKE_MCP_ORIGIN = `http://127.0.0.1:${port}`;
   let mcpProcess;
   let tunnelStarted = false;
   let client;
@@ -954,9 +969,24 @@ async function main() {
   const fixtureDir = await mkdtemp(path.join(tempParent, "mcp-tunnel-"));
   const { fakeScript } = await createFakeCloudflared(fixtureDir);
   const argsLog = path.join(fixtureDir, "fake-args.log");
-  const server = await listenOnFreePort();
+  // A TCP listener is not MCP. Never stop it or start a tunnel to it.
+  const foreign = await listenOnFreePort();
+  const foreignPort = foreign.address().port;
+  try {
+    const denied = await runTunnelStart(commonArgs(foreignPort,
+      path.join(fixtureDir, "foreign-logs"), fakeScript), 1,
+      { FAKE_CLOUDFLARED_MODE: "quic-success", FAKE_ARGS_LOG: argsLog });
+    assert(denied.stdout.includes("unverified process") || denied.stderr.includes("unverified process"),
+      `Foreign listener was not rejected: ${denied.stdout} ${denied.stderr}`);
+    assert(foreign.listening, "Launcher stopped an unrelated listener");
+    const files = await readdir(path.join(fixtureDir, "foreign-logs"));
+    assert(!files.includes("cloudflared-tunnel.state.json"), "Started a tunnel to a foreign listener");
+  } finally { await new Promise(resolve => foreign.close(resolve)); }
+  const fixtureMcp = await spawnMcpHttpServerOnAvailablePort({ env: childEnvironment({ MCP_TOOL_PROFILE: "chatgpt_developer" }) });
+  const server = { listening: true, close(done) { terminateProcessTree(fixtureMcp.serverProcess); this.listening = false; done(); } };
   let serverClosed = false;
-  const port = server.address().port;
+  const port = fixtureMcp.port;
+  process.env.FAKE_MCP_ORIGIN = `http://127.0.0.1:${port}`;
 
   try {
     const quicLogDir = path.join(fixtureDir, "quic-logs");
@@ -981,7 +1011,7 @@ async function main() {
       quicResult.stdout.includes("https://fresh-quic.trycloudflare.com/mcp"),
       "Healthy QUIC did not print its current MCP URL.",
     );
-    const quicStatus = runTunnel(["-Status", "-LogDirectory", quicLogDir], 0);
+    const quicStatus = runTunnel(["-Status", "-McpPort", String(port), "-LogDirectory", quicLogDir], 0);
     assert(
       quicStatus.stdout.includes("Tunnel status: registered / healthy"),
       "Registered QUIC tunnel was not reported healthy.",
@@ -1019,7 +1049,7 @@ async function main() {
       "Launcher printed a stale Quick Tunnel URL instead of the successful fallback URL.",
     );
     assert(
-      fallbackResult.stdout.includes("MCP HTTP server is already listening; it will not be restarted."),
+      fallbackResult.stdout.includes("Verified current repository MCP server; initialize and tools/list passed."),
       "An existing MCP listener was not preserved.",
     );
     assert(
@@ -1027,7 +1057,7 @@ async function main() {
       "Launcher restarted the MCP server even though its port was already listening.",
     );
     assert(server.listening, "Tunnel restart stopped the existing MCP server.");
-    const fallbackStatus = runTunnel(["-Status", "-LogDirectory", fallbackLogDir], 0);
+    const fallbackStatus = runTunnel(["-Status", "-McpPort", String(port), "-LogDirectory", fallbackLogDir], 0);
     assert(
       fallbackStatus.stdout.includes("https://fresh-http2.trycloudflare.com/mcp"),
       "Status did not print the successful fallback MCP URL.",
@@ -1064,7 +1094,8 @@ async function main() {
           version: 1,
           attemptId: "connecting-test",
           pid: connectingProcess.pid,
-          processStartedAtUtc: null,
+          processStartedAtUtc: new Date().toISOString(),
+          executablePath: process.execPath,
           status: "connecting",
           requestedProtocol: "auto",
           protocol: null,

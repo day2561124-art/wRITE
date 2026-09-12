@@ -1,4 +1,5 @@
 import "./mcp-stdio-guard.mjs";
+import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -5590,6 +5591,8 @@ async function dispatch(message) {
     });
   }
 
+  await ensureRuntimeReady();
+
   if (message.method === "tools/call") {
     try {
       return makeResult(message.id, await callTool(message.params));
@@ -5973,9 +5976,13 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.exit(0);
 }
 
-await initializeDevJournalRuntime();
-await initializeDevCheckpointRuntime();
-await initializeDevTransactionRuntime();
+// Discovery must not wait for potentially large on-disk recovery scans.
+// Every operation beyond protocol discovery still awaits the same fail-closed gate.
+const ensureRuntimeReady = createRuntimeReadiness([
+  ["journal", initializeDevJournalRuntime],
+  ["checkpoint", initializeDevCheckpointRuntime],
+  ["transaction", initializeDevTransactionRuntime],
+]);
 
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);

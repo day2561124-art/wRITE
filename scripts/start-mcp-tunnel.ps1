@@ -1,4 +1,4 @@
-param(
+﻿param(
   [ValidateRange(1, 65535)]
   [int]$McpPort = 8787,
   [switch]$Status,
@@ -28,6 +28,14 @@ $RegistrationPattern = "Registered tunnel connection"
 $QuicFailurePattern = "Failed to dial a quic connection|QUIC connection failed|UDP Connectivity[^\r\n]*FAIL"
 $QuickTunnelUrlPattern = "https://[a-zA-Z0-9-]+\.trycloudflare\.com"
 
+function Invoke-McpProbe {
+  param([string]$Endpoint, [string]$Mode = "probe", [string]$ExpectedInstance = "")
+  $probeScript = Join-Path $Root "scripts\probe-mcp.mjs"
+  $probeOutput = & node $probeScript $Endpoint $Mode $ExpectedInstance
+  if ($LASTEXITCODE -ne 0) { return $null }
+  try { return ($probeOutput | ConvertFrom-Json) } catch { return $null }
+}
+
 function Write-TunnelEvent {
   param([string]$Message)
 
@@ -56,7 +64,7 @@ function Write-TunnelState {
 function Get-ManagedProcess {
   param($State)
 
-  if (-not $State -or -not $State.pid) { return $null }
+  if (-not $State -or -not $State.pid -or -not $State.processStartedAtUtc) { return $null }
   $process = Get-Process -Id ([int]$State.pid) -ErrorAction SilentlyContinue
   if (-not $process) { return $null }
 
@@ -70,6 +78,13 @@ function Get-ManagedProcess {
     }
   }
 
+  $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
+  if (-not $cim -or -not $cim.CommandLine -or -not $State.originUrl) { return $null }
+  $originPattern = '--url\s+"?' + [regex]::Escape([string]$State.originUrl) + '(?:"|\s|$)'
+  if ($cim.CommandLine -notmatch $originPattern) { return $null }
+  if ($State.executablePath) {
+    if (-not [string]::Equals($cim.ExecutablePath, $State.executablePath, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+  } elseif ($cim.Name -ne 'cloudflared.exe') { return $null }
   return $process
 }
 
@@ -127,7 +142,11 @@ function Get-TunnelStatusInfo {
   $hasFailure = ($logText -match $QuicFailurePattern)
 
   if ($process -and $registration) {
-    $statusName = "registered / healthy"
+    $statusName = "registered / unverified"
+    if ($state.originUrl -eq $OriginUrl -and $state.mcpInstanceId -and $registration.McpUrl) {
+      $verified = Invoke-McpProbe $registration.McpUrl "probe" $state.mcpInstanceId
+      if ($verified) { $statusName = "registered / healthy" }
+    }
   } elseif ($process -and -not $hasFailure -and $state.status -eq "connecting") {
     $statusName = "connecting"
   } else {
@@ -194,7 +213,7 @@ function Test-McpPortOpen {
 
 function Get-McpOwningProcess {
   try {
-    return (Get-NetTCPConnection -State Listen -LocalAddress "127.0.0.1" -LocalPort $McpPort -ErrorAction Stop | Select-Object -First 1).OwningProcess
+    return (Get-NetTCPConnection -State Listen -LocalPort $McpPort -ErrorAction Stop | Select-Object -First 1).OwningProcess
   } catch {
     return $null
   }
@@ -278,7 +297,8 @@ function Start-CloudflaredAttempt {
     -PassThru
 
   $state = [pscustomobject]@{
-    version = 1
+    version = 2
+    executablePath = $Cloudflared.Source
     attemptId = $attemptId
     pid = $process.Id
     processStartedAtUtc = $process.StartTime.ToUniversalTime().ToString("o")
@@ -286,6 +306,7 @@ function Start-CloudflaredAttempt {
     requestedProtocol = $Protocol
     protocol = $null
     fallback = $Fallback
+    mcpInstanceId = $current.instanceId
     originUrl = $OriginUrl
     baseUrl = $null
     mcpUrl = $null
@@ -308,6 +329,10 @@ function Wait-ForTunnelRegistration {
   $deadline = (Get-Date).AddSeconds($RegistrationTimeoutSeconds)
   do {
     Start-Sleep -Milliseconds $PollIntervalMilliseconds
+    $Attempt.Process.Refresh()
+    if ($Attempt.Process.HasExited) {
+      return [pscustomobject]@{ Registered = $false; Reason = "process-exited-$($Attempt.Process.ExitCode)"; Registration = $null }
+    }
     $logText = Get-AttemptLogText $Attempt.State
     $registration = Get-Registration $logText
     if ($registration) {
@@ -338,8 +363,13 @@ function Complete-TunnelAttempt {
   Write-TunnelEvent "action=registered attempt=$($Attempt.State.attemptId) pid=$($Attempt.Process.Id) protocol=$actualProtocol fallback=$($Attempt.State.fallback) url=$($Registration.BaseUrl)"
 }
 
+$mutexKey = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Root|$LogDir")).Replace("/", "_")
+$launchMutex = New-Object System.Threading.Mutex($false, "Local\WriterMcp-$mutexKey")
+$hasMutex = $false
 Push-Location $Root
 try {
+  try { $hasMutex = $launchMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $hasMutex = $true }
+  if (-not $hasMutex) { throw "Another MCP launcher operation is in progress." }
   New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
   if ($Status) {
@@ -356,66 +386,74 @@ try {
   Set-BackendGenerationProviderDefaults
 
   Write-Host "`n=== 1. MCP HTTP server ==="
+  $node = Require-Command "node" "Install Node.js 18 or newer first."
+  if (-not $node) { exit 1 }
+  $mcpScript = [IO.Path]::GetFullPath((Join-Path $Root "server\src\mcp-http-server.mjs"))
+  $current = $null
   if (Test-McpPortOpen) {
-    Write-Host "MCP HTTP server is already listening; it will not be restarted." -ForegroundColor Green
-    Write-Host "MCP_PORT=$McpPort"
     $owner = Get-McpOwningProcess
-    if ($owner) { Write-Host "MCP_OWNING_PROCESS=$owner" }
-  } else {
-    $node = Require-Command "node" "Install Node.js 18 or newer first."
-    $npm = Require-Command "npm.cmd" "Install Node.js/npm first."
-    if (-not $node -or -not $npm) { exit 1 }
-
-    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $info = Get-CimInstance Win32_Process -Filter "ProcessId = $owner" -ErrorAction SilentlyContinue
+    $identity = Invoke-McpProbe "$OriginUrl/mcp" "identity"
+    # Unknown listeners are never stopped. Legacy relative command lines require
+    # an operator migration; matching a filename alone cannot establish ownership.
+    $owned = $info -and $info.Name -eq "node.exe" -and $info.CommandLine -and
+      $info.CommandLine.Replace("/", "\").IndexOf($mcpScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    if (-not $owned -or -not $identity -or [int]$identity.pid -ne [int]$owner) {
+      throw "Port $McpPort is occupied by an unverified process (PID $owner); it was not stopped."
+    }
+    if ($identity.current) { $current = Invoke-McpProbe "$OriginUrl/mcp" "probe" }
+    if (-not $current) {
+      # Recheck both PID and start time before stopping our verified instance.
+      $again = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
+      if ((Get-McpOwningProcess) -ne $owner -or $again.CreationDate -ne $info.CreationDate) {
+        throw "MCP owner changed during validation; refusing to stop it."
+      }
+      Write-TunnelEvent "action=mcp-restart pid=$owner reason=stale-or-unhealthy"
+      & taskkill.exe /PID $owner /T /F | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "Could not stop verified MCP PID $owner" }
+      $releaseDeadline = (Get-Date).AddSeconds(5)
+      while ((Test-McpPortOpen) -and (Get-Date) -lt $releaseDeadline) { Start-Sleep -Milliseconds 100 }
+      if (Test-McpPortOpen) { throw "MCP port did not become available." }
+    } else {
+      Write-Host "Verified current repository MCP server; initialize and tools/list passed."
+      Write-Host "MCP_OWNING_PROCESS=$owner"
+    }
+  }
+  if (-not $current) {
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmssfff"
     $mcpOut = Join-Path $LogDir "mcp-http.$stamp.stdout.log"
     $mcpErr = Join-Path $LogDir "mcp-http.$stamp.stderr.log"
-    $mcpToolProfileWasSet = Test-Path Env:\MCP_TOOL_PROFILE
     $originalMcpToolProfile = $env:MCP_TOOL_PROFILE
-    $effectiveMcpToolProfile = if ($mcpToolProfileWasSet) {
-      $originalMcpToolProfile
-    } else {
-      "chatgpt_developer"
-    }
-    Write-Host "Starting MCP HTTP server..." -ForegroundColor Cyan
+    $effectiveMcpToolProfile = if (Test-Path Env:\MCP_TOOL_PROFILE) { $originalMcpToolProfile } else { "chatgpt_developer" }
     try {
       $env:MCP_TOOL_PROFILE = $effectiveMcpToolProfile
-      $mcpProcess = Start-Process `
-        -FilePath $npm.Source `
-        -ArgumentList @("run", "mcp:http", "--", "--port", [string]$McpPort) `
-        -WorkingDirectory $Root `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $mcpOut `
-        -RedirectStandardError $mcpErr `
-        -PassThru
+      $mcpProcess = Start-Process -FilePath $node.Source `
+        -ArgumentList @("`"$mcpScript`"", "--config", "`"$(Join-Path $Root 'config\mcp-http.example.json')`"", "--port", [string]$McpPort) `
+        -WorkingDirectory $Root -WindowStyle Hidden `
+        -RedirectStandardOutput $mcpOut -RedirectStandardError $mcpErr -PassThru
     } finally {
-      if ($mcpToolProfileWasSet) {
-        $env:MCP_TOOL_PROFILE = $originalMcpToolProfile
-      } else {
-        Remove-Item Env:\MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
-      }
+      if ($null -eq $originalMcpToolProfile) { Remove-Item Env:\MCP_TOOL_PROFILE -ErrorAction SilentlyContinue }
+      else { $env:MCP_TOOL_PROFILE = $originalMcpToolProfile }
     }
-
-    $mcpDeadline = (Get-Date).AddSeconds(12)
-    do {
-      Start-Sleep -Milliseconds 500
-      if (Test-McpPortOpen) { break }
-    } while ((Get-Date) -lt $mcpDeadline)
-
-    if (-not (Test-McpPortOpen)) {
-      Write-Host "MCP HTTP server did not start listening on 127.0.0.1:$McpPort in time." -ForegroundColor Red
-      Write-Host "MCP_HTTP_PID=$($mcpProcess.Id)"
-      Write-Host "MCP_HTTP_OUT_LOG=$mcpOut"
-      Write-Host "MCP_HTTP_ERR_LOG=$mcpErr"
-      if (Test-Path -LiteralPath $mcpErr) { Get-Content -LiteralPath $mcpErr -Tail 40 }
-      exit 1
-    }
-
-    Write-Host "MCP HTTP server started." -ForegroundColor Green
-    Write-Host "MCP_TOOL_PROFILE=$effectiveMcpToolProfile"
     Write-Host "MCP_HTTP_PID=$($mcpProcess.Id)"
     Write-Host "MCP_HTTP_OUT_LOG=$mcpOut"
     Write-Host "MCP_HTTP_ERR_LOG=$mcpErr"
+    Write-Host "MCP_TOOL_PROFILE=$effectiveMcpToolProfile"
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+      Start-Sleep -Milliseconds 250
+      $mcpProcess.Refresh()
+      if ($mcpProcess.HasExited) { throw "MCP exited before readiness; see $mcpErr" }
+      if (Test-McpPortOpen) { break }
+    } while ((Get-Date) -lt $deadline)
+    $current = Invoke-McpProbe "$OriginUrl/mcp" "probe"
+    if (-not $current -or [int]$current.pid -ne $mcpProcess.Id -or (Get-McpOwningProcess) -ne $mcpProcess.Id) {
+      if (-not $mcpProcess.HasExited) { & taskkill.exe /PID $mcpProcess.Id /T /F | Out-Null }
+      throw "MCP failed identity / protocol readiness; see $mcpErr"
+    }
+    Write-Host "MCP HTTP server started and protocol verified."
   }
+  Write-Host "MCP_PORT=$McpPort"
 
   Write-Host "`n=== 2. Cloudflare quick tunnel ==="
   Stop-ManagedTunnel "restart-before-new-attempt" | Out-Null
@@ -450,17 +488,34 @@ try {
   }
 
   Write-Host "`n=== 3. ChatGPT MCP URL ==="
-  Write-Host "Tunnel registered / healthy." -ForegroundColor Green
+  Write-Host "Tunnel registered; checking public MCP protocol..." -ForegroundColor Cyan
   Write-Host "TUNNEL_PROTOCOL=$($successfulAttempt.State.protocol)"
   Write-Host "TUNNEL_FALLBACK=$($successfulAttempt.State.fallback)"
   if (-not $successfulRegistration.McpUrl) {
     Write-Host "Tunnel registered, but this attempt did not emit a Quick Tunnel URL." -ForegroundColor Red
     exit 1
   }
+  $public = $null
+  $publicDeadline = (Get-Date).AddSeconds(45)
+  do {
+    $public = Invoke-McpProbe $successfulRegistration.McpUrl "probe" $current.instanceId
+    if ($public) { break }
+    Start-Sleep -Milliseconds 1000
+  } while ((Get-Date) -lt $publicDeadline)
+  if (-not $public) {
+    $successfulAttempt.State.status = "unverified"
+    $successfulAttempt.State.failureReason = "public-mcp-probe-failed"
+    Write-TunnelState $successfulAttempt.State
+    throw "Tunnel registered but public MCP verification failed; URL is not ready for ChatGPT."
+  }
+  Write-TunnelEvent "action=public-mcp-verified instance=$($public.instanceId) tools=$($public.toolCount) discovery_ms=$($public.discoveryMs)"
+  Write-Host "Tunnel registered / healthy; public initialize, tools/list and ping passed." -ForegroundColor Green
   Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
   Write-Host $successfulRegistration.McpUrl -ForegroundColor Cyan
   Write-Host "URL_LOG=$($successfulAttempt.State.stderrLog)"
   exit 0
 } finally {
   Pop-Location
+  if ($hasMutex) { $launchMutex.ReleaseMutex() }
+  $launchMutex.Dispose()
 }

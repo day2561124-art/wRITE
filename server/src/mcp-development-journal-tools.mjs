@@ -51,7 +51,7 @@ export const DEV_JOURNAL_MAX_EVENT_BYTES = 128 * 1024;
 export const DEV_JOURNAL_MAX_TARGETS = 100;
 export const DEV_JOURNAL_MAX_LINKS = 100;
 export const DEV_JOURNAL_MAX_QUERY_RESULTS = 100;
-export const DEV_JOURNAL_MAX_RECOVERY_SCAN = 10_000;
+export const DEV_JOURNAL_MAX_RECOVERY_SCAN = 100_000;
 export const DEV_JOURNAL_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 export const DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS = 10_000;
 export const DEV_JOURNAL_LOCK_RETRY_MIN_MS = 25;
@@ -753,8 +753,14 @@ export function createDevOperationJournalService({
       if (!started) continue;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
         || started.operation_type.startsWith("transaction_");
+      const requiresWorkspaceContext = !started.operation_type.startsWith("checkpoint_")
+        && !transactionOperation
+        && (
+          started.operation_type === "git_commit"
+          || (started.operation_type !== "integration_apply" && started.targets.length > 0)
+        );
       let context = null;
-      if (!started.operation_type.startsWith("checkpoint_") && !transactionOperation) {
+      if (requiresWorkspaceContext) {
         try {
           context = await resolveContext(started.workspace_id);
         } catch (error) {

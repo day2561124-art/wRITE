@@ -165,13 +165,15 @@ async function fixture() {
   await mkdir(scripts, { recursive: true });
   await mkdir(runtime);
   for (const file of [
-    'mcp-http-server.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
+    'mcp-http-server.mjs', 'mcp-http-identity.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
+    'mcp-runtime-readiness.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
     'mcp-workspace-change-clock-provider.mjs',
     'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
     'world-simulation-formal-experiential-deliberation-contract.mjs',
     'canonical-json-hash-service.mjs', 'process-control.mjs', 'file-transactions.mjs', 'project-paths.mjs',
   ]) await copyFile(path.join(root, 'server', 'src', file), path.join(src, file));
+  await copyFile(path.join(root, 'package-lock.json'), path.join(repo, 'package-lock.json'));
   await copyFile(
     path.join(root, 'scripts', 'mcp-workspace-change-watch.ps1'),
     path.join(scripts, 'mcp-workspace-change-watch.ps1'),

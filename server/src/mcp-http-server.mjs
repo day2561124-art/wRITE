@@ -1,4 +1,5 @@
 import http from 'http';
+import { getMcpIdentity } from './mcp-http-identity.mjs';
 import { randomUUID } from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -687,7 +688,14 @@ function createBridgeSession() {
   return entry;
 }
 
+const instanceIdentity = { ...getMcpIdentity(), pid: process.pid, instanceId: randomUUID(),
+  startedAt: new Date().toISOString(), profile: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public' };
 const server = http.createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(instanceIdentity));
+    return;
+  }
   if (req.url !== '/mcp') {
     res.statusCode = 404;
     res.end('Not found');
