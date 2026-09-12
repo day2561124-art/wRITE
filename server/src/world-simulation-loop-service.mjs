@@ -94,6 +94,10 @@ import {
   projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-appraisal-service.mjs";
 import {
+  buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView,
+  projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmission,
+} from "./world-simulation-counterfactual-linked-experience-longitudinal-reuse-outcome-revise-retain-admission-service.mjs";
+import {
   bridgeWorldSimulationPostOutcomeSubjectiveExperienceToMemory,
   worldSimulationPostOutcomeSubjectiveMemoryBridgeVersion,
 } from "./world-simulation-post-outcome-subjective-memory-bridge-service.mjs";
@@ -8826,6 +8830,88 @@ export async function resolveWorldSimulationTurn(
         rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisalDecisions,
     });
 
+  // Phase82D is the explicit revise/retain admission boundary after Phase82C.
+  // Character Brain may admit only the disposition already licensed by the exact
+  // qualitative appraisal: recurrent evidence may be retained as a future case,
+  // context-sensitive evidence may request discriminating context, and uncertain
+  // evidence must defer. This remains append-only case evidence and cannot author
+  // rules, scores, beliefs, semantic memory, ordinary memory, or World State.
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView =
+    buildWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      longitudinal_reuse_outcome_evidence:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+      longitudinal_reuse_outcome_variation:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
+      longitudinal_reuse_outcome_appraisal:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal,
+      current_phase81q_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+    });
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver =
+    typeof options.counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver === "function"
+      ? options.counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver
+      : null;
+  const rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionDecisions =
+    counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver
+      && counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView.candidate_count > 0
+      ? await counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver(
+        cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView),
+      )
+      : [];
+  if (!Array.isArray(rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionDecisions)) {
+    const error = new Error(
+      "counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolver must return an array of bounded Phase82D admission decisions.",
+    );
+    error.code =
+      "WORLD_SIMULATION_COUNTERFACTUAL_LINKED_LONGITUDINAL_REUSE_OUTCOME_ADMISSION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  const counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmission =
+    projectWorldSimulationCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmission({
+      world_simulation_session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      world_history: counterfactualLinkedExperienceReuseOutcomeCanonicalHistory ?? [],
+      longitudinal_reuse_outcome_evidence:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeEvidence,
+      longitudinal_reuse_outcome_variation:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation,
+      longitudinal_reuse_outcome_appraisal:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal,
+      current_phase81q_outcome_evidence:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionOutcomeEvidence,
+      counterfactual_linked_experience_reuse_outcome_selected_action_lineage:
+        counterfactualLinkedExperienceReuseOutcomeSelectedActionLineage,
+      subjective_choice_commitment_receipts:
+        subjectiveChoiceCommitmentReceipts,
+      counterfactual_linked_experience_reuse_outcome_reentry_projections:
+        counterfactualLinkedExperienceReuseOutcomeReentryProjections,
+      counterfactual_linked_experience_reuse_outcome_deliberation_projections:
+        counterfactualLinkedExperienceReuseOutcomeDeliberationProjections,
+      post_outcome_subjective_perception_projection:
+        postOutcomeSubjectivePerceptionProjection,
+      resolver_view:
+        counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionResolverView,
+      admission_decisions:
+        rawCounterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmissionDecisions,
+    });
+
   // Phase81L joins only the exact Phase81K reuse-intent selected-action lineage
   // with the bounded Phase76A subjective outcome for that same character/action.
   // It records what the character actually experienced after selecting an action
@@ -10969,6 +11055,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeVariation),
       counterfactual_linked_experience_longitudinal_reuse_outcome_appraisal:
         cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeAppraisal),
+      counterfactual_linked_experience_longitudinal_reuse_outcome_revise_retain_admission:
+        cloneJson(counterfactualLinkedExperienceLongitudinalReuseOutcomeReviseRetainAdmission),
       counterfactual_linked_experience_reuse_projections:
         cloneJson(counterfactualLinkedExperienceReuseProjections),
       counterfactual_linked_experience_selected_action_lineage:
