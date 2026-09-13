@@ -369,6 +369,11 @@ function validateArtifactIndex(record, kind) {
 function validateMcpAudit(record) {
   const errors = [];
   const warnings = [];
+  const parentOwnedIntegration = (
+    record.tool_name === "dev_workspace_integrate"
+    && record.ownership === "mcp_http_parent"
+  );
+
   requireFields(errors, record, [
     "audit_id",
     "created_at",
@@ -377,13 +382,27 @@ function validateMcpAudit(record) {
     "risk",
     "actor",
     "input_summary",
-    "affected_paths",
-    "previous_version",
-    "new_version",
     "result",
   ]);
+  if (!parentOwnedIntegration) {
+    requireFields(errors, record, [
+      "affected_paths",
+      "previous_version",
+      "new_version",
+    ]);
+  }
+
   for (const field of ["audit_id", "created_at", "status", "tool_name", "risk", "actor"]) {
     if (field in record) requireString(errors, record, field);
+  }
+  if ("ownership" in record) {
+    requireString(errors, record, "ownership");
+    if (record.ownership !== "mcp_http_parent" || record.tool_name !== "dev_workspace_integrate") {
+      errors.push("ownership=mcp_http_parent is reserved for dev_workspace_integrate audit records.");
+    }
+  }
+  if (parentOwnedIntegration && record.risk !== "high-risk-write") {
+    errors.push("parent-owned dev_workspace_integrate risk must be high-risk-write.");
   }
   if ("created_at" in record && !isIsoDate(record.created_at)) {
     errors.push("created_at must be a valid ISO date string.");
@@ -394,7 +413,9 @@ function validateMcpAudit(record) {
   if (!["completed", "tool_error"].includes(record.status)) {
     errors.push("status must be completed or tool_error.");
   }
-  if (!Array.isArray(record.affected_paths)) errors.push("affected_paths must be an array.");
+  if ("affected_paths" in record && !Array.isArray(record.affected_paths)) {
+    errors.push("affected_paths must be an array.");
+  }
   for (const field of ["input_summary", "previous_version", "new_version", "result"]) {
     if (field in record && !isObject(record[field])) errors.push(`${field} must be an object.`);
   }
