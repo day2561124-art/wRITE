@@ -107,10 +107,38 @@ function assertExistingEvent(event, eventId) {
     error.code = "WORLD_SIMULATION_RECONSOLIDATION_INTERPRETATION_UPDATE_EVENT_HASH_MISMATCH";
     throw error;
   }
+  const projection = object(event.source_projection);
+  const projectionBody = cloneJson(projection);
+  delete projectionBody.projection_hash;
+  const listFields = [
+    "source_retrieval_event_ids", "conflict_relation_event_ids",
+    "prior_claim_event_ids", "current_claim_event_ids",
+    "newly_relevant_supporting_memory_refs",
+  ];
+  if (projection.projection_hash !== event.source_projection_hash
+    || hashAgentRunValue(projectionBody) !== event.source_projection_hash
+    || projection.memory_id !== event.memory_id
+    || projection.projection_kind !== "bounded_reconsolidation_interpretive_update"
+    || projection.old_memory_trace_preserved !== true
+    || projection.canonical_memory_content_rewritten !== false
+    || projection.storage_strength_mutated !== false
+    || projection.retrieval_strength_mutated !== false
+    || projection.biological_reconsolidation_established !== false
+    || event.interpretation_update_recorded !== true
+    || event.future_retrieval_effect_applied !== false
+    || listFields.some((field) => !Array.isArray(projection[field])
+      || !projection[field].length
+      || projection[field].some((id) => !optionalString(id))
+      || new Set(projection[field]).size !== projection[field].length
+      || !sameValue(event[field], projection[field]))) {
+    const error = new Error("Persisted Phase85C event is detached from its source projection.");
+    error.code = "WORLD_SIMULATION_RECONSOLIDATION_INTERPRETATION_UPDATE_SOURCE_PROJECTION_MISMATCH";
+    throw error;
+  }
   return event;
 }
 
-function validateExistingHistory(worldState) {
+export function validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory(worldState) {
   if (Object.hasOwn(worldState, "memory_reconsolidation_interpretation_update_events")
     && !isObject(worldState.memory_reconsolidation_interpretation_update_events)) {
     const error = new Error("memory_reconsolidation_interpretation_update_events must be an object when present.");
@@ -153,15 +181,27 @@ function validateExistingHistory(worldState) {
       || ref.memory_id !== event.memory_id
       || ref.character !== event.character
       || ref.source_turn_id !== event.source_turn_id
+      || ref.previous_interpretation_update_event_id !== event.previous_interpretation_update_event_id
+      || ref.previous_interpretation_update_event_hash !== event.previous_interpretation_update_event_hash
       || event.previous_interpretation_update_event_id !== (previous?.interpretation_update_event_id ?? null)
       || event.previous_interpretation_update_event_hash !== (previous?.interpretation_update_event_hash ?? null)) {
       const error = new Error(`Phase85C history reference ${eventId} does not match its immutable chain.`);
       error.code = "WORLD_SIMULATION_RECONSOLIDATION_INTERPRETATION_UPDATE_HISTORY_REFERENCE_MISMATCH";
       throw error;
     }
+    if (bySourceProjectionHash.has(event.source_projection_hash)) {
+      const error = new Error("Phase85C source projection occurs more than once.");
+      error.code = "WORLD_SIMULATION_RECONSOLIDATION_INTERPRETATION_UPDATE_SOURCE_DUPLICATE";
+      throw error;
+    }
     seen.add(eventId);
     latestByCharacter.set(key, event);
     bySourceProjectionHash.set(event.source_projection_hash, event);
+  }
+  if (Object.keys(events).some((id) => !seen.has(id))) {
+    const error = new Error("Phase85C event store contains an event without a committed history reference.");
+    error.code = "WORLD_SIMULATION_RECONSOLIDATION_INTERPRETATION_UPDATE_HISTORY_INCOMPLETE";
+    throw error;
   }
   return { events, history, latestByCharacter, bySourceProjectionHash };
 }
@@ -246,7 +286,7 @@ export function buildWorldSimulationMemoryReconsolidationInterpretationUpdateEve
   const character = requiredString(input.character, "character");
   const currentTurnId = requiredString(input.current_turn_id, "current_turn_id");
   const phase85b = verifyPhase85B(input, worldState, character, currentTurnId);
-  const existing = validateExistingHistory(worldState);
+  const existing = validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory(worldState);
   const preview = cloneJson(worldState);
   const latestByCharacter = new Map(existing.latestByCharacter);
   const createdEvents = [];

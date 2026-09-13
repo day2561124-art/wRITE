@@ -73,7 +73,24 @@ unrelated.targetClaim.evidence[0].source_memory_ref = "m-unrelated";
 }
 unrelated.worldState.subjective_claim_events[unrelated.targetClaim.claim_event_id] = unrelated.targetClaim;
 unrelated.worldState.subjective_claim_history[0].claim_event_hash = unrelated.targetClaim.claim_event_hash;
+// Keep the unrelated-memory fixture internally consistent with the relation's
+// pinned claim image; stale pins are a separate corruption case below.
+unrelated.relation.target_claim_event_hash = unrelated.targetClaim.claim_event_hash;
+{
+  const body = { ...unrelated.relation }; delete body.relation_event_hash;
+  unrelated.relation.relation_event_hash = hashAgentRunValue(body);
+}
+unrelated.worldState.subjective_claim_relation_history[0].relation_event_hash = unrelated.relation.relation_event_hash;
 assert.deepEqual(buildWorldSimulationMemoryReconsolidationLabilityCandidateEvidence({ world_state: unrelated.worldState, character: "Alice", current_turn_id: "turn-current" }).lability_candidates, [], "Claim conflict unrelated to the retrieved memory must not create a candidate.");
+
+const detachedClaim = fixture();
+detachedClaim.targetClaim.proposition = "A different prior interpretation.";
+{
+  const body = { ...detachedClaim.targetClaim }; delete body.claim_event_hash;
+  detachedClaim.targetClaim.claim_event_hash = hashAgentRunValue(body);
+}
+detachedClaim.worldState.subjective_claim_history[0].claim_event_hash = detachedClaim.targetClaim.claim_event_hash;
+assert.throws(() => buildWorldSimulationMemoryReconsolidationLabilityCandidateEvidence({ world_state: detachedClaim.worldState, character: "Alice", current_turn_id: "turn-current" }), (error) => error?.code === "WORLD_SIMULATION_RECONSOLIDATION_LABILITY_RELATION_CLAIM_HASH_MISMATCH", "Rehashing a changed claim cannot silently retarget an old conflict relation.");
 
 const tampered = fixture();
 tampered.worldState.subjective_claim_relation_events["phase85a-relation"].relation = "supersedes";

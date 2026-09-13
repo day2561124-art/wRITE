@@ -894,6 +894,13 @@ const steps = [
   ["Phase 85A bounded reconsolidation lability candidate evidence", ["tests/phase85/phase85a-memory-reconsolidation-lability-candidate-evidence.test.mjs"]],
   ["Phase 85B bounded reconsolidation restabilization update projection", ["tests/phase85/phase85b-memory-reconsolidation-restabilization-update-projection.test.mjs"]],
   ["Phase 85C append-only reconsolidation interpretation update events", ["tests/phase85/phase85c-memory-reconsolidation-interpretation-update-event.test.mjs"]],
+  ["Phase 85D memory interpretation character continuity", ["tests/phase85/phase85d-memory-interpretation-character-continuity.test.mjs"]],
+  ["Phase 85E native atomic memory interpretation continuity", ["tests/phase85/phase85e-memory-interpretation-native-turn.test.mjs"]],
+  ["Phase 86A bounded goal-relative affective appraisal", ["tests/phase86/phase86a-goal-relative-affective-appraisal.test.mjs"]],
+  ["Phase 86B native committed affective continuity", ["tests/phase86/phase86b-affective-continuity-native-turn.test.mjs"]],
+  ["Phase 86C experience-grounded reappraisal", ["tests/phase86/phase86c-experience-grounded-reappraisal.test.mjs"]],
+  ["Phase 86D action-aware affective appraisal", ["tests/phase86/phase86d-action-aware-affective-appraisal.test.mjs"]],
+  ["Phase 86E explicit coping intention native continuity", ["tests/phase86/phase86e-explicit-coping-intention-native-turn.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

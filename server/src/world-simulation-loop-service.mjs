@@ -467,6 +467,9 @@ import {
   buildWorldSimulationSubjectiveClaimConflictRevisions,
   worldSimulationSubjectiveClaimConflictRevisionProjectionVersion,
 } from "./world-simulation-subjective-claim-conflict-revision-projection-service.mjs";
+import { buildWorldSimulationActionAwareAffectiveContexts, worldSimulationAffectiveAppraisalResolverViews, projectWorldSimulationAffectiveAppraisals, projectWorldSimulationAffectiveContinuity } from "./world-simulation-affective-appraisal-service.mjs";
+import { buildWorldSimulationCopingChoiceContext, buildWorldSimulationCopingIntentionCommitments, projectWorldSimulationCopingContinuity } from "./world-simulation-coping-intention-service.mjs";
+import { buildWorldSimulationMemoryInterpretationTurn } from "./world-simulation-memory-interpretation-turn-service.mjs";
 import {
   buildWorldSimulationSubjectiveCognitionProjectionContract,
   projectWorldSimulationSubjectiveCognition,
@@ -5577,6 +5580,22 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           revisedStructuredSelfModelCharacterProjection.character_view,
         ),
     };
+    const affectiveContinuity = projectWorldSimulationAffectiveContinuity({
+      world_history: worldHistory, character, current_turn_id: turnId,
+      current_goals: characterCognition.goals ?? [],
+    });
+    // This channel is Runtime-owned; neural cognition cannot invent history.
+    delete characterCognition.affective_context;
+    if (affectiveContinuity.recent_appraisals.length) {
+      characterCognition.affective_context = cloneJson(affectiveContinuity);
+    }
+    const copingInput = { world_history: worldHistory, character, current_turn_id: turnId, current_goals: characterCognition.goals ?? [] };
+    const copingChoice = buildWorldSimulationCopingChoiceContext(copingInput);
+    const copingContinuity = projectWorldSimulationCopingContinuity(copingInput);
+    delete characterCognition.coping_context;
+    if (copingChoice.character_view.appraisals.length || copingContinuity.recent_intentions.length) {
+      characterCognition.coping_context = cloneJson({ ...copingChoice.character_view, ...copingContinuity });
+    }
     characterCognition.experiential_method_guidance = cloneJson(
       experientialMethodCompetitionGuidance.character_view,
     );
@@ -8769,6 +8788,14 @@ export async function resolveWorldSimulationTurn(
       selected_action_intents: selected,
     });
 
+  const copingIntentionCommitments = buildWorldSimulationCopingIntentionCommitments({
+    world_history: await getWorldSimulationHistory(sessionId, options),
+    world_simulation_session_id: sessionId, turn_id: preparedTurn.turn_id,
+    state_revision: snapshot.revision, world_state_hash: snapshot.state_hash,
+    decision_packets: preparedTurn.decision_packets, responses: object(selectedActions),
+    selected_action_intents: selected, subjective_choice_commitment_receipts: subjectiveChoiceCommitmentReceipts,
+  });
+
   // Phase81F closes only the deterministic provenance edge between a bounded
   // Phase81E counterfactual advisory that was actually present during this
   // action deliberation and the exact Phase74D action the Character Brain then
@@ -8972,6 +8999,31 @@ export async function resolveWorldSimulationTurn(
       action_outcomes: array(causalResolution.action_outcomes),
       state_transitions: array(causalResolution.state_transitions),
     });
+
+  // The resolver sees one character's own goal/experience context per call.
+  // The record remains speculative until the existing atomic world commit.
+  let affectiveAppraisalRecord = null;
+  if (typeof options.affectiveAppraisalResolver === "function") {
+    const contextBundle = buildWorldSimulationActionAwareAffectiveContexts({
+      world_simulation_session_id: sessionId, state_revision: snapshot.revision, world_state_hash: snapshot.state_hash,
+      selected_action_intents: selected, subjective_choice_commitment_receipts: subjectiveChoiceCommitmentReceipts,
+      world_history: await getWorldSimulationHistory(sessionId, options),
+      turn_id: preparedTurn.turn_id, decision_packets: preparedTurn.decision_packets,
+      post_outcome_subjective_perception: postOutcomeSubjectivePerceptionProjection,
+    });
+    const decisions = [];
+    for (const view of worldSimulationAffectiveAppraisalResolverViews(contextBundle)) {
+      const raw = await options.affectiveAppraisalResolver(cloneJson(view));
+      if (!Array.isArray(raw) || raw.some((entry) => entry?.context_ref !== view.context_ref)) {
+        const error = new Error("affectiveAppraisalResolver must return decisions for its own character context.");
+        error.code = "WORLD_SIMULATION_AFFECTIVE_APPRAISAL_INVALID";
+        throw error;
+      }
+      decisions.push(...raw);
+    }
+    affectiveAppraisalRecord = { context_bundle: contextBundle,
+      projection: projectWorldSimulationAffectiveAppraisals({ context_bundle: contextBundle, decisions }) };
+  }
 
   // Phase82H joins only the exact Phase82G longitudinal-case selected-action
   // lineage with the bounded Phase76A subjective outcome for the same character
@@ -10584,10 +10636,30 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase85E stages interpretation updates after current subjective conflicts
+  // exist, but before the single atomic world commit. Prepare-time cognition
+  // has already run, so these updates are visible only in a subsequent turn.
+  const memoryInterpretationTurn = buildWorldSimulationMemoryInterpretationTurn({
+    world_state: subjectiveClaimRelationMutationExecution.next_world_state,
+    current_turn_id: preparedTurn.turn_id,
+  });
+  const memoryInterpretationMutationQueue = buildWorldSimulationChronologicalMutationQueue({
+    turn_id: preparedTurn.turn_id + ":memory_interpretation",
+    world_state_hash: hashAgentRunValue(subjectiveClaimRelationMutationExecution.next_world_state),
+    state_transitions: memoryInterpretationTurn.result.state_transitions,
+    elapsed_ms: 0,
+  });
+  const memoryInterpretationMutationExecution = executeWorldSimulationChronologicalMutationQueue({
+    world_state: subjectiveClaimRelationMutationExecution.next_world_state,
+    preview_world_state: memoryInterpretationTurn.result.preview_world_state,
+    queue: memoryInterpretationMutationQueue,
+    scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
+  });
+
   const subjectiveBeliefResolution =
     resolveWorldSimulationSubjectiveBeliefs({
       world_state:
-        subjectiveClaimRelationMutationExecution.next_world_state,
+        memoryInterpretationMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
     });
@@ -10595,7 +10667,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveBeliefRevision =
     buildWorldSimulationSubjectiveBeliefRevisions({
       world_state:
-        subjectiveClaimRelationMutationExecution.next_world_state,
+        memoryInterpretationMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       resolution:
@@ -10608,7 +10680,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_belief_revision`,
       world_state_hash:
         hashAgentRunValue(
-          subjectiveClaimRelationMutationExecution.next_world_state,
+          memoryInterpretationMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveBeliefRevision
@@ -10620,7 +10692,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveBeliefRevisionMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        subjectiveClaimRelationMutationExecution.next_world_state,
+        memoryInterpretationMutationExecution.next_world_state,
       preview_world_state:
         subjectiveBeliefRevision
           .result
@@ -11641,6 +11713,11 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           subjectiveClaimRelationMutationExecution.execution,
         ),
+      coping_intention_commitments: cloneJson(copingIntentionCommitments),
+      affective_appraisal_record: cloneJson(affectiveAppraisalRecord),
+      memory_interpretation_turn: cloneJson(memoryInterpretationTurn.summary),
+      memory_interpretation_mutation_queue: cloneJson(memoryInterpretationMutationQueue),
+      memory_interpretation_mutation_execution: cloneJson(memoryInterpretationMutationExecution.execution),
       subjective_belief_resolution: {
         version:
           subjectiveBeliefResolution.version,
@@ -12783,6 +12860,11 @@ export async function resolveWorldSimulationTurn(
       unresolved_competing_claims_preserved:
         true,
     },
+    coping_intentions: { recorded_count: copingIntentionCommitments.records.length, effectiveness_established: false },
+    affective_appraisal: { resolver_used: typeof options.affectiveAppraisalResolver === "function",
+      appraisal_count: affectiveAppraisalRecord?.projection.appraisals.length ?? 0,
+      same_turn_character_feedback_allowed: false, current_mood_established: false },
+    memory_interpretation_turn: cloneJson(memoryInterpretationTurn.summary),
     subjective_belief_resolution: {
       version:
         worldSimulationSubjectiveBeliefResolutionVersion,
@@ -13154,6 +13236,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       packet,
       {
         include_legacy_retrieved_memories_alias: true,
+        include_native_coping_response_contract: true,
       },
     );
 

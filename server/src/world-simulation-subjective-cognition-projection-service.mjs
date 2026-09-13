@@ -10,6 +10,15 @@ import {
   subjectiveClaimRelationHistoryReferenceSchemaVersion,
 } from "./world-simulation-subjective-claim-conflict-revision-projection-service.mjs";
 
+import {
+  validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory,
+} from "./world-simulation-memory-reconsolidation-interpretation-update-event-service.mjs";
+import { memoryRetrievalEventSchemaVersion } from "./world-simulation-memory-retrieval-persistence-service.mjs";
+
+export const worldSimulationMemoryInterpretationCharacterProjectionVersion =
+  "phase85d-memory-interpretation-character-projection-v1";
+export const worldSimulationMemoryInterpretationMaxEntries = 8;
+
 export const worldSimulationSubjectiveCognitionProjectionVersion =
   "phase65c-subjective-cognition-read-projection-v1";
 
@@ -369,6 +378,86 @@ function validateRelations(worldState, claims) {
   };
 }
 
+// Consume only the canonical claim/relation collections verified above. This
+// annotates already-visible subjective claims; it does not open another route
+// to recovered memory content or bypass Current Mind output gating.
+function projectMemoryInterpretations(worldState, character, currentTurnId, claims, relations, selectedRelations) {
+  const store = validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory(worldState);
+  const committedClaimIds = new Set(claims.ordered.map((event) => event.claim_event_id));
+  const relationById = new Map(relations.ordered.map((event) => [event.relation_event_id, event]));
+  const visibleRelationIds = new Set(selectedRelations.map((event) => event.relation_event_id));
+  const entries = new Map();
+  function reject() {
+    const error = new Error("Phase85D interpretation history is detached from canonical subjective evidence.");
+    error.code = "WORLD_SIMULATION_MEMORY_INTERPRETATION_CHARACTER_LINEAGE_MISMATCH";
+    throw error;
+  }
+  function supports(claim) {
+    return array(claim.evidence).filter((item) => item.relation === "supports")
+      .map((item) => item.source_memory_ref);
+  }
+  function sameSet(left, right) {
+    return Array.isArray(left) && JSON.stringify([...new Set(left)].sort())
+      === JSON.stringify([...new Set(right)].sort());
+  }
+  for (const ref of store.history) {
+    const event = store.events[ref.interpretation_update_event_id];
+    if (!sameCharacter(event.character, character) || event.source_turn_id === currentTurnId) continue;
+    const eventRelations = event.conflict_relation_event_ids.map((id) => relationById.get(id));
+    if (eventRelations.some((relation) => !relation
+      || !sameCharacter(relation.character, character)
+      || relation.source_turn_id !== event.source_turn_id)) reject();
+    const priorIds = eventRelations.map((relation) => relation.target_claim_event_id);
+    const currentIds = eventRelations.map((relation) => relation.source_claim_event_id);
+    if (!sameSet(event.prior_claim_event_ids, priorIds)
+      || !sameSet(event.current_claim_event_ids, currentIds)
+      || !sameSet(event.source_projection.conflict_relations, eventRelations.map((relation) => relation.relation))
+      || [...priorIds, ...currentIds].some((id) => !committedClaimIds.has(id))) reject();
+    const priorClaims = priorIds.map((id) => claims.events[id]);
+    const currentClaims = currentIds.map((id) => claims.events[id]);
+    if (priorClaims.some((claim) => claim.source_turn_id === event.source_turn_id
+        || claim.source_turn_id === currentTurnId || !supports(claim).includes(event.memory_id))
+      || currentClaims.some((claim) => claim.source_turn_id !== event.source_turn_id)
+      || !sameSet(event.newly_relevant_supporting_memory_refs, currentClaims.flatMap(supports))) reject();
+    for (const id of event.source_retrieval_event_ids) {
+      const retrieval = object(object(worldState.retrieval_events)[id]);
+      const body = cloneJson(retrieval);
+      delete body.retrieval_event_hash;
+      if (retrieval.schema_version !== memoryRetrievalEventSchemaVersion
+        || retrieval.retrieval_event_id !== id || retrieval.immutable !== true
+        || !sameCharacter(retrieval.character, character)
+        || !optionalString(retrieval.turn_id)
+        || retrieval.turn_id === event.source_turn_id || retrieval.turn_id === currentTurnId
+        || retrieval.recovered_any_content !== true
+        || hashAgentRunValue(body) !== retrieval.retrieval_event_hash
+        || !array(retrieval.memory_recoveries).some((item) => item.source_memory_ref === event.memory_id)) reject();
+    }
+    for (const relation of eventRelations) {
+      if (!visibleRelationIds.has(relation.relation_event_id)) continue;
+      const entry = {
+        prior_interpretation: claims.events[relation.target_claim_event_id].proposition,
+        later_interpretation: claims.events[relation.source_claim_event_id].proposition,
+        relation: relation.relation,
+        subjective_not_world_truth: true,
+        candidate_relation_only: true,
+        original_memory_preserved: true,
+        belief_adoption_implied: false,
+      };
+      // Repeated reminders do not turn the same interpretation into additional
+      // evidence. Keep chronological order, with exact semantic duplicates folded.
+      const key = JSON.stringify(entry);
+      entries.delete(key);
+      entries.set(key, entry);
+    }
+  }
+  const all = [...entries.values()];
+  return {
+    source: "committed_prior_turn_memory_interpretation_history",
+    interpretations: all.slice(-worldSimulationMemoryInterpretationMaxEntries),
+    truncated: all.length > worldSimulationMemoryInterpretationMaxEntries,
+  };
+}
+
 export function buildWorldSimulationSubjectiveCognitionProjectionContract() {
   return deepFreeze({
     version: worldSimulationSubjectiveCognitionProjectionVersion,
@@ -394,6 +483,9 @@ export function buildWorldSimulationSubjectiveCognitionProjectionContract() {
     retrieval_frequency_counts_as_credibility: false,
     accessibility_strength_counts_as_credibility: false,
     plasticity_strength_counts_as_truth_support: false,
+    memory_interpretation_projection_version: worldSimulationMemoryInterpretationCharacterProjectionVersion,
+    memory_interpretations_require_visible_claim_relations: true,
+    max_memory_interpretations: worldSimulationMemoryInterpretationMaxEntries,
     max_claims: worldSimulationSubjectiveCognitionMaxClaims,
     max_relations: worldSimulationSubjectiveCognitionMaxRelations,
   });
@@ -454,6 +546,15 @@ export function projectWorldSimulationSubjectiveCognition(input = {}) {
     relations_truncated:
       selectedRelations.length < eligibleRelations.length,
   };
+
+  // Preserve the legacy view shape when no interpretation stream is present.
+  // A present but malformed stream must still be validated, even when empty.
+  if (Object.hasOwn(worldState, "memory_reconsolidation_interpretation_update_events")
+    || Object.hasOwn(worldState, "memory_reconsolidation_interpretation_update_history")) {
+    characterView.memory_interpretation_context = projectMemoryInterpretations(
+      worldState, character, currentTurnId, claims, relations, selectedRelations,
+    );
+  }
 
   return deepFreeze({
     ok: true,

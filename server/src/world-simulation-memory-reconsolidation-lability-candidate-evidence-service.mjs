@@ -119,6 +119,9 @@ function canonicalRelationEvents(worldState, character, currentTurnId) {
     }
     seen.add(id);
     const event = object(object(worldState.subjective_claim_relation_events)[id]);
+    // Histories are world-level; ownership must be scoped before validating
+    // this character's relation. An unrelated character is not a mismatch.
+    if (optionalString(event.character) && !sameCharacter(event.character, character)) continue;
     assertRelationEvent(event, id, character);
     if (event.relation_event_hash !== ref.relation_event_hash) {
       const error = new Error(`subjective_claim_relation_history[${index}] hash mismatch for ${id}.`);
@@ -193,6 +196,12 @@ export function buildWorldSimulationMemoryReconsolidationLabilityCandidateEviden
     const target = object(claims[targetId]);
     assertClaimEvent(source, sourceId, character);
     assertClaimEvent(target, targetId, character);
+    if (relation.source_claim_event_hash !== source.claim_event_hash
+      || relation.target_claim_event_hash !== target.claim_event_hash) {
+      const error = new Error("Phase85A conflict relation is detached from its canonical claim images.");
+      error.code = "WORLD_SIMULATION_RECONSOLIDATION_LABILITY_RELATION_CLAIM_HASH_MISMATCH";
+      throw error;
+    }
     if (source.source_turn_id !== currentTurnId || target.source_turn_id === currentTurnId) continue;
     const sourceSupports = supportingMemoryIds(source);
     const targetSupports = supportingMemoryIds(target);

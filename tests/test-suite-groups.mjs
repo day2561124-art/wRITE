@@ -238,6 +238,16 @@ export const phase85MemoryReconsolidationSteps = Object.freeze([
   Object.freeze(["Phase 85A bounded reconsolidation lability candidate evidence", Object.freeze(["tests/phase85/phase85a-memory-reconsolidation-lability-candidate-evidence.test.mjs"])]),
   Object.freeze(["Phase 85B bounded reconsolidation restabilization update projection", Object.freeze(["tests/phase85/phase85b-memory-reconsolidation-restabilization-update-projection.test.mjs"])]),
   Object.freeze(["Phase 85C append-only reconsolidation interpretation update events", Object.freeze(["tests/phase85/phase85c-memory-reconsolidation-interpretation-update-event.test.mjs"])]),
+  Object.freeze(["Phase 85D memory interpretation character continuity", Object.freeze(["tests/phase85/phase85d-memory-interpretation-character-continuity.test.mjs"])]),
+  Object.freeze(["Phase 85E native atomic memory interpretation continuity", Object.freeze(["tests/phase85/phase85e-memory-interpretation-native-turn.test.mjs"])]),
+]);
+
+export const phase86AffectiveCognitionSteps = Object.freeze([
+  Object.freeze(["Phase 86A bounded goal-relative affective appraisal", Object.freeze(["tests/phase86/phase86a-goal-relative-affective-appraisal.test.mjs"])]),
+  Object.freeze(["Phase 86B native committed affective continuity", Object.freeze(["tests/phase86/phase86b-affective-continuity-native-turn.test.mjs"])]),
+  Object.freeze(["Phase 86C experience-grounded reappraisal", Object.freeze(["tests/phase86/phase86c-experience-grounded-reappraisal.test.mjs"])]),
+  Object.freeze(["Phase 86D action-aware affective appraisal", Object.freeze(["tests/phase86/phase86d-action-aware-affective-appraisal.test.mjs"])]),
+  Object.freeze(["Phase 86E explicit coping intention native continuity", Object.freeze(["tests/phase86/phase86e-explicit-coping-intention-native-turn.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
@@ -269,6 +279,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase83RetrievalCompetitionConsequenceSteps,
   ...phase84MemoryContextRevivalSteps,
   ...phase85MemoryReconsolidationSteps,
+  ...phase86AffectiveCognitionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -296,6 +307,7 @@ export const cognitionSteps = Object.freeze([
   ...phase83RetrievalCompetitionConsequenceSteps,
   ...phase84MemoryContextRevivalSteps,
   ...phase85MemoryReconsolidationSteps,
+  ...phase86AffectiveCognitionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -318,4 +330,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase83RetrievalCompetitionConsequenceSteps,
   ...phase84MemoryContextRevivalSteps,
   ...phase85MemoryReconsolidationSteps,
+  ...phase86AffectiveCognitionSteps,
 ]);

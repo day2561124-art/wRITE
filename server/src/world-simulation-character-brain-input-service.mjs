@@ -317,5 +317,10 @@ export function buildWorldSimulationCharacterBrainInput(
       );
   }
 
+  // Only native Character Brain responses currently accept coping_intention.
+  // Shared/formal readers retain the history without an unsupported response instruction.
+  if (isObject(input.cognition.coping_context) && options.include_native_coping_response_contract !== true) {
+    delete input.cognition.coping_context.response_contract;
+  }
   return input;
 }

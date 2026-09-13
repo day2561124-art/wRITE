@@ -437,6 +437,11 @@ export async function commitWorldSimulationTurn(
               input.subjective_claim_relation_mutation_queue ?? null,
             subjective_claim_relation_mutation_execution:
               input.subjective_claim_relation_mutation_execution ?? null,
+            coping_intention_commitments: input.coping_intention_commitments ?? null,
+            affective_appraisal_record: input.affective_appraisal_record ?? null,
+            memory_interpretation_turn: input.memory_interpretation_turn ?? null,
+            memory_interpretation_mutation_queue: input.memory_interpretation_mutation_queue ?? null,
+            memory_interpretation_mutation_execution: input.memory_interpretation_mutation_execution ?? null,
             subjective_belief_resolution:
               input.subjective_belief_resolution ?? null,
             subjective_belief_revision_projection:
