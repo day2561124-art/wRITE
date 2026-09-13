@@ -236,6 +236,7 @@ export const phase84MemoryContextRevivalSteps = Object.freeze([
 
 export const phase85MemoryReconsolidationSteps = Object.freeze([
   Object.freeze(["Phase 85A bounded reconsolidation lability candidate evidence", Object.freeze(["tests/phase85/phase85a-memory-reconsolidation-lability-candidate-evidence.test.mjs"])]),
+  Object.freeze(["Phase 85B bounded reconsolidation restabilization update projection", Object.freeze(["tests/phase85/phase85b-memory-reconsolidation-restabilization-update-projection.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
