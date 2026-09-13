@@ -902,6 +902,7 @@ const steps = [
   ["Phase 86D action-aware affective appraisal", ["tests/phase86/phase86d-action-aware-affective-appraisal.test.mjs"]],
   ["Phase 86E explicit coping intention native continuity", ["tests/phase86/phase86e-explicit-coping-intention-native-turn.test.mjs"]],
   ["Phase 87A retrieval-conditioned memory interpretation re-entry", ["tests/phase87/phase87a-retrieval-conditioned-memory-interpretation-reentry.test.mjs"]],
+  ["Phase 87B retrieval-conditioned memory interpretation native adoption", ["tests/phase87/phase87b-retrieval-conditioned-memory-interpretation-native-adoption.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

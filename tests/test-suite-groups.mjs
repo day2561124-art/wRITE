@@ -252,6 +252,7 @@ export const phase86AffectiveCognitionSteps = Object.freeze([
 
 export const phase87RetrievalConditionedInterpretationSteps = Object.freeze([
   Object.freeze(["Phase 87A retrieval-conditioned memory interpretation re-entry", Object.freeze(["tests/phase87/phase87a-retrieval-conditioned-memory-interpretation-reentry.test.mjs"])]),
+  Object.freeze(["Phase 87B retrieval-conditioned memory interpretation native adoption", Object.freeze(["tests/phase87/phase87b-retrieval-conditioned-memory-interpretation-native-adoption.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(

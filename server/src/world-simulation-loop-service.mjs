@@ -446,6 +446,11 @@ import {
   worldSimulationMemoryRetrievalPersistenceVersion,
 } from "./world-simulation-memory-retrieval-persistence-service.mjs";
 import {
+  adoptWorldSimulationRetrievalConditionedMemoryInterpretationReentry,
+  assertWorldSimulationRetrievalConditionedMemoryInterpretationPersistenceLineage,
+  worldSimulationRetrievalConditionedMemoryInterpretationReentryAdoptionVersion,
+} from "./world-simulation-retrieval-conditioned-memory-interpretation-reentry-adoption-service.mjs";
+import {
   buildWorldSimulationMemoryPlasticity,
   buildWorldSimulationMemoryPlasticityContract,
   worldSimulationMemoryPlasticityVersion,
@@ -4460,6 +4465,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
+  const retrievalConditionedMemoryInterpretationAdoptions = [];
+  let retrievalOccurredAt = null;
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.prepareSpeculativeCurrentMind !== "function") {
@@ -4637,6 +4644,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         information_boundary: perception.information_boundary ?? {},
       },
     );
+    if (retrievalOccurredAt === null || retrievalOccurredAt === undefined) {
+      retrievalOccurredAt =
+        characterPerception.simulation_time
+        ?? event.simulation_time
+        ?? worldState.simulation_time
+        ?? null;
+    }
 
     // Phase73A projects only already-committed Phase72 evidence that was
     // explicitly marked character-visible. Receipts are available for exactly
@@ -5080,7 +5094,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
     });
 
-    memoryRetrievalProcesses.push({
+    const currentMemoryRetrievalProcess = {
       observer:
         character,
       version:
@@ -5093,7 +5107,49 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(
           memoryRetrievalProcess,
         ),
-    });
+    };
+    memoryRetrievalProcesses.push(currentMemoryRetrievalProcess);
+
+    // Phase87B deterministically previews the exact Phase63C RetrievalEvent
+    // that resolve will later persist. The preview is not a write: it exists only
+    // to let Phase87A validate exact successful recovery identity before its
+    // already-sanitized interpretation enters current cognition. Resolve later
+    // revalidates this engine-side event identity/hash against real persistence.
+    let retrievalConditionedMemoryInterpretationAdoption = null;
+    const retrievalPersistencePreview =
+      buildWorldSimulationMemoryRetrievalPersistence({
+        world_state:
+          worldState,
+        turn_id:
+          turnId,
+        occurred_at:
+          retrievalOccurredAt,
+        retrieval_processes: [
+          currentMemoryRetrievalProcess,
+        ],
+      });
+    const currentRetrievalEvent =
+      retrievalPersistencePreview.result.retrieval_events_created.find(
+        (retrievalEvent) =>
+          sameCharacterName(retrievalEvent.character, character)
+          && retrievalEvent.turn_id === turnId,
+      )
+      ?? null;
+    if (currentRetrievalEvent) {
+      retrievalConditionedMemoryInterpretationAdoption =
+        adoptWorldSimulationRetrievalConditionedMemoryInterpretationReentry({
+          preview_world_state:
+            retrievalPersistencePreview.result.preview_world_state,
+          character,
+          current_turn_id:
+            turnId,
+          retrieval_event:
+            currentRetrievalEvent,
+        });
+      retrievalConditionedMemoryInterpretationAdoptions.push(
+        cloneJson(retrievalConditionedMemoryInterpretationAdoption),
+      );
+    }
 
     // Step 2 preserves the legacy projector invocation for
     // compatibility and neural trace continuity, but its output
@@ -6073,6 +6129,20 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       selected_action_authority: false,
     });
 
+    // Phase87B installs the retrieval-conditioned interpretation only after all
+    // other bounded cognition sources are assembled and strictly before Action
+    // Proposer / Character Brain deliberation. The same Runtime-owned sanitized
+    // view therefore reaches both consumers through one cognition surface.
+    delete characterCognition.retrieval_conditioned_memory_interpretation;
+    if (retrievalConditionedMemoryInterpretationAdoption
+        ?.character_view
+        ?.interpretation_count > 0) {
+      characterCognition.retrieval_conditioned_memory_interpretation =
+        cloneJson(
+          retrievalConditionedMemoryInterpretationAdoption.character_view,
+        );
+    }
+
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
@@ -6271,6 +6341,45 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           retrievalExperience
             .target_outcome
           ?? null,
+
+        retrieval_conditioned_memory_interpretation_native_adoption_installed:
+          true,
+
+        retrieval_conditioned_memory_interpretation_adoption_version:
+          worldSimulationRetrievalConditionedMemoryInterpretationReentryAdoptionVersion,
+
+        retrieval_conditioned_memory_interpretation_source_projection_owner:
+          "Phase87A",
+
+        retrieval_conditioned_memory_interpretation_character_view_sanitized:
+          true,
+
+        retrieval_conditioned_memory_interpretation_engine_lineage_exposed:
+          false,
+
+        retrieval_conditioned_memory_interpretation_advisory_only:
+          true,
+
+        retrieval_conditioned_memory_interpretation_action_selection_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_belief_revision_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_memory_rewrite_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_retrieval_strength_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_storage_strength_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_world_truth_authority:
+          false,
+
+        retrieval_conditioned_memory_interpretation_same_turn_phase85e_feedback_allowed:
+          false,
 
         legacy_memory_projection_engine_only:
           true,
@@ -6501,6 +6610,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
+    retrieval_conditioned_memory_interpretation_adoptions:
+      cloneJson(retrievalConditionedMemoryInterpretationAdoptions),
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,
@@ -6583,6 +6694,27 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
       native_retrieval_process_execution_installed:
         true,
+
+      retrieval_conditioned_memory_interpretation_native_adoption_installed:
+        true,
+
+      retrieval_conditioned_memory_interpretation_adoption_version:
+        worldSimulationRetrievalConditionedMemoryInterpretationReentryAdoptionVersion,
+
+      retrieval_conditioned_memory_interpretation_source_projection_owner:
+        "Phase87A",
+
+      retrieval_conditioned_memory_interpretation_prepare_uses_deterministic_phase63c_persistence_preview:
+        true,
+
+      retrieval_conditioned_memory_interpretation_resolve_revalidates_canonical_persistence_lineage:
+        true,
+
+      retrieval_conditioned_memory_interpretation_private_lineage_not_forwarded_to_character_brain:
+        true,
+
+      retrieval_conditioned_memory_interpretation_same_turn_phase85e_feedback_allowed:
+        false,
 
       missing_retrieval_resolver_means_no_process:
         true,
@@ -9567,6 +9699,47 @@ export async function resolveWorldSimulationTurn(
         ?? [],
     });
 
+  const retrievalConditionedMemoryInterpretationPersistenceLineage =
+    assertWorldSimulationRetrievalConditionedMemoryInterpretationPersistenceLineage({
+      adoptions:
+        preparedTurn.retrieval_conditioned_memory_interpretation_adoptions
+        ?? [],
+      retrieval_events_created:
+        subjectiveMemoryRetrievalPersistence.result.retrieval_events_created,
+      persisted_retrieval_events:
+        subjectiveMemoryRetrievalPersistence.result.preview_world_state?.retrieval_events
+        ?? {},
+    });
+
+  const retrievalConditionedMemoryInterpretationAdoptionSummary = {
+    version:
+      worldSimulationRetrievalConditionedMemoryInterpretationReentryAdoptionVersion,
+    prepared_adoption_count:
+      array(preparedTurn.retrieval_conditioned_memory_interpretation_adoptions).length,
+    adopted_interpretation_count:
+      array(preparedTurn.retrieval_conditioned_memory_interpretation_adoptions)
+        .reduce(
+          (total, adoption) => total + Number(adoption?.character_view?.interpretation_count ?? 0),
+          0,
+        ),
+    verified_adoption_count:
+      retrievalConditionedMemoryInterpretationPersistenceLineage.verified_adoption_count,
+    persistence_lineage_verified:
+      retrievalConditionedMemoryInterpretationPersistenceLineage.persistence_lineage_verified === true,
+    source_projection_owner: "Phase87A",
+    deterministic_phase63c_persistence_preview_used: true,
+    resolve_time_canonical_persistence_revalidated: true,
+    character_view_sanitized: true,
+    engine_lineage_forwarded_to_character_brain: false,
+    memory_rewrite_performed: false,
+    retrieval_strength_mutated: false,
+    storage_strength_mutated: false,
+    belief_revision_performed: false,
+    action_selected: false,
+    world_truth_authority_exposed: false,
+    same_turn_phase85e_interpretation_feedback_allowed: false,
+  };
+
   const subjectiveMemoryRetrievalMutationQueue =
     buildWorldSimulationChronologicalMutationQueue({
       turn_id:
@@ -11261,6 +11434,8 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           subjectiveMemoryRetrievalMutationExecution.execution,
         ),
+      retrieval_conditioned_memory_interpretation_adoption:
+        cloneJson(retrievalConditionedMemoryInterpretationAdoptionSummary),
       retrieval_induced_forgetting_consequence:
         cloneJson(
           retrievalInducedForgettingConsequence,
@@ -12272,6 +12447,9 @@ export async function resolveWorldSimulationTurn(
           .execution
           .version,
     },
+
+    retrieval_conditioned_memory_interpretation_adoption:
+      cloneJson(retrievalConditionedMemoryInterpretationAdoptionSummary),
 
     retrieval_induced_forgetting_consequence: {
       version:
