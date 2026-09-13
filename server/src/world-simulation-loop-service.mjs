@@ -412,6 +412,15 @@ import {
   worldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionVersion,
 } from "./world-simulation-retrieval-induced-forgetting-reexposure-recovery-projection-service.mjs";
 import {
+  buildWorldSimulationRetrievalContextRevivalCandidateEvidence,
+  worldSimulationRetrievalContextRevivalCandidateEvidenceVersion,
+} from "./world-simulation-retrieval-context-revival-candidate-evidence-service.mjs";
+import {
+  buildWorldSimulationRetrievalContextRevivalAccessibilityProjectionContract,
+  projectWorldSimulationRetrievalContextRevivalAccessibility,
+  worldSimulationRetrievalContextRevivalAccessibilityProjectionVersion,
+} from "./world-simulation-retrieval-context-revival-accessibility-projection-service.mjs";
+import {
   buildWorldSimulationBaseLevelActivationProjectionContract,
   projectWorldSimulationBaseLevelActivation,
 } from "./world-simulation-base-level-activation-projection-service.mjs";
@@ -4747,8 +4756,50 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         phase83b_projection:
           retrievalInducedForgettingAccessibilityProjection,
       });
+    // Phase84A assembles only committed prior-turn successful retrieval evidence
+    // whose canonical explicit context cues are shared with an unrecovered memory.
+    // It remains evidence-only and cannot change accessibility by itself.
+    const retrievalContextRevivalCandidateEvidence =
+      buildWorldSimulationRetrievalContextRevivalCandidateEvidence({
+        world_state:
+          worldState,
+        character,
+        current_turn_id:
+          turnId,
+        as_of:
+          worldState.simulation_time
+          ?? event.simulation_time
+          ?? null,
+        memory_records:
+          retrievalMemoryRecords,
+      });
+    // Phase84B may recover only Phase83B suppression that Phase83C has not
+    // already recovered, and only when canonical Phase84A evidence comes from
+    // a successful retrieval strictly after the latest applicable Phase83A
+    // consequence. It cannot reverse Phase83C, treat a generic context switch as
+    // recovery, or change anything except this turn's ephemeral search order.
+    const retrievalContextRevivalAccessibilityProjection =
+      projectWorldSimulationRetrievalContextRevivalAccessibility({
+        world_state:
+          worldState,
+        character,
+        current_turn_id:
+          turnId,
+        as_of:
+          worldState.simulation_time
+          ?? event.simulation_time
+          ?? null,
+        memory_records:
+          retrievalMemoryRecords,
+        phase83b_projection:
+          retrievalInducedForgettingAccessibilityProjection,
+        phase83c_projection:
+          retrievalInducedForgettingReexposureRecoveryProjection,
+        phase84a_evidence:
+          retrievalContextRevivalCandidateEvidence,
+      });
     const retrievalMemoryRecordsAfterRifRecovery =
-      retrievalInducedForgettingReexposureRecoveryProjection
+      retrievalContextRevivalAccessibilityProjection
         .projected_memory_records;
 
     const memoryAccessibilityBaseInput = {
@@ -4803,6 +4854,26 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         audit:
           cloneJson(
             retrievalInducedForgettingReexposureRecoveryProjection.audit,
+          ),
+      },
+      retrieval_context_revival_candidate_evidence: {
+        version:
+          worldSimulationRetrievalContextRevivalCandidateEvidenceVersion,
+        evidence_id:
+          retrievalContextRevivalCandidateEvidence.evidence_id,
+        audit:
+          cloneJson(
+            retrievalContextRevivalCandidateEvidence.audit,
+          ),
+      },
+      retrieval_context_revival_accessibility_projection: {
+        version:
+          worldSimulationRetrievalContextRevivalAccessibilityProjectionVersion,
+        projection_id:
+          retrievalContextRevivalAccessibilityProjection.projection_id,
+        audit:
+          cloneJson(
+            retrievalContextRevivalAccessibilityProjection.audit,
           ),
       },
     });

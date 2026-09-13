@@ -231,6 +231,7 @@ export const phase83RetrievalCompetitionConsequenceSteps = Object.freeze([
 
 export const phase84MemoryContextRevivalSteps = Object.freeze([
   Object.freeze(["Phase 84A bounded explicit-context retrieval revival candidate evidence", Object.freeze(["tests/phase84/phase84a-retrieval-context-revival-candidate-evidence.test.mjs"])]),
+  Object.freeze(["Phase 84B bounded explicit-context revival accessibility recovery projection", Object.freeze(["tests/phase84/phase84b-retrieval-context-revival-accessibility-projection.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
