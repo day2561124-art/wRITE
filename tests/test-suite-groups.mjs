@@ -229,6 +229,10 @@ export const phase83RetrievalCompetitionConsequenceSteps = Object.freeze([
   Object.freeze(["Phase 83C exact post-consequence re-encoding recovery projection", Object.freeze(["tests/phase83/phase83c-retrieval-induced-forgetting-reexposure-recovery-projection.test.mjs"])]),
 ]);
 
+export const phase84MemoryContextRevivalSteps = Object.freeze([
+  Object.freeze(["Phase 84A bounded explicit-context retrieval revival candidate evidence", Object.freeze(["tests/phase84/phase84a-retrieval-context-revival-candidate-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -256,6 +260,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase81CounterfactualExperienceSteps,
   ...phase82LongitudinalExperienceLearningSteps,
   ...phase83RetrievalCompetitionConsequenceSteps,
+  ...phase84MemoryContextRevivalSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -281,6 +286,7 @@ export const cognitionSteps = Object.freeze([
   ...phase81CounterfactualExperienceSteps,
   ...phase82LongitudinalExperienceLearningSteps,
   ...phase83RetrievalCompetitionConsequenceSteps,
+  ...phase84MemoryContextRevivalSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -301,4 +307,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase81CounterfactualReflectionReentrySteps,
   ...phase82LongitudinalExperienceLearningSteps,
   ...phase83RetrievalCompetitionConsequenceSteps,
+  ...phase84MemoryContextRevivalSteps,
 ]);
