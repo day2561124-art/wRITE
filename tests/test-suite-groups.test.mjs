@@ -31,6 +31,7 @@ import {
   phase82LongitudinalExperienceLearningSteps,
   phase83RetrievalCompetitionConsequenceSteps,
   phase84MemoryContextRevivalSteps,
+  phase85MemoryReconsolidationSteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
@@ -53,7 +54,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(
-    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84)\/[^"]+\.test\.mjs"/g,
+    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85)\/[^"]+\.test\.mjs"/g,
   ),
 ].map((match) => match[0].slice(1, -1));
 
@@ -86,6 +87,7 @@ const phase81CounterfactualReflectionReentryPaths = pathsFor(
 const phase82Paths = pathsFor(phase82LongitudinalExperienceLearningSteps);
 const phase83Paths = pathsFor(phase83RetrievalCompetitionConsequenceSteps);
 const phase84Paths = pathsFor(phase84MemoryContextRevivalSteps);
+const phase85Paths = pathsFor(phase85MemoryReconsolidationSteps);
 const phase62CognitionPaths = pathsFor(phase62CognitionIntegrationSteps);
 
 assertUnique("run-all active world-simulation inventory", activeRunAllPaths);
@@ -96,12 +98,12 @@ assertUnique("memory-retrieval runner", memoryPaths);
 assert.deepEqual(
   worldPaths,
   activeRunAllPaths,
-  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84 inventory in run-all.mjs.",
+  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85 inventory in run-all.mjs.",
 );
 
 assert.deepEqual(
   memoryPaths,
-  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths],
+  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths, ...phase85Paths],
   "Memory-retrieval runner must cover Phase63 memory, Phase64 retrieval cognition, Phase67 autobiographical memory, Phase68 self interpretation, Phase69 goal-to-plan cognition, Phase70 goal lifecycle cognition, Phase71 adaptive replanning cognition, Phase72 means-feasibility cognition, Phase73 visible-constraint observation cognition, Phase76 post-outcome experience-memory-learning cognition, Phase77 multi-experience schema induction cognition, Phase78 contextual schema refinement cognition, Phase79 experiential method competition cognition, Phase80 analogical experience adaptation cognition, the Phase81D-Q counterfactual reflection/reuse path, Phase82 longitudinal experience learning, Phase83 retrieval-competition consequence cognition, and Phase84 explicit-context revival cognition.",
 );
 
@@ -131,8 +133,9 @@ assert.deepEqual(
     ...phase82Paths,
     ...phase83Paths,
     ...phase84Paths,
+    ...phase85Paths,
   ],
-  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84 cognition.",
+  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85 cognition.",
 );
 
 assert.deepEqual(
@@ -144,7 +147,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84)\//,
+    /^tests\/phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85)\//,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

@@ -891,6 +891,7 @@ const steps = [
   ["Phase 83C exact post-consequence re-encoding recovery projection", ["tests/phase83/phase83c-retrieval-induced-forgetting-reexposure-recovery-projection.test.mjs"]],
   ["Phase 84A bounded explicit-context retrieval revival candidate evidence", ["tests/phase84/phase84a-retrieval-context-revival-candidate-evidence.test.mjs"]],
   ["Phase 84B bounded explicit-context revival accessibility recovery projection", ["tests/phase84/phase84b-retrieval-context-revival-accessibility-projection.test.mjs"]],
+  ["Phase 85A bounded reconsolidation lability candidate evidence", ["tests/phase85/phase85a-memory-reconsolidation-lability-candidate-evidence.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
