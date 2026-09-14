@@ -187,6 +187,11 @@ import {
   worldSimulationSelectiveMemoryEncodingVersion,
 } from "./world-simulation-selective-memory-encoding-service.mjs";
 import {
+  buildWorldSimulationAdaptiveMemoryConsolidation,
+  buildWorldSimulationAdaptiveMemoryConsolidationContract,
+  worldSimulationAdaptiveMemoryConsolidationVersion,
+} from "./world-simulation-adaptive-memory-consolidation-service.mjs";
+import {
   buildWorldSimulationSubjectiveEpisodeSegmentationContract,
   buildWorldSimulationSubjectiveEpisodeSegmentations,
   worldSimulationSubjectiveEpisodeSegmentationVersion,
@@ -3605,6 +3610,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationMemoryRetrievalPersistenceContract(),
     subjective_memory_plasticity:
       buildWorldSimulationMemoryPlasticityContract(),
+    adaptive_memory_consolidation:
+      buildWorldSimulationAdaptiveMemoryConsolidationContract(),
     subjective_claim_projection:
       buildWorldSimulationSubjectiveClaimProjectionContract(),
     subjective_claim_conflict_revision_projection:
@@ -10076,6 +10083,52 @@ export async function resolveWorldSimulationTurn(
     subjectiveMemoryPlasticityMutationExecution
       .next_world_state;
 
+  // Phase91 advances only memories that already existed before this turn. It
+  // consumes canonical retrieval-practice plasticity plus bounded historical
+  // relevance/affective evidence, then persists append-only lifecycle events.
+  // The current turn's new memories are formed only after this pass, so they
+  // cannot become stabilizing or consolidated in the same turn they are encoded.
+  const adaptiveMemoryConsolidation =
+    buildWorldSimulationAdaptiveMemoryConsolidation({
+      world_state:
+        plasticityPersistedWorldState,
+      world_history:
+        await getWorldSimulationHistory(sessionId, options),
+      current_turn_id:
+        preparedTurn.turn_id,
+      current_time:
+        retrievalOccurredAt,
+    });
+
+  const adaptiveMemoryConsolidationMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id:
+        `${preparedTurn.turn_id}:adaptive_memory_consolidation`,
+      world_state_hash:
+        hashAgentRunValue(plasticityPersistedWorldState),
+      state_transitions:
+        adaptiveMemoryConsolidation.result.state_transitions,
+      elapsed_ms: 0,
+    });
+
+  const adaptiveMemoryConsolidationMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state:
+        plasticityPersistedWorldState,
+      preview_world_state:
+        adaptiveMemoryConsolidation.result.preview_world_state,
+      queue:
+        adaptiveMemoryConsolidationMutationQueue,
+      scene_id:
+        preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id
+        ?? null,
+    });
+
+  const consolidationPersistedWorldState =
+    adaptiveMemoryConsolidationMutationExecution
+      .next_world_state;
+
   const subjectiveMemoryEncodingDecisions =
     await resolveMemoryEncodingDecisions(
       preparedTurn,
@@ -10092,7 +10145,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveMemoryFormation =
     formWorldSimulationSubjectiveMemories({
       world_state:
-        plasticityPersistedWorldState,
+        consolidationPersistedWorldState,
 
       turn_id:
         preparedTurn.turn_id,
@@ -10110,17 +10163,17 @@ export async function resolveWorldSimulationTurn(
         subjectiveMemoryEpisodeBindings.bindings,
     });
   const subjectiveMemoryPreview = applySubjectiveMemoryPreview(
-    plasticityPersistedWorldState,
+    consolidationPersistedWorldState,
     subjectiveMemoryFormation.result,
   );
   const subjectiveMemoryMutationQueue = buildWorldSimulationChronologicalMutationQueue({
     turn_id: `${preparedTurn.turn_id}:subjective_memory`,
-    world_state_hash: hashAgentRunValue(plasticityPersistedWorldState),
+    world_state_hash: hashAgentRunValue(consolidationPersistedWorldState),
     state_transitions: subjectiveMemoryFormation.result.memory_transitions,
     elapsed_ms: 0,
   });
   const subjectiveMemoryMutationExecution = executeWorldSimulationChronologicalMutationQueue({
-    world_state: plasticityPersistedWorldState,
+    world_state: consolidationPersistedWorldState,
     preview_world_state: subjectiveMemoryPreview,
     queue: subjectiveMemoryMutationQueue,
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
@@ -11658,6 +11711,17 @@ export async function resolveWorldSimulationTurn(
         cloneJson(
           subjectiveMemoryPlasticityMutationExecution.execution,
         ),
+
+      adaptive_memory_consolidation: {
+        version:
+          worldSimulationAdaptiveMemoryConsolidationVersion,
+        projection:
+          cloneJson(adaptiveMemoryConsolidation),
+      },
+      adaptive_memory_consolidation_mutation_queue:
+        cloneJson(adaptiveMemoryConsolidationMutationQueue),
+      adaptive_memory_consolidation_mutation_execution:
+        cloneJson(adaptiveMemoryConsolidationMutationExecution.execution),
 
       subjective_memory_formation:
         cloneJson(

@@ -270,6 +270,10 @@ export const phase90MemoryCoreIntegrationSteps = Object.freeze([
   Object.freeze(["Phase 90B unified bounded memory accessibility", Object.freeze(["tests/phase90/phase90b-unified-memory-accessibility.test.mjs"])]),
 ]);
 
+export const phase91AdaptiveMemoryConsolidationSteps = Object.freeze([
+  Object.freeze(["Phase 91 adaptive memory consolidation lifecycle", Object.freeze(["tests/phase91/phase91-adaptive-memory-consolidation.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -304,6 +308,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
+  ...phase91AdaptiveMemoryConsolidationSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -336,6 +341,7 @@ export const cognitionSteps = Object.freeze([
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
+  ...phase91AdaptiveMemoryConsolidationSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -363,4 +369,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
+  ...phase91AdaptiveMemoryConsolidationSteps,
 ]);
