@@ -279,6 +279,9 @@ export function projectWorldSimulationAffectiveAppraisals(input = {}) {
 
 export const worldSimulationAffectiveContinuityVersion = "phase86b-committed-affective-continuity-v1";
 export const affectiveContinuityMaxEntries = 8;
+export const worldSimulationPersistentAffectiveToneEvidenceVersion =
+  "phase89a-bounded-persistent-affective-tone-evidence-v1";
+export const persistentAffectiveToneEvidenceMaxEntries = affectiveContinuityMaxEntries;
 
 // Read committed history, preserving historical appraisals as remembered
 // subjective meaning. This does not establish the character's current mood.
@@ -291,6 +294,94 @@ export function projectWorldSimulationAffectiveContinuity(input = {}) {
     recent_appraisals: entries.slice(-affectiveContinuityMaxEntries),
     truncated: selected.total > affectiveContinuityMaxEntries,
     current_mood_established: false, historical_appraisal_is_current_fact: false });
+}
+
+export function buildWorldSimulationPersistentAffectiveToneEvidenceContract() {
+  return freeze({
+    version: worldSimulationPersistentAffectiveToneEvidenceVersion,
+    phase: "Phase89A",
+    source_owner: "canonical_committed_phase86_affective_history",
+    character_scope_is_cross_goal: true,
+    bounded_recent_window: true,
+    same_turn_feedback_allowed: false,
+    historical_appraisal_is_current_fact: false,
+    current_mood_established: false,
+    named_mood_inferred: false,
+    objective_emotion_label_inferred: false,
+    numeric_intensity_modeled: false,
+    numeric_decay_rate_modeled: false,
+    personality_baseline_mood_modeled: false,
+    belief_revision_authority: false,
+    action_selection_authority: false,
+    world_truth_authority: false,
+  });
+}
+
+// Phase89A deliberately assembles evidence before any Character Brain-owned
+// mood interpretation exists. Unlike Phase86B's goal-relative reappraisal view,
+// this window is character-wide so an unrelated goal change cannot erase the
+// character's recent affective history. Exact turn ids and appraisal hashes stay
+// engine-private; only bounded qualitative subjective evidence is projected.
+export function projectWorldSimulationPersistentAffectiveToneEvidence(input = {}) {
+  if (!Array.isArray(input.world_history?.turns) || !text(input.character) || !text(input.current_turn_id)) {
+    fail("Persistent affective-tone evidence requires committed history and character identity.");
+  }
+  const prior = readCommittedAppraisals(input);
+  const byGoal = prior.characters.get(key(input.character));
+  const allEntries = byGoal
+    ? [...byGoal.values()].flatMap(group => group.entries).sort((a, b) => a.order - b.order)
+    : [];
+  const recent = allEntries.slice(-persistentAffectiveToneEvidenceMaxEntries);
+  const sourceTurns = new Set(recent.map(entry => entry.appraisal.source_turn_id));
+  const evidenceEntries = recent.map((entry, index) => {
+    const appraisal = entry.appraisal;
+    const evidenceRef = "phase89a_affective_tone_" + hashAgentRunValue({
+      version: worldSimulationPersistentAffectiveToneEvidenceVersion,
+      character: key(input.character),
+      source_appraisal_hash: appraisal.appraisal_hash,
+      window_position: index,
+    }).slice(0, 24);
+    return {
+      evidence_ref: evidenceRef,
+      goal: appraisal.goal,
+      goal_congruence: appraisal.goal_congruence,
+      expectedness: appraisal.expectedness,
+      coping_potential: appraisal.coping_potential,
+      interpretation: appraisal.interpretation,
+      historical_subjective_appraisal: true,
+      historical_appraisal_is_current_fact: false,
+      current_mood_established: false,
+      objective_emotion_label_established: false,
+      action_selection_implied: false,
+      world_truth_authority: false,
+    };
+  });
+  const body = {
+    version: worldSimulationPersistentAffectiveToneEvidenceVersion,
+    character: input.character,
+    source: "canonical_committed_phase86_affective_history",
+    evidence_entries: evidenceEntries,
+    evidence_count: evidenceEntries.length,
+    distinct_committed_turn_count: sourceTurns.size,
+    spans_multiple_committed_turns: sourceTurns.size > 1,
+    truncated: allEntries.length > persistentAffectiveToneEvidenceMaxEntries,
+    boundaries: {
+      evidence_only: true,
+      character_scope_is_cross_goal: true,
+      same_turn_feedback_allowed: false,
+      historical_appraisal_is_current_fact: false,
+      current_mood_established: false,
+      named_mood_inferred: false,
+      objective_emotion_label_inferred: false,
+      numeric_intensity_modeled: false,
+      numeric_decay_rate_modeled: false,
+      personality_baseline_mood_modeled: false,
+      belief_revision_authority: false,
+      action_selection_authority: false,
+      world_truth_authority: false,
+    },
+  };
+  return freeze({ ...body, evidence_hash: hashAgentRunValue(body) });
 }
 
 function readCommittedAppraisals(input) {

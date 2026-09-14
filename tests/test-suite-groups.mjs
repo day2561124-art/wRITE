@@ -259,6 +259,10 @@ export const phase88RetrievalConditionedDeliberationGroundingSteps = Object.free
   Object.freeze(["Phase 88A retrieval-conditioned interpretation deliberation grounding", Object.freeze(["tests/phase88/phase88a-retrieval-conditioned-interpretation-deliberation-grounding.test.mjs"])]),
 ]);
 
+export const phase89PersistentAffectiveToneSteps = Object.freeze([
+  Object.freeze(["Phase 89A bounded persistent affective-tone evidence", Object.freeze(["tests/phase89/phase89a-bounded-persistent-affective-tone-evidence.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -291,6 +295,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
+  ...phase89PersistentAffectiveToneSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -321,6 +326,7 @@ export const cognitionSteps = Object.freeze([
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
+  ...phase89PersistentAffectiveToneSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -346,4 +352,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
   ...phase88RetrievalConditionedDeliberationGroundingSteps,
+  ...phase89PersistentAffectiveToneSteps,
 ]);
