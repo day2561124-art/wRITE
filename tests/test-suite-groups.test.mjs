@@ -38,6 +38,7 @@ import {
   phase89PersistentAffectiveToneSteps,
   phase90MemoryCoreIntegrationSteps,
   phase91AdaptiveMemoryConsolidationSteps,
+  phase92MemoryReconsolidationLifecycleSteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
@@ -60,7 +61,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(
-    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91)\/[^"]+\.test\.mjs"/g,
+    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92)\/[^"]+\.test\.mjs"/g,
   ),
 ].map((match) => match[0].slice(1, -1));
 
@@ -100,6 +101,7 @@ const phase88Paths = pathsFor(phase88RetrievalConditionedDeliberationGroundingSt
 const phase89Paths = pathsFor(phase89PersistentAffectiveToneSteps);
 const phase90Paths = pathsFor(phase90MemoryCoreIntegrationSteps);
 const phase91Paths = pathsFor(phase91AdaptiveMemoryConsolidationSteps);
+const phase92Paths = pathsFor(phase92MemoryReconsolidationLifecycleSteps);
 const phase62CognitionPaths = pathsFor(phase62CognitionIntegrationSteps);
 
 assertUnique("run-all active world-simulation inventory", activeRunAllPaths);
@@ -110,13 +112,13 @@ assertUnique("memory-retrieval runner", memoryPaths);
 assert.deepEqual(
   worldPaths,
   activeRunAllPaths,
-  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85/86/87/88/89/90/91 inventory in run-all.mjs.",
+  "World-simulation runner must exactly cover the Phase62/63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85/86/87/88/89/90/91/92 inventory in run-all.mjs.",
 );
 
 assert.deepEqual(
   memoryPaths,
-  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths, ...phase85Paths, ...phase86Paths, ...phase87Paths, ...phase88Paths, ...phase89Paths, ...phase90Paths, ...phase91Paths],
-  "Memory-retrieval runner must cover Phase63 memory through Phase91 adaptive consolidation, including selective encoding, unified accessibility, retrieval-practice/base-level, competition suppression/recovery, context revival, memory interpretation, affective cognition, and retrieval-conditioned deliberation integration.",
+  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths, ...phase85Paths, ...phase86Paths, ...phase87Paths, ...phase88Paths, ...phase89Paths, ...phase90Paths, ...phase91Paths, ...phase92Paths],
+  "Memory-retrieval runner must cover Phase63 memory through Phase92 reconsolidation lifecycle closure, including selective encoding, unified accessibility, retrieval-practice/base-level, competition suppression/recovery, context revival, memory interpretation, affective cognition, and retrieval-conditioned deliberation integration.",
 );
 
 assert.deepEqual(
@@ -152,8 +154,9 @@ assert.deepEqual(
     ...phase89Paths,
     ...phase90Paths,
     ...phase91Paths,
+    ...phase92Paths,
   ],
-  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85/86/87/88/89/90/91 cognition.",
+  "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85/86/87/88/89/90/91/92 cognition.",
 );
 
 assert.deepEqual(
@@ -165,7 +168,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91)\//,
+    /^tests\/phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92)\//,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

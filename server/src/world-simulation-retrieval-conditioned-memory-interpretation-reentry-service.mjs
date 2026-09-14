@@ -1,6 +1,7 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { memoryRetrievalEventSchemaVersion } from "./world-simulation-memory-retrieval-persistence-service.mjs";
 import { validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory } from "./world-simulation-memory-reconsolidation-interpretation-update-event-service.mjs";
+import { projectWorldSimulationEffectiveMemoryReconsolidationStates } from "./world-simulation-memory-reconsolidation-lifecycle-service.mjs";
 import { projectWorldSimulationSubjectiveCognition } from "./world-simulation-subjective-cognition-projection-service.mjs";
 
 export const worldSimulationRetrievalConditionedMemoryInterpretationReentryVersion =
@@ -95,10 +96,32 @@ function recoveredMemoryIds(event) {
 
 function latestInterpretationsByMemory(worldState, character, currentTurnId) {
   const validated = validateWorldSimulationMemoryReconsolidationInterpretationUpdateHistory(worldState);
+  const lifecycle = projectWorldSimulationEffectiveMemoryReconsolidationStates({ world_state: worldState });
+  const lifecycleByInterpretation = new Map(
+    array(lifecycle.interpretation_update_states).map((entry) => [
+      entry.interpretation_update_event_id,
+      entry,
+    ]),
+  );
+  const memoriesUnderLifecycle = new Set(
+    array(lifecycle.interpretation_update_states)
+      .filter((entry) => entry.tracked_by_phase92 === true)
+      .map((entry) => `${String(entry.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}::${entry.memory_id}`),
+  );
   const latest = new Map();
   for (const ref of validated.history) {
     const event = validated.events[ref.interpretation_update_event_id];
     if (!sameCharacter(event.character, character) || event.source_turn_id === currentTurnId) continue;
+    const memoryLifecycleKey = `${String(event.character ?? "").trim().toLocaleLowerCase("zh-Hant-TW")}::${event.memory_id}`;
+    if (memoriesUnderLifecycle.has(memoryLifecycleKey)) {
+      const state = lifecycleByInterpretation.get(event.interpretation_update_event_id);
+      if (!state
+          || state.tracked_by_phase92 !== true
+          || state.lifecycle_state !== "restabilized_with_update"
+          || state.future_retrieval_effect_available !== true) {
+        continue;
+      }
+    }
     latest.set(event.memory_id, event);
   }
   return latest;
@@ -151,6 +174,10 @@ export function buildWorldSimulationRetrievalConditionedMemoryInterpretationReen
     exact_recovered_memory_identity_required: true,
     prior_committed_phase85c_interpretation_required: true,
     latest_prior_interpretation_per_recovered_memory_only: true,
+    phase92_tracked_memory_requires_restabilized_update: true,
+    phase92_destabilized_update_reentry_allowed: false,
+    phase92_untracked_newer_update_can_bypass_tracked_memory_gate: false,
+    legacy_phase85c_without_phase92_lifecycle_preserved: true,
     same_turn_reentry_allowed: false,
     character_scope_isolated: true,
     character_view_sanitized: true,

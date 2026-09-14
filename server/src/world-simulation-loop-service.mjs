@@ -498,6 +498,11 @@ import {
 } from "./world-simulation-persistent-mood-native-adoption-service.mjs";
 import { buildWorldSimulationMemoryInterpretationTurn } from "./world-simulation-memory-interpretation-turn-service.mjs";
 import {
+  buildWorldSimulationMemoryReconsolidationLifecycle,
+  buildWorldSimulationMemoryReconsolidationLifecycleContract,
+  worldSimulationMemoryReconsolidationLifecycleVersion,
+} from "./world-simulation-memory-reconsolidation-lifecycle-service.mjs";
+import {
   buildWorldSimulationSubjectiveCognitionProjectionContract,
   projectWorldSimulationSubjectiveCognition,
   worldSimulationSubjectiveCognitionProjectionVersion,
@@ -11079,10 +11084,35 @@ export async function resolveWorldSimulationTurn(
     scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
   });
 
+  // Phase92 closes the computational reconsolidation lifecycle only after
+  // Phase85E has produced canonical append-only interpretation-update evidence.
+  // A consolidated trace may become destabilized_for_update now, but that same
+  // cycle cannot restabilize until a later committed turn. Original memory
+  // content and Phase91 consolidation state remain separate authorities.
+  const memoryReconsolidationLifecycle =
+    buildWorldSimulationMemoryReconsolidationLifecycle({
+      world_state: memoryInterpretationMutationExecution.next_world_state,
+      current_turn_id: preparedTurn.turn_id,
+    });
+  const memoryReconsolidationLifecycleMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:memory_reconsolidation_lifecycle`,
+      world_state_hash: hashAgentRunValue(memoryInterpretationMutationExecution.next_world_state),
+      state_transitions: memoryReconsolidationLifecycle.result.state_transitions,
+      elapsed_ms: 0,
+    });
+  const memoryReconsolidationLifecycleMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: memoryInterpretationMutationExecution.next_world_state,
+      preview_world_state: memoryReconsolidationLifecycle.result.preview_world_state,
+      queue: memoryReconsolidationLifecycleMutationQueue,
+      scene_id: preparedTurn.event?.scene_id ?? preparedTurn.event?.location_id ?? null,
+    });
+
   const subjectiveBeliefResolution =
     resolveWorldSimulationSubjectiveBeliefs({
       world_state:
-        memoryInterpretationMutationExecution.next_world_state,
+        memoryReconsolidationLifecycleMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
     });
@@ -11090,7 +11120,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveBeliefRevision =
     buildWorldSimulationSubjectiveBeliefRevisions({
       world_state:
-        memoryInterpretationMutationExecution.next_world_state,
+        memoryReconsolidationLifecycleMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       resolution:
@@ -11103,7 +11133,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_belief_revision`,
       world_state_hash:
         hashAgentRunValue(
-          memoryInterpretationMutationExecution.next_world_state,
+          memoryReconsolidationLifecycleMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveBeliefRevision
@@ -11115,7 +11145,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveBeliefRevisionMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        memoryInterpretationMutationExecution.next_world_state,
+        memoryReconsolidationLifecycleMutationExecution.next_world_state,
       preview_world_state:
         subjectiveBeliefRevision
           .result
@@ -12154,6 +12184,14 @@ export async function resolveWorldSimulationTurn(
       memory_interpretation_turn: cloneJson(memoryInterpretationTurn.summary),
       memory_interpretation_mutation_queue: cloneJson(memoryInterpretationMutationQueue),
       memory_interpretation_mutation_execution: cloneJson(memoryInterpretationMutationExecution.execution),
+      memory_reconsolidation_lifecycle: {
+        version: worldSimulationMemoryReconsolidationLifecycleVersion,
+        projection: cloneJson(memoryReconsolidationLifecycle),
+      },
+      memory_reconsolidation_lifecycle_mutation_queue:
+        cloneJson(memoryReconsolidationLifecycleMutationQueue),
+      memory_reconsolidation_lifecycle_mutation_execution:
+        cloneJson(memoryReconsolidationLifecycleMutationExecution.execution),
       subjective_belief_resolution: {
         version:
           subjectiveBeliefResolution.version,

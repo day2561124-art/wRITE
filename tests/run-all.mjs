@@ -910,6 +910,7 @@ const steps = [
   ["Phase 90A native selective memory encoding", ["tests/phase90/phase90a-selective-memory-encoding.test.mjs"]],
   ["Phase 90B unified bounded memory accessibility", ["tests/phase90/phase90b-unified-memory-accessibility.test.mjs"]],
   ["Phase 91 adaptive memory consolidation lifecycle", ["tests/phase91/phase91-adaptive-memory-consolidation.test.mjs"]],
+  ["Phase 92 memory reconsolidation lifecycle closure", ["tests/phase92/phase92-memory-reconsolidation-lifecycle.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

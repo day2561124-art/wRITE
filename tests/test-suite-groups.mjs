@@ -274,6 +274,10 @@ export const phase91AdaptiveMemoryConsolidationSteps = Object.freeze([
   Object.freeze(["Phase 91 adaptive memory consolidation lifecycle", Object.freeze(["tests/phase91/phase91-adaptive-memory-consolidation.test.mjs"])]),
 ]);
 
+export const phase92MemoryReconsolidationLifecycleSteps = Object.freeze([
+  Object.freeze(["Phase 92 memory reconsolidation lifecycle closure", Object.freeze(["tests/phase92/phase92-memory-reconsolidation-lifecycle.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -309,6 +313,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
   ...phase91AdaptiveMemoryConsolidationSteps,
+  ...phase92MemoryReconsolidationLifecycleSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -342,6 +347,7 @@ export const cognitionSteps = Object.freeze([
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
   ...phase91AdaptiveMemoryConsolidationSteps,
+  ...phase92MemoryReconsolidationLifecycleSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -370,4 +376,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase89PersistentAffectiveToneSteps,
   ...phase90MemoryCoreIntegrationSteps,
   ...phase91AdaptiveMemoryConsolidationSteps,
+  ...phase92MemoryReconsolidationLifecycleSteps,
 ]);
