@@ -182,6 +182,11 @@ import {
   worldSimulationSubjectiveMemoryFormationVersion,
 } from "./world-simulation-subjective-memory-formation-service.mjs";
 import {
+  buildWorldSimulationNativeSelectiveMemoryEncodingDecisions,
+  buildWorldSimulationSelectiveMemoryEncodingContract,
+  worldSimulationSelectiveMemoryEncodingVersion,
+} from "./world-simulation-selective-memory-encoding-service.mjs";
+import {
   buildWorldSimulationSubjectiveEpisodeSegmentationContract,
   buildWorldSimulationSubjectiveEpisodeSegmentations,
   worldSimulationSubjectiveEpisodeSegmentationVersion,
@@ -420,6 +425,11 @@ import {
   projectWorldSimulationRetrievalContextRevivalAccessibility,
   worldSimulationRetrievalContextRevivalAccessibilityProjectionVersion,
 } from "./world-simulation-retrieval-context-revival-accessibility-projection-service.mjs";
+import {
+  buildWorldSimulationUnifiedMemoryAccessibilityProjectionContract,
+  projectWorldSimulationUnifiedMemoryAccessibility,
+  worldSimulationUnifiedMemoryAccessibilityProjectionVersion,
+} from "./world-simulation-unified-memory-accessibility-projection-service.mjs";
 import {
   buildWorldSimulationBaseLevelActivationProjectionContract,
   projectWorldSimulationBaseLevelActivation,
@@ -3549,6 +3559,8 @@ export function buildWorldSimulationLoopContract() {
     subjective_means_feasibility_reconsideration:
       buildWorldSimulationSubjectiveMeansFeasibilityReconsiderationContract(),
     subjective_memory_formation: buildWorldSimulationSubjectiveMemoryFormationContract(),
+    selective_memory_encoding:
+      buildWorldSimulationSelectiveMemoryEncodingContract(),
     subjective_episode_segmentation:
       buildWorldSimulationSubjectiveEpisodeSegmentationContract(),
     autobiographical_life_event_organization:
@@ -3582,6 +3594,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationRetrievalInducedForgettingReexposureRecoveryProjectionContract(),
     base_level_activation_projection:
       buildWorldSimulationBaseLevelActivationProjectionContract(),
+    unified_memory_accessibility_projection:
+      buildWorldSimulationUnifiedMemoryAccessibilityProjectionContract(),
     query_relative_cue_diagnostic_evidence_projection:
       buildWorldSimulationCueDiagnosticEvidenceProjectionContract(),
     subjective_memory_retrieval_process: buildWorldSimulationMemoryRetrievalProcessV3Contract(),
@@ -4382,6 +4396,15 @@ export function buildWorldSimulationLoopContract() {
 
       optional: true,
 
+      compatibility_override_only:
+        true,
+
+      native_policy_version:
+        worldSimulationSelectiveMemoryEncodingVersion,
+
+      native_policy_used_without_hook:
+        true,
+
       receives_world_state:
         false,
 
@@ -4407,6 +4430,9 @@ export function buildWorldSimulationLoopContract() {
         false,
 
       missing_hook_preserves_legacy_encoding:
+        false,
+
+      missing_hook_uses_native_selective_encoding_policy:
         true,
     },
 
@@ -4836,10 +4862,27 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         ),
     };
 
+    const unifiedMemoryAccessibilityProjection =
+      projectWorldSimulationUnifiedMemoryAccessibility({
+        character,
+        current_turn_id:
+          turnId,
+        accessibility_input:
+          memoryAccessibilityBaseInput,
+        retrieval_practice_activation_projection:
+          retrievalPracticeActivationProjection,
+        base_level_activation_projection:
+          baseLevelActivationProjection,
+        retrieval_induced_forgetting_accessibility_projection:
+          retrievalInducedForgettingAccessibilityProjection,
+        retrieval_induced_forgetting_reexposure_recovery_projection:
+          retrievalInducedForgettingReexposureRecoveryProjection,
+        retrieval_context_revival_accessibility_projection:
+          retrievalContextRevivalAccessibilityProjection,
+      });
     const memoryAccessibilityQuery =
-      queryWorldSimulationMemoryAccessibility(
-        memoryAccessibilityBaseInput,
-      );
+      unifiedMemoryAccessibilityProjection
+        .memory_accessibility_query;
     const cueDiagnosticEvidenceProjection =
       projectWorldSimulationCueDiagnosticEvidence({
         memory_accessibility_query:
@@ -4858,6 +4901,20 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(
           baseLevelActivationProjection.audit,
         ),
+      unified_memory_accessibility_projection: {
+        version:
+          worldSimulationUnifiedMemoryAccessibilityProjectionVersion,
+        projection_id:
+          unifiedMemoryAccessibilityProjection.projection_id,
+        accessibility_evidence:
+          cloneJson(
+            unifiedMemoryAccessibilityProjection.accessibility_evidence,
+          ),
+        audit:
+          cloneJson(
+            unifiedMemoryAccessibilityProjection.audit,
+          ),
+      },
       query_relative_cue_diagnostic_evidence_projection:
         cloneJson(
           cueDiagnosticEvidenceProjection.audit,
@@ -6986,15 +7043,28 @@ async function resolveMemoryEncodingDecisions(
     typeof options.memoryEncodingDecider === "function"
       ? options.memoryEncodingDecider
       : null;
+  const nativePolicy =
+    buildWorldSimulationNativeSelectiveMemoryEncodingDecisions({
+      prepared_turn: preparedTurn,
+    });
 
   if (!decider) {
     return {
-      decisions: [],
+      decisions:
+        cloneJson(nativePolicy.decisions),
+      native_policy:
+        cloneJson(nativePolicy),
       audit: {
         decider_used: false,
 
-        missing_decider_preserved_legacy_encoding:
+        native_policy_used:
           true,
+
+        native_policy_version:
+          worldSimulationSelectiveMemoryEncodingVersion,
+
+        missing_decider_preserved_legacy_encoding:
+          false,
 
         bounded_character_information_only:
           true,

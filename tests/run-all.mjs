@@ -907,6 +907,8 @@ const steps = [
   ["Phase 89A bounded persistent affective-tone evidence", ["tests/phase89/phase89a-bounded-persistent-affective-tone-evidence.test.mjs"]],
   ["Phase 89B bounded qualitative persistent mood interpretation", ["tests/phase89/phase89b-bounded-qualitative-persistent-mood-interpretation.test.mjs"]],
   ["Phase 89C persistent mood interpretation native adoption", ["tests/phase89/phase89c-persistent-mood-native-adoption.test.mjs"]],
+  ["Phase 90A native selective memory encoding", ["tests/phase90/phase90a-selective-memory-encoding.test.mjs"]],
+  ["Phase 90B unified bounded memory accessibility", ["tests/phase90/phase90b-unified-memory-accessibility.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
