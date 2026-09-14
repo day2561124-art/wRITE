@@ -229,6 +229,11 @@ function buildCognitionGroundingCatalog(character, cognition) {
       "cognition.effective_action_commitment",
       source.effective_action_commitment,
     ],
+    [
+      "retrieval_conditioned_memory_interpretation",
+      "cognition.retrieval_conditioned_memory_interpretation",
+      source.retrieval_conditioned_memory_interpretation,
+    ],
     ["emotion_context", "cognition.emotion", source.emotion],
     ["emotion_context", "cognition.affective_context", source.affective_context],
     ["working_memory_focus", "cognition.working_context.focus", working.focus],
@@ -258,6 +263,11 @@ export function buildWorldSimulationSubjectiveActionDeliberationContract() {
     plan_commitment_may_constrain_later_deliberation: true,
     experiential_method_guidance_may_ground_deliberation: true,
     experiential_method_guidance_remains_advisory: true,
+    retrieval_conditioned_memory_interpretation_may_ground_deliberation: true,
+    retrieval_conditioned_memory_interpretation_remains_subjective: true,
+    retrieval_conditioned_memory_interpretation_belief_adoption_implied: false,
+    retrieval_conditioned_memory_interpretation_grounding_identity_is_source_specific: true,
+    ambiguous_grounding_reference_rejected: true,
     explicit_impasse_or_reject_all_preserved: true,
     deterministic_action_winner_computed: false,
     subjective_prospective_consequence_simulation_modeled: false,
@@ -296,6 +306,13 @@ export function buildWorldSimulationSubjectiveActionDeliberationView(input = {})
   }
   const groundings = buildCognitionGroundingCatalog(character, input.cognition);
   const groundingRefs = groundings.map((entry) => entry.grounding_ref);
+  if (new Set(groundingRefs).size !== groundingRefs.length) {
+    const error = new Error(
+      "Phase74A cognition grounding catalog contains ambiguous duplicate grounding references.",
+    );
+    error.code = "WORLD_SIMULATION_SUBJECTIVE_ACTION_DELIBERATION_GROUNDING_AMBIGUOUS";
+    throw error;
+  }
   const actionOptions = candidates.map((candidate) => ({
     ...candidate,
     grounding_scope: "same_character_open_cognition_catalog",

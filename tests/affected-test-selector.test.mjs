@@ -76,6 +76,28 @@ const groupedTest = await plan([
 assert.equal(groupedTest.suite, "cognition");
 assert.equal(groupedTest.focused, true);
 
+const analyzableInventoryInfrastructure = await plan([
+  "tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs",
+  "tests/test-suite-groups.mjs",
+  "tests/test-suite-groups.test.mjs",
+  "tests/affected-test-selector.mjs",
+  "tests/affected-test-selector.test.mjs",
+]);
+assert.equal(
+  analyzableInventoryInfrastructure.suite,
+  "cognition",
+  JSON.stringify(analyzableInventoryInfrastructure, null, 2),
+);
+assert.equal(analyzableInventoryInfrastructure.focused, true);
+assert.equal(analyzableInventoryInfrastructure.fallback_reason, null);
+assert.equal(analyzableInventoryInfrastructure.certification_required, true);
+assert(analyzableInventoryInfrastructure.deferred_certification_tests.includes(
+  "tests/test-suite-groups.test.mjs",
+));
+assert(analyzableInventoryInfrastructure.deferred_certification_tests.includes(
+  "tests/affected-test-selector.test.mjs",
+));
+
 const runAllInventoryAppend = await plan(
   ["tests/run-all.mjs"],
   {
@@ -95,6 +117,32 @@ assert.equal(runAllInventoryAppend.fallback_reason, null);
 assert.equal(runAllInventoryAppend.certification_required, false);
 assert.deepEqual(
   runAllInventoryAppend.selected_group_tests,
+  ["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"],
+);
+
+const runAllInventoryAppendWithEquivalentRewrite = await plan(
+  ["tests/run-all.mjs"],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -785,2 +785,3 @@ const steps = [",
+      "-  [\"Phase 65B subjective claim conflict revision projection\", [\"tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs\"]],",
+      "+  [\"Phase 65B subjective claim conflict revision projection\", [\"tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs\"]],",
+      "+  [\"Phase 66B effective subjective belief state projection\", [\"tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs\"]],",
+    ].join("\n"),
+  },
+);
+assert.equal(
+  runAllInventoryAppendWithEquivalentRewrite.suite,
+  "cognition",
+  JSON.stringify(runAllInventoryAppendWithEquivalentRewrite, null, 2),
+);
+assert.equal(runAllInventoryAppendWithEquivalentRewrite.focused, true);
+assert.equal(runAllInventoryAppendWithEquivalentRewrite.fallback_reason, null);
+assert.deepEqual(
+  runAllInventoryAppendWithEquivalentRewrite.selected_group_tests,
   ["tests/phase66/phase66b-effective-subjective-belief-projection.test.mjs"],
 );
 

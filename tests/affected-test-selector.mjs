@@ -33,6 +33,12 @@ const groupedTests = new Set([
 ]);
 
 const RUN_ALL_PATH = "tests/run-all.mjs";
+const ANALYZABLE_TEST_INFRA_PATHS = new Set([
+  "tests/test-suite-groups.mjs",
+  "tests/test-suite-groups.test.mjs",
+  "tests/affected-test-selector.mjs",
+  "tests/affected-test-selector.test.mjs",
+]);
 const STATIC_RUN_ALL_TEST_STEP_PATTERN = /^\s*\["[^"\r\n]+",\s*\["(tests\/[^"\r\n]+\.test\.mjs)"\]\],\s*$/u;
 
 export function classifyRunAllInventoryDiff(diffText) {
@@ -76,6 +82,12 @@ export function classifyRunAllInventoryDiff(diffText) {
     const testPath = normalizeProjectPath(match[1]);
     if (line.startsWith("+")) addedTests.add(testPath);
     else removedTests.add(testPath);
+  }
+
+  for (const testPath of [...addedTests]) {
+    if (!removedTests.has(testPath)) continue;
+    addedTests.delete(testPath);
+    removedTests.delete(testPath);
   }
 
   if (removedTests.size > 0) {
@@ -275,6 +287,7 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAll
     const eligibleProduction = changedPath.startsWith("server/src/world-simulation-")
       && changedPath.endsWith(".mjs");
     const eligibleGroupedTest = groupedTests.has(changedPath);
+    const eligibleAnalyzableTestInfra = ANALYZABLE_TEST_INFRA_PATHS.has(changedPath);
     if (changedPath === RUN_ALL_PATH) {
       let diffText = runAllDiffText;
       if (diffText === undefined) {
@@ -293,7 +306,7 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAll
       }
       continue;
     }
-    if (!eligibleProduction && !eligibleGroupedTest) {
+    if (!eligibleProduction && !eligibleGroupedTest && !eligibleAnalyzableTestInfra) {
       return fallbackPlan(normalizedChangedPaths, `UNSCOPED_CHANGE:${changedPath}`);
     }
   }

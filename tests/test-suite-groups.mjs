@@ -255,6 +255,10 @@ export const phase87RetrievalConditionedInterpretationSteps = Object.freeze([
   Object.freeze(["Phase 87B retrieval-conditioned memory interpretation native adoption", Object.freeze(["tests/phase87/phase87b-retrieval-conditioned-memory-interpretation-native-adoption.test.mjs"])]),
 ]);
 
+export const phase88RetrievalConditionedDeliberationGroundingSteps = Object.freeze([
+  Object.freeze(["Phase 88A retrieval-conditioned interpretation deliberation grounding", Object.freeze(["tests/phase88/phase88a-retrieval-conditioned-interpretation-deliberation-grounding.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -286,6 +290,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase85MemoryReconsolidationSteps,
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
+  ...phase88RetrievalConditionedDeliberationGroundingSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -315,6 +320,7 @@ export const cognitionSteps = Object.freeze([
   ...phase85MemoryReconsolidationSteps,
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
+  ...phase88RetrievalConditionedDeliberationGroundingSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -339,4 +345,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase85MemoryReconsolidationSteps,
   ...phase86AffectiveCognitionSteps,
   ...phase87RetrievalConditionedInterpretationSteps,
+  ...phase88RetrievalConditionedDeliberationGroundingSteps,
 ]);
