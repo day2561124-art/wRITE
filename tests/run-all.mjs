@@ -906,6 +906,7 @@ const steps = [
   ["Phase 88A retrieval-conditioned interpretation deliberation grounding", ["tests/phase88/phase88a-retrieval-conditioned-interpretation-deliberation-grounding.test.mjs"]],
   ["Phase 89A bounded persistent affective-tone evidence", ["tests/phase89/phase89a-bounded-persistent-affective-tone-evidence.test.mjs"]],
   ["Phase 89B bounded qualitative persistent mood interpretation", ["tests/phase89/phase89b-bounded-qualitative-persistent-mood-interpretation.test.mjs"]],
+  ["Phase 89C persistent mood interpretation native adoption", ["tests/phase89/phase89c-persistent-mood-native-adoption.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

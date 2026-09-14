@@ -127,6 +127,7 @@ function storeSubmission(decisionInput, deliberationResponse) {
 const contract = buildWorldSimulationFormalImpasseDeliberationContract();
 assert.equal(contract.version, worldSimulationFormalImpasseDeliberationVersion);
 assert.deepEqual(contract.stage_order, [
+  "Phase89B",
   "Phase76D",
   "Phase76E",
   "Phase79B",

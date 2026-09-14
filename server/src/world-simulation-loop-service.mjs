@@ -474,6 +474,13 @@ import {
 } from "./world-simulation-subjective-claim-conflict-revision-projection-service.mjs";
 import { buildWorldSimulationActionAwareAffectiveContexts, worldSimulationAffectiveAppraisalResolverViews, projectWorldSimulationAffectiveAppraisals, projectWorldSimulationAffectiveContinuity } from "./world-simulation-affective-appraisal-service.mjs";
 import { buildWorldSimulationCopingChoiceContext, buildWorldSimulationCopingIntentionCommitments, projectWorldSimulationCopingContinuity } from "./world-simulation-coping-intention-service.mjs";
+import {
+  buildWorldSimulationPersistentMoodInterpretationResolverView,
+} from "./world-simulation-persistent-affective-tone-interpretation-service.mjs";
+import {
+  adoptWorldSimulationPersistentMoodInterpretation,
+  worldSimulationPersistentMoodNativeAdoptionVersion,
+} from "./world-simulation-persistent-mood-native-adoption-service.mjs";
 import { buildWorldSimulationMemoryInterpretationTurn } from "./world-simulation-memory-interpretation-turn-service.mjs";
 import {
   buildWorldSimulationSubjectiveCognitionProjectionContract,
@@ -4466,6 +4473,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
   const retrievalConditionedMemoryInterpretationAdoptions = [];
+  const persistentMoodInterpretationResolverViews = [];
+  const persistentMoodNativeAdoptions = [];
   let retrievalOccurredAt = null;
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
@@ -5150,6 +5159,53 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         cloneJson(retrievalConditionedMemoryInterpretationAdoption),
       );
     }
+
+    // Phase89C gives the Character Brain one bounded qualitative interpretation
+    // round over canonical prior-turn Phase89A affective-tone evidence. Direct
+    // callers may provide the resolver callback; formal transport supplies the
+    // same callback only through its trusted resolver-view-hash-bound replay.
+    // The adoption is context only: it neither overwrites Phase86B affective
+    // continuity nor grants action, belief, memory, personality, or world truth
+    // authority, and it does not yet become Phase74A deliberation grounding.
+    const persistentMoodInterpretationResolverView =
+      buildWorldSimulationPersistentMoodInterpretationResolverView({
+        world_history: worldHistory,
+        character,
+        current_turn_id: turnId,
+      });
+    persistentMoodInterpretationResolverViews.push(
+      cloneJson(persistentMoodInterpretationResolverView),
+    );
+    const persistentMoodInterpretationResolver =
+      typeof options.persistentMoodInterpretationResolver === "function"
+        ? options.persistentMoodInterpretationResolver
+        : null;
+    const rawPersistentMoodInterpretations =
+      persistentMoodInterpretationResolver
+        && persistentMoodInterpretationResolverView.evidence_count > 0
+        ? await persistentMoodInterpretationResolver(
+          cloneJson(persistentMoodInterpretationResolverView),
+        )
+        : [];
+    if (!Array.isArray(rawPersistentMoodInterpretations)) {
+      const error = new Error(
+        "persistentMoodInterpretationResolver must return an array containing zero or one bounded Phase89B mood interpretation.",
+      );
+      error.code =
+        "WORLD_SIMULATION_PERSISTENT_MOOD_INTERPRETATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const persistentMoodNativeAdoption =
+      adoptWorldSimulationPersistentMoodInterpretation({
+        world_history: worldHistory,
+        character,
+        current_turn_id: turnId,
+        resolver_view: persistentMoodInterpretationResolverView,
+        interpretation_decisions: rawPersistentMoodInterpretations,
+      });
+    persistentMoodNativeAdoptions.push(
+      cloneJson(persistentMoodNativeAdoption),
+    );
 
     // Step 2 preserves the legacy projector invocation for
     // compatibility and neural trace continuity, but its output
@@ -6143,6 +6199,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         );
     }
 
+    // Phase89C adopts only the sanitized Phase89B character view as an
+    // independent medium-term cognition context. Phase86B affective_context is
+    // intentionally preserved as the recent appraisal continuity owner. Mood is
+    // not yet an explicit Phase74A grounding source in this phase.
+    delete characterCognition.persistent_mood_context;
+    if (persistentMoodNativeAdoption
+        ?.character_view
+        ?.subjective_current_mood_interpretation_established === true) {
+      characterCognition.persistent_mood_context = cloneJson(
+        persistentMoodNativeAdoption.character_view,
+      );
+    }
+
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
@@ -6381,6 +6450,60 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         retrieval_conditioned_memory_interpretation_same_turn_phase85e_feedback_allowed:
           false,
 
+        persistent_mood_native_adoption_installed:
+          true,
+
+        persistent_mood_native_adoption_version:
+          worldSimulationPersistentMoodNativeAdoptionVersion,
+
+        persistent_mood_source_evidence_owner:
+          "Phase89A",
+
+        persistent_mood_source_interpretation_owner:
+          "Phase89B",
+
+        persistent_mood_character_view_sanitized:
+          true,
+
+        persistent_mood_independent_from_phase86b_affective_context:
+          true,
+
+        persistent_mood_phase86b_affective_context_overwritten:
+          false,
+
+        persistent_mood_advisory_only:
+          true,
+
+        persistent_mood_candidate_generation_authority:
+          false,
+
+        persistent_mood_action_selection_authority:
+          false,
+
+        persistent_mood_belief_revision_authority:
+          false,
+
+        persistent_mood_memory_rewrite_authority:
+          false,
+
+        persistent_mood_personality_revision_authority:
+          false,
+
+        persistent_mood_world_truth_authority:
+          false,
+
+        persistent_mood_numeric_intensity_modeled:
+          false,
+
+        persistent_mood_numeric_decay_rate_modeled:
+          false,
+
+        persistent_mood_same_turn_phase86_feedback_allowed:
+          false,
+
+        persistent_mood_deliberation_grounding_installed:
+          false,
+
         legacy_memory_projection_engine_only:
           true,
 
@@ -6612,6 +6735,10 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     memory_retrieval_processes: memoryRetrievalProcesses,
     retrieval_conditioned_memory_interpretation_adoptions:
       cloneJson(retrievalConditionedMemoryInterpretationAdoptions),
+    persistent_mood_interpretation_resolver_views:
+      cloneJson(persistentMoodInterpretationResolverViews),
+    persistent_mood_native_adoptions:
+      cloneJson(persistentMoodNativeAdoptions),
     trace_ids: traceIds,
     causal_boundary: {
       world_state_not_returned_to_character_brain: true,

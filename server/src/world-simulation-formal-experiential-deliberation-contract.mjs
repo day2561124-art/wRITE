@@ -13,6 +13,7 @@ export const worldSimulationFormalImpasseDecisionKinds = Object.freeze({
   PHASE81J: "counterfactual_linked_experience_reuse",
   PHASE81O: "counterfactual_linked_reuse_outcome_deliberation",
   PHASE82F: "counterfactual_linked_longitudinal_case_deliberative_reuse",
+  PHASE89B: "persistent_mood_interpretation",
   ACTION: "action_selection",
 });
 
@@ -79,6 +80,8 @@ function stageLabel(kind) {
       return "Phase81O";
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return "Phase82F";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return "Phase89B";
     default:
       return null;
   }
@@ -107,6 +110,8 @@ function responseField(kind) {
       return "reuse_outcome_deliberation_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return "activated_longitudinal_case_refs";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return "mood_interpretations";
     default:
       return null;
   }
@@ -854,6 +859,61 @@ function normalizePhase82F(task, values) {
   return [...refs].sort();
 }
 
+function normalizePhase89B(task, values) {
+  if (values.length > 1) {
+    fail(
+      "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+      "Phase89B accepts at most one bounded persistent mood interpretation.",
+    );
+  }
+  const allowedEvidenceRefs = new Set(
+    array(task.persistent_affective_tone_evidence)
+      .map((entry) => text(entry?.evidence_ref))
+      .filter(Boolean),
+  );
+  return values.map((raw) => {
+    if (!isObject(raw)) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_INVALID",
+        "Phase89B mood_interpretations[0] must be an object.",
+      );
+    }
+    const allowedKeys = new Set([
+      "subjective_mood_label",
+      "interpretation",
+      "supporting_evidence_refs",
+    ]);
+    if (Object.keys(raw).some((key) => !allowedKeys.has(key))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_AUTHORITY_FIELD_FORBIDDEN",
+        "Phase89B mood interpretation contains fields outside the bounded qualitative response contract.",
+      );
+    }
+    const label = text(raw.subjective_mood_label);
+    const interpretation = text(raw.interpretation);
+    const refs = array(raw.supporting_evidence_refs).map(text);
+    if (!label
+        || label.length > 96
+        || !interpretation
+        || interpretation.length > 512
+        || refs.length < 1
+        || refs.length > allowedEvidenceRefs.size
+        || refs.some((ref) => !ref)
+        || new Set(refs).size !== refs.length
+        || refs.some((ref) => !allowedEvidenceRefs.has(ref))) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_DECISION_OUT_OF_VIEW",
+        "Phase89B mood interpretation must remain qualitative and cite only unique visible Phase89A evidence refs.",
+      );
+    }
+    return {
+      subjective_mood_label: label,
+      interpretation,
+      supporting_evidence_refs: [...refs].sort(),
+    };
+  });
+}
+
 function normalizeImpasse(task, kind, values) {
   const contexts = array(task.impasse_contexts);
   const contextByRef = new Map(contexts.map((context) => [context.impasse_ref, context]));
@@ -956,6 +1016,9 @@ export function validateWorldSimulationFormalImpasseDeliberationSubmission(input
       break;
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       normalized = normalizePhase82F(envelope.task, envelope.values);
+      break;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      normalized = normalizePhase89B(envelope.task, envelope.values);
       break;
     default:
       fail(

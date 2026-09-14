@@ -571,6 +571,7 @@ export function createEphemeralWorldSimulationPreparedTurnBroker(options = {}) {
       worldSimulationFormalImpasseDecisionKinds.PHASE81E,
       worldSimulationFormalImpasseDecisionKinds.PHASE81J,
       worldSimulationFormalImpasseDecisionKinds.PHASE81O,
+      worldSimulationFormalImpasseDecisionKinds.PHASE89B,
     ]);
     if (!deliberationKinds.has(record.decision_round_kind)
         || expected.decision_kind !== record.decision_round_kind) {

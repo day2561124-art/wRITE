@@ -31,6 +31,9 @@ import {
 import {
   worldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseVersion,
 } from "./world-simulation-counterfactual-linked-experience-longitudinal-case-deliberative-reuse-service.mjs";
+import {
+  worldSimulationPersistentMoodInterpretationVersion,
+} from "./world-simulation-persistent-affective-tone-interpretation-service.mjs";
 
 import {
   worldSimulationFormalImpasseDecisionKinds,
@@ -110,6 +113,8 @@ function stageLabel(kind) {
       return "Phase81O";
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return "Phase82F";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return "Phase89B";
     default:
       return null;
   }
@@ -139,6 +144,8 @@ function expectedVersion(kind) {
       return worldSimulationCounterfactualLinkedExperienceReuseOutcomeDeliberationVersion;
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return worldSimulationCounterfactualLinkedExperienceLongitudinalCaseDeliberativeReuseVersion;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return worldSimulationPersistentMoodInterpretationVersion;
     default:
       return null;
   }
@@ -167,6 +174,8 @@ function responseField(kind) {
       return "reuse_outcome_deliberation_decisions";
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return "activated_longitudinal_case_refs";
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return "mood_interpretations";
     default:
       return null;
   }
@@ -186,6 +195,16 @@ function assertResolverView(raw, kind) {
       fail(
         "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
         "Phase79M Phase79B resolver view requires character_contexts.",
+      );
+    }
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE89B) {
+    if (!text(raw.character)
+        || !Array.isArray(raw.evidence_entries)
+        || !Number.isSafeInteger(raw.evidence_count)
+        || raw.evidence_count !== raw.evidence_entries.length) {
+      fail(
+        "WORLD_SIMULATION_FORMAL_EXPERIENTIAL_DELIBERATION_VIEW_INVALID",
+        "Phase89B formal mood interpretation requires a bounded character evidence view.",
       );
     }
   } else if (!text(raw.character) || !text(raw.current_turn_id)) {
@@ -399,6 +418,24 @@ function publicCharacterInput(view, kind, character = view.character) {
         cloneJson(array(view.longitudinal_case_candidates)),
       response_contract: cloneJson(view.response_contract ?? {}),
     };
+  } else if (kind === worldSimulationFormalImpasseDecisionKinds.PHASE89B) {
+    task = {
+      purpose:
+        "Optionally form one bounded qualitative current-mood interpretation from the character's visible committed affective-tone evidence. Returning none is valid. Do not author numeric intensity, decay, confidence, belief, personality, action, or world-truth claims.",
+      persistent_affective_tone_evidence:
+        cloneJson(array(view.evidence_entries)),
+      response_contract: {
+        output_field: "mood_interpretations",
+        may_return_empty_array: true,
+        maximum_interpretation_count: 1,
+        required_fields: [
+          "subjective_mood_label",
+          "interpretation",
+          "supporting_evidence_refs",
+        ],
+        supporting_evidence_refs_must_be_visible: true,
+      },
+    };
   } else {
     const evidenceField = kind === worldSimulationFormalImpasseDecisionKinds.PHASE79F
       ? "evidence_cue_refs"
@@ -476,6 +513,8 @@ function eligible(view, kind, character = view.character) {
       return array(view.reuse_outcome_candidates).length > 0;
     case worldSimulationFormalImpasseDecisionKinds.PHASE82F:
       return array(view.longitudinal_case_candidates).length > 0;
+    case worldSimulationFormalImpasseDecisionKinds.PHASE89B:
+      return array(view.evidence_entries).length > 0;
     default:
       return false;
   }
@@ -516,6 +555,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
     phase: "Phase79M",
     status: "formal_native_experiential_deliberation_chain_installed",
     stage_order: [
+      "Phase89B",
       "Phase76D",
       "Phase76E",
       "Phase79B",
@@ -529,6 +569,7 @@ export function buildWorldSimulationFormalImpasseDeliberationContract() {
       "Phase82F",
       "action_selection",
     ],
+    phase89b_persistent_mood_interpretation_supported: true,
     phase76d_experiential_reentry_supported: true,
     phase76e_method_transfer_supported: true,
     phase79b_qualitative_competition_supported: true,
@@ -564,6 +605,8 @@ export function buildWorldSimulationFormalImpasseDeliberationRound(input = {}) {
     submission?.character,
   )));
   const stages = [
+    [worldSimulationFormalImpasseDecisionKinds.PHASE89B,
+      preparedTurn.persistent_mood_interpretation_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE76D,
       preparedTurn.experiential_knowledge_reentry_resolver_views],
     [worldSimulationFormalImpasseDecisionKinds.PHASE76E,
@@ -663,6 +706,8 @@ export function buildWorldSimulationFormalImpasseResolverReplay(priorSubmissions
     return decisions;
   };
   return {
+    persistentMoodInterpretationResolver:
+      singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE89B),
     experientialKnowledgeReentryResolver:
       singleCharacterReplay(worldSimulationFormalImpasseDecisionKinds.PHASE76D),
     experientialMethodTransferResolver:
