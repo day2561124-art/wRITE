@@ -261,6 +261,7 @@ export const phase88RetrievalConditionedDeliberationGroundingSteps = Object.free
 
 export const phase89PersistentAffectiveToneSteps = Object.freeze([
   Object.freeze(["Phase 89A bounded persistent affective-tone evidence", Object.freeze(["tests/phase89/phase89a-bounded-persistent-affective-tone-evidence.test.mjs"])]),
+  Object.freeze(["Phase 89B bounded qualitative persistent mood interpretation", Object.freeze(["tests/phase89/phase89b-bounded-qualitative-persistent-mood-interpretation.test.mjs"])]),
 ]);
 
 export const phase62CognitionIntegrationSteps = Object.freeze(
