@@ -5978,11 +5978,22 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
 // Discovery must not wait for potentially large on-disk recovery scans.
 // Every operation beyond protocol discovery still awaits the same fail-closed gate.
+function publishRuntimeReadiness(status) {
+  if (typeof process.send !== "function" || process.connected === false) return;
+  try {
+    process.send({
+      protocol: "writer-workbench/runtime-readiness/v1",
+      kind: "status",
+      status,
+    }, () => {});
+  } catch {}
+}
+
 const ensureRuntimeReady = createRuntimeReadiness([
   ["journal", initializeDevJournalRuntime],
   ["checkpoint", initializeDevCheckpointRuntime],
   ["transaction", initializeDevTransactionRuntime],
-]);
+], () => {}, publishRuntimeReadiness);
 
 process.stdin.on("data", (chunk) => {
   acceptInputChunk(chunk);

@@ -8,6 +8,26 @@ import { terminateProcessTree } from './process-control.mjs';
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
 // and provide helpers to forward JSON-RPC messages via newline framing.
 
+const DEFAULT_CHILD_CALL_TIMEOUT_MS = 120_000;
+const DEFAULT_RECOVERY_MAX_ATTEMPTS = 3;
+const DEFAULT_RECOVERY_WINDOW_MS = 60_000;
+const DEFAULT_RECOVERY_BASE_DELAY_MS = 100;
+const DEFAULT_RECOVERY_MAX_DELAY_MS = 2_000;
+const RUNTIME_READINESS_PROTOCOL = 'writer-workbench/runtime-readiness/v1';
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) return fallback;
+  return parsed;
+}
+
+function reliabilityError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
 function encodeMessage(message, framing = 'line') {
   const json = JSON.stringify(message);
   if (framing === 'header') {
@@ -18,20 +38,101 @@ function encodeMessage(message, framing = 'line') {
 
 export function createStdioSession(options = {}) {
   const listeners = new Map();
+  const spawnProcess = options.spawnProcess ?? spawn;
   let child = null;
   let stdoutBuffer = '';
   let initializeRequest = null;
   let initializedNotification = null;
   let generation = 0;
   let restarting = false;
+  let recovering = false;
+  let recoveryPromise = null;
+  let recoveryBlockedReason = null;
+  let lastRecovery = null;
+  const recoveryAttemptTimestamps = [];
   let closed = false;
   let lastExit = null;
+  let runtimeReadiness = {
+    state: 'unverified',
+    current_step: null,
+    started_at: null,
+    completed_at: null,
+    failed_at: null,
+    last_error: null,
+    generation: 0,
+  };
+  const callTimeoutMs = boundedInteger(
+    options.callTimeoutMs ?? process.env.MCP_HTTP_CHILD_CALL_TIMEOUT_MS,
+    DEFAULT_CHILD_CALL_TIMEOUT_MS,
+    100,
+    30 * 60 * 1000,
+  );
+  const recoveryMaxAttempts = boundedInteger(
+    options.recoveryMaxAttempts ?? process.env.MCP_HTTP_CHILD_RECOVERY_MAX_ATTEMPTS,
+    DEFAULT_RECOVERY_MAX_ATTEMPTS,
+    1,
+    10,
+  );
+  const recoveryWindowMs = boundedInteger(
+    options.recoveryWindowMs ?? process.env.MCP_HTTP_CHILD_RECOVERY_WINDOW_MS,
+    DEFAULT_RECOVERY_WINDOW_MS,
+    1_000,
+    60 * 60 * 1000,
+  );
+  const recoveryBaseDelayMs = boundedInteger(
+    options.recoveryBaseDelayMs ?? process.env.MCP_HTTP_CHILD_RECOVERY_BASE_DELAY_MS,
+    DEFAULT_RECOVERY_BASE_DELAY_MS,
+    0,
+    60_000,
+  );
+  const recoveryMaxDelayMs = boundedInteger(
+    options.recoveryMaxDelayMs ?? process.env.MCP_HTTP_CHILD_RECOVERY_MAX_DELAY_MS,
+    DEFAULT_RECOVERY_MAX_DELAY_MS,
+    recoveryBaseDelayMs,
+    60_000,
+  );
+
+  function settleListener(id, error, response) {
+    const entry = listeners.get(id);
+    if (!entry) return false;
+    listeners.delete(id);
+    if (entry.timer) clearTimeout(entry.timer);
+    try {
+      entry.callback(error, response);
+    } catch (listenerError) {
+      console.error('listener callback threw', listenerError);
+    }
+    return true;
+  }
 
   function notifyPendingListeners(error) {
-    for (const [id, cb] of listeners.entries()) {
-      try { cb(error, null); } catch (listenerError) { console.error('listener threw while handling child failure', listenerError); }
-      listeners.delete(id);
+    for (const id of [...listeners.keys()]) {
+      settleListener(id, error, null);
     }
+  }
+
+  function registerListener(id, callback, options = {}) {
+    const timeoutMs = boundedInteger(options.timeoutMs, callTimeoutMs, 100, 30 * 60 * 1000);
+    const listenerGeneration = generation;
+    const timer = setTimeout(() => {
+      const entry = listeners.get(id);
+      if (!entry || entry.generation !== listenerGeneration) return;
+      const error = reliabilityError(
+        'CHILD_HUNG',
+        `MCP child call timed out after ${timeoutMs}ms`,
+        { request_id: id, generation: listenerGeneration, timeout_ms: timeoutMs },
+      );
+      notifyPendingListeners(error);
+      if (options.recoverOnTimeout !== false && initializedNotification) {
+        void scheduleRecovery('call_timeout');
+      }
+    }, timeoutMs);
+    listeners.set(id, {
+      callback,
+      timer,
+      generation: listenerGeneration,
+      internal: options.internal === true,
+    });
   }
 
   function bindChild(nextChild, childGeneration) {
@@ -50,6 +151,23 @@ export function createStdioSession(options = {}) {
         },
       )
       : () => {};
+    const onRuntimeReadinessMessage = (message) => {
+      if (
+        message?.protocol !== RUNTIME_READINESS_PROTOCOL
+        || message?.kind !== 'status'
+        || child !== nextChild
+      ) return;
+      runtimeReadiness = {
+        ...message.status,
+        generation: childGeneration,
+      };
+      try {
+        options.onRuntimeReadiness?.({ ...runtimeReadiness });
+      } catch (error) {
+        console.error('[mcp-server] runtime readiness observer threw', error);
+      }
+    };
+    nextChild.on('message', onRuntimeReadinessMessage);
 
     nextChild.stdout.on('data', (chunk) => {
       stdoutBuffer += chunk.toString('utf8');
@@ -74,10 +192,7 @@ export function createStdioSession(options = {}) {
           try {
             const msg = JSON.parse(jsonText);
             const id = msg.id ?? randomUUID();
-            const cb = listeners.get(id);
-            if (cb) {
-              try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
-            }
+            settleListener(id, null, msg);
           } catch (e) {
             console.error('[mcp-server] JSON parse error (header frame):', e);
           }
@@ -92,10 +207,7 @@ export function createStdioSession(options = {}) {
         try {
           const msg = JSON.parse(line);
           const id = msg.id ?? randomUUID();
-          const cb = listeners.get(id);
-          if (cb) {
-            try { cb(null, msg); } catch (err) { console.error('listener callback threw', err); }
-          }
+          settleListener(id, null, msg);
         } catch (e) {
           console.warn('[mcp-server] ignoring non-JSON stdout line:', line.slice(0, 200));
         }
@@ -112,39 +224,47 @@ export function createStdioSession(options = {}) {
         `[mcp-server child error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}]`,
         err,
       );
-      if (child === nextChild) {
-        notifyPendingListeners(new Error(
-          `child process error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}: ${err?.message ?? String(err)}`,
+      if (child === nextChild && !closed) {
+        notifyPendingListeners(reliabilityError(
+          'CHILD_DEAD',
+          `MCP child process error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}: ${err?.message ?? String(err)}`,
+          { child_pid: nextChild.pid ?? null, generation: childGeneration },
         ));
+        if (!restarting && !recovering && initializedNotification) void scheduleRecovery('child_error');
       }
     });
 
     nextChild.on('exit', (code, signal) => {
       detachPreparedTurnBrokerIpc();
       detachWorkspaceSnapshotAuthorityIpc();
+      nextChild.off('message', onRuntimeReadinessMessage);
       lastExit = {
         child_pid: nextChild.pid ?? null,
         generation: childGeneration,
         exit_code: code,
         signal: signal ?? null,
         restarting,
+        recovering,
         closed,
         exited_at: new Date().toISOString(),
       };
       console.error(
-        `[mcp-server] child exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal} restarting=${lastExit.restarting} closed=${lastExit.closed}`,
+        `[mcp-server] child exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal} restarting=${lastExit.restarting} recovering=${lastExit.recovering} closed=${lastExit.closed}`,
       );
-      if (child === nextChild && !restarting && !closed) {
-        notifyPendingListeners(new Error(
-          `child process exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal}`,
+      if (child === nextChild && !restarting && !recovering && !closed) {
+        notifyPendingListeners(reliabilityError(
+          'CHILD_DEAD',
+          `MCP child process exited pid=${lastExit.child_pid} generation=${lastExit.generation} code=${lastExit.exit_code} signal=${lastExit.signal}`,
+          { ...lastExit },
         ));
+        if (initializedNotification) void scheduleRecovery('child_exit');
       }
     });
   }
 
   function spawnChild() {
     stdoutBuffer = '';
-    const nextChild = spawn(process.execPath, ['server/src/mcp-server.mjs'], {
+    const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs'], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -158,6 +278,15 @@ export function createStdioSession(options = {}) {
     });
     generation += 1;
     child = nextChild;
+    runtimeReadiness = {
+      state: 'unverified',
+      current_step: null,
+      started_at: null,
+      completed_at: null,
+      failed_at: null,
+      last_error: null,
+      generation,
+    };
     bindChild(nextChild, generation);
     return nextChild;
   }
@@ -184,6 +313,147 @@ export function createStdioSession(options = {}) {
     }
   }
 
+  function trimRecoveryBudget(now = Date.now()) {
+    while (
+      recoveryAttemptTimestamps.length > 0
+      && now - recoveryAttemptTimestamps[0] >= recoveryWindowMs
+    ) {
+      recoveryAttemptTimestamps.shift();
+    }
+  }
+
+  function recoveryDelayMs(attemptNumber) {
+    if (attemptNumber <= 1 || recoveryBaseDelayMs === 0) return 0;
+    const exponential = Math.min(
+      recoveryMaxDelayMs,
+      recoveryBaseDelayMs * (2 ** (attemptNumber - 2)),
+    );
+    const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(exponential * 0.25)));
+    return Math.min(recoveryMaxDelayMs, exponential + jitter);
+  }
+
+  async function waitForRecoveryDelay(delayMs) {
+    if (delayMs <= 0) return;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, delayMs);
+      timer.unref?.();
+    });
+  }
+
+  async function replayLifecycleAfterSpawn() {
+    if (!initializeRequest || !initializedNotification) {
+      throw reliabilityError(
+        'CHILD_RECOVERY_UNAVAILABLE',
+        'MCP session lifecycle is incomplete and cannot be recovered.',
+      );
+    }
+    const replayInitialize = structuredClone(initializeRequest);
+    replayInitialize.id = `recovery-${randomUUID()}`;
+    const initializeResponse = await internalCall(replayInitialize, {
+      timeoutMs: callTimeoutMs,
+      recoverOnTimeout: false,
+    });
+    if (initializeResponse?.error) {
+      throw reliabilityError(
+        'CHILD_RECOVERY_FAILED',
+        `Recovered MCP child initialize failed: ${initializeResponse.error.message ?? 'unknown error'}`,
+      );
+    }
+    const frame = encodeMessage(structuredClone(initializedNotification), 'line');
+    child.stdin.write(frame);
+  }
+
+  function scheduleRecovery(trigger) {
+    if (closed) return Promise.resolve(null);
+    if (runtimeReadiness.state === 'failed') {
+      recoveryBlockedReason = 'runtime_readiness_failed';
+      lastRecovery = {
+        ok: false,
+        trigger,
+        blocked_reason: recoveryBlockedReason,
+        attempts: 0,
+        completed_at: new Date().toISOString(),
+      };
+      return Promise.resolve(lastRecovery);
+    }
+    if (!initializeRequest || !initializedNotification) {
+      recoveryBlockedReason = 'session_lifecycle_incomplete';
+      return Promise.resolve(null);
+    }
+    if (restarting) {
+      recoveryBlockedReason = 'manual_restart_in_progress';
+      return Promise.resolve(null);
+    }
+    if (recoveryPromise) return recoveryPromise;
+
+    recoveryPromise = (async () => {
+      recovering = true;
+      recoveryBlockedReason = null;
+      const startedAt = new Date().toISOString();
+      let attempts = 0;
+      let lastError = null;
+
+      try {
+        while (attempts < recoveryMaxAttempts && !closed) {
+          const now = Date.now();
+          trimRecoveryBudget(now);
+          if (recoveryAttemptTimestamps.length >= recoveryMaxAttempts) {
+            recoveryBlockedReason = 'recovery_budget_exhausted';
+            break;
+          }
+
+          recoveryAttemptTimestamps.push(now);
+          attempts += 1;
+          await waitForRecoveryDelay(recoveryDelayMs(attempts));
+
+          const previousChild = child;
+          try {
+            await stopChild(previousChild);
+            spawnChild();
+            await replayLifecycleAfterSpawn();
+            lastRecovery = {
+              ok: true,
+              trigger,
+              attempts,
+              started_at: startedAt,
+              completed_at: new Date().toISOString(),
+              child_pid: child?.pid ?? null,
+              generation,
+            };
+            recoveryBlockedReason = null;
+            return lastRecovery;
+          } catch (error) {
+            lastError = error;
+            console.error(
+              `[mcp-server] child recovery attempt failed trigger=${trigger} attempt=${attempts} generation=${generation}`,
+              error,
+            );
+            const failedChild = child;
+            await stopChild(failedChild).catch(() => {});
+          }
+        }
+
+        if (!recoveryBlockedReason) recoveryBlockedReason = 'recovery_attempts_exhausted';
+        lastRecovery = {
+          ok: false,
+          trigger,
+          attempts,
+          started_at: startedAt,
+          completed_at: new Date().toISOString(),
+          blocked_reason: recoveryBlockedReason,
+          error: lastError?.message ?? null,
+        };
+        return lastRecovery;
+      } finally {
+        recovering = false;
+      }
+    })().finally(() => {
+      recoveryPromise = null;
+    });
+
+    return recoveryPromise;
+  }
+
   function captureLifecycleMessage(message) {
     if (!initializeRequest && message?.method === 'initialize' && message.id !== undefined) {
       initializeRequest = structuredClone(message);
@@ -196,17 +466,46 @@ export function createStdioSession(options = {}) {
   function send(message) {
     captureLifecycleMessage(message);
     const frame = encodeMessage(message, 'line');
+    const activeChild = child;
+    if (
+      !activeChild
+      || activeChild.exitCode !== null
+      || activeChild.signalCode !== null
+      || !activeChild.stdin?.writable
+    ) {
+      const error = reliabilityError(
+        'CHILD_DEAD',
+        'MCP child is not writable.',
+        { generation, child_pid: activeChild?.pid ?? null },
+      );
+      const id = message.id ?? null;
+      if (id !== null) settleListener(id, error, null);
+      if (initializedNotification) void scheduleRecovery('write_unavailable');
+      return false;
+    }
     try {
-      child.stdin.write(frame);
-    } catch (e) {
-      console.error('failed to write to child.stdin', e);
-      try {
+      activeChild.stdin.write(frame, (error) => {
+        if (!error) return;
+        console.error('failed to write to child.stdin', error);
         const id = message.id ?? null;
-        if (id) {
-          const cb = listeners.get(id);
-          if (cb) { cb(new Error('failed to write to child.stdin'), null); listeners.delete(id); }
-        }
-      } catch (e2) { console.error('error notifying listener after write failure', e2); }
+        if (id !== null) settleListener(id, reliabilityError(
+          'CHILD_DEAD',
+          `Failed to write to MCP child: ${error.message ?? String(error)}`,
+          { generation, child_pid: activeChild.pid ?? null },
+        ), null);
+        if (initializedNotification) void scheduleRecovery('write_failure');
+      });
+      return true;
+    } catch (error) {
+      console.error('failed to write to child.stdin', error);
+      const id = message.id ?? null;
+      if (id !== null) settleListener(id, reliabilityError(
+        'CHILD_DEAD',
+        `Failed to write to MCP child: ${error.message ?? String(error)}`,
+        { generation, child_pid: activeChild.pid ?? null },
+      ), null);
+      if (initializedNotification) void scheduleRecovery('write_failure');
+      return false;
     }
   }
 
@@ -214,28 +513,38 @@ export function createStdioSession(options = {}) {
     captureLifecycleMessage(message);
     const id = message.id ?? randomUUID();
     message.id = id;
-    listeners.set(id, (err, res) => {
-      listeners.delete(id);
-      cb(err, res);
-    });
+    registerListener(id, cb, { timeoutMs: callTimeoutMs, recoverOnTimeout: true });
     send(message);
   }
 
-  function internalCall(message) {
+  function internalCall(message, options = {}) {
     return new Promise((resolve, reject) => {
       const id = message.id ?? randomUUID();
       message.id = id;
-      listeners.set(id, (err, res) => {
-        listeners.delete(id);
+      registerListener(id, (err, res) => {
         if (err) reject(err);
         else resolve(res);
+      }, {
+        timeoutMs: options.timeoutMs ?? callTimeoutMs,
+        internal: true,
+        recoverOnTimeout: options.recoverOnTimeout === true,
       });
       const frame = encodeMessage(message, 'line');
+      const activeChild = child;
       try {
-        child.stdin.write(frame);
+        if (!activeChild?.stdin?.writable) {
+          throw reliabilityError('CHILD_DEAD', 'MCP child is not writable.');
+        }
+        activeChild.stdin.write(frame, (error) => {
+          if (!error) return;
+          settleListener(id, reliabilityError(
+            'CHILD_DEAD',
+            `Failed to write internal MCP child request: ${error.message ?? String(error)}`,
+            { generation, child_pid: activeChild.pid ?? null },
+          ), null);
+        });
       } catch (error) {
-        listeners.delete(id);
-        reject(error);
+        settleListener(id, error, null);
       }
     });
   }
@@ -243,6 +552,7 @@ export function createStdioSession(options = {}) {
   async function restart() {
     if (closed) throw new Error('MCP stdio session is closed.');
     if (restarting) throw new Error('MCP stdio session reload is already in progress.');
+    if (recovering || recoveryPromise) throw new Error('MCP stdio session recovery is already in progress.');
     if (listeners.size > 0) throw new Error('MCP child has active tool calls and cannot be reloaded.');
     if (!initializeRequest) throw new Error('MCP session has not completed initialize and cannot be reloaded.');
 
@@ -254,7 +564,10 @@ export function createStdioSession(options = {}) {
       const nextChild = spawnChild();
       const replayInitialize = structuredClone(initializeRequest);
       replayInitialize.id = `reload-${randomUUID()}`;
-      const initializeResponse = await internalCall(replayInitialize);
+      const initializeResponse = await internalCall(replayInitialize, {
+        timeoutMs: callTimeoutMs,
+        recoverOnTimeout: false,
+      });
       if (initializeResponse?.error) {
         throw new Error(`Reloaded MCP child initialize failed: ${initializeResponse.error.message ?? 'unknown error'}`);
       }
@@ -262,6 +575,9 @@ export function createStdioSession(options = {}) {
         const frame = encodeMessage(structuredClone(initializedNotification), 'line');
         nextChild.stdin.write(frame);
       }
+      recoveryAttemptTimestamps.length = 0;
+      recoveryBlockedReason = null;
+      lastRecovery = null;
       return {
         previous_child_pid: previousChildPid,
         child_pid: nextChild.pid,
@@ -277,11 +593,31 @@ export function createStdioSession(options = {}) {
   }
 
   function getStatus() {
+    trimRecoveryBudget();
+    const activeChild = child;
+    const childAlive = Boolean(
+      activeChild
+      && activeChild.exitCode === null
+      && activeChild.signalCode === null
+      && !closed
+    );
     return {
-      child_pid: child?.pid ?? null,
+      child_pid: activeChild?.pid ?? null,
+      child_alive: childAlive,
       generation,
       pending_calls: listeners.size,
+      call_timeout_ms: callTimeoutMs,
       restarting,
+      recovering,
+      recovery_blocked_reason: recoveryBlockedReason,
+      recovery_budget: {
+        max_attempts: recoveryMaxAttempts,
+        window_ms: recoveryWindowMs,
+        attempts_in_window: recoveryAttemptTimestamps.length,
+        remaining_attempts: Math.max(0, recoveryMaxAttempts - recoveryAttemptTimestamps.length),
+      },
+      last_recovery: lastRecovery,
+      runtime_readiness: { ...runtimeReadiness },
       closed,
       initialized: initializeRequest !== null,
       last_exit: lastExit,

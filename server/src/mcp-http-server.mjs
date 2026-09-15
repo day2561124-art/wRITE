@@ -688,12 +688,113 @@ function createBridgeSession() {
   return entry;
 }
 
+function sessionReadiness(entry) {
+  if (!entry || entry.closed) {
+    return {
+      ready: false,
+      code: 'SESSION_NOT_FOUND',
+      reason: 'session_not_found',
+      child: null,
+    };
+  }
+
+  const child = entry.session.getStatus();
+  const runtime = child.runtime_readiness ?? { state: 'idle' };
+  let code = null;
+  let reason = null;
+
+  if (!child.child_alive) {
+    code = 'CHILD_DEAD';
+    reason = 'child_not_alive';
+  } else if (child.recovering) {
+    code = 'CHILD_RECOVERING';
+    reason = 'child_recovery_in_progress';
+  } else if (child.recovery_blocked_reason) {
+    code = runtime.state === 'failed' ? 'RUNTIME_NOT_READY' : 'CHILD_RECOVERY_BLOCKED';
+    reason = child.recovery_blocked_reason;
+  } else if (runtime.state !== 'ready') {
+    code = 'RUNTIME_NOT_READY';
+    reason = runtime.state === 'failed'
+      ? 'runtime_recovery_failed'
+      : `runtime_recovery_${runtime.state ?? 'unknown'}`;
+  }
+
+  return {
+    ready: code === null,
+    code,
+    reason,
+    child,
+  };
+}
+
+function readinessAggregate() {
+  const entries = [...bridgeEntries].filter((entry) => !entry.closed);
+  const snapshots = entries.map((entry) => sessionReadiness(entry));
+  return {
+    session_count: entries.length,
+    ready_session_count: snapshots.filter((snapshot) => snapshot.ready).length,
+    recovering_session_count: snapshots.filter((snapshot) => snapshot.code === 'CHILD_RECOVERING').length,
+    failed_session_count: snapshots.filter((snapshot) => (
+      snapshot.code === 'CHILD_DEAD'
+      || snapshot.code === 'CHILD_RECOVERY_BLOCKED'
+      || snapshot.reason === 'runtime_recovery_failed'
+    )).length,
+  };
+}
+
+function writeHealthJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(payload));
+}
+
 const instanceIdentity = { ...getMcpIdentity(), pid: process.pid, instanceId: randomUUID(),
   startedAt: new Date().toISOString(), profile: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public' };
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(instanceIdentity));
+    writeHealthJson(res, 200, instanceIdentity);
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/live') {
+    writeHealthJson(res, 200, {
+      ...instanceIdentity,
+      live: true,
+      component: 'http_parent',
+      uptime_ms: Math.round(process.uptime() * 1000),
+      ...readinessAggregate(),
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/ready') {
+    const readinessSessionId = getSessionId(req);
+    if (!readinessSessionId) {
+      writeHealthJson(res, 503, {
+        ...instanceIdentity,
+        ready: false,
+        code: 'SESSION_REQUIRED',
+        reason: 'Mcp-Session-Id is required for session-scoped readiness.',
+        ...readinessAggregate(),
+      });
+      return;
+    }
+    const entry = sessions.get(readinessSessionId);
+    if (!entry) {
+      writeHealthJson(res, 404, {
+        ...instanceIdentity,
+        ready: false,
+        code: 'SESSION_NOT_FOUND',
+        session_id: readinessSessionId,
+      });
+      return;
+    }
+    const readiness = sessionReadiness(entry);
+    writeHealthJson(res, readiness.ready ? 200 : 503, {
+      ...instanceIdentity,
+      ...readiness,
+      session_id: readinessSessionId,
+    });
     return;
   }
   if (req.url !== '/mcp') {
