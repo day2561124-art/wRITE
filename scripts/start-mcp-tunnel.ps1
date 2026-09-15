@@ -27,6 +27,66 @@ $OriginUrl = "http://127.0.0.1:$McpPort"
 $RegistrationPattern = "Registered tunnel connection"
 $QuicFailurePattern = "Failed to dial a quic connection|QUIC connection failed|UDP Connectivity[^\r\n]*FAIL"
 $QuickTunnelUrlPattern = "https://[a-zA-Z0-9-]+\.trycloudflare\.com"
+$ConfiguredTunnelMode = if ($env:WRITER_MCP_TUNNEL_MODE) { [string]$env:WRITER_MCP_TUNNEL_MODE } else { "auto" }
+$ConfiguredTunnelHostname = if ($env:WRITER_MCP_TUNNEL_HOSTNAME) { [string]$env:WRITER_MCP_TUNNEL_HOSTNAME } else { "" }
+$ConfiguredTunnelToken = if ($env:WRITER_MCP_TUNNEL_TOKEN) { [string]$env:WRITER_MCP_TUNNEL_TOKEN } else { "" }
+$ConfiguredTunnelTokenFile = if ($env:WRITER_MCP_TUNNEL_TOKEN_FILE) { [string]$env:WRITER_MCP_TUNNEL_TOKEN_FILE } else { "" }
+
+function Resolve-TunnelConfiguration {
+  $mode = $ConfiguredTunnelMode.Trim().ToLowerInvariant()
+  if ($mode -notin @("auto", "named", "quick")) {
+    throw "WRITER_MCP_TUNNEL_MODE must be auto, named, or quick."
+  }
+
+  $hostname = $ConfiguredTunnelHostname.Trim().TrimEnd(".").ToLowerInvariant()
+  $token = if ($env:TUNNEL_TOKEN) { [string]$env:TUNNEL_TOKEN } else { $ConfiguredTunnelToken }
+  $tokenFile = if ($env:TUNNEL_TOKEN_FILE) { [string]$env:TUNNEL_TOKEN_FILE } else { $ConfiguredTunnelTokenFile }
+  $hasHostname = -not [string]::IsNullOrWhiteSpace($hostname)
+  $hasToken = -not [string]::IsNullOrWhiteSpace($token)
+  $hasTokenFile = -not [string]::IsNullOrWhiteSpace($tokenFile)
+
+  if ($hasToken -and $hasTokenFile) {
+    throw "Configure only one of TUNNEL_TOKEN/WRITER_MCP_TUNNEL_TOKEN or TUNNEL_TOKEN_FILE/WRITER_MCP_TUNNEL_TOKEN_FILE."
+  }
+
+  $hasAnyNamedSetting = $hasHostname -or $hasToken -or $hasTokenFile
+  $hasCompleteNamedSetting = $hasHostname -and ($hasToken -or $hasTokenFile)
+  if ($mode -eq "auto") {
+    if ($hasCompleteNamedSetting) { $mode = "named" }
+    elseif ($hasAnyNamedSetting) { throw "Named tunnel configuration is incomplete: set WRITER_MCP_TUNNEL_HOSTNAME and exactly one tunnel token source." }
+    else { $mode = "quick" }
+  }
+
+  if ($mode -eq "named") {
+    if (-not $hasCompleteNamedSetting) {
+      throw "Named tunnel mode requires WRITER_MCP_TUNNEL_HOSTNAME and exactly one tunnel token source."
+    }
+    if ([Uri]::CheckHostName($hostname) -ne [UriHostNameType]::Dns) {
+      throw "WRITER_MCP_TUNNEL_HOSTNAME must be a DNS hostname without scheme, path, or port."
+    }
+    if ($hasTokenFile) {
+      $tokenFile = [IO.Path]::GetFullPath($tokenFile)
+      if (-not (Test-Path -LiteralPath $tokenFile -PathType Leaf)) {
+        throw "Configured tunnel token file does not exist."
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    Mode = $mode
+    StableHostname = if ($mode -eq "named") { $hostname } else { $null }
+    BaseUrl = if ($mode -eq "named") { "https://$hostname" } else { $null }
+    Token = if ($mode -eq "named" -and $hasToken) { $token } else { $null }
+    TokenFile = if ($mode -eq "named" -and $hasTokenFile) { $tokenFile } else { $null }
+  }
+}
+
+function Clear-TunnelCredentialEnvironment {
+  Remove-Item Env:\TUNNEL_TOKEN -ErrorAction SilentlyContinue
+  Remove-Item Env:\TUNNEL_TOKEN_FILE -ErrorAction SilentlyContinue
+  Remove-Item Env:\WRITER_MCP_TUNNEL_TOKEN -ErrorAction SilentlyContinue
+  Remove-Item Env:\WRITER_MCP_TUNNEL_TOKEN_FILE -ErrorAction SilentlyContinue
+}
 
 function Invoke-McpProbe {
   param([string]$Endpoint, [string]$Mode = "probe", [string]$ExpectedInstance = "")
@@ -80,8 +140,14 @@ function Get-ManagedProcess {
 
   $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction SilentlyContinue
   if (-not $cim -or -not $cim.CommandLine -or -not $State.originUrl) { return $null }
-  $originPattern = '--url\s+"?' + [regex]::Escape([string]$State.originUrl) + '(?:"|\s|$)'
-  if ($cim.CommandLine -notmatch $originPattern) { return $null }
+  $mode = if ($State.mode) { [string]$State.mode } else { "quick" }
+  if ($mode -eq "named") {
+    if ($cim.CommandLine -notmatch '(?i)(?:^|\s)tunnel(?:\s|$)' -or $cim.CommandLine -notmatch '(?i)(?:^|\s)run(?:\s|$)') { return $null }
+    if ($cim.CommandLine -match '(?i)--token(?:\s|=)') { return $null }
+  } else {
+    $originPattern = '--url\s+"?' + [regex]::Escape([string]$State.originUrl) + '(?:"|\s|$)'
+    if ($cim.CommandLine -notmatch $originPattern) { return $null }
+  }
   if ($State.executablePath) {
     if (-not [string]::Equals($cim.ExecutablePath, $State.executablePath, [StringComparison]::OrdinalIgnoreCase)) { return $null }
   } elseif ($cim.Name -ne 'cloudflared.exe') { return $null }
@@ -101,7 +167,10 @@ function Get-AttemptLogText {
 }
 
 function Get-Registration {
-  param([string]$LogText)
+  param(
+    [string]$LogText,
+    [string]$ConfiguredBaseUrl = ""
+  )
 
   if (-not $LogText -or $LogText -notmatch $RegistrationPattern) { return $null }
 
@@ -113,8 +182,13 @@ function Get-Registration {
     $protocol = $Matches[1].ToLowerInvariant()
   }
 
-  $urlMatches = [regex]::Matches($LogText, $QuickTunnelUrlPattern)
-  $baseUrl = if ($urlMatches.Count -gt 0) { $urlMatches[$urlMatches.Count - 1].Value } else { $null }
+  $baseUrl = $null
+  if (-not [string]::IsNullOrWhiteSpace($ConfiguredBaseUrl)) {
+    $baseUrl = $ConfiguredBaseUrl.TrimEnd("/")
+  } else {
+    $urlMatches = [regex]::Matches($LogText, $QuickTunnelUrlPattern)
+    if ($urlMatches.Count -gt 0) { $baseUrl = $urlMatches[$urlMatches.Count - 1].Value }
+  }
   return [pscustomobject]@{
     Protocol = $protocol
     BaseUrl = $baseUrl
@@ -124,48 +198,75 @@ function Get-Registration {
 
 function Get-TunnelStatusInfo {
   $state = Read-TunnelState
+  $localIdentity = Invoke-McpProbe "$OriginUrl/mcp" "identity"
+  $runtimeProbe = if ($localIdentity -and $localIdentity.current) { Invoke-McpProbe "$OriginUrl/mcp" "probe" } else { $null }
+  $localStatus = if ($localIdentity) { "healthy" } else { "unreachable" }
+  $runtimeStatus = if ($runtimeProbe) { "ready" } elseif ($localIdentity) { "not-ready" } else { "unreachable" }
+
   if (-not $state) {
     $unmanaged = Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object -First 1
     return [pscustomobject]@{
       ProcessRunning = [bool]$unmanaged
       Pid = if ($unmanaged) { $unmanaged.Id } else { $null }
       Status = if ($unmanaged) { "unverified" } else { "failed" }
+      Mode = "unmanaged"
       Protocol = $null
       McpUrl = $null
+      LocalStatus = $localStatus
+      RuntimeStatus = $runtimeStatus
+      RemoteStatus = "unverified"
       State = $null
     }
   }
 
   $process = Get-ManagedProcess $state
   $logText = Get-AttemptLogText $state
-  $registration = Get-Registration $logText
+  $mode = if ($state.mode) { [string]$state.mode } else { "quick" }
+  $configuredBaseUrl = if ($mode -eq "named" -and $state.stableHostname) { "https://$($state.stableHostname)" } else { "" }
+  $registration = Get-Registration $logText $configuredBaseUrl
   $hasFailure = ($logText -match $QuicFailurePattern)
+  $remoteStatus = "unverified"
 
   if ($process -and $registration) {
     $statusName = "registered / unverified"
     if ($state.originUrl -eq $OriginUrl -and $state.mcpInstanceId -and $registration.McpUrl) {
       $verified = Invoke-McpProbe $registration.McpUrl "probe" $state.mcpInstanceId
-      if ($verified) { $statusName = "registered / healthy" }
+      if ($verified) {
+        $statusName = "registered / healthy"
+        $remoteStatus = "healthy"
+      } else {
+        $remoteStatus = "unreachable-or-not-ready"
+      }
     }
   } elseif ($process -and -not $hasFailure -and $state.status -eq "connecting") {
     $statusName = "connecting"
+    $remoteStatus = "connecting"
   } else {
     $statusName = "failed"
+    $remoteStatus = "failed"
   }
 
   return [pscustomobject]@{
     ProcessRunning = [bool]$process
     Pid = if ($process) { $process.Id } else { $state.pid }
     Status = $statusName
+    Mode = $mode
     Protocol = if ($registration.Protocol) { $registration.Protocol } else { $state.protocol }
     McpUrl = if ($statusName -eq "registered / healthy") { $registration.McpUrl } else { $null }
+    LocalStatus = $localStatus
+    RuntimeStatus = $runtimeStatus
+    RemoteStatus = $remoteStatus
     State = $state
   }
 }
 
 function Show-TunnelStatus {
   $info = Get-TunnelStatusInfo
+  Write-Host "Local MCP: $($info.LocalStatus)"
+  Write-Host "Runtime readiness: $($info.RuntimeStatus)"
   Write-Host "Cloudflare process: $(if ($info.ProcessRunning) { "running (PID $($info.Pid))" } else { "stopped" })"
+  Write-Host "Tunnel mode: $($info.Mode)"
+  Write-Host "Remote transport: $($info.RemoteStatus)"
   Write-Host "Tunnel status: $($info.Status)" -ForegroundColor $(if ($info.Status -eq "registered / healthy") { "Green" } elseif ($info.Status -eq "connecting") { "Yellow" } else { "Red" })
   if ($info.Protocol) { Write-Host "Tunnel protocol: $($info.Protocol)" }
   if ($info.McpUrl) {
@@ -277,27 +378,55 @@ function Start-CloudflaredAttempt {
     $Cloudflared,
     [ValidateSet("auto", "http2")]
     [string]$Protocol,
-    [string]$Fallback
+    [string]$Fallback,
+    $TunnelConfig
   )
 
   $attemptId = "{0}-{1}-{2}" -f (Get-Date -Format "yyyyMMdd-HHmmssfff"), $Protocol, ([Guid]::NewGuid().ToString("N").Substring(0, 8))
   $cfOut = Join-Path $LogDir "cloudflared.$attemptId.stdout.log"
   $cfErr = Join-Path $LogDir "cloudflared.$attemptId.stderr.log"
+  $mode = [string]$TunnelConfig.Mode
 
-  Write-Host "Starting Cloudflare quick tunnel with protocol=$Protocol..." -ForegroundColor Cyan
-  Write-TunnelEvent "action=start attempt=$attemptId requested_protocol=$Protocol fallback=$Fallback origin=$OriginUrl"
-  $cloudflaredArguments = @($CloudflaredPrefixArguments) + @("tunnel", "--protocol", $Protocol, "--url", $OriginUrl)
-  $process = Start-Process `
-    -FilePath $Cloudflared.Source `
-    -ArgumentList $cloudflaredArguments `
-    -WorkingDirectory $Root `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $cfOut `
-    -RedirectStandardError $cfErr `
-    -PassThru
+  Write-Host "Starting Cloudflare $mode tunnel with protocol=$Protocol..." -ForegroundColor Cyan
+  Write-TunnelEvent "action=start attempt=$attemptId mode=$mode requested_protocol=$Protocol fallback=$Fallback origin=$OriginUrl stable_hostname=$($TunnelConfig.StableHostname)"
+  $cloudflaredArguments = if ($mode -eq "named") {
+    @($CloudflaredPrefixArguments) + @("tunnel", "--protocol", $Protocol, "run")
+  } else {
+    @($CloudflaredPrefixArguments) + @("tunnel", "--protocol", $Protocol, "--url", $OriginUrl)
+  }
+
+  $hadTunnelToken = Test-Path Env:\TUNNEL_TOKEN
+  $hadTunnelTokenFile = Test-Path Env:\TUNNEL_TOKEN_FILE
+  $originalTunnelToken = $env:TUNNEL_TOKEN
+  $originalTunnelTokenFile = $env:TUNNEL_TOKEN_FILE
+  try {
+    if ($mode -eq "named") {
+      if ($TunnelConfig.Token) {
+        $env:TUNNEL_TOKEN = [string]$TunnelConfig.Token
+        Remove-Item Env:\TUNNEL_TOKEN_FILE -ErrorAction SilentlyContinue
+      } else {
+        $env:TUNNEL_TOKEN_FILE = [string]$TunnelConfig.TokenFile
+        Remove-Item Env:\TUNNEL_TOKEN -ErrorAction SilentlyContinue
+      }
+    }
+    $process = Start-Process `
+      -FilePath $Cloudflared.Source `
+      -ArgumentList $cloudflaredArguments `
+      -WorkingDirectory $Root `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $cfOut `
+      -RedirectStandardError $cfErr `
+      -PassThru
+  } finally {
+    if ($hadTunnelToken) { $env:TUNNEL_TOKEN = $originalTunnelToken } else { Remove-Item Env:\TUNNEL_TOKEN -ErrorAction SilentlyContinue }
+    if ($hadTunnelTokenFile) { $env:TUNNEL_TOKEN_FILE = $originalTunnelTokenFile } else { Remove-Item Env:\TUNNEL_TOKEN_FILE -ErrorAction SilentlyContinue }
+  }
 
   $state = [pscustomobject]@{
-    version = 2
+    version = 3
+    mode = $mode
+    stableHostname = $TunnelConfig.StableHostname
+    credentialSource = if ($mode -eq "named" -and $TunnelConfig.TokenFile) { "token_file" } elseif ($mode -eq "named") { "token_env" } else { "none" }
     executablePath = $Cloudflared.Source
     attemptId = $attemptId
     pid = $process.Id
@@ -308,7 +437,7 @@ function Start-CloudflaredAttempt {
     fallback = $Fallback
     mcpInstanceId = $current.instanceId
     originUrl = $OriginUrl
-    baseUrl = $null
+    baseUrl = $TunnelConfig.BaseUrl
     mcpUrl = $null
     stdoutLog = $cfOut
     stderrLog = $cfErr
@@ -334,7 +463,8 @@ function Wait-ForTunnelRegistration {
       return [pscustomobject]@{ Registered = $false; Reason = "process-exited-$($Attempt.Process.ExitCode)"; Registration = $null }
     }
     $logText = Get-AttemptLogText $Attempt.State
-    $registration = Get-Registration $logText
+    $configuredBaseUrl = if ($Attempt.State.mode -eq "named") { [string]$Attempt.State.baseUrl } else { "" }
+    $registration = Get-Registration $logText $configuredBaseUrl
     if ($registration) {
       return [pscustomobject]@{ Registered = $true; Reason = $null; Registration = $registration }
     }
@@ -389,6 +519,13 @@ try {
 
   $cloudflared = Resolve-Cloudflared
   if (-not $cloudflared) { exit 1 }
+  $tunnelConfig = Resolve-TunnelConfiguration
+  Clear-TunnelCredentialEnvironment
+  if ($tunnelConfig.Mode -eq "named") {
+    Write-Host "Stable Cloudflare tunnel configured for $($tunnelConfig.StableHostname)." -ForegroundColor Green
+  } else {
+    Write-Host "Quick Tunnel development fallback selected; the public hostname is temporary." -ForegroundColor Yellow
+  }
   Set-BackendGenerationProviderDefaults
 
   Write-Host "`n=== 1. MCP HTTP server ==="
@@ -461,10 +598,10 @@ try {
   }
   Write-Host "MCP_PORT=$McpPort"
 
-  Write-Host "`n=== 2. Cloudflare quick tunnel ==="
+  Write-Host "`n=== 2. Cloudflare tunnel ($($tunnelConfig.Mode)) ==="
   Stop-ManagedTunnel "restart-before-new-attempt" | Out-Null
 
-  $autoAttempt = Start-CloudflaredAttempt $cloudflared "auto" "none"
+  $autoAttempt = Start-CloudflaredAttempt $cloudflared "auto" "none" $tunnelConfig
   $autoResult = Wait-ForTunnelRegistration $autoAttempt
   if ($autoResult.Registered) {
     Complete-TunnelAttempt $autoAttempt $autoResult.Registration
@@ -475,7 +612,7 @@ try {
     Write-TunnelEvent "action=fallback fallback=quic->http2 failed_attempt=$($autoAttempt.State.attemptId) reason=$($autoResult.Reason)"
     Stop-ManagedTunnel "fallback=quic->http2" | Out-Null
 
-    $http2Attempt = Start-CloudflaredAttempt $cloudflared "http2" "quic->http2"
+    $http2Attempt = Start-CloudflaredAttempt $cloudflared "http2" "quic->http2" $tunnelConfig
     $http2Result = Wait-ForTunnelRegistration $http2Attempt
     if (-not $http2Result.Registered) {
       $http2Attempt.State.status = "failed"
@@ -498,7 +635,7 @@ try {
   Write-Host "TUNNEL_PROTOCOL=$($successfulAttempt.State.protocol)"
   Write-Host "TUNNEL_FALLBACK=$($successfulAttempt.State.fallback)"
   if (-not $successfulRegistration.McpUrl) {
-    Write-Host "Tunnel registered, but this attempt did not emit a Quick Tunnel URL." -ForegroundColor Red
+    Write-Host "Tunnel registered, but no public MCP URL could be resolved for this attempt." -ForegroundColor Red
     exit 1
   }
   $public = $null

@@ -32,13 +32,25 @@ function childEnvironment(overrides = {}) {
   return environment;
 }
 
+function launcherEnvironment(overrides = {}) {
+  return childEnvironment({
+    WRITER_MCP_TUNNEL_MODE: "quick",
+    WRITER_MCP_TUNNEL_HOSTNAME: undefined,
+    WRITER_MCP_TUNNEL_TOKEN: undefined,
+    WRITER_MCP_TUNNEL_TOKEN_FILE: undefined,
+    TUNNEL_TOKEN: undefined,
+    TUNNEL_TOKEN_FILE: undefined,
+    ...overrides,
+  });
+}
+
 function runTunnel(args, expectedStatus, env = {}) {
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tunnelScript, ...args],
     {
       cwd: rootDir,
-      env: childEnvironment(env),
+      env: launcherEnvironment(env),
       encoding: "utf8",
       timeout: 45_000,
       windowsHide: true,
@@ -59,7 +71,7 @@ function runTunnelStart(args, expectedStatus, env = {}) {
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tunnelScript, ...args],
       {
         cwd: rootDir,
-        env: childEnvironment(env),
+        env: launcherEnvironment(env),
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -99,10 +111,19 @@ async function createFakeCloudflared(fixtureDir) {
 
 const protocolIndex = process.argv.indexOf("--protocol");
 const protocol = protocolIndex >= 0 ? process.argv[protocolIndex + 1] : "missing";
-appendFileSync(process.env.FAKE_ARGS_LOG, \`protocol=\${protocol} args=\${process.argv.slice(2).join(" ")}\\n\`);
+const tokenEnvPresent = Boolean(process.env.TUNNEL_TOKEN);
+const tokenFileEnvPresent = Boolean(process.env.TUNNEL_TOKEN_FILE);
+const writerTokenPresent = Boolean(process.env.WRITER_MCP_TUNNEL_TOKEN || process.env.WRITER_MCP_TUNNEL_TOKEN_FILE);
+appendFileSync(
+  process.env.FAKE_ARGS_LOG,
+  \`protocol=\${protocol} args=\${process.argv.slice(2).join(" ")} token_env=\${tokenEnvPresent} token_file_env=\${tokenFileEnvPresent} writer_token_env=\${writerTokenPresent}\\n\`,
+);
 const mode = process.env.FAKE_CLOUDFLARED_MODE;
 
-if (mode === "quic-success" && protocol === "auto") {
+if (mode === "named-success") {
+  process.stderr.write(\`Initial protocol \${protocol === "http2" ? "http2" : "quic"}\\n\`);
+  process.stderr.write(\`Registered tunnel connection connIndex=0 protocol=\${protocol === "http2" ? "http2" : "quic"}\\n\`);
+} else if (mode === "quic-success" && protocol === "auto") {
   process.stderr.write("https://fresh-quic.trycloudflare.com\\n");
   process.stderr.write("Initial protocol quic\\n");
   process.stderr.write("Registered tunnel connection connIndex=0 protocol=quic\\n");
@@ -124,7 +145,10 @@ setInterval(() => {}, 1000);
   await writeFile(preload, `const realFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const url = new URL(input instanceof Request ? input.url : input);
-  if (url.hostname.endsWith('.trycloudflare.com')) {
+  if (
+    url.hostname.endsWith('.trycloudflare.com')
+    || (process.env.FAKE_NAMED_HOSTNAME && url.hostname === process.env.FAKE_NAMED_HOSTNAME)
+  ) {
     const origin = process.env.FAKE_MCP_ORIGIN;
     if (!origin) throw new Error('Missing test tunnel origin');
     const mapped = new URL(url.pathname + url.search, origin);
@@ -1069,6 +1093,81 @@ async function main() {
       "Status did not print the successful fallback MCP URL.",
     );
     await stopManagedTunnel(fallbackLogDir);
+
+    await writeFile(argsLog, "", "utf8");
+    const namedLogDir = path.join(fixtureDir, "named-logs");
+    const stableHostname = "stable-mcp.example.test";
+    const tunnelSecret = "unit-test-tunnel-secret";
+    const namedEnvironment = {
+      FAKE_CLOUDFLARED_MODE: "named-success",
+      FAKE_ARGS_LOG: argsLog,
+      FAKE_NAMED_HOSTNAME: stableHostname,
+      WRITER_MCP_TUNNEL_MODE: "named",
+      WRITER_MCP_TUNNEL_HOSTNAME: stableHostname,
+      WRITER_MCP_TUNNEL_TOKEN: tunnelSecret,
+    };
+    const namedFirst = await runTunnelStart(
+      commonArgs(port, namedLogDir, fakeScript),
+      0,
+      namedEnvironment,
+    );
+    const namedFirstState = await readState(namedLogDir);
+    assert(namedFirstState.version === 3, "Named tunnel state schema must be version 3.");
+    assert(namedFirstState.mode === "named", "Named tunnel state did not record named mode.");
+    assert(namedFirstState.stableHostname === stableHostname, "Named tunnel state did not retain the stable hostname.");
+    assert(namedFirstState.credentialSource === "token_env", "Named tunnel credential source was not recorded safely.");
+    assert(namedFirstState.mcpUrl === `https://${stableHostname}/mcp`, "Named tunnel did not expose the configured stable MCP URL.");
+    assert(namedFirst.stdout.includes(`https://${stableHostname}/mcp`), "Named tunnel launcher did not print the stable MCP URL.");
+    assert(namedFirst.stdout.includes("Stable Cloudflare tunnel configured"), "Named tunnel launcher did not report stable mode.");
+
+    const namedStatus = runTunnel(
+      ["-Status", "-McpPort", String(port), "-LogDirectory", namedLogDir],
+      0,
+      { FAKE_NAMED_HOSTNAME: stableHostname },
+    );
+    assert(namedStatus.stdout.includes("Tunnel mode: named"), "Named tunnel status did not identify named mode.");
+    assert(namedStatus.stdout.includes("Local MCP: healthy"), "Named tunnel status lost local MCP health.");
+    assert(namedStatus.stdout.includes("Runtime readiness: ready"), "Named tunnel status lost runtime readiness.");
+    assert(namedStatus.stdout.includes("Remote transport: healthy"), "Named tunnel status did not report remote transport health separately.");
+
+    const namedSecond = await runTunnelStart(
+      commonArgs(port, namedLogDir, fakeScript),
+      0,
+      namedEnvironment,
+    );
+    const namedSecondState = await readState(namedLogDir);
+    assert(namedSecondState.pid !== namedFirstState.pid, "Named tunnel restart did not replace the cloudflared process.");
+    assert(!isProcessRunning(namedFirstState.pid), "Named tunnel restart left the previous cloudflared process running.");
+    assert(namedSecondState.mcpUrl === namedFirstState.mcpUrl, "Named tunnel restart changed the stable MCP URL.");
+    assert(namedSecond.stdout.includes(namedFirstState.mcpUrl), "Named tunnel restart did not print the same stable MCP URL.");
+
+    const namedInvocations = await readFile(argsLog, "utf8");
+    const namedEvents = await readFile(path.join(namedLogDir, "cloudflared-launcher.log"), "utf8");
+    const namedStateText = await readFile(path.join(namedLogDir, "cloudflared-tunnel.state.json"), "utf8");
+    const namedOutput = `${namedFirst.stdout}\n${namedFirst.stderr}\n${namedSecond.stdout}\n${namedSecond.stderr}\n${namedInvocations}\n${namedEvents}\n${namedStateText}`;
+    assert(namedInvocations.match(/args=.*\brun\b/g)?.length === 2, `Named tunnel should run twice with the run command. Calls: ${namedInvocations}`);
+    assert(!namedInvocations.includes("--url"), `Named tunnel unexpectedly used the Quick Tunnel --url argument. Calls: ${namedInvocations}`);
+    assert(!namedInvocations.includes("--token"), `Named tunnel exposed a token argument in process argv. Calls: ${namedInvocations}`);
+    assert(namedInvocations.match(/token_env=true/g)?.length === 2, "Named tunnel child did not receive TUNNEL_TOKEN through its environment.");
+    assert(!namedInvocations.includes("writer_token_env=true"), "Named tunnel child inherited WRITER_MCP_TUNNEL_TOKEN unexpectedly.");
+    assert(!namedOutput.includes(tunnelSecret), "Named tunnel secret leaked into argv, state, logs, or launcher output.");
+    await stopManagedTunnel(namedLogDir);
+
+    const incompleteNamed = await runTunnelStart(
+      commonArgs(port, path.join(fixtureDir, "incomplete-named-logs"), fakeScript),
+      1,
+      {
+        FAKE_CLOUDFLARED_MODE: "named-success",
+        FAKE_ARGS_LOG: argsLog,
+        WRITER_MCP_TUNNEL_MODE: "auto",
+        WRITER_MCP_TUNNEL_HOSTNAME: stableHostname,
+      },
+    );
+    assert(
+      incompleteNamed.stdout.includes("Named tunnel configuration is incomplete")
+        || incompleteNamed.stderr.includes("Named tunnel configuration is incomplete"),
+      "Incomplete named tunnel configuration did not fail closed.",
+    );
 
     const connectingLogDir = path.join(fixtureDir, "connecting-logs");
     await mkdir(connectingLogDir, { recursive: true });
