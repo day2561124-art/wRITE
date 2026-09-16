@@ -577,6 +577,65 @@ test("terminal create, duplicate create, stale revision, and dirty removal fail 
   }
 });
 
+test("interrupted isolated removal persists removing state and resumes residual cleanup", async () => {
+  const harness = await createGitHarness("remove-resume");
+  try {
+    const workstream = await harness.service.begin({ label: "resumable remove" });
+    const isolated = await harness.service.createIsolated({ workstream_id: workstream.workstream_id });
+    await harness.service.end({ workstream_id: workstream.workstream_id, outcome: "completed" });
+    const absolute = path.join(harness.worktreeRootPath, isolated.workspace_id);
+    let injectResidual = true;
+    let failResidualRemoval = true;
+    const flakyGitRunner = async (args, options = {}) => {
+      if (injectResidual && args[0] === "worktree" && args[1] === "remove" && path.resolve(args[2]) === path.resolve(absolute)) {
+        injectResidual = false;
+        const result = await harness.runGit(args, options);
+        await mkdir(absolute, { recursive: true });
+        await writeFile(path.join(absolute, "residual.txt"), "residual\n", "utf8");
+        return result;
+      }
+      return harness.runGit(args, options);
+    };
+    const flakyService = createDevWorkstreamRegistryService({
+      registryPath: harness.registryPath,
+      headReader: async () => harness.head,
+      repositoryRoot: harness.repositoryRoot,
+      worktreeRootPath: harness.worktreeRootPath,
+      gitRunner: flakyGitRunner,
+      removePath: async (target, options) => {
+        if (failResidualRemoval && path.resolve(target) === path.resolve(absolute)) {
+          failResidualRemoval = false;
+          const error = new Error("simulated EBUSY residual removal");
+          error.code = "EBUSY";
+          throw error;
+        }
+        return rm(target, options);
+      },
+    });
+
+    await assert.rejects(
+      flakyService.removeIsolated({ workspace_id: isolated.workspace_id }),
+      /simulated EBUSY residual removal/u,
+    );
+    const interrupted = await flakyService.getWorkspace({ workspace_id: isolated.workspace_id });
+    assert.equal(interrupted.state, "removing");
+    assert.equal(interrupted.filesystem_path_exists, true);
+    assert.equal(interrupted.git_worktree_mapping_exists, false);
+    assert.equal(interrupted.healthy, false);
+
+    const resumed = await harness.service.removeIsolated({ workspace_id: isolated.workspace_id });
+    assert.equal(resumed.state, "removed");
+    assert.equal(resumed.healthy, true);
+    const removed = await harness.service.getWorkspace({ workspace_id: isolated.workspace_id });
+    assert.equal(removed.state, "removed");
+    assert.equal(removed.filesystem_path_exists, false);
+    assert.equal(removed.git_worktree_mapping_exists, false);
+    assert.equal(removed.healthy, true);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("same-workstream concurrent isolated create yields exactly one workspace", async () => {
   const harness = await createGitHarness("concurrency");
   try {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, mkdir, readFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { commitFileTransaction } from "./file-transactions.mjs";
@@ -543,6 +543,7 @@ export function createDevWorkstreamRegistryService({
   repositoryRoot = projectRoot,
   worktreeRootPath = worktreeRoot,
   gitRunner = runFixedGit,
+  removePath = rm,
 } = {}) {
   const storagePath = normalizeRegistryPath(registryPath);
 
@@ -1124,13 +1125,41 @@ export function createDevWorkstreamRegistryService({
     const workspaceId = input.workspace_id;
     if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
     await assertWorkspaceTransactionAvailable(workspaceId);
-    return mutate("dev_workspace_remove_isolated", async (registry) => {
+
+    const prepared = await mutate("dev_workspace_remove_isolated_prepare", async (registry) => {
       const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
       if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
       assertExpectedRevision(record, input.expected_workstream_revision);
       if (!terminalStateSet.has(record.state)) throw new Error("Isolated workspace removal requires a completed or abandoned workstream.");
       if (record.workspace.state === "removed") throw new Error("Workspace is already removed.");
-      const health = await inspectRegisteredWorkspace(record.workspace);
+
+      let health = await inspectRegisteredWorkspace(record.workspace);
+      const absolutePath = absoluteWorkspacePath(workspaceId);
+      if (record.workspace.state !== "removing"
+        && health.filesystem_path_exists
+        && !health.git_worktree_mapping_exists
+        && health.registry_mapping_consistent) {
+        try {
+          await gitRunner(["worktree", "repair", absolutePath], { cwd: repositoryRoot, timeout: 60_000 });
+        } catch {
+          // Legacy interrupted removals are only recoverable when Git can safely restore the mapping.
+        }
+        health = await inspectRegisteredWorkspace(record.workspace);
+      }
+
+      if (record.workspace.state === "removing") {
+        if (!health.registry_mapping_consistent) throw new Error("Workspace registry mapping is inconsistent; refusing removal recovery.");
+        return (nextRegistry) => {
+          const nextRecord = findRecord(nextRegistry, record.workstream_id);
+          return {
+            workspace: structuredClone(nextRecord.workspace),
+            workstream_revision: nextRecord.revision,
+            registry_revision: nextRegistry.revision,
+            resumed: true,
+          };
+        };
+      }
+
       if (!health.filesystem_path_exists || !health.git_worktree_mapping_exists || !health.registered_branch_matches || !health.registry_mapping_consistent) {
         throw new Error("Workspace mapping is unhealthy; refusing removal.");
       }
@@ -1139,24 +1168,88 @@ export function createDevWorkstreamRegistryService({
         error.code = "WORKSPACE_DIRTY_REMOVE_REJECTED";
         throw error;
       }
+
+      const now = clock().toISOString();
       record.workspace.state = "removing";
-      record.workspace.updated_at = clock().toISOString();
+      record.workspace.locked = health.locked;
+      record.workspace.lock_reason = health.lock_reason;
+      record.workspace.git_worktree_head = health.git_worktree_head;
+      record.workspace.updated_at = now;
       record.workspace.revision += 1;
-      const absolutePath = absoluteWorkspacePath(workspaceId);
+      record.revision += 1;
+      record.updated_at = now;
+      record.last_activity_at = now;
+      return (nextRegistry) => {
+        const nextRecord = findRecord(nextRegistry, record.workstream_id);
+        return {
+          workspace: structuredClone(nextRecord.workspace),
+          workstream_revision: nextRecord.revision,
+          registry_revision: nextRegistry.revision,
+          resumed: false,
+        };
+      };
+    });
+
+    const absolutePath = absoluteWorkspacePath(workspaceId);
+    let health = await inspectRegisteredWorkspace(prepared.workspace);
+    if (health.git_worktree_mapping_exists) {
+      if (!health.filesystem_path_exists || !health.registered_branch_matches || !health.registry_mapping_consistent) {
+        throw new Error("Workspace mapping became unhealthy during removal; refusing destructive cleanup.");
+      }
+      if (health.dirty || health.staged.length > 0 || health.conflicted.length > 0 || health.untracked.length > 0) {
+        const error = new Error("Dirty isolated worktree cannot be removed; tracked, staged, conflicted, and untracked state must be preserved.");
+        error.code = "WORKSPACE_DIRTY_REMOVE_REJECTED";
+        throw error;
+      }
       if (health.locked) await gitRunner(["worktree", "unlock", absolutePath], { cwd: repositoryRoot });
-      await gitRunner(["worktree", "remove", absolutePath], { cwd: repositoryRoot, timeout: 60_000 });
+      try {
+        await gitRunner(["worktree", "remove", absolutePath], { cwd: repositoryRoot, timeout: 60_000 });
+      } catch (error) {
+        const afterFailure = await inspectRegisteredWorkspace(prepared.workspace);
+        if (afterFailure.git_worktree_mapping_exists) throw error;
+      }
+      health = await inspectRegisteredWorkspace(prepared.workspace);
+    }
+
+    if (health.git_worktree_mapping_exists) throw new Error("Git worktree removal verification failed; mapping still exists.");
+    if (!health.registry_mapping_consistent) throw new Error("Workspace registry mapping is inconsistent after Git removal.");
+    if (health.filesystem_path_exists) {
+      await removePath(absolutePath, {
+        recursive: true,
+        force: false,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+      health = await inspectRegisteredWorkspace(prepared.workspace);
+    }
+    if (health.filesystem_path_exists || health.git_worktree_mapping_exists) {
+      throw new Error("Workspace residual cleanup verification failed.");
+    }
+
+    return mutate("dev_workspace_remove_isolated_finalize", async (registry) => {
+      const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace);
+      if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
+      if (!terminalStateSet.has(record.state)) throw new Error("Isolated workspace removal requires a completed or abandoned workstream.");
+      if (record.workspace.state !== "removing") throw new Error("Workspace removal finalization requires durable removing state.");
       const after = await inspectRegisteredWorkspace(record.workspace);
-      if (after.filesystem_path_exists || after.git_worktree_mapping_exists) throw new Error("Git worktree removal verification failed.");
+      if (after.filesystem_path_exists || after.git_worktree_mapping_exists || !after.registry_mapping_consistent) {
+        throw new Error("Workspace removal finalization verification failed.");
+      }
+      const now = clock().toISOString();
       record.workspace.state = "removed";
       record.workspace.locked = false;
       record.workspace.lock_reason = null;
-      record.workspace.git_worktree_head = health.git_worktree_head;
-      record.workspace.updated_at = clock().toISOString();
+      record.workspace.updated_at = now;
       record.workspace.revision += 1;
       record.revision += 1;
-      record.updated_at = record.workspace.updated_at;
-      record.last_activity_at = record.workspace.updated_at;
-      return (nextRegistry) => ({ ...(findRecord(nextRegistry, record.workstream_id).workspace), healthy: true, workstream_revision: findRecord(nextRegistry, record.workstream_id).revision, registry_revision: nextRegistry.revision });
+      record.updated_at = now;
+      record.last_activity_at = now;
+      return (nextRegistry) => ({
+        ...(findRecord(nextRegistry, record.workstream_id).workspace),
+        healthy: true,
+        workstream_revision: findRecord(nextRegistry, record.workstream_id).revision,
+        registry_revision: nextRegistry.revision,
+      });
     });
   }
 
