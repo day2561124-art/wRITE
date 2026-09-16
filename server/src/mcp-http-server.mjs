@@ -1113,6 +1113,11 @@ async function shutdown(signal) {
   server.close(() => {
     process.exit(0);
   });
+  // keepAliveTimeout=0 is intentionally retained for MCP session compatibility,
+  // so explicitly reap idle HTTP/1.1 sockets once the listener has stopped
+  // accepting new connections. Active requests/SSE streams are left alone and
+  // finish through their normal transport/session shutdown path.
+  server.closeIdleConnections?.();
 }
 
 process.once('SIGINT', () => {
