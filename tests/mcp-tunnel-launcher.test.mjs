@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
+import os from "node:os";
 import { createServer } from "node:net";
 import {
   mkdir,
@@ -19,6 +20,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const tunnelScript = path.join(rootDir, "scripts", "start-mcp-tunnel.ps1");
+const serviceManagerScript = path.join(rootDir, "scripts", "manage-mcp-service.ps1");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -60,6 +62,30 @@ function runTunnel(args, expectedStatus, env = {}) {
   assert(
     result.status === expectedStatus,
     `Tunnel launcher exited ${result.status}; expected ${expectedStatus}. stdout=${result.stdout} stderr=${result.stderr}`,
+  );
+  return result;
+}
+
+function runServiceManager(args, expectedStatus, env = {}) {
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", serviceManagerScript, ...args],
+    {
+      cwd: rootDir,
+      env: childEnvironment({
+        TUNNEL_TOKEN: undefined,
+        WRITER_MCP_TUNNEL_TOKEN: undefined,
+        ...env,
+      }),
+      encoding: "utf8",
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+  if (result.error) throw result.error;
+  assert(
+    result.status === expectedStatus,
+    `Service manager exited ${result.status}; expected ${expectedStatus}. stdout=${result.stdout} stderr=${result.stderr}`,
   );
   return result;
 }
@@ -315,6 +341,119 @@ async function waitUntil(predicate, message, timeoutMs = 5_000) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(message);
+}
+
+function waitForChildExit(child, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve({ code: child.exitCode, signal: child.signalCode });
+      return;
+    }
+    const timer = setTimeout(() => {
+      terminateProcessTree(child);
+      reject(new Error(`Timed out waiting for child PID ${child.pid} to exit.`));
+    }, timeoutMs);
+    child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function launchServiceHost({ fixtureDir, fakeScript, tokenFile, label }) {
+  const port = await freePort();
+  const logDir = path.join(fixtureDir, `service-host-${label}`);
+  const argsLog = path.join(fixtureDir, `service-host-${label}.args.log`);
+  await mkdir(logDir, { recursive: true });
+  await writeFile(argsLog, "", "utf8");
+  const hostname = `${label}.service.example.test`;
+  const child = spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      tunnelScript,
+      ...commonArgs(port, logDir, fakeScript),
+      "-ServiceHost",
+      "-ServicePollMilliseconds",
+      "100",
+    ],
+    {
+      cwd: rootDir,
+      env: launcherEnvironment({
+        FAKE_CLOUDFLARED_MODE: "named-success",
+        FAKE_ARGS_LOG: argsLog,
+        FAKE_NAMED_HOSTNAME: hostname,
+        FAKE_MCP_ORIGIN: `http://127.0.0.1:${port}`,
+        WRITER_MCP_TUNNEL_MODE: "named",
+        WRITER_MCP_TUNNEL_HOSTNAME: hostname,
+        WRITER_MCP_TUNNEL_TOKEN_FILE: tokenFile,
+      }),
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+  await waitUntil(
+    () => stdout.includes("Service host active; SCM owns restart policy."),
+    `Service host did not become active. stdout=${stdout} stderr=${stderr}`,
+    45_000,
+  );
+  const state = await readState(logDir);
+  const mcpMatch = stdout.match(/SERVICE_HOST_MCP_PID=(\d+)/u);
+  assert(mcpMatch, `Service host did not print its MCP PID. stdout=${stdout}`);
+  return {
+    child,
+    port,
+    logDir,
+    state,
+    mcpPid: Number.parseInt(mcpMatch[1], 10),
+    stdout: () => stdout,
+    stderr: () => stderr,
+  };
+}
+
+async function verifyServiceHostProcessDeath({ fixtureDir, fakeScript, tokenFile }) {
+  const cloudflaredDeath = await launchServiceHost({
+    fixtureDir,
+    fakeScript,
+    tokenFile,
+    label: "cloudflared-death",
+  });
+  assert(isProcessRunning(cloudflaredDeath.state.pid), "Service host cloudflared process was not running before fault injection.");
+  assert(isProcessRunning(cloudflaredDeath.mcpPid), "Service host MCP process was not running before fault injection.");
+  process.kill(cloudflaredDeath.state.pid);
+  const cloudflaredExit = await waitForChildExit(cloudflaredDeath.child);
+  assert(cloudflaredExit.code === 21, `Cloudflared death should exit service host with code 21; got ${cloudflaredExit.code}. stdout=${cloudflaredDeath.stdout()} stderr=${cloudflaredDeath.stderr()}`);
+  await waitForPortAvailable(cloudflaredDeath.port);
+  assert(!isProcessRunning(cloudflaredDeath.mcpPid), "Cloudflared death left the MCP process orphaned.");
+
+  const mcpDeath = await launchServiceHost({
+    fixtureDir,
+    fakeScript,
+    tokenFile,
+    label: "mcp-death",
+  });
+  assert(isProcessRunning(mcpDeath.state.pid), "Service host cloudflared process was not running before MCP fault injection.");
+  assert(isProcessRunning(mcpDeath.mcpPid), "Service host MCP process was not running before fault injection.");
+  process.kill(mcpDeath.mcpPid);
+  const mcpExit = await waitForChildExit(mcpDeath.child);
+  assert(mcpExit.code === 20, `MCP death should exit service host with code 20; got ${mcpExit.code}. stdout=${mcpDeath.stdout()} stderr=${mcpDeath.stderr()}`);
+  await waitUntil(
+    () => !isProcessRunning(mcpDeath.state.pid),
+    "MCP death left the cloudflared process orphaned.",
+    10_000,
+  );
+  await waitForPortAvailable(mcpDeath.port);
 }
 
 function parseMcpHttpPayload(text) {
@@ -991,8 +1130,40 @@ async function main() {
   const tempParent = path.join(rootDir, "tests", ".tmp");
   await mkdir(tempParent, { recursive: true });
   const fixtureDir = await mkdtemp(path.join(tempParent, "mcp-tunnel-"));
+  const serviceFixtureDir = await mkdtemp(path.join(os.tmpdir(), "writer-mcp-service-"));
+  const serviceTokenFile = path.join(serviceFixtureDir, "tunnel-token.txt");
+  const serviceSecret = "service-test-secret-that-must-not-enter-xml";
+  await writeFile(serviceTokenFile, serviceSecret, "utf8");
   const { fakeScript } = await createFakeCloudflared(fixtureDir);
   const argsLog = path.join(fixtureDir, "fake-args.log");
+  const serviceConfigPath = path.join(fixtureDir, "WriterWorkbenchMcp.xml");
+  const serviceRender = runServiceManager([
+    "-Action", "Render",
+    "-Hostname", "stable-service.example.test",
+    "-TokenFile", serviceTokenFile,
+    "-ConfigPath", serviceConfigPath,
+    "-LogDirectory", path.join(fixtureDir, "service-logs"),
+  ], 0);
+  const serviceXml = await readFile(serviceConfigPath, "utf8");
+  assert(serviceRender.stdout.includes("SERVICE_CONFIG="), "Service manager did not report its rendered config path.");
+  assert(serviceXml.includes("-ServiceHost"), "WinSW config does not launch the MCP service-host mode.");
+  assert(serviceXml.includes('<onfailure action="restart" delay="15 sec" />'), "WinSW first recovery action drifted.");
+  assert(serviceXml.includes('<onfailure action="restart" delay="60 sec" />'), "WinSW second recovery action drifted.");
+  assert(serviceXml.includes('<onfailure action="none" />'), "WinSW crash-loop cutoff is missing.");
+  assert(serviceXml.includes("<resetfailure>15 min</resetfailure>"), "WinSW failure reset window drifted.");
+  assert(serviceXml.includes("WRITER_MCP_TUNNEL_TOKEN_FILE"), "WinSW config does not use a token-file credential source.");
+  assert(!serviceXml.includes(serviceSecret), "Raw tunnel secret leaked into WinSW XML.");
+  assert(!serviceXml.includes('name="TUNNEL_TOKEN"'), "WinSW XML unexpectedly contains a raw TUNNEL_TOKEN environment entry.");
+  const rawTokenDenied = runServiceManager([
+    "-Action", "Render",
+    "-Hostname", "stable-service.example.test",
+    "-TokenFile", serviceTokenFile,
+    "-ConfigPath", path.join(fixtureDir, "raw-token-denied.xml"),
+  ], 1, { TUNNEL_TOKEN: serviceSecret });
+  assert(
+    rawTokenDenied.stdout.includes("Raw tunnel token") || rawTokenDenied.stderr.includes("Raw tunnel token"),
+    "Service manager did not fail closed when a raw tunnel token was present.",
+  );
   const longMutexLogDir = path.join(fixtureDir, `mutex-${"x".repeat(140)}`);
   const longMutexStatus = runTunnel(["-Status", "-LogDirectory", longMutexLogDir], 1);
   assert(
@@ -1235,6 +1406,12 @@ async function main() {
     await new Promise((resolve) => server.close(resolve));
     serverClosed = true;
 
+    await verifyServiceHostProcessDeath({
+      fixtureDir,
+      fakeScript,
+      tokenFile: serviceTokenFile,
+    });
+
     await verifyMcpIdleSessionCapReclaimsChildren();
     await verifyMcpTotalSessionCapReclaimsIdleChildren();
     await verifyMcpTotalSessionCapProtectsActiveRequest();
@@ -1278,6 +1455,7 @@ async function main() {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));
     try {
       await rm(fixtureDir, { recursive: true, force: true });
+      await rm(serviceFixtureDir, { recursive: true, force: true });
     } catch (error) {
       console.error(`Fixture cleanup warning: ${error.message}`);
     }

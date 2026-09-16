@@ -3,6 +3,9 @@
   [int]$McpPort = 8787,
   [switch]$Status,
   [switch]$StopTunnel,
+  [switch]$ServiceHost,
+  [ValidateRange(100, 10000)]
+  [int]$ServicePollMilliseconds = 1000,
   [string]$CloudflaredPath,
   [string[]]$CloudflaredPrefixArguments = @(),
   [ValidateRange(1, 300)]
@@ -299,6 +302,41 @@ function Stop-ManagedTunnel {
   return [bool]$process
 }
 
+function Invoke-ServiceHostWatchdog {
+  param(
+    [int]$ExpectedMcpPid,
+    [int]$ExpectedCloudflaredPid
+  )
+
+  Write-Host "Service host active; SCM owns restart policy." -ForegroundColor Green
+  Write-Host "SERVICE_HOST_MCP_PID=$ExpectedMcpPid"
+  Write-Host "SERVICE_HOST_CLOUDFLARED_PID=$ExpectedCloudflaredPid"
+  Write-TunnelEvent "action=service-host-start mcp_pid=$ExpectedMcpPid cloudflared_pid=$ExpectedCloudflaredPid"
+
+  while ($true) {
+    Start-Sleep -Milliseconds $ServicePollMilliseconds
+
+    $mcpOwner = Get-McpOwningProcess
+    if (-not $mcpOwner -or [int]$mcpOwner -ne $ExpectedMcpPid) {
+      Write-TunnelEvent "action=service-host-exit component=mcp reason=process-dead expected_pid=$ExpectedMcpPid observed_pid=$mcpOwner"
+      Stop-ManagedTunnel "service-host-mcp-dead" | Out-Null
+      Write-Host "Service host detected MCP process death; exiting for SCM recovery." -ForegroundColor Red
+      return 20
+    }
+
+    $state = Read-TunnelState
+    $cloudflared = Get-ManagedProcess $state
+    if (-not $cloudflared -or [int]$cloudflared.Id -ne $ExpectedCloudflaredPid) {
+      Write-TunnelEvent "action=service-host-exit component=cloudflared reason=process-dead expected_pid=$ExpectedCloudflaredPid"
+      if ($mcpOwner) {
+        & taskkill.exe /PID $ExpectedMcpPid /T /F | Out-Null
+      }
+      Write-Host "Service host detected cloudflared process death; exiting for SCM recovery." -ForegroundColor Red
+      return 21
+    }
+  }
+}
+
 function Test-McpPortOpen {
   $client = New-Object System.Net.Sockets.TcpClient
   try {
@@ -520,6 +558,14 @@ try {
   $cloudflared = Resolve-Cloudflared
   if (-not $cloudflared) { exit 1 }
   $tunnelConfig = Resolve-TunnelConfiguration
+  if ($ServiceHost) {
+    if ($tunnelConfig.Mode -ne "named") {
+      throw "Service host mode requires a named Cloudflare tunnel. Quick Tunnel is not supported for SCM operation."
+    }
+    if (-not $tunnelConfig.TokenFile -or $tunnelConfig.Token) {
+      throw "Service host mode requires TUNNEL_TOKEN_FILE/WRITER_MCP_TUNNEL_TOKEN_FILE; raw tunnel tokens are not accepted."
+    }
+  }
   Clear-TunnelCredentialEnvironment
   if ($tunnelConfig.Mode -eq "named") {
     Write-Host "Stable Cloudflare tunnel configured for $($tunnelConfig.StableHostname)." -ForegroundColor Green
@@ -544,22 +590,37 @@ try {
     if (-not $owned -or -not $identity -or [int]$identity.pid -ne [int]$owner) {
       throw "Port $McpPort is occupied by an unverified process (PID $owner); it was not stopped."
     }
-    if ($identity.current) { $current = Invoke-McpProbe "$OriginUrl/mcp" "probe" }
-    if (-not $current) {
-      # Recheck both PID and start time before stopping our verified instance.
+    if ($ServiceHost) {
+      # SCM service mode establishes a fresh process tree owned by the wrapper.
+      # A verified prior Workbench MCP is safe to stop, but unknown listeners are never touched.
       $again = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
       if ((Get-McpOwningProcess) -ne $owner -or $again.CreationDate -ne $info.CreationDate) {
-        throw "MCP owner changed during validation; refusing to stop it."
+        throw "MCP owner changed during service-host takeover; refusing to stop it."
       }
-      Write-TunnelEvent "action=mcp-restart pid=$owner reason=stale-or-unhealthy"
+      Write-TunnelEvent "action=mcp-restart pid=$owner reason=service-host-takeover"
       & taskkill.exe /PID $owner /T /F | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "Could not stop verified MCP PID $owner" }
+      if ($LASTEXITCODE -ne 0) { throw "Could not stop verified MCP PID $owner for service-host takeover." }
       $releaseDeadline = (Get-Date).AddSeconds(5)
       while ((Test-McpPortOpen) -and (Get-Date) -lt $releaseDeadline) { Start-Sleep -Milliseconds 100 }
-      if (Test-McpPortOpen) { throw "MCP port did not become available." }
+      if (Test-McpPortOpen) { throw "MCP port did not become available for service-host takeover." }
     } else {
-      Write-Host "Verified current repository MCP server; initialize and tools/list passed."
-      Write-Host "MCP_OWNING_PROCESS=$owner"
+      if ($identity.current) { $current = Invoke-McpProbe "$OriginUrl/mcp" "probe" }
+      if (-not $current) {
+        # Recheck both PID and start time before stopping our verified instance.
+        $again = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
+        if ((Get-McpOwningProcess) -ne $owner -or $again.CreationDate -ne $info.CreationDate) {
+          throw "MCP owner changed during validation; refusing to stop it."
+        }
+        Write-TunnelEvent "action=mcp-restart pid=$owner reason=stale-or-unhealthy"
+        & taskkill.exe /PID $owner /T /F | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not stop verified MCP PID $owner" }
+        $releaseDeadline = (Get-Date).AddSeconds(5)
+        while ((Test-McpPortOpen) -and (Get-Date) -lt $releaseDeadline) { Start-Sleep -Milliseconds 100 }
+        if (Test-McpPortOpen) { throw "MCP port did not become available." }
+      } else {
+        Write-Host "Verified current repository MCP server; initialize and tools/list passed."
+        Write-Host "MCP_OWNING_PROCESS=$owner"
+      }
     }
   }
   if (-not $current) {
@@ -656,6 +717,18 @@ try {
   Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
   Write-Host $successfulRegistration.McpUrl -ForegroundColor Cyan
   Write-Host "URL_LOG=$($successfulAttempt.State.stderrLog)"
+
+  if ($ServiceHost) {
+    # Startup/reconfiguration is mutex-protected, but a long-running service host
+    # must not block independent status/stop operations for its entire lifetime.
+    if ($hasMutex) {
+      $launchMutex.ReleaseMutex()
+      $hasMutex = $false
+    }
+    $serviceExitCode = Invoke-ServiceHostWatchdog -ExpectedMcpPid ([int]$current.pid) -ExpectedCloudflaredPid ([int]$successfulAttempt.Process.Id)
+    exit $serviceExitCode
+  }
+
   exit 0
 } finally {
   Pop-Location
