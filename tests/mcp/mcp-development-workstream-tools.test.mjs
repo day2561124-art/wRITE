@@ -636,6 +636,65 @@ test("interrupted isolated removal persists removing state and resumes residual 
   }
 });
 
+test("legacy residual cleanup requires proven branch ancestry and no remaining .git identity", async () => {
+  const harness = await createGitHarness("legacy-remove");
+  try {
+    const workstream = await harness.service.begin({ label: "legacy residual" });
+    const isolated = await harness.service.createIsolated({ workstream_id: workstream.workstream_id });
+    const ended = await harness.service.end({ workstream_id: workstream.workstream_id, outcome: "completed" });
+    const absolute = path.join(harness.worktreeRootPath, isolated.workspace_id);
+    await harness.runGit(["worktree", "unlock", absolute]);
+    await harness.runGit(["worktree", "remove", absolute]);
+    await mkdir(absolute, { recursive: true });
+    await writeFile(path.join(absolute, "legacy-residual.txt"), "legacy\n", "utf8");
+
+    const before = await harness.service.getWorkspace({ workspace_id: isolated.workspace_id });
+    assert.equal(before.state, "active");
+    assert.equal(before.filesystem_path_exists, true);
+    assert.equal(before.git_worktree_mapping_exists, false);
+
+    const removed = await harness.service.removeIsolated({
+      workspace_id: isolated.workspace_id,
+      expected_workstream_revision: ended.revision,
+    });
+    assert.equal(removed.state, "removed");
+    assert.equal(removed.healthy, true);
+    const after = await harness.service.getWorkspace({ workspace_id: isolated.workspace_id });
+    assert.equal(after.filesystem_path_exists, false);
+    assert.equal(after.git_worktree_mapping_exists, false);
+    assert.equal(after.healthy, true);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("legacy residual cleanup fails closed when dedicated branch identity is missing", async () => {
+  const harness = await createGitHarness("legacy-remove-no-branch");
+  try {
+    const workstream = await harness.service.begin({ label: "legacy residual missing branch" });
+    const isolated = await harness.service.createIsolated({ workstream_id: workstream.workstream_id });
+    await harness.service.end({ workstream_id: workstream.workstream_id, outcome: "completed" });
+    const absolute = path.join(harness.worktreeRootPath, isolated.workspace_id);
+    await harness.runGit(["worktree", "unlock", absolute]);
+    await harness.runGit(["worktree", "remove", absolute]);
+    await harness.runGit(["branch", "-D", isolated.branch_name]);
+    await mkdir(absolute, { recursive: true });
+    await writeFile(path.join(absolute, "must-survive.txt"), "preserve\n", "utf8");
+
+    await assert.rejects(
+      harness.service.removeIsolated({ workspace_id: isolated.workspace_id }),
+      /branch identity is unavailable/u,
+    );
+    const after = await harness.service.getWorkspace({ workspace_id: isolated.workspace_id });
+    assert.equal(after.state, "active");
+    assert.equal(after.filesystem_path_exists, true);
+    assert.equal(after.git_worktree_mapping_exists, false);
+    assert.equal((await readFile(path.join(absolute, "must-survive.txt"), "utf8")), "preserve\n");
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("same-workstream concurrent isolated create yields exactly one workspace", async () => {
   const harness = await createGitHarness("concurrency");
   try {

@@ -1135,6 +1135,8 @@ export function createDevWorkstreamRegistryService({
 
       let health = await inspectRegisteredWorkspace(record.workspace);
       const absolutePath = absoluteWorkspacePath(workspaceId);
+      let legacyResidualVerified = false;
+      let legacyResidualHead = null;
       if (record.workspace.state !== "removing"
         && health.filesystem_path_exists
         && !health.git_worktree_mapping_exists
@@ -1142,9 +1144,51 @@ export function createDevWorkstreamRegistryService({
         try {
           await gitRunner(["worktree", "repair", absolutePath], { cwd: repositoryRoot, timeout: 60_000 });
         } catch {
-          // Legacy interrupted removals are only recoverable when Git can safely restore the mapping.
+          // A legacy interrupted removal may already have lost its Git worktree metadata.
         }
         health = await inspectRegisteredWorkspace(record.workspace);
+
+        if (!health.git_worktree_mapping_exists) {
+          let gitIdentityExists = false;
+          try {
+            await lstat(path.join(absolutePath, ".git"));
+            gitIdentityExists = true;
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+          if (gitIdentityExists) {
+            throw new Error("Legacy residual workspace still has .git identity; refusing unregistered cleanup.");
+          }
+          const branchRef = `refs/heads/${record.workspace.branch_name}`;
+          let branchHead;
+          try {
+            const branchResult = await gitRunner(["rev-parse", "--verify", `${branchRef}^{commit}`], { cwd: repositoryRoot });
+            branchHead = String(branchResult.stdout).trim().toLowerCase();
+          } catch {
+            throw new Error("Legacy residual workspace branch identity is unavailable; refusing cleanup.");
+          }
+          if (!gitSha1Pattern.test(branchHead)) {
+            throw new Error("Legacy residual workspace branch identity is invalid; refusing cleanup.");
+          }
+          const persistedHead = String(record.workspace.git_worktree_head ?? "").toLowerCase();
+          if (!gitSha1Pattern.test(persistedHead)) {
+            throw new Error("Legacy residual workspace has no persisted Git head identity; refusing cleanup.");
+          }
+          try {
+            await gitRunner(["merge-base", "--is-ancestor", persistedHead, branchHead], { cwd: repositoryRoot });
+          } catch {
+            throw new Error("Legacy residual workspace branch no longer descends from its persisted head; refusing cleanup.");
+          }
+          const currentMainHead = String(await headReader()).trim().toLowerCase();
+          if (!gitSha1Pattern.test(currentMainHead)) throw new Error("Server HEAD reader returned an invalid Git SHA-1.");
+          try {
+            await gitRunner(["merge-base", "--is-ancestor", branchHead, currentMainHead], { cwd: repositoryRoot });
+          } catch {
+            throw new Error("Legacy residual workspace branch is not integrated into current main; refusing cleanup.");
+          }
+          legacyResidualVerified = true;
+          legacyResidualHead = branchHead;
+        }
       }
 
       if (record.workspace.state === "removing") {
@@ -1160,20 +1204,22 @@ export function createDevWorkstreamRegistryService({
         };
       }
 
-      if (!health.filesystem_path_exists || !health.git_worktree_mapping_exists || !health.registered_branch_matches || !health.registry_mapping_consistent) {
-        throw new Error("Workspace mapping is unhealthy; refusing removal.");
-      }
-      if (health.dirty || health.staged.length > 0 || health.conflicted.length > 0 || health.untracked.length > 0) {
-        const error = new Error("Dirty isolated worktree cannot be removed; tracked, staged, conflicted, and untracked state must be preserved.");
-        error.code = "WORKSPACE_DIRTY_REMOVE_REJECTED";
-        throw error;
+      if (!legacyResidualVerified) {
+        if (!health.filesystem_path_exists || !health.git_worktree_mapping_exists || !health.registered_branch_matches || !health.registry_mapping_consistent) {
+          throw new Error("Workspace mapping is unhealthy; refusing removal.");
+        }
+        if (health.dirty || health.staged.length > 0 || health.conflicted.length > 0 || health.untracked.length > 0) {
+          const error = new Error("Dirty isolated worktree cannot be removed; tracked, staged, conflicted, and untracked state must be preserved.");
+          error.code = "WORKSPACE_DIRTY_REMOVE_REJECTED";
+          throw error;
+        }
       }
 
       const now = clock().toISOString();
       record.workspace.state = "removing";
-      record.workspace.locked = health.locked;
-      record.workspace.lock_reason = health.lock_reason;
-      record.workspace.git_worktree_head = health.git_worktree_head;
+      record.workspace.locked = legacyResidualVerified ? false : health.locked;
+      record.workspace.lock_reason = legacyResidualVerified ? null : health.lock_reason;
+      record.workspace.git_worktree_head = legacyResidualVerified ? legacyResidualHead : health.git_worktree_head;
       record.workspace.updated_at = now;
       record.workspace.revision += 1;
       record.revision += 1;
