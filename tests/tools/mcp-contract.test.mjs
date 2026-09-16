@@ -25,6 +25,7 @@ const testScripts = [
   "tests/mcp/mcp-http-integration-control.test.mjs",
   "tests/mcp/mcp-http-session-lifecycle.test.mjs",
   "tests/mcp/mcp-http-reliability.test.mjs",
+  "tests/mcp/mcp-http-resource-bounds.test.mjs",
   "tests/mcp/mcp-development-integration-tools.test.mjs",
 ];
 

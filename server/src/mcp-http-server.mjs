@@ -8,6 +8,7 @@ import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simula
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
 import { createWorkspaceChangeClockProvider } from './mcp-workspace-change-clock-provider.mjs';
+import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
 import fs from 'fs';
 import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
@@ -57,6 +58,7 @@ const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_MAX_IDLE_SESSION_COUNT = 16;
 const DEFAULT_MAX_TOTAL_SESSION_COUNT = 32;
 const DEFAULT_SESSION_REAPER_INTERVAL_MS = 60 * 1000;
+const DEFAULT_MAX_POST_BODY_BYTES = 4 * 1024 * 1024;
 
 function boundedIntegerEnvironment(name, fallback, minimum, maximum) {
   const raw = process.env[name]?.trim();
@@ -112,29 +114,46 @@ function writeJsonRpcError(res, statusCode, code, message) {
   );
 }
 
-function readPostBody(req) {
+function readPostBody(req, maxBytes) {
   return new Promise((resolve) => {
     let body = '';
+    let receivedBytes = 0;
     let settled = false;
-    const finish = (value) => {
+    const finish = (result) => {
       if (settled) return;
       settled = true;
-      resolve(value);
+      resolve(result);
     };
 
-    req.on('data', (chunk) => {
+    const declaredLength = Number.parseInt(String(req.headers['content-length'] ?? ''), 10);
+    if (Number.isSafeInteger(declaredLength) && declaredLength > maxBytes) {
+      req.resume();
+      finish({ status: 'too_large', received_bytes: 0, declared_bytes: declaredLength });
+      return;
+    }
+
+    const onData = (chunk) => {
+      receivedBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      if (receivedBytes > maxBytes) {
+        req.off('data', onData);
+        req.resume();
+        finish({ status: 'too_large', received_bytes: receivedBytes, declared_bytes: declaredLength || null });
+        return;
+      }
       body += chunk.toString('utf8');
-    });
+    };
+    req.on('data', onData);
 
     req.on('end', () => {
+      if (settled) return;
       try {
-        finish(JSON.parse(body));
+        finish({ status: 'ok', value: JSON.parse(body), received_bytes: receivedBytes });
       } catch {
-        finish(undefined);
+        finish({ status: 'invalid', received_bytes: receivedBytes });
       }
     });
-    req.once('aborted', () => finish(undefined));
-    req.once('error', () => finish(undefined));
+    req.once('aborted', () => finish({ status: 'aborted', received_bytes: receivedBytes }));
+    req.once('error', (error) => finish({ status: 'error', received_bytes: receivedBytes, error }));
   });
 }
 
@@ -153,6 +172,13 @@ const config = {
   ...readConfig(configPath),
   ...(portOverride === null ? {} : { port: portOverride }),
 };
+const maxPostBodyBytes = boundedIntegerEnvironment(
+  'MCP_HTTP_MAX_POST_BODY_BYTES',
+  DEFAULT_MAX_POST_BODY_BYTES,
+  1_024,
+  64 * 1024 * 1024,
+);
+const diagnostics = createMcpRuntimeDiagnostics();
 const sessions = new Map();
 const bridgeEntries = new Set();
 const sessionIdleTimeoutMs = boundedIntegerEnvironment(
@@ -637,6 +663,11 @@ function createBridgeSession() {
     preparedTurnBroker,
     workspaceSnapshotAuthority,
     workspaceChangeClockProvider,
+    onIncident: (incident) => diagnostics.captureIncident(
+      incident?.type ?? 'stdio_incident',
+      incident?.details ?? incident ?? {},
+      incident?.error,
+    ),
   });
   let entry;
 
@@ -845,7 +876,24 @@ const server = http.createServer(async (req, res) => {
       requestStarted = beginBridgeRequest(entry);
     }
 
-    const parsed = await readPostBody(req);
+    const bodyResult = await readPostBody(req, maxPostBodyBytes);
+    if (bodyResult.status === 'too_large') {
+      diagnostics.captureIncident('http_payload_too_large', {
+        max_body_bytes: maxPostBodyBytes,
+        received_bytes: bodyResult.received_bytes,
+        declared_bytes: bodyResult.declared_bytes,
+        session_present: Boolean(sessionId),
+      });
+      writeJsonRpcError(
+        res,
+        413,
+        -32013,
+        `Payload Too Large: maximum request body is ${maxPostBodyBytes} bytes.`,
+      );
+      if (requestStarted && entry) endBridgeRequest(entry);
+      return;
+    }
+    const parsed = bodyResult.status === 'ok' ? bodyResult.value : undefined;
 
     if (!entry) {
       if (

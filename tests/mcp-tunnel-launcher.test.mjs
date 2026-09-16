@@ -403,23 +403,39 @@ async function launchServiceHost({ fixtureDir, fakeScript, tokenFile, label }) {
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
   child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-  await waitUntil(
-    () => stdout.includes("Service host active; SCM owns restart policy."),
-    `Service host did not become active. stdout=${stdout} stderr=${stderr}`,
-    45_000,
-  );
-  const state = await readState(logDir);
-  const mcpMatch = stdout.match(/SERVICE_HOST_MCP_PID=(\d+)/u);
-  assert(mcpMatch, `Service host did not print its MCP PID. stdout=${stdout}`);
-  return {
-    child,
-    port,
-    logDir,
-    state,
-    mcpPid: Number.parseInt(mcpMatch[1], 10),
-    stdout: () => stdout,
-    stderr: () => stderr,
-  };
+  try {
+    await waitUntil(
+      () => (
+        stdout.includes("Service host active; SCM owns restart policy.")
+        && /SERVICE_HOST_MCP_PID=(\d+)/u.test(stdout)
+        && /SERVICE_HOST_CLOUDFLARED_PID=(\d+)/u.test(stdout)
+      ),
+      `Service host did not publish its complete ownership identity. stdout=${stdout} stderr=${stderr}`,
+      45_000,
+    );
+    const state = await readState(logDir);
+    const mcpMatch = stdout.match(/SERVICE_HOST_MCP_PID=(\d+)/u);
+    const cloudflaredMatch = stdout.match(/SERVICE_HOST_CLOUDFLARED_PID=(\d+)/u);
+    assert(mcpMatch, `Service host did not print its MCP PID. stdout=${stdout}`);
+    assert(cloudflaredMatch, `Service host did not print its cloudflared PID. stdout=${stdout}`);
+    assert(
+      Number.parseInt(cloudflaredMatch[1], 10) === state.pid,
+      `Service host ownership PID did not match tunnel state. stdout=${stdout} state_pid=${state.pid}`,
+    );
+    return {
+      child,
+      port,
+      logDir,
+      state,
+      mcpPid: Number.parseInt(mcpMatch[1], 10),
+      stdout: () => stdout,
+      stderr: () => stderr,
+    };
+  } catch (error) {
+    terminateProcessTree(child);
+    await waitForPortAvailable(port).catch(() => {});
+    throw error;
+  }
 }
 
 async function verifyServiceHostProcessDeath({ fixtureDir, fakeScript, tokenFile }) {
@@ -1191,8 +1207,22 @@ async function main() {
 
   try {
     const quicLogDir = path.join(fixtureDir, "quic-logs");
+    await mkdir(quicLogDir, { recursive: true });
+    for (let index = 0; index < 10; index += 1) {
+      await writeFile(
+        path.join(quicLogDir, `cloudflared.old-${String(index).padStart(2, "0")}.stdout.log`),
+        `old-log-${index}\n`,
+        "utf8",
+      );
+    }
     const quicResult = await runTunnelStart(
-      commonArgs(port, quicLogDir, fakeScript),
+      [
+        ...commonArgs(port, quicLogDir, fakeScript),
+        "-MaxManagedLogFiles",
+        "4",
+        "-MaxManagedLogTotalMegabytes",
+        "16",
+      ],
       0,
       {
         FAKE_CLOUDFLARED_MODE: "quic-success",
@@ -1203,6 +1233,18 @@ async function main() {
     const quicEvents = await readFile(
       path.join(quicLogDir, "cloudflared-launcher.log"),
       "utf8",
+    );
+    const quicManagedLogs = (await readdir(quicLogDir)).filter((name) =>
+      /^(?:cloudflared|mcp-http)\..+\.(?:stdout|stderr)\.log$/u.test(name),
+    );
+    assert(
+      quicManagedLogs.length <= 4,
+      `Managed log retention exceeded the configured file cap: ${quicManagedLogs.join(",")}`,
+    );
+    assert(
+      quicManagedLogs.includes(path.basename(quicState.stdoutLog))
+        && quicManagedLogs.includes(path.basename(quicState.stderrLog)),
+      `Managed log retention removed active tunnel logs: ${quicManagedLogs.join(",")}`,
     );
     assert(quicState.status === "registered", "QUIC success must be registered.");
     assert(quicState.protocol === "quic", "Actual QUIC protocol must be recorded.");

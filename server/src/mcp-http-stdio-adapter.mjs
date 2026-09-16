@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
 import { attachWorkspaceSnapshotAuthorityIpc } from './mcp-workspace-snapshot-authority-ipc.mjs';
+import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
 import { terminateProcessTree } from './process-control.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
@@ -13,7 +14,10 @@ const DEFAULT_RECOVERY_MAX_ATTEMPTS = 3;
 const DEFAULT_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 100;
 const DEFAULT_RECOVERY_MAX_DELAY_MS = 2_000;
+const DEFAULT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_HEADER_BYTES = 16 * 1024;
 const RUNTIME_READINESS_PROTOCOL = 'writer-workbench/runtime-readiness/v1';
+const HEADER_DELIMITER = Buffer.from('\r\n\r\n', 'ascii');
 
 function boundedInteger(value, fallback, minimum, maximum) {
   const parsed = Number(value ?? fallback);
@@ -39,8 +43,9 @@ function encodeMessage(message, framing = 'line') {
 export function createStdioSession(options = {}) {
   const listeners = new Map();
   const spawnProcess = options.spawnProcess ?? spawn;
+  const diagnostics = options.diagnostics ?? createMcpRuntimeDiagnostics();
   let child = null;
-  let stdoutBuffer = '';
+  let stdoutBuffer = Buffer.alloc(0);
   let initializeRequest = null;
   let initializedNotification = null;
   let generation = 0;
@@ -67,6 +72,19 @@ export function createStdioSession(options = {}) {
     100,
     30 * 60 * 1000,
   );
+  const maxFrameBytes = boundedInteger(
+    options.maxFrameBytes ?? process.env.MCP_HTTP_CHILD_MAX_FRAME_BYTES,
+    DEFAULT_MAX_FRAME_BYTES,
+    64 * 1024,
+    64 * 1024 * 1024,
+  );
+  const maxHeaderBytes = boundedInteger(
+    options.maxHeaderBytes ?? process.env.MCP_HTTP_CHILD_MAX_HEADER_BYTES,
+    DEFAULT_MAX_HEADER_BYTES,
+    1_024,
+    1024 * 1024,
+  );
+  const maxBufferedBytes = maxFrameBytes * 2 + maxHeaderBytes;
   const recoveryMaxAttempts = boundedInteger(
     options.recoveryMaxAttempts ?? process.env.MCP_HTTP_CHILD_RECOVERY_MAX_ATTEMPTS,
     DEFAULT_RECOVERY_MAX_ATTEMPTS,
@@ -169,46 +187,111 @@ export function createStdioSession(options = {}) {
     };
     nextChild.on('message', onRuntimeReadinessMessage);
 
-    nextChild.stdout.on('data', (chunk) => {
-      stdoutBuffer += chunk.toString('utf8');
+    let protocolOverflowed = false;
+    const failProtocolOverflow = (reason, details = {}) => {
+      if (protocolOverflowed || child !== nextChild || closed) return;
+      protocolOverflowed = true;
+      const error = reliabilityError(
+        'CHILD_PROTOCOL_OVERFLOW',
+        `MCP child stdout exceeded protocol bounds: ${reason}`,
+        {
+          reason,
+          child_pid: nextChild.pid ?? null,
+          generation: childGeneration,
+          max_frame_bytes: maxFrameBytes,
+          max_header_bytes: maxHeaderBytes,
+          max_buffered_bytes: maxBufferedBytes,
+          ...details,
+        },
+      );
+      diagnostics.captureIncident('child_protocol_overflow', error.details, error);
+      stdoutBuffer = Buffer.alloc(0);
+      notifyPendingListeners(error);
+      void stopChild(nextChild).catch((stopError) => {
+        console.error('[mcp-server] failed to stop protocol-overflow child', stopError);
+        try { terminateProcessTree(nextChild); } catch { }
+      });
+    };
 
-      // Parse as many complete frames as possible. Support header (Content-Length) framing
-      // and fallback to newline-delimited JSON objects.
-      while (true) {
-        const headerEnd = stdoutBuffer.indexOf('\r\n\r\n');
+    nextChild.stdout.on('data', (chunk) => {
+      if (protocolOverflowed) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (stdoutBuffer.length + bytes.length > maxBufferedBytes) {
+        failProtocolOverflow('aggregate_buffer_limit', {
+          buffered_bytes: stdoutBuffer.length,
+          incoming_bytes: bytes.length,
+        });
+        return;
+      }
+      stdoutBuffer = stdoutBuffer.length === 0
+        ? Buffer.from(bytes)
+        : Buffer.concat([stdoutBuffer, bytes], stdoutBuffer.length + bytes.length);
+
+      // Parse as many complete frames as possible. Content-Length is byte-based,
+      // so header framing is parsed from Buffer slices rather than JS string length.
+      while (!protocolOverflowed && stdoutBuffer.length > 0) {
+        const headerEnd = stdoutBuffer.indexOf(HEADER_DELIMITER);
         if (headerEnd !== -1) {
-          const header = stdoutBuffer.slice(0, headerEnd);
-          const m = header.match(/Content-Length:\s*(\d+)/i);
-          if (!m) {
-            stdoutBuffer = stdoutBuffer.slice(headerEnd + 4);
+          if (headerEnd > maxHeaderBytes) {
+            failProtocolOverflow('header_limit', { header_bytes: headerEnd });
+            return;
+          }
+          const headerText = stdoutBuffer.subarray(0, headerEnd).toString('ascii');
+          const match = headerText.match(/Content-Length:\s*(\d+)/i);
+          if (!match) {
+            stdoutBuffer = stdoutBuffer.subarray(headerEnd + HEADER_DELIMITER.length);
             continue;
           }
-          const len = parseInt(m[1], 10);
-          const totalNeeded = headerEnd + 4 + len;
+          const frameBytes = Number.parseInt(match[1], 10);
+          if (!Number.isSafeInteger(frameBytes) || frameBytes < 0 || frameBytes > maxFrameBytes) {
+            failProtocolOverflow('declared_frame_limit', {
+              declared_frame_bytes: Number.isSafeInteger(frameBytes) ? frameBytes : null,
+            });
+            return;
+          }
+          const bodyStart = headerEnd + HEADER_DELIMITER.length;
+          const totalNeeded = bodyStart + frameBytes;
           if (stdoutBuffer.length < totalNeeded) break;
-          const jsonText = stdoutBuffer.slice(headerEnd + 4, totalNeeded);
-          stdoutBuffer = stdoutBuffer.slice(totalNeeded);
+          const jsonText = stdoutBuffer.subarray(bodyStart, totalNeeded).toString('utf8');
+          stdoutBuffer = stdoutBuffer.subarray(totalNeeded);
           if (!jsonText) continue;
           try {
             const msg = JSON.parse(jsonText);
             const id = msg.id ?? randomUUID();
             settleListener(id, null, msg);
-          } catch (e) {
-            console.error('[mcp-server] JSON parse error (header frame):', e);
+          } catch (error) {
+            console.error('[mcp-server] JSON parse error (header frame):', error);
           }
           continue;
         }
 
-        const idx = stdoutBuffer.indexOf('\n');
-        if (idx === -1) break;
-        const line = stdoutBuffer.slice(0, idx).trim();
-        stdoutBuffer = stdoutBuffer.slice(idx + 1);
+        const newlineIndex = stdoutBuffer.indexOf(0x0a);
+        if (newlineIndex === -1) {
+          const asciiPrefix = stdoutBuffer.subarray(0, Math.min(stdoutBuffer.length, 32)).toString('ascii');
+          if (/^Content-Length:/iu.test(asciiPrefix) && stdoutBuffer.length > maxHeaderBytes) {
+            failProtocolOverflow('unterminated_header_limit', { buffered_bytes: stdoutBuffer.length });
+            return;
+          }
+          if (stdoutBuffer.length > maxFrameBytes) {
+            failProtocolOverflow('unterminated_line_frame_limit', { buffered_bytes: stdoutBuffer.length });
+            return;
+          }
+          break;
+        }
+        if (newlineIndex > maxFrameBytes) {
+          failProtocolOverflow('line_frame_limit', { frame_bytes: newlineIndex });
+          return;
+        }
+        let lineBuffer = stdoutBuffer.subarray(0, newlineIndex);
+        stdoutBuffer = stdoutBuffer.subarray(newlineIndex + 1);
+        if (lineBuffer.at(-1) === 0x0d) lineBuffer = lineBuffer.subarray(0, -1);
+        const line = lineBuffer.toString('utf8').trim();
         if (!line) continue;
         try {
           const msg = JSON.parse(line);
           const id = msg.id ?? randomUUID();
           settleListener(id, null, msg);
-        } catch (e) {
+        } catch (error) {
           console.warn('[mcp-server] ignoring non-JSON stdout line:', line.slice(0, 200));
         }
       }
@@ -263,7 +346,7 @@ export function createStdioSession(options = {}) {
   }
 
   function spawnChild() {
-    stdoutBuffer = '';
+    stdoutBuffer = Buffer.alloc(0);
     const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs'], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
@@ -607,6 +690,10 @@ export function createStdioSession(options = {}) {
       generation,
       pending_calls: listeners.size,
       call_timeout_ms: callTimeoutMs,
+      max_frame_bytes: maxFrameBytes,
+      max_header_bytes: maxHeaderBytes,
+      max_buffered_bytes: maxBufferedBytes,
+      buffered_stdout_bytes: stdoutBuffer.length,
       restarting,
       recovering,
       recovery_blocked_reason: recoveryBlockedReason,

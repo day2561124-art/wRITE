@@ -72,6 +72,21 @@ function createFakeSpawn(scenario) {
           });
           return true;
         }
+        if (message.method === 'test/overflow' && scenario === 'overflow' && generation === 1) {
+          setImmediate(() => child.stdout.emit('data', Buffer.alloc((64 * 1024) + 1, 0x61)));
+          return true;
+        }
+        if (message.method === 'test/header-unicode' && scenario === 'header-unicode') {
+          const payload = JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { text: '中文🙂', generation },
+          });
+          const payloadBytes = Buffer.from(payload, 'utf8');
+          const header = Buffer.from(`Content-Length: ${payloadBytes.length}\r\n\r\n`, 'ascii');
+          setImmediate(() => child.stdout.emit('data', Buffer.concat([header, payloadBytes])));
+          return true;
+        }
         if (message.id !== undefined) emitResponse(message);
         return true;
       },
@@ -215,6 +230,88 @@ async function verifyCrashFailsInflightOnceAndRecoversWithoutReplay() {
   }
 }
 
+async function verifyProtocolOverflowFailsOnceAndRecoversWithoutReplay() {
+  const fake = createFakeSpawn('overflow');
+  const incidents = [];
+  const session = createStdioSession({
+    spawnProcess: fake.spawnProcess,
+    maxFrameBytes: 64 * 1024,
+    maxHeaderBytes: 1024,
+    callTimeoutMs: 1_000,
+    recoveryMaxAttempts: 1,
+    recoveryBaseDelayMs: 0,
+    recoveryMaxDelayMs: 0,
+    diagnostics: {
+      captureIncident(type, details, error) {
+        incidents.push({ type, details, code: error?.code ?? null });
+        return null;
+      },
+    },
+  });
+  try {
+    await initializeSession(session, 'overflow-test');
+    const statusBefore = session.getStatus();
+    assert.equal(statusBefore.max_frame_bytes, 64 * 1024);
+    assert.equal(statusBefore.max_header_bytes, 1024);
+    await assert.rejects(
+      rpcCall(session, {
+        jsonrpc: '2.0',
+        id: 'overflow-call',
+        method: 'test/overflow',
+        params: {},
+      }),
+      (error) => error?.code === 'CHILD_PROTOCOL_OVERFLOW',
+    );
+    assert.equal(session.pendingCallCount(), 0, 'Protocol overflow listener was not cleaned up.');
+    assert.equal(incidents.length, 1, 'Protocol overflow did not capture exactly one incident.');
+    assert.equal(incidents[0].type, 'child_protocol_overflow');
+    assert.equal(incidents[0].code, 'CHILD_PROTOCOL_OVERFLOW');
+    await waitForRecovered(session, 2);
+    assert.equal(fake.children.length, 2, 'Protocol overflow triggered more than one replacement child.');
+    assert.equal(
+      fake.children[1].messages.some((message) => message.method === 'test/overflow'),
+      false,
+      'Overflowing in-flight request was replayed on the replacement child.',
+    );
+    const safe = await rpcCall(session, {
+      jsonrpc: '2.0',
+      id: 'safe-after-overflow',
+      method: 'test/safe',
+      params: {},
+    });
+    assert.equal(safe.result.generation, 2);
+  } finally {
+    if (session.child) session.child.exitCode = 0;
+    session.close();
+  }
+}
+
+async function verifyHeaderFramingUsesUtf8ByteLength() {
+  const fake = createFakeSpawn('header-unicode');
+  const session = createStdioSession({
+    spawnProcess: fake.spawnProcess,
+    maxFrameBytes: 64 * 1024,
+    maxHeaderBytes: 1024,
+  });
+  try {
+    await initializeSession(session, 'header-unicode-test');
+    const response = await rpcCall(session, {
+      jsonrpc: '2.0',
+      id: 'header-unicode-call',
+      method: 'test/header-unicode',
+      params: {},
+    });
+    assert.equal(response.result.text, '中文🙂');
+    assert.equal(response.result.generation, 1);
+    assert.equal(session.getStatus().buffered_stdout_bytes, 0);
+  } finally {
+    if (session.child) session.child.exitCode = 0;
+    session.close();
+  }
+}
+
 await verifyHungCallFailsOnceAndRecoversWithoutReplay();
 await verifyCrashFailsInflightOnceAndRecoversWithoutReplay();
-console.log('MCP HTTP reliability crash/hang recovery regressions passed.');
+await verifyProtocolOverflowFailsOnceAndRecoversWithoutReplay();
+await verifyHeaderFramingUsesUtf8ByteLength();
+console.log('MCP HTTP reliability crash/hang/overflow and framing regressions passed.');

@@ -30,6 +30,14 @@ $env:TUNNEL_TOKEN_FILE = 'C:\secure\writer-mcp-tunnel-token.txt'
 
 `-Status` 會分別顯示 local MCP、runtime readiness、Cloudflare process 與 remote transport，避免把 origin failure 與 tunnel failure 混為同一種錯誤。
 
+## MCP resource bounds / diagnostics
+
+R4 對 MCP HTTP parent 與 stdio child framing 加入硬上限。HTTP POST body 預設最多 4 MiB，可用 `MCP_HTTP_MAX_POST_BODY_BYTES` 調整；超限會回 `413 Payload Too Large`，不會繼續累積 request body。Child stdout framing 預設單一 frame 最多 16 MiB、header 最多 16 KiB，可分別用 `MCP_HTTP_CHILD_MAX_FRAME_BYTES` 與 `MCP_HTTP_CHILD_MAX_HEADER_BYTES` 調整；overflow 會 fail closed 為 `CHILD_PROTOCOL_OVERFLOW`，原 in-flight request 不會被 replay，後續仍由既有 bounded child recovery 負責。
+
+資源邊界事件會寫入 `MCP_DIAGNOSTICS_DIRECTORY`（預設 `data/outputs/logs/mcp-incidents`）。Diagnostics 只保存 bounded runtime / heap / resource summary 與經過 redaction 的 Node report subset，不保存完整 environment 或 network endpoint；檔案數可用 `MCP_DIAGNOSTICS_MAX_FILES` 設定。
+
+`start-mcp-tunnel.ps1` 也會限制自己管理的 MCP/cloudflared logs。可用 `-MaxManagedLogFiles`、`-MaxManagedLogAgeDays`、`-MaxManagedLogTotalMegabytes`、`-MaxLauncherLogMegabytes`、`-MaxLauncherLogArchives` 調整；目前 state 指向的 active cloudflared logs 與正在使用的最新 MCP log pair 會被保護，其他 outputs、Journal、checkpoint 與 incident store 不在這個 retention scope。
+
 ## MCP Windows Service / SCM
 
 長時間執行建議讓 Windows Service Control Manager 負責整體 process survival，而不是讓互動式 PowerShell launcher ���己無限重啟。R3 使用 WinSW 作為 service wrapper；WinSW executable 請自行下載並放在 repository 外，專案不會 vendor 或自動下載 service binary。

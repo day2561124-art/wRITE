@@ -12,6 +12,16 @@
   [int]$RegistrationTimeoutSeconds = 30,
   [ValidateRange(50, 5000)]
   [int]$PollIntervalMilliseconds = 250,
+  [ValidateRange(1, 500)]
+  [int]$MaxManagedLogFiles = 40,
+  [ValidateRange(1, 3650)]
+  [int]$MaxManagedLogAgeDays = 14,
+  [ValidateRange(1, 4096)]
+  [int]$MaxManagedLogTotalMegabytes = 256,
+  [ValidateRange(1, 256)]
+  [int]$MaxLauncherLogMegabytes = 8,
+  [ValidateRange(1, 20)]
+  [int]$MaxLauncherLogArchives = 4,
   [string]$LogDirectory
 )
 
@@ -99,10 +109,96 @@ function Invoke-McpProbe {
   try { return ($probeOutput | ConvertFrom-Json) } catch { return $null }
 }
 
+function Rotate-LauncherLogIfNeeded {
+  if (-not (Test-Path -LiteralPath $LauncherLog -PathType Leaf)) { return }
+  $maxBytes = [int64]$MaxLauncherLogMegabytes * 1MB
+  try {
+    $current = Get-Item -LiteralPath $LauncherLog -ErrorAction Stop
+    if ($current.Length -lt $maxBytes) { return }
+    for ($index = $MaxLauncherLogArchives; $index -ge 1; $index--) {
+      $source = if ($index -eq 1) { $LauncherLog } else { "$LauncherLog.$($index - 1)" }
+      $destination = "$LauncherLog.$index"
+      if ($index -eq $MaxLauncherLogArchives -and (Test-Path -LiteralPath $destination -PathType Leaf)) {
+        Remove-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+      }
+      if (Test-Path -LiteralPath $source -PathType Leaf) {
+        Move-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+      }
+    }
+  } catch {
+    Write-Host "Launcher log rotation warning: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+}
+
+function Get-ManagedChildLogFiles {
+  if (-not (Test-Path -LiteralPath $LogDir -PathType Container)) { return @() }
+  return @(
+    Get-ChildItem -LiteralPath $LogDir -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '^(?:cloudflared\..+\.(?:stdout|stderr)|mcp-http\..+\.(?:stdout|stderr))\.log$' }
+  )
+}
+
+function Invoke-ManagedLogRetention {
+  New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+  $protected = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $state = Read-TunnelState
+  foreach ($path in @($state.stdoutLog, $state.stderrLog)) {
+    if ($path) { [void]$protected.Add([IO.Path]::GetFullPath([string]$path)) }
+  }
+  if (Test-McpPortOpen) {
+    foreach ($file in @(
+      Get-ManagedChildLogFiles |
+        Where-Object { $_.Name -match '^mcp-http\..+\.(?:stdout|stderr)\.log$' } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 2
+    )) {
+      [void]$protected.Add($file.FullName)
+    }
+  }
+
+  $removed = 0
+  $cutoff = (Get-Date).ToUniversalTime().AddDays(-$MaxManagedLogAgeDays)
+  foreach ($file in (Get-ManagedChildLogFiles)) {
+    if ($protected.Contains($file.FullName)) { continue }
+    if ($file.LastWriteTimeUtc -lt $cutoff) {
+      try {
+        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+        $removed++
+      } catch { }
+    }
+  }
+
+  $all = @(Get-ManagedChildLogFiles | Sort-Object LastWriteTimeUtc -Descending)
+  $maxTotalBytes = [int64]$MaxManagedLogTotalMegabytes * 1MB
+  $retainedCount = 0
+  $retainedBytes = [int64]0
+  foreach ($file in $all) {
+    $isProtected = $protected.Contains($file.FullName)
+    $fitsCount = $retainedCount -lt $MaxManagedLogFiles
+    $fitsBytes = ($retainedBytes + [int64]$file.Length) -le $maxTotalBytes
+    if ($isProtected -or ($fitsCount -and $fitsBytes)) {
+      $retainedCount++
+      $retainedBytes += [int64]$file.Length
+      continue
+    }
+    try {
+      Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+      $removed++
+    } catch {
+      $retainedCount++
+      $retainedBytes += [int64]$file.Length
+    }
+  }
+  if ($removed -gt 0) {
+    Write-Host "Managed MCP/tunnel log retention removed $removed old file(s)."
+  }
+}
+
 function Write-TunnelEvent {
   param([string]$Message)
 
   New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+  Rotate-LauncherLogIfNeeded
   $line = "{0} {1}" -f (Get-Date).ToUniversalTime().ToString("o"), $Message
   Add-Content -LiteralPath $LauncherLog -Value $line -Encoding UTF8
 }
@@ -572,6 +668,7 @@ try {
   } else {
     Write-Host "Quick Tunnel development fallback selected; the public hostname is temporary." -ForegroundColor Yellow
   }
+  Invoke-ManagedLogRetention
   Set-BackendGenerationProviderDefaults
 
   Write-Host "`n=== 1. MCP HTTP server ==="
@@ -713,6 +810,7 @@ try {
     throw "Tunnel registered but public MCP verification failed; URL is not ready for ChatGPT."
   }
   Write-TunnelEvent "action=public-mcp-verified instance=$($public.instanceId) tools=$($public.toolCount) discovery_ms=$($public.discoveryMs)"
+  Invoke-ManagedLogRetention
   Write-Host "Tunnel registered / healthy; public initialize, tools/list and ping passed." -ForegroundColor Green
   Write-Host "ChatGPT MCP URL:" -ForegroundColor Green
   Write-Host $successfulRegistration.McpUrl -ForegroundColor Cyan
