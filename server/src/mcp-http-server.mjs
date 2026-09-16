@@ -325,6 +325,8 @@ const workspaceSnapshotAuthority = createWorkspaceSnapshotAuthority({
 const activeToolProfileName = process.env.MCP_TOOL_PROFILE?.trim() || 'chatgpt_public';
 const integrationControl = createParentIntegrationControl({ profile: activeToolProfileName });
 const DEV_MCP_RELOAD_TOOL_NAME = 'dev_mcp_reload';
+const REMOVE_ISOLATED_TOOL_NAME = 'dev_workspace_remove_isolated';
+const ISOLATED_WORKSPACE_ID_PATTERN = /^dev_workspace_[a-f0-9]{24}$/u;
 const devMcpReloadToolDefinition = Object.freeze({
   name: DEV_MCP_RELOAD_TOOL_NAME,
   description: '[low-risk-write] Reload only the current ChatGPT MCP stdio child inside the long-lived HTTP parent. The HTTP listener, Cloudflare tunnel, and parent-owned world prepared-turn broker remain running; child-local ephemeral session state is intentionally reset. Reload is rejected while another child tool call is active.',
@@ -572,6 +574,47 @@ function bindBridge(entry) {
       ) {
         void handleDevMcpReload(entry, message);
         return;
+      }
+
+      if (message?.method === 'tools/call' && message?.params?.name === REMOVE_ISOLATED_TOOL_NAME) {
+        const workspaceId = message?.params?.arguments?.workspace_id;
+        if (typeof workspaceId === 'string' && ISOLATED_WORKSPACE_ID_PATTERN.test(workspaceId)) {
+          workspaceSnapshotAuthority.invalidate({
+            workspace_id: workspaceId,
+            reason: 'parent_owned_workspace_remove_requested',
+          });
+          void workspaceChangeClockProvider.release({ workspace_id: workspaceId }).then(() => {
+            session.call(message, (err, reply) => {
+              if (err) {
+                safeTransportSend(
+                  transport,
+                  {
+                    jsonrpc: '2.0',
+                    id: message.id,
+                    error: { code: -32000, message: String(err) },
+                  },
+                  'transport.send(dev_workspace_remove_isolated-error)',
+                );
+                return;
+              }
+              safeTransportSend(transport, reply, 'transport.send(dev_workspace_remove_isolated)');
+            });
+          }).catch((error) => {
+            safeTransportSend(
+              transport,
+              {
+                jsonrpc: '2.0',
+                id: message.id,
+                error: {
+                  code: -32000,
+                  message: `Workspace watcher release failed before removal: ${error?.message ?? String(error)}`,
+                },
+              },
+              'transport.send(dev_workspace_remove_isolated-release-error)',
+            );
+          });
+          return;
+        }
       }
 
       if (message?.method === 'tools/call' && message?.params?.name === INTEGRATE_TOOL_NAME) {

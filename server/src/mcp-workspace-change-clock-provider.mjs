@@ -275,11 +275,15 @@ export function createWorkspaceChangeClockProvider(options = {}) {
     ?? (async (filePath) => { try { await unlink(filePath); } catch {} });
   const fenceTimeoutMs = options.fence_timeout_ms ?? DEFAULT_FENCE_TIMEOUT_MS;
   const startTimeoutMs = options.start_timeout_ms ?? DEFAULT_START_TIMEOUT_MS;
+  const releaseTimeoutMs = options.release_timeout_ms ?? 3_000;
   if (!Number.isSafeInteger(fenceTimeoutMs) || fenceTimeoutMs < 100 || fenceTimeoutMs > 4_000) {
     throw new Error("fence_timeout_ms must be an integer between 100 and 4000.");
   }
   if (!Number.isSafeInteger(startTimeoutMs) || startTimeoutMs < 100 || startTimeoutMs > 10_000) {
     throw new Error("start_timeout_ms must be an integer between 100 and 10000.");
+  }
+  if (!Number.isSafeInteger(releaseTimeoutMs) || releaseTimeoutMs < 100 || releaseTimeoutMs > 10_000) {
+    throw new Error("release_timeout_ms must be an integer between 100 and 10000.");
   }
 
   const entries = new Map();
@@ -322,6 +326,44 @@ export function createWorkspaceChangeClockProvider(options = {}) {
     if (entry.child && entry.child.exitCode === null && entry.child.signalCode === null) {
       try { terminateProcessTree(entry.child); } catch {}
     }
+  }
+
+  async function release({ workspace_id } = {}) {
+    const workspaceId = assertWorkspaceId(workspace_id);
+    if (closed) return { released: false, reason: "provider_closed", ...providerStatus(workspaceId) };
+
+    const starting = startPromises.get(workspaceId);
+    if (starting) {
+      try {
+        await promiseWithTimeout(starting, releaseTimeoutMs, "workspace watcher release start wait timeout");
+      } catch (error) {
+        throw new Error(`workspace watcher release could not settle startup: ${error?.message ?? String(error)}`);
+      }
+    }
+
+    const entry = entries.get(workspaceId);
+    if (!entry) {
+      changeClock.markFreshInstance({ workspace_id: workspaceId, reason: "workspace_watcher_released" });
+      return { released: false, reason: "watcher_not_present", ...providerStatus(workspaceId) };
+    }
+
+    const child = entry.child;
+    let exitPromise = null;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      exitPromise = new Promise((resolve) => {
+        child.once("exit", () => resolve(true));
+        child.once("error", () => resolve(true));
+      });
+    }
+
+    stopEntry(entry);
+    if (exitPromise) {
+      await promiseWithTimeout(exitPromise, releaseTimeoutMs, "workspace watcher release timeout");
+    }
+
+    entries.delete(workspaceId);
+    changeClock.markFreshInstance({ workspace_id: workspaceId, reason: "workspace_watcher_released" });
+    return { released: true, reason: null, ...providerStatus(workspaceId) };
   }
 
   function markFault(entry, reason, { failed = false, overflow = false } = {}) {
@@ -720,6 +762,7 @@ export function createWorkspaceChangeClockProvider(options = {}) {
     prepareReuse,
     prepareSynchronization,
     fenceSynchronization,
+    release,
     status,
     close,
   });

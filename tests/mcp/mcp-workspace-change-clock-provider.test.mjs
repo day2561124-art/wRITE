@@ -30,6 +30,7 @@ class FakeChild extends EventEmitter {
   kill(signal = "SIGTERM") {
     this.killed = true;
     this.signalCode = signal;
+    setImmediate(() => this.emit("exit", null, signal));
     return true;
   }
 }
@@ -351,6 +352,23 @@ function createHarness({ platform = "win32", fenceTimeoutMs = 250 } = {}) {
   h.provider.close();
 }
 
+// Per-workspace release waits for helper exit, removes the provider entry, and
+// forces a fresh-instance boundary before filesystem removal may proceed.
+{
+  const h = createHarness();
+  const child = await h.readyProvider();
+  const released = await h.provider.release({ workspace_id: workspaceId });
+  assert.equal(released.released, true);
+  assert.equal(released.reason, null);
+  assert.equal(child.killed, true);
+  assert.equal(h.provider.status({ workspace_id: workspaceId }).helper_pid, null);
+  const state = h.clock.status({ workspace_id: workspaceId });
+  assert.equal(state.provider_ready, false);
+  assert.equal(state.watch_state, "unknown");
+  assert.equal(state.fresh_instance, true);
+  h.provider.close();
+}
+
 // A fence timeout is fail-closed: the helper is discarded and the clock returns to fresh/unknown.
 {
   let child;
@@ -450,6 +468,11 @@ if (process.platform === "win32") {
     const changed = clock.status({ workspace_id: workspaceId });
     assert.ok(changed.change_epoch > beforeEpoch, "real Windows watcher did not observe the filesystem mutation");
     assert.equal(changed.watch_state, "synchronizing");
+
+    const released = await provider.release({ workspace_id: workspaceId });
+    assert.equal(released.released, true, released.reason ?? "real Windows watcher release did not complete");
+    assert.equal(provider.status({ workspace_id: workspaceId }).helper_pid, null);
+    await rm(root, { recursive: true, force: true });
   } finally {
     provider.close();
     await rm(temp, { recursive: true, force: true });
