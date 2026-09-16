@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { commitFileTransaction } from "./file-transactions.mjs";
 import { controlledProcessEnvironment } from "./process-control.mjs";
+import { findWindowsPathLockOwners } from "./mcp-windows-lock-owner-diagnostics.mjs";
 import { projectPaths, projectRoot, resolveProjectPath } from "./project-paths.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -544,6 +545,7 @@ export function createDevWorkstreamRegistryService({
   worktreeRootPath = worktreeRoot,
   gitRunner = runFixedGit,
   removePath = rm,
+  lockOwnerInspector = findWindowsPathLockOwners,
 } = {}) {
   const storagePath = normalizeRegistryPath(registryPath);
 
@@ -1061,6 +1063,47 @@ export function createDevWorkstreamRegistryService({
     const workspaces = [];
     for (const record of records.slice(0, limit)) workspaces.push(await workspaceView(record));
     return { registry_revision: registry.revision, total, returned: workspaces.length, truncated: total > limit, workspaces };
+  }
+
+  async function workspaceLockOwnerStatus(input = {}) {
+    const allowed = new Set(["workspace_id"]);
+    assertObject(input, "dev_workspace_lock_owner_status input", allowed);
+    const workspaceId = input.workspace_id;
+    if (typeof workspaceId !== "string" || !workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id must be a server-issued workspace ID.");
+    await assertWorkspaceTransactionAvailable(workspaceId);
+    const { registry } = await readRegistryWithHealth();
+    const record = registry.workstreams.find((candidate) => candidate.workspace_id === workspaceId && candidate.workspace) ?? null;
+    if (!record) throw new Error(`Unknown workspace: ${workspaceId}.`);
+    const absolutePath = absoluteWorkspacePath(workspaceId);
+    let targetExists = false;
+    try {
+      const info = await lstat(absolutePath);
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("Registered workspace path is not a safe directory.");
+      targetExists = true;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (!targetExists) {
+      return {
+        workspace_id: workspaceId,
+        workstream_id: record.workstream_id,
+        workspace_state: record.workspace.state,
+        target_exists: false,
+        supported: process.platform === "win32",
+        platform: process.platform,
+        owner_count: 0,
+        owners: [],
+        scan: null,
+      };
+    }
+    const diagnostic = await lockOwnerInspector(absolutePath);
+    return {
+      workspace_id: workspaceId,
+      workstream_id: record.workstream_id,
+      workspace_state: record.workspace.state,
+      target_exists: true,
+      ...diagnostic,
+    };
   }
 
   async function lockWorkspace(input = {}) {
@@ -1588,6 +1631,7 @@ export function createDevWorkstreamRegistryService({
     createIsolated,
     getWorkspace,
     listWorkspaces,
+    workspaceLockOwnerStatus,
     lockWorkspace,
     unlockWorkspace,
     removeIsolated,
@@ -1610,6 +1654,7 @@ export const dev_workspace_status = defaultService.status;
 export const dev_workspace_create_isolated = defaultService.createIsolated;
 export const dev_workspace_get_workspace = defaultService.getWorkspace;
 export const dev_workspace_list_workspaces = defaultService.listWorkspaces;
+export const dev_workspace_lock_owner_status = defaultService.workspaceLockOwnerStatus;
 export const dev_workspace_lock = defaultService.lockWorkspace;
 export const dev_workspace_unlock = defaultService.unlockWorkspace;
 export const dev_workspace_remove_isolated = defaultService.removeIsolated;

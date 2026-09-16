@@ -520,6 +520,53 @@ test("controlled isolated worktree create is server-owned, locked, persistent, a
   }
 });
 
+test("workspace lock-owner diagnostics derive the exact server-owned path and reject caller paths", async () => {
+  const harness = await createGitHarness("lock-owner-status");
+  try {
+    const workstream = await harness.service.begin({ label: "lock owner diagnostics" });
+    const isolated = await harness.service.createIsolated({ workstream_id: workstream.workstream_id });
+    const expectedPath = path.join(harness.worktreeRootPath, isolated.workspace_id);
+    let inspectedPath = null;
+    const diagnosticService = createDevWorkstreamRegistryService({
+      registryPath: harness.registryPath,
+      headReader: async () => harness.head,
+      repositoryRoot: harness.repositoryRoot,
+      worktreeRootPath: harness.worktreeRootPath,
+      gitRunner: harness.runGit,
+      lockOwnerInspector: async (targetPath) => {
+        inspectedPath = targetPath;
+        return {
+          supported: true,
+          platform: "win32",
+          owner_count: 1,
+          owners: [{ pid: 1234, image_name: "node.exe", image_path: "C:/node.exe", matched_relative_path: ".", matches_workspace_root: true }],
+          scan: { system_handle_count: 10, scanned_handle_count: 10, inaccessible_process_count: 0, duplicate_failure_count: 0, disk_handle_count: 1, truncated: false },
+        };
+      },
+    });
+
+    const result = await diagnosticService.workspaceLockOwnerStatus({ workspace_id: isolated.workspace_id });
+    assert.equal(path.resolve(inspectedPath), path.resolve(expectedPath));
+    assert.equal(result.workspace_id, isolated.workspace_id);
+    assert.equal(result.workstream_id, workstream.workstream_id);
+    assert.equal(result.workspace_state, "active");
+    assert.equal(result.target_exists, true);
+    assert.equal(result.owner_count, 1);
+    assert.equal(result.owners[0].pid, 1234);
+    assert.equal(Object.hasOwn(result, "target_path"), false);
+
+    await assertRejectsMessage(
+      diagnosticService.workspaceLockOwnerStatus({ workspace_id: isolated.workspace_id, path: expectedPath }),
+      /does not accept path/u,
+    );
+
+    await harness.service.end({ workstream_id: workstream.workstream_id, outcome: "abandoned" });
+    await harness.service.removeIsolated({ workspace_id: isolated.workspace_id });
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("dirty main does not block isolated create and uncommitted main content is not copied", async () => {
   const harness = await createGitHarness("dirty-main");
   try {

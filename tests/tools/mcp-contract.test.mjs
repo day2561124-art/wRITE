@@ -19,6 +19,7 @@ const testScripts = [
   "tests/mcp/mcp-launcher-wrapper.test.mjs",
   "tests/mcp/mcp-workspace-change-clock.test.mjs",
   "tests/mcp/mcp-workspace-change-clock-provider.test.mjs",
+  "tests/mcp/mcp-windows-lock-owner-diagnostics.test.mjs",
   "tests/mcp/mcp-workspace-snapshot-authority.test.mjs",
   "tests/mcp/mcp-development-checkpoint-tools.test.mjs",
   "tests/mcp/mcp-development-transaction-tools.test.mjs",
