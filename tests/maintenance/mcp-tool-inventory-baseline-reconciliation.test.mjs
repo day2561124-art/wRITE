@@ -34,14 +34,23 @@ const step4B2AddedToolNames = [
   "chatgpt_bridge_submit_world_character_action",
   "chatgpt_bridge_resolve_world_turn",
 ];
+const postStep4B2AddedWorldSimulationToolNames = [
+  "chatgpt_bridge_submit_world_character_deliberation",
+];
+const currentWorldTurnTransportToolNames = [
+  "chatgpt_bridge_prepare_world_turn",
+  ...postStep4B2AddedWorldSimulationToolNames,
+  "chatgpt_bridge_submit_world_character_action",
+  "chatgpt_bridge_resolve_world_turn",
+];
 const worldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
-  ...step4B2AddedToolNames,
+  ...currentWorldTurnTransportToolNames,
   ...preStep4B2WorldSimulationToolNames.slice(1),
 ];
 const formalPublicWorldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
-  ...step4B2AddedToolNames,
+  ...currentWorldTurnTransportToolNames,
 ];
 const externalBrainToolNames = [
   "chatgpt_bridge_begin_external_brain_writing_session",
@@ -182,6 +191,7 @@ const directPreStep4B2Names = directNames.filter((name) => (
   name !== currentAddedToolName
   && !isDevelopmentToolName(name)
   && !step4B2AddedToolNames.includes(name)
+  && !postStep4B2AddedWorldSimulationToolNames.includes(name)
 ));
 
 assert(historicalNames);
@@ -200,6 +210,9 @@ assert.deepEqual(historicalNames.filter((name) => !directPreStep4B2Names.include
 assert.equal(digest(directPreStep4B2Names), expectedPreStep4B2DirectDigest);
 assert.equal(directNames.filter((name) => name === currentAddedToolName).length, 1);
 for (const toolName of step4B2AddedToolNames) {
+  assert.equal(directNames.filter((name) => name === toolName).length, 1);
+}
+for (const toolName of postStep4B2AddedWorldSimulationToolNames) {
   assert.equal(directNames.filter((name) => name === toolName).length, 1);
 }
 assert.deepEqual(
@@ -261,6 +274,7 @@ assert.equal(
     name !== currentAddedToolName
     && !isDevelopmentToolName(name)
     && !step4B2AddedToolNames.includes(name)
+    && !postStep4B2AddedWorldSimulationToolNames.includes(name)
   ))),
   expectedPreStep4B2RuntimeDigest,
 );
