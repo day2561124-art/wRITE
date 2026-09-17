@@ -90,6 +90,69 @@ function getSessionId(req) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+const LOOPBACK_ORIGIN_HOSTNAMES = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+]);
+
+function validateMcpOrigin(req) {
+  const rawOrigin = req.headers.origin;
+  if (rawOrigin === undefined) {
+    return { allowed: true, origin: null, hostname: null, reason: 'origin_absent' };
+  }
+  if (Array.isArray(rawOrigin) || typeof rawOrigin !== 'string') {
+    return { allowed: false, origin: null, hostname: null, reason: 'origin_not_single_value' };
+  }
+
+  const origin = rawOrigin.trim();
+  if (!origin || origin === 'null') {
+    return { allowed: false, origin: null, hostname: null, reason: 'origin_invalid' };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return { allowed: false, origin: null, hostname: null, reason: 'origin_malformed' };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const protocolAllowed = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  const shapeAllowed = (
+    !parsed.username
+    && !parsed.password
+    && parsed.pathname === '/'
+    && parsed.search === ''
+    && parsed.hash === ''
+  );
+  if (!protocolAllowed || !shapeAllowed || !LOOPBACK_ORIGIN_HOSTNAMES.has(hostname)) {
+    return {
+      allowed: false,
+      origin: null,
+      hostname: LOOPBACK_ORIGIN_HOSTNAMES.has(hostname) ? hostname : null,
+      reason: 'origin_not_allowed',
+    };
+  }
+
+  return {
+    allowed: true,
+    origin: parsed.origin,
+    hostname,
+    reason: 'origin_allowed',
+  };
+}
+
+function writeOriginRejected(res) {
+  res.writeHead(403, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+    Vary: 'Origin',
+  });
+  res.end('Forbidden: invalid Origin');
+}
+
 function writeJsonRpcError(res, statusCode, code, message) {
   if (res.headersSent) {
     if (!res.writableEnded) {
@@ -877,9 +940,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  const originValidation = validateMcpOrigin(req);
+  if (!originValidation.allowed) {
+    diagnostics.captureIncident('http_origin_rejected', {
+      method: req.method ?? null,
+      reason: originValidation.reason,
+      origin_hostname: originValidation.hostname,
+    });
+    writeOriginRejected(res);
+    return;
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': 'http://127.0.0.1',
+      'Access-Control-Allow-Origin': originValidation.origin ?? 'http://127.0.0.1',
       'Access-Control-Allow-Methods':
         'GET,POST,DELETE,OPTIONS',
       'Access-Control-Allow-Headers': [
