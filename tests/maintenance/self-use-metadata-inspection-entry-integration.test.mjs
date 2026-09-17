@@ -15,8 +15,11 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 const endpointPath = "/api/system/inspect-sealed-chain-closure-metadata";
 const activeEnginePath = path.join(rootDir, "data", "canon_db", "active_engine.md");
+// Historical ordered public inventory at 2ccbbf43, excluding dependency status.
 const expectedBaselinePublicDigest = "6386032597d2af1459e13bac17f8a1e2f46458399ec9104889ca171f7016651e";
 const activeEngineDependencyStatusTool = "get_active_engine_dependency_status";
+// 97fc79b6 formally added Phase79M deliberation between prepare and action.
+const formalDeliberationTool = "chatgpt_bridge_submit_world_character_deliberation";
 const requiredIdentities = {
   capability_id: "inspect_sealed_chain_closure_metadata",
   capability_kind: "read_only_status_inspection",
@@ -265,9 +268,22 @@ assert.equal(await directoryDigest(path.join(rootDir, "data", "canon_db")), cano
 
 const publicNamesAfter = await listPublicToolNames();
 assert.deepEqual(publicNamesAfter, publicNamesBefore);
+// Admit only the documented addition, exactly once and at its registered position.
+// The remaining ordered inventory must still match the unchanged historical digest.
+assert.deepEqual(
+  publicNamesAfter.filter((name) => name === formalDeliberationTool),
+  [formalDeliberationTool],
+);
+const prepareTurnIndex = publicNamesAfter.indexOf("chatgpt_bridge_prepare_world_turn");
+assert(prepareTurnIndex >= 0);
+assert.deepEqual(publicNamesAfter.slice(prepareTurnIndex, prepareTurnIndex + 3), [
+  "chatgpt_bridge_prepare_world_turn",
+  formalDeliberationTool,
+  "chatgpt_bridge_submit_world_character_action",
+]);
 assert.equal(
   sha256(publicNamesAfter
-    .filter((name) => name !== activeEngineDependencyStatusTool)
+    .filter((name) => name !== activeEngineDependencyStatusTool && name !== formalDeliberationTool)
     .join("\n")),
   expectedBaselinePublicDigest,
 );
