@@ -916,6 +916,8 @@ const steps = [
 ];
 
 function getTimeoutMs(label) {
+  // Match the controlled mcp suite budget; each child still has its own deadline.
+  if (label === "MCP contract tests") return 1_500_000;
 
   if (
     label === "UI server contract tests"
