@@ -162,6 +162,13 @@ import {
   dev_run_tests,
 } from "./mcp-development-test-tools.mjs";
 import {
+  POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
+  POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
+  POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS,
+  powershell_admin_run,
+  powershell_run,
+} from "./mcp-powershell-maintenance-tools.mjs";
+import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
   DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE,
   DEV_WORKSPACE_ID_PATTERN_SOURCE,
@@ -859,6 +866,15 @@ function summarizeToolArguments(args, toolName = "") {
   }
   const summary = {};
   for (const [key, value] of Object.entries(args)) {
+    if (["powershell_run", "powershell_admin_run"].includes(toolName) && key === "command" && typeof value === "string") {
+      summary[key] = {
+        type: "string",
+        length: value.length,
+        sha256: hashText(value),
+        sensitive_payload_preview_omitted: true,
+      };
+      continue;
+    }
     if (toolName === "dev_create_file" && key === "content" && typeof value === "string") {
       summary[key] = {
         type: "string",
@@ -908,6 +924,35 @@ function auditOutputSummary(result, toolName = "") {
   const text = Array.isArray(result?.content)
     ? result.content.map((item) => item?.text ?? "").join("\n")
     : "";
+  if (["powershell_run", "powershell_admin_run"].includes(toolName)) {
+    try {
+      const payload = JSON.parse(text);
+      return {
+        is_error: result?.isError === true,
+        elevated: payload.elevated === true,
+        execution_ok: payload.execution_ok === true,
+        ok: payload.ok === true,
+        command_sha256: typeof payload.command_sha256 === "string" ? payload.command_sha256 : null,
+        cwd: typeof payload.cwd === "string" ? redactProcessOutput(payload.cwd) : null,
+        timeout_ms: Number.isInteger(payload.timeout_ms) ? payload.timeout_ms : null,
+        exit_code: Number.isInteger(payload.exit_code) ? payload.exit_code : null,
+        timed_out: payload.timed_out === true,
+        duration_ms: Number.isFinite(payload.duration_ms) ? payload.duration_ms : null,
+        stdout_truncated: payload.stdout_truncated === true,
+        stderr_truncated: payload.stderr_truncated === true,
+        reason: typeof payload.reason === "string"
+          ? truncateText(redactProcessOutput(payload.reason), 160)
+          : null,
+        operation_id: typeof payload.operation_id === "string" ? payload.operation_id : null,
+      };
+    } catch {
+      return {
+        is_error: result?.isError === true,
+        execution_ok: false,
+        summary_error: "Could not parse bounded PowerShell maintenance result metadata.",
+      };
+    }
+  }
   if (toolName === "dev_git_push") {
     try {
       const payload = JSON.parse(text);
@@ -1134,7 +1179,7 @@ async function auditedToolCall(tool, args, actor) {
     if (guardError) {
       throw new Error(guardError);
     }
-    if (tool.name.startsWith("dev_")) {
+    if (tool.name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(tool.name)) {
       await assertDevJournalMutationAllowed();
     }
     result = await tool.handler(effectiveArgs);
@@ -1951,6 +1996,48 @@ const toolDefinitions = [
       suite: { type: "string", enum: DEV_TEST_SUITES },
     }, ["suite"]),
     handler: async (args) => jsonContent(await dev_run_tests(args)),
+  },
+  {
+    name: "powershell_run",
+    description: "Run bounded non-elevated Windows PowerShell for host/MCP maintenance only. cwd is restricted to the selected Writer Workbench workspace; timeout/output are capped and obvious destructive system operations are rejected.",
+    risk: "low-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      command: {
+        type: "string",
+        minLength: 1,
+        maxLength: POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
+      },
+      cwd: { type: "string", default: "." },
+      timeoutMs: {
+        type: "integer",
+        minimum: 1_000,
+        maximum: POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS,
+        default: POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
+      },
+    }, ["command"]),
+    handler: async (args) => jsonContent(await powershell_run(args)),
+  },
+  {
+    name: "powershell_admin_run",
+    description: "Run bounded elevated Windows PowerShell through the one-time registered protected Task Scheduler runner. Writer Workbench itself remains non-elevated; UAC stays enabled; cwd/timeout/output/safety limits and Development Journal recording still apply.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({
+      command: {
+        type: "string",
+        minLength: 1,
+        maxLength: POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
+      },
+      cwd: { type: "string", default: "." },
+      timeoutMs: {
+        type: "integer",
+        minimum: 1_000,
+        maximum: POWERSHELL_MAINTENANCE_MAX_TIMEOUT_MS,
+        default: POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
+      },
+    }, ["command"]),
+    handler: async (args) => jsonContent(await powershell_admin_run(args)),
   },
   {
     name: "dev_git_status",
@@ -4460,6 +4547,8 @@ const workspaceAwareDeveloperToolNames = new Set([
   "dev_move_path",
   "dev_delete_file",
   "dev_run_tests",
+  "powershell_run",
+  "powershell_admin_run",
   "dev_git_status",
   "dev_git_diff",
   "dev_git_diff_check",
@@ -4596,6 +4685,8 @@ const chatgptDeveloperToolNames = new Set([
   "dev_apply_patch",
   "dev_delete_file",
   "dev_run_tests",
+  "powershell_run",
+  "powershell_admin_run",
   "dev_git_commit",
   "dev_git_push",
 ]);
@@ -4629,6 +4720,19 @@ const permissionSources = {
   dev_apply_patch: ["repository_development_text_file", "mcp_client_exact_patch"],
   dev_delete_file: ["repository_development_text_file", "mcp_client_delete_request"],
   dev_run_tests: ["repository_test_entrypoints", "server_owned_test_allowlist"],
+  powershell_run: [
+    "windows_host_maintenance",
+    "selected_workspace_cwd",
+    "mcp_client_powershell_command",
+    "development_operation_journal",
+  ],
+  powershell_admin_run: [
+    "windows_host_maintenance",
+    "selected_workspace_cwd",
+    "mcp_client_powershell_command",
+    "windows_task_scheduler_elevated_runner",
+    "development_operation_journal",
+  ],
   dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
   dev_git_push: ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],
   dev_git_status: ["repository_git_worktree_status"],

@@ -991,6 +991,8 @@ async function verifyLauncherMcpProfile({
   expectPatch,
   expectDelete,
   expectRunTests,
+  expectPowerShell,
+  expectAdminPowerShell,
   expectCommit,
   expectPush,
   expectReload,
@@ -1055,6 +1057,14 @@ async function verifyLauncherMcpProfile({
     assert(
       names.includes("dev_run_tests") === expectRunTests,
       `${label} launcher profile dev_run_tests exposure was ${names.includes("dev_run_tests")}.`,
+    );
+    assert(
+      names.includes("powershell_run") === expectPowerShell,
+      `${label} launcher profile powershell_run exposure was ${names.includes("powershell_run")}.`,
+    );
+    assert(
+      names.includes("powershell_admin_run") === expectAdminPowerShell,
+      `${label} launcher profile powershell_admin_run exposure was ${names.includes("powershell_admin_run")}.`,
     );
     assert(
       names.includes("dev_git_commit") === expectCommit,
@@ -1464,11 +1474,13 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 99,
+      expectedCount: 101,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
       expectRunTests: true,
+      expectPowerShell: true,
+      expectAdminPowerShell: true,
       expectCommit: true,
       expectPush: true,
       expectReload: true,
@@ -1484,6 +1496,8 @@ async function main() {
       expectPatch: false,
       expectDelete: false,
       expectRunTests: false,
+      expectPowerShell: false,
+      expectAdminPowerShell: false,
       expectCommit: false,
       expectPush: false,
       expectReload: false,
@@ -1491,8 +1505,8 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (99 tools: 98 child-owned plus parent-owned dev_mcp_reload)");
-    console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test tools absent)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (101 tools: 100 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));
     try {

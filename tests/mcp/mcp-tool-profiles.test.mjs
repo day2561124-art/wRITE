@@ -83,6 +83,8 @@ const blockedToolNames = [
   "dev_apply_patch",
   "dev_delete_file",
   "dev_run_tests",
+  "powershell_run",
+  "powershell_admin_run",
   "dev_git_commit",
   "dev_git_push",
   "activate_engine_version",
@@ -323,7 +325,7 @@ const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"].sort(),
+  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
 for (const [toolName, expectedProperties, expectedSources] of [
@@ -1494,7 +1496,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...new Set([...publicToolNames, "dev_apply_patch", "dev_run_tests", "dev_git_commit", "dev_git_push"])].sort(),
+    [...new Set([...publicToolNames, "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
@@ -1508,5 +1510,5 @@ try {
 }
 
 console.log(
-  `MCP tool profile tests passed (public=${publicToolNames.length}, developer=${publicToolNames.length + 54}).`,
+  `MCP tool profile tests passed (public=${listedPublicNames.length}, developer=${developerNames.length}).`,
 );

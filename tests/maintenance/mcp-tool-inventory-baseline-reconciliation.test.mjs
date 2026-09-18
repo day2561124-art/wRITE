@@ -18,7 +18,7 @@ const directRegistrationCommit = "8dfc25818bc25391f4852b4c2eac81361ffa0bf6";
 const readonlyImplementationCommit = "85bf4cdbc6d1d7d5e105303ff1e68fc121b66d42";
 const addedToolName = "preview_visual_reference_consumer_output_guard";
 const currentAddedToolName = "get_active_engine_dependency_status";
-const isDevelopmentToolName = (name) => name.startsWith("dev_");
+const isDevelopmentToolName = (name) => name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(name);
 const preStep4B2WorldSimulationToolNames = [
   "chatgpt_bridge_begin_world_simulation_session",
   "chatgpt_bridge_use_world_scene_causal_analyzer",
