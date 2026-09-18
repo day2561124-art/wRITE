@@ -33,9 +33,11 @@ if (!script) {
   throw new Error(`Affected selector returned unsupported suite: ${plan.suite}`);
 }
 
+const timeoutMs = plan.suite === "all" ? 7_200_000 : undefined;
+
 await runTestSteps(
   [[`Affected gate -> ${plan.suite}`, [script]]],
-  { suiteLabel: `Affected test gate (${plan.suite})` },
+  { suiteLabel: `Affected test gate (${plan.suite})`, timeoutMs },
 );
 
 console.log("Affected tests passed.");

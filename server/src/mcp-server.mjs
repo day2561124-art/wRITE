@@ -1,3 +1,4 @@
+import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
@@ -206,6 +207,7 @@ import {
 } from "./mcp-development-integration-tools.mjs";
 import {
   DEV_JOURNAL_MAX_QUERY_RESULTS,
+  executeReconciledMcpMutation,
   DEV_OPERATION_ID_PATTERN_SOURCE,
   assertDevJournalMutationAllowed,
   dev_workspace_get_operation,
@@ -2137,7 +2139,9 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
       operation_id: { type: "string", pattern: DEV_OPERATION_ID_PATTERN_SOURCE, maxLength: 64 },
-    }, ["operation_id"]),
+      reconciliation_key: { type: "string", pattern: MCP_RECONCILIATION_KEY_PATTERN_SOURCE, maxLength: stringMaxLengthFor("reconciliation_key") },
+      request_fingerprint_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    }),
     handler: async (args) => jsonContent(await dev_workspace_get_operation(args)),
   },
   {
@@ -5266,6 +5270,14 @@ function publicToolDefinition(tool) {
     annotations: tool.annotations,
     _meta: {
       "armed-academy/permission": permission,
+      ...(tool.risk !== "read" ? {
+        "armed-academy/reconciliation": {
+          key_location: "params._meta.reconciliation_key",
+          key_pattern: MCP_RECONCILIATION_KEY_PATTERN_SOURCE,
+          lookup_tool: "dev_workspace_get_operation",
+          automatic_replay_allowed: false,
+        },
+      } : {}),
       ...(actionSurface ? { "armed-academy/chatgpt_action_surface": actionSurface } : {}),
       ...(visualReferenceGuardFinalClosure ? {
         "armed-academy/visual_reference_guard_public_action_e2e_final_closure": visualReferenceGuardFinalClosure,
@@ -5543,7 +5555,27 @@ async function callTool(params) {
     : "mcp-client";
 
   if (tool.risk !== "read") {
-    return auditedToolCall(tool, args, actor);
+    const mutationArgs = args;
+    // MCP metadata carries transport identity without weakening strict tool argument schemas.
+    const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
+    if (!key) return auditedToolCall(tool, mutationArgs, actor);
+    const effectiveArgs = prepareToolArguments(tool, mutationArgs);
+    const guardError = confirmationGuardError(tool, effectiveArgs);
+    if (guardError) throw new Error(guardError);
+    const outcome = await executeReconciledMcpMutation({
+      reconciliation_key: key,
+      request_fingerprint_sha256: fingerprintMcpMutationRequest(tool.name, mutationArgs),
+      tool_name: tool.name,
+    }, () => auditedToolCall(tool, mutationArgs, actor));
+    if (!outcome.reconciled) {
+      return { ...outcome.value, _meta: { ...outcome.value?._meta,
+        reconciliation_key: key, operation_id: outcome.operation.operation_id } };
+    }
+    const operation = outcome.operation;
+    return {
+      ...jsonContent({ reconciled: true, ...operation }),
+      isError: operation.reconciliation_state !== "completed",
+    };
   }
 
   try {

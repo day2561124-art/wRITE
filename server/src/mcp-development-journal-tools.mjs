@@ -19,6 +19,12 @@ import { controlledProcessEnvironment } from "./process-control.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
 import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
+import {
+  getMcpOperationReconciliationContext,
+  runWithMcpOperationReconciliationContext,
+  MCP_RECONCILIATION_KEY_PATTERN_SOURCE,
+  normalizeMcpReconciliationKey,
+} from "./mcp-operation-reconciliation-context.mjs";
 
 const execFileAsync = promisify(execFile);
 const parentWorkspaceSnapshotAuthorityIpcClient =
@@ -69,6 +75,7 @@ export const DEV_WORKSPACE_SNAPSHOT_FINGERPRINT_CACHE_SCHEMA_VERSION = 1;
 
 export const DEV_OPERATION_ID_PATTERN_SOURCE = "^dev_operation_[a-f0-9]{32}$";
 export const DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE = "^dev_journal_event_[a-f0-9]{32}$";
+export const DEV_RECONCILIATION_KEY_PATTERN_SOURCE = MCP_RECONCILIATION_KEY_PATTERN_SOURCE;
 const operationIdPattern = new RegExp(DEV_OPERATION_ID_PATTERN_SOURCE, "u");
 const eventIdPattern = new RegExp(DEV_JOURNAL_EVENT_ID_PATTERN_SOURCE, "u");
 const workspaceIdPattern = /^(?:dev_workspace_[a-f0-9]{24}|dev_workspace_shared_repository_v1)$/u;
@@ -111,8 +118,11 @@ async function invalidateParentWorkspaceSnapshotAuthority(event) {
   }
 }
 
+// A test-only group lets independent MCP child processes exercise one durable journal.
+const testJournalGroup = process.env.WRITER_WORKBENCH_TEST_JOURNAL_GROUP;
+if (testJournalGroup !== undefined && !/^[a-f0-9-]{36}$/u.test(testJournalGroup)) throw new Error("Invalid test journal group.");
 export const DEV_JOURNAL_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1"
-  ? path.join(os.tmpdir(), `writer-workbench-operation-journal-test-${process.pid}`, "operation-journal")
+  ? path.join(os.tmpdir(), `writer-workbench-operation-journal-test-${testJournalGroup ?? process.pid}`, "operation-journal")
   : path.join(
     projectPaths.outputLogs,
     "development_runtime",
@@ -292,6 +302,12 @@ function normalizeBaseEvent(input, { sequence, previousEventHash, eventId, times
   const operationId = input.operation_id;
   if (!operationIdPattern.test(operationId)) throw new Error("operation_id is invalid.");
   if (!stageSet.has(input.stage)) throw new Error("stage is invalid.");
+  const reconciliationKey = normalizeMcpReconciliationKey(input.reconciliation_key, { optional: true });
+  const requestFingerprint = input.request_fingerprint_sha256 ?? null;
+  if (requestFingerprint !== null && !sha256Pattern.test(requestFingerprint)) throw new Error("request_fingerprint_sha256 is invalid.");
+  if ((reconciliationKey === null) !== (requestFingerprint === null)) {
+    throw new Error("reconciliation_key and request_fingerprint_sha256 must be supplied together.");
+  }
   const workspaceId = input.workspace_id ?? "dev_workspace_shared_repository_v1";
   if (!workspaceIdPattern.test(workspaceId)) throw new Error("workspace_id is invalid.");
   const workstreamId = input.workstream_id ?? null;
@@ -309,6 +325,8 @@ function normalizeBaseEvent(input, { sequence, previousEventHash, eventId, times
     workspace_id: workspaceId,
     actor: normalizeActor(input.actor, input.tool_name),
     diagnostic: { owner_pid: process.pid, hostname: os.hostname() },
+    reconciliation_key: reconciliationKey,
+    request_fingerprint_sha256: requestFingerprint,
     parent_operation_id: input.parent_operation_id ?? null,
     reconciles_event_id: input.reconciles_event_id ?? null,
     targets: normalizeTargets(input.targets ?? []),
@@ -502,6 +520,10 @@ function parseEvent(raw) {
   if (typeof event.timestamp !== "string" || !Number.isFinite(Date.parse(event.timestamp))) throw new Error("Journal event timestamp is invalid.");
   if (event.previous_event_hash !== null && !sha256Pattern.test(event.previous_event_hash)) throw new Error("Journal previous_event_hash is invalid.");
   if (!sha256Pattern.test(event.event_hash) || computeEventHash(event) !== event.event_hash) throw new Error("Journal event hash mismatch.");
+  const reconciliationKey = normalizeMcpReconciliationKey(event.reconciliation_key, { optional: true });
+  const requestFingerprint = event.request_fingerprint_sha256 ?? null;
+  if (requestFingerprint !== null && !sha256Pattern.test(requestFingerprint)) throw new Error("Journal request fingerprint is invalid.");
+  if ((reconciliationKey === null) !== (requestFingerprint === null)) throw new Error("Journal reconciliation identity is incomplete.");
   normalizeTargets(event.targets ?? []);
   normalizeLinks(event.links ?? []);
   return event;
@@ -516,6 +538,20 @@ async function listEventFiles(eventsPath) {
     }
   }
   return entries.map((entry) => entry.name).sort();
+}
+
+async function findStartedEventByReconciliationKey(eventsPath, reconciliationKey) {
+  const files = await listEventFiles(eventsPath);
+  if (files.length > DEV_JOURNAL_MAX_RECOVERY_SCAN) throw new Error(`Journal scan exceeds ${DEV_JOURNAL_MAX_RECOVERY_SCAN} events.`);
+  for (let index = files.length - 1; index >= 0; index -= 1) {
+    const fileName = files[index];
+    const filePath = path.join(eventsPath, fileName);
+    const info = await lstat(filePath);
+    if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
+    const event = parseEvent(await readFile(filePath, "utf8"));
+    if (event.stage === "operation_started" && event.reconciliation_key === reconciliationKey) return event;
+  }
+  return null;
 }
 
 export function createDevOperationJournalService({
@@ -637,7 +673,12 @@ export function createDevOperationJournalService({
 
   function classifyVerifiedSnapshot({ head, events }) {
     const byOperation = new Map();
+    const keys = new Set();
     for (const event of events) {
+      if (event.stage === "operation_started" && event.reconciliation_key) {
+        if (keys.has(event.reconciliation_key)) throw new Error("Duplicate reconciliation admission.");
+        keys.add(event.reconciliation_key);
+      }
       const list = byOperation.get(event.operation_id) ?? [];
       list.push(event);
       byOperation.set(event.operation_id, list);
@@ -648,6 +689,11 @@ export function createDevOperationJournalService({
       const starts = operationEvents.filter((event) => event.stage === "operation_started");
       const terminals = operationEvents.filter((event) => terminalStageSet.has(event.stage));
       if (starts.length !== 1) throw new Error(`Operation ${operationId} has invalid STARTED cardinality.`);
+      if (operationEvents.some((event) =>
+        (event.reconciliation_key ?? null) !== (starts[0].reconciliation_key ?? null)
+        || (event.request_fingerprint_sha256 ?? null) !== (starts[0].request_fingerprint_sha256 ?? null))) {
+        throw new Error("Operation reconciliation identity changed.");
+      }
       if (terminals.length > 1) throw new Error(`Operation ${operationId} has multiple terminal events.`);
       if (terminals.length === 0) {
         const diagnostic = starts[0].diagnostic;
@@ -704,6 +750,28 @@ export function createDevOperationJournalService({
     const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
     try {
       const head = await readHead(headPath);
+      // The durable lookup and STARTED append share the cross-process append lock.
+      const key = normalizeMcpReconciliationKey(input.reconciliation_key);
+      if (input.stage === "operation_started" && key) {
+        const existing = await findStartedEventByReconciliationKey(eventsPath, key);
+        if (existing) {
+          const same = existing.request_fingerprint_sha256 === input.request_fingerprint_sha256
+            && existing.tool_name === input.tool_name;
+          const error = new Error(same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT");
+          error.code = same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT";
+          error.operation_id = existing.operation_id;
+          throw error;
+        }
+      }
+      if (terminalStageSet.has(input.stage)) {
+        for (const file of (await listEventFiles(eventsPath)).reverse()) {
+          const event = parseEvent(await readFile(path.join(eventsPath, file), "utf8"));
+          if (event.operation_id === input.operation_id && event.stage === "operation_started") break;
+          if (event.operation_id === input.operation_id && terminalStageSet.has(event.stage)) {
+            throw new Error("Operation already has a terminal event: " + input.operation_id);
+          }
+        }
+      }
       const sequence = head.latest_sequence + 1;
       const eventId = eventIdGenerator();
       if (!eventIdPattern.test(eventId)) throw new Error("Journal event ID generator returned an invalid ID.");
@@ -748,7 +816,8 @@ export function createDevOperationJournalService({
       return resolveDevWorkspaceExecutionContext({ workspace_id: workspaceId }, { mutation: false });
     });
 
-    for (const operationId of verification.dangling_operations) {
+    // Recover inner operations before their boundary admission.
+    for (const operationId of [...verification.dangling_operations].reverse()) {
       const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
       if (!started) continue;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
@@ -774,7 +843,18 @@ export function createDevOperationJournalService({
       let outcome = "no_effect_observed";
       let ambiguous = false;
       let observedTargets = [];
-      if (transactionOperation) {
+      if (started.operation_type === "mcp_mutation") {
+        // Absence of child evidence never proves that an arbitrary handler had no effect.
+        const current = await verify();
+        const children = current.events.filter((event) => event.parent_operation_id === operationId
+          && event.stage === "operation_started");
+        const terminals = children.map((event) => current.events.find((candidate) =>
+          candidate.operation_id === event.operation_id && terminalStageSet.has(candidate.stage)));
+        const noEffect = children.length > 0 && terminals.every((event) =>
+          event && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome));
+        outcome = noEffect ? "no_effect_observed" : "ambiguous_effect";
+        ambiguous = !noEffect;
+      } else if (transactionOperation) {
         try {
           const { inspectDevTransactionOperationEffect } = await import("./mcp-development-transaction-tools.mjs");
           const inspection = await inspectDevTransactionOperationEffect(started);
@@ -864,11 +944,20 @@ export function createDevOperationJournalService({
     await assertMutationAllowed();
     const operationId = operationIdGenerator();
     if (!operationIdPattern.test(operationId)) throw new Error("Operation ID generator returned an invalid ID.");
+    const context = getMcpOperationReconciliationContext();
+    const identity = context?.operation_id
+      ? { parent_operation_id: context.operation_id }
+      : {
+        reconciliation_key: context?.reconciliation_key ?? input.reconciliation_key,
+        request_fingerprint_sha256: context?.request_fingerprint_sha256 ?? input.request_fingerprint_sha256,
+      };
     const event = await append({
       ...input,
+      ...identity,
       operation_id: operationId,
       stage: "operation_started",
     });
+    if (context?.reconciliation_key && !context.operation_id) context.operation_id = operationId;
     noteMutationStarted(event);
     await invalidateParentWorkspaceSnapshotAuthority(event);
     return { operation_id: operationId, started_event_id: event.journal_event_id, started_sequence: event.sequence };
@@ -889,6 +978,8 @@ export function createDevOperationJournalService({
       workstream_id: started.workstream_id,
       workspace_id: started.workspace_id,
       actor: started.actor,
+      reconciliation_key: started.reconciliation_key,
+      request_fingerprint_sha256: started.request_fingerprint_sha256,
       parent_operation_id: started.parent_operation_id,
       reconciles_event_id: input.reconciles_event_id ?? null,
       targets: input.targets ?? started.targets,
@@ -978,22 +1069,97 @@ export function createDevOperationJournalService({
   }
 
   async function getOperation(input = {}) {
-    const allowed = new Set(["operation_id"]);
-    if (!isObject(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new Error("dev_workspace_get_operation accepts operation_id only.");
-    if (!operationIdPattern.test(input.operation_id)) throw new Error("operation_id must be a server-issued operation ID.");
+    const allowed = new Set(["operation_id", "reconciliation_key", "request_fingerprint_sha256"]);
+    if (!isObject(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new Error("Unsupported operation lookup fields.");
+    const key = normalizeMcpReconciliationKey(input.reconciliation_key);
+    if (Boolean(key) === Boolean(input.operation_id)) throw new Error("Supply exactly one operation_id or reconciliation_key.");
+    if (input.operation_id && !operationIdPattern.test(input.operation_id)) throw new Error("operation_id must be a server-issued operation ID.");
+    if (input.request_fingerprint_sha256 !== undefined && !sha256Pattern.test(input.request_fingerprint_sha256)) throw new Error("Invalid request fingerprint.");
     const verification = await verify();
-    const events = verification.events.filter((event) => event.operation_id === input.operation_id);
-    if (events.length === 0) throw new Error(`Unknown operation: ${input.operation_id}.`);
+    const started = verification.events.find((event) => event.stage === "operation_started"
+      && (key ? event.reconciliation_key === key : event.operation_id === input.operation_id));
+    if (!started) {
+      if (!key) throw new Error("Unknown operation: " + input.operation_id);
+      // This is an observation, never an admission: begin() must still acquire the lock.
+      return { reconciliation_key: key, operation_id: null, reconciliation_state: "not_admitted",
+        safe_to_reinitiate: true, reinitiate_requires_same_key: true, automatic_replay_allowed: false };
+    }
+    if (input.request_fingerprint_sha256 && started.request_fingerprint_sha256 !== input.request_fingerprint_sha256) {
+      const error = new Error("RECONCILIATION_KEY_CONFLICT");
+      error.code = "RECONCILIATION_KEY_CONFLICT";
+      throw error;
+    }
+    const events = verification.events.filter((event) => event.operation_id === started.operation_id);
+    const terminal = events.find((event) => terminalStageSet.has(event.stage));
+    const ambiguous = terminal?.result?.outcome === "ambiguous_effect" || terminal?.result?.reconciliation_required === true;
+    const noEffect = ["failed_no_effect", "no_effect_observed"].includes(terminal?.result?.outcome);
+    const intended = terminal?.stage === "operation_completed"
+      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(terminal?.result?.outcome);
+    const state = ambiguous ? "recovery_required" : noEffect ? "no_effect" : intended ? "completed"
+      : terminal ? "recovery_required" : verification.active_operations.includes(started.operation_id) ? "active" : "dangling";
     return {
-      operation_id: input.operation_id,
-      operation_type: events[0].operation_type,
-      tool_name: events[0].tool_name,
-      workstream_id: events[0].workstream_id,
-      workspace_id: events[0].workspace_id,
-      terminal: events.some((event) => terminalStageSet.has(event.stage)),
-      outcome: events.find((event) => terminalStageSet.has(event.stage))?.stage ?? "dangling",
-      events,
+      operation_id: started.operation_id, operation_type: started.operation_type, tool_name: started.tool_name,
+      workstream_id: started.workstream_id, workspace_id: started.workspace_id,
+      reconciliation_key: started.reconciliation_key ?? null,
+      request_fingerprint_sha256: started.request_fingerprint_sha256 ?? null,
+      terminal: Boolean(terminal), outcome: terminal?.stage ?? "dangling",
+      reconciliation_state: state, recovered: terminal?.stage === "operation_recovered",
+      safe_to_reinitiate: noEffect && !ambiguous, reinitiate_requires_new_key: noEffect && !ambiguous,
+      automatic_replay_allowed: false, original_result: terminal?.result ?? null, events,
     };
+  }
+
+  async function executeReconciled(context, callback) {
+    return runWithMcpOperationReconciliationContext(context, async () => {
+      // Fast lookup permits successful reconciliation even when another operation degraded the journal.
+      const existing = await getOperation({
+        reconciliation_key: context.reconciliation_key,
+        request_fingerprint_sha256: context.request_fingerprint_sha256,
+      });
+      if (existing.operation_id) return { reconciled: true, operation: existing };
+      let admission;
+      try {
+        admission = await begin({ operation_type: "mcp_mutation", tool_name: context.tool_name });
+      } catch (error) {
+        if (error.code !== "RECONCILIATION_EXISTING_OPERATION") throw error;
+        return { reconciled: true, operation: await getOperation({ operation_id: error.operation_id }) };
+      }
+      let value;
+      try {
+        value = await callback();
+      } catch (error) {
+        await fail(admission.operation_id, { result: { outcome: "ambiguous_effect", reconciliation_required: true } });
+        throw error;
+      }
+      let payload;
+      try { payload = JSON.parse(value?.content?.[0]?.text ?? "{}"); } catch { payload = {}; }
+      if (value?.isError === true || payload?.ok === false || payload?.execution_ok === false) {
+        const verification = await verify();
+        const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
+          && event.stage === "operation_started");
+        const noEffect = children.length > 0 && children.every((child) => verification.events.some((event) =>
+          event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
+          && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
+        await fail(admission.operation_id, { result: {
+          outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect,
+        } });
+      } else {
+        const verification = await verify();
+        const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
+          && event.stage === "operation_started");
+        const uncertain = children.some((child) => {
+          const terminal = verification.events.find((event) => event.operation_id === child.operation_id
+            && terminalStageSet.has(event.stage));
+          return !terminal || terminal.result?.reconciliation_required === true || terminal.result?.outcome === "ambiguous_effect";
+        });
+        if (uncertain) {
+          await fail(admission.operation_id, { result: { outcome: "ambiguous_effect", reconciliation_required: true } });
+          throw new Error("RECONCILIATION_RECOVERY_REQUIRED");
+        }
+        await complete(admission.operation_id, { result: { outcome: "intended_effect_observed" } });
+      }
+      return { reconciled: false, value, operation: await getOperation({ operation_id: admission.operation_id }) };
+    });
   }
 
   async function listOperations(input = {}) {
@@ -1171,6 +1337,7 @@ export function createDevOperationJournalService({
     recover,
     markDegraded,
     getOperation,
+    executeReconciled,
     listOperations,
     getProvenance,
     getMutationToken,
@@ -1338,6 +1505,7 @@ export const dev_workspace_journal_status = () => defaultJournal.status();
 export const dev_workspace_get_operation = (input) => defaultJournal.getOperation(input);
 export const dev_workspace_list_operations = (input) => defaultJournal.listOperations(input);
 export const dev_workspace_get_provenance = (input) => defaultJournal.getProvenance(input);
+export const executeReconciledMcpMutation = (context, callback) => defaultJournal.executeReconciled(context, callback);
 export const beginDevJournalOperation = (input) => defaultJournal.begin(input);
 export const completeDevJournalOperation = (operationId, input) => defaultJournal.complete(operationId, input);
 export const failDevJournalOperation = (operationId, input) => defaultJournal.fail(operationId, input);

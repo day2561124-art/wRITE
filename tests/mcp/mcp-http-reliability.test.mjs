@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createStdioSession } from '../../server/src/mcp-http-stdio-adapter.mjs';
+import { createStdioSession, createReadonlyRetryBudget } from '../../server/src/mcp-http-stdio-adapter.mjs';
 
 function waitUntil(predicate, message, timeoutMs = 3_000) {
   const started = Date.now();
@@ -49,7 +49,10 @@ function createFakeSpawn(scenario) {
         : {
           jsonrpc: '2.0',
           id: message.id,
-          result: { ok: true, generation },
+          result: message.method === 'tools/list'
+            ? { tools: [{ name: 'safe_read', annotations: { readOnlyHint: !(scenario === 'read-flips' && generation > 1) } },
+              { name: 'unsafe_write', annotations: { readOnlyHint: false } }] }
+            : { ok: true, generation },
         };
       setImmediate(() => child.stdout.emit('data', `${JSON.stringify(payload)}\n`));
     };
@@ -61,6 +64,20 @@ function createFakeSpawn(scenario) {
         const message = JSON.parse(String(frame).trim());
         child.messages.push(structuredClone(message));
         if (message.method === 'notifications/initialized') return true;
+        if (message.method === 'tools/call' && (generation === 1 || scenario === 'read-always')) {
+          if (message.params.name === 'safe_read' && ['read-hang', 'read-always', 'read-flips'].includes(scenario)) return true;
+          if (message.params.name === 'unsafe_write') {
+            if (scenario === 'mutation-hang') return true;
+            if (scenario === 'mutation-crash') {
+              setImmediate(() => { child.exitCode = 17; child.stdin.writable = false; child.emit('exit', 17, null); });
+              return true;
+            }
+            if (scenario === 'mutation-overflow') {
+              setImmediate(() => child.stdout.emit('data', Buffer.alloc((64 * 1024) + 1, 0x61)));
+              return true;
+            }
+          }
+        }
         if (message.method === 'test/hang' && scenario === 'hang' && generation === 1) {
           return true;
         }
@@ -315,3 +332,80 @@ await verifyCrashFailsInflightOnceAndRecoversWithoutReplay();
 await verifyProtocolOverflowFailsOnceAndRecoversWithoutReplay();
 await verifyHeaderFramingUsesUtf8ByteLength();
 console.log('MCP HTTP reliability crash/hang/overflow and framing regressions passed.');
+
+
+async function retryFixture(scenario, overrides = {}) {
+  const fake = createFakeSpawn(scenario);
+  const delays = [];
+  const session = createStdioSession({
+    spawnProcess: fake.spawnProcess, callTimeoutMs: 100,
+    recoveryMaxAttempts: 5, recoveryBaseDelayMs: 0, recoveryMaxDelayMs: 0,
+    readonlyRetryBaseDelayMs: 100, readonlyRetryMaxDelayMs: 200,
+    retryRandom: () => 0.5, retrySleep: async (ms) => {
+      assert.equal(session.getStatus().recovering, false);
+      assert.equal(session.getStatus().last_recovery.ok, true);
+      delays.push(ms);
+    }, ...overrides,
+  });
+  await initializeSession(session, scenario);
+  await rpcCall(session, { jsonrpc: '2.0', id: 'catalog', method: 'tools/list' });
+  return { fake, session, delays, close() { session.child.exitCode = 0; session.close(); } };
+}
+const readRequest = (id) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'safe_read', arguments: {} } });
+{
+  const fixture = await retryFixture('read-hang');
+  try {
+    const reply = await rpcCall(fixture.session, readRequest('read-recovered'));
+    assert.equal(reply.id, 'read-recovered');
+    assert.equal(reply.result.generation, 2);
+    assert.deepEqual(fixture.delays, [75]);
+    assert.equal(fixture.session.pendingCallCount(), 0);
+  } finally { fixture.close(); }
+}
+{
+  const fixture = await retryFixture('read-always');
+  try {
+    await assert.rejects(rpcCall(fixture.session, readRequest('exhausted')), (error) =>
+      error.code === 'READ_ONLY_RETRY_EXHAUSTED' && error.details.retries === 2);
+    assert.deepEqual(fixture.delays, [75, 150]);
+    assert.equal(fixture.fake.children.flatMap((child) => child.messages).filter((m) => m.params?.name === 'safe_read').length, 3);
+    await waitUntil(() => !fixture.session.getStatus().recovering, 'last recovery did not finish');
+  } finally { fixture.close(); }
+}
+// A common budget spans sessions, limits amplification and bounds concurrent retry waiters.
+{
+  const budget = createReadonlyRetryBudget({ maxRetries: 2, maxConcurrent: 2 });
+  const fixtures = await Promise.all([retryFixture('read-hang', { readonlyRetryBudget: budget }),
+    retryFixture('read-hang', { readonlyRetryBudget: budget })]);
+  try {
+    const results = await Promise.allSettled(fixtures.flatMap((f, index) =>
+      Array.from({ length: 4 }, (_, i) => rpcCall(f.session, readRequest('storm-' + index + '-' + i)))));
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 2);
+    assert(results.filter((r) => r.status === 'rejected').every((r) => r.reason.code === 'READ_ONLY_RETRY_EXHAUSTED'));
+    assert.equal(budget.status().used, 2);
+    assert.equal(budget.status().active, 0);
+    assert.equal(fixtures.flatMap((f) => f.fake.children.slice(1).flatMap((c) => c.messages))
+      .filter((m) => m.params?.name === 'safe_read').length, 2);
+  } finally { fixtures.forEach((f) => f.close()); }
+}
+for (const failure of ['hang', 'crash', 'overflow']) {
+  const fixture = await retryFixture('mutation-' + failure, { maxFrameBytes: 64 * 1024, diagnostics: { captureIncident() {} } });
+  try {
+    await assert.rejects(rpcCall(fixture.session, { jsonrpc: '2.0', id: 'mutation', method: 'tools/call',
+      params: { name: 'unsafe_write', arguments: { reconciliation_key: 'stable-mutation-key' }, readOnlyHint: true } }),
+    (error) => error.code === ({ hang: 'CHILD_HUNG', crash: 'CHILD_DEAD', overflow: 'CHILD_PROTOCOL_OVERFLOW' })[failure]);
+    await waitForRecovered(fixture.session, 2);
+    assert.equal(fixture.fake.children.flatMap((c) => c.messages).filter((m) => m.params?.name === 'unsafe_write').length, 1);
+    assert.deepEqual(fixture.delays, []);
+  } finally { fixture.close(); }
+}
+console.log('R5 bounded read retry, deterministic jitter, shared storm budget and mutation no-replay passed.');
+
+{
+  const fixture = await retryFixture('read-flips');
+  try {
+    await assert.rejects(rpcCall(fixture.session, readRequest('changed-catalog')), (error) =>
+      error.code === 'READ_ONLY_RETRY_EXHAUSTED' && error.details.reason === 'read_only_classification_changed');
+    assert.equal(fixture.fake.children[1].messages.some((m) => m.params?.name === 'safe_read'), false);
+  } finally { fixture.close(); }
+}

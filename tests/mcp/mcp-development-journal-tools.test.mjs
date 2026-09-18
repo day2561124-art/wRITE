@@ -1,3 +1,4 @@
+import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -172,6 +173,18 @@ if (process.argv[2] === "--worker") {
   const mode = process.argv[3];
   const storageRoot = process.env.JOURNAL_WORKER_ROOT;
   const service = createDevOperationJournalService({ storageRoot });
+  if (mode === "reconciliation-race") {
+    try {
+      const operation = await service.begin({ operation_type: "test_mutation", tool_name: "test_mutation",
+        reconciliation_key: "cross-session-stable-key", request_fingerprint_sha256: sha256("same-request") });
+      await service.complete(operation.operation_id, { result: { mutation_count: 1 } });
+      console.log("admitted");
+    } catch (error) {
+      if (error.code !== "RECONCILIATION_EXISTING_OPERATION") throw error;
+      console.log("existing");
+    }
+    process.exit(0);
+  }
   const before = process.env.JOURNAL_WORKER_BEFORE ?? "AAA";
   const expected = process.env.JOURNAL_WORKER_EXPECTED ?? "BBB";
   const targetPath = process.env.JOURNAL_WORKER_PATH ?? "fixture.txt";
@@ -184,6 +197,8 @@ if (process.argv[2] === "--worker") {
     operation_type: "filesystem_patch",
     tool_name: "dev_apply_patch",
     workspace_id: workspaceId,
+    ...(mode === "start-only" ? { reconciliation_key: "worker-stable-recovery-key",
+      request_fingerprint_sha256: sha256("worker-request") } : {}),
     targets: [{
       path: targetPath,
       role: "modified_file",
@@ -328,6 +343,7 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
     await writeFile(targetPath, "AAA", "utf8");
     const operationId = await runWorker(fixture.storageRoot, "start-only");
     const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    assert.equal((await service.getOperation({ reconciliation_key: "worker-stable-recovery-key" })).reconciliation_state, "dangling");
     const recovered = await service.reconcileDangling({
       contextResolver: async () => ({ root: fixture.workspaceRoot, current_head: zeroHead }),
     });
@@ -335,6 +351,9 @@ await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
     const operation = await service.getOperation({ operation_id: operationId });
     assert.equal(operation.outcome, "operation_recovered");
     assert.equal(operation.events[1].result.outcome, "no_effect_observed");
+    assert.equal(operation.recovered, true);
+    assert.equal(operation.reconciliation_state, "no_effect");
+    assert.equal(operation.events[1].reconciliation_key, "worker-stable-recovery-key");
     assert.equal(operation.events[1].reconciles_event_id, operation.events[0].journal_event_id);
     assert.equal((await service.status()).health, "healthy");
   } finally { await clean(fixture); }
@@ -1445,6 +1464,85 @@ assert.equal(
     assert(partialOperation.events[1].links.some((link) => link.operation_id === linkedTwo.operation_id));
     assert.equal(partialOperation.events[1].links.some((link) => link.operation_id === linked.operation_id), false);
   } finally { await harness.cleanup(); }
+}
+
+
+// R5: durable admission survives response loss and arbitrates independent sessions.
+{
+  const fixture = await tempFixture("r5-admission");
+  try {
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    const context = { reconciliation_key: "r5-stable-request", tool_name: "test_mutation",
+      request_fingerprint_sha256: fingerprintMcpMutationRequest("test_mutation", { b: 2, a: 1 }) };
+    assert.equal(context.request_fingerprint_sha256, fingerprintMcpMutationRequest("test_mutation", { a: 1, b: 2 }));
+    let mutations = 0;
+    const mutation = async () => {
+      const inner = await service.begin({ operation_type: "filesystem_create", tool_name: "test_mutation" });
+      mutations += 1;
+      await service.complete(inner.operation_id, { result: { created: true } });
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
+    };
+    const first = await service.executeReconciled(context, mutation);
+    // Simulate loss of the successful response; the caller resends through a fresh service/session.
+    const second = await createDevOperationJournalService({ storageRoot: fixture.storageRoot }).executeReconciled(context, mutation);
+    assert.equal(mutations, 1);
+    assert.equal(second.reconciled, true);
+    assert.equal(second.operation.operation_id, first.operation.operation_id);
+    assert.equal(second.operation.reconciliation_state, "completed");
+    assert.equal(second.operation.original_result.outcome, "intended_effect_observed");
+    assert(second.operation.events.every((e) => e.reconciliation_key === context.reconciliation_key
+      && e.request_fingerprint_sha256 === context.request_fingerprint_sha256));
+    const verified = await service.verify();
+    assert.equal(verified.events.filter((e) => e.parent_operation_id === first.operation.operation_id).length, 2);
+    for (const fingerprint of [fingerprintMcpMutationRequest("test_mutation", { a: 2, b: 2 }),
+      fingerprintMcpMutationRequest("other_mutation", { a: 1, b: 2 })]) {
+      await assert.rejects(service.executeReconciled({ ...context, request_fingerprint_sha256: fingerprint }, mutation),
+        (error) => error.code === "RECONCILIATION_KEY_CONFLICT");
+    }
+    assert.equal(mutations, 1);
+    assert.equal((await service.status()).health, "healthy");
+  } finally { await clean(fixture); }
+}
+{
+  const fixture = await tempFixture("r5-cross-process");
+  try {
+    const results = await Promise.all(Array.from({ length: 4 }, () => runWorker(fixture.storageRoot, "reconciliation-race")));
+    assert.equal(results.filter((v) => v === "admitted").length, 1);
+    assert.equal(results.filter((v) => v === "existing").length, 3);
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    assert.equal((await service.verify()).events.length, 2);
+    assert.equal((await service.status()).health, "healthy");
+  } finally { await clean(fixture); }
+}
+{
+  const fixture = await tempFixture("r5-states");
+  try {
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    const input = { operation_type: "test_mutation", tool_name: "test_mutation",
+      reconciliation_key: "r5-no-effect-key", request_fingerprint_sha256: sha256("test-request") };
+    const absent = await service.getOperation({ reconciliation_key: input.reconciliation_key });
+    assert.equal(absent.reconciliation_state, "not_admitted");
+    assert.equal(absent.safe_to_reinitiate, true);
+    const operation = await service.begin(input);
+    const active = await service.getOperation({ reconciliation_key: input.reconciliation_key });
+    assert.equal(active.reconciliation_state, "active");
+    assert.equal(active.safe_to_reinitiate, false);
+    await assert.rejects(service.begin(input), (error) => error.code === "RECONCILIATION_EXISTING_OPERATION");
+    await service.fail(operation.operation_id, { result: { outcome: "failed_no_effect" } });
+    const noEffect = await service.getOperation({ reconciliation_key: input.reconciliation_key });
+    assert.equal(noEffect.reconciliation_state, "no_effect");
+    assert.equal(noEffect.safe_to_reinitiate, true);
+    assert.equal(noEffect.reinitiate_requires_new_key, true);
+    await assert.rejects(service.begin(input), (error) => error.code === "RECONCILIATION_EXISTING_OPERATION");
+    const next = await service.begin({ ...input, reconciliation_key: "r5-reinitiated-key" });
+    await service.complete(next.operation_id);
+    const ambiguous = await service.begin({ ...input, reconciliation_key: "r5-ambiguous-key" });
+    await service.fail(ambiguous.operation_id, { result: { outcome: "ambiguous_effect", reconciliation_required: true } });
+    const read = await service.getOperation({ reconciliation_key: "r5-ambiguous-key" });
+    assert.equal(read.reconciliation_state, "recovery_required");
+    assert.equal(read.safe_to_reinitiate, false);
+    assert.equal(read.automatic_replay_allowed, false);
+  } finally { await clean(fixture); }
 }
 
 if (process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL === "1") {

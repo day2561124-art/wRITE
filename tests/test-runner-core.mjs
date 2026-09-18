@@ -8,8 +8,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 
-function getTimeoutMs() {
-  return 360_000;
+export const DEFAULT_TIMEOUT_MS = 360_000;
+
+export function resolveTimeoutMs(options = {}) {
+  const {
+    timeoutMs,
+    suiteTimeoutMs,
+    defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
+  } = options;
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    return timeoutMs;
+  }
+
+  if (Number.isFinite(suiteTimeoutMs) && suiteTimeoutMs > 0) {
+    return suiteTimeoutMs;
+  }
+
+  if (Number.isFinite(defaultTimeoutMs) && defaultTimeoutMs > 0) {
+    return defaultTimeoutMs;
+  }
+
+  return DEFAULT_TIMEOUT_MS;
 }
 
 export function formatTestDuration(durationMs) {
@@ -39,7 +59,7 @@ export function printTestTimingSummary(timings, options = {}) {
   }
 }
 
-function runStep(label, args) {
+function runStep(label, args, stepOptions = {}) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     console.log(`\n== ${label} ==`);
@@ -51,7 +71,7 @@ function runStep(label, args) {
     });
 
     let settled = false;
-    const timeoutMs = getTimeoutMs(label);
+    const timeoutMs = resolveTimeoutMs(stepOptions);
     const timeoutSeconds = Math.round(timeoutMs / 1000);
 
     const timer = setTimeout(() => {
@@ -91,10 +111,21 @@ export async function runTestSteps(steps, options = {}) {
       ? options.suiteLabel.trim()
       : "Test suite";
 
+  const suiteTimeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : undefined;
+
   const suiteStartedAt = Date.now();
   const timings = [];
-  for (const [label, args] of steps) {
-    timings.push(await runStep(label, args));
+  for (const step of steps) {
+    const [label, args, stepOptions = {}] = Array.isArray(step)
+      ? step
+      : [step.label, step.args, step];
+    const timeoutMs = resolveTimeoutMs({
+      timeoutMs: stepOptions.timeoutMs,
+      suiteTimeoutMs,
+    });
+    timings.push(await runStep(label, args, { timeoutMs }));
   }
 
   const suiteDurationMs = Math.max(0, Date.now() - suiteStartedAt);

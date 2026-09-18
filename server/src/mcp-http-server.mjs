@@ -3,7 +3,7 @@ import { getMcpIdentity } from './mcp-http-identity.mjs';
 import { randomUUID } from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createStdioSession } from './mcp-http-stdio-adapter.mjs';
+import { createStdioSession, createReadonlyRetryBudget } from './mcp-http-stdio-adapter.mjs';
 import { createEphemeralWorldSimulationPreparedTurnBroker } from './world-simulation-prepared-turn-ephemeral-broker.mjs';
 import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-authority.mjs';
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
@@ -463,13 +463,12 @@ function reloadToolResult(id, payload, isError = false) {
   };
 }
 
-async function handleDevMcpReload(entry, message) {
+async function handleDevMcpReload(entry, message, emit = (payload, label) => safeTransportSend(entry.transport, payload, label)) {
   const id = message?.id;
   if (id === undefined) return;
 
   if (!isDeveloperReloadAllowed()) {
-    safeTransportSend(
-      entry.transport,
+    emit(
       {
         jsonrpc: '2.0',
         id,
@@ -490,8 +489,7 @@ async function handleDevMcpReload(entry, message) {
     Array.isArray(args) ||
     Object.keys(args).length > 0
   ) {
-    safeTransportSend(
-      entry.transport,
+    emit(
       {
         jsonrpc: '2.0',
         id,
@@ -507,8 +505,7 @@ async function handleDevMcpReload(entry, message) {
 
   const before = entry.session.getStatus();
   if (before.pending_calls > 0) {
-    safeTransportSend(
-      entry.transport,
+    emit(
       reloadToolResult(id, {
         ok: false,
         reloaded: false,
@@ -533,8 +530,7 @@ async function handleDevMcpReload(entry, message) {
     console.error(
       `[mcp-http] dev_mcp_reload completed profile=${activeToolProfileName} parent_pid=${process.pid} previous_child_pid=${reloaded.previous_child_pid} child_pid=${reloaded.child_pid} generation=${reloaded.generation}`,
     );
-    safeTransportSend(
-      entry.transport,
+    emit(
       reloadToolResult(id, {
         ok: true,
         reloaded: true,
@@ -583,8 +579,7 @@ async function handleDevMcpReload(entry, message) {
     console.error(
       `[mcp-http] dev_mcp_reload failed profile=${activeToolProfileName} parent_pid=${process.pid} child_pid=${before.child_pid} error=${error?.message ?? String(error)}`,
     );
-    safeTransportSend(
-      entry.transport,
+    emit(
       reloadToolResult(id, {
         ok: false,
         reloaded: false,
@@ -626,11 +621,77 @@ function closeBridgeSession(entry, reason = 'transport_closed') {
   );
 }
 
+function decorateReconciliationMetadata(reply) {
+  if (!Array.isArray(reply?.result?.tools)) return reply;
+  return { ...reply, result: { ...reply.result, tools: reply.result.tools.map((tool) =>
+    tool.annotations?.readOnlyHint !== false ? tool : { ...tool, _meta: { ...tool._meta,
+      'armed-academy/reconciliation': {
+        key_location: 'params._meta.reconciliation_key',
+        lookup_tool: 'dev_workspace_get_operation', automatic_replay_allowed: false,
+      },
+    } }) } };
+}
+
+async function handleReconciledParentCall(entry, message) {
+  const id = message.id;
+  if (id === undefined) return;
+  try {
+    // Bootstrap-only parents may not have the development runtime installed yet.
+    // A keyed call requires it and fails closed before any effect if it is unavailable.
+    const { executeReconciledMcpMutation } = await import('./mcp-development-journal-tools.mjs');
+    const { normalizeMcpReconciliationKey, fingerprintMcpMutationRequest } = await import('./mcp-operation-reconciliation-context.mjs');
+    const name = message.params.name;
+    const key = normalizeMcpReconciliationKey(message.params._meta.reconciliation_key, { optional: false });
+    const args = message.params.arguments ?? {};
+    if (!isDeveloperReloadAllowed()) throw new Error('Parent mutation is unavailable in this MCP profile.');
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object.');
+    if (name === DEV_MCP_RELOAD_TOOL_NAME && Object.keys(args).length) throw new Error('dev_mcp_reload does not accept arguments.');
+    if (name === INTEGRATE_TOOL_NAME && (Object.keys(args).some((field) => !['integration_candidate_id', 'expected_revision'].includes(field))
+      || !/^dev_integration_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u.test(args.integration_candidate_id)
+      || !Number.isSafeInteger(args.expected_revision) || args.expected_revision < 1)) {
+      throw new Error('Invalid integration identity or revision.');
+    }
+    const outcome = await executeReconciledMcpMutation({
+      reconciliation_key: key, request_fingerprint_sha256: fingerprintMcpMutationRequest(name, args), tool_name: name,
+    }, async () => {
+      if (name === DEV_MCP_RELOAD_TOOL_NAME) {
+        let reply;
+        await handleDevMcpReload(entry, message, (value) => { reply = value; });
+        if (!reply?.result) throw new Error(reply?.error?.message ?? 'Reload did not produce a result.');
+        return reply.result;
+      }
+      workspaceSnapshotAuthority.invalidate({ workspace_id: 'dev_workspace_shared_repository_v1', reason: 'parent_owned_integration_requested' });
+      const reply = await integrationControl.call(message);
+      if (!reply?.result) throw new Error(reply?.error?.message ?? 'Integration did not produce a result.');
+      if (!reply.result.isError) {
+        const payload = JSON.parse(reply.result.content?.[0]?.text ?? '{}');
+        if (payload.state !== 'integrated') return { ...reply.result, isError: true };
+      }
+      return reply.result;
+    });
+    const result = outcome.reconciled
+      ? { content: [{ type: 'text', text: JSON.stringify({ reconciled: true, ...outcome.operation }) }],
+        isError: outcome.operation.reconciliation_state !== 'completed' }
+      : { ...outcome.value, _meta: { ...outcome.value?._meta, reconciliation_key: key, operation_id: outcome.operation.operation_id } };
+    safeTransportSend(entry.transport, { jsonrpc: '2.0', id, result }, 'transport.send(parent-reconciliation)');
+  } catch (error) {
+    safeTransportSend(entry.transport, { jsonrpc: '2.0', id, error: {
+      code: -32602, message: error.message, data: { code: error.code ?? 'RECONCILIATION_FAILED' },
+    } }, 'transport.send(parent-reconciliation-error)');
+  }
+}
+
 function bindBridge(entry) {
   const { transport, session } = entry;
 
   transport.onmessage = (message) => {
     try {
+      if (message?.method === 'tools/call'
+        && [DEV_MCP_RELOAD_TOOL_NAME, INTEGRATE_TOOL_NAME].includes(message.params?.name)
+        && message.params?._meta?.reconciliation_key != null) {
+        void handleReconciledParentCall(entry, message);
+        return;
+      }
       if (
         message?.method === 'tools/call' &&
         message?.params?.name === DEV_MCP_RELOAD_TOOL_NAME
@@ -711,6 +772,7 @@ function bindBridge(entry) {
               error: {
                 code: -32000,
                 message: String(err),
+                data: { code: err.code ?? 'CHILD_CALL_FAILED', ...err.details },
               },
             },
             'transport.send(error)',
@@ -721,7 +783,7 @@ function bindBridge(entry) {
 
         if (message.method === 'tools/list') {
           void integrationControl.prepare().then(() => {
-            safeTransportSend(transport, integrationControl.decorate(decorateParentOwnedTools(message, reply)), 'transport.send(tools/list)');
+            safeTransportSend(transport, decorateReconciliationMetadata(integrationControl.decorate(decorateParentOwnedTools(message, reply))), 'transport.send(tools/list)');
           }).catch((error) => {
             safeTransportSend(transport, { jsonrpc: '2.0', id: message.id, error: { code: -32000, message: error.message } }, 'transport.send(integration-control-error)');
           });
@@ -764,8 +826,11 @@ function bindBridge(entry) {
   };
 }
 
+const readonlyRetryBudget = createReadonlyRetryBudget();
+
 function createBridgeSession() {
   const session = createStdioSession({
+    readonlyRetryBudget,
     preparedTurnBroker,
     workspaceSnapshotAuthority,
     workspaceChangeClockProvider,

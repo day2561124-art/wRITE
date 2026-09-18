@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { rm, readFile } from 'node:fs/promises';
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
@@ -298,3 +301,81 @@ await verifyOpenSseDoesNotDefeatIdleCap();
 await verifyOpenSseDoesNotDefeatIdleTimeout();
 await verifySseReconnectsDoNotRefreshIdleTimeout();
 console.log('MCP HTTP session lifecycle SSE regression tests passed.');
+
+
+async function verifyCrossSessionReconciliation() {
+  const group = randomUUID();
+  const artifact = 'tests/r5-reconciliation-' + group + '.txt';
+  const journalRoot = path.join(os.tmpdir(), 'writer-workbench-operation-journal-test-' + group);
+  try {
+    await withServer({
+      WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL: '1', WRITER_WORKBENCH_TEST_JOURNAL_GROUP: group,
+      WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT: '1', WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION: '1',
+      MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: '60000', MCP_HTTP_CHILD_CALL_TIMEOUT_MS: '120000',
+    }, async ({ port, stderr }) => {
+      const sessions = await Promise.all([initializeSession(port, 'r5-first'), initializeSession(port, 'r5-second')]);
+      let id = 0;
+      const call = async (session, name, args) => {
+        const { reconciliation_key, ...mutationArgs } = args;
+        const lookup = name === 'dev_workspace_get_operation';
+        const response = await postMcp({ port, ...session, message: { jsonrpc: '2.0', id: ++id,
+          method: 'tools/call', params: { name, arguments: lookup ? args : mutationArgs,
+            ...(!lookup && reconciliation_key ? { _meta: { reconciliation_key } } : {}) } } });
+        assert.equal(response.statusCode, 200, response.text);
+        return response.payload;
+      };
+      const payload = (reply) => JSON.parse(reply.result.content[0].text);
+      await Promise.all(sessions.map((session) => call(session, 'dev_workspace_journal_status', {})));
+      const key = 'r5-session-' + group;
+      const args = { path: artifact, content: 'exactly one mutation\n', reconciliation_key: key };
+      const replies = await Promise.all(sessions.map((session) => call(session, 'dev_create_file', args)));
+      assert.equal(replies.filter((reply) => payload(reply).created === true).length, 1);
+      assert.equal(replies.filter((reply) => payload(reply).reconciled === true).length, 1);
+      assert.equal(await readFile(path.join(rootDir, artifact), 'utf8'), args.content);
+      const lookup = payload(await call(sessions[1], 'dev_workspace_get_operation', { reconciliation_key: key }));
+      assert.equal(lookup.reconciliation_state, 'completed');
+      assert.equal(lookup.events.length, 2);
+      // Simulate a caller that never received the original successful response.
+      const resend = payload(await call(sessions[1], 'dev_create_file', args));
+      assert.equal(resend.reconciliation_state, 'completed');
+      assert.equal(resend.operation_id, lookup.operation_id);
+      const conflict = await call(sessions[0], 'dev_create_file', { ...args, content: 'different' });
+      assert.match(conflict.error.message, /RECONCILIATION_KEY_CONFLICT/u);
+      const wrongTool = await call(sessions[0], 'dev_delete_file', { path: artifact, reconciliation_key: key });
+      assert.match(wrongTool.error.message, /RECONCILIATION_KEY_CONFLICT/u);
+      const invalidKey = 'r5-invalid-' + group;
+      const rejected = await call(sessions[0], 'dev_create_file', { path: artifact, content: 42, reconciliation_key: invalidKey });
+      assert(rejected.error);
+      assert.equal(payload(await call(sessions[0], 'dev_workspace_get_operation', { reconciliation_key: invalidKey })).reconciliation_state, 'not_admitted');
+      const operations = payload(await call(sessions[0], 'dev_workspace_list_operations', { operation_type: 'filesystem_create', limit: 100 }));
+      assert.equal(operations.operations.length, 1, 'Cross-session requests admitted a second filesystem mutation.');
+      const health = payload(await call(sessions[0], 'dev_workspace_journal_status', {}));
+      assert.equal(health.health, 'healthy');
+      assert.equal(health.chain_verified, true);
+      assert.equal(health.dangling_operation_count, 0);
+      const reloadKey = 'r5-reload-' + group;
+      const reloaded = payload(await call(sessions[0], 'dev_mcp_reload', { reconciliation_key: reloadKey }));
+      assert.equal(reloaded.reloaded, true);
+      const replayReload = payload(await call(sessions[1], 'dev_mcp_reload', { reconciliation_key: reloadKey }));
+      assert.equal(replayReload.reconciliation_state, 'completed');
+      assert.equal((stderr().match(/dev_mcp_reload requested/g) ?? []).length, 1);
+      const parentConflict = await call(sessions[0], 'dev_workspace_integrate', {
+        integration_candidate_id: 'dev_integration_20260917-010000_000000000001', expected_revision: 1,
+        reconciliation_key: key,
+      });
+      assert.match(parentConflict.error.message, /RECONCILIATION_KEY_CONFLICT/u);
+      const finalHealth = payload(await call(sessions[1], 'dev_workspace_journal_status', {}));
+      assert.equal(finalHealth.health, 'healthy');
+      assert.equal(finalHealth.active_operation_count, 0);
+      const deleted = payload(await call(sessions[0], 'dev_delete_file', { path: artifact }));
+      assert.equal(deleted.deleted, true);
+    });
+  } finally {
+    await rm(path.join(rootDir, artifact), { force: true });
+    assert.equal(path.dirname(journalRoot), os.tmpdir());
+    assert(path.basename(journalRoot).startsWith('writer-workbench-operation-journal-test-'));
+    await rm(journalRoot, { recursive: true, force: true });
+  }
+}
+await verifyCrossSessionReconciliation();
+console.log('R5 cross-session HTTP reconciliation acceptance passed.');

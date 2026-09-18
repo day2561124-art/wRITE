@@ -40,8 +40,50 @@ function encodeMessage(message, framing = 'line') {
   return `${json}\n`;
 }
 
+// Shared by HTTP sessions; tokens bound total amplification, slots bound queued retries.
+export function createReadonlyRetryBudget({ maxRetries = 16, maxConcurrent = 2,
+  windowMs = 60_000, now = Date.now } = {}) {
+  if (![maxRetries, maxConcurrent, windowMs].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('Retry budget bounds must be positive integers.');
+  }
+  let started = now();
+  let used = 0;
+  let active = 0;
+  return {
+    acquire() {
+      const time = now();
+      if (time - started >= windowMs) { started = time; used = 0; }
+      if (used >= maxRetries || active >= maxConcurrent) return null;
+      used += 1;
+      active += 1;
+      let released = false;
+      return () => { if (!released) { released = true; active -= 1; } };
+    },
+    status: () => ({ used, active, max_retries: maxRetries, max_concurrent: maxConcurrent, window_ms: windowMs }),
+  };
+}
+
 export function createStdioSession(options = {}) {
   const listeners = new Map();
+  const logicalCalls = new Set();
+  const readOnlyTools = new Set();
+  const retryBudget = options.readonlyRetryBudget ?? createReadonlyRetryBudget();
+  const retryMaxAttempts = boundedInteger(options.readonlyRetryMaxAttempts, 2, 0, 5);
+  const retryBaseMs = boundedInteger(options.readonlyRetryBaseDelayMs, 100, 1, 10_000);
+  const retryMaxMs = boundedInteger(options.readonlyRetryMaxDelayMs, 2_000, retryBaseMs, 30_000);
+  const random = options.retryRandom ?? Math.random;
+  const retrySleep = options.retrySleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const retryableCodes = new Set(['CHILD_HUNG', 'CHILD_DEAD', 'CHILD_PROTOCOL_OVERFLOW']);
+  function captureReadOnlyCatalog(response) {
+    readOnlyTools.clear();
+    for (const tool of response?.result?.tools ?? []) {
+      if (tool.annotations?.readOnlyHint === true) readOnlyTools.add(tool.name);
+    }
+  }
+  function isReadOnly(message) {
+    if (['ping', 'tools/list', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get'].includes(message.method)) return true;
+    return message.method === 'tools/call' && readOnlyTools.has(message.params?.name);
+  }
   const spawnProcess = options.spawnProcess ?? spawn;
   const diagnostics = options.diagnostics ?? createMcpRuntimeDiagnostics();
   let child = null;
@@ -346,6 +388,7 @@ export function createStdioSession(options = {}) {
   }
 
   function spawnChild() {
+    readOnlyTools.clear();
     stdoutBuffer = Buffer.alloc(0);
     const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs'], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
@@ -411,7 +454,7 @@ export function createStdioSession(options = {}) {
       recoveryMaxDelayMs,
       recoveryBaseDelayMs * (2 ** (attemptNumber - 2)),
     );
-    const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(exponential * 0.25)));
+    const jitter = Math.floor(random() * Math.max(1, Math.floor(exponential * 0.25)));
     return Math.min(recoveryMaxDelayMs, exponential + jitter);
   }
 
@@ -444,6 +487,10 @@ export function createStdioSession(options = {}) {
     }
     const frame = encodeMessage(structuredClone(initializedNotification), 'line');
     child.stdin.write(frame);
+    // Code may have changed between generations. Re-establish server-owned retry eligibility.
+    const catalog = await internalCall({ jsonrpc: '2.0', id: 'recovery-catalog-' + randomUUID(), method: 'tools/list' },
+      { timeoutMs: callTimeoutMs, recoverOnTimeout: false });
+    captureReadOnlyCatalog(catalog);
   }
 
   function scheduleRecovery(trigger) {
@@ -594,10 +641,73 @@ export function createStdioSession(options = {}) {
 
   function call(message, cb) {
     captureLifecycleMessage(message);
-    const id = message.id ?? randomUUID();
-    message.id = id;
-    registerListener(id, cb, { timeoutMs: callTimeoutMs, recoverOnTimeout: true });
-    send(message);
+    const request = structuredClone(message);
+    const originalId = request.id ?? randomUUID();
+    request.id = originalId;
+    // Eligibility comes only from the server catalog, never caller-supplied hints.
+    const readOnly = isReadOnly(request);
+    let finished = false;
+    const finish = (error, response) => {
+      if (finished) return;
+      finished = true;
+      logicalCalls.delete(finish);
+      if (!error && request.method === 'tools/list' && Array.isArray(response?.result?.tools)) {
+        captureReadOnlyCatalog(response);
+      }
+      cb(error, response ? { ...response, id: originalId } : null);
+    };
+    logicalCalls.add(finish);
+    const attempt = (retryNumber) => new Promise((resolve, reject) => {
+      if (closed || finished) { reject(reliabilityError('SESSION_CLOSED', 'MCP stdio session closed.')); return; }
+      if (retryNumber > 0 && (recovering || restarting || !isReadOnly(request))) {
+        reject(reliabilityError('READ_ONLY_RETRY_EXHAUSTED', 'Retry eligibility changed before dispatch.',
+          { retries: retryNumber, reason: 'recovery_or_catalog_changed' }));
+        return;
+      }
+      const sent = { ...request, id: retryNumber === 0 ? originalId : 'retry-' + randomUUID() };
+      registerListener(sent.id, (error, response) => error ? reject(error) : resolve(response),
+        { timeoutMs: callTimeoutMs, recoverOnTimeout: true });
+      send(sent);
+    });
+    void (async () => {
+      let retries = 0;
+      let release = null;
+      try {
+        while (!finished) {
+          const attemptedGeneration = generation;
+          try {
+            finish(null, await attempt(retries));
+            return;
+          } catch (error) {
+            release?.();
+            release = null;
+            if (!readOnly || !retryableCodes.has(error.code) || closed) throw error;
+            const boundedFailure = (reason) => reliabilityError('READ_ONLY_RETRY_EXHAUSTED',
+              'Read-only request exhausted its bounded retry budget.',
+              { retries, max_retries: retryMaxAttempts, reason, last_error_code: error.code });
+            if (retries >= retryMaxAttempts) throw boundedFailure('request_budget_exhausted');
+            release = retryBudget.acquire();
+            if (!release) throw boundedFailure('shared_budget_exhausted');
+            retries += 1;
+            // Recovery is single-flight. Never dispatch a retry into the failed generation.
+            const recovery = await (recoveryPromise ?? (generation === attemptedGeneration
+              ? scheduleRecovery('read_only_retry') : Promise.resolve(lastRecovery)));
+            if (!recovery?.ok || closed || finished) throw boundedFailure('child_recovery_unavailable');
+            if (request.method === 'tools/call' && !readOnlyTools.has(request.params?.name)) {
+              throw boundedFailure('read_only_classification_changed');
+            }
+            const cap = Math.min(retryMaxMs, retryBaseMs * (2 ** (retries - 1)));
+            const sample = Math.max(0, Math.min(1, Number(random()) || 0));
+            const delay = Math.ceil(cap / 2 + sample * cap / 2);
+            await retrySleep(delay);
+          }
+        }
+      } catch (error) {
+        finish(error, null);
+      } finally {
+        release?.();
+      }
+    })();
   }
 
   function internalCall(message, options = {}) {
@@ -636,7 +746,7 @@ export function createStdioSession(options = {}) {
     if (closed) throw new Error('MCP stdio session is closed.');
     if (restarting) throw new Error('MCP stdio session reload is already in progress.');
     if (recovering || recoveryPromise) throw new Error('MCP stdio session recovery is already in progress.');
-    if (listeners.size > 0) throw new Error('MCP child has active tool calls and cannot be reloaded.');
+    if (logicalCalls.size > 0 || listeners.size > 0) throw new Error('MCP child has active tool calls and cannot be reloaded.');
     if (!initializeRequest) throw new Error('MCP session has not completed initialize and cannot be reloaded.');
 
     restarting = true;
@@ -672,7 +782,7 @@ export function createStdioSession(options = {}) {
   }
 
   function pendingCallCount() {
-    return listeners.size;
+    return logicalCalls.size + [...listeners.values()].filter((entry) => entry.internal).length;
   }
 
   function getStatus() {
@@ -688,7 +798,9 @@ export function createStdioSession(options = {}) {
       child_pid: activeChild?.pid ?? null,
       child_alive: childAlive,
       generation,
-      pending_calls: listeners.size,
+      pending_calls: pendingCallCount(),
+      readonly_retry_budget: retryBudget.status(),
+      readonly_retry_max_attempts: retryMaxAttempts,
       call_timeout_ms: callTimeoutMs,
       max_frame_bytes: maxFrameBytes,
       max_header_bytes: maxHeaderBytes,
@@ -715,6 +827,7 @@ export function createStdioSession(options = {}) {
     if (closed) return;
     closed = true;
     notifyPendingListeners(new Error('MCP stdio session closed.'));
+    for (const finish of logicalCalls) finish(reliabilityError('SESSION_CLOSED', 'MCP stdio session closed.'), null);
     const currentChild = child;
     if (!currentChild || currentChild.exitCode !== null || currentChild.signalCode !== null) return;
     try {
