@@ -63,6 +63,7 @@ export const DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS = 10_000;
 export const DEV_JOURNAL_LOCK_RETRY_MIN_MS = 25;
 export const DEV_JOURNAL_LOCK_RETRY_MAX_MS = 200;
 export const DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES = 8;
+export const DEV_JOURNAL_VERIFY_CONCURRENCY = 8;
 export const DEV_WORKSPACE_SNAPSHOT_MAX_CONSISTENCY_ATTEMPTS = 3;
 export const DEV_WORKSPACE_SNAPSHOT_RETRY_DELAY_MS = 25;
 export const DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY = 4;
@@ -554,6 +555,25 @@ async function findStartedEventByReconciliationKey(eventsPath, reconciliationKey
   return null;
 }
 
+// Keep both in-flight I/O and worker promises bounded. Drain workers even on failure;
+// the caller consumes outcomes in filename order, preserving deterministic errors.
+async function mapJournalFilesBounded(files, callback) {
+  const results = new Array(files.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < files.length) {
+      const index = cursor++;
+      try {
+        results[index] = { value: await callback(files[index], index) };
+      } catch (error) {
+        results[index] = { error };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(DEV_JOURNAL_VERIFY_CONCURRENCY, files.length) }, worker));
+  return results;
+}
+
 export function createDevOperationJournalService({
   storageRoot = DEV_JOURNAL_STORAGE_ROOT,
   clock = () => new Date(),
@@ -571,6 +591,8 @@ export function createDevOperationJournalService({
   let reconciliationRequired = false;
   let lastHealthError = null;
   let explicitDegraded = false;
+  // Only successfully classified snapshots are cached; public results never alias them.
+  let verifiedSnapshot = null;
   const workspaceMutationState = new Map();
 
   function mutationStateFor(workspaceId) {
@@ -637,23 +659,42 @@ export function createDevOperationJournalService({
     for (let index = 0; index < base.files.length; index += 1) {
       if (snapshot.files[index] !== base.files[index]) throw new Error("Journal event-file snapshot changed a previously captured immutable prefix.");
     }
+    // Names/head alone cannot prove that an immutable prefix survived. Check every
+    // cached file's identity and nanosecond metadata, including on catch-up passes.
+    const prefixChecks = await mapJournalFilesBounded(base.files, async (fileName, index) => {
+      const info = await lstat(path.join(eventsPath, fileName), { bigint: true });
+      if (info.isSymbolicLink() || !info.isFile()
+        || snapshotArtifactVersionToken(info) !== base.versions[index]) {
+        throw new Error(`Journal event-file snapshot changed a previously verified immutable prefix: ${fileName}.`);
+      }
+    });
+    for (const check of prefixChecks) if (check.error) throw check.error;
     let previousHash = base.head.latest_event_hash;
     let previousSequence = base.head.latest_sequence;
     const events = [...base.events];
+    const versions = [...base.versions];
     const seenSequence = new Set(events.map((event) => event.sequence));
-    for (const fileName of snapshot.files.slice(base.files.length)) {
+    const suffix = snapshot.files.slice(base.files.length);
+    const loaded = await mapJournalFilesBounded(suffix, async (fileName) => {
       const filePath = path.join(eventsPath, fileName);
-      const beforeInfo = await lstat(filePath);
+      const beforeInfo = await lstat(filePath, { bigint: true });
       if (beforeInfo.isSymbolicLink() || !beforeInfo.isFile() || beforeInfo.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
       const event = parseEvent(await eventReader(filePath, "utf8"));
-      const afterInfo = await lstat(filePath);
+      const afterInfo = await lstat(filePath, { bigint: true });
+      const version = snapshotArtifactVersionToken(afterInfo);
       if (!afterInfo.isFile()
         || afterInfo.isSymbolicLink()
-        || beforeInfo.size !== afterInfo.size
-        || beforeInfo.mtimeMs !== afterInfo.mtimeMs
-        || beforeInfo.ctimeMs !== afterInfo.ctimeMs) {
+        || version === null
+        || snapshotArtifactVersionToken(beforeInfo) !== version) {
         throw new Error(`Journal event file changed while its immutable snapshot was being verified: ${fileName}.`);
       }
+      return { event, version };
+    });
+    // Parallel loading never decides sequence, chain, or the first failing event.
+    for (let index = 0; index < suffix.length; index += 1) {
+      const fileName = suffix[index];
+      if (loaded[index].error) throw loaded[index].error;
+      const { event, version } = loaded[index].value;
       if (seenSequence.has(event.sequence)) throw new Error(`Duplicate journal sequence ${event.sequence}.`);
       seenSequence.add(event.sequence);
       if (event.sequence !== previousSequence + 1) throw new Error(`Journal sequence gap or reorder at ${event.sequence}.`);
@@ -662,13 +703,14 @@ export function createDevOperationJournalService({
       previousSequence = event.sequence;
       previousHash = event.event_hash;
       events.push(event);
+      versions.push(version);
     }
     if (snapshot.head.latest_sequence !== previousSequence
       || snapshot.head.latest_event_hash !== previousHash
       || snapshot.head.latest_event_id !== (events.at(-1)?.journal_event_id ?? null)) {
       throw new Error("Journal head does not match the verified event tail.");
     }
-    return { head: snapshot.head, files: snapshot.files, events };
+    return { head: snapshot.head, files: snapshot.files, events, versions };
   }
 
   function classifyVerifiedSnapshot({ head, events }) {
@@ -724,18 +766,26 @@ export function createDevOperationJournalService({
   }
 
   async function verify() {
-    const { eventsPath } = await ensureStorageRoot(storageRoot);
     try {
-      let verified = { head: emptyHead(), files: [], events: [] };
+      const { eventsPath } = await ensureStorageRoot(storageRoot);
+      let verified = verifiedSnapshot ?? { head: emptyHead(), files: [], events: [], versions: [] };
       let snapshot = await captureSnapshot(eventsPath);
       for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
         verified = await verifySnapshotExtension({ eventsPath, base: verified, snapshot });
         const confirmation = await captureSnapshot(eventsPath);
-        if (snapshotsEqual(snapshot, confirmation)) return classifyVerifiedSnapshot(verified);
+        if (snapshotsEqual(snapshot, confirmation)) {
+          const result = classifyVerifiedSnapshot(verified);
+          // An overlapping older verification must not roll the cache backwards.
+          if (!verifiedSnapshot || verifiedSnapshot.head.latest_sequence <= verified.head.latest_sequence) {
+            verifiedSnapshot = verified;
+          }
+          return structuredClone(result);
+        }
         snapshot = confirmation;
       }
       throw journalSnapshotUnstableError();
     } catch (error) {
+      verifiedSnapshot = null;
       if (isTransientJournalVerificationError(error)) throw error;
       runtimeHealth = "corrupt";
       reconciliationRequired = true;
@@ -1014,24 +1064,36 @@ export function createDevOperationJournalService({
     lastHealthError = String(reason).slice(0, 1024);
   }
 
+  function statusFromVerification(verification) {
+    return {
+      schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+      health: runtimeHealth,
+      chain_verified: runtimeHealth !== "corrupt",
+      latest_sequence: verification.head.latest_sequence,
+      latest_event_id: verification.head.latest_event_id,
+      latest_event_hash: verification.head.latest_event_hash,
+      dangling_operation_count: verification.dangling_operations.length,
+      dangling_operations: verification.dangling_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
+      active_operation_count: verification.active_operations.length,
+      active_operations: verification.active_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
+      reconciliation_required: reconciliationRequired,
+      last_health_error: lastHealthError,
+      storage: "server_owned_per_event_files",
+    };
+  }
+
+  async function initialize() {
+    try {
+      return statusFromVerification(await reconcileDangling());
+    } catch {
+      // Preserve read-only diagnosis and mutation gates on recovery failure.
+      return status();
+    }
+  }
+
   async function status() {
     try {
-      const verification = await verify();
-      return {
-        schema_version: DEV_JOURNAL_SCHEMA_VERSION,
-        health: runtimeHealth,
-        chain_verified: runtimeHealth !== "corrupt",
-        latest_sequence: verification.head.latest_sequence,
-        latest_event_id: verification.head.latest_event_id,
-        latest_event_hash: verification.head.latest_event_hash,
-        dangling_operation_count: verification.dangling_operations.length,
-        dangling_operations: verification.dangling_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
-        active_operation_count: verification.active_operations.length,
-        active_operations: verification.active_operations.slice(0, DEV_JOURNAL_MAX_QUERY_RESULTS),
-        reconciliation_required: reconciliationRequired,
-        last_health_error: lastHealthError,
-        storage: "server_owned_per_event_files",
-      };
+      return statusFromVerification(await verify());
     } catch (error) {
       if (isTransientJournalVerificationError(error) && runtimeHealth !== "corrupt") {
         return {
@@ -1327,6 +1389,7 @@ export function createDevOperationJournalService({
   }
 
   return {
+    initialize,
     verify,
     reconcileDangling,
     status,
@@ -1492,13 +1555,7 @@ function workspaceSnapshotUnstableError(reason, pathValue = null) {
 }
 
 export async function initializeDevJournalRuntime() {
-  try {
-    await defaultJournal.reconcileDangling();
-  } catch {
-    // Keep the read-only MCP surface available for diagnosis. status() preserves
-    // corrupt/degraded health and all mutation gates remain fail-closed.
-  }
-  return defaultJournal.status();
+  return defaultJournal.initialize();
 }
 
 export const dev_workspace_journal_status = () => defaultJournal.status();

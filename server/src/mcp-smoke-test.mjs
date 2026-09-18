@@ -4132,7 +4132,8 @@ async function runSmokeTest(options) {
   }), options.verbose);
   sendMessage(child, makeRequest(11, "tools/call", {
     name: "dev_search_files",
-    arguments: { query: "test:mcp", maxResults: 5 },
+    // The fixture asserts the package.json match; do not scan for unrelated matches.
+    arguments: { query: "test:mcp", maxResults: 1 },
   }), options.verbose);
   sendMessage(child, makeRequest(12, "resources/list", {}), options.verbose);
   sendMessage(child, makeRequest(13, "resources/read", {
@@ -4190,6 +4191,16 @@ async function runSmokeTest(options) {
     firstToolLevelErrorRequestId + toolLevelErrorFixtures.length
   );
   sendMessage(child, makeRequest(postToolLevelErrorPingRequestId, "ping", {}), options.verbose);
+  // Each schema case retains the normal response deadline. Bound queued work so
+  // one ping does not charge the entire growing matrix to that single deadline.
+  // Dedicated transport fixtures still exercise saturation and backpressure.
+  async function drainSchemaBatch(index, count, requestId) {
+    if ((index + 1) % 16 !== 0 && index + 1 !== count) return;
+    const observed = await waitForResponse(responses, requestId);
+    recordResponse(responses, observed); // Retain it for the existing assertions.
+  }
+  const observedSchemaPrelude = await waitForResponse(responses, postToolLevelErrorPingRequestId);
+  recordResponse(responses, observedSchemaPrelude);
   const firstUnknownArgumentRequestId = postToolLevelErrorPingRequestId + 1;
   for (const [index, fixture] of unknownArgumentFixtures.entries()) {
     sendMessage(
@@ -4203,6 +4214,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, unknownArgumentFixtures.length, firstUnknownArgumentRequestId + index);
   }
   const postUnknownArgumentPingRequestId = (
     firstUnknownArgumentRequestId + unknownArgumentFixtures.length
@@ -4232,6 +4244,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, enumConstraintFixtures.length, firstEnumConstraintRequestId + index);
   }
   const postEnumConstraintPingRequestId = (
     firstEnumConstraintRequestId + enumConstraintFixtures.length
@@ -4254,6 +4267,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, schemaTypeFixtures.length, firstSchemaTypeRequestId + index);
   }
   const postSchemaTypePingRequestId = firstSchemaTypeRequestId + schemaTypeFixtures.length;
   sendMessage(
@@ -4274,6 +4288,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, integerMaximumFixtures.length, firstIntegerMaximumRequestId + index);
   }
   const postIntegerMaximumPingRequestId = (
     firstIntegerMaximumRequestId + integerMaximumFixtures.length
@@ -4296,6 +4311,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, sizeConstraintFixtures.length, firstSizeConstraintRequestId + index);
   }
   const postSizeConstraintPingRequestId = (
     firstSizeConstraintRequestId + sizeConstraintFixtures.length
@@ -4318,6 +4334,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, stringArrayBlankFixtures.length, firstStringArrayBlankRequestId + index);
   }
   const postStringArrayBlankPingRequestId = (
     firstStringArrayBlankRequestId + stringArrayBlankFixtures.length
@@ -4340,6 +4357,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, requiredConstraintFixtures.length, firstRequiredConstraintRequestId + index);
   }
   const postRequiredConstraintPingRequestId = (
     firstRequiredConstraintRequestId + requiredConstraintFixtures.length
@@ -4362,6 +4380,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, crossFieldConstraintFixtures.length, firstCrossFieldConstraintRequestId + index);
   }
   const postCrossFieldConstraintPingRequestId = (
     firstCrossFieldConstraintRequestId + crossFieldConstraintFixtures.length
@@ -4384,6 +4403,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, highRiskArgumentErrorFixtures.length, firstHighRiskArgumentErrorRequestId + index);
   }
   const postHighRiskArgumentErrorPingRequestId = (
     firstHighRiskArgumentErrorRequestId + highRiskArgumentErrorFixtures.length
@@ -4406,6 +4426,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, optionalNullDefaultFixtures.length, firstOptionalNullDefaultRequestId + index);
   }
   const postOptionalNullDefaultPingRequestId = (
     firstOptionalNullDefaultRequestId + optionalNullDefaultFixtures.length
@@ -4428,6 +4449,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, optionalBlankStringFixtures.length, firstOptionalBlankStringRequestId + index);
   }
   const postOptionalBlankStringPingRequestId = (
     firstOptionalBlankStringRequestId + optionalBlankStringFixtures.length
@@ -4450,6 +4472,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, highRiskConfirmationFixtures.length, firstHighRiskConfirmationRequestId + index);
   }
   const postHighRiskConfirmationPingRequestId = (
     firstHighRiskConfirmationRequestId + highRiskConfirmationFixtures.length
@@ -4472,6 +4495,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, wrongConfirmationFixtures.length, firstWrongConfirmationRequestId + index);
   }
   const postWrongConfirmationPingRequestId = (
     firstWrongConfirmationRequestId + wrongConfirmationFixtures.length
@@ -4494,6 +4518,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, confirmedDryRunFixtures.length, firstConfirmedDryRunRequestId + index);
   }
   const postConfirmedDryRunPingRequestId = (
     firstConfirmedDryRunRequestId + confirmedDryRunFixtures.length
@@ -4516,6 +4541,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, confirmedNoOpFixtures.length, firstConfirmedNoOpRequestId + index);
   }
   const postConfirmedNoOpPingRequestId = (
     firstConfirmedNoOpRequestId + confirmedNoOpFixtures.length
@@ -4538,6 +4564,7 @@ async function runSmokeTest(options) {
       }),
       options.verbose,
     );
+    await drainSchemaBatch(index, concurrencyFailureFixtures.length, firstConcurrencyFailureRequestId + index);
   }
   const postConcurrencyFailurePingRequestId = (
     firstConcurrencyFailureRequestId + concurrencyFailureFixtures.length

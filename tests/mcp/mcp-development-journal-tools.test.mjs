@@ -1,5 +1,7 @@
 import { fingerprintMcpMutationRequest } from "../../server/src/mcp-operation-reconciliation-context.mjs";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdtemp,
@@ -20,6 +22,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   DEV_JOURNAL_STORAGE_ROOT,
+  DEV_JOURNAL_VERIFY_CONCURRENCY,
+  initializeDevJournalRuntime,
   DEV_WORKSPACE_SNAPSHOT_CAPTURE_CONCURRENCY,
   beginDevJournalOperation,
   canonicalJson,
@@ -334,6 +338,257 @@ await expectCorrupt("orphan-tail", async (storageRoot) => {
 await expectCorrupt("unexpected-event-entry", async (storageRoot) => {
   await writeFile(path.join(storageRoot, "events", "unexpected.txt"), "unexpected\n", "utf8");
 });
+
+// R6: cold validation spans multiple worker batches; warm validation rechecks file
+// versions without reading bodies. Appends from this process and a child remain visible.
+{
+  const { fixture } = await completedFixture("r6-cache");
+  try {
+    const writer = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    for (let index = 0; index < DEV_JOURNAL_VERIFY_CONCURRENCY + 2; index += 1) {
+      const started = await writer.begin({ operation_type: "fixture", tool_name: "dev_fixture" });
+      await writer.complete(started.operation_id);
+    }
+    const expectedCount = (DEV_JOURNAL_VERIFY_CONCURRENCY + 3) * 2;
+    const readNames = [];
+    let active = 0;
+    let peak = 0;
+    const service = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => {
+        readNames.push(path.basename(args[0]));
+        active += 1;
+        peak = Math.max(peak, active);
+        try {
+          // Force reverse completion within batches; chain order must stay canonical.
+          const sequence = Number(path.basename(args[0]).slice(0, 12));
+          await delay((DEV_JOURNAL_VERIFY_CONCURRENCY - sequence % DEV_JOURNAL_VERIFY_CONCURRENCY) * 2);
+          return await readFile(...args);
+        } finally { active -= 1; }
+      },
+    });
+    const cold = await service.verify();
+    assert.equal(readNames.length, expectedCount);
+    assert(peak > 1 && peak <= DEV_JOURNAL_VERIFY_CONCURRENCY);
+    assert.equal(active, 0);
+    for (let index = 0; index < cold.events.length; index += 1) {
+      assert.equal(cold.events[index].sequence, index + 1);
+      assert.equal(cold.events[index].previous_event_hash, index ? cold.events[index - 1].event_hash : null);
+      assert.equal(cold.events[index].event_hash, eventHash(cold.events[index]));
+    }
+    assert.equal(cold.head.latest_event_hash, cold.events.at(-1).event_hash);
+    // Public event/head objects must not let a caller poison the private verified cache.
+    cold.head.latest_event_hash = "0".repeat(64);
+    cold.events[0].result.poisoned = true;
+    cold.events.pop();
+    readNames.length = 0;
+    const warm = await service.verify();
+    assert.equal(warm.events.length, expectedCount);
+    assert.equal(warm.events[0].result.poisoned, undefined);
+    assert.equal(warm.head.latest_event_hash, warm.events.at(-1).event_hash);
+    assert.equal((await service.status()).chain_verified, true);
+    assert.equal(readNames.length, 0, "unchanged prefix must not reread event bodies");
+
+    const local = await service.begin({ operation_type: "fixture", tool_name: "dev_fixture" });
+    await service.complete(local.operation_id);
+    const localStatus = await service.status();
+    assert.equal(localStatus.latest_sequence, expectedCount + 2);
+    assert.equal(localStatus.chain_verified, true);
+    assert.equal(readNames.length, 2, "local append reads only its new suffix");
+    readNames.length = 0;
+    await runWorker(fixture.storageRoot, "complete");
+    const externalStatus = await service.status();
+    assert.equal(externalStatus.latest_sequence, expectedCount + 4);
+    assert.equal(externalStatus.chain_verified, true);
+    assert.equal(readNames.length, 2, "external append must be discovered and verified");
+  } finally { await clean(fixture); }
+}
+
+// R6: warm-cache mismatches cannot be accepted, even if cardinality stays the same.
+for (const mode of ["filename", "backward", "head-hash", "same-size-restored-mtime", "replacement"]) {
+  const { fixture, service } = await completedFixture(`r6-prefix-${mode}`);
+  try {
+    await service.verify();
+    const first = await readEvent(fixture.storageRoot, 0);
+    const filePath = path.join(fixture.storageRoot, "events", first.file);
+    const headPath = path.join(fixture.storageRoot, "head.json");
+    if (mode === "filename") {
+      await rename(filePath, path.join(fixture.storageRoot, "events", `000000000001-dev_journal_event_${"e".repeat(32)}.json`));
+    } else if (mode === "backward") {
+      const files = await eventFiles(fixture.storageRoot);
+      await rm(path.join(fixture.storageRoot, "events", files[1]));
+      await writeFile(headPath, canonicalJson({ schema_version: 1, latest_sequence: 1,
+        latest_event_id: first.event.journal_event_id, latest_event_hash: first.event.event_hash }));
+    } else if (mode === "head-hash") {
+      const head = JSON.parse(await readFile(headPath, "utf8"));
+      head.latest_event_hash = "f".repeat(64);
+      await writeFile(headPath, canonicalJson(head));
+    } else if (mode === "same-size-restored-mtime") {
+      const before = await stat(filePath);
+      const raw = await readFile(filePath, "utf8");
+      await delay(10);
+      await writeFile(filePath, raw.replace('"dev_fixture"', '"bad_fixture"'));
+      await utimes(filePath, before.atime, before.mtime);
+      assert.equal((await stat(filePath)).size, before.size);
+    } else {
+      const raw = await readFile(filePath, "utf8");
+      await rename(filePath, path.join(fixture.root, "old-event.json"));
+      await writeFile(filePath, raw);
+    }
+    await assert.rejects(service.verify(), /prefix|backwards|tail/u, mode);
+  } finally { await clean(fixture); }
+}
+
+// R6: cold hash validation and before/after metadata guards still reject changes.
+for (const mode of ["hash", "metadata-during-read", "symlink", "oversize"]) {
+  const { fixture } = await completedFixture(`r6-cold-${mode}`);
+  try {
+    const { file, event } = await readEvent(fixture.storageRoot, 0);
+    const filePath = path.join(fixture.storageRoot, "events", file);
+    if (mode === "hash") {
+      event.tool_name = "tampered";
+      await writeFile(filePath, canonicalJson(event));
+    } else if (mode === "oversize") {
+      await writeFile(filePath, " ".repeat(128 * 1024 + 1));
+    } else if (mode === "symlink") {
+      const target = path.join(fixture.root, "linked-event.json");
+      await rename(filePath, target);
+      try { await symlink(target, filePath, "file"); }
+      catch (error) {
+        if (!["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) throw error;
+        console.log("R6 event symlink test skipped: platform cannot create file symlinks.");
+        continue;
+      }
+    }
+    const service = createDevOperationJournalService({
+      storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => {
+        const raw = await readFile(...args);
+        if (mode === "metadata-during-read" && args[0] === filePath) {
+          const info = await stat(filePath);
+          await utimes(filePath, info.atime, new Date(info.mtimeMs + 5000));
+        }
+        return raw;
+      },
+    });
+    const status = await service.status();
+    assert.equal(status.chain_verified, false, mode);
+    assert.equal(status.health, "corrupt", mode);
+    assert.match(status.last_health_error, mode === "hash" ? /hash mismatch/u
+      : mode === "metadata-during-read" ? /changed while/u : /Unsafe|Unexpected/u);
+    await assert.rejects(service.begin({ operation_type: "blocked", tool_name: "dev_fixture" }));
+  } finally { await clean(fixture); }
+}
+
+// R6: exercise lstat type guards even on Windows without symlink privileges.
+// Simulate replacement after readdir, for both cold loads and cached-prefix checks.
+for (const warm of [false, true]) {
+  for (const kind of ["symlink", "directory"]) {
+    const { fixture } = await completedFixture(`r6-type-${warm}-${kind}`);
+    const originalLstat = fs.promises.lstat;
+    try {
+      let reads = 0;
+      const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot,
+        eventReader: async (...args) => { reads += 1; return readFile(...args); } });
+      if (warm) await service.verify();
+      reads = 0;
+      fs.promises.lstat = async (...args) => {
+        const info = await originalLstat(...args);
+        if (path.dirname(String(args[0])) !== path.join(fixture.storageRoot, "events")) return info;
+        return Object.assign(Object.create(info), {
+          isSymbolicLink: () => kind === "symlink",
+          isFile: () => kind !== "directory",
+        });
+      };
+      syncBuiltinESMExports();
+      await assert.rejects(service.verify(), warm ? /immutable prefix/u : /Unsafe journal event file/u);
+      assert.equal(reads, 0, "unsafe files must be rejected before reading bodies");
+    } finally {
+      fs.promises.lstat = originalLstat;
+      syncBuiltinESMExports();
+      await clean(fixture);
+    }
+  }
+}
+
+// R6: the earlier chain error wins over a later, faster read/hash error. Workers
+// are all drained before rejection, so no background reader survives a failed verify.
+{
+  const { fixture } = await completedFixture("r6-deterministic-errors");
+  try {
+    const first = await readEvent(fixture.storageRoot, 0);
+    first.event.previous_event_hash = "f".repeat(64);
+    first.event.event_hash = eventHash(first.event);
+    await writeFile(path.join(fixture.storageRoot, "events", first.file), canonicalJson(first.event));
+    const second = await readEvent(fixture.storageRoot, 1);
+    second.event.tool_name = "tampered";
+    await writeFile(path.join(fixture.storageRoot, "events", second.file), canonicalJson(second.event));
+    let active = 0;
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => {
+        active += 1;
+        try {
+          if (path.basename(args[0]) === first.file) await delay(30);
+          return await readFile(...args);
+        } finally { active -= 1; }
+      } });
+    await assert.rejects(service.verify(), /previous hash mismatch at 1/u);
+    assert.equal(active, 0);
+  } finally { await clean(fixture); }
+}
+
+// R6: initialization uses the final reconciliation verification, without a second
+// capture/confirm cycle. Count real lock acquisitions, not just cached body reads.
+{
+  const { fixture } = await completedFixture("r6-initialize-once");
+  const originalOpen = fs.promises.open;
+  let captures = 0;
+  let reads = 0;
+  try {
+    fs.promises.open = async (...args) => {
+      if (path.basename(String(args[0])) === "append.lock") captures += 1;
+      return originalOpen(...args);
+    };
+    syncBuiltinESMExports();
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot,
+      eventReader: async (...args) => { reads += 1; return readFile(...args); } });
+    const status = await service.initialize();
+    assert.equal(status.chain_verified, true);
+    assert.equal(status.latest_sequence, 2);
+    assert.equal(reads, 2);
+    assert.equal(captures, 2, "one capture plus one confirmation, with no second verify");
+    captures = 0;
+    const runtime = await initializeDevJournalRuntime();
+    assert.equal(runtime.chain_verified, true);
+    assert.equal(captures, 2, "defaultJournal uses the same single-verification initialization");
+  } finally {
+    fs.promises.open = originalOpen;
+    syncBuiltinESMExports();
+    await clean(fixture);
+  }
+}
+
+// R6: startup still reconciles dead owners and returns read-only corruption diagnosis.
+{
+  const fixture = await tempFixture("r6-initialize-recovery");
+  try {
+    await runWorker(fixture.storageRoot, "start-only-targetless");
+    const service = createDevOperationJournalService({ storageRoot: fixture.storageRoot });
+    const status = await service.initialize();
+    assert.equal(status.health, "healthy");
+    assert.equal(status.chain_verified, true);
+    assert.equal(status.latest_sequence, 2);
+    assert.equal(status.dangling_operation_count, 0);
+    assert.equal((await service.verify()).events[1].stage, "operation_recovered");
+    const { file } = await readEvent(fixture.storageRoot, 0);
+    await writeFile(path.join(fixture.storageRoot, "events", file), "{}");
+    const corrupt = await service.initialize();
+    assert.equal(corrupt.health, "corrupt");
+    assert.equal(corrupt.chain_verified, false);
+    assert.equal(corrupt.reconciliation_required, true);
+    await assert.rejects(service.begin({ operation_type: "blocked", tool_name: "dev_fixture" }));
+  } finally { await clean(fixture); }
+}
 
 // Crash recovery A: STARTED owner exits and no effect is visible.
 {
