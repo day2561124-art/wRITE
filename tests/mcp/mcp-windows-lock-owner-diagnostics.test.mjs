@@ -30,6 +30,54 @@ test("non-Windows lock-owner diagnostics fail soft as unsupported", async () => 
   assert.equal(result.scan, null);
 });
 
+test("Windows lock-owner transport preserves non-ASCII paths through UTF-8 base64", async () => {
+  const target = path.join(
+    rootDir,
+    "tests",
+    ".tmp",
+    "鎖定診斷-中文路徑",
+  );
+  const processId = 4242;
+  const payload = {
+    Owners: [{
+      ProcessId: processId,
+      ImagePath: process.execPath,
+      MatchedPath: target,
+    }],
+    SystemHandleCount: 1,
+    ScannedHandleCount: 1,
+    InaccessibleProcessCount: 0,
+    DuplicateFailureCount: 0,
+    DiskHandleCount: 1,
+    Truncated: false,
+  };
+
+  let invocation = null;
+
+  const result = await findWindowsPathLockOwners(target, {
+    platform: "win32",
+    execFileRunner: async (...args) => {
+      invocation = args;
+      return {
+        stdout: Buffer.from(
+          JSON.stringify(payload),
+          "utf8",
+        ).toString("base64"),
+        stderr: "",
+      };
+    },
+  });
+
+  assert(invocation);
+  assert.equal(invocation[0], "powershell.exe");
+  assert(invocation[1].at(-1).includes("ToBase64String"));
+  assert.equal(result.supported, true);
+  assert.equal(result.owner_count, 1);
+  assert.equal(result.owners[0].pid, processId);
+  assert.equal(result.owners[0].matches_workspace_root, true);
+  assert.equal(result.owners[0].matched_relative_path, ".");
+});
+
 test("Windows live lock-owner diagnostics find a child whose cwd is the target directory", {
   skip: process.platform !== "win32",
   timeout: 60_000,

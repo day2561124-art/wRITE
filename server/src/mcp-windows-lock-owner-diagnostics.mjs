@@ -248,7 +248,9 @@ public static class WriterWindowsHandleScanner {
 '@
 Add-Type -TypeDefinition $source -Language CSharp
 $report = [WriterWindowsHandleScanner]::Scan($targetPath)
-$report | ConvertTo-Json -Depth 5 -Compress
+$json = $report | ConvertTo-Json -Depth 5 -Compress
+$utf8 = [System.Text.Encoding]::UTF8.GetBytes($json)
+[Convert]::ToBase64String($utf8)
 `;
 
 function normalizeMatchedPath(targetPath, matchedPath) {
@@ -298,7 +300,8 @@ export async function findWindowsPathLockOwners(targetPath, {
     },
   );
 
-  const raw = String(stdout ?? "").trim();
+  const encoded = String(stdout ?? "").trim();
+  const raw = encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
   const parsed = raw ? JSON.parse(raw) : {};
   const rawOwners = Array.isArray(parsed.Owners) ? parsed.Owners : (parsed.Owners ? [parsed.Owners] : []);
   const owners = [];
