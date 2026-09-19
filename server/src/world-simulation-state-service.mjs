@@ -302,6 +302,12 @@ export async function commitWorldSimulationTurn(
             memory_accessibility_queries: input.memory_accessibility_queries ?? [],
             subjective_memory_encoding_decisions: input.subjective_memory_encoding_decisions ?? null,
             subjective_memory_episode_bindings: input.subjective_memory_episode_bindings ?? null,
+            subjective_memory_retrieval_persistence:
+              input.subjective_memory_retrieval_persistence ?? null,
+            subjective_memory_retrieval_mutation_queue:
+              input.subjective_memory_retrieval_mutation_queue ?? null,
+            subjective_memory_retrieval_mutation_execution:
+              input.subjective_memory_retrieval_mutation_execution ?? null,
             retrieval_conditioned_memory_interpretation_adoption:
               input.retrieval_conditioned_memory_interpretation_adoption ?? null,
             retrieval_induced_forgetting_consequence:

@@ -57,6 +57,10 @@ import {
   projectWorldSimulationRetrievalGlobalTerminationDecisionEvidence,
 } from "./world-simulation-retrieval-global-termination-decision-evidence-service.mjs";
 import {
+  buildWorldSimulationMetamemoryRetrievalEffortContract,
+  projectWorldSimulationMetamemoryRetrievalEffort,
+} from "./world-simulation-metamemory-retrieval-effort-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2326,6 +2330,24 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase64a_r4f1_full_evidence_persisted:
       false,
+    phase93_metamemory_retrieval_effort:
+      buildWorldSimulationMetamemoryRetrievalEffortContract(),
+    phase93_monitoring_occurs_after_step_recovery_before_continuation:
+      true,
+    phase93_existing_continuation_resolver_reused:
+      true,
+    phase93_hidden_memory_truth_exposed:
+      false,
+    phase93_numeric_recall_probability_modeled:
+      false,
+    phase93_technical_step_budget_used_as_effort_signal:
+      false,
+    phase93_continuation_decision_authority:
+      false,
+    phase93_stop_decision_authority:
+      false,
+    phase93_cue_selection_authority:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -3263,6 +3285,26 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
           .values(),
       ];
 
+    const metamemoryRetrievalEffort =
+      projectWorldSimulationMetamemoryRetrievalEffort({
+        query_id:
+          query.query_id,
+        character:
+          query.character,
+        step_index:
+          stepIndex,
+        cumulative_target_outcome_after_step:
+          cumulativeTargetOutcome,
+        recovered_memories_this_step:
+          recoveredThisStep.map(
+            (item) => cloneJson(item.character_view),
+          ),
+        recovery_occurrences_this_step:
+          cloneJson(occurrences),
+        available_reinstatement_cues:
+          cloneJson(availableCueOptions),
+      });
+
     const continuationResolution =
       await callResolver(
         resolver,
@@ -3316,6 +3358,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
                 cloneJson(
                   item.character_view,
                 ),
+            ),
+          metamemory:
+            cloneJson(
+              metamemoryRetrievalEffort.character_view,
             ),
           available_reinstatement_cues:
             cloneJson(
@@ -3556,6 +3602,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       global_termination_decision_evidence_hash:
         globalTerminationDecisionEvidence
           .evidence_hash,
+      metamemory_retrieval_effort:
+        cloneJson(
+          metamemoryRetrievalEffort.character_view,
+        ),
+      metamemory_retrieval_effort_projection_hash:
+        metamemoryRetrievalEffort.projection_hash,
       continuation: {
         control_action:
           control.control_action,
