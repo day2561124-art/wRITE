@@ -915,6 +915,7 @@ const steps = [
   ["Phase 94 familiarity / recognition / source monitoring", ["tests/phase94/phase94-familiarity-recognition-source-monitoring.test.mjs"]],
   ["Phase 95 interference + bounded memory distortion", ["tests/phase95/phase95-interference-bounded-memory-distortion.test.mjs"]],
   ["Phase 96 memory–affect integration + lifecycle closure", ["tests/phase96/phase96-memory-affect-lifecycle-closure.test.mjs"]],
+  ["Character Memory Core Certification Final Audit", ["tests/certification/character-memory-core-certification.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
