@@ -284,6 +284,7 @@ function objectPosition(worldState, scene, objectState) {
 }
 
 function actionKind(candidate) {
+  if (isObject(candidate.communication)) return "communication";
   if (isObject(candidate.door_interaction)) return "door_interaction";
   if (isObject(candidate.object_interaction)) return "object_interaction";
   if (isObject(candidate.projectile)) return "projectile";
@@ -308,6 +309,69 @@ function pushOutcome(outcomes, actor, candidate, result, causalEvidence, extra =
 function pushTransition(transitions, entity, field, from, to, cause, extra = {}) {
   if (JSON.stringify(from) === JSON.stringify(to)) return;
   transitions.push({ entity, field, from: cloneJson(from), to: cloneJson(to), cause, ...extra });
+}
+
+function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
+  const communication = object(candidate.communication);
+  const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
+  const channel = String(communication.channel ?? "").trim();
+  const expressionMode = String(communication.expression_mode ?? "").trim();
+  const message = object(communication.message);
+  const durationMs = parseDurationMs(
+    candidate,
+    positiveNumber(rules.communication_action_seconds, positiveNumber(rules.passive_action_seconds, 0.25)) * 1000,
+  );
+  if (!addressee || addressee === actor || !["speech", "nonverbal"].includes(channel)) {
+    pushOutcome(outcomes, actor, candidate, "blocked", "communication intent requires a distinct addressee and supported channel");
+    return durationMs;
+  }
+  if (channel === "speech" && !String(message.semantic_content ?? "").trim()) {
+    pushOutcome(outcomes, actor, candidate, "blocked", "speech communication requires bounded semantic content");
+    return durationMs;
+  }
+  if (channel === "nonverbal" && !String(message.signal_intent ?? "").trim()) {
+    pushOutcome(outcomes, actor, candidate, "blocked", "nonverbal communication requires bounded signal intent");
+    return durationMs;
+  }
+  const communicationEvent = {
+    schema_version: "cc1-world-communication-event-v1",
+    actor,
+    addressee,
+    channel,
+    expression_mode: expressionMode || null,
+    ...(channel === "speech"
+      ? {
+          speech_act: message.speech_act ?? null,
+          semantic_content: message.semantic_content ?? null,
+          epistemic_status: message.epistemic_status ?? null,
+          addressee_must_infer_indirect_intention:
+            message.addressee_must_infer_indirect_intention === true,
+        }
+      : {
+          signal_intent: message.signal_intent ?? null,
+          semantic_content: message.semantic_content ?? null,
+        }),
+    surface_realization_complete: false,
+    private_purpose_exposed: false,
+    withheld_private_content_exposed: false,
+    world_truth_claimed: false,
+  };
+  pushOutcome(
+    outcomes,
+    actor,
+    candidate,
+    "communication_emitted",
+    "selected bounded communication intent reached the programmatic world interaction layer",
+    {
+      communication_event: communicationEvent,
+      character_experience: {
+        performed: true,
+        perceived_status: "communication_emitted",
+      },
+      duration_ms: durationMs,
+    },
+  );
+  return durationMs;
 }
 
 function addMilliseconds(isoTime, elapsedMs) {
@@ -600,6 +664,11 @@ function resolveSpatialRulePreview(input = {}) {
       continue;
     }
     const kind = actionKind(candidate);
+    if (kind === "communication") {
+      const durationMs = resolveCommunicationIntent(actor, candidate, rules, outcomes);
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      continue;
+    }
     if (kind === "movement") {
       const movement = validateMovement(snapshot, snapshotScene, actor, candidate, movementConflicts.get(actor));
       elapsedMs = Math.max(elapsedMs, movement.durationMs ?? 0);
@@ -710,6 +779,15 @@ export function buildWorldSimulationCausalRuleContract() {
       exclusive_holder_enforced: true,
       reach_enforced: true,
       simultaneous_pickup_contention_blocks_all_claimants: true,
+    },
+    communication: {
+      bounded_character_authored_plan_required: true,
+      selected_action_required_before_emission: true,
+      world_layer_records_emission_not_intended_effect_success: true,
+      private_purpose_exposed_in_world_event: false,
+      withheld_private_content_exposed_in_world_event: false,
+      surface_realization_completed_here: false,
+      recipient_comprehension_modeled_here: false,
     },
     combat: {
       weapon_holder_state_enforced: true,

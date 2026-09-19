@@ -164,6 +164,7 @@ function normalizeCandidate(raw, index) {
     defense: boundedCharacterValue(raw.defense ?? null),
     projectile: boundedCharacterValue(raw.projectile ?? null),
     ability: boundedCharacterValue(raw.ability ?? null),
+    communication: boundedCharacterValue(raw.communication ?? null),
     resource_commitment: boundedCharacterValue(raw.resource_commitment ?? null),
   };
   const actionHash = hashAgentRunValue({
@@ -217,6 +218,7 @@ function buildCognitionGroundingCatalog(character, cognition) {
     ["active_goal", "cognition.goals", source.goals],
     ["value_context", "cognition.values", source.values],
     ["relationship_context", "cognition.relationship_cognition", source.relationship_cognition],
+    ["communication_intention", "cognition.communication_goal", source.communication_goal],
     ["decision_pressure", "cognition.decision_pressures", source.decision_pressures],
     ["current_action", "cognition.current_action", source.current_action],
     [
