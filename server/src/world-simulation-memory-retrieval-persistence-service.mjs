@@ -747,6 +747,15 @@ function canonicalSearchSteps(
           optionalString(
             step?.familiarity_recognition_source_monitoring_projection_hash,
           ),
+        interference_bounded_memory_distortion:
+          cloneJson(
+            step?.interference_bounded_memory_distortion
+            ?? null,
+          ),
+        interference_bounded_memory_distortion_projection_hash:
+          optionalString(
+            step?.interference_bounded_memory_distortion_projection_hash,
+          ),
         continuation: {
           control_action:
             controlAction,
@@ -757,6 +766,106 @@ function canonicalSearchSteps(
           === true,
       };
     });
+}
+
+function validatePhase95InterferenceDistortionEvidenceBinding(
+  process,
+  processResult,
+) {
+  const steps =
+    array(
+      process?.steps,
+    );
+
+  const evidence =
+    array(
+      processResult
+        ?.interference_bounded_memory_distortion_evidence,
+    );
+
+  const stepHashes =
+    steps.map(
+      (step) =>
+        optionalString(
+          step
+            ?.interference_bounded_memory_distortion_projection_hash,
+        ),
+    );
+
+  const processHashes =
+    array(
+      process
+        ?.interference_bounded_memory_distortion_evidence_hashes,
+    )
+      .map(optionalString);
+
+  const phase95Present =
+    evidence.length > 0
+    || stepHashes.some(Boolean)
+    || processHashes.length > 0;
+
+  if (!phase95Present) {
+    return {
+      present: false,
+      evidence_count: 0,
+    };
+  }
+
+  if (
+    evidence.length !== steps.length
+    || stepHashes.some((hash) => !hash)
+    || processHashes.length !== stepHashes.length
+    || JSON.stringify(processHashes)
+      !== JSON.stringify(stepHashes)
+  ) {
+    const error = new Error(
+      "Phase95 persisted interference/distortion evidence is detached from retrieval search steps.",
+    );
+    error.code =
+      "WORLD_SIMULATION_MEMORY_RETRIEVAL_PERSISTENCE_PHASE95_BINDING_MISMATCH";
+    throw error;
+  }
+
+  evidence.forEach(
+    (item, index) => {
+      if (!isObject(item)) {
+        const error = new Error(
+          `Phase95 evidence[${index}] must be an object.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_MEMORY_RETRIEVAL_PERSISTENCE_PHASE95_BINDING_MISMATCH";
+        throw error;
+      }
+
+      const projectionHash =
+        optionalString(
+          item.projection_hash,
+        );
+
+      const body =
+        cloneJson(item);
+
+      delete body.projection_hash;
+
+      if (
+        !projectionHash
+        || projectionHash !== stepHashes[index]
+        || hashAgentRunValue(body) !== projectionHash
+      ) {
+        const error = new Error(
+          `Phase95 evidence[${index}] hash does not match its retrieval step.`,
+        );
+        error.code =
+          "WORLD_SIMULATION_MEMORY_RETRIEVAL_PERSISTENCE_PHASE95_BINDING_MISMATCH";
+        throw error;
+      }
+    },
+  );
+
+  return {
+    present: true,
+    evidence_count: evidence.length,
+  };
 }
 
 function buildMemoryRecoveries(
@@ -1075,6 +1184,12 @@ function eventForProcess(
       occurrences,
     );
 
+  const phase95InterferenceDistortionBinding =
+    validatePhase95InterferenceDistortionEvidenceBinding(
+      process,
+      result,
+    );
+
   const fragments =
     cloneJson(
       array(
@@ -1225,6 +1340,22 @@ function eventForProcess(
         controlAnnotations,
       control_reason_is_subjective_character_thought:
         false,
+      phase95_interference_bounded_memory_distortion_full_evidence_persisted:
+        false,
+      phase95_projection_hash_committed_via_search_steps:
+        phase95InterferenceDistortionBinding.present,
+      phase95_evidence_binding_verified:
+        phase95InterferenceDistortionBinding.present,
+      phase95_evidence_count_verified:
+        phase95InterferenceDistortionBinding.evidence_count,
+      phase95_non_contacted_competitor_refs_persisted:
+        false,
+      phase95_generated_memory_content_persisted:
+        false,
+      phase95_stored_memory_content_rewritten:
+        false,
+      phase95_distortion_promoted_to_world_truth:
+        false,
       counterfactual_reinstatement_options_persisted:
         false,
       retrieval_cue_orientation_evidence_persisted:
@@ -1365,6 +1496,20 @@ export function buildWorldSimulationMemoryRetrievalPersistenceContract() {
       false,
     retrieval_search_control_readiness_hash_committed_via_retrieval_process_hash:
       true,
+    phase95_interference_bounded_memory_distortion_full_evidence_persisted:
+      false,
+    phase95_projection_hash_committed_via_search_steps:
+      true,
+    phase95_evidence_bound_to_search_step_and_process_hash:
+      true,
+    phase95_non_contacted_competitor_refs_persisted:
+      false,
+    phase95_generated_memory_content_persisted:
+      false,
+    phase95_stored_memory_content_rewritten:
+      false,
+    phase95_distortion_promoted_to_world_truth:
+      false,
     counterfactual_cue_options_persisted:
       false,
     historical_recovered_content_snapshotted:

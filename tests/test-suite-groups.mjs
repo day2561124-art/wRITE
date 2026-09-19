@@ -286,6 +286,10 @@ export const phase94FamiliarityRecognitionSourceMonitoringSteps = Object.freeze(
   Object.freeze(["Phase 94 familiarity / recognition / source monitoring", Object.freeze(["tests/phase94/phase94-familiarity-recognition-source-monitoring.test.mjs"])]),
 ]);
 
+export const phase95InterferenceBoundedMemoryDistortionSteps = Object.freeze([
+  Object.freeze(["Phase 95 interference + bounded memory distortion", Object.freeze(["tests/phase95/phase95-interference-bounded-memory-distortion.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -324,6 +328,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
+  ...phase95InterferenceBoundedMemoryDistortionSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -360,6 +365,7 @@ export const cognitionSteps = Object.freeze([
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
+  ...phase95InterferenceBoundedMemoryDistortionSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -391,4 +397,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
+  ...phase95InterferenceBoundedMemoryDistortionSteps,
 ]);

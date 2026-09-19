@@ -65,6 +65,10 @@ import {
   projectWorldSimulationFamiliarityRecognitionSourceMonitoring,
 } from "./world-simulation-familiarity-recognition-source-monitoring-service.mjs";
 import {
+  buildWorldSimulationInterferenceBoundedMemoryDistortionContract,
+  projectWorldSimulationInterferenceBoundedMemoryDistortion,
+} from "./world-simulation-interference-bounded-memory-distortion-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -959,6 +963,95 @@ function safeEvaluationView(
         ),
       ),
   };
+}
+
+function phase95CandidateTemporalEvidence(
+  frontier,
+) {
+  return array(
+    frontier?.candidate_records,
+  ).map(
+    (record) => ({
+      memory_ref:
+        memoryIdFor(
+          record,
+          "phase95_candidate_memory",
+        ),
+      encoded_at:
+        record?.encoded_at
+        ?? record?.remembered_at
+        ?? null,
+    }),
+  );
+}
+
+function phase95CompetitionRelations(
+  frontier,
+) {
+  return array(
+    frontier?.candidate_evaluations,
+  ).map(
+    (evaluation) => {
+      const competitorRefs =
+        [
+          ...array(
+            evaluation?.interference_competitor_refs,
+          ),
+          ...array(
+            evaluation?.cue_competition,
+          ).flatMap(
+            (entry) =>
+              array(
+                entry?.competing_memory_ids,
+              ),
+          ),
+        ]
+          .map(optionalString)
+          .filter(Boolean);
+
+      return {
+        memory_ref:
+          optionalString(
+            evaluation?.memory_id,
+          ),
+        competitor_memory_refs:
+          [
+            ...new Set(
+              competitorRefs,
+            ),
+          ],
+      };
+    },
+  ).filter(
+    (relation) =>
+      Boolean(
+        relation.memory_ref,
+      ),
+  );
+}
+
+function phase95RecoveredMemoryEvidence(
+  recovered,
+) {
+  return array(recovered).map(
+    (item) => ({
+      source_memory_ref:
+        item?.source_memory_ref
+        ?? null,
+      fragment_id:
+        item?.fragment
+          ?.fragment_id
+        ?? null,
+      content_kind:
+        item?.fragment
+          ?.content_kind
+        ?? "unspecified",
+      target_relation:
+        item?.fragment
+          ?.target_relation
+        ?? "unresolved",
+    }),
+  );
 }
 
 function resolverFrontierView(
@@ -2370,6 +2463,20 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase94_continuation_decision_authority:
       false,
+    phase95_interference_bounded_memory_distortion:
+      buildWorldSimulationInterferenceBoundedMemoryDistortionContract(),
+    phase95_monitoring_occurs_after_phase94_before_continuation:
+      true,
+    phase95_hidden_candidate_content_inspected:
+      false,
+    phase95_generated_memory_content_allowed:
+      false,
+    phase95_stored_memory_content_rewritten:
+      false,
+    phase95_distortion_world_truth:
+      false,
+    phase95_continuation_decision_authority:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -2986,6 +3093,7 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
   const episodeLocalReprojections = [];
 
   const globalTerminationDecisionEvidenceByStep = [];
+  const interferenceBoundedMemoryDistortionEvidenceByStep = [];
 
   let currentEpisodeContext =
     buildWorldSimulationRetrievalEpisodeLocalInitialContext({
@@ -3362,6 +3470,38 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
           ),
       });
 
+    const interferenceBoundedMemoryDistortion =
+      projectWorldSimulationInterferenceBoundedMemoryDistortion({
+        query_id:
+          query.query_id,
+        character:
+          query.character,
+        step_index:
+          stepIndex,
+        recovered_memory_evidence:
+          phase95RecoveredMemoryEvidence(
+            recoveredThisStep,
+          ),
+        candidate_temporal_evidence:
+          phase95CandidateTemporalEvidence(
+            currentFrontier,
+          ),
+        competition_relations:
+          phase95CompetitionRelations(
+            currentFrontier,
+          ),
+        source_monitoring:
+          cloneJson(
+            familiarityRecognitionSourceMonitoring.character_view,
+          ),
+        source_monitoring_projection_hash:
+          familiarityRecognitionSourceMonitoring.projection_hash,
+      });
+
+    interferenceBoundedMemoryDistortionEvidenceByStep.push(
+      interferenceBoundedMemoryDistortion,
+    );
+
     const continuationResolution =
       await callResolver(
         resolver,
@@ -3423,6 +3563,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
           recognition:
             cloneJson(
               familiarityRecognitionSourceMonitoring.character_view,
+            ),
+          memory_distortion:
+            cloneJson(
+              interferenceBoundedMemoryDistortion.character_view,
             ),
           available_reinstatement_cues:
             cloneJson(
@@ -3675,6 +3819,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         ),
       familiarity_recognition_source_monitoring_projection_hash:
         familiarityRecognitionSourceMonitoring.projection_hash,
+      interference_bounded_memory_distortion:
+        cloneJson(
+          interferenceBoundedMemoryDistortion.character_view,
+        ),
+      interference_bounded_memory_distortion_projection_hash:
+        interferenceBoundedMemoryDistortion.projection_hash,
       continuation: {
         control_action:
           control.control_action,
@@ -4013,6 +4163,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       retrieval_search_control_readiness_evidence_hash:
         retrievalSearchControlReadinessEvidence
           .evidence_hash,
+      interference_bounded_memory_distortion_evidence_hashes:
+        interferenceBoundedMemoryDistortionEvidenceByStep
+          .map(
+            (evidence) =>
+              evidence.projection_hash,
+          ),
       step_hashes:
         steps.map(
           (step) =>
@@ -4079,6 +4235,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
     retrieval_search_control_readiness_evidence_hash:
       retrievalSearchControlReadinessEvidence
         .evidence_hash,
+    interference_bounded_memory_distortion_evidence_hashes:
+      interferenceBoundedMemoryDistortionEvidenceByStep
+        .map(
+          (evidence) =>
+            evidence.projection_hash,
+        ),
     frozen_memory_snapshot: {
       phase63b_version:
         query.phase63b_version,
@@ -4145,6 +4307,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
       cloneJson(
         retrievalSearchControlReadinessEvidence,
       ),
+    interference_bounded_memory_distortion_evidence:
+      cloneJson(
+        interferenceBoundedMemoryDistortionEvidenceByStep,
+      ),
     recovered_fragments:
       recoveredUnique.map(
         (item) =>
@@ -4185,6 +4351,20 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         true,
       initial_frontier_verified:
         true,
+      phase95_interference_bounded_memory_distortion_evidence_count:
+        interferenceBoundedMemoryDistortionEvidenceByStep.length,
+      phase95_hidden_candidate_content_inspected:
+        false,
+      phase95_unrecovered_memory_content_inspected:
+        false,
+      phase95_generated_memory_content:
+        false,
+      phase95_stored_memory_content_rewritten:
+        false,
+      phase95_distortion_promoted_to_world_truth:
+        false,
+      phase95_continuation_decision_authority:
+        false,
       cue_diagnostic_frontier_evidence_bound:
         Boolean(
           query.initial_frontier

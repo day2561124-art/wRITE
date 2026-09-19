@@ -1547,6 +1547,9 @@ function evaluateNativeCueMemory(
     interference_competitor_count:
       null,
 
+    interference_competitor_refs:
+      [],
+
     interference_penalty:
       null,
 
@@ -1755,26 +1758,35 @@ function interferenceKeys(record) {
 function interferenceFor(record, candidates, config) {
   const perCompetitorPenalty = unitNumber(config?.per_competitor_penalty);
   if (config?.enabled !== true || perCompetitorPenalty === null || perCompetitorPenalty <= 0) {
-    return { competitor_count: 0, penalty: 0 };
+    return { competitor_count: 0, competitor_memory_refs: [], penalty: 0 };
   }
   const keys = interferenceKeys(record);
-  if (!keys.length) return { competitor_count: 0, penalty: 0 };
+  if (!keys.length) {
+    return { competitor_count: 0, competitor_memory_refs: [], penalty: 0 };
+  }
   const ownId = String(record?.memory_id ?? record?.id ?? "");
   const keySet = new Set(keys.map((item) => JSON.stringify(item)));
-  let competitorCount = 0;
+  const competitorMemoryRefs = [];
   for (const other of candidates) {
     if (other === record) continue;
     const otherId = String(other?.memory_id ?? other?.id ?? "");
     if (ownId && otherId && ownId === otherId) continue;
     const otherKeys = interferenceKeys(other);
-    if (otherKeys.some((item) => keySet.has(JSON.stringify(item)))) competitorCount += 1;
+    if (!otherKeys.some((item) => keySet.has(JSON.stringify(item)))) continue;
+    if (otherId) competitorMemoryRefs.push(otherId);
   }
+  const deduplicatedCompetitorMemoryRefs = [...new Set(competitorMemoryRefs)];
+  const competitorCount = deduplicatedCompetitorMemoryRefs.length;
   const uncapped = competitorCount * perCompetitorPenalty;
   const configuredCap = unitNumber(config?.max_penalty);
   const penalty = configuredCap === null
     ? Math.min(1, uncapped)
     : Math.min(configuredCap, uncapped);
-  return { competitor_count: competitorCount, penalty };
+  return {
+    competitor_count: competitorCount,
+    competitor_memory_refs: deduplicatedCompetitorMemoryRefs,
+    penalty,
+  };
 }
 
 function perceptionContext(context) {
@@ -2021,6 +2033,7 @@ function evaluateMemory(record, originalIndex, candidates, context, profile, cur
     context_match: currentContextMatch.value,
     context_match_details: currentContextMatch.details,
     interference_competitor_count: interference.competitor_count,
+    interference_competitor_refs: cloneJson(interference.competitor_memory_refs),
     interference_penalty: interference.penalty,
     components,
   };
