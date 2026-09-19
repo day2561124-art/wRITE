@@ -39,7 +39,7 @@ const productionSuiteDefinitions = Object.freeze({
   mcp_tunnel: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/mcp-tunnel-launcher.test.mjs"]),
-    timeoutMs: 300_000,
+    timeoutMs: 600_000,
     cleanupPort: 8787,
   }),
   affected: Object.freeze({

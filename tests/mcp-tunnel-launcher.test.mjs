@@ -303,7 +303,7 @@ async function waitForPortAvailable(port, timeoutMs = 10_000) {
 
 async function waitForPortListening(
   port,
-  timeoutMs = 10_000,
+  timeoutMs = 30_000,
   { child = null, stderr = null } = {},
 ) {
   const stderrText = () =>

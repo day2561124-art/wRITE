@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { getMcpIdentity } from '../../server/src/mcp-http-identity.mjs';
-import { runMcpProbe, DEFAULT_OP_TIMEOUT } from '../../scripts/probe-mcp.mjs';
+import { runMcpProbe, DEFAULT_OP_TIMEOUT, normalizeOperationTimeout } from '../../scripts/probe-mcp.mjs';
 import { createProbeClient } from './probe-fake-client.mjs';
 
 async function runProbe(port, extraEnv = {}) {
@@ -186,4 +186,59 @@ async function listenFixture(handler) {
   })();
   if (!(hard > startup)) throw new Error('global hard deadline should exceed startup budget');
   console.log('probe-startup-budget: timings verification passed');
+}
+
+// 6) Startup callers may opt into bounded per-operation headroom while the
+// steady-state default remains fast and the override is capped.
+{
+  assert.equal(normalizeOperationTimeout(undefined), DEFAULT_OP_TIMEOUT);
+  assert.equal(normalizeOperationTimeout(30_000), 30_000);
+  assert.equal(normalizeOperationTimeout(60_000), 30_000);
+  assert.throws(() => normalizeOperationTimeout(0), /Invalid PROBE_OP_TIMEOUT_MS/);
+  assert.throws(() => normalizeOperationTimeout(0.5), /Invalid PROBE_OP_TIMEOUT_MS/);
+
+  const observedTimeouts = [];
+  const server = await listenFixture((req, res) => {
+    if (req.url === '/health') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ...getMcpIdentity(), pid: process.pid, instanceId: 'fixture-instance' }));
+    } else if (req.url === '/ready') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ready: true, child: { runtime_readiness: { state: 'ready' }, generation: 1 } }));
+    } else {
+      res.writeHead(404); res.end();
+    }
+  });
+  try {
+    const endpoint = `http://127.0.0.1:${server.address().port}/mcp`;
+    const createClientFactory = async () => ({
+      transport: { sessionId: 'startup-timeout-contract-session' },
+      client: {
+        async connect(_transport, options = {}) { observedTimeouts.push(options.timeout); },
+        getServerVersion() { return { name: 'armed-academy-fiction-engine' }; },
+        async listTools(_params = {}, options = {}) {
+          observedTimeouts.push(options.timeout);
+          return { tools: [{ name: 't1' }] };
+        },
+        async listResources(_params = {}, options = {}) {
+          observedTimeouts.push(options.timeout);
+          return { resources: [] };
+        },
+        async ping(options = {}) { observedTimeouts.push(options.timeout); },
+        async close() {},
+      },
+    });
+    const result = await runMcpProbe({
+      endpoint,
+      mode: 'probe',
+      expectedInstance: 'fixture-instance',
+      operationTimeoutMs: 30_000,
+      createClientFactory,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(observedTimeouts, [30_000, 30_000, 30_000, 30_000]);
+    console.log('probe-startup-budget: startup operation timeout override passed');
+  } finally {
+    await new Promise(r => server.close(r));
+  }
 }

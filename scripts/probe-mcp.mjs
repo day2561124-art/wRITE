@@ -5,9 +5,17 @@ import { fileURLToPath } from 'node:url';
 
 // Configuration defaults and caps
 const DEFAULT_OP_TIMEOUT_MS = 10_000;
+const MAX_OP_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_READINESS_BUDGET_MS = 30_000;
 const HARD_DEADLINE_HEADROOM_MS = 5_000;
 const GLOBAL_HARD_CAP_MS = 60_000;
+
+export function normalizeOperationTimeout(value) {
+  const parsed = Number(value ?? DEFAULT_OP_TIMEOUT_MS);
+  const normalized = Math.trunc(parsed);
+  if (!Number.isFinite(parsed) || normalized < 1) throw new Error('Invalid PROBE_OP_TIMEOUT_MS');
+  return Math.min(normalized, MAX_OP_TIMEOUT_MS);
+}
 
 export function normalizeTimings(startupBudgetEnv, hardDeadlineEnv) {
   let startup = Number(startupBudgetEnv ?? DEFAULT_STARTUP_READINESS_BUDGET_MS);
@@ -94,9 +102,16 @@ function isTransientResourceError(err) {
 
 export const DEFAULT_OP_TIMEOUT = DEFAULT_OP_TIMEOUT_MS;
 
-export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance = undefined, startupBudgetMs = undefined, hardDeadlineMs = undefined, createClientFactory = null } = {}) {
+export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance = undefined, startupBudgetMs = undefined, hardDeadlineMs = undefined, operationTimeoutMs = undefined, createClientFactory = null } = {}) {
   if (!endpoint) throw new ProbeError('INVALID_ARGS', 'endpoint is required');
   const endpointUrl = new URL(endpoint);
+
+  let OP_TIMEOUT_MS;
+  try {
+    OP_TIMEOUT_MS = normalizeOperationTimeout(operationTimeoutMs ?? process.env.PROBE_OP_TIMEOUT_MS);
+  } catch (err) {
+    throw new ProbeError('INVALID_TIMING_CONFIG', String(err.message ?? err));
+  }
 
   // normalize timings and enforce invariants
   let { startup: STARTUP_READINESS_BUDGET_MS, hard: GLOBAL_HARD_DEADLINE_MS } = (function () {
@@ -107,7 +122,8 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
     }
   })();
 
-  // bounded fetch uses the local DEFAULT_OP_TIMEOUT_MS
+  // bounded fetch uses the operation timeout. Startup callers may opt into
+  // bounded extra headroom without weakening steady-state probe defaults.
   const boundedFetch = async (url, init = {}) => {
     try {
       return await fetch(url, {
@@ -115,12 +131,12 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
         redirect: 'error',
         signal: AbortSignal.any([
           ...(init.signal ? [init.signal] : []),
-          AbortSignal.timeout(DEFAULT_OP_TIMEOUT_MS),
+          AbortSignal.timeout(OP_TIMEOUT_MS),
         ]),
       });
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        throw new ProbeError('HTTP_TIMEOUT', `HTTP request timed out after ${DEFAULT_OP_TIMEOUT_MS}ms`, {
+        throw new ProbeError('HTTP_TIMEOUT', `HTTP request timed out after ${OP_TIMEOUT_MS}ms`, {
           cause: error?.message ?? String(error),
         });
       }
@@ -189,7 +205,7 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
       }
 
       try {
-        await client.connect(transport, { timeout: DEFAULT_OP_TIMEOUT_MS });
+        await client.connect(transport, { timeout: OP_TIMEOUT_MS });
       } catch (error) {
         if (error instanceof ProbeError) throw error;
         throw new ProbeError('MCP_HANDSHAKE_FAILED', error?.message ?? String(error));
@@ -200,7 +216,7 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
 
       let tools;
       try {
-        tools = await client.listTools?.({}, { timeout: DEFAULT_OP_TIMEOUT_MS });
+        tools = await client.listTools?.({}, { timeout: OP_TIMEOUT_MS });
       } catch (error) {
         throw new ProbeError('TOOLS_DISCOVERY_FAILED', error?.message ?? String(error));
       }
@@ -213,7 +229,7 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
       // readiness polling against /ready until the startup budget expires.
       let resourcesOk = false;
       try {
-        await client.listResources?.({}, { timeout: DEFAULT_OP_TIMEOUT_MS });
+        await client.listResources?.({}, { timeout: OP_TIMEOUT_MS });
         resourcesOk = true;
       } catch (error) {
         if (!isTransientResourceError(error)) {
@@ -250,7 +266,7 @@ export async function runMcpProbe({ endpoint, mode = 'probe', expectedInstance =
         throw new ProbeError(readiness?.code ?? (readyResponse.status === 404 ? 'SESSION_NOT_FOUND' : 'RUNTIME_NOT_READY'), readiness?.reason ?? `readiness HTTP ${readyResponse.status}`, { readiness });
       }
 
-      await client.ping?.({ timeout: DEFAULT_OP_TIMEOUT_MS });
+      await client.ping?.({ timeout: OP_TIMEOUT_MS });
       const { response: afterResponse, payload: after } = await fetchJson('/health');
       if (afterResponse.status !== 200) throw new ProbeError('HTTP_HEALTH_FAILED', `identity recheck HTTP ${afterResponse.status}`);
       if (after.instanceId !== identity.instanceId) throw new ProbeError('INSTANCE_CHANGED', 'MCP instance changed during probe');

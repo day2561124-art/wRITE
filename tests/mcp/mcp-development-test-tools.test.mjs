@@ -304,7 +304,7 @@ try {
   assert.deepEqual(mapping.memory_retrieval.argv, ["tests/run-memory-retrieval.mjs"]);
   assert.deepEqual(mapping.all.argv, ["tests/run-all.mjs"]);
   assert.equal(mapping.mcp.timeout_ms, 1_500_000);
-  assert.equal(mapping.mcp_tunnel.timeout_ms, 300_000);
+  assert.equal(mapping.mcp_tunnel.timeout_ms, 600_000);
   assert.equal(mapping.affected.timeout_ms, 7_200_000);
   assert.equal(mapping.world_simulation.timeout_ms, 3_600_000);
   assert.equal(mapping.cognition.timeout_ms, 2_700_000);

@@ -44,6 +44,7 @@ $ConfiguredTunnelMode = if ($env:WRITER_MCP_TUNNEL_MODE) { [string]$env:WRITER_M
 $ConfiguredTunnelHostname = if ($env:WRITER_MCP_TUNNEL_HOSTNAME) { [string]$env:WRITER_MCP_TUNNEL_HOSTNAME } else { "" }
 $ConfiguredTunnelToken = if ($env:WRITER_MCP_TUNNEL_TOKEN) { [string]$env:WRITER_MCP_TUNNEL_TOKEN } else { "" }
 $ConfiguredTunnelTokenFile = if ($env:WRITER_MCP_TUNNEL_TOKEN_FILE) { [string]$env:WRITER_MCP_TUNNEL_TOKEN_FILE } else { "" }
+$FreshMcpProbeOperationTimeoutMilliseconds = 30000
 
 function Resolve-TunnelConfiguration {
   $mode = $ConfiguredTunnelMode.Trim().ToLowerInvariant()
@@ -102,10 +103,26 @@ function Clear-TunnelCredentialEnvironment {
 }
 
 function Invoke-McpProbe {
-  param([string]$Endpoint, [string]$Mode = "probe", [string]$ExpectedInstance = "")
+  param(
+    [string]$Endpoint,
+    [string]$Mode = "probe",
+    [string]$ExpectedInstance = "",
+    [int]$OperationTimeoutMilliseconds = 0
+  )
   $probeScript = Join-Path $Root "scripts\probe-mcp.mjs"
-  $probeOutput = & node $probeScript $Endpoint $Mode $ExpectedInstance
-  if ($LASTEXITCODE -ne 0) { return $null }
+  $hadOperationTimeout = Test-Path Env:\PROBE_OP_TIMEOUT_MS
+  $originalOperationTimeout = $env:PROBE_OP_TIMEOUT_MS
+  try {
+    if ($OperationTimeoutMilliseconds -gt 0) {
+      $env:PROBE_OP_TIMEOUT_MS = [string]$OperationTimeoutMilliseconds
+    }
+    $probeOutput = & node $probeScript $Endpoint $Mode $ExpectedInstance
+    $probeExitCode = $LASTEXITCODE
+  } finally {
+    if ($hadOperationTimeout) { $env:PROBE_OP_TIMEOUT_MS = $originalOperationTimeout }
+    else { Remove-Item Env:\PROBE_OP_TIMEOUT_MS -ErrorAction SilentlyContinue }
+  }
+  if ($probeExitCode -ne 0) { return $null }
   try { return ($probeOutput | ConvertFrom-Json) } catch { return $null }
 }
 
@@ -747,7 +764,7 @@ try {
       if ($mcpProcess.HasExited) { throw "MCP exited before readiness; see $mcpErr" }
       if (Test-McpPortOpen) { break }
     } while ((Get-Date) -lt $deadline)
-    $current = Invoke-McpProbe "$OriginUrl/mcp" "probe"
+    $current = Invoke-McpProbe "$OriginUrl/mcp" "probe" "" $FreshMcpProbeOperationTimeoutMilliseconds
     if (-not $current -or [int]$current.pid -ne $mcpProcess.Id -or (Get-McpOwningProcess) -ne $mcpProcess.Id) {
       if (-not $mcpProcess.HasExited) { & taskkill.exe /PID $mcpProcess.Id /T /F | Out-Null }
       throw "MCP failed identity / protocol readiness; see $mcpErr"
