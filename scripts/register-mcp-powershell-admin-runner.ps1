@@ -30,6 +30,28 @@ New-Item -ItemType Directory -Path (Join-Path $requestRoot 'requests') -Force | 
 New-Item -ItemType Directory -Path (Join-Path $requestRoot 'results') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $requestRoot 'temp') -Force | Out-Null
 
+# Protect the directory before creating or replacing protected files.
+& icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /C | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Could not protect the elevated runner directory ACL.'
+}
+
+# Upgrade path for registrations created by an older ACL layout.
+# Only these two fixed files are ever taken over; recursion is intentionally forbidden.
+foreach ($protectedFile in @($protectedRunner, $configPath)) {
+    if (-not (Test-Path -LiteralPath $protectedFile -PathType Leaf)) { continue }
+
+    & takeown.exe /F $protectedFile /A | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not take ownership of existing elevated runner file: $protectedFile"
+    }
+
+    & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not repair existing elevated runner file ACL: $protectedFile"
+    }
+}
+
 Copy-Item -LiteralPath $sourceRunner -Destination $protectedRunner -Force
 
 $config = [ordered]@{
@@ -50,15 +72,7 @@ $configJson = $config | ConvertTo-Json -Depth 4
     (New-Object Text.UTF8Encoding $false)
 )
 
-# The scheduled task must never execute a runner that the normal user can rewrite.
-# Protect the directory first, then repair the two existing files explicitly.
-# /T is intentionally avoided here: applying inheritable directory ACEs recursively
-# can leave existing files without effective file ACEs on Windows.
-& icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /C | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not protect the elevated runner directory ACL.'
-}
-
+# Reassert explicit file ACLs after replacement. The normal user receives RX only.
 foreach ($protectedFile in @($protectedRunner, $configPath)) {
     & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
     if ($LASTEXITCODE -ne 0) {
