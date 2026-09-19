@@ -496,6 +496,11 @@ import {
   adoptWorldSimulationPersistentMoodInterpretation,
   worldSimulationPersistentMoodNativeAdoptionVersion,
 } from "./world-simulation-persistent-mood-native-adoption-service.mjs";
+import {
+  buildWorldSimulationMemoryAffectLifecycleClosureContract,
+  projectWorldSimulationMemoryAffectLifecycleClosure,
+  worldSimulationMemoryAffectLifecycleClosureVersion,
+} from "./world-simulation-memory-affect-lifecycle-closure-service.mjs";
 import { buildWorldSimulationMemoryInterpretationTurn } from "./world-simulation-memory-interpretation-turn-service.mjs";
 import {
   buildWorldSimulationMemoryReconsolidationLifecycle,
@@ -3617,6 +3622,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationMemoryPlasticityContract(),
     adaptive_memory_consolidation:
       buildWorldSimulationAdaptiveMemoryConsolidationContract(),
+    memory_affect_lifecycle_closure:
+      buildWorldSimulationMemoryAffectLifecycleClosureContract(),
     subjective_claim_projection:
       buildWorldSimulationSubjectiveClaimProjectionContract(),
     subjective_claim_conflict_revision_projection:
@@ -6281,6 +6288,31 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       );
     }
 
+    // Phase96 bridges only a same-turn, actually recovered memory that is
+    // independently admitted by both Runtime Current Mind and the final
+    // Character Brain working context. The Phase89C mood remains its own
+    // subjective interpretation; this read-only context never selects a
+    // memory, changes affect, rewrites a trace, or advances a lifecycle.
+    delete characterCognition.memory_affect_context;
+    const memoryAffectLifecycleClosure =
+      projectWorldSimulationMemoryAffectLifecycleClosure({
+        character,
+        current_turn_id: turnId,
+        world_state:
+          retrievalPersistencePreview.result.preview_world_state,
+        retrieval_event: currentRetrievalEvent,
+        recovered_memories: recoveredMemories,
+        runtime_working_context:
+          speculativeCurrentMind.working_context,
+        working_context: characterCognition.working_context,
+        persistent_mood_native_adoption: persistentMoodNativeAdoption,
+      });
+    if (memoryAffectLifecycleClosure.character_view) {
+      characterCognition.memory_affect_context = cloneJson(
+        memoryAffectLifecycleClosure.character_view,
+      );
+    }
+
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
@@ -6571,6 +6603,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           false,
 
         persistent_mood_deliberation_grounding_installed:
+          false,
+
+        phase96_memory_affect_lifecycle_closure_installed:
+          true,
+        phase96_memory_affect_lifecycle_closure_version:
+          worldSimulationMemoryAffectLifecycleClosureVersion,
+        phase96_character_view_only_for_runtime_admitted_current_recollection:
+          true,
+        phase96_lifecycle_stage_promoted_to_world_truth:
+          false,
+        phase96_mood_or_memory_rewritten:
+          false,
+        phase96_retrieval_selection_authority:
+          false,
+        phase96_action_or_belief_authority:
           false,
 
         legacy_memory_projection_engine_only:

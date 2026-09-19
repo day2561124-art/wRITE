@@ -914,6 +914,7 @@ const steps = [
   ["Phase 93 metamemory + retrieval effort", ["tests/phase93/phase93-metamemory-retrieval-effort.test.mjs"]],
   ["Phase 94 familiarity / recognition / source monitoring", ["tests/phase94/phase94-familiarity-recognition-source-monitoring.test.mjs"]],
   ["Phase 95 interference + bounded memory distortion", ["tests/phase95/phase95-interference-bounded-memory-distortion.test.mjs"]],
+  ["Phase 96 memory–affect integration + lifecycle closure", ["tests/phase96/phase96-memory-affect-lifecycle-closure.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
