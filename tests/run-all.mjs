@@ -912,6 +912,7 @@ const steps = [
   ["Phase 91 adaptive memory consolidation lifecycle", ["tests/phase91/phase91-adaptive-memory-consolidation.test.mjs"]],
   ["Phase 92 memory reconsolidation lifecycle closure", ["tests/phase92/phase92-memory-reconsolidation-lifecycle.test.mjs"]],
   ["Phase 93 metamemory + retrieval effort", ["tests/phase93/phase93-metamemory-retrieval-effort.test.mjs"]],
+  ["Phase 94 familiarity / recognition / source monitoring", ["tests/phase94/phase94-familiarity-recognition-source-monitoring.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

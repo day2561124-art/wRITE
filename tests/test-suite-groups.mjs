@@ -282,6 +282,10 @@ export const phase93MetamemoryRetrievalEffortSteps = Object.freeze([
   Object.freeze(["Phase 93 metamemory + retrieval effort", Object.freeze(["tests/phase93/phase93-metamemory-retrieval-effort.test.mjs"])]),
 ]);
 
+export const phase94FamiliarityRecognitionSourceMonitoringSteps = Object.freeze([
+  Object.freeze(["Phase 94 familiarity / recognition / source monitoring", Object.freeze(["tests/phase94/phase94-familiarity-recognition-source-monitoring.test.mjs"])]),
+]);
+
 export const phase62CognitionIntegrationSteps = Object.freeze(
   phase62WorldSimulationSteps.slice(0, 13),
 );
@@ -319,6 +323,7 @@ export const worldSimulationSteps = Object.freeze([
   ...phase91AdaptiveMemoryConsolidationSteps,
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
+  ...phase94FamiliarityRecognitionSourceMonitoringSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -354,6 +359,7 @@ export const cognitionSteps = Object.freeze([
   ...phase91AdaptiveMemoryConsolidationSteps,
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
+  ...phase94FamiliarityRecognitionSourceMonitoringSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -384,4 +390,5 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase91AdaptiveMemoryConsolidationSteps,
   ...phase92MemoryReconsolidationLifecycleSteps,
   ...phase93MetamemoryRetrievalEffortSteps,
+  ...phase94FamiliarityRecognitionSourceMonitoringSteps,
 ]);

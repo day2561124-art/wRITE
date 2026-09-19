@@ -61,6 +61,10 @@ import {
   projectWorldSimulationMetamemoryRetrievalEffort,
 } from "./world-simulation-metamemory-retrieval-effort-service.mjs";
 import {
+  buildWorldSimulationFamiliarityRecognitionSourceMonitoringContract,
+  projectWorldSimulationFamiliarityRecognitionSourceMonitoring,
+} from "./world-simulation-familiarity-recognition-source-monitoring-service.mjs";
+import {
   buildWorldSimulationMemoryRetrievalQuery,
   executeWorldSimulationMemoryRetrievalProcess,
 } from "./world-simulation-memory-retrieval-process-service.mjs";
@@ -2348,6 +2352,24 @@ export function buildWorldSimulationMemoryRetrievalProcessV3Contract() {
       false,
     phase93_cue_selection_authority:
       false,
+    phase94_familiarity_recognition_source_monitoring:
+      buildWorldSimulationFamiliarityRecognitionSourceMonitoringContract(),
+    phase94_monitoring_occurs_after_phase93_before_continuation:
+      true,
+    phase94_familiarity_distinct_from_recollection:
+      true,
+    phase94_familiarity_requires_recognition_task_context:
+      true,
+    phase94_feeling_of_knowing_is_not_familiarity:
+      true,
+    phase94_hidden_internal_provenance_inspected:
+      false,
+    phase94_numeric_source_confidence_modeled:
+      false,
+    phase94_source_attribution_world_truth:
+      false,
+    phase94_continuation_decision_authority:
+      false,
     internally_reinstated_is_cue_provenance_not_semantic_kind:
       true,
     resolver_authored_reinstated_cue_content_allowed:
@@ -3305,6 +3327,41 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
           cloneJson(availableCueOptions),
       });
 
+    const familiarityRecognitionSourceMonitoring =
+      projectWorldSimulationFamiliarityRecognitionSourceMonitoring({
+        query_id:
+          query.query_id,
+        character:
+          query.character,
+        step_index:
+          stepIndex,
+        recovered_memories_this_step:
+          recoveredThisStep.map(
+            (item) => cloneJson(item.character_view),
+          ),
+        metamemory_retrieval_effort:
+          cloneJson(
+            metamemoryRetrievalEffort.character_view,
+          ),
+        retrieval_task_mode:
+          retrievalTask.mode,
+        source_query:
+          cloneJson(
+            retrievalTask.mode
+            === "source_query"
+              ? (
+                object(query.retrieval_goal)
+                  .source_query
+                ?? {}
+              )
+              : (
+                object(query.retrieval_goal)
+                  .source_query
+                ?? null
+              ),
+          ),
+      });
+
     const continuationResolution =
       await callResolver(
         resolver,
@@ -3362,6 +3419,10 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
           metamemory:
             cloneJson(
               metamemoryRetrievalEffort.character_view,
+            ),
+          recognition:
+            cloneJson(
+              familiarityRecognitionSourceMonitoring.character_view,
             ),
           available_reinstatement_cues:
             cloneJson(
@@ -3608,6 +3669,12 @@ export async function executeWorldSimulationMemoryRetrievalProcessV3(
         ),
       metamemory_retrieval_effort_projection_hash:
         metamemoryRetrievalEffort.projection_hash,
+      familiarity_recognition_source_monitoring:
+        cloneJson(
+          familiarityRecognitionSourceMonitoring.character_view,
+        ),
+      familiarity_recognition_source_monitoring_projection_hash:
+        familiarityRecognitionSourceMonitoring.projection_hash,
       continuation: {
         control_action:
           control.control_action,

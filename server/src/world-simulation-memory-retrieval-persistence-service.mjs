@@ -738,6 +738,15 @@ function canonicalSearchSteps(
           optionalString(
             step?.metamemory_retrieval_effort_projection_hash,
           ),
+        familiarity_recognition_source_monitoring:
+          cloneJson(
+            step?.familiarity_recognition_source_monitoring
+            ?? null,
+          ),
+        familiarity_recognition_source_monitoring_projection_hash:
+          optionalString(
+            step?.familiarity_recognition_source_monitoring_projection_hash,
+          ),
         continuation: {
           control_action:
             controlAction,
