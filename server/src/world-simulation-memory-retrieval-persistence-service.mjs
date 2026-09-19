@@ -729,6 +729,15 @@ function canonicalSearchSteps(
               ? processResult.target_outcome
               : null
           ),
+        metamemory_retrieval_effort:
+          cloneJson(
+            step?.metamemory_retrieval_effort
+            ?? null,
+          ),
+        metamemory_retrieval_effort_projection_hash:
+          optionalString(
+            step?.metamemory_retrieval_effort_projection_hash,
+          ),
         continuation: {
           control_action:
             controlAction,
