@@ -51,7 +51,9 @@ function createFakeSpawn(scenario) {
           id: message.id,
           result: message.method === 'tools/list'
             ? { tools: [{ name: 'safe_read', annotations: { readOnlyHint: !(scenario === 'read-flips' && generation > 1) } },
-              { name: 'unsafe_write', annotations: { readOnlyHint: false } }] }
+              { name: 'unsafe_write', annotations: { readOnlyHint: false } },
+              { name: 'dev_run_tests', annotations: { readOnlyHint: false } },
+              { name: 'dev_workspace_validate_integration', annotations: { readOnlyHint: false } }] }
             : { ok: true, generation },
         };
       setImmediate(() => child.stdout.emit('data', `${JSON.stringify(payload)}\n`));
@@ -91,6 +93,11 @@ function createFakeSpawn(scenario) {
         }
         if (message.method === 'test/overflow' && scenario === 'overflow' && generation === 1) {
           setImmediate(() => child.stdout.emit('data', Buffer.alloc((64 * 1024) + 1, 0x61)));
+          return true;
+        }
+        if (message.method === 'tools/call' && scenario === 'long-tool-slow'
+          && message.params?.name === 'dev_run_tests') {
+          setTimeout(() => emitResponse(message), 175);
           return true;
         }
         if (message.method === 'test/header-unicode' && scenario === 'header-unicode') {
@@ -331,7 +338,41 @@ await verifyHungCallFailsOnceAndRecoversWithoutReplay();
 await verifyCrashFailsInflightOnceAndRecoversWithoutReplay();
 await verifyProtocolOverflowFailsOnceAndRecoversWithoutReplay();
 await verifyHeaderFramingUsesUtf8ByteLength();
-console.log('MCP HTTP reliability crash/hang/overflow and framing regressions passed.');
+
+async function verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly() {
+  const fake = createFakeSpawn('long-tool-slow');
+  const session = createStdioSession({
+    spawnProcess: fake.spawnProcess,
+    callTimeoutMs: 100,
+    longToolCallTimeoutMs: 300,
+    recoveryMaxAttempts: 1,
+    recoveryBaseDelayMs: 0,
+    recoveryMaxDelayMs: 0,
+  });
+  try {
+    await initializeSession(session, 'long-tool-timeout-test');
+    await rpcCall(session, { jsonrpc: '2.0', id: 'catalog-long-tool', method: 'tools/list' });
+    const before = session.getStatus();
+    assert.equal(before.call_timeout_ms, 100);
+    assert.equal(before.long_tool_call_timeout_ms, 300);
+    assert.deepEqual(before.long_running_tools, ['dev_run_tests', 'dev_workspace_validate_integration']);
+    const reply = await rpcCall(session, {
+      jsonrpc: '2.0',
+      id: 'long-tool',
+      method: 'tools/call',
+      params: { name: 'dev_run_tests', arguments: { suite: 'mcp' } },
+    });
+    assert.equal(reply.result.generation, 1);
+    assert.equal(session.getStatus().generation, 1, 'legitimate long-running tool triggered child recovery');
+    assert.equal(session.pendingCallCount(), 0);
+  } finally {
+    if (session.child) session.child.exitCode = 0;
+    session.close();
+  }
+}
+
+await verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly();
+console.log('MCP HTTP reliability crash/hang/overflow, framing, and long-tool timeout regressions passed.');
 
 
 async function retryFixture(scenario, overrides = {}) {

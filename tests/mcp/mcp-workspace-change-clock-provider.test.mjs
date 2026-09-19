@@ -409,6 +409,60 @@ function createHarness({ platform = "win32", fenceTimeoutMs = 250 } = {}) {
   provider.close();
 }
 
+// A timeout that fires while the fence file is still being written must remain
+// a handled fail-closed result instead of surfacing as process-level unhandledRejection.
+{
+  let child;
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  const clock = createWorkspaceChangeClock({ provider_instance_id: "slow-write-timeout-provider" });
+  const provider = createWorkspaceChangeClockProvider({
+    change_clock: clock,
+    platform: "win32",
+    fence_timeout_ms: 100,
+    start_timeout_ms: 500,
+    describe_workspace: async () => ({
+      workspace_id: workspaceId,
+      repository_root: "/repo",
+      watch_roots: ["/repo"],
+      root_identity: "sha256:slow-write-timeout-root",
+      fence_root: "/repo/tests/.tmp/.writer-workbench-watch-fences",
+    }),
+    root_identity_resolver: async () => "sha256:slow-write-timeout-root",
+    validate_git_projection: async () => ({ ok: true, reason: null }),
+    spawn_helper: () => {
+      child = new FakeChild(9002);
+      return child;
+    },
+    write_fence: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 175));
+    },
+    remove_fence: async () => {},
+  });
+  try {
+    const readyPromise = provider.ensureReady({ workspace_id: workspaceId });
+    await nextTurn();
+    emitJson(child, { kind: "ready", watcher_count: 1, roots: ["/repo"], process_id: child.pid });
+    await readyPromise;
+    const begin = clock.beginSynchronization({ workspace_id: workspaceId });
+    const fence = await provider.fenceSynchronization({
+      workspace_id: workspaceId,
+      token: begin.token,
+      snapshot: snapshotFixture,
+    });
+    await nextTurn();
+    assert.equal(fence.ok, false);
+    assert.equal(fence.reason, "watcher_fence_timeout");
+    assert.equal(unhandled.length, 0, "slow fence write timeout must not emit unhandledRejection");
+    assert.equal(clock.status({ workspace_id: workspaceId }).watch_state, "unknown");
+    assert.equal(child.killed, true);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    provider.close();
+  }
+}
+
 // Windows production smoke: launch the real PowerShell/.NET watcher, cross a
 // fence, and verify that a real recursive filesystem mutation advances the epoch.
 if (process.platform === "win32") {

@@ -616,6 +616,14 @@ export function createWorkspaceChangeClockProvider(options = {}) {
       resolveFence = resolve;
       rejectFence = reject;
     });
+    // Attach the rejection handler before any awaited filesystem work. A slow
+    // fence write may outlive the timeout; without an attached handler the
+    // timeout rejection can become an unhandled rejection before we reach the
+    // later await, which is process-fatal under Node's default policy.
+    const observedOutcome = observed.then(
+      (value) => ({ ok: true, value }),
+      (error) => ({ ok: false, error }),
+    );
     const timer = setTimeout(() => {
       entry.pending_fences.delete(fenceKey);
       rejectFence(new Error("watcher_fence_timeout"));
@@ -623,7 +631,8 @@ export function createWorkspaceChangeClockProvider(options = {}) {
     entry.pending_fences.set(fenceKey, { resolve: resolveFence, reject: rejectFence, timer });
     try {
       await writeFence(fencePath, `${nonce}\n`);
-      await observed;
+      const outcome = await observedOutcome;
+      if (!outcome.ok) throw outcome.error;
     } finally {
       entry.pending_fences.delete(fenceKey);
       clearTimeout(timer);

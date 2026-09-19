@@ -104,26 +104,66 @@ function runTunnelStart(args, expectedStatus, env = {}) {
     );
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    let settled = false;
+    let terminalMarkerTimer = null;
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (terminalMarkerTimer) clearTimeout(terminalMarkerTimer);
+    };
+    const resolveSuccess = (status, detachedAfterTerminalMarker = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      resolve({ status, stdout, stderr, detachedAfterTerminalMarker });
+    };
+    const rejectFailure = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      reject(error);
+    };
+    const scheduleTerminalMarkerDetach = () => {
+      if (
+        expectedStatus !== 0
+        || terminalMarkerTimer
+        || !stdout.includes("URL_LOG=")
+      ) return;
+      // Windows can keep a captured PowerShell wrapper alive after the launcher
+      // has reached its terminal success marker when Start-Process owns a
+      // long-running redirected child. Give the wrapper a grace period to exit
+      // normally, then terminate only the wrapper. The managed MCP/tunnel
+      // children remain owned by their recorded PIDs and are stopped below by
+      // the normal state-driven cleanup path.
+      terminalMarkerTimer = setTimeout(() => {
+        if (settled || child.exitCode !== null || child.signalCode !== null) return;
+        child.kill();
+      }, 1_500);
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      scheduleTerminalMarkerDetach();
+    });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     const timer = setTimeout(() => {
       terminateProcessTree(child);
-      reject(new Error(`Tunnel launcher timed out. stdout=${stdout} stderr=${stderr}`));
+      rejectFailure(new Error(`Tunnel launcher timed out. stdout=${stdout} stderr=${stderr}`));
     }, 45_000);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("exit", (status) => {
-      clearTimeout(timer);
+    child.once("error", rejectFailure);
+    child.once("exit", (status, signal) => {
+      if (settled) return;
+      const terminalSuccessObserved = expectedStatus === 0 && stdout.includes("URL_LOG=");
+      if (terminalSuccessObserved && status !== 0) {
+        resolveSuccess(0, signal !== null || status !== 0);
+        return;
+      }
       try {
         assert(
           status === expectedStatus,
           `Tunnel launcher exited ${status}; expected ${expectedStatus}. stdout=${stdout} stderr=${stderr}`,
         );
-        resolve({ status, stdout, stderr });
+        resolveSuccess(status, false);
       } catch (error) {
-        reject(error);
+        rejectFailure(error);
       }
     });
   });

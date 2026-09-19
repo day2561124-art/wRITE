@@ -10,6 +10,11 @@ import { terminateProcessTree } from './process-control.mjs';
 // and provide helpers to forward JSON-RPC messages via newline framing.
 
 const DEFAULT_CHILD_CALL_TIMEOUT_MS = 120_000;
+const DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_LONG_RUNNING_TOOL_NAMES = Object.freeze([
+  'dev_run_tests',
+  'dev_workspace_validate_integration',
+]);
 const DEFAULT_RECOVERY_MAX_ATTEMPTS = 3;
 const DEFAULT_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 100;
@@ -114,6 +119,21 @@ export function createStdioSession(options = {}) {
     100,
     30 * 60 * 1000,
   );
+  const longToolCallTimeoutMs = boundedInteger(
+    options.longToolCallTimeoutMs,
+    DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS,
+    callTimeoutMs,
+    30 * 60 * 1000,
+  );
+  const longRunningToolNames = new Set(
+    options.longRunningToolNames ?? DEFAULT_LONG_RUNNING_TOOL_NAMES,
+  );
+  function timeoutForRequest(request) {
+    return request?.method === 'tools/call'
+      && longRunningToolNames.has(request.params?.name)
+      ? longToolCallTimeoutMs
+      : callTimeoutMs;
+  }
   const maxFrameBytes = boundedInteger(
     options.maxFrameBytes ?? process.env.MCP_HTTP_CHILD_MAX_FRAME_BYTES,
     DEFAULT_MAX_FRAME_BYTES,
@@ -666,7 +686,7 @@ export function createStdioSession(options = {}) {
       }
       const sent = { ...request, id: retryNumber === 0 ? originalId : 'retry-' + randomUUID() };
       registerListener(sent.id, (error, response) => error ? reject(error) : resolve(response),
-        { timeoutMs: callTimeoutMs, recoverOnTimeout: true });
+        { timeoutMs: timeoutForRequest(request), recoverOnTimeout: true });
       send(sent);
     });
     void (async () => {
@@ -802,6 +822,8 @@ export function createStdioSession(options = {}) {
       readonly_retry_budget: retryBudget.status(),
       readonly_retry_max_attempts: retryMaxAttempts,
       call_timeout_ms: callTimeoutMs,
+      long_tool_call_timeout_ms: longToolCallTimeoutMs,
+      long_running_tools: [...longRunningToolNames].sort(),
       max_frame_bytes: maxFrameBytes,
       max_header_bytes: maxHeaderBytes,
       max_buffered_bytes: maxBufferedBytes,
