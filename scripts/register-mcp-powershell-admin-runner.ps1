@@ -51,10 +51,19 @@ $configJson = $config | ConvertTo-Json -Depth 4
 )
 
 # The scheduled task must never execute a runner that the normal user can rewrite.
-# SYSTEM and Administrators retain Full Control; the registered user receives read/execute only.
-& icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /T /C | Out-Null
+# Protect the directory first, then repair the two existing files explicitly.
+# /T is intentionally avoided here: applying inheritable directory ACEs recursively
+# can leave existing files without effective file ACEs on Windows.
+& icacls.exe $protectedRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($identity.User.Value):(OI)(CI)RX" /C | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not protect the elevated runner directory ACL.'
+}
+
+foreach ($protectedFile in @($protectedRunner, $configPath)) {
+    & icacls.exe $protectedFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' "*$($identity.User.Value):RX" /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not protect elevated runner file ACL: $protectedFile"
+    }
 }
 
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'

@@ -240,6 +240,11 @@ try {
   assert.match(registrationScript, /ProgramData/u);
   assert.match(registrationScript, /icacls\.exe/u);
   assert.match(registrationScript, /\(OI\)\(CI\)RX/u);
+  assert.match(registrationScript, /foreach \(\$protectedFile in @\(\$protectedRunner, \$configPath\)\)/u);
+  assert.match(registrationScript, /\*S-1-5-18:F/u);
+  assert.match(registrationScript, /\*S-1-5-32-544:F/u);
+  assert.match(registrationScript, /\$\(\$identity\.User\.Value\):RX/u);
+  assert.doesNotMatch(registrationScript, /\$protectedRoot[^\r\n]*\/T\b/u);
   assert.match(registrationScript, /LogonType Interactive/u);
   assert.doesNotMatch(registrationScript, /EnableLUA|ConsentPromptBehaviorAdmin|PromptOnSecureDesktop/u);
 } finally {
