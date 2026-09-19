@@ -916,6 +916,8 @@ const steps = [
   ["Phase 95 interference + bounded memory distortion", ["tests/phase95/phase95-interference-bounded-memory-distortion.test.mjs"]],
   ["Phase 96 memory–affect integration + lifecycle closure", ["tests/phase96/phase96-memory-affect-lifecycle-closure.test.mjs"]],
   ["Character Memory Core Certification Final Audit", ["tests/certification/character-memory-core-certification.test.mjs"]],
+  ["CC-1 communication planning foundation", ["tests/communication/cc1-foundation.test.mjs"]],
+  ["CC-1 native communication loop closure", ["tests/communication/cc1-native-loop.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

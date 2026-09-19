@@ -31,6 +31,9 @@ import {
   prepareWorldSimulationEngineIntegrityCapabilityRuntime,
   worldSimulationEngineIntegrityRuntimeVersion,
 } from "./world-simulation-engine-integrity-capability-runtime-service.mjs";
+import {
+  buildCharacterCommunicationActionCandidate,
+} from "./character-communication-foundation-service.mjs";
 
 export const worldSimulationCapabilityNames = Object.freeze([
   "world_scene_causal_analyzer",
@@ -969,6 +972,9 @@ function buildWorldCharacterCognition(input = {}) {
 
     known,
     uncertain,
+    // CC-1 consumes a goal already present in this same character's state;
+    // the generation provider cannot invent or change its core intention.
+    communication_goal: cloneJson(state.communication_goal ?? null),
     needs,
     emotion,
     attention,
@@ -1040,14 +1046,24 @@ function normalizeAction(action, index) {
     defense: cloneJson(value.defense ?? null),
     projectile: cloneJson(value.projectile ?? null),
     ability: cloneJson(value.ability ?? null),
+    communication: cloneJson(value.communication ?? null),
     resource_commitment: cloneJson(value.resource_commitment ?? null),
   };
 }
 
 function buildWorldActionCandidates(input = {}) {
   const character = suppliedCharacter(input);
-  const candidates = array(input.available_actions)
-    .slice(0, 24)
+  const communicationCandidate = character
+    ? buildCharacterCommunicationActionCandidate({
+        character,
+        cognition: object(input.cognition),
+      })
+    : null;
+  const existingCandidates = array(input.available_actions);
+  const candidates = [
+    ...existingCandidates.slice(0, communicationCandidate ? 23 : 24),
+    ...(communicationCandidate ? [communicationCandidate] : []),
+  ]
     .map(normalizeAction)
     .filter((action) => action.intent);
   return {

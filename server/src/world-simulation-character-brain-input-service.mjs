@@ -2,6 +2,9 @@ import {
   buildWorldSimulationSubjectiveActionDeliberationView,
 } from "./world-simulation-subjective-action-deliberation-service.mjs";
 import {
+  planCharacterCommunication,
+} from "./character-communication-foundation-service.mjs";
+import {
   buildWorldSimulationSubjectiveProspectiveConsequenceView,
 } from "./world-simulation-subjective-prospective-consequence-service.mjs";
 import {
@@ -303,6 +306,15 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.subjective_action_deliberation_grounding_v1_installed = true;
     input.boundaries.subjective_prospective_consequence_simulation_v1_installed = true;
     input.boundaries.subjective_cross_option_preference_resolution_v1_installed = true;
+  }
+
+  // CC-1 is a non-binding same-character planning view. It does not
+  // select a world action or realize speech before the world emission gate.
+  if (input.cognition.communication_goal != null) {
+    input.communication_foundation = planCharacterCommunication(input);
+    input.boundaries.communication_foundation_v1_installed = true;
+    input.boundaries.communication_foundation_action_authority = false;
+    input.boundaries.communication_foundation_world_truth_authority = false;
   }
 
   // Historical compatibility aliases are never allowed to bypass v3's
