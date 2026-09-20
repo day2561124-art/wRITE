@@ -41,12 +41,33 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
   const indirect = sourceMessage.addressee_must_infer_indirect_intention === true;
   const withheld = text(plan.withheld_private_content);
   const publicOnly = options.publicOnly === true;
+  // Only speaker-authored, explicitly supplied planning metadata may fill these
+  // optional slots. Missing data stays unknown; World and listener state are
+  // never reverse-filled from the planner.
+  const context = isRecord(plan.ir_context) ? plan.ir_context : {};
+  const safeList = (value, label, limit = 16) => {
+    if (value == null) return [];
+    if (!Array.isArray(value) || value.length > limit) fail(`${label} must be a bounded list.`);
+    const normalized = value.map((item) => text(item, 240));
+    if (normalized.some((item) => !item) || new Set(normalized).size !== normalized.length)
+      fail(`${label} must contain distinct nonblank values.`);
+    return normalized;
+  };
+  const overhearers = safeList(context.possible_overhearers, "possible_overhearers");
+  if (overhearers.includes(speaker) || overhearers.includes(addressee))
+    fail("Overhearers cannot duplicate speaker or primary addressee.");
+  const referenceTargets = safeList(context.reference_targets, "reference_targets");
+  const communicativeFunctions = safeList(context.communicative_functions, "communicative_functions");
+  const modalityContext = isRecord(context.modality_meanings) ? context.modality_meanings : {};
+  const meaning = (key) => publicOnly ? null : text(modalityContext[key], 600);
 
   return copy({
     schema_version: characterCommunicationIrVersion,
     participants: {
       speaker,
       intended_addressees: [addressee],
+      primary_addressee: addressee,
+      possible_overhearers: publicOnly ? [] : overhearers,
     },
     communicative_goal: {
       purpose: publicOnly ? null : purpose,
@@ -55,6 +76,12 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
     content: {
       semantic_content: semanticContent,
       speech_act: speechAct,
+      reference_targets: publicOnly ? [] : referenceTargets,
+      information_structure: {
+        topic: publicOnly ? null : text(context.topic, 240),
+        focus: publicOnly ? null : text(context.focus, 240),
+        contrast_set: publicOnly ? [] : safeList(context.contrast_set, "contrast_set"),
+      },
       epistemic: {
         status: epistemicStatus,
         source: publicOnly ? null : epistemicSource,
@@ -70,6 +97,9 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
       indirect,
       intended_effect: indirect && !publicOnly ? purpose : null,
       listener_inference_required: indirect,
+      communicative_functions: publicOnly ? [] : communicativeFunctions,
+      stance: publicOnly ? null : text(context.stance, 240),
+      social_presentation_concern: publicOnly ? null : text(context.social_presentation_concern, 240),
     },
     modalities: {
       speech: channel === "speech"
@@ -78,11 +108,25 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
       nonverbal: channel === "nonverbal"
         ? { intended_meaning: signalIntent, surface_realization_complete: false }
         : null,
+      prosody: meaning("prosody"),
+      voice: meaning("voice"),
+      gaze: meaning("gaze"),
+      face: meaning("face"),
+      gesture: meaning("gesture"),
+      body: meaning("body"),
+      pause: meaning("pause"),
+    },
+    meaning_layers: {
+      speaker_intended_content: semanticContent ?? signalIntent,
+      observable_signal: null,
+      listener_inferred_meanings: [],
     },
     interaction: {
       repair_of: null,
       response_to: null,
       grounding_status: "not_yet_observed",
+      interaction_id: publicOnly ? null : text(context.interaction_id, 240),
+      thread_id: publicOnly ? null : text(context.thread_id, 240),
     },
     boundaries: {
       speaker_intended_meaning_only: true,

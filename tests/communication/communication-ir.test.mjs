@@ -75,3 +75,63 @@ test("IR constructor rejects self-addressed or identity-incomplete plans", () =>
     character: "A", addressee: "A", purpose: "測試", mode: "direct",
   }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
 });
+
+test("optional speaker-authored context preserves reference, audience, pragmatics and multiple modalities", () => {
+  const ir = buildCharacterCommunicationIr({
+    character: "A", addressee: "B", purpose: "請 B 留下", mode: "indirect",
+    external_action: "speech",
+    message: { semantic_content: basis, speech_act: "indirect_query" },
+    ir_context: {
+      possible_overhearers: ["C"],
+      reference_targets: ["book-B"],
+      topic: "書", focus: "還沒看完", contrast_set: ["已經看完"],
+      communicative_functions: ["request", "turn_management"],
+      stance: "uncertain", social_presentation_concern: "不願承認依賴",
+      modality_meanings: { gaze: "看向書", gesture: "指向書", prosody: "保留試探語氣" },
+      interaction_id: "talk-1", thread_id: "thread-1",
+    },
+  });
+  assert.deepEqual(ir.participants.possible_overhearers, ["C"]);
+  assert.equal(ir.participants.primary_addressee, "B");
+  assert.deepEqual(ir.content.reference_targets, ["book-B"]);
+  assert.equal(ir.content.information_structure.focus, "還沒看完");
+  assert.deepEqual(ir.pragmatics.communicative_functions, ["request", "turn_management"]);
+  assert.equal(ir.modalities.gaze, "看向書");
+  assert.equal(ir.modalities.gesture, "指向書");
+  assert.equal(ir.modalities.prosody, "保留試探語氣");
+  assert.equal(ir.meaning_layers.observable_signal, null);
+  assert.deepEqual(ir.meaning_layers.listener_inferred_meanings, []);
+  assert.equal(ir.interaction.thread_id, "thread-1");
+});
+
+test("public projection strips private audience, reference, interaction and display plan", () => {
+  const input = {
+    character: "A", addressee: "B", purpose: "我不想 B 離開", mode: "indirect",
+    external_action: "speech", withheld_private_content: "我很依戀 B",
+    message: { semantic_content: basis, speech_act: "indirect_query", source: "cognition.known[0]" },
+    ir_context: {
+      possible_overhearers: ["C"], reference_targets: ["private-book"],
+      topic: "secret-topic", stance: "secret-stance",
+      modality_meanings: { gaze: "秘密手勢" },
+      interaction_id: "secret-interaction",
+    },
+  };
+  const ir = buildCharacterCommunicationIr(input, { publicOnly: true });
+  const serialized = JSON.stringify(ir);
+  for (const secret of ["我不想 B 離開", "我很依戀 B", "cognition.known", "private-book", "secret-topic", "secret-stance", "秘密手勢", "secret-interaction"])
+    assert.equal(serialized.includes(secret), false, `Leaked ${secret}`);
+  assert.deepEqual(ir.participants.possible_overhearers, []);
+  assert.equal(ir.modalities.gaze, null);
+  assert.equal(ir.meaning_layers.observable_signal, null);
+  assert.equal(ir.boundaries.listener_inferred_meaning_authored, false);
+});
+
+test("speaker audience context rejects duplicate and unbounded overhearers", () => {
+  const base = { character: "A", addressee: "B", purpose: "告知", mode: "direct" };
+  assert.throws(() => buildCharacterCommunicationIr({
+    ...base, ir_context: { possible_overhearers: ["B"] },
+  }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
+  assert.throws(() => buildCharacterCommunicationIr({
+    ...base, ir_context: { possible_overhearers: Array.from({ length: 17 }, (_, i) => `C${i}`) },
+  }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
+});
