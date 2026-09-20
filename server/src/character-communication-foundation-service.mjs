@@ -110,6 +110,13 @@ export function planCharacterCommunication(characterInput = {}) {
     fail("Withholding requires a defined private content.");
   const withheld = goal.withhold_private_content === true ? privateContent : null;
   const basis = string(goal.basis_claim);
+  // CC-3: pragmatic/disclosure planning remains an explicit same-character
+  // cognition decision. These fields describe what the speaker is trying to
+  // make inferable or socially manageable; they never predict what a listener
+  // actually understands, believes, or does. The IR owns validation and
+  // bounded normalization of this optional context.
+  const irContext = isRecord(goal.communication_context)
+    ? copy(goal.communication_context) : null;
   if (mode === "silence") {
     return copy({
       version: characterCommunicationFoundationVersion,
@@ -117,6 +124,7 @@ export function planCharacterCommunication(characterInput = {}) {
       external_action: "none",
       message: null,
       withheld_private_content: withheld,
+      ...(irContext ? { ir_context: irContext } : {}),
       other_character_goal_inferred: false,
       world_truth_claimed: false,
     });
@@ -130,6 +138,7 @@ export function planCharacterCommunication(characterInput = {}) {
       external_action: "nonverbal_signal",
       message: { signal_intent: signal, semantic_content: null },
       withheld_private_content: withheld,
+      ...(irContext ? { ir_context: irContext } : {}),
       other_character_goal_inferred: false,
       world_truth_claimed: false,
     });
@@ -376,6 +385,7 @@ export function planCharacterCommunication(characterInput = {}) {
         } : {}),
       },
       withheld_private_content: withheld,
+      ...(irContext ? { ir_context: irContext } : {}),
       other_character_goal_inferred: false,
       world_truth_claimed: false,
     });
@@ -412,6 +422,7 @@ export function planCharacterCommunication(characterInput = {}) {
       world_truth_claimed: false,
     },
     withheld_private_content: withheld,
+    ...(irContext ? { ir_context: irContext } : {}),
     other_character_goal_inferred: false,
     world_truth_claimed: false,
   });

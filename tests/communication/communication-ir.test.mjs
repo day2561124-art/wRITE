@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildCharacterCommunicationIr } from "../../server/src/character-communication-ir-service.mjs";
-import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
+import { buildCharacterCommunicationActionCandidate, planCharacterCommunication } from "../../server/src/character-communication-foundation-service.mjs";
 
 const basis = "B 正在看的書尚未看完";
 const privateContent = "我很依戀 B";
@@ -41,6 +41,57 @@ test("shared IR separates speaker intention from observable and listener-authore
   assert.equal(ir.boundaries.observable_signal_authored, false);
   assert.equal(ir.boundaries.listener_inferred_meaning_authored, false);
   assert.equal(ir.boundaries.listener_private_state_inferred, false);
+});
+
+test("native planner carries speaker-authored pragmatic context privately without claiming listener uptake", () => {
+  const candidate = buildCharacterCommunicationActionCandidate({
+    character: "A",
+    cognition: {
+      known: [basis],
+      communication_goal: {
+        character: "A", purpose: "希望 B 留下", addressee: "B", mode: "indirect",
+        basis_claim: basis,
+        communication_context: {
+          communicative_functions: ["hint", "request"],
+          allowed_implications: ["可以再待一下"],
+          stance: "tentative",
+          social_presentation_concern: "不直接暴露依賴",
+          intentional_display: { intended_meaning: "試探是否願意留下", modality: "gaze", target: "B" },
+        },
+      },
+    },
+  });
+  const privatePlan = candidate.communication.ir;
+  // Action candidates intentionally carry only the public IR projection.
+  assert.deepEqual(privatePlan.pragmatics.communicative_functions, []);
+  assert.deepEqual(privatePlan.disclosure.allowed_implications, []);
+  assert.equal(privatePlan.pragmatics.stance, null);
+  assert.deepEqual(privatePlan.meaning_layers.listener_inferred_meanings, []);
+  assert.equal(privatePlan.boundaries.listener_private_state_inferred, false);
+
+  // The planner itself retains the same-character context for downstream
+  // private planning/inspection without treating intended implication as uptake.
+  const plan = planCharacterCommunication({
+    character: "A",
+    cognition: {
+      known: [basis],
+      communication_goal: {
+        character: "A", purpose: "希望 B 留下", addressee: "B", mode: "indirect",
+        basis_claim: basis,
+        communication_context: {
+          communicative_functions: ["hint", "request"],
+          allowed_implications: ["可以再待一下"], stance: "tentative",
+        },
+      },
+    },
+  });
+  const ir = buildCharacterCommunicationIr(plan);
+  assert.deepEqual(ir.pragmatics.communicative_functions, ["hint", "request"]);
+  assert.deepEqual(ir.disclosure.allowed_implications, ["可以再待一下"]);
+  assert.equal(ir.pragmatics.stance, "tentative");
+  assert.equal(ir.pragmatics.listener_inference_required, true);
+  assert.deepEqual(ir.meaning_layers.listener_inferred_meanings, []);
+  assert.equal(ir.interaction.grounding_status, "not_yet_observed");
 });
 
 test("shared IR keeps withheld content private while retaining disclosure provenance", () => {
