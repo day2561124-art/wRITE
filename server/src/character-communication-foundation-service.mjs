@@ -120,9 +120,23 @@ export function planCharacterCommunication(characterInput = {}) {
     // goal alone authorizes an intention/request, not a new factual claim.
     const claimKind = goal.claim_kind == null ? null : string(goal.claim_kind, 40);
     if (goal.claim_kind != null
-      && !["sincere_assertion", "uncertain_hypothesis", "deliberate_deception"]
-        .includes(claimKind))
+      && !["sincere_assertion", "uncertain_hypothesis", "deliberate_deception",
+        "explicit_assumption"].includes(claimKind))
       fail("Unsupported or ungrounded communication claim kind.");
+    // A supposition is an explicitly framed speech act, not a newly known
+    // fact, a recollection, or an uncertain report masquerading as evidence.
+    // The speaker commits only to proposing the hypothetical, not its truth.
+    const assumption = claimKind === "explicit_assumption"
+      ? goal.assumption_intent : null;
+    if (goal.assumption_intent != null && claimKind !== "explicit_assumption")
+      fail("An assumption intention requires its explicit claim kind.");
+    if (claimKind === "explicit_assumption"
+      && (!isRecord(assumption)
+        || string(assumption.addressee, 240) !== addressee
+        || string(assumption.hypothetical_content) !== content
+        || assumption.speaker_intends_hypothetical_frame !== true
+        || assumption.not_asserted_as_fact !== true))
+      fail("Assumption requires a matched speaker-authored hypothetical frame.");
     // Deception is an explicit speaker-side act, not a generator license to
     // invent a factual source. These commitments describe the actor's
     // intention and contrary subjective basis, not a semantic truth verdict.
@@ -178,13 +192,16 @@ export function planCharacterCommunication(characterInput = {}) {
     const sourceCollection = claimKind === "sincere_assertion"
       ? "known" : "uncertain";
     const sourceIndex = claimKind == null || sourceKind != null
+      || claimKind === "explicit_assumption"
       ? -1
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
-    if (claimKind && (claimKind === "deliberate_deception"
-      ? contraryIndex < 0
-      : sourceKind === "subjective_inference"
-        ? inferenceIndex < 0
-        : sourceIndex < 0 && !recollection && !percept)) {
+    if (claimKind && (claimKind === "explicit_assumption"
+      ? false
+      : claimKind === "deliberate_deception"
+        ? contraryIndex < 0
+        : sourceKind === "subjective_inference"
+          ? inferenceIndex < 0
+          : sourceIndex < 0 && !recollection && !percept)) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
@@ -204,30 +221,35 @@ export function planCharacterCommunication(characterInput = {}) {
         world_truth_claimed: false,
       });
     }
-    const sourceRef = claimKind === "deliberate_deception"
-      ? `cognition.known[${contraryIndex}]`
-      : inference
-        ? `cognition.${inferenceCollection}[${inferenceIndex}]`
-        : recollection
-          ? recollection.sourceRef
-          : percept
-            ? percept.sourceRef
-            : claimKind
-              ? `cognition.${sourceCollection}[${sourceIndex}]`
-              : "cognition.communication_goal";
+    const sourceRef = claimKind === "explicit_assumption"
+      ? "cognition.communication_goal"
+      : claimKind === "deliberate_deception"
+        ? `cognition.known[${contraryIndex}]`
+        : inference
+          ? `cognition.${inferenceCollection}[${inferenceIndex}]`
+          : recollection
+            ? recollection.sourceRef
+            : percept
+              ? percept.sourceRef
+              : claimKind
+                ? `cognition.${sourceCollection}[${sourceIndex}]`
+                : "cognition.communication_goal";
     const epistemicStatus = claimKind === "sincere_assertion"
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
         ? "character_uncertain"
         : claimKind === "deliberate_deception"
           ? "speaker_asserted"
-          : "speaker_intention";
+          : claimKind === "explicit_assumption"
+            ? "speaker_hypothetical"
+            : "speaker_intention";
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
       external_action: "speech",
       message: {
-        speech_act: claimKind ? "assert" : "inform_or_request",
+        speech_act: claimKind === "explicit_assumption"
+          ? "suppose" : claimKind ? "assert" : "inform_or_request",
         semantic_content: content,
         epistemic_status: epistemicStatus,
         source: sourceRef,
@@ -235,17 +257,25 @@ export function planCharacterCommunication(characterInput = {}) {
           claim_provenance: {
             schema_version: "cc2-speaker-claim-provenance-v1",
             claim_kind: claimKind,
-            source_kind: claimKind === "deliberate_deception"
-              ? "same_character_contrary_known_basis"
-              : inference
-                ? "same_character_subjective_inference"
-                : recollection
-                  ? "admitted_recollection_current_mind"
-                  : percept
-                    ? "same_character_current_perception"
-                    : "same_character_accessible_cognition",
+            source_kind: claimKind === "explicit_assumption"
+              ? "same_character_explicit_hypothetical_goal"
+              : claimKind === "deliberate_deception"
+                ? "same_character_contrary_known_basis"
+                : inference
+                  ? "same_character_subjective_inference"
+                  : recollection
+                    ? "admitted_recollection_current_mind"
+                    : percept
+                      ? "same_character_current_perception"
+                      : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
+            ...(assumption ? {
+              hypothetical_content: content,
+              speaker_authored_hypothetical_frame: true,
+              proposition_accepted_as_fact: false,
+              inference_or_evidence_claimed: false,
+            } : {}),
             ...(inference ? {
               premise_content: inference.premise_content,
               premise_epistemic_status: inference.premise_epistemic_status,

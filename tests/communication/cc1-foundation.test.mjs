@@ -427,6 +427,90 @@ test("CC-2 explicit current perception does not merge stale cognition perception
     .communication_foundation.external_action, "speech");
 });
 
+test("CC-2 explicit assumption emits a visibly hypothetical speech act without factual evidence", () => {
+  const hypothetical = "如果 B 已經看完那本書";
+  const input = packet(goal("direct", {
+    public_content: hypothetical,
+    claim_kind: "explicit_assumption",
+    assumption_intent: {
+      addressee: "B",
+      hypothetical_content: hypothetical,
+      speaker_intends_hypothetical_frame: true,
+      not_asserted_as_fact: true,
+    },
+  }), [], []);
+  input.world_state = { hidden_fact: hypothetical };
+  input.other_character_cognition = { known: [hypothetical] };
+  const plan = planCharacterCommunication(input);
+  assert.equal(plan.external_action, "speech");
+  assert.equal(plan.message.speech_act, "suppose");
+  assert.equal(plan.message.semantic_content, hypothetical);
+  assert.equal(plan.message.epistemic_status, "speaker_hypothetical");
+  assert.equal(plan.message.source, "cognition.communication_goal");
+  assert.deepEqual(plan.message.claim_provenance, {
+    schema_version: "cc2-speaker-claim-provenance-v1",
+    claim_kind: "explicit_assumption",
+    source_kind: "same_character_explicit_hypothetical_goal",
+    source_ref: "cognition.communication_goal",
+    epistemic_status: "speaker_hypothetical",
+    hypothetical_content: hypothetical,
+    speaker_authored_hypothetical_frame: true,
+    proposition_accepted_as_fact: false,
+    inference_or_evidence_claimed: false,
+    world_truth_claimed: false,
+  });
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.speech_act, "suppose");
+  assert.equal(candidate.communication.message.epistemic_status, "speaker_hypothetical");
+  assert.equal(candidate.communication.ir.content.speech_act, "suppose");
+  assert.equal(candidate.communication.ir.content.epistemic.status, "speaker_hypothetical");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+  assert.equal(candidate.communication.surface_realization_complete, false);
+  const publicText = JSON.stringify(candidate);
+  for (const privatePart of ["same_character_explicit_hypothetical_goal",
+    "cognition.communication_goal", "speaker_authored_hypothetical_frame",
+    "proposition_accepted_as_fact", "我很依戀 B", "希望 B 留下"])
+    assert.equal(publicText.includes(privatePart), false,
+      `Private assumption provenance leaked: ${privatePart}`);
+});
+
+test("CC-2 assumption cannot turn missing or mismatched intention into factual assertion", () => {
+  const hypothetical = "如果 B 已經看完那本書";
+  const intent = {
+    addressee: "B",
+    hypothetical_content: hypothetical,
+    speaker_intends_hypothetical_frame: true,
+    not_asserted_as_fact: true,
+  };
+  for (const invalid of [
+    { addressee: "C" },
+    { hypothetical_content: "不同假設" },
+    { hypothetical_content: "" },
+    { speaker_intends_hypothetical_frame: false },
+    { not_asserted_as_fact: false },
+  ]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: hypothetical, claim_kind: "explicit_assumption",
+      assumption_intent: { ...intent, ...invalid },
+    }), [], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  for (const claim_kind of [undefined, "sincere_assertion",
+    "uncertain_hypothesis", "deliberate_deception"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: hypothetical, claim_kind,
+      assumption_intent: intent,
+    }), [], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  for (const claim_source_kind of ["current_perception", "retrieved_memory",
+    "subjective_inference"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: hypothetical, claim_kind: "explicit_assumption",
+      claim_source_kind, assumption_intent: intent,
+    }), [], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+});
+
 test("CC-2 subjective inference retains a same-character premise without claiming entailment", () => {
   const conclusion = "B 可能還想繼續看書";
   for (const premise_epistemic_status of ["known", "uncertain"]) {
