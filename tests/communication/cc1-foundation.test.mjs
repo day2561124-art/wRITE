@@ -210,6 +210,127 @@ test("CC-2 recollection cannot silently certify facts or bypass explicit source-
   }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
 });
 
+test("CC-2 current perception supports only bounded uncertain same-character reports", () => {
+  for (const channel of ["observed", "audible", "other_senses"]) {
+    const input = packet(goal("direct", {
+      public_content: basis,
+      claim_kind: "uncertain_hypothesis",
+      claim_source_kind: "current_perception",
+    }), [], []);
+    input.perception = { observed: [], audible: [], other_senses: [] };
+    input.perception[channel] = [basis];
+    const plan = planCharacterCommunication(input);
+    assert.equal(plan.external_action, "speech");
+    assert.equal(plan.message.source, `perception.${channel}[0]`);
+    assert.equal(plan.message.epistemic_status, "character_uncertain");
+    assert.deepEqual(plan.message.claim_provenance, {
+      schema_version: "cc2-speaker-claim-provenance-v1",
+      claim_kind: "uncertain_hypothesis",
+      source_kind: "same_character_current_perception",
+      source_ref: `perception.${channel}[0]`,
+      epistemic_status: "character_uncertain",
+      sensory_channel: channel,
+      perception_does_not_establish_world_truth: true,
+      world_truth_claimed: false,
+    });
+    const candidate = buildCharacterCommunicationActionCandidate(input);
+    assert.equal(candidate.communication.message.epistemic_status, "character_uncertain");
+    assert.equal(candidate.communication.ir.content.epistemic.source, null);
+    assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+    const serialized = JSON.stringify(candidate);
+    for (const privatePart of [
+      "same_character_current_perception", `perception.${channel}`,
+      "perception_does_not_establish_world_truth", "我很依戀 B",
+    ]) assert.equal(serialized.includes(privatePart), false,
+      `private perception provenance leaked: ${privatePart}`);
+  }
+});
+
+test("CC-2 a requested perception report cannot mine raw world or memory or fallback to known", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "current_perception",
+  }), [basis], [basis]);
+  input.world_state = { hidden_fact: basis };
+  input.recovered_memories = [{ content: basis }];
+  input.cognition.working_context = { focus: {
+    context_origin: "recovered_memory", content: basis,
+  } };
+  input.cognition.attention = { focus: { content: basis } };
+  for (const perception of [
+    undefined,
+    { observed: [], audible: [], other_senses: [] },
+    { observed: ["unrelated"], audible: [], other_senses: [] },
+    { observed: [{ content: basis }], audible: [], other_senses: [] },
+  ]) {
+    input.perception = perception;
+    const plan = planCharacterCommunication(input);
+    assert.equal(plan.external_action, "none");
+    assert.equal(plan.blocked_reason, "claim_not_in_same_character_current_perception");
+    assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  }
+});
+
+test("CC-2 a sensory observation alone does not authorize sincere certainty or unknown source kinds", () => {
+  for (const claim_kind of [null, "sincere_assertion"]) {
+    const input = packet(goal("direct", {
+      public_content: basis, claim_kind, claim_source_kind: "current_perception",
+    }), [], []);
+    input.perception = { observed: [basis] };
+    assert.throws(() => planCharacterCommunication(input),
+      { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "unobserved_world_truth",
+  }), [], []);
+  input.perception = { observed: [basis] };
+  assert.throws(() => planCharacterCommunication(input),
+    { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+});
+
+test("CC-2 native action proposer reads observer-bounded cognition perception", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "current_perception",
+  }), [], []);
+  // world_character_cognition embeds the character-scoped perception in
+  // cognition; world_action_proposer passes cognition, not packet.perception.
+  input.cognition.perception = { observed: [basis], audible: [], other_senses: [] };
+  const planned = planCharacterCommunication(input);
+  assert.equal(planned.external_action, "speech");
+  assert.equal(planned.message.source, "perception.observed[0]");
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.ok(candidate, "native cognition-only action proposal must be available");
+  assert.equal(candidate.communication.message.epistemic_status, "character_uncertain");
+  const brainInput = buildWorldSimulationCharacterBrainInput(input);
+  assert.equal(brainInput.communication_foundation.message.source, "perception.observed[0]");
+  assert.equal(brainInput.boundaries.communication_foundation_world_truth_authority, false);
+});
+
+test("CC-2 explicit current perception does not merge stale cognition perception", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "current_perception",
+  }), [], []);
+  input.cognition.perception = { observed: [basis] };
+  input.perception = { observed: [], audible: [], other_senses: [] };
+  assert.equal(planCharacterCommunication(input).blocked_reason,
+    "claim_not_in_same_character_current_perception");
+  assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  assert.equal(buildWorldSimulationCharacterBrainInput(input)
+    .communication_foundation.blocked_reason,
+    "claim_not_in_same_character_current_perception");
+  delete input.perception;
+  assert.equal(planCharacterCommunication(input).external_action, "speech");
+  assert.equal(buildWorldSimulationCharacterBrainInput(input)
+    .communication_foundation.external_action, "speech");
+});
+
 test("silence emits no message even with a compatible known basis", () => {
   const value = planCharacterCommunication(packet(goal("silence")));
   assert.equal(value.external_action, "none");

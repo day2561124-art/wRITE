@@ -42,6 +42,22 @@ function admittedRecollection(cognition, character, content) {
   return null;
 }
 
+// Perception is already scoped to the observer by World. Match only an exact
+// current sensory item: hearing a claim is not proof that the claim is true,
+// and a hidden scene fact is not a percept.
+function currentPerceptionSource(perception, content) {
+  const scoped = isRecord(perception) ? perception : {};
+  for (const channel of ["observed", "audible", "other_senses"]) {
+    const items = list(scoped[channel]).slice(0, 32);
+    const index = items.findIndex((item) => item === content);
+    if (index >= 0) return {
+      sourceRef: `perception.${channel}[${index}]`,
+      channel,
+    };
+  }
+  return null;
+}
+
 /**
  * Deliberately accepts only the final character-facing cognition and an
  * explicitly retained communication goal. Raw world state and other
@@ -108,18 +124,27 @@ export function planCharacterCommunication(characterInput = {}) {
       fail("Unsupported or ungrounded communication claim kind.");
     const sourceKind = goal.claim_source_kind == null
       ? null : string(goal.claim_source_kind, 40);
-    if (goal.claim_source_kind != null && sourceKind !== "retrieved_memory")
+    if (goal.claim_source_kind != null
+      && !["retrieved_memory", "current_perception"].includes(sourceKind))
       fail("Unsupported communication claim source.");
-    if (sourceKind === "retrieved_memory" && claimKind !== "uncertain_hypothesis")
-      fail("Recollection can ground only an explicitly uncertain claim.");
+    if (sourceKind != null && claimKind !== "uncertain_hypothesis")
+      fail("A sensory or recollection source can ground only an explicitly uncertain claim.");
     const recollection = sourceKind === "retrieved_memory"
       ? admittedRecollection(cognition, character, content) : null;
+    // The native action proposer supplies cognition (including its observer-
+    // bounded perception), while the Character Brain packet also has a top-
+    // level perception view. Prefer the explicit packet view when supplied;
+    // never combine it with a potentially stale cognition fallback.
+    const perceived = isRecord(characterInput.perception)
+      ? characterInput.perception : cognition.perception;
+    const percept = sourceKind === "current_perception"
+      ? currentPerceptionSource(perceived, content) : null;
     const sourceCollection = claimKind === "sincere_assertion"
       ? "known" : "uncertain";
-    const sourceIndex = claimKind == null || sourceKind === "retrieved_memory"
+    const sourceIndex = claimKind == null || sourceKind != null
       ? -1
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
-    if (claimKind && sourceIndex < 0 && !recollection) {
+    if (claimKind && sourceIndex < 0 && !recollection && !percept) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
@@ -127,7 +152,9 @@ export function planCharacterCommunication(characterInput = {}) {
         message: null,
         blocked_reason: sourceKind === "retrieved_memory"
           ? "recollection_not_admitted_to_current_mind"
-          : "claim_not_in_same_character_accessible_cognition",
+          : sourceKind === "current_perception"
+            ? "claim_not_in_same_character_current_perception"
+            : "claim_not_in_same_character_accessible_cognition",
         withheld_private_content: withheld,
         other_character_goal_inferred: false,
         world_truth_claimed: false,
@@ -135,9 +162,11 @@ export function planCharacterCommunication(characterInput = {}) {
     }
     const sourceRef = recollection
       ? recollection.sourceRef
-      : claimKind
-        ? `cognition.${sourceCollection}[${sourceIndex}]`
-        : "cognition.communication_goal";
+      : percept
+        ? percept.sourceRef
+        : claimKind
+          ? `cognition.${sourceCollection}[${sourceIndex}]`
+          : "cognition.communication_goal";
     const epistemicStatus = claimKind === "sincere_assertion"
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
@@ -158,13 +187,19 @@ export function planCharacterCommunication(characterInput = {}) {
             claim_kind: claimKind,
             source_kind: recollection
               ? "admitted_recollection_current_mind"
-              : "same_character_accessible_cognition",
+              : percept
+                ? "same_character_current_perception"
+                : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
             ...(recollection ? {
               possibly_incorrect: recollection.item.possibly_incorrect !== false,
               source_confused: recollection.item.source_confused === true,
               recollection_certainty_not_inferred: true,
+            } : {}),
+            ...(percept ? {
+              sensory_channel: percept.channel,
+              perception_does_not_establish_world_truth: true,
             } : {}),
             world_truth_claimed: false,
           },

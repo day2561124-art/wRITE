@@ -157,7 +157,12 @@ export function buildWorldSimulationCharacterBrainInput(
 
     perception:
       cloneJson(
+        // The native cognition-only action proposer receives this already
+        // observer-bounded view from world_character_cognition. Preserve it
+        // for the final Brain input when no distinct packet view was sent.
+        // An explicit (even empty) packet perception remains authoritative.
         packet.perception
+        ?? packet.cognition?.perception
         ?? {},
       ),
 
