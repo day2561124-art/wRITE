@@ -140,10 +140,27 @@ export function planCharacterCommunication(characterInput = {}) {
     const sourceKind = goal.claim_source_kind == null
       ? null : string(goal.claim_source_kind, 40);
     if (goal.claim_source_kind != null
-      && !["retrieved_memory", "current_perception"].includes(sourceKind))
+      && !["retrieved_memory", "current_perception", "subjective_inference"].includes(sourceKind))
       fail("Unsupported communication claim source.");
     if (sourceKind != null && claimKind !== "uncertain_hypothesis")
-      fail("A sensory or recollection source can ground only an explicitly uncertain claim.");
+      fail("A sensory, recollection or inferential source can ground only an explicitly uncertain claim.");
+    // A subjective inference is a character-authored relation to a premise,
+    // not an engine-proven entailment. Never derive its premise from raw World,
+    // Memory catalogs, the generator, or another person's cognition.
+    const inference = sourceKind === "subjective_inference"
+      ? goal.inference_intent : null;
+    if (sourceKind === "subjective_inference"
+      && (!isRecord(inference)
+        || string(inference.conclusion) !== content
+        || !string(inference.premise_content)
+        || !["known", "uncertain"].includes(inference.premise_epistemic_status)
+        || inference.premise_relation !== "supports"))
+      fail("Subjective inference requires an actor-authored conclusion and bounded premise relation.");
+    const inferenceCollection = inference?.premise_epistemic_status;
+    const inferenceIndex = inference
+      ? list(cognition[inferenceCollection]).findIndex(
+        (value) => value === inference.premise_content,
+      ) : -1;
     const contraryIndex = claimKind === "deliberate_deception"
       ? list(cognition.known).findIndex(
         (value) => value === deception.contrary_known_content,
@@ -164,7 +181,10 @@ export function planCharacterCommunication(characterInput = {}) {
       ? -1
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
     if (claimKind && (claimKind === "deliberate_deception"
-      ? contraryIndex < 0 : sourceIndex < 0 && !recollection && !percept)) {
+      ? contraryIndex < 0
+      : sourceKind === "subjective_inference"
+        ? inferenceIndex < 0
+        : sourceIndex < 0 && !recollection && !percept)) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
@@ -172,11 +192,13 @@ export function planCharacterCommunication(characterInput = {}) {
         message: null,
         blocked_reason: claimKind === "deliberate_deception"
           ? "deception_contrary_basis_not_in_same_character_known"
-          : sourceKind === "retrieved_memory"
-            ? "recollection_not_admitted_to_current_mind"
-            : sourceKind === "current_perception"
-              ? "claim_not_in_same_character_current_perception"
-              : "claim_not_in_same_character_accessible_cognition",
+          : sourceKind === "subjective_inference"
+            ? "inference_premise_not_in_same_character_accessible_cognition"
+            : sourceKind === "retrieved_memory"
+              ? "recollection_not_admitted_to_current_mind"
+              : sourceKind === "current_perception"
+                ? "claim_not_in_same_character_current_perception"
+                : "claim_not_in_same_character_accessible_cognition",
         withheld_private_content: withheld,
         other_character_goal_inferred: false,
         world_truth_claimed: false,
@@ -184,13 +206,15 @@ export function planCharacterCommunication(characterInput = {}) {
     }
     const sourceRef = claimKind === "deliberate_deception"
       ? `cognition.known[${contraryIndex}]`
-      : recollection
-        ? recollection.sourceRef
-        : percept
-          ? percept.sourceRef
-          : claimKind
-            ? `cognition.${sourceCollection}[${sourceIndex}]`
-            : "cognition.communication_goal";
+      : inference
+        ? `cognition.${inferenceCollection}[${inferenceIndex}]`
+        : recollection
+          ? recollection.sourceRef
+          : percept
+            ? percept.sourceRef
+            : claimKind
+              ? `cognition.${sourceCollection}[${sourceIndex}]`
+              : "cognition.communication_goal";
     const epistemicStatus = claimKind === "sincere_assertion"
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
@@ -213,13 +237,23 @@ export function planCharacterCommunication(characterInput = {}) {
             claim_kind: claimKind,
             source_kind: claimKind === "deliberate_deception"
               ? "same_character_contrary_known_basis"
-              : recollection
-                ? "admitted_recollection_current_mind"
-                : percept
-                  ? "same_character_current_perception"
-                  : "same_character_accessible_cognition",
+              : inference
+                ? "same_character_subjective_inference"
+                : recollection
+                  ? "admitted_recollection_current_mind"
+                  : percept
+                    ? "same_character_current_perception"
+                    : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
+            ...(inference ? {
+              premise_content: inference.premise_content,
+              premise_epistemic_status: inference.premise_epistemic_status,
+              premise_relation: "speaker_authored_supports",
+              conclusion: content,
+              semantic_entailment_verified: false,
+              inference_confidence_inferred: false,
+            } : {}),
             ...(claimKind === "deliberate_deception" ? {
               intended_addressee: addressee,
               intended_target_belief: content,

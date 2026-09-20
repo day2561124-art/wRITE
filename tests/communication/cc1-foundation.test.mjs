@@ -427,6 +427,97 @@ test("CC-2 explicit current perception does not merge stale cognition perception
     .communication_foundation.external_action, "speech");
 });
 
+test("CC-2 subjective inference retains a same-character premise without claiming entailment", () => {
+  const conclusion = "B 可能還想繼續看書";
+  for (const premise_epistemic_status of ["known", "uncertain"]) {
+    const input = packet(goal("direct", {
+      public_content: conclusion,
+      claim_kind: "uncertain_hypothesis",
+      claim_source_kind: "subjective_inference",
+      inference_intent: {
+        conclusion, premise_content: basis,
+        premise_epistemic_status, premise_relation: "supports",
+      },
+    }), premise_epistemic_status === "known" ? [basis] : [],
+    premise_epistemic_status === "uncertain" ? [basis] : []);
+    const plan = planCharacterCommunication(input);
+    assert.equal(plan.external_action, "speech");
+    assert.equal(plan.message.semantic_content, conclusion);
+    assert.equal(plan.message.epistemic_status, "character_uncertain");
+    assert.equal(plan.message.source, `cognition.${premise_epistemic_status}[0]`);
+    assert.deepEqual(plan.message.claim_provenance, {
+      schema_version: "cc2-speaker-claim-provenance-v1",
+      claim_kind: "uncertain_hypothesis",
+      source_kind: "same_character_subjective_inference",
+      source_ref: `cognition.${premise_epistemic_status}[0]`,
+      epistemic_status: "character_uncertain",
+      premise_content: basis,
+      premise_epistemic_status,
+      premise_relation: "speaker_authored_supports",
+      conclusion,
+      semantic_entailment_verified: false,
+      inference_confidence_inferred: false,
+      world_truth_claimed: false,
+    });
+    const candidate = buildCharacterCommunicationActionCandidate(input);
+    assert.equal(candidate.communication.message.epistemic_status, "character_uncertain");
+    assert.equal(candidate.communication.ir.content.epistemic.source, null);
+    assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+    const serialized = JSON.stringify(candidate);
+    for (const secret of [basis, "same_character_subjective_inference",
+      "speaker_authored_supports", "cognition.known", "cognition.uncertain",
+      "semantic_entailment_verified", "我很依戀 B"])
+      assert.equal(serialized.includes(secret), false, `Private inference provenance leaked: ${secret}`);
+  }
+});
+
+test("CC-2 inference cannot obtain premise from raw world, hidden memory or another character", () => {
+  const conclusion = "B 可能還想繼續看書";
+  const input = packet(goal("direct", {
+    public_content: conclusion, claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "subjective_inference",
+    inference_intent: {
+      conclusion, premise_content: basis,
+      premise_epistemic_status: "known", premise_relation: "supports",
+    },
+  }), [], [basis]);
+  input.world_state = { hidden_fact: basis };
+  input.recovered_memories = [{ content: basis }];
+  input.cognition.working_context = { focus: { content: basis,
+    context_origin: "recovered_memory" } };
+  input.perception = { audible: [basis] };
+  input.other_character_cognition = { known: [basis] };
+  const plan = planCharacterCommunication(input);
+  assert.equal(plan.external_action, "none");
+  assert.equal(plan.blocked_reason, "inference_premise_not_in_same_character_accessible_cognition");
+  assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+});
+
+test("CC-2 inferred claims require authored matching conclusion, premise and source contract", () => {
+  const conclusion = "B 可能還想繼續看書";
+  const intent = {
+    conclusion, premise_content: basis,
+    premise_epistemic_status: "known", premise_relation: "supports",
+  };
+  for (const invalid of [
+    { conclusion: "不同結論" }, { premise_content: "" },
+    { premise_epistemic_status: "retrieved_memory" },
+    { premise_relation: "entails" },
+  ]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: conclusion, claim_kind: "uncertain_hypothesis",
+      claim_source_kind: "subjective_inference",
+      inference_intent: { ...intent, ...invalid },
+    }), [basis], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  for (const claim_kind of [null, "sincere_assertion", "deliberate_deception"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: conclusion, claim_kind, claim_source_kind: "subjective_inference",
+      inference_intent: intent,
+    }), [basis], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+});
+
 test("silence emits no message even with a compatible known basis", () => {
   const value = planCharacterCommunication(packet(goal("silence")));
   assert.equal(value.external_action, "none");
