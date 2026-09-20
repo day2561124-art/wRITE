@@ -21,6 +21,27 @@ function fail(message) {
   throw error;
 }
 
+// The v3/v5 Runtime owns the Current Mind readout. Recovered memories,
+// memory-candidate catalogs, and attention compatibility aliases cannot
+// independently authorize an utterance about a recollection.
+function admittedRecollection(cognition, character, content) {
+  const working = isRecord(cognition.working_context)
+    ? cognition.working_context : {};
+  const entries = [
+    ["cognition.working_context.focus", working.focus],
+    ...["active_context", "peripheral_context", "fading_context", "suspended_context"]
+      .flatMap((key) => list(working[key]).slice(0, 16)
+        .map((item, index) => [`cognition.working_context.${key}[${index}]`, item])),
+  ];
+  for (const [sourceRef, item] of entries) {
+    if (!isRecord(item) || item.context_origin !== "recovered_memory"
+      || item.content !== content
+      || (item.character != null && item.character !== character)) continue;
+    return { sourceRef, item };
+  }
+  return null;
+}
+
 /**
  * Deliberately accepts only the final character-facing cognition and an
  * explicitly retained communication goal. Raw world state and other
@@ -85,25 +106,38 @@ export function planCharacterCommunication(characterInput = {}) {
     if (goal.claim_kind != null
       && !["sincere_assertion", "uncertain_hypothesis"].includes(claimKind))
       fail("Unsupported or ungrounded communication claim kind.");
+    const sourceKind = goal.claim_source_kind == null
+      ? null : string(goal.claim_source_kind, 40);
+    if (goal.claim_source_kind != null && sourceKind !== "retrieved_memory")
+      fail("Unsupported communication claim source.");
+    if (sourceKind === "retrieved_memory" && claimKind !== "uncertain_hypothesis")
+      fail("Recollection can ground only an explicitly uncertain claim.");
+    const recollection = sourceKind === "retrieved_memory"
+      ? admittedRecollection(cognition, character, content) : null;
     const sourceCollection = claimKind === "sincere_assertion"
       ? "known" : "uncertain";
-    const sourceIndex = claimKind == null ? -1
+    const sourceIndex = claimKind == null || sourceKind === "retrieved_memory"
+      ? -1
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
-    if (claimKind && sourceIndex < 0) {
+    if (claimKind && sourceIndex < 0 && !recollection) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
         external_action: "none",
         message: null,
-        blocked_reason: "claim_not_in_same_character_accessible_cognition",
+        blocked_reason: sourceKind === "retrieved_memory"
+          ? "recollection_not_admitted_to_current_mind"
+          : "claim_not_in_same_character_accessible_cognition",
         withheld_private_content: withheld,
         other_character_goal_inferred: false,
         world_truth_claimed: false,
       });
     }
-    const sourceRef = claimKind
-      ? `cognition.${sourceCollection}[${sourceIndex}]`
-      : "cognition.communication_goal";
+    const sourceRef = recollection
+      ? recollection.sourceRef
+      : claimKind
+        ? `cognition.${sourceCollection}[${sourceIndex}]`
+        : "cognition.communication_goal";
     const epistemicStatus = claimKind === "sincere_assertion"
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
@@ -122,9 +156,16 @@ export function planCharacterCommunication(characterInput = {}) {
           claim_provenance: {
             schema_version: "cc2-speaker-claim-provenance-v1",
             claim_kind: claimKind,
-            source_kind: "same_character_accessible_cognition",
+            source_kind: recollection
+              ? "admitted_recollection_current_mind"
+              : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
+            ...(recollection ? {
+              possibly_incorrect: recollection.item.possibly_incorrect !== false,
+              source_confused: recollection.item.source_confused === true,
+              recollection_certainty_not_inferred: true,
+            } : {}),
             world_truth_claimed: false,
           },
         } : {}),

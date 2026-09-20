@@ -109,6 +109,107 @@ test("CC-2 unknown or deceptive claim kinds cannot bypass a character-side prove
   }
 });
 
+test("CC-2 recalled hypothesis requires actually admitted Current Mind content", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "retrieved_memory",
+  }), [], []);
+  input.cognition.working_context = {
+    focus: {
+      context_origin: "recovered_memory",
+      content: basis,
+      possibly_incorrect: true,
+      source_confused: true,
+    },
+    active_context: [],
+  };
+  const privatePlan = planCharacterCommunication(input);
+  assert.equal(privatePlan.external_action, "speech");
+  assert.equal(privatePlan.message.source, "cognition.working_context.focus");
+  assert.deepEqual(privatePlan.message.claim_provenance, {
+    schema_version: "cc2-speaker-claim-provenance-v1",
+    claim_kind: "uncertain_hypothesis",
+    source_kind: "admitted_recollection_current_mind",
+    source_ref: "cognition.working_context.focus",
+    epistemic_status: "character_uncertain",
+    possibly_incorrect: true,
+    source_confused: true,
+    recollection_certainty_not_inferred: true,
+    world_truth_claimed: false,
+  });
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.epistemic_status, "character_uncertain");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+  const publicText = JSON.stringify(candidate);
+  for (const secret of ["cognition.working_context", "admitted_recollection_current_mind",
+    "possibly_incorrect", "source_confused", "我很依戀 B"])
+    assert.equal(publicText.includes(secret), false, `Leaked private recollection provenance ${secret}`);
+});
+
+test("CC-2 Current Mind can source an active recalled item without elevating it to known fact", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "retrieved_memory",
+  }), [], []);
+  input.cognition.working_context = {
+    focus: { content: "unrelated current focus" },
+    active_context: [{
+      context_origin: "recovered_memory",
+      content: basis,
+      possibly_incorrect: false,
+    }],
+  };
+  const planned = planCharacterCommunication(input);
+  assert.equal(planned.message.source, "cognition.working_context.active_context[0]");
+  assert.equal(planned.message.epistemic_status, "character_uncertain");
+  assert.equal(planned.message.claim_provenance.possibly_incorrect, false);
+  assert.equal(planned.message.claim_provenance.recollection_certainty_not_inferred, true);
+});
+
+test("CC-2 raw Memory aliases, nonadmitted attention and foreign recollection cannot invent sources", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "retrieved_memory",
+  }), [], []);
+  input.recovered_memories = [{ content: basis, memory_id: "engine-private" }];
+  input.retrieved_memories = [{ content: basis }];
+  input.cognition.recovered_memories = [{ content: basis }];
+  input.cognition.attention = { focus: {
+    context_origin: "recovered_memory", content: basis,
+  } };
+  for (const working_context of [
+    undefined,
+    { focus: { content: basis } },
+    { focus: { context_origin: "recovered_memory", content: basis, character: "B" } },
+    { focus: { context_origin: "recovered_memory", content: "different memory" } },
+  ]) {
+    input.cognition.working_context = working_context;
+    const planned = planCharacterCommunication(input);
+    assert.equal(planned.external_action, "none");
+    assert.equal(planned.blocked_reason, "recollection_not_admitted_to_current_mind");
+    assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  }
+});
+
+test("CC-2 recollection cannot silently certify facts or bypass explicit source-kind contract", () => {
+  for (const claim_kind of [null, "sincere_assertion"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: basis,
+      claim_kind,
+      claim_source_kind: "retrieved_memory",
+    }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "uncertain_hypothesis",
+    claim_source_kind: "raw_world_memory_database",
+  }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+});
+
 test("silence emits no message even with a compatible known basis", () => {
   const value = planCharacterCommunication(packet(goal("silence")));
   assert.equal(value.external_action, "none");
