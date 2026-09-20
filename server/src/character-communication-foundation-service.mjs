@@ -1,4 +1,5 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
+import { buildCharacterCommunicationIr } from "./character-communication-ir-service.mjs";
 
 /**
  * CC-1 bounded communication foundation. This is a same-character planning
@@ -142,6 +143,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
         semantic_content: sourceMessage.semantic_content ?? null,
         world_truth_claimed: false,
       };
+  const communicationIr = buildCharacterCommunicationIr(plan, { publicOnly: true });
   const identity = {
     version: characterCommunicationFoundationVersion,
     character: plan.character,
@@ -149,6 +151,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
     mode: plan.mode,
     channel,
     public_message: publicMessage,
+    communication_ir: communicationIr,
   };
   return copy({
     action_id: `communication_${hashAgentRunValue(identity).slice(0, 24)}`,
@@ -163,6 +166,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
       addressee: plan.addressee,
       expression_mode: plan.mode,
       message: publicMessage,
+      ir: communicationIr,
       surface_realization_complete: false,
       private_purpose_exposed: false,
       withheld_private_content_exposed: false,
