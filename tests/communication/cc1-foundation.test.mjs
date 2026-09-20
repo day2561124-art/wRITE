@@ -42,6 +42,73 @@ test("direct expression follows character's distinct disclosure decision", () =>
   assert.equal(value.mode, "direct");
 });
 
+test("CC-2 sincere assertion retains bounded same-character provenance only in private plan", () => {
+  const input = packet(goal("direct", {
+    public_content: basis,
+    claim_kind: "sincere_assertion",
+  }));
+  const planned = planCharacterCommunication(input);
+  assert.equal(planned.message.speech_act, "assert");
+  assert.equal(planned.message.epistemic_status, "character_known");
+  assert.equal(planned.message.source, "cognition.known[0]");
+  assert.deepEqual(planned.message.claim_provenance, {
+    schema_version: "cc2-speaker-claim-provenance-v1",
+    claim_kind: "sincere_assertion",
+    source_kind: "same_character_accessible_cognition",
+    source_ref: "cognition.known[0]",
+    epistemic_status: "character_known",
+    world_truth_claimed: false,
+  });
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.speech_act, "assert");
+  assert.equal(candidate.communication.message.epistemic_status, "character_known");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+  const publicText = JSON.stringify(candidate);
+  assert.equal(publicText.includes("cognition.known"), false);
+  assert.equal(publicText.includes("cc2-speaker-claim-provenance-v1"), false);
+  assert.equal(publicText.includes("希望 B 留下"), false);
+  assert.equal(publicText.includes("我很依戀 B"), false);
+});
+
+test("CC-2 unsupported sincere assertion is blocked rather than generated from goal alone", () => {
+  const input = packet(goal("direct", {
+    public_content: "B 已經看完那本書",
+    claim_kind: "sincere_assertion",
+  }));
+  const planned = planCharacterCommunication(input);
+  assert.equal(planned.external_action, "none");
+  assert.equal(planned.message, null);
+  assert.equal(planned.blocked_reason, "claim_not_in_same_character_accessible_cognition");
+  assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  const uncertainOnly = packet(goal("direct", {
+    public_content: basis, claim_kind: "sincere_assertion",
+  }), [], [basis]);
+  assert.equal(planCharacterCommunication(uncertainOnly).external_action, "none");
+});
+
+test("CC-2 explicitly uncertain hypothesis keeps its uncertainty and does not claim world truth", () => {
+  const input = packet(goal("direct", {
+    public_content: basis, claim_kind: "uncertain_hypothesis",
+  }), [], [basis]);
+  const planned = planCharacterCommunication(input);
+  assert.equal(planned.message.epistemic_status, "character_uncertain");
+  assert.equal(planned.message.claim_provenance.source_ref, "cognition.uncertain[0]");
+  assert.equal(planned.message.claim_provenance.world_truth_claimed, false);
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.epistemic_status, "character_uncertain");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(JSON.stringify(candidate).includes("cognition.uncertain"), false);
+});
+
+test("CC-2 unknown or deceptive claim kinds cannot bypass a character-side provenance gate", () => {
+  for (const claim_kind of ["deliberate_deception", "generator_hallucination", "unknown"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: basis, claim_kind,
+    }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+});
+
 test("silence emits no message even with a compatible known basis", () => {
   const value = planCharacterCommunication(packet(goal("silence")));
   assert.equal(value.external_action, "none");

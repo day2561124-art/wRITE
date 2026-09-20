@@ -77,11 +77,58 @@ export function planCharacterCommunication(characterInput = {}) {
       ? privateContent
       : goal.public_content);
     if (!content) fail("Direct communication requires character-owned expressible content.");
+
+    // CC-2: a declared factual assertion or uncertain hypothesis must be
+    // grounded in the same character's accessible cognition. A communication
+    // goal alone authorizes an intention/request, not a new factual claim.
+    const claimKind = goal.claim_kind == null ? null : string(goal.claim_kind, 40);
+    if (goal.claim_kind != null
+      && !["sincere_assertion", "uncertain_hypothesis"].includes(claimKind))
+      fail("Unsupported or ungrounded communication claim kind.");
+    const sourceCollection = claimKind === "sincere_assertion"
+      ? "known" : "uncertain";
+    const sourceIndex = claimKind == null ? -1
+      : list(cognition[sourceCollection]).findIndex((value) => value === content);
+    if (claimKind && sourceIndex < 0) {
+      return copy({
+        version: characterCommunicationFoundationVersion,
+        character, addressee, purpose, mode,
+        external_action: "none",
+        message: null,
+        blocked_reason: "claim_not_in_same_character_accessible_cognition",
+        withheld_private_content: withheld,
+        other_character_goal_inferred: false,
+        world_truth_claimed: false,
+      });
+    }
+    const sourceRef = claimKind
+      ? `cognition.${sourceCollection}[${sourceIndex}]`
+      : "cognition.communication_goal";
+    const epistemicStatus = claimKind === "sincere_assertion"
+      ? "character_known"
+      : claimKind === "uncertain_hypothesis"
+        ? "character_uncertain"
+        : "speaker_intention";
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
       external_action: "speech",
-      message: { speech_act: "inform_or_request", semantic_content: content, epistemic_status: "speaker_intention", source: "cognition.communication_goal" },
+      message: {
+        speech_act: claimKind ? "assert" : "inform_or_request",
+        semantic_content: content,
+        epistemic_status: epistemicStatus,
+        source: sourceRef,
+        ...(claimKind ? {
+          claim_provenance: {
+            schema_version: "cc2-speaker-claim-provenance-v1",
+            claim_kind: claimKind,
+            source_kind: "same_character_accessible_cognition",
+            source_ref: sourceRef,
+            epistemic_status: epistemicStatus,
+            world_truth_claimed: false,
+          },
+        } : {}),
+      },
       withheld_private_content: withheld,
       other_character_goal_inferred: false,
       world_truth_claimed: false,
