@@ -81,6 +81,9 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
       semantic_content: semanticContent,
       event_content: publicOnly ? null : text(context.event_content),
       speech_act: speechAct,
+      // Attribution is part of the *public* report; the private listener
+      // receipt/action reference is not. No belief or truth is inferred.
+      reported_speaker: text(sourceMessage.reported_speaker, 240),
       reference_targets: publicOnly ? [] : referenceTargets,
       information_structure: {
         topic: publicOnly ? null : text(context.topic, 240),

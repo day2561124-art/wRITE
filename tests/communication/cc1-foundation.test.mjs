@@ -427,6 +427,136 @@ test("CC-2 explicit current perception does not merge stale cognition perception
     .communication_foundation.external_action, "speech");
 });
 
+test("CC-2 attributed testimony requires an understood same-listener public utterance", () => {
+  const statement = "門已經上鎖";
+  const action = `communication_${"a".repeat(24)}`;
+  const intent = { speaker: "C", reported_content: statement, source_action_id: action };
+  const input = packet(goal("direct", {
+    public_content: statement, claim_kind: "attributed_testimony",
+    claim_source_kind: "understood_testimony", testimony_intent: intent,
+  }), [], []);
+  input.perception = {
+    character: "A",
+    information_boundary: { listener_receipt_verified: true },
+    audible: [{
+      schema_version: "cc2-listener-understood-utterance-v1",
+      kind: "understood_utterance", observer: "A", channel: "speech",
+      speaker: "C", semantic_content: statement, source_action_id: action,
+      speech_content_intelligible: true, speaker_identity_recognized: true,
+      public_event_committed: true,
+    }],
+  };
+  const plan = planCharacterCommunication(input);
+  assert.equal(plan.external_action, "speech");
+  assert.equal(plan.message.speech_act, "report_testimony");
+  assert.equal(plan.message.epistemic_status, "speaker_attributed_report");
+  assert.equal(plan.message.reported_speaker, "C");
+  assert.equal(plan.message.source, "perception.audible[0]");
+  assert.deepEqual(plan.message.claim_provenance, {
+    schema_version: "cc2-speaker-claim-provenance-v1",
+    claim_kind: "attributed_testimony",
+    source_kind: "same_character_understood_testimony_receipt",
+    source_ref: "perception.audible[0]",
+    epistemic_status: "speaker_attributed_report",
+    reported_speaker: "C", reported_content: statement,
+    receipt_action_id: action, listener_understanding_attested: true,
+    reported_content_truth_inferred: false,
+    speaker_private_belief_inferred: false,
+    world_truth_claimed: false,
+  });
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.reported_speaker, "C");
+  assert.equal(candidate.communication.message.speech_act, "report_testimony");
+  assert.equal(candidate.communication.ir.content.reported_speaker, "C");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+  const publicText = JSON.stringify(candidate);
+  for (const privatePart of [
+    action, "perception.audible", "same_character_understood_testimony_receipt",
+    "listener_understanding_attested", "我很依戀 B", "希望 B 留下",
+  ]) assert.equal(publicText.includes(privatePart), false,
+    `Private testimony evidence leaked: ${privatePart}`);
+});
+
+test("CC-2 raw world speech or audible sound never creates understood testimony", () => {
+  const statement = "門已經上鎖";
+  const action = `communication_${"a".repeat(24)}`;
+  const intent = { speaker: "C", reported_content: statement, source_action_id: action };
+  const g = goal("direct", {
+    public_content: statement, claim_kind: "attributed_testimony",
+    claim_source_kind: "understood_testimony", testimony_intent: intent,
+  });
+  const expected = {
+    schema_version: "cc2-listener-understood-utterance-v1",
+    kind: "understood_utterance", observer: "A", channel: "speech",
+    speaker: "C", semantic_content: statement, source_action_id: action,
+    speech_content_intelligible: true, speaker_identity_recognized: true,
+    public_event_committed: true,
+  };
+  const input = packet(g, [statement], [statement]);
+  input.world_state = { communication_event: {
+    actor: "C", semantic_content: statement, source_action_id: action,
+  } };
+  input.other_character_cognition = { known: [statement] };
+  input.recovered_memories = [{ content: statement }];
+  const cases = [
+    { perception: { audible: [statement] } },
+    { perception: { audible: [{ kind: "audible_sound",
+      perceptual_label: "聽見有人說話" }] } },
+    { perception: { audible: [expected] } },
+    { perception: { character: "B",
+      information_boundary: { listener_receipt_verified: true },
+      audible: [expected] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, observer: "B" }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, speech_content_intelligible: false }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, speaker_identity_recognized: false }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, public_event_committed: false }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, speaker: "D" }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, semantic_content: "錯誤內容" }] } },
+    { perception: { information_boundary: { listener_receipt_verified: true },
+      audible: [{ ...expected, source_action_id: `communication_${"b".repeat(24)}` }] } },
+  ];
+  for (const value of cases) {
+    input.perception = value.perception;
+    const plan = planCharacterCommunication(input);
+    assert.equal(plan.external_action, "none");
+    assert.equal(plan.blocked_reason,
+      "testimony_not_in_same_character_verified_listener_receipt");
+    assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  }
+});
+
+test("CC-2 testimony requires explicit source and cannot be used as factual certainty", () => {
+  const statement = "門已經上鎖";
+  const action = `communication_${"a".repeat(24)}`;
+  const intent = { speaker: "C", reported_content: statement, source_action_id: action };
+  for (const claim_kind of [null, "sincere_assertion", "uncertain_hypothesis",
+    "deliberate_deception", "explicit_assumption"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      public_content: statement, claim_kind, claim_source_kind: "understood_testimony",
+      testimony_intent: intent,
+    }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  for (const bad of [
+    { speaker: "A" }, { speaker: "" },
+    { reported_content: "別的內容" }, { source_action_id: "not_committed" },
+  ]) assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+    public_content: statement, claim_kind: "attributed_testimony",
+    claim_source_kind: "understood_testimony",
+    testimony_intent: { ...intent, ...bad },
+  }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+    public_content: statement, claim_kind: "attributed_testimony",
+    testimony_intent: intent,
+  }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+});
+
 test("CC-2 explicit assumption emits a visibly hypothetical speech act without factual evidence", () => {
   const hypothetical = "如果 B 已經看完那本書";
   const input = packet(goal("direct", {

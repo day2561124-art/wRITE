@@ -58,6 +58,33 @@ function currentPerceptionSource(perception, content) {
   return null;
 }
 
+// This is a consumer gate, not a producer of speech intelligibility.
+// The existing acoustic query only establishes that a sound is audible.
+// A future authoritative World listener projection must explicitly attest
+// comprehension and source recognition in this observer-scoped packet.
+function admittedUnderstoodTestimony(perception, character, intent, content) {
+  const scoped = isRecord(perception) ? perception : {};
+  if (scoped.character !== character) return null;
+  if (scoped.information_boundary?.listener_receipt_verified !== true) return null;
+  const index = list(scoped.audible).slice(0, 32).findIndex((item) =>
+    isRecord(item)
+    && item.schema_version === "cc2-listener-understood-utterance-v1"
+    && item.kind === "understood_utterance"
+    && item.observer === character
+    && item.channel === "speech"
+    && item.speaker === intent.speaker
+    && item.semantic_content === content
+    && item.source_action_id === intent.source_action_id
+    && item.speech_content_intelligible === true
+    && item.speaker_identity_recognized === true
+    && item.public_event_committed === true
+  );
+  return index < 0 ? null : {
+    sourceRef: `perception.audible[${index}]`,
+    item: scoped.audible[index],
+  };
+}
+
 /**
  * Deliberately accepts only the final character-facing cognition and an
  * explicitly retained communication goal. Raw world state and other
@@ -121,8 +148,22 @@ export function planCharacterCommunication(characterInput = {}) {
     const claimKind = goal.claim_kind == null ? null : string(goal.claim_kind, 40);
     if (goal.claim_kind != null
       && !["sincere_assertion", "uncertain_hypothesis", "deliberate_deception",
-        "explicit_assumption"].includes(claimKind))
+        "explicit_assumption", "attributed_testimony"].includes(claimKind))
       fail("Unsupported or ungrounded communication claim kind.");
+    // A testimony report attributes an understood utterance to its speaker.
+    // It neither adopts the proposition nor infers the speaker's belief.
+    const testimony = claimKind === "attributed_testimony"
+      ? goal.testimony_intent : null;
+    if (goal.testimony_intent != null && claimKind !== "attributed_testimony")
+      fail("A testimony intention requires its explicit claim kind.");
+    if (claimKind === "attributed_testimony"
+      && (!isRecord(testimony)
+        || !string(testimony.speaker, 240)
+        || testimony.speaker === character
+        || string(testimony.reported_content) !== content
+        || typeof testimony.source_action_id !== "string"
+        || !/^communication_[a-f0-9]{24}$/.test(testimony.source_action_id)))
+      fail("Testimony requires a speaker-authored exact attributed report and action reference.");
     // A supposition is an explicitly framed speech act, not a newly known
     // fact, a recollection, or an uncertain report masquerading as evidence.
     // The speaker commits only to proposing the hypothetical, not its truth.
@@ -154,9 +195,15 @@ export function planCharacterCommunication(characterInput = {}) {
     const sourceKind = goal.claim_source_kind == null
       ? null : string(goal.claim_source_kind, 40);
     if (goal.claim_source_kind != null
-      && !["retrieved_memory", "current_perception", "subjective_inference"].includes(sourceKind))
+      && !["retrieved_memory", "current_perception", "subjective_inference",
+        "understood_testimony"].includes(sourceKind))
       fail("Unsupported communication claim source.");
-    if (sourceKind != null && claimKind !== "uncertain_hypothesis")
+    if (claimKind === "attributed_testimony" && sourceKind !== "understood_testimony")
+      fail("Attributed testimony requires an explicitly understood listener source.");
+    if (sourceKind === "understood_testimony" && claimKind !== "attributed_testimony")
+      fail("A listener receipt only grounds an attributed testimony report.");
+    if (sourceKind != null && sourceKind !== "understood_testimony"
+      && claimKind !== "uncertain_hypothesis")
       fail("A sensory, recollection or inferential source can ground only an explicitly uncertain claim.");
     // A subjective inference is a character-authored relation to a premise,
     // not an engine-proven entailment. Never derive its premise from raw World,
@@ -189,6 +236,8 @@ export function planCharacterCommunication(characterInput = {}) {
       ? characterInput.perception : cognition.perception;
     const percept = sourceKind === "current_perception"
       ? currentPerceptionSource(perceived, content) : null;
+    const receipt = sourceKind === "understood_testimony"
+      ? admittedUnderstoodTestimony(perceived, character, testimony, content) : null;
     const sourceCollection = claimKind === "sincere_assertion"
       ? "known" : "uncertain";
     const sourceIndex = claimKind == null || sourceKind != null
@@ -197,6 +246,8 @@ export function planCharacterCommunication(characterInput = {}) {
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
     if (claimKind && (claimKind === "explicit_assumption"
       ? false
+      : claimKind === "attributed_testimony"
+        ? !receipt
       : claimKind === "deliberate_deception"
         ? contraryIndex < 0
         : sourceKind === "subjective_inference"
@@ -207,9 +258,11 @@ export function planCharacterCommunication(characterInput = {}) {
         character, addressee, purpose, mode,
         external_action: "none",
         message: null,
-        blocked_reason: claimKind === "deliberate_deception"
-          ? "deception_contrary_basis_not_in_same_character_known"
-          : sourceKind === "subjective_inference"
+        blocked_reason: claimKind === "attributed_testimony"
+          ? "testimony_not_in_same_character_verified_listener_receipt"
+          : claimKind === "deliberate_deception"
+            ? "deception_contrary_basis_not_in_same_character_known"
+            : sourceKind === "subjective_inference"
             ? "inference_premise_not_in_same_character_accessible_cognition"
             : sourceKind === "retrieved_memory"
               ? "recollection_not_admitted_to_current_mind"
@@ -221,9 +274,11 @@ export function planCharacterCommunication(characterInput = {}) {
         world_truth_claimed: false,
       });
     }
-    const sourceRef = claimKind === "explicit_assumption"
-      ? "cognition.communication_goal"
-      : claimKind === "deliberate_deception"
+    const sourceRef = claimKind === "attributed_testimony"
+      ? receipt.sourceRef
+      : claimKind === "explicit_assumption"
+        ? "cognition.communication_goal"
+        : claimKind === "deliberate_deception"
         ? `cognition.known[${contraryIndex}]`
         : inference
           ? `cognition.${inferenceCollection}[${inferenceIndex}]`
@@ -238,30 +293,37 @@ export function planCharacterCommunication(characterInput = {}) {
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
         ? "character_uncertain"
-        : claimKind === "deliberate_deception"
-          ? "speaker_asserted"
-          : claimKind === "explicit_assumption"
-            ? "speaker_hypothetical"
-            : "speaker_intention";
+        : claimKind === "attributed_testimony"
+          ? "speaker_attributed_report"
+          : claimKind === "deliberate_deception"
+            ? "speaker_asserted"
+            : claimKind === "explicit_assumption"
+              ? "speaker_hypothetical"
+              : "speaker_intention";
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
       external_action: "speech",
       message: {
-        speech_act: claimKind === "explicit_assumption"
-          ? "suppose" : claimKind ? "assert" : "inform_or_request",
+        speech_act: claimKind === "attributed_testimony"
+          ? "report_testimony"
+          : claimKind === "explicit_assumption"
+            ? "suppose" : claimKind ? "assert" : "inform_or_request",
         semantic_content: content,
         epistemic_status: epistemicStatus,
+        ...(receipt ? { reported_speaker: testimony.speaker } : {}),
         source: sourceRef,
         ...(claimKind ? {
           claim_provenance: {
             schema_version: "cc2-speaker-claim-provenance-v1",
             claim_kind: claimKind,
-            source_kind: claimKind === "explicit_assumption"
-              ? "same_character_explicit_hypothetical_goal"
-              : claimKind === "deliberate_deception"
-                ? "same_character_contrary_known_basis"
-                : inference
+            source_kind: receipt
+              ? "same_character_understood_testimony_receipt"
+              : claimKind === "explicit_assumption"
+                ? "same_character_explicit_hypothetical_goal"
+                : claimKind === "deliberate_deception"
+                  ? "same_character_contrary_known_basis"
+                  : inference
                   ? "same_character_subjective_inference"
                   : recollection
                     ? "admitted_recollection_current_mind"
@@ -270,6 +332,14 @@ export function planCharacterCommunication(characterInput = {}) {
                       : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
+            ...(receipt ? {
+              reported_speaker: testimony.speaker,
+              reported_content: content,
+              receipt_action_id: testimony.source_action_id,
+              listener_understanding_attested: true,
+              reported_content_truth_inferred: false,
+              speaker_private_belief_inferred: false,
+            } : {}),
             ...(assumption ? {
               hypothetical_content: content,
               speaker_authored_hypothetical_frame: true,
@@ -357,6 +427,8 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
         speech_act: sourceMessage.speech_act ?? null,
         semantic_content: sourceMessage.semantic_content ?? null,
         epistemic_status: sourceMessage.epistemic_status ?? null,
+        ...(sourceMessage.reported_speaker
+          ? { reported_speaker: sourceMessage.reported_speaker } : {}),
         addressee_must_infer_indirect_intention:
           sourceMessage.addressee_must_infer_indirect_intention === true,
         world_truth_claimed: false,

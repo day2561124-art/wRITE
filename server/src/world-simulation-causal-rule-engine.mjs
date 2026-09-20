@@ -327,6 +327,7 @@ function publicCommunicationIrLineage(actor, addressee, channel, expressionMode,
     || participants.speaker !== actor || participants.primary_addressee !== addressee
     || goal.expression_mode !== expressionMode || goal.purpose !== null
     || content.semantic_content !== (message.semantic_content ?? null)
+    || (content.reported_speaker ?? null) !== (message.reported_speaker ?? null)
     || epistemic.status !== (message.epistemic_status ?? null)
     || epistemic.source !== null || epistemic.world_truth_claimed !== false
     || carried.intended_meaning !== (channel === "speech"
@@ -380,6 +381,8 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
           speech_act: message.speech_act ?? null,
           semantic_content: message.semantic_content ?? null,
           epistemic_status: message.epistemic_status ?? null,
+          ...(message.reported_speaker
+            ? { reported_speaker: message.reported_speaker } : {}),
           addressee_must_infer_indirect_intention:
             message.addressee_must_infer_indirect_intention === true,
         }
