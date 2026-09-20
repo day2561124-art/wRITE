@@ -135,3 +135,84 @@ test("speaker audience context rejects duplicate and unbounded overhearers", () 
     ...base, ir_context: { possible_overhearers: Array.from({ length: 17 }, (_, i) => `C${i}`) },
   }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
 });
+
+test("speaker-authored IR retains subjective/event content, permitted implication and repair lineage", () => {
+  const ir = buildCharacterCommunicationIr({
+    character: "A", addressee: "B", purpose: "挽留", mode: "indirect",
+    external_action: "speech",
+    message: { semantic_content: basis, speech_act: "indirect_query", epistemic_status: "character_uncertain" },
+    ir_context: {
+      event_content: "B 尚未結束閱讀",
+      subjective_status: "speaker_hypothesis", certainty: "uncertain",
+      allowed_implications: ["可以再待一下"],
+      intentional_display: { intended_meaning: "試探 B", modality: "gaze", target: "B" },
+      state_dependent_modulation: {
+        speaker_state_basis: "內心緊張", expression_constraint: "語氣保留",
+        intended_effect: "避免直接暴露依賴",
+      },
+      response_to: "event-B-1", repair_of: "event-A-0",
+    },
+  });
+  assert.equal(ir.content.event_content, "B 尚未結束閱讀");
+  assert.equal(ir.content.epistemic.subjective_status, "speaker_hypothesis");
+  assert.equal(ir.content.epistemic.certainty, "uncertain");
+  assert.equal(ir.content.epistemic.world_truth_claimed, false);
+  assert.deepEqual(ir.disclosure.allowed_implications, ["可以再待一下"]);
+  assert.equal(ir.expression_planning.intentional_display.intended_meaning, "試探 B");
+  assert.equal(ir.expression_planning.intentional_display.realized, false);
+  assert.equal(ir.expression_planning.state_dependent_modulation.expression_constraint, "語氣保留");
+  assert.equal(ir.expression_planning.state_dependent_modulation.realized, false);
+  assert.equal(ir.interaction.response_to, "event-B-1");
+  assert.equal(ir.interaction.repair_of, "event-A-0");
+  assert.equal(ir.interaction.grounding_status, "not_yet_observed");
+  assert.equal(ir.meaning_layers.observable_signal, null);
+  assert.deepEqual(ir.meaning_layers.listener_inferred_meanings, []);
+});
+
+test("public IR never exports private implication, display, state or repair provenance", () => {
+  const ir = buildCharacterCommunicationIr({
+    character: "A", addressee: "B", purpose: "secret-purpose", mode: "indirect",
+    external_action: "speech", message: { semantic_content: basis },
+    ir_context: {
+      event_content: "secret-event", subjective_status: "secret-subjective",
+      certainty: "secret-certainty", allowed_implications: ["secret-implication"],
+      intentional_display: { intended_meaning: "secret-display", modality: "gaze", target: "secret-target" },
+      state_dependent_modulation: {
+        speaker_state_basis: "secret-state", expression_constraint: "secret-constraint",
+        intended_effect: "secret-effect",
+      },
+      response_to: "secret-response", repair_of: "secret-repair",
+    },
+  }, { publicOnly: true });
+  const output = JSON.stringify(ir);
+  for (const secret of ["secret-purpose", "secret-event", "secret-subjective", "secret-certainty",
+    "secret-implication", "secret-display", "secret-target", "secret-state",
+    "secret-constraint", "secret-effect", "secret-response", "secret-repair"])
+    assert.equal(output.includes(secret), false, `Leaked ${secret}`);
+  assert.deepEqual(ir.disclosure.allowed_implications, []);
+  assert.equal(ir.expression_planning.intentional_display.realized, false);
+  assert.equal(ir.expression_planning.state_dependent_modulation.realized, false);
+  assert.equal(ir.interaction.repair_of, null);
+  assert.equal(ir.boundaries.listener_private_state_inferred, false);
+});
+
+test("silence IR does not fake an observable utterance or grounding", () => {
+  const ir = buildCharacterCommunicationIr({
+    character: "A", addressee: "B", purpose: "不透露", mode: "silence",
+    external_action: "none", message: null,
+  });
+  assert.equal(ir.modalities.speech, null);
+  assert.equal(ir.modalities.nonverbal, null);
+  assert.equal(ir.meaning_layers.observable_signal, null);
+  assert.equal(ir.interaction.grounding_status, "not_yet_observed");
+});
+
+test("allowed implications reject duplicate and unbounded lists", () => {
+  const base = { character: "A", addressee: "B", purpose: "試探", mode: "indirect" };
+  assert.throws(() => buildCharacterCommunicationIr({
+    ...base, ir_context: { allowed_implications: ["X", "X"] },
+  }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
+  assert.throws(() => buildCharacterCommunicationIr({
+    ...base, ir_context: { allowed_implications: Array.from({ length: 17 }, (_, i) => `implication-${i}`) },
+  }), { code: "CHARACTER_COMMUNICATION_IR_INVALID" });
+});

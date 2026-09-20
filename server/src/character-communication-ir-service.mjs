@@ -58,6 +58,10 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
     fail("Overhearers cannot duplicate speaker or primary addressee.");
   const referenceTargets = safeList(context.reference_targets, "reference_targets");
   const communicativeFunctions = safeList(context.communicative_functions, "communicative_functions");
+  const allowedImplications = safeList(context.allowed_implications, "allowed_implications");
+  const display = isRecord(context.intentional_display) ? context.intentional_display : {};
+  const modulation = isRecord(context.state_dependent_modulation)
+    ? context.state_dependent_modulation : {};
   const modalityContext = isRecord(context.modality_meanings) ? context.modality_meanings : {};
   const meaning = (key) => publicOnly ? null : text(modalityContext[key], 600);
 
@@ -75,6 +79,7 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
     },
     content: {
       semantic_content: semanticContent,
+      event_content: publicOnly ? null : text(context.event_content),
       speech_act: speechAct,
       reference_targets: publicOnly ? [] : referenceTargets,
       information_structure: {
@@ -84,12 +89,15 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
       },
       epistemic: {
         status: epistemicStatus,
+        subjective_status: publicOnly ? null : text(context.subjective_status, 120),
+        certainty: publicOnly ? null : text(context.certainty, 120),
         source: publicOnly ? null : epistemicSource,
         world_truth_claimed: false,
       },
     },
     disclosure: {
       withheld_private_content: publicOnly ? null : withheld,
+      allowed_implications: publicOnly ? [] : allowedImplications,
       withheld_content_exposed: false,
       private_purpose_exposed: false,
     },
@@ -116,14 +124,29 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
       body: meaning("body"),
       pause: meaning("pause"),
     },
+    expression_planning: {
+      intentional_display: {
+        intended_meaning: publicOnly ? null : text(display.intended_meaning),
+        modality: publicOnly ? null : text(display.modality, 120),
+        target: publicOnly ? null : text(display.target, 240),
+        // A display request is not an observed movement or a World signal.
+        realized: false,
+      },
+      state_dependent_modulation: {
+        speaker_state_basis: publicOnly ? null : text(modulation.speaker_state_basis, 240),
+        expression_constraint: publicOnly ? null : text(modulation.expression_constraint, 240),
+        intended_effect: publicOnly ? null : text(modulation.intended_effect, 240),
+        realized: false,
+      },
+    },
     meaning_layers: {
       speaker_intended_content: semanticContent ?? signalIntent,
       observable_signal: null,
       listener_inferred_meanings: [],
     },
     interaction: {
-      repair_of: null,
-      response_to: null,
+      repair_of: publicOnly ? null : text(context.repair_of, 240),
+      response_to: publicOnly ? null : text(context.response_to, 240),
       grounding_status: "not_yet_observed",
       interaction_id: publicOnly ? null : text(context.interaction_id, 240),
       thread_id: publicOnly ? null : text(context.thread_id, 240),
