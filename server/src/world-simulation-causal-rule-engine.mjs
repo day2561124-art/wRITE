@@ -311,6 +311,39 @@ function pushTransition(transitions, entity, field, from, to, cause, extra = {})
   transitions.push({ entity, field, from: cloneJson(from), to: cloneJson(to), cause, ...extra });
 }
 
+// The committed event names the selected public IR without copying planner data
+// into World. The selected candidate remains the source of the full public IR.
+function publicCommunicationIrLineage(actor, addressee, channel, expressionMode, message, candidate) {
+  const ir = object(object(candidate.communication).ir);
+  const participants = object(ir.participants);
+  const goal = object(ir.communicative_goal);
+  const content = object(ir.content);
+  const epistemic = object(content.epistemic);
+  const boundaries = object(ir.boundaries);
+  const actionId = candidate.action_id;
+  const carried = object(object(ir.modalities)[channel === "speech" ? "speech" : "nonverbal"]);
+  if (ir.schema_version !== "character-communication-ir-v1"
+    || typeof actionId !== "string" || !/^communication_[a-f0-9]{24}$/.test(actionId)
+    || participants.speaker !== actor || participants.primary_addressee !== addressee
+    || goal.expression_mode !== expressionMode || goal.purpose !== null
+    || content.semantic_content !== (message.semantic_content ?? null)
+    || epistemic.status !== (message.epistemic_status ?? null)
+    || epistemic.source !== null || epistemic.world_truth_claimed !== false
+    || carried.intended_meaning !== (channel === "speech"
+      ? (message.semantic_content ?? null) : (message.signal_intent ?? null))
+    || boundaries.speaker_intended_meaning_only !== true
+    || boundaries.observable_signal_authored !== false
+    || boundaries.listener_inferred_meaning_authored !== false
+    || boundaries.listener_private_state_inferred !== false
+    || boundaries.world_truth_claimed !== false) return null;
+  return {
+    source_action_id: actionId,
+    source_ir_schema_version: "character-communication-ir-v1",
+    source_projection: "public_only",
+    relation: "derived_from_selected_communication_ir",
+  };
+}
+
 function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
   const communication = object(candidate.communication);
   const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
@@ -333,6 +366,9 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
     pushOutcome(outcomes, actor, candidate, "blocked", "nonverbal communication requires bounded signal intent");
     return durationMs;
   }
+  const publicIrLineage = publicCommunicationIrLineage(
+    actor, addressee, channel, expressionMode, message, candidate,
+  );
   const communicationEvent = {
     schema_version: "cc1-world-communication-event-v1",
     actor,
@@ -355,6 +391,7 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
     private_purpose_exposed: false,
     withheld_private_content_exposed: false,
     world_truth_claimed: false,
+    ...(publicIrLineage ? { public_ir_lineage: publicIrLineage } : {}),
   };
   pushOutcome(
     outcomes,

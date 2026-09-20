@@ -163,6 +163,15 @@ try {
   assert.ok(emitted, "Selected communication must reach committed causal history.");
   assert.equal(emitted.character_experience.performed, true);
   assert.equal(emitted.communication_event.schema_version, "cc1-world-communication-event-v1");
+  assert.equal(selectedA.candidate.communication.ir.schema_version, "character-communication-ir-v1");
+  assert.deepEqual(emitted.communication_event.public_ir_lineage, {
+    source_action_id: selectedA.action_id,
+    source_ir_schema_version: selectedA.candidate.communication.ir.schema_version,
+    source_projection: "public_only",
+    relation: "derived_from_selected_communication_ir",
+  });
+  assert.equal(Object.hasOwn(emitted.communication_event, "communication_ir"), false,
+    "World must link rather than copy speaker-authored IR.");
   assert.equal(emitted.communication_event.addressee, "B");
   assert.equal(emitted.communication_event.channel, "speech");
   assert.equal(emitted.communication_event.expression_mode, "indirect");
