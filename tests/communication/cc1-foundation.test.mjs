@@ -101,12 +101,108 @@ test("CC-2 explicitly uncertain hypothesis keeps its uncertainty and does not cl
   assert.equal(JSON.stringify(candidate).includes("cognition.uncertain"), false);
 });
 
-test("CC-2 unknown or deceptive claim kinds cannot bypass a character-side provenance gate", () => {
+test("CC-2 deceptive or unknown claims cannot bypass a character-side provenance gate", () => {
   for (const claim_kind of ["deliberate_deception", "generator_hallucination", "unknown"]) {
     assert.throws(() => planCharacterCommunication(packet(goal("direct", {
       public_content: basis, claim_kind,
     }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
   }
+});
+
+test("CC-2 deliberate deception requires actor-authored intention and contrary known evidence", () => {
+  const misleading = "B 已經看完那本書";
+  const deception = {
+    addressee: "B",
+    target_belief: misleading,
+    contrary_known_content: basis,
+    intends_addressee_to_believe: true,
+    speaker_regards_claim_as_contrary: true,
+  };
+  const input = packet(goal("direct", {
+    public_content: misleading,
+    claim_kind: "deliberate_deception",
+    deception_intent: deception,
+  }), [basis], []);
+  const privatePlan = planCharacterCommunication(input);
+  assert.equal(privatePlan.external_action, "speech");
+  assert.equal(privatePlan.message.semantic_content, misleading);
+  assert.equal(privatePlan.message.speech_act, "assert");
+  assert.equal(privatePlan.message.epistemic_status, "speaker_asserted");
+  assert.equal(privatePlan.message.source, "cognition.known[0]");
+  assert.deepEqual(privatePlan.message.claim_provenance, {
+    schema_version: "cc2-speaker-claim-provenance-v1",
+    claim_kind: "deliberate_deception",
+    source_kind: "same_character_contrary_known_basis",
+    source_ref: "cognition.known[0]",
+    epistemic_status: "speaker_asserted",
+    intended_addressee: "B",
+    intended_target_belief: misleading,
+    contrary_known_content: basis,
+    actor_authored_contrary_belief: true,
+    speaker_intends_to_mislead: true,
+    semantic_contradiction_verified: false,
+    world_truth_claimed: false,
+  });
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(candidate.communication.message.epistemic_status, "speaker_asserted");
+  assert.equal(candidate.communication.message.speech_act, "assert");
+  assert.equal(candidate.communication.ir.content.epistemic.source, null);
+  assert.equal(candidate.communication.ir.content.epistemic.world_truth_claimed, false);
+  assert.equal(candidate.communication.message.world_truth_claimed, false);
+  const publicText = JSON.stringify(candidate);
+  for (const secret of [
+    "deliberate_deception", "same_character_contrary_known_basis", "cognition.known",
+    "speaker_intends_to_mislead", "semantic_contradiction_verified", basis,
+    "我很依戀 B", "希望 B 留下",
+  ]) assert.equal(publicText.includes(secret), false,
+    `Private deceptive intent or evidence leaked: ${secret}`);
+});
+
+test("CC-2 deceptive content cannot be generated solely from goal or unrelated known facts", () => {
+  const misleading = "B 已經看完那本書";
+  const intent = {
+    addressee: "B", target_belief: misleading, contrary_known_content: basis,
+    intends_addressee_to_believe: true, speaker_regards_claim_as_contrary: true,
+  };
+  for (const known of [[], [misleading], ["與該主張無關的事實"]]) {
+    const input = packet(goal("direct", {
+      public_content: misleading, claim_kind: "deliberate_deception",
+      deception_intent: intent,
+    }), known, [basis]);
+    input.world_state = { hidden_fact: basis };
+    input.recovered_memories = [{ content: basis }];
+    const plan = planCharacterCommunication(input);
+    assert.equal(plan.external_action, "none");
+    assert.equal(plan.blocked_reason, "deception_contrary_basis_not_in_same_character_known");
+    assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  }
+});
+
+test("CC-2 deception requires exact target and addressee, not a generator-supplied label", () => {
+  const misleading = "B 已經看完那本書";
+  const intent = {
+    addressee: "B", target_belief: misleading, contrary_known_content: basis,
+    intends_addressee_to_believe: true, speaker_regards_claim_as_contrary: true,
+  };
+  for (const invalid of [
+    { intends_addressee_to_believe: false },
+    { speaker_regards_claim_as_contrary: false },
+    { addressee: "C" },
+    { target_belief: "別的主張" },
+    { contrary_known_content: misleading },
+    { contrary_known_content: "" },
+  ]) {
+    const input = packet(goal("direct", {
+      public_content: misleading, claim_kind: "deliberate_deception",
+      deception_intent: { ...intent, ...invalid },
+    }), [basis], []);
+    assert.throws(() => planCharacterCommunication(input),
+      { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+    public_content: misleading, claim_kind: "deliberate_deception",
+    claim_source_kind: "retrieved_memory", deception_intent: intent,
+  }), [basis], [])), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
 });
 
 test("CC-2 recalled hypothesis requires actually admitted Current Mind content", () => {

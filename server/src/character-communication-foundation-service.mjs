@@ -120,8 +120,23 @@ export function planCharacterCommunication(characterInput = {}) {
     // goal alone authorizes an intention/request, not a new factual claim.
     const claimKind = goal.claim_kind == null ? null : string(goal.claim_kind, 40);
     if (goal.claim_kind != null
-      && !["sincere_assertion", "uncertain_hypothesis"].includes(claimKind))
+      && !["sincere_assertion", "uncertain_hypothesis", "deliberate_deception"]
+        .includes(claimKind))
       fail("Unsupported or ungrounded communication claim kind.");
+    // Deception is an explicit speaker-side act, not a generator license to
+    // invent a factual source. These commitments describe the actor's
+    // intention and contrary subjective basis, not a semantic truth verdict.
+    const deception = claimKind === "deliberate_deception"
+      ? goal.deception_intent : null;
+    if (claimKind === "deliberate_deception"
+      && (!isRecord(deception)
+        || deception.intends_addressee_to_believe !== true
+        || deception.speaker_regards_claim_as_contrary !== true
+        || string(deception.addressee, 240) !== addressee
+        || string(deception.target_belief) !== content
+        || !string(deception.contrary_known_content)
+        || string(deception.contrary_known_content) === content))
+      fail("Deliberate deception requires actor-authored contrary belief and addressee intention.");
     const sourceKind = goal.claim_source_kind == null
       ? null : string(goal.claim_source_kind, 40);
     if (goal.claim_source_kind != null
@@ -129,6 +144,10 @@ export function planCharacterCommunication(characterInput = {}) {
       fail("Unsupported communication claim source.");
     if (sourceKind != null && claimKind !== "uncertain_hypothesis")
       fail("A sensory or recollection source can ground only an explicitly uncertain claim.");
+    const contraryIndex = claimKind === "deliberate_deception"
+      ? list(cognition.known).findIndex(
+        (value) => value === deception.contrary_known_content,
+      ) : -1;
     const recollection = sourceKind === "retrieved_memory"
       ? admittedRecollection(cognition, character, content) : null;
     // The native action proposer supplies cognition (including its observer-
@@ -144,34 +163,41 @@ export function planCharacterCommunication(characterInput = {}) {
     const sourceIndex = claimKind == null || sourceKind != null
       ? -1
       : list(cognition[sourceCollection]).findIndex((value) => value === content);
-    if (claimKind && sourceIndex < 0 && !recollection && !percept) {
+    if (claimKind && (claimKind === "deliberate_deception"
+      ? contraryIndex < 0 : sourceIndex < 0 && !recollection && !percept)) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
         external_action: "none",
         message: null,
-        blocked_reason: sourceKind === "retrieved_memory"
-          ? "recollection_not_admitted_to_current_mind"
-          : sourceKind === "current_perception"
-            ? "claim_not_in_same_character_current_perception"
-            : "claim_not_in_same_character_accessible_cognition",
+        blocked_reason: claimKind === "deliberate_deception"
+          ? "deception_contrary_basis_not_in_same_character_known"
+          : sourceKind === "retrieved_memory"
+            ? "recollection_not_admitted_to_current_mind"
+            : sourceKind === "current_perception"
+              ? "claim_not_in_same_character_current_perception"
+              : "claim_not_in_same_character_accessible_cognition",
         withheld_private_content: withheld,
         other_character_goal_inferred: false,
         world_truth_claimed: false,
       });
     }
-    const sourceRef = recollection
-      ? recollection.sourceRef
-      : percept
-        ? percept.sourceRef
-        : claimKind
-          ? `cognition.${sourceCollection}[${sourceIndex}]`
-          : "cognition.communication_goal";
+    const sourceRef = claimKind === "deliberate_deception"
+      ? `cognition.known[${contraryIndex}]`
+      : recollection
+        ? recollection.sourceRef
+        : percept
+          ? percept.sourceRef
+          : claimKind
+            ? `cognition.${sourceCollection}[${sourceIndex}]`
+            : "cognition.communication_goal";
     const epistemicStatus = claimKind === "sincere_assertion"
       ? "character_known"
       : claimKind === "uncertain_hypothesis"
         ? "character_uncertain"
-        : "speaker_intention";
+        : claimKind === "deliberate_deception"
+          ? "speaker_asserted"
+          : "speaker_intention";
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
@@ -185,13 +211,23 @@ export function planCharacterCommunication(characterInput = {}) {
           claim_provenance: {
             schema_version: "cc2-speaker-claim-provenance-v1",
             claim_kind: claimKind,
-            source_kind: recollection
-              ? "admitted_recollection_current_mind"
-              : percept
-                ? "same_character_current_perception"
-                : "same_character_accessible_cognition",
+            source_kind: claimKind === "deliberate_deception"
+              ? "same_character_contrary_known_basis"
+              : recollection
+                ? "admitted_recollection_current_mind"
+                : percept
+                  ? "same_character_current_perception"
+                  : "same_character_accessible_cognition",
             source_ref: sourceRef,
             epistemic_status: epistemicStatus,
+            ...(claimKind === "deliberate_deception" ? {
+              intended_addressee: addressee,
+              intended_target_belief: content,
+              contrary_known_content: deception.contrary_known_content,
+              actor_authored_contrary_belief: true,
+              speaker_intends_to_mislead: true,
+              semantic_contradiction_verified: false,
+            } : {}),
             ...(recollection ? {
               possibly_incorrect: recollection.item.possibly_incorrect !== false,
               source_confused: recollection.item.source_confused === true,
