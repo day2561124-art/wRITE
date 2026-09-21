@@ -70,6 +70,73 @@ assert.equal(sharedWorldLoop.focused, true);
 assert(sharedWorldLoop.affected_tests.some((item) => item.includes("phase62z-audibility-propagation")));
 assert(sharedWorldLoop.affected_tests.some((item) => item.includes("phase65b-subjective-claim-conflict")));
 
+const communicationNativeIntegration = await plan([
+  "server/src/character-communication-listener-understanding-service.mjs",
+]);
+assert.equal(
+  communicationNativeIntegration.suite,
+  "world_simulation",
+  JSON.stringify(communicationNativeIntegration, null, 2),
+);
+assert.deepEqual(
+  communicationNativeIntegration.required_suites,
+  ["world_simulation", "communication"],
+);
+assert.equal(communicationNativeIntegration.focused, true);
+assert.equal(communicationNativeIntegration.fallback_reason, null);
+assert(communicationNativeIntegration.selected_group_tests.includes(
+  "tests/communication/cc6-native-listener-interpretation.test.mjs",
+));
+assert(communicationNativeIntegration.selected_group_tests.some(
+  (item) => item.startsWith("tests/phase62/"),
+));
+
+const communicationGroupedTest = await plan([
+  "tests/communication/cc6-native-listener-interpretation.test.mjs",
+]);
+assert.equal(communicationGroupedTest.suite, "communication");
+assert.deepEqual(communicationGroupedTest.required_suites, ["communication"]);
+assert.equal(communicationGroupedTest.focused, true);
+assert.equal(communicationGroupedTest.certification_required, false);
+
+const communicationCrossSystem = await plan([
+  "server/src/character-communication-foundation-service.mjs",
+]);
+assert.equal(
+  communicationCrossSystem.suite,
+  "world_simulation",
+  JSON.stringify(communicationCrossSystem, null, 2),
+);
+assert.deepEqual(
+  communicationCrossSystem.required_suites,
+  ["world_simulation", "communication"],
+);
+assert.equal(communicationCrossSystem.focused, true);
+assert.equal(communicationCrossSystem.fallback_reason, null);
+assert(communicationCrossSystem.selected_group_tests.includes(
+  "tests/communication/cc1-foundation.test.mjs",
+));
+assert(communicationCrossSystem.selected_group_tests.some((item) => item.startsWith("tests/phase62/")));
+
+const communicationIr = await plan([
+  "server/src/character-communication-ir-service.mjs",
+]);
+assert.equal(communicationIr.suite, "world_simulation", JSON.stringify(communicationIr, null, 2));
+assert.deepEqual(communicationIr.required_suites, ["world_simulation", "communication"]);
+assert(communicationIr.affected_tests.includes(
+  "tests/communication/communication-ir.test.mjs",
+));
+
+const unreviewedCommunicationSource = await plan([
+  "server/src/character-communication-speaker-recognition-service.mjs",
+]);
+assert.equal(unreviewedCommunicationSource.suite, "all");
+assert.equal(unreviewedCommunicationSource.focused, false);
+assert.equal(
+  unreviewedCommunicationSource.fallback_reason,
+  "UNSCOPED_CHANGE:server/src/character-communication-speaker-recognition-service.mjs",
+);
+
 const groupedTest = await plan([
   "tests/phase65/phase65b-subjective-claim-conflict-revision-projection.test.mjs",
 ]);

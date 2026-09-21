@@ -1,3 +1,14 @@
+export const communicationSteps = Object.freeze([
+  Object.freeze(["CC-1 communication planning foundation", ["tests/communication/cc1-foundation.test.mjs"]]),
+  Object.freeze(["CC-1 native communication loop closure", ["tests/communication/cc1-native-loop.test.mjs"]]),
+  Object.freeze(["CC-5 bounded Mandarin surface realization", ["tests/communication/cc5-mandarin-surface-realization.test.mjs"]]),
+  Object.freeze(["CC-5 native Mandarin realization loop", ["tests/communication/cc5-native-loop.test.mjs"]]),
+  Object.freeze(["CC-6A bounded listener reception and interpretation", ["tests/communication/cc6-listener-reception.test.mjs"]]),
+  Object.freeze(["CC-6B native speech acoustic bridge", ["tests/communication/cc6-native-acoustic-bridge.test.mjs"]]),
+  Object.freeze(["CC-6C native listener recognition and subjective interpretation", ["tests/communication/cc6-native-listener-interpretation.test.mjs"]]),
+  Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
+]);
+
 export const phase62WorldSimulationSteps = Object.freeze([
   Object.freeze(["Phase 62A-R1 capability envelope", Object.freeze(["tests/phase62/phase62a-r1-capability-envelope.test.mjs"])]),
   Object.freeze(["Phase 62A-R1 character-facing runtime", Object.freeze(["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"])]),

@@ -4,11 +4,12 @@ import path from "node:path";
 
 import {
   cognitionSteps,
+  communicationSteps,
   memoryRetrievalSteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
 
-export const affectedTestSelectorVersion = "affected-test-selector-v2";
+export const affectedTestSelectorVersion = "affected-test-selector-v3";
 
 function normalizeProjectPath(value) {
   return String(value ?? "")
@@ -26,7 +27,17 @@ function stepPaths(steps) {
 const memoryRetrievalTests = stepPaths(memoryRetrievalSteps);
 const cognitionTests = stepPaths(cognitionSteps);
 const worldSimulationTests = stepPaths(worldSimulationSteps);
+const communicationTests = stepPaths(communicationSteps);
+// Reviewed committed modules only: new/unknown modules keep the conservative fallback.
+const communicationSources = new Set([
+  "server/src/character-communication-foundation-service.mjs",
+  "server/src/character-communication-ir-service.mjs",
+  "server/src/character-communication-mandarin-realization-service.mjs",
+  "server/src/character-communication-listener-reception-service.mjs",
+  "server/src/character-communication-listener-understanding-service.mjs",
+]);
 const groupedTests = new Set([
+  ...communicationTests,
   ...worldSimulationTests,
   ...cognitionTests,
   ...memoryRetrievalTests,
@@ -38,6 +49,8 @@ const ANALYZABLE_TEST_INFRA_PATHS = new Set([
   "tests/test-suite-groups.test.mjs",
   "tests/affected-test-selector.mjs",
   "tests/affected-test-selector.test.mjs",
+  "tests/run-affected.mjs",
+  "tests/run-communication.mjs",
 ]);
 const STATIC_RUN_ALL_TEST_STEP_PATTERN = /^\s*\["[^"\r\n]+",\s*\["(tests\/[^"\r\n]+\.test\.mjs)"\]\],\s*$/u;
 
@@ -248,6 +261,9 @@ function collectAffectedTests(reverseGraph, changedPath) {
 }
 
 function focusedSuiteForTests(tests) {
+  if (tests.size > 0 && [...tests].every((item) => communicationTests.has(item))) return "communication";
+  // Cross-component evidence must retain the nearest existing subsystem too.
+  tests = new Set([...tests].filter((item) => !communicationTests.has(item)));
   if (tests.size > 0 && [...tests].every((item) => memoryRetrievalTests.has(item))) {
     return "memory_retrieval";
   }
@@ -264,6 +280,7 @@ function fallbackPlan(changedPaths, reason, affectedTests = []) {
   return {
     selector_version: affectedTestSelectorVersion,
     suite: "all",
+    required_suites: ["all"],
     focused: false,
     fallback_reason: reason,
     changed_paths: [...changedPaths].sort(),
@@ -286,6 +303,15 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAll
   for (const changedPath of normalizedChangedPaths) {
     const eligibleProduction = changedPath.startsWith("server/src/world-simulation-")
       && changedPath.endsWith(".mjs");
+    const eligibleCommunication = communicationSources.has(changedPath);
+    if (eligibleCommunication) {
+      let source;
+      try { source = await readFile(path.join(projectRoot, changedPath), "utf8"); }
+      catch { return fallbackPlan(normalizedChangedPaths, `SOURCE_UNAVAILABLE:${changedPath}`); }
+      if (/\bimport\s*\((?!\s*["'])|\b(?:require|readFile|readFileSync|readdir|readdirSync|fetch)\s*\(/u.test(source)) {
+        return fallbackPlan(normalizedChangedPaths, `UNANALYZABLE_SOURCE_DEPENDENCY:${changedPath}`);
+      }
+    }
     const eligibleGroupedTest = groupedTests.has(changedPath);
     const eligibleAnalyzableTestInfra = ANALYZABLE_TEST_INFRA_PATHS.has(changedPath);
     if (changedPath === RUN_ALL_PATH) {
@@ -306,7 +332,7 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAll
       }
       continue;
     }
-    if (!eligibleProduction && !eligibleGroupedTest && !eligibleAnalyzableTestInfra) {
+    if (!eligibleProduction && !eligibleCommunication && !eligibleGroupedTest && !eligibleAnalyzableTestInfra) {
       return fallbackPlan(normalizedChangedPaths, `UNSCOPED_CHANGE:${changedPath}`);
     }
   }
@@ -343,6 +369,7 @@ export async function selectAffectedTestPlan({ projectRoot, changedPaths, runAll
   return {
     selector_version: affectedTestSelectorVersion,
     suite,
+    required_suites: [suite, ...((suite !== "communication" && [...selectedGroupTests].some((item) => communicationTests.has(item))) ? ["communication"] : [])],
     focused: true,
     fallback_reason: null,
     changed_paths: [...normalizedChangedPaths].sort(),

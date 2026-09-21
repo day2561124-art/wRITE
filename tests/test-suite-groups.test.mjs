@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   cognitionSteps,
+  communicationSteps,
   memoryRetrievalSteps,
   phase62CognitionIntegrationSteps,
   phase62WorldSimulationSteps,
@@ -211,5 +212,20 @@ for (const testPath of cognitionPaths) {
     `Cognition runner must not pull legacy writing pipeline test: ${testPath}`,
   );
 }
+
+const communicationPaths = pathsFor(communicationSteps);
+const activeCommunicationPaths = [...runAllSource.matchAll(/"(tests\/communication\/[^"\r\n]+\.test\.mjs)"/gu)].map((match) => match[1]);
+const supplementalCommunicationPaths = ["tests/communication/communication-ir.test.mjs"];
+const expectedCommunicationPaths = [
+  ...activeCommunicationPaths,
+  ...supplementalCommunicationPaths.filter((testPath) => !activeCommunicationPaths.includes(testPath)),
+];
+assertUnique("communication runner", communicationPaths);
+assert.deepEqual(
+  communicationPaths,
+  expectedCommunicationPaths,
+  "Communication group must cover all active run-all communication tests plus reviewed supplemental contracts.",
+);
+for (const testPath of communicationPaths) assert.ok(fs.existsSync(path.join(__dirname, "..", testPath)));
 
 console.log("Test-suite dependency-aligned inventory passed.");

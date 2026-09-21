@@ -11,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(__filename), "..");
 
 const suiteScripts = Object.freeze({
+  communication: "tests/run-communication.mjs",
   memory_retrieval: "tests/run-memory-retrieval.mjs",
   cognition: "tests/run-cognition.mjs",
   world_simulation: "tests/run-world-simulation.mjs",
@@ -28,15 +29,17 @@ if (plan.focused && plan.certification_required) {
   );
 }
 
-const script = suiteScripts[plan.suite];
-if (!script) {
-  throw new Error(`Affected selector returned unsupported suite: ${plan.suite}`);
-}
+const requiredSuites = plan.required_suites ?? [plan.suite];
+const steps = requiredSuites.map((suite) => {
+  const script = suiteScripts[suite];
+  if (!script) throw new Error(`Affected selector returned unsupported suite: ${suite}`);
+  return [`Affected gate -> ${suite}`, [script]];
+});
 
 const timeoutMs = plan.suite === "all" ? 7_200_000 : undefined;
 
 await runTestSteps(
-  [[`Affected gate -> ${plan.suite}`, [script]]],
+  steps,
   { suiteLabel: `Affected test gate (${plan.suite})`, timeoutMs },
 );
 
