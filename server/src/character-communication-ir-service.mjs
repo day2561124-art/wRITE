@@ -41,6 +41,12 @@ export function buildCharacterCommunicationIr(plan = {}, options = {}) {
   const indirect = sourceMessage.addressee_must_infer_indirect_intention === true;
   const withheld = text(plan.withheld_private_content);
   const publicOnly = options.publicOnly === true;
+  // A direct caller of the shared IR must not bypass the speaker planner's
+  // explicit disclosure boundary. Keep intended implications private, but
+  // reject a verbatim withheld string inside any public signal payload.
+  if (publicOnly && withheld
+    && [semanticContent, signalIntent].some((value) => value?.includes(withheld)))
+    fail("Public signal contains explicitly withheld private content.");
   // Only speaker-authored, explicitly supplied planning metadata may fill these
   // optional slots. Missing data stays unknown; World and listener state are
   // never reverse-filled from the planner.

@@ -94,6 +94,39 @@ test("native planner carries speaker-authored pragmatic context privately withou
   assert.equal(ir.interaction.grounding_status, "not_yet_observed");
 });
 
+test("CC-3 shared public IR rejects verbatim withheld content even without the native planner", () => {
+  const base = {
+    character: "A", addressee: "B", purpose: "希望 B 留下",
+    withheld_private_content: privateContent,
+  };
+  for (const [mode, external_action, message] of [
+    ["direct", "speech", { semantic_content: `其實${privateContent}，別走` }],
+    ["indirect", "speech", { semantic_content: `只是說${privateContent}` }],
+    ["nonverbal", "nonverbal_signal", { signal_intent: `展示文字：${privateContent}` }],
+  ]) {
+    const plan = { ...base, mode, external_action, message };
+    assert.throws(() => buildCharacterCommunicationIr(plan, { publicOnly: true }), {
+      code: "CHARACTER_COMMUNICATION_IR_INVALID",
+    });
+    // Private planning may inspect the explicit act; only publication is blocked.
+    assert.equal(buildCharacterCommunicationIr(plan).disclosure.withheld_private_content, privateContent);
+  }
+});
+
+test("CC-3 shared public IR permits an indirect hint while hiding private implication", () => {
+  const ir = buildCharacterCommunicationIr({
+    character: "A", addressee: "B", purpose: "希望 B 留下", mode: "indirect",
+    external_action: "speech", withheld_private_content: privateContent,
+    message: { semantic_content: basis, addressee_must_infer_indirect_intention: true },
+    ir_context: { allowed_implications: [privateContent] },
+  }, { publicOnly: true });
+  assert.equal(ir.content.semantic_content, basis);
+  assert.equal(ir.pragmatics.listener_inference_required, true);
+  assert.deepEqual(ir.disclosure.allowed_implications, []);
+  assert.equal(JSON.stringify(ir).includes(privateContent), false);
+  assert.deepEqual(ir.meaning_layers.listener_inferred_meanings, []);
+});
+
 test("shared IR keeps withheld content private while retaining disclosure provenance", () => {
   const candidate = buildCharacterCommunicationActionCandidate(indirectInput);
   const ir = candidate.communication.ir;
