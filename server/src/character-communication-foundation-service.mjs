@@ -113,6 +113,18 @@ export function planCharacterCommunication(characterInput = {}) {
   const mode = goal.mode;
   if (!["direct", "indirect", "silence", "nonverbal"].includes(mode))
     fail("Communication mode must be an explicit character-goal decision.");
+  // CC-3: an opportunity is a decision in this speaker's current cognition,
+  // never a World or partner-state inference. A choice not to participate
+  // must not be converted into a speech/nonverbal candidate.
+  const opportunity = goal.communication_opportunity == null
+    ? null : string(goal.communication_opportunity, 40);
+  if (goal.communication_opportunity != null
+    && !["initiate", "respond", "continue", "stay_silent", "withdraw"].includes(opportunity))
+    fail("Communication opportunity must be an explicit bounded speaker decision.");
+  if (mode === "silence" && opportunity
+    && !["stay_silent", "withdraw"].includes(opportunity))
+    fail("An active communication opportunity cannot use silence mode.");
+  const opportunityField = opportunity ? { communication_opportunity: opportunity } : {};
   const privateContent = string(goal.private_content);
   if (goal.withhold_private_content === true && !privateContent)
     fail("Withholding requires a defined private content.");
@@ -125,10 +137,24 @@ export function planCharacterCommunication(characterInput = {}) {
   // bounded normalization of this optional context.
   const irContext = isRecord(goal.communication_context)
     ? copy(goal.communication_context) : null;
+  if (opportunity === "stay_silent" || opportunity === "withdraw") {
+    return copy({
+      version: characterCommunicationFoundationVersion,
+      character, addressee, purpose, mode,
+      ...opportunityField,
+      external_action: "none",
+      message: null,
+      withheld_private_content: withheld,
+      ...(irContext ? { ir_context: irContext } : {}),
+      other_character_goal_inferred: false,
+      world_truth_claimed: false,
+    });
+  }
   if (mode === "silence") {
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
+      ...opportunityField,
       external_action: "none",
       message: null,
       withheld_private_content: withheld,
@@ -144,6 +170,7 @@ export function planCharacterCommunication(characterInput = {}) {
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
+      ...opportunityField,
       external_action: "nonverbal_signal",
       message: { signal_intent: signal, semantic_content: null },
       withheld_private_content: withheld,
@@ -275,6 +302,7 @@ export function planCharacterCommunication(characterInput = {}) {
       return copy({
         version: characterCommunicationFoundationVersion,
         character, addressee, purpose, mode,
+        ...opportunityField,
         external_action: "none",
         message: null,
         blocked_reason: claimKind === "attributed_testimony"
@@ -322,6 +350,7 @@ export function planCharacterCommunication(characterInput = {}) {
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
+      ...opportunityField,
       external_action: "speech",
       message: {
         speech_act: claimKind === "attributed_testimony"
@@ -409,6 +438,7 @@ export function planCharacterCommunication(characterInput = {}) {
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
+      ...opportunityField,
       external_action: "none",
       message: null,
       blocked_reason: "basis_not_in_same_character_accessible_cognition",
@@ -421,6 +451,7 @@ export function planCharacterCommunication(characterInput = {}) {
   return copy({
     version: characterCommunicationFoundationVersion,
     character, addressee, purpose, mode,
+    ...opportunityField,
     external_action: "speech",
     message: {
       speech_act: "indirect_query",

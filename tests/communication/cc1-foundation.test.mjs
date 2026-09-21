@@ -72,6 +72,96 @@ test("CC-3 a speaker may deliberately imply withheld content without saying its 
   assert.equal(candidate.communication.ir.boundaries.listener_private_state_inferred, false);
 });
 
+test("CC-3 speaker-authored communication opportunities distinguish participation from nonparticipation", () => {
+  for (const opportunity of ["initiate", "respond", "continue"]) {
+    const input = packet(goal("indirect", { communication_opportunity: opportunity }));
+    const planned = planCharacterCommunication(input);
+    assert.equal(planned.communication_opportunity, opportunity);
+    assert.equal(planned.external_action, "speech");
+    const publicCandidate = buildCharacterCommunicationActionCandidate(input);
+    assert.ok(publicCandidate);
+    assert.equal(JSON.stringify(publicCandidate).includes("communication_opportunity"), false,
+      "Speaker's decision opportunity must not become a public receipt.");
+  }
+  for (const opportunity of ["stay_silent", "withdraw"]) {
+    // The opportunity decision overrides a previously considered speech mode,
+    // without requiring speech text or inventing a physical departure action.
+    const input = packet(goal("direct", {
+      communication_opportunity: opportunity, public_content: "不要說出口",
+    }));
+    const planned = planCharacterCommunication(input);
+    assert.equal(planned.communication_opportunity, opportunity);
+    assert.equal(planned.external_action, "none");
+    assert.equal(planned.message, null);
+    assert.equal(Object.hasOwn(planned, "blocked_reason"), false);
+    assert.equal(buildCharacterCommunicationActionCandidate(input), null);
+  }
+  assert.equal(planCharacterCommunication(packet(goal("silence", {
+    communication_opportunity: "stay_silent",
+  }))).external_action, "none");
+});
+
+test("CC-3 rejects unsupported or contradictory speaker opportunity instructions", () => {
+  for (const communication_opportunity of ["auto", "invented", "", 42]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("direct", {
+      communication_opportunity, public_content: "可以",
+    }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  for (const communication_opportunity of ["initiate", "respond", "continue"]) {
+    assert.throws(() => planCharacterCommunication(packet(goal("silence", {
+      communication_opportunity,
+    }))), { code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID" });
+  }
+  assert.equal(planCharacterCommunication(packet(goal("silence"))).external_action, "none",
+    "Legacy no-op decision remains valid without the optional field.");
+});
+
+test("CC-3 different partners or current Brain states can support different actor-authored strategies", () => {
+  const purpose = "希望對方再待一會";
+  const friend = packet(goal("indirect", {
+    purpose, addressee: "B", communication_opportunity: "continue",
+  }));
+  friend.cognition.relationship_cognition = { B: "熟悉的朋友" };
+  friend.cognition.emotion = { label: "緊張" };
+  const newPartner = packet(goal("direct", {
+    purpose, addressee: "C", communication_opportunity: "initiate",
+    public_content: "要不要再留一下？",
+  }));
+  newPartner.cognition.relationship_cognition = { C: "剛認識的人" };
+  newPartner.cognition.emotion = { label: "平靜" };
+  const friendPlan = planCharacterCommunication(friend);
+  const newPlan = planCharacterCommunication(newPartner);
+  assert.equal(friendPlan.purpose, newPlan.purpose);
+  assert.equal(friendPlan.mode, "indirect");
+  assert.equal(newPlan.mode, "direct");
+  assert.equal(friendPlan.message.semantic_content, basis);
+  assert.equal(newPlan.message.semantic_content, "要不要再留一下？");
+  for (const input of [friend, newPartner]) {
+    const candidate = buildCharacterCommunicationActionCandidate(input);
+    assert.equal(candidate.communication.addressee, input.cognition.communication_goal.addressee);
+    assert.equal(JSON.stringify(candidate).includes(purpose), false);
+  }
+
+  // The same addressee can also receive a different explicit choice after a
+  // same-character state change. Changing emotion alone cannot create a goal
+  // or silently override an existing speaker decision.
+  const tense = packet(goal("nonverbal", {
+    purpose, communication_opportunity: "respond",
+    nonverbal_signal: "看著 B，輕點頭",
+  }));
+  tense.cognition.emotion = { label: "緊張" };
+  const withdrawn = packet(goal("nonverbal", {
+    purpose, communication_opportunity: "withdraw",
+    nonverbal_signal: "看著 B，輕點頭",
+  }));
+  withdrawn.cognition.emotion = { label: "不願交談" };
+  assert.equal(planCharacterCommunication(tense).external_action, "nonverbal_signal");
+  assert.equal(planCharacterCommunication(withdrawn).external_action, "none");
+  assert.equal(buildCharacterCommunicationActionCandidate(withdrawn), null);
+  const noGoal = { ...tense, cognition: { emotion: { label: "緊張" } } };
+  assert.equal(planCharacterCommunication(noGoal), null);
+});
+
 test("CC-3 disclosure constraint belongs to this character goal and addressee", () => {
   const direct = goal("direct", {
     withhold_private_content: false,
