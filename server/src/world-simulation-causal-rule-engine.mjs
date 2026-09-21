@@ -3,6 +3,11 @@ import {
 } from "./agent-run-service.mjs";
 import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
 import {
+  buildWorldSimulationCommunicationAcousticBridgeContract,
+  projectWorldSimulationCommunicationAcousticBridge,
+  worldSimulationCommunicationAcousticBridgeVersion,
+} from "./world-simulation-communication-acoustic-bridge-service.mjs";
+import {
   adjudicateWorldSimulationCombat,
   buildWorldSimulationCombatCausalContract,
 } from "./world-simulation-combat-causal-service.mjs";
@@ -903,6 +908,7 @@ export function buildWorldSimulationCausalRuleContract() {
       withheld_private_content_exposed_in_world_event: false,
       surface_realization_completed_here: false,
       recipient_comprehension_modeled_here: false,
+      acoustic_bridge: buildWorldSimulationCommunicationAcousticBridgeContract(),
     },
     combat: {
       weapon_holder_state_enforced: true,
@@ -1223,6 +1229,56 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   });
   next = postPhysicsActorProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+
+  // CC-6B turns only already-resolved, realized speech outcomes into a
+  // short-lived physical sound source. The sound carries no wording or
+  // proposition. It remains available through the next turn's perception
+  // phase, then this projection expires it during that turn's causal resolve.
+  const communicationAcousticBridge =
+    projectWorldSimulationCommunicationAcousticBridge({
+      world_state: snapshot,
+      scene_id: sceneId,
+      turn_id: input.turn_id ?? null,
+      action_outcomes: outcomes,
+      suppressed_action_ids: suppressedActionIds,
+    });
+  const acousticRegistrationByAction = new Map(
+    communicationAcousticBridge.registrations.map((item) => [item.action_id, item]),
+  );
+  const acousticSkipByAction = new Map(
+    communicationAcousticBridge.skipped.map((item) => [item.action_id, item]),
+  );
+  for (const outcome of outcomes) {
+    if (outcome?.result !== "communication_emitted") continue;
+    const actionId = String(outcome.action_id ?? "").trim();
+    const registration = acousticRegistrationByAction.get(actionId);
+    const skipped = acousticSkipByAction.get(actionId);
+    outcome.communication_acoustic_signal = {
+      schema_version: worldSimulationCommunicationAcousticBridgeVersion,
+      registered: Boolean(registration),
+      source_action_id: actionId || null,
+      sound_id: registration?.sound_id ?? null,
+      reason: registration ? "registered" : (skipped?.status ?? "not_registered"),
+      lifecycle: registration ? "next_perception_only" : null,
+      surface_text_exposed_in_signal: false,
+      semantic_content_exposed_in_signal: false,
+      speaker_identity_recognition_inferred: false,
+      listener_comprehension_inferred: false,
+      grounding_inferred: false,
+    };
+  }
+  if (communicationAcousticBridge.changed) {
+    next.sound_events = cloneJson(communicationAcousticBridge.next_sound_events);
+    pushTransition(
+      transitions,
+      "world",
+      "sound_events",
+      communicationAcousticBridge.before_sound_events,
+      communicationAcousticBridge.next_sound_events,
+      "expired prior communication sound residues and registered current committed speech signals",
+      { time_ms: elapsedMs, source_layer: "causal_resolution" },
+    );
+  }
 
   const causalTimeline = buildResolvedWorldSimulationGlobalTimeline({
     arbitration: timelineArbitration,

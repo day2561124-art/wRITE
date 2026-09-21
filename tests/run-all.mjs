@@ -921,6 +921,7 @@ const steps = [
   ["CC-5 bounded Mandarin surface realization", ["tests/communication/cc5-mandarin-surface-realization.test.mjs"]],
   ["CC-5 native Mandarin realization loop", ["tests/communication/cc5-native-loop.test.mjs"]],
   ["CC-6A bounded listener reception and interpretation", ["tests/communication/cc6-listener-reception.test.mjs"]],
+  ["CC-6B native speech acoustic bridge", ["tests/communication/cc6-native-acoustic-bridge.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
