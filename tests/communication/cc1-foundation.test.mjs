@@ -42,6 +42,47 @@ test("direct expression follows character's distinct disclosure decision", () =>
   assert.equal(value.mode, "direct");
 });
 
+test("CC-3 withholding blocks exact private text embedded in public expressions", () => {
+  const secret = "我很依戀 B";
+  const cases = [
+    goal("direct", { public_content: `其實${secret}，別走。` }),
+    goal("indirect", { basis_claim: `大家說${secret}` }),
+    goal("nonverbal", { nonverbal_signal: `比手勢傳達：${secret}` }),
+  ];
+  for (const g of cases) {
+    const input = packet(g, [basis, `大家說${secret}`]);
+    assert.throws(() => planCharacterCommunication(input), {
+      code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+    });
+    assert.throws(() => buildCharacterCommunicationActionCandidate(input), {
+      code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+    });
+  }
+});
+
+test("CC-3 a speaker may deliberately imply withheld content without saying its literal text", () => {
+  const input = packet(goal("indirect", {
+    communication_context: { allowed_implications: ["我很依戀 B"] },
+  }));
+  const plan = planCharacterCommunication(input);
+  assert.equal(plan.message.semantic_content, basis);
+  assert.deepEqual(plan.ir_context.allowed_implications, ["我很依戀 B"]);
+  const candidate = buildCharacterCommunicationActionCandidate(input);
+  assert.equal(JSON.stringify(candidate).includes("我很依戀 B"), false);
+  assert.equal(candidate.communication.ir.boundaries.listener_private_state_inferred, false);
+});
+
+test("CC-3 disclosure constraint belongs to this character goal and addressee", () => {
+  const direct = goal("direct", {
+    withhold_private_content: false,
+    public_content: "其實我很依戀 B，別走。",
+  });
+  const plan = planCharacterCommunication(packet(direct));
+  assert.equal(plan.message.semantic_content, direct.public_content);
+  assert.equal(plan.withheld_private_content, null);
+  assert.equal(plan.addressee, "B");
+});
+
 test("CC-2 sincere assertion retains bounded same-character provenance only in private plan", () => {
   const input = packet(goal("direct", {
     public_content: basis,

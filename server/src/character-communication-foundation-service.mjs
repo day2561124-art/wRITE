@@ -21,6 +21,14 @@ function fail(message) {
   throw error;
 }
 
+// A speaker may imply a withheld idea without literally disclosing it.
+// Check only explicitly withheld text in the public semantic payload; do not
+// attempt a semantic lie detector or inspect private implied meanings.
+function guardLiteralDisclosure(publicContent, withheld) {
+  if (withheld && publicContent?.includes(withheld))
+    fail("Public expression contains explicitly withheld private content.");
+}
+
 // The v3/v5 Runtime owns the Current Mind readout. Recovered memories,
 // memory-candidate catalogs, and attention compatibility aliases cannot
 // independently authorize an utterance about a recollection.
@@ -132,6 +140,7 @@ export function planCharacterCommunication(characterInput = {}) {
   if (mode === "nonverbal") {
     const signal = string(goal.nonverbal_signal, 120);
     if (!signal) fail("Nonverbal expression needs character-authored signal intent.");
+    guardLiteralDisclosure(signal, withheld);
     return copy({
       version: characterCommunicationFoundationVersion,
       character, addressee, purpose, mode,
@@ -150,6 +159,7 @@ export function planCharacterCommunication(characterInput = {}) {
       ? privateContent
       : goal.public_content);
     if (!content) fail("Direct communication requires character-owned expressible content.");
+    guardLiteralDisclosure(content, withheld);
 
     // CC-2: a declared factual assertion or uncertain hypothesis must be
     // grounded in the same character's accessible cognition. A communication
@@ -391,7 +401,7 @@ export function planCharacterCommunication(characterInput = {}) {
     });
   }
   if (!basis) fail("Indirect communication requires an explicit semantic basis.");
-  if (basis === withheld) fail("Withheld inner content cannot be used as an indirect public basis.");
+  guardLiteralDisclosure(basis, withheld);
   const knownIndex = list(cognition.known).findIndex((v) => v === basis);
   const uncertainIndex = list(cognition.uncertain).findIndex((v) => v === basis);
   if (knownIndex < 0 && uncertainIndex < 0) {
