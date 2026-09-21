@@ -918,6 +918,8 @@ const steps = [
   ["Character Memory Core Certification Final Audit", ["tests/certification/character-memory-core-certification.test.mjs"]],
   ["CC-1 communication planning foundation", ["tests/communication/cc1-foundation.test.mjs"]],
   ["CC-1 native communication loop closure", ["tests/communication/cc1-native-loop.test.mjs"]],
+  ["CC-5 bounded Mandarin surface realization", ["tests/communication/cc5-mandarin-surface-realization.test.mjs"]],
+  ["CC-5 native Mandarin realization loop", ["tests/communication/cc5-native-loop.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

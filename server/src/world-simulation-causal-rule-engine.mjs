@@ -1,6 +1,7 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
 import {
   adjudicateWorldSimulationCombat,
   buildWorldSimulationCombatCausalContract,
@@ -345,6 +346,63 @@ function publicCommunicationIrLineage(actor, addressee, channel, expressionMode,
   };
 }
 
+export function validateCommunicationSurfaceRealization(actor, candidate, communication, message) {
+  const complete = communication.surface_realization_complete === true;
+  const supplied = communication.surface_realization;
+  if (!complete) {
+    if (supplied != null) return { ok: false, reason: "surface realization payload supplied without completion flag" };
+    return { ok: true, realization: null };
+  }
+  const realization = object(supplied);
+  const boundaries = object(realization.boundaries);
+  const surfaceText = String(realization.surface_text ?? "").trim();
+  const semanticContent = message.semantic_content ?? null;
+  if (realization.schema_version !== "cc5-mandarin-clause-realization-v1"
+    || realization.language !== "zh"
+    || realization.realization_kind !== "bounded_clause_linearization"
+    || realization.semantic_anchor !== semanticContent
+    || !surfaceText
+    || [...surfaceText].length > 600
+    || boundaries.speaker_authored_clause_slots_only !== true
+    || boundaries.lexical_choice_inferred !== false
+    || boundaries.classifier_inferred !== false
+    || boundaries.subject_omission_inferred !== false
+    || boundaries.semantic_equivalence_verified !== false
+    || boundaries.new_proposition_authored !== false
+    || boundaries.listener_understanding_inferred !== false
+    || boundaries.listener_private_state_inferred !== false
+    || boundaries.world_truth_claimed !== false
+    || boundaries.model_generation_required !== false) {
+    return { ok: false, reason: "invalid or unbound Mandarin surface realization" };
+  }
+  // Do not trust the candidate's text, declared features, or boundary flags.
+  // Re-linearize only the normalized public request against the selected message.
+  let replayed;
+  try {
+    replayed = realizeCharacterCommunicationMandarin({
+      external_action: "speech",
+      message,
+      surface_realization_request: realization.surface_request,
+    });
+  } catch {
+    return { ok: false, reason: "Mandarin surface request cannot be re-realized" };
+  }
+  if (JSON.stringify(replayed) !== JSON.stringify(realization)) {
+    return { ok: false, reason: "Mandarin surface realization differs from deterministic replay" };
+  }
+  return {
+    ok: true,
+    realization: {
+      schema_version: realization.schema_version,
+      language: "zh",
+      surface_text: surfaceText,
+      source_action_id: candidate.action_id ?? null,
+      semantic_anchor: semanticContent,
+      relation: "derived_from_selected_candidate_surface_realization",
+    },
+  };
+}
+
 function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
   const communication = object(candidate.communication);
   const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
@@ -365,6 +423,19 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
   }
   if (channel === "nonverbal" && !String(message.signal_intent ?? "").trim()) {
     pushOutcome(outcomes, actor, candidate, "blocked", "nonverbal communication requires bounded signal intent");
+    return durationMs;
+  }
+  const surfaceValidation =
+    validateCommunicationSurfaceRealization(actor, candidate, communication, message);
+  if (!surfaceValidation.ok
+    || (channel !== "speech" && surfaceValidation.realization !== null)) {
+    pushOutcome(
+      outcomes,
+      actor,
+      candidate,
+      "blocked",
+      surfaceValidation.reason ?? "surface realization is only valid for speech",
+    );
     return durationMs;
   }
   const publicIrLineage = publicCommunicationIrLineage(
@@ -390,7 +461,11 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
           signal_intent: message.signal_intent ?? null,
           semantic_content: message.semantic_content ?? null,
         }),
-    surface_realization_complete: false,
+    ...(surfaceValidation.realization ? {
+      surface_text: surfaceValidation.realization.surface_text,
+      surface_realization: surfaceValidation.realization,
+    } : {}),
+    surface_realization_complete: surfaceValidation.realization !== null,
     private_purpose_exposed: false,
     withheld_private_content_exposed: false,
     world_truth_claimed: false,

@@ -1,5 +1,6 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { buildCharacterCommunicationIr } from "./character-communication-ir-service.mjs";
+import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
 
 /**
  * CC-1 bounded communication foundation. This is a same-character planning
@@ -250,6 +251,9 @@ export function planCharacterCommunication(characterInput = {}) {
   const mode = goal.mode;
   if (!["direct", "indirect", "silence", "nonverbal"].includes(mode))
     fail("Communication mode must be an explicit character-goal decision.");
+  if (goal.surface_realization != null
+    && (!["direct", "indirect"].includes(mode) || !isRecord(goal.surface_realization)))
+    fail("Mandarin surface realization must be a structured speech-goal request.");
   // CC-3: an opportunity is a decision in this speaker's current cognition,
   // never a World or partner-state inference. A choice not to participate
   // must not be converted into a speech/nonverbal candidate.
@@ -634,6 +638,14 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
         world_truth_claimed: false,
       };
   const communicationIr = buildCharacterCommunicationIr(plan, { publicOnly: true });
+  const communicationGoal = isRecord(characterInput.cognition?.communication_goal)
+    ? characterInput.cognition.communication_goal : {};
+  const surfaceRealization = channel === "speech" && communicationGoal.surface_realization != null
+    ? realizeCharacterCommunicationMandarin({
+        ...plan,
+        surface_realization_request: copy(communicationGoal.surface_realization),
+      })
+    : null;
   const identity = {
     version: characterCommunicationFoundationVersion,
     character: plan.character,
@@ -642,6 +654,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
     channel,
     public_message: publicMessage,
     communication_ir: communicationIr,
+    surface_realization: surfaceRealization,
   };
   return copy({
     action_id: `communication_${hashAgentRunValue(identity).slice(0, 24)}`,
@@ -657,7 +670,8 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
       expression_mode: plan.mode,
       message: publicMessage,
       ir: communicationIr,
-      surface_realization_complete: false,
+      ...(surfaceRealization ? { surface_realization: surfaceRealization } : {}),
+      surface_realization_complete: surfaceRealization !== null,
       private_purpose_exposed: false,
       withheld_private_content_exposed: false,
       world_truth_claimed: false,
