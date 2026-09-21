@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCharacterCommunicationActionCandidate,
+  buildCharacterCommunicationDiscourseState,
   planCharacterCommunication,
 } from "../../server/src/character-communication-foundation-service.mjs";
 import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
@@ -40,6 +41,183 @@ test("direct expression follows character's distinct disclosure decision", () =>
   })));
   assert.equal(value.message.semantic_content, "我很依戀 B");
   assert.equal(value.mode, "direct");
+});
+
+test("CC-4 discourse state keeps QUD, local entities and reference competition private", () => {
+  const single = packet(goal("direct", {
+    withhold_private_content: false,
+    public_content: "拿那本就好",
+  }));
+  single.cognition.communication_discourse_state = {
+    character: "A",
+    interaction_id: "talk-books",
+    current_topic: "要拿哪一本書",
+    current_event_frame: "A 與 B 正在桌邊選書",
+    active_entities: ["A", "B", "book-1"],
+    recent_mentions: ["book-1"],
+    questions_under_discussion: ["B 要拿哪一本書？"],
+    given_entities: ["A", "B"],
+    new_entities: ["book-1"],
+    contrast_set: [],
+    competitor_referents: [],
+    shared_perceptual_targets: ["book-1"],
+    unresolved_references: [],
+    reference: {
+      target: "book-1",
+      candidate_referents: ["book-1"],
+      speaker_believes_listener_identifiable: true,
+    },
+    interaction: {
+      current_speakers: ["A", "B"],
+      pending_questions: ["B 要拿哪一本書？"],
+      pending_proposals: [],
+      repairs: [],
+      active_threads: ["選書"],
+      suspended_threads: [],
+      possible_closing: false,
+    },
+  };
+  const state = buildCharacterCommunicationDiscourseState(single);
+  assert.equal(state.schema_version, "cc4-character-discourse-state-v1");
+  assert.equal(state.reference.candidate_count, 1);
+  assert.equal(state.reference.ambiguity_status, "single_candidate");
+  assert.equal(state.reference.speaker_believes_listener_identifiable, true);
+  assert.deepEqual(state.questions_under_discussion, ["B 要拿哪一本書？"]);
+  assert.deepEqual(state.shared_perceptual_targets, ["book-1"]);
+  assert.equal(state.boundaries.engine_uniqueness_used_for_reference, false);
+  assert.equal(state.boundaries.listener_understanding_claimed, false);
+
+  const privatePlan = planCharacterCommunication(single);
+  assert.equal(privatePlan.ir_context.discourse_state.reference.ambiguity_status,
+    "single_candidate");
+  const publicCandidate = buildCharacterCommunicationActionCandidate(single);
+  const publicText = JSON.stringify(publicCandidate);
+  for (const privatePart of ["cc4-character-discourse-state-v1", "talk-books",
+    "B 要拿哪一本書？", "shared_perceptual_targets"])
+    assert.equal(publicText.includes(privatePart), false,
+      `Private discourse state leaked: ${privatePart}`);
+
+  const competing = packet(goal("direct", {
+    withhold_private_content: false,
+    public_content: "拿靠左邊那本",
+  }));
+  competing.cognition.communication_discourse_state = {
+    character: "A",
+    active_entities: ["book-1", "book-2", "book-3", "book-4", "book-5"],
+    competitor_referents: ["book-2", "book-3", "book-4", "book-5"],
+    reference: {
+      target: "book-1",
+      candidate_referents: ["book-1", "book-2", "book-3", "book-4", "book-5"],
+      speaker_believes_listener_identifiable: false,
+    },
+  };
+  const competingState = buildCharacterCommunicationDiscourseState(competing);
+  assert.equal(competingState.reference.candidate_count, 5);
+  assert.equal(competingState.reference.ambiguity_status, "multiple_candidates");
+  assert.equal(competingState.reference.speaker_believes_listener_identifiable, false);
+});
+
+test("CC-4 reference state cannot be invented from engine uniqueness or another character", () => {
+  const input = packet(goal("direct", {
+    withhold_private_content: false,
+    public_content: "拿那本",
+  }));
+  input.world_state = {
+    engine_unique_objects: [{ id: "book-1", kind: "book" }],
+  };
+  input.other_character_cognition = {
+    communication_discourse_state: {
+      character: "B",
+      reference: {
+        target: "book-1",
+        candidate_referents: ["book-1"],
+        speaker_believes_listener_identifiable: true,
+      },
+    },
+  };
+  assert.equal(buildCharacterCommunicationDiscourseState(input), null);
+  const plan = planCharacterCommunication(input);
+  assert.equal(Object.hasOwn(plan, "ir_context"), false);
+
+  input.cognition.communication_discourse_state = {
+    character: "B",
+    reference: {
+      target: "book-1",
+      candidate_referents: ["book-1"],
+      speaker_believes_listener_identifiable: true,
+    },
+  };
+  assert.throws(() => buildCharacterCommunicationDiscourseState(input), {
+    code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+  });
+});
+
+test("CC-4 partner-specific labels require admitted same-character interaction history", () => {
+  const evidence = "A 與 B 過去共同把 book-1 稱為「藍本」";
+  const input = packet(goal("direct", {
+    withhold_private_content: false,
+    public_content: "把書拿來",
+  }));
+  input.cognition.communication_discourse_state = {
+    character: "A",
+    reference: {
+      target: "book-1",
+      candidate_referents: ["book-1"],
+      speaker_believes_listener_identifiable: true,
+      partner_convention: {
+        label: "藍本",
+        partner: "B",
+        evidence_content: evidence,
+      },
+    },
+  };
+  assert.throws(() => buildCharacterCommunicationDiscourseState(input), {
+    code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+  });
+
+  input.cognition.working_context = {
+    focus: {
+      context_origin: "recovered_memory",
+      character: "A",
+      content: evidence,
+    },
+  };
+  const state = buildCharacterCommunicationDiscourseState(input);
+  assert.deepEqual(state.reference.partner_convention, {
+    label: "藍本",
+    partner: "B",
+    evidence_source_ref: "cognition.working_context.focus",
+    evidence_content_exposed: false,
+  });
+  const candidateText = JSON.stringify(buildCharacterCommunicationActionCandidate(input));
+  assert.equal(candidateText.includes("藍本"), false);
+  assert.equal(candidateText.includes(evidence), false);
+});
+
+test("CC-4 discourse state rejects duplicate entities and inconsistent reference targets", () => {
+  const input = packet(goal("direct", {
+    withhold_private_content: false,
+    public_content: "拿那本",
+  }));
+  input.cognition.communication_discourse_state = {
+    character: "A",
+    active_entities: ["book-1", "book-1"],
+  };
+  assert.throws(() => buildCharacterCommunicationDiscourseState(input), {
+    code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+  });
+
+  input.cognition.communication_discourse_state = {
+    character: "A",
+    reference: {
+      target: "book-1",
+      candidate_referents: ["book-2"],
+      speaker_believes_listener_identifiable: false,
+    },
+  };
+  assert.throws(() => buildCharacterCommunicationDiscourseState(input), {
+    code: "CHARACTER_COMMUNICATION_FOUNDATION_INVALID",
+  });
 });
 
 test("CC-3 withholding blocks exact private text embedded in public expressions", () => {

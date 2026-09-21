@@ -119,6 +119,8 @@ function boundedCognitionContext(cognition) {
     known: value.known ?? [],
     uncertain: value.uncertain ?? [],
     communication_goal: value.communication_goal ?? null,
+    communication_discourse_state:
+      value.communication_discourse_state ?? null,
     needs: value.needs ?? {},
     emotion: value.emotion ?? null,
     attention: value.attention ?? null,
@@ -290,6 +292,8 @@ function cognitionCharacterView(trustedBase, input, neuralExtension) {
     known: trustedBase.known ?? [],
     uncertain: trustedBase.uncertain ?? [],
     communication_goal: trustedBase.communication_goal ?? null,
+    communication_discourse_state:
+      trustedBase.communication_discourse_state ?? null,
     needs: trustedBase.needs ?? {},
     emotion: trustedBase.emotion ?? null,
     attention: trustedBase.attention ?? null,

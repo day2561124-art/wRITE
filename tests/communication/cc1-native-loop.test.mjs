@@ -61,6 +61,24 @@ try {
           known: [basis],
           current_goal: "和 B 繼續相處",
           relationships: { B: "朋友" },
+          communication_discourse_state: {
+            character: "A",
+            interaction_id: "cc4-private-thread",
+            current_topic: "B 是否要繼續看書",
+            active_entities: ["A", "B", "book-1"],
+            recent_mentions: ["book-1"],
+            questions_under_discussion: ["B 是否還要繼續看書？"],
+            shared_perceptual_targets: ["book-1"],
+            reference: {
+              target: "book-1",
+              candidate_referents: ["book-1"],
+              speaker_believes_listener_identifiable: true,
+            },
+            interaction: {
+              current_speakers: ["A", "B"],
+              active_threads: ["留在房間"],
+            },
+          },
           communication_goal: {
             character: "A",
             purpose: privatePurpose,
@@ -116,6 +134,13 @@ try {
           assert.equal(packet.communication_foundation.mode, "indirect");
           assert.equal(packet.communication_foundation.purpose, privatePurpose);
           assert.equal(packet.communication_foundation.withheld_private_content, privateContent);
+          const discourse = packet.communication_foundation.ir_context.discourse_state;
+          assert.equal(discourse.schema_version, "cc4-character-discourse-state-v1");
+          assert.equal(discourse.character, "A");
+          assert.equal(discourse.reference.ambiguity_status, "single_candidate");
+          assert.equal(discourse.reference.speaker_believes_listener_identifiable, true);
+          assert.equal(discourse.boundaries.engine_uniqueness_used_for_reference, false);
+          assert.equal(discourse.boundaries.listener_understanding_claimed, false);
           const candidate = packet.candidate_action_intents.find(
             (item) => item.communication?.schema_version === "cc1-bounded-communication-action-v1",
           );
@@ -127,6 +152,9 @@ try {
           assert.equal(candidateText.includes(privatePurpose), false);
           assert.equal(candidateText.includes(privateContent), false);
           assert.equal(candidateText.includes("cognition.known"), false);
+          assert.equal(candidateText.includes("cc4-private-thread"), false);
+          assert.equal(candidateText.includes("B 是否還要繼續看書？"), false);
+          assert.equal(candidateText.includes("cc4-character-discourse-state-v1"), false);
           aCandidateId = candidate.action_id;
           return { action_id: candidate.action_id };
         }

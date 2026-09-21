@@ -975,6 +975,11 @@ function buildWorldCharacterCognition(input = {}) {
     // CC-1 consumes a goal already present in this same character's state;
     // the generation provider cannot invent or change its core intention.
     communication_goal: cloneJson(state.communication_goal ?? null),
+    // CC-4 keeps discourse/reference state as short-term same-character
+    // cognition. It is not reconstructed from global history or another
+    // character, and downstream public action projection still strips it.
+    communication_discourse_state:
+      cloneJson(state.communication_discourse_state ?? null),
     needs,
     emotion,
     attention,

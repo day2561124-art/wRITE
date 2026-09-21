@@ -50,6 +50,143 @@ function admittedRecollection(cognition, character, content) {
   return null;
 }
 
+function boundedDistinctTextList(value, label, limit = 24) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > limit)
+    fail(`${label} must be a bounded list.`);
+  const normalized = value.map((item) => string(item, 240));
+  if (normalized.some((item) => !item)
+    || new Set(normalized).size !== normalized.length)
+    fail(`${label} must contain distinct nonblank values.`);
+  return normalized;
+}
+
+/**
+ * CC-4 private short-term discourse/reference state. This reads only the
+ * current character's cognition. It is not a Memory store, does not inspect
+ * raw World uniqueness, and does not claim listener understanding.
+ */
+export function buildCharacterCommunicationDiscourseState(characterInput = {}) {
+  const character = string(characterInput.character, 240);
+  if (!character) fail("Same-character identity is required.");
+  const cognition = isRecord(characterInput.cognition) ? characterInput.cognition : {};
+  const source = cognition.communication_discourse_state;
+  if (source == null) return null;
+  if (!isRecord(source)) fail("communication_discourse_state must be structured.");
+  const owner = string(source.character ?? source.owner, 240);
+  if (owner !== character) fail("Communication discourse state belongs to another character.");
+
+  const goal = isRecord(cognition.communication_goal) ? cognition.communication_goal : {};
+  const addressee = string(goal.addressee, 240);
+  const activeEntities = boundedDistinctTextList(source.active_entities, "active_entities");
+  const recentMentions = boundedDistinctTextList(source.recent_mentions, "recent_mentions");
+  const questionsUnderDiscussion =
+    boundedDistinctTextList(source.questions_under_discussion, "questions_under_discussion");
+  const givenEntities = boundedDistinctTextList(source.given_entities, "given_entities");
+  const newEntities = boundedDistinctTextList(source.new_entities, "new_entities");
+  const contrastSet = boundedDistinctTextList(source.contrast_set, "contrast_set");
+  const competitorReferents =
+    boundedDistinctTextList(source.competitor_referents, "competitor_referents");
+  const sharedPerceptualTargets =
+    boundedDistinctTextList(source.shared_perceptual_targets, "shared_perceptual_targets");
+  const unresolvedReferences =
+    boundedDistinctTextList(source.unresolved_references, "unresolved_references");
+
+  const reference = source.reference == null ? {} : source.reference;
+  if (!isRecord(reference)) fail("reference must be structured.");
+  const target = reference.target == null ? null : string(reference.target, 240);
+  if (reference.target != null && !target) fail("Reference target must be nonblank.");
+  const candidateReferents =
+    boundedDistinctTextList(reference.candidate_referents, "reference.candidate_referents");
+  if (target && candidateReferents.length && !candidateReferents.includes(target))
+    fail("Reference target must belong to the speaker-modeled candidate set.");
+  const listenerIdentifiable = reference.speaker_believes_listener_identifiable;
+  if (listenerIdentifiable != null && typeof listenerIdentifiable !== "boolean")
+    fail("speaker_believes_listener_identifiable must be boolean when supplied.");
+
+  let partnerConvention = null;
+  if (reference.partner_convention != null) {
+    if (!isRecord(reference.partner_convention))
+      fail("partner_convention must be structured.");
+    const label = string(reference.partner_convention.label, 240);
+    const partner = string(reference.partner_convention.partner, 240);
+    const evidenceContent = string(reference.partner_convention.evidence_content);
+    if (!label || !partner || !evidenceContent || !addressee || partner !== addressee)
+      fail("Partner convention requires the current addressee and explicit history evidence.");
+    const recollection = admittedRecollection(cognition, character, evidenceContent);
+    if (!recollection)
+      fail("Partner convention history must already be admitted to the current mind.");
+    partnerConvention = {
+      label,
+      partner,
+      evidence_source_ref: recollection.sourceRef,
+      evidence_content_exposed: false,
+    };
+  }
+
+  const interaction = source.interaction == null ? {} : source.interaction;
+  if (!isRecord(interaction)) fail("interaction must be structured.");
+  const possibleClosing = interaction.possible_closing;
+  if (possibleClosing != null && typeof possibleClosing !== "boolean")
+    fail("interaction.possible_closing must be boolean when supplied.");
+
+  return copy({
+    schema_version: "cc4-character-discourse-state-v1",
+    character,
+    interaction_id: string(source.interaction_id, 240),
+    current_topic: string(source.current_topic, 240),
+    current_event_frame: string(source.current_event_frame, 600),
+    active_entities: activeEntities,
+    recent_mentions: recentMentions,
+    questions_under_discussion: questionsUnderDiscussion,
+    given_entities: givenEntities,
+    new_entities: newEntities,
+    contrast_set: contrastSet,
+    competitor_referents: competitorReferents,
+    shared_perceptual_targets: sharedPerceptualTargets,
+    unresolved_references: unresolvedReferences,
+    reference: {
+      target,
+      candidate_referents: candidateReferents,
+      candidate_count: candidateReferents.length,
+      ambiguity_status: !target
+        ? "no_reference_target"
+        : candidateReferents.length === 0
+          ? "candidate_set_unknown"
+          : candidateReferents.length === 1
+            ? "single_candidate"
+            : "multiple_candidates",
+      speaker_believes_listener_identifiable: listenerIdentifiable ?? null,
+      partner_convention: partnerConvention,
+    },
+    interaction: {
+      current_speakers:
+        boundedDistinctTextList(interaction.current_speakers, "interaction.current_speakers"),
+      pending_questions:
+        boundedDistinctTextList(interaction.pending_questions, "interaction.pending_questions"),
+      pending_proposals:
+        boundedDistinctTextList(interaction.pending_proposals, "interaction.pending_proposals"),
+      repairs: boundedDistinctTextList(interaction.repairs, "interaction.repairs"),
+      active_threads:
+        boundedDistinctTextList(interaction.active_threads, "interaction.active_threads"),
+      suspended_threads:
+        boundedDistinctTextList(interaction.suspended_threads, "interaction.suspended_threads"),
+      possible_closing: possibleClosing ?? null,
+    },
+    boundaries: {
+      short_term_working_state_only: true,
+      long_term_memory_store_created: false,
+      engine_uniqueness_used_for_reference: false,
+      speaker_belief_is_not_listener_truth: true,
+      listener_private_state_inferred: false,
+      listener_understanding_claimed: false,
+      shared_perceptual_targets_are_speaker_beliefs: true,
+      partner_convention_requires_admitted_recollection: true,
+      world_truth_claimed: false,
+    },
+  });
+}
+
 // Perception is already scoped to the observer by World. Match only an exact
 // current sensory item: hearing a claim is not proof that the claim is true,
 // and a hidden scene fact is not a percept.
@@ -135,8 +272,14 @@ export function planCharacterCommunication(characterInput = {}) {
   // make inferable or socially manageable; they never predict what a listener
   // actually understands, believes, or does. The IR owns validation and
   // bounded normalization of this optional context.
-  const irContext = isRecord(goal.communication_context)
-    ? copy(goal.communication_context) : null;
+  const discourseState = buildCharacterCommunicationDiscourseState(characterInput);
+  const privateContext = isRecord(goal.communication_context)
+    ? copy(goal.communication_context) : {};
+  // CC-4 discourse state has one authoritative same-character source. A caller
+  // cannot smuggle an alternate state through communication_context.
+  delete privateContext.discourse_state;
+  if (discourseState) privateContext.discourse_state = discourseState;
+  const irContext = Object.keys(privateContext).length ? privateContext : null;
   if (opportunity === "stay_silent" || opportunity === "withdraw") {
     return copy({
       version: characterCommunicationFoundationVersion,
