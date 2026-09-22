@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import "./mcp-integration-verification-router.test.mjs";
+import "./mcp-verification-manifest.test.mjs";
 import {
   DEV_INTEGRATION_SCHEMA_VERSION,
   createDevIntegrationService,
@@ -245,6 +246,11 @@ test("fast-forward candidate persists, validates exact commit, and preserves unr
     assert.equal(ready.state, "ready");
     assert.equal(ready.validation_report.passed, true);
     assert.equal(ready.validation_report.integration_commit, source.sourceHead);
+    assert.equal(ready.validation_report.verification_manifest.commit, source.sourceHead);
+    assert.deepEqual(ready.validation_report.verification_manifest.changed_files, ["a.txt"]);
+    assert.deepEqual(ready.validation_report.verification_manifest.tests_selected, ["mcp", "mcp_tunnel"]);
+    assert.equal(ready.validation_report.verification_manifest.gate_result, "passed");
+    assert.match(ready.validation_report.verification_manifest_sha256, /^[a-f0-9]{64}$/u);
     assert.equal(ready.integration_workspace.state, "removed");
     assert.equal(ready.integration_workspace.cleanup_pending, false);
     const validationProvenance = await dev_workspace_get_provenance({

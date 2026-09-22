@@ -16,6 +16,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { createDevTestRunner } from "./mcp-development-test-tools.mjs";
 import { selectIntegrationVerificationPlan } from "./mcp-integration-verification-router.mjs";
+import { buildIntegrationVerificationManifest } from "./mcp-verification-manifest.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
   dev_workspace_get_workspace,
@@ -496,7 +497,7 @@ async function productionValidationRunner(root, candidate) {
     // A required FAIL/timeout cannot be hidden by later green suites.
     if (result.execution_ok !== true || result.passed !== true || result.timed_out === true) break;
   }
-  return results;
+  return { plan, results };
 }
 
 export function createDevIntegrationService({
@@ -962,22 +963,50 @@ export function createDevIntegrationService({
 
     candidate = await updateCandidate(candidateId, candidate.revision, (record) => transitionCandidate(record, "testing"));
     let suites;
+    let verificationPlan;
     try {
-      suites = await validationRunner(integrationPath, candidate);
+      const output = await validationRunner(integrationPath, candidate);
+      if (Array.isArray(output)) {
+        // Compatibility with injected validation runners; derive the same
+        // exact candidate delta rather than inventing selection evidence.
+        suites = output;
+        verificationPlan = await selectCandidateVerificationPlan(integrationPath, candidate, gitRunner);
+      } else if (Array.isArray(output?.results) && output.plan) {
+        suites = output.results;
+        verificationPlan = output.plan;
+      } else {
+        throw new Error("Validation runner did not provide suite results and a verified plan.");
+      }
     } catch (error) {
       suites = [{ suite: "validation_runner", execution_ok: false, passed: false, timed_out: false, stderr: error.message }];
+      verificationPlan = {
+        risk_class: "unknown_escalated",
+        fallback_reason: "VERIFICATION_PLAN_OR_RUNNER_UNAVAILABLE",
+        changed_paths: [],
+        required_suites: ["mcp", "mcp_tunnel"],
+        focused: false,
+      };
     }
     const afterStatus = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
-    const allPassed = diffCheck.passed
-      && suites.length > 0
-      && suites.every((result) => result.execution_ok === true && result.passed === true && result.timed_out !== true)
-      && !afterStatus.dirty;
     const completedAt = clock().toISOString();
+    const verificationManifest = buildIntegrationVerificationManifest({
+      candidate,
+      plan: verificationPlan,
+      suiteResults: suites,
+      diffCheck,
+      postTestWorktreeClean: !afterStatus.dirty,
+      completedAt,
+    });
+    const verificationManifestSha256 = createHash("sha256")
+      .update(JSON.stringify(verificationManifest), "utf8").digest("hex");
+    const allPassed = verificationManifest.gate_result === "passed";
     const validationReport = {
       status: allPassed ? "passed" : "failed",
       integration_commit: candidate.integration_commit,
       target_head: candidate.target_head,
       source_head: candidate.source_head,
+      verification_manifest: verificationManifest,
+      verification_manifest_sha256: verificationManifestSha256,
       suites: suites.map((result) => ({
         suite: result.suite,
         execution_ok: result.execution_ok === true,
@@ -1029,6 +1058,9 @@ export function createDevIntegrationService({
           timed_out: validationReport.timed_out,
           diff_check_passed: validationReport.diff_check?.passed === true,
           suite_names: validationReport.suites.map((item) => item.suite),
+          verification_manifest_sha256: verificationManifestSha256,
+          verification_manifest_gate_result: verificationManifest.gate_result,
+          verification_manifest_risk_class: verificationManifest.risk_class,
           cleanup_completed: cleanup.cleaned,
         },
       });
