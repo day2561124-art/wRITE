@@ -24,18 +24,32 @@ const workflow = await readFile(
   "utf8",
 );
 const normalizedWorkflow = workflow.replaceAll("\r\n", "\n");
-assert(
-  /- uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth:\s*0\b/u.test(normalizedWorkflow),
-  "CI must fetch full Git history because maintenance baseline reconciliation reads historical commits.",
-);
-const npmCiIndex = workflow.indexOf("- run: npm ci");
-const runAllIndex = workflow.indexOf("- run: node tests/run-all.mjs");
-assert(npmCiIndex >= 0, "CI must install locked dependencies with npm ci.");
-assert(runAllIndex >= 0, "CI must execute tests/run-all.mjs.");
-assert(
-  npmCiIndex < runAllIndex,
-  "CI must run npm ci before tests/run-all.mjs.",
-);
+
+function jobBlock(startMarker, endMarker = null) {
+  const start = normalizedWorkflow.indexOf(startMarker);
+  assert(start >= 0, "Missing CI job: " + startMarker.trim());
+  const end = endMarker === null
+    ? normalizedWorkflow.length
+    : normalizedWorkflow.indexOf(endMarker, start + startMarker.length);
+  assert(end >= 0, "Missing CI job boundary: " + String(endMarker).trim());
+  return normalizedWorkflow.slice(start, end);
+}
+
+for (const [name, block] of [
+  ["main-regression", jobBlock("  main-regression:\n", "  scheduled-full:\n")],
+  ["scheduled-full", jobBlock("  scheduled-full:\n", "  manual-full:\n")],
+  ["manual-full", jobBlock("  manual-full:\n")],
+]) {
+  assert(
+    /- uses: actions\/checkout@v\d+\n\s+with:\n(?:\s+[^\n]+\n)*?\s+fetch-depth:\s*0\b/u.test(block),
+    name + " must fetch full Git history because run-all maintenance reconciliation reads historical commits.",
+  );
+  const npmCiIndex = block.indexOf("- run: npm ci");
+  const runAllIndex = block.indexOf("node tests/run-all.mjs");
+  assert(npmCiIndex >= 0, name + " must install locked dependencies with npm ci.");
+  assert(runAllIndex >= 0, name + " must execute tests/run-all.mjs.");
+  assert(npmCiIndex < runAllIndex, name + " must run npm ci before tests/run-all.mjs.");
+}
 assert(
   /node:\s*18\b/u.test(workflow),
   "CI must retain a Node 18 job while package.json declares node >=18.",
