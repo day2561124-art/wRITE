@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   TEST_KINDS,
   classifyTestFile,
+  reviewedParallelSafeTestPaths,
   testClassificationVersion,
 } from "./test-classification.mjs";
 import {
@@ -56,17 +57,36 @@ for (const testPath of tests) {
 }
 
 const byPath = new Map(classifications.map((item) => [item.test_path, item]));
+const reviewedParallelSafeSet = new Set(reviewedParallelSafeTestPaths);
 for (const testPath of [...mcpHermeticCoreScripts, mcpHermeticCoreEntrypoint]) {
   const classified = byPath.get(testPath);
   assert(classified, `Missing reviewed hermetic test: ${testPath}`);
   assert.equal(classified.kind, "unit");
   assert.equal(classified.hermetic, true);
   assert.equal(classified.external_state, false);
-  assert.equal(classified.parallel_safe, false, "VA-10 is separate from hermetic audit");
+  assert.equal(
+    classified.parallel_safe,
+    reviewedParallelSafeSet.has(testPath),
+    `${testPath}: VA-10 parallel safety must be explicitly reviewed`,
+  );
   assert.equal(classified.cacheable, false, "VA-11 is separate from hermetic audit");
   assert.deepEqual(classified.dependencies, []);
   assert(classified.classification_basis.includes("reviewed_hermetic_core_local_fixture"));
 }
+for (const testPath of reviewedParallelSafeTestPaths) {
+  const classified = byPath.get(testPath);
+  assert(classified, `Missing reviewed parallel-safe test: ${testPath}`);
+  assert.equal(classified.hermetic, true, `${testPath}: parallel-safe test must be hermetic`);
+  assert.equal(classified.parallel_safe, true);
+  assert.equal(classified.external_state, false);
+  assert.deepEqual(classified.dependencies, []);
+  assert(classified.classification_basis.includes("reviewed_parallel_safe"));
+}
+assert.deepEqual(
+  classifications.filter((item) => item.parallel_safe).map((item) => item.test_path).sort(),
+  [...reviewedParallelSafeTestPaths].sort(),
+  "VA-10 parallel-safe classification must remain explicit and fail closed.",
+);
 for (const testPath of mcpFullScripts.filter((item) => item.startsWith("tests/"))) {
   const classified = byPath.get(testPath);
   assert(classified, `Missing legacy MCP test: ${testPath}`);
@@ -79,6 +99,10 @@ assert.throws(() => classifyTestFile({
   testPath: mcpHermeticCoreScripts[0],
   source: 'import { spawn } from "node:child_process";',
 }), /Reviewed hermetic test gained dependencies/u);
+assert.throws(() => classifyTestFile({
+  testPath: "tests/communication/communication-ir.test.mjs",
+  source: 'import { readFile } from "node:fs/promises";',
+}), /Reviewed parallel-safe test gained dependencies/u);
 
 assert.equal(
   new Set(classifications.map((item) => item.test_path)).size,

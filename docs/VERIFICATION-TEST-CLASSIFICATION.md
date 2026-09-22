@@ -77,10 +77,43 @@ node tests/tools/mcp-suite-groups.test.mjs
 node tests/test-classification.test.mjs
 ```
 
-`parallel_safe` and `cacheable` remain **false** for the reviewed
-hermetic subset until VA-10/VA-11 explicitly validate those properties.
-This first slice does not assert that `mcp_core` is wholly hermetic or
-replace the legacy formal MCP / MCP tunnel gates.
+`cacheable` remains **false** for the reviewed MCP hermetic subset until
+VA-11 explicitly validates cache inputs. VA-10 may promote only individual
+tests that independently satisfy its parallel-safety review; the aggregate
+MCP hermetic entrypoint remains serial. This does not assert that `mcp_core`
+is wholly hermetic or replace the legacy formal MCP / MCP tunnel gates.
+
+## VA-10: bounded parallel / sharding (first reviewed slice)
+
+Parallel execution is fail-closed and remains opt-in. Hermeticity is a
+necessary condition, not automatic permission to run concurrently.
+`reviewedParallelSafeTestPaths` is the explicit machine-readable allowlist;
+if one of those files gains filesystem, process, network, git, environment,
+clock, or persistent-state evidence, repository classification fails before
+the test can enter a parallel lane.
+
+The first reviewed cohort is intentionally small:
+
+- the two pure MCP verification-policy unit tests from VA-9;
+- `cc1-foundation.test.mjs`;
+- `cc5-mandarin-surface-realization.test.mjs`;
+- `cc6-listener-reception.test.mjs`;
+- `communication-ir.test.mjs`.
+
+Communication native-loop/acoustic tests remain serial because they use
+filesystem/time-backed isolated fixture state. Recent Memory Core Phase90-96
+tests also remain unpromoted where source-file reads are part of their wiring
+evidence. VA-10 does not weaken the VA-9 hermetic boundary to manufacture
+parallelism.
+
+`runTestSteps()` keeps its original serial semantics. The additive
+`runParallelTestSteps()` accepts only a single reviewed `.test.mjs` path per
+step, caps concurrency at four, and waits for every already-started child in
+a bounded batch before surfacing a failure. The Communication runner uses a
+smaller concurrency of two and keeps all non-reviewed steps in a serial
+shard. `tests/run-all.mjs`, external-network tests, shared ports, Journal,
+transaction/checkpoint fixtures, and process-lifecycle/reliability tests are
+unchanged by this phase.
 
 Research reference: Bazel's Test Encyclopedia defines hermetic tests by
 declared inputs and runner-guaranteed environment; Google's Hermetic

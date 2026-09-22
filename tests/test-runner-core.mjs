@@ -9,6 +9,40 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 
 export const DEFAULT_TIMEOUT_MS = 360_000;
+export const MAX_PARALLEL_TEST_CONCURRENCY = 4;
+
+export function resolveMaxConcurrency(options = {}) {
+  const requested = Number.isInteger(options.maxConcurrency)
+    ? options.maxConcurrency
+    : 1;
+  return Math.min(MAX_PARALLEL_TEST_CONCURRENCY, Math.max(1, requested));
+}
+
+function singleTestPath(args) {
+  if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string") {
+    return null;
+  }
+  const normalized = args[0].replaceAll("\\", "/").replace(/^\.\//u, "");
+  if (!normalized.startsWith("tests/") || !normalized.endsWith(".test.mjs")) {
+    return null;
+  }
+  return normalized;
+}
+
+export function partitionTestStepsByParallelSafety(steps, options = {}) {
+  const reviewed = new Set(options.parallelSafeTestPaths ?? []);
+  const parallel = [];
+  const serial = [];
+  for (const step of steps ?? []) {
+    const [, args] = Array.isArray(step) ? step : [step?.label, step?.args];
+    const testPath = singleTestPath(args);
+    (testPath && reviewed.has(testPath) ? parallel : serial).push(step);
+  }
+  return Object.freeze({
+    parallel: Object.freeze(parallel),
+    serial: Object.freeze(serial),
+  });
+}
 
 export function resolveTimeoutMs(options = {}) {
   const {
@@ -133,4 +167,65 @@ export async function runTestSteps(steps, options = {}) {
   console.log(`\n${suiteLabel} completed in ${formatTestDuration(suiteDurationMs)}.`);
   console.log(`\n${suiteLabel} passed.`);
   return { duration_ms: suiteDurationMs, timings };
+}
+
+export async function runParallelTestSteps(steps, options = {}) {
+  const suiteLabel =
+    typeof options.suiteLabel === "string" && options.suiteLabel.trim()
+      ? options.suiteLabel.trim()
+      : "Parallel test shard";
+  const reviewed = new Set(options.parallelSafeTestPaths ?? []);
+  const normalized = [];
+
+  for (const step of steps ?? []) {
+    const [label, args, stepOptions = {}] = Array.isArray(step)
+      ? step
+      : [step?.label, step?.args, step ?? {}];
+    const testPath = singleTestPath(args);
+    if (!testPath || !reviewed.has(testPath)) {
+      throw new Error(
+        `${label ?? "<unnamed>"} is not an explicitly reviewed parallel-safe test step.`,
+      );
+    }
+    normalized.push({ label, args, stepOptions, testPath });
+  }
+
+  const maxConcurrency = resolveMaxConcurrency(options);
+  const suiteTimeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : undefined;
+  const suiteStartedAt = Date.now();
+  const timings = [];
+
+  // Deliberately run bounded batches. Promise.allSettled waits for every
+  // already-started child in the batch before reporting failure, preventing
+  // an early rejection from leaving sibling test processes behind.
+  for (let offset = 0; offset < normalized.length; offset += maxConcurrency) {
+    const batch = normalized.slice(offset, offset + maxConcurrency);
+    const settled = await Promise.allSettled(batch.map(({ label, args, stepOptions }) => {
+      const timeoutMs = resolveTimeoutMs({
+        timeoutMs: stepOptions.timeoutMs,
+        suiteTimeoutMs,
+      });
+      return runStep(label, args, { timeoutMs });
+    }));
+    for (const result of settled) {
+      if (result.status === "fulfilled") timings.push(result.value);
+    }
+    const failure = settled.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
+  }
+
+  const suiteDurationMs = Math.max(0, Date.now() - suiteStartedAt);
+  printTestTimingSummary(timings);
+  console.log(
+    `\n${suiteLabel} completed in ${formatTestDuration(suiteDurationMs)} with max concurrency ${maxConcurrency}.`,
+  );
+  console.log(`\n${suiteLabel} passed.`);
+  return {
+    duration_ms: suiteDurationMs,
+    timings,
+    max_concurrency: maxConcurrency,
+    parallel_safe_test_paths: normalized.map(({ testPath }) => testPath),
+  };
 }

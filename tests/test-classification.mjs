@@ -16,6 +16,15 @@ const reviewedHermeticCoreSet = new Set([
   mcpHermeticCoreEntrypoint,
 ]);
 
+export const reviewedParallelSafeTestPaths = Object.freeze([
+  ...mcpHermeticCoreScripts,
+  "tests/communication/cc1-foundation.test.mjs",
+  "tests/communication/cc5-mandarin-surface-realization.test.mjs",
+  "tests/communication/cc6-listener-reception.test.mjs",
+  "tests/communication/communication-ir.test.mjs",
+]);
+const reviewedParallelSafeSet = new Set(reviewedParallelSafeTestPaths);
+
 export const testClassificationVersion = "verification-test-classification-v1";
 
 export const TEST_KINDS = Object.freeze([
@@ -131,7 +140,9 @@ function evidenceFlags(testPath, source, kind, dependencies) {
     && !clock
     && !fixedPort
     && !["infrastructure", "reliability", "e2e"].includes(kind);
-  const parallelSafe = hermetic;
+  // VA-10 requires explicit review before a hermetic test may enter a
+  // concurrent execution lane. Hermeticity is necessary but not sufficient.
+  const parallelSafe = false;
   const cacheable = hermetic
     && !["certification", "reliability", "infrastructure", "e2e"].includes(kind);
 
@@ -151,6 +162,7 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
   }
 
   const reviewedHermeticCore = reviewedHermeticCoreSet.has(path);
+  const reviewedParallelSafe = reviewedParallelSafeSet.has(path);
   const legacyExternalState = legacyMcpScriptSet.has(path);
   const kind = reviewedHermeticCore ? "unit" : classifyKind(path);
   const components = componentsFor(path);
@@ -162,13 +174,19 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
     throw new Error(`Reviewed hermetic test gained dependencies: ${path}: ${dependencies.join(", ")}.`);
   }
   const inferred = evidenceFlags(path, source, kind, dependencies);
+  if (reviewedParallelSafe && (!inferred.hermetic || inferred.external_state || dependencies.length > 0)) {
+    throw new Error(`Reviewed parallel-safe test gained dependencies: ${path}: ${dependencies.join(", ") || "external state"}.`);
+  }
   const flags = reviewedHermeticCore ? {
-    hermetic: true, external_state: false, parallel_safe: false,
+    hermetic: true, external_state: false, parallel_safe: reviewedParallelSafe,
     cacheable: false, fixed_port_evidence: false,
   } : legacyExternalState ? {
     ...inferred, hermetic: false, external_state: true,
     parallel_safe: false, cacheable: false,
-  } : inferred;
+  } : {
+    ...inferred,
+    parallel_safe: reviewedParallelSafe,
+  };
 
   return Object.freeze({
     schema_version: testClassificationVersion,
@@ -189,6 +207,7 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
       "conservative_execution_flags",
       ...(legacyExternalState ? ["legacy_mcp_external_state"] : []),
       ...(reviewedHermeticCore ? ["reviewed_hermetic_core_local_fixture"] : []),
+      ...(reviewedParallelSafe ? ["reviewed_parallel_safe"] : []),
     ]),
   });
 }
