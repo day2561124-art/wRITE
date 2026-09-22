@@ -11,6 +11,11 @@ import {
   projectCharacterCommunicationListenerUnderstanding,
 } from "./character-communication-listener-understanding-service.mjs";
 import {
+  buildCharacterCommunicationSpeakerRecognitionContract,
+  characterCommunicationSpeakerRecognitionVersion,
+  projectCharacterCommunicationSpeakerRecognition,
+} from "./character-communication-speaker-recognition-service.mjs";
+import {
   buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
   buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
@@ -4498,6 +4503,8 @@ export function buildWorldSimulationLoopContract() {
     character_perception_audio_uses_programmatic_audibility: true,
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
+    character_listener_speaker_recognition:
+      buildCharacterCommunicationSpeakerRecognitionContract(),
     built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
     custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
@@ -4523,6 +4530,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const illuminationVisibilityQueries = [];
   const audibilityQueries = [];
   const communicationListenerUnderstandingProjections = [];
+  const communicationSpeakerRecognitionProjections = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
@@ -4771,10 +4779,54 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         communication_listener_speaker_identity_inferred: false,
         communication_listener_world_truth_claimed: false,
         communication_listener_grounding_claimed: false,
-        // CC-2 testimony admission remains intentionally closed in CC-6C.
+        // CC-2 testimony admission remains intentionally closed until CC-6D
+        // finds explicit same-listener speaker-identification evidence.
         listener_receipt_verified: false,
       };
     }
+
+    const speakerRecognitionProjection =
+      projectCharacterCommunicationSpeakerRecognition({
+        observer: character,
+        character_state: characterState,
+        listener_understanding_projection: listenerUnderstandingProjection,
+      });
+    const understoodTestimonyReceipts =
+      array(speakerRecognitionProjection.character_view?.understood_testimony_receipts);
+    if (understoodTestimonyReceipts.length > 0) {
+      characterPerception.audible = [
+        ...array(characterPerception.audible),
+        ...cloneJson(understoodTestimonyReceipts),
+      ];
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        listener_receipt_verified: true,
+        communication_listener_speaker_identity_recognized: true,
+        communication_listener_speaker_identity_source:
+          "same_listener_explicit_familiar_voice_evidence",
+        communication_listener_testimony_subjective_only: true,
+        communication_listener_world_truth_claimed: false,
+        communication_listener_grounding_claimed: false,
+      };
+    }
+    communicationSpeakerRecognitionProjections.push({
+      character,
+      version: characterCommunicationSpeakerRecognitionVersion,
+      receipt_count:
+        speakerRecognitionProjection.audit?.receipt_count ?? 0,
+      character_view_hash:
+        hashAgentRunValue(speakerRecognitionProjection.character_view),
+      audit: cloneJson(speakerRecognitionProjection.audit),
+      source_engine_identity_exposed_to_character: false,
+      source_action_id_exposed_only_in_private_cc2_receipt:
+        speakerRecognitionProjection.audit
+          ?.source_action_id_exposed_only_in_private_cc2_receipt === true,
+      relationship_field_used_as_identity_evidence: false,
+      voice_identity_learning_performed: false,
+      world_truth_claimed: false,
+      grounding_claimed: false,
+    });
+
     communicationListenerUnderstandingProjections.push({
       character,
       version: characterCommunicationListenerUnderstandingVersion,
@@ -6941,6 +6993,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     audibility_queries: audibilityQueries,
     communication_listener_understanding_projections:
       cloneJson(communicationListenerUnderstandingProjections),
+    communication_speaker_recognition_projections:
+      cloneJson(communicationSpeakerRecognitionProjections),
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
@@ -6977,6 +7031,15 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_listener_understanding_cc2_testimony_issued: false,
       communication_listener_understanding_belief_update_performed: false,
       communication_listener_understanding_grounding_claimed: false,
+      communication_speaker_recognition_version:
+        characterCommunicationSpeakerRecognitionVersion,
+      communication_speaker_recognition_requires_explicit_familiar_voice_identity: true,
+      communication_speaker_recognition_relationship_field_not_used: true,
+      communication_speaker_recognition_source_engine_identity_exposed: false,
+      communication_speaker_recognition_testimony_content_from_listener_interpretation: true,
+      communication_speaker_recognition_world_truth_claimed: false,
+      communication_speaker_recognition_belief_update_performed: false,
+      communication_speaker_recognition_grounding_claimed: false,
       visible_constraint_observation_version:
         worldSimulationVisibleConstraintObservationVersion,
       visible_constraint_observation_projection_version:
@@ -11844,6 +11907,9 @@ export async function resolveWorldSimulationTurn(
       audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
       communication_listener_understanding_projections: cloneJson(
         preparedTurn.communication_listener_understanding_projections ?? [],
+      ),
+      communication_speaker_recognition_projections: cloneJson(
+        preparedTurn.communication_speaker_recognition_projections ?? [],
       ),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
 
