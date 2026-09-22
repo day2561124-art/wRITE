@@ -21,6 +21,10 @@ import {
   projectCharacterCommunicationGroundingEvidence,
 } from "./character-communication-grounding-evidence-service.mjs";
 import {
+  characterCommunicationRepairInitiationVersion,
+  projectCharacterCommunicationRepairInitiation,
+} from "./character-communication-repair-initiation-service.mjs";
+import {
   buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
   buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
@@ -4539,6 +4543,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationListenerUnderstandingProjections = [];
   const communicationSpeakerRecognitionProjections = [];
   const communicationGroundingEvidenceProjections = [];
+  const communicationRepairInitiationProjections = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
@@ -4863,6 +4868,62 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       repair_automatically_triggered: false,
       belief_update_performed: false,
       world_truth_claimed: false,
+      grounding_claimed: false,
+    });
+
+    // CC-6G adopts a same-listener CHOICE to request repair, not a World
+    // communication action. The resolver sees the existing CC-6C public
+    // surface only; engine source identities and speaker intent stay hidden.
+    const listenerRepairResolver =
+      typeof options.characterCommunicationRepairInitiationResolver === "function"
+        ? options.characterCommunicationRepairInitiationResolver
+        : null;
+    const rawListenerRepairDecisions =
+      listenerRepairResolver && listenerSpeechCandidates.length > 0
+        ? await listenerRepairResolver(
+          cloneJson(listenerUnderstandingAssembly.resolver_view),
+        )
+        : [];
+    if (!Array.isArray(rawListenerRepairDecisions)) {
+      const error = new Error(
+        "characterCommunicationRepairInitiationResolver must return an array of bounded listener decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COMMUNICATION_REPAIR_INITIATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const listenerRepairProjection =
+      projectCharacterCommunicationRepairInitiation({
+        observer: character,
+        listener_understanding_projection: listenerUnderstandingProjection,
+        decisions: rawListenerRepairDecisions,
+      });
+    const listenerRepairCandidates =
+      array(listenerRepairProjection.character_view?.repair_request_candidates);
+    if (listenerRepairCandidates.length > 0) {
+      // Do NOT place an unrealized intention in perception.audible:
+      // no sound or action has occurred, and no other character sees it.
+      characterPerception.communication_repair_request_candidates =
+        cloneJson(listenerRepairCandidates);
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        communication_listener_repair_candidate_available: true,
+        communication_listener_repair_candidate_subjective_only: true,
+        communication_listener_repair_world_signal_emitted: false,
+        communication_listener_repair_completed: false,
+        communication_listener_grounding_claimed: false,
+      };
+    }
+    communicationRepairInitiationProjections.push({
+      character,
+      version: characterCommunicationRepairInitiationVersion,
+      candidate_count: listenerRepairProjection.audit.candidate_count,
+      character_view_hash:
+        hashAgentRunValue(listenerRepairProjection.character_view),
+      audit: cloneJson(listenerRepairProjection.audit),
+      source_engine_identity_exposed: false,
+      world_signal_emitted: false,
+      repair_completed: false,
       grounding_claimed: false,
     });
 
@@ -7054,6 +7115,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationSpeakerRecognitionProjections),
     communication_grounding_evidence_projections:
       cloneJson(communicationGroundingEvidenceProjections),
+    communication_repair_initiation_projections:
+      cloneJson(communicationRepairInitiationProjections),
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
@@ -7110,6 +7173,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_grounding_evidence_belief_update_performed: false,
       communication_grounding_evidence_world_truth_claimed: false,
       communication_grounding_evidence_grounding_claimed: false,
+      communication_repair_initiation_version:
+        characterCommunicationRepairInitiationVersion,
+      communication_repair_initiation_explicit_listener_choice_required: true,
+      communication_repair_initiation_world_signal_emitted: false,
+      communication_repair_initiation_completed: false,
+      communication_repair_initiation_grounding_claimed: false,
       visible_constraint_observation_version:
         worldSimulationVisibleConstraintObservationVersion,
       visible_constraint_observation_projection_version:
@@ -11983,6 +12052,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_grounding_evidence_projections: cloneJson(
         preparedTurn.communication_grounding_evidence_projections ?? [],
+      ),
+      communication_repair_initiation_projections: cloneJson(
+        preparedTurn.communication_repair_initiation_projections ?? [],
       ),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
 

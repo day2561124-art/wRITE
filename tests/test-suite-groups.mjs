@@ -9,6 +9,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-6D bounded speaker identification and testimony receipt", ["tests/communication/cc6-native-speaker-recognition.test.mjs"]]),
   Object.freeze(["CC-6E bounded conversational grounding evidence", ["tests/communication/cc6-native-grounding-evidence.test.mjs"]]),
   Object.freeze(["CC-6F bounded listener repair initiation contract", ["tests/communication/cc6-repair-initiation.test.mjs"]]),
+  Object.freeze(["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
