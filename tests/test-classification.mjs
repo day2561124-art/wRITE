@@ -4,6 +4,17 @@ import {
   memoryRetrievalSteps,
   worldSimulationSteps,
 } from "./test-suite-groups.mjs";
+import {
+  mcpFullScripts,
+  mcpHermeticCoreScripts,
+  mcpHermeticCoreEntrypoint,
+} from "./tools/mcp-suite-groups.mjs";
+
+const legacyMcpScriptSet = new Set(mcpFullScripts);
+const reviewedHermeticCoreSet = new Set([
+  ...mcpHermeticCoreScripts,
+  mcpHermeticCoreEntrypoint,
+]);
 
 export const testClassificationVersion = "verification-test-classification-v1";
 
@@ -139,11 +150,25 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
     throw new Error(`Unsupported test path for classification: ${path || "<empty>"}`);
   }
 
-  const kind = classifyKind(path);
+  const reviewedHermeticCore = reviewedHermeticCoreSet.has(path);
+  const legacyExternalState = legacyMcpScriptSet.has(path);
+  const kind = reviewedHermeticCore ? "unit" : classifyKind(path);
   const components = componentsFor(path);
   const component = primaryComponent(path, components);
   const dependencies = inferDependencies(source);
-  const flags = evidenceFlags(path, source, kind, dependencies);
+  // A reviewed test must stop being called hermetic as soon as its own source
+  // gains an observable host/process/network/time/persistence dependency.
+  if (reviewedHermeticCore && dependencies.length > 0) {
+    throw new Error(`Reviewed hermetic test gained dependencies: ${path}: ${dependencies.join(", ")}.`);
+  }
+  const inferred = evidenceFlags(path, source, kind, dependencies);
+  const flags = reviewedHermeticCore ? {
+    hermetic: true, external_state: false, parallel_safe: false,
+    cacheable: false, fixed_port_evidence: false,
+  } : legacyExternalState ? {
+    ...inferred, hermetic: false, external_state: true,
+    parallel_safe: false, cacheable: false,
+  } : inferred;
 
   return Object.freeze({
     schema_version: testClassificationVersion,
@@ -162,6 +187,8 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
       ...(components.some((item) => Object.hasOwn(grouped, item)) ? ["suite_group_membership"] : []),
       ...(dependencies.length > 0 ? ["static_dependency_evidence"] : []),
       "conservative_execution_flags",
+      ...(legacyExternalState ? ["legacy_mcp_external_state"] : []),
+      ...(reviewedHermeticCore ? ["reviewed_hermetic_core_local_fixture"] : []),
     ]),
   });
 }

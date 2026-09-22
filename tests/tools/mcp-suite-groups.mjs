@@ -26,8 +26,10 @@ const entries = [
   ["tests/mcp/mcp-http-resource-bounds.test.mjs", "reliability"],
   ["tests/mcp/mcp-development-integration-tools.test.mjs", "infrastructure"],
 ];
+// Existing VA-4 layer labels describe functional ownership, not hermeticity.
+// The legacy runner creates child processes and may read live host/runtime state.
 export const mcpScriptEntries = Object.freeze(entries.map(([path, layer]) =>
-  Object.freeze({ path, layer }),
+  Object.freeze({ path, layer, external_state: true, hermetic: false }),
 ));
 export const mcpFullScripts = Object.freeze(mcpScriptEntries.map(({ path }) => path));
 export const mcpCoreScripts = Object.freeze(mcpScriptEntries
@@ -36,6 +38,14 @@ export const mcpInfrastructureScripts = Object.freeze(mcpScriptEntries
   .filter(({ layer }) => layer === "infrastructure").map(({ path }) => path));
 export const mcpReliabilityScripts = Object.freeze(mcpScriptEntries
   .filter(({ layer }) => layer === "reliability").map(({ path }) => path));
+
+// VA-9: manually audited, local-fixture-only, no spawned process/network/port
+// unit tests. This ADDITIVE entry does not alter the VA-4 24-script contract.
+export const mcpHermeticCoreScripts = Object.freeze([
+  "tests/mcp/mcp-verification-failure-classifier.test.mjs",
+  "tests/mcp/mcp-verification-controlled-retry.test.mjs",
+]);
+export const mcpHermeticCoreEntrypoint = "tests/tools/mcp-hermetic-core.test.mjs";
 export const mcpSuiteScripts = Object.freeze({
   mcp_core: mcpCoreScripts,
   mcp_infrastructure: mcpInfrastructureScripts,

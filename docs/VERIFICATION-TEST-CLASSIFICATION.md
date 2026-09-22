@@ -43,3 +43,47 @@ node tests/test-classification.test.mjs
 The command prints aggregate kind/flag counts and must report complete one-to-one classification.
 VA-2 does not claim that conservative `false` values are permanent; later phases may refine them
 only with evidence.
+
+## VA-9: reviewed hermetic Core versus external-state MCP tests (first slice)
+
+The VA-4 `mcp_core` label identifies *functional ownership*, not an
+environmental guarantee. Its legacy 24-script partition (Core,
+Infrastructure, Reliability), full runner, routing, and all certification
+gates remain unchanged. The legacy scripts have conservative
+`external_state: true` and `hermetic: false` group metadata because the
+legacy execution surface includes real child processes, host files, HTTP,
+ports, live service/tunnel interactions, and persistent runtime state.
+This is not a claim that each assertion itself performs every operation.
+
+VA-9 adds the standalone, additive entrypoint
+`tests/tools/mcp-hermetic-core.test.mjs`, containing only the reviewed
+failure-classifier and controlled-retry *policy* unit tests. Their inputs
+are local fixtures and pure modules; there are no real ports, spawned
+children, external network, public tunnel, or live Journal/transaction
+access. The explicit allowlist in `mcp-suite-groups.mjs` must match its
+static imports exactly. The test inventory classifies these two files
+and their pure entrypoint as `unit`, `hermetic: true` and
+`external_state: false`, fails closed if any gains static external
+dependency evidence, and conservatively marks the original MCP scripts
+`external_state: true`. Any still-ambiguous test remains unpromoted;
+filename-based assumptions are insufficient.
+
+Run the independent core, reviewed script inventory, and repository-wide
+classification contract:
+
+```powershell
+node --test tests/tools/mcp-hermetic-core.test.mjs
+node tests/tools/mcp-suite-groups.test.mjs
+node tests/test-classification.test.mjs
+```
+
+`parallel_safe` and `cacheable` remain **false** for the reviewed
+hermetic subset until VA-10/VA-11 explicitly validate those properties.
+This first slice does not assert that `mcp_core` is wholly hermetic or
+replace the legacy formal MCP / MCP tunnel gates.
+
+Research reference: Bazel's Test Encyclopedia defines hermetic tests by
+declared inputs and runner-guaranteed environment; Google's Hermetic
+Servers guidance recommends injected service connections and local fakes.
+Neither source justifies declaring existing process/network tests
+hermetic solely because their assertions use fixture data.

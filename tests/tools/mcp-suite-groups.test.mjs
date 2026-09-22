@@ -10,6 +10,8 @@ import {
   mcpReliabilityScripts,
   mcpSuiteScripts,
   mcpScriptTimeoutOverrides,
+  mcpHermeticCoreScripts,
+  mcpHermeticCoreEntrypoint,
 } from "./mcp-suite-groups.mjs";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +39,8 @@ assert.deepEqual(
 );
 for (const entry of mcpScriptEntries) {
   assert.ok(["core", "infrastructure", "reliability"].includes(entry.layer));
+  assert.equal(entry.external_state, true, "Legacy MCP scripts retain explicit external-state labeling");
+  assert.equal(entry.hermetic, false, "A functional Core label does not imply hermetic execution");
   assert.ok(existsSync(path.join(root, entry.path)), "Missing MCP test script: " + entry.path);
 }
 assert.ok(mcpCoreScripts.includes("server/src/mcp-smoke-test.mjs"));
@@ -58,4 +62,18 @@ assert.deepEqual(
     ["tests/mcp/mcp-development-transaction-tools.test.mjs", 600_000],
   ],
 );
+assert.deepEqual(mcpHermeticCoreScripts, [
+  "tests/mcp/mcp-verification-failure-classifier.test.mjs",
+  "tests/mcp/mcp-verification-controlled-retry.test.mjs",
+]);
+assert.equal(new Set(mcpHermeticCoreScripts).size, mcpHermeticCoreScripts.length);
+assert(mcpHermeticCoreScripts.every((item) => !mcpFullScripts.includes(item)),
+  "VA-9 hermetic suite must be additive, not a disguised VA-4 migration");
+assert(existsSync(path.join(root, mcpHermeticCoreEntrypoint)));
+const entrypoint = readFileSync(path.join(root, mcpHermeticCoreEntrypoint), "utf8");
+const directImports = [...entrypoint.matchAll(/import "\.\.\/mcp\/([^"]+\.test\.mjs)";/gu)]
+  .map((match) => `tests/mcp/${match[1]}`);
+assert.deepEqual(directImports, mcpHermeticCoreScripts,
+  "Hermetic entrypoint and reviewed inventory must agree exactly");
 console.log("VA-4 MCP 24-script partition and legacy full-suite preservation: PASS");
+console.log("VA-9 reviewed hermetic core and explicit legacy external-state contract: PASS");

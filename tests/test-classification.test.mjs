@@ -8,6 +8,11 @@ import {
   classifyTestFile,
   testClassificationVersion,
 } from "./test-classification.mjs";
+import {
+  mcpFullScripts,
+  mcpHermeticCoreScripts,
+  mcpHermeticCoreEntrypoint,
+} from "./tools/mcp-suite-groups.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -49,6 +54,31 @@ for (const testPath of tests) {
   }
   classifications.push(item);
 }
+
+const byPath = new Map(classifications.map((item) => [item.test_path, item]));
+for (const testPath of [...mcpHermeticCoreScripts, mcpHermeticCoreEntrypoint]) {
+  const classified = byPath.get(testPath);
+  assert(classified, `Missing reviewed hermetic test: ${testPath}`);
+  assert.equal(classified.kind, "unit");
+  assert.equal(classified.hermetic, true);
+  assert.equal(classified.external_state, false);
+  assert.equal(classified.parallel_safe, false, "VA-10 is separate from hermetic audit");
+  assert.equal(classified.cacheable, false, "VA-11 is separate from hermetic audit");
+  assert.deepEqual(classified.dependencies, []);
+  assert(classified.classification_basis.includes("reviewed_hermetic_core_local_fixture"));
+}
+for (const testPath of mcpFullScripts.filter((item) => item.startsWith("tests/"))) {
+  const classified = byPath.get(testPath);
+  assert(classified, `Missing legacy MCP test: ${testPath}`);
+  assert.equal(classified.external_state, true, `VA-9 legacy MCP external state: ${testPath}`);
+  assert.equal(classified.hermetic, false);
+  assert.equal(classified.cacheable, false);
+  assert(classified.classification_basis.includes("legacy_mcp_external_state"));
+}
+assert.throws(() => classifyTestFile({
+  testPath: mcpHermeticCoreScripts[0],
+  source: 'import { spawn } from "node:child_process";',
+}), /Reviewed hermetic test gained dependencies/u);
 
 assert.equal(
   new Set(classifications.map((item) => item.test_path)).size,
