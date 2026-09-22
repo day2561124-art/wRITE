@@ -1089,6 +1089,7 @@ assert.deepEqual(developerTestSchema.properties.suite.enum, [
   "mcp_reliability",
   "mcp_tunnel",
   "affected",
+  "communication",
   "world_simulation",
   "cognition",
   "memory_retrieval",

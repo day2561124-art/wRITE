@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import "./mcp-integration-verification-router.test.mjs";
 import {
   DEV_INTEGRATION_SCHEMA_VERSION,
   createDevIntegrationService,

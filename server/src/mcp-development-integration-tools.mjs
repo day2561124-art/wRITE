@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { createDevTestRunner } from "./mcp-development-test-tools.mjs";
+import { selectIntegrationVerificationPlan } from "./mcp-integration-verification-router.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
   dev_workspace_get_workspace,
@@ -457,6 +458,19 @@ function parseMergeTreeConflicts(stdout, stderr) {
   return conflicts;
 }
 
+export async function selectCandidateVerificationPlan(root, candidate, gitRunner = defaultGitRunner) {
+  const targetHead = normalizeSha(candidate.target_head, "candidate target_head");
+  const integrationCommit = normalizeSha(candidate.integration_commit, "candidate integration_commit");
+  const diff = await gitRunner([
+    "diff", "--name-only", "--no-renames", "-z",
+    targetHead, integrationCommit, "--",
+  ], { cwd: root, maxBuffer: 8 * 1024 * 1024 });
+  if (diff.exit_code !== 0 || typeof diff.stdout !== "string") {
+    throw new Error("Could not verify exact integration candidate diff.");
+  }
+  return selectIntegrationVerificationPlan(splitNullPaths(diff.stdout));
+}
+
 async function productionValidationRunner(root, candidate) {
   const contextResolver = async () => ({
     workspace_id: candidate.workspace_id,
@@ -471,10 +485,16 @@ async function productionValidationRunner(root, candidate) {
     healthy: true,
     mutation_allowed: true,
   });
+  // Route on the immutable candidate delta, never the clean materialized
+  // worktree or an unrelated dirty main. Git diff failure fails validation.
+  const plan = await selectCandidateVerificationPlan(root, candidate);
   const runner = createDevTestRunner({ workspaceContextResolver: contextResolver });
   const results = [];
-  for (const suite of ["mcp", "mcp_tunnel"]) {
-    results.push(await runner({ suite, workspace_id: candidate.workspace_id }));
+  for (const suite of plan.required_suites) {
+    const result = await runner({ suite, workspace_id: candidate.workspace_id });
+    results.push(result);
+    // A required FAIL/timeout cannot be hidden by later green suites.
+    if (result.execution_ok !== true || result.passed !== true || result.timed_out === true) break;
   }
   return results;
 }

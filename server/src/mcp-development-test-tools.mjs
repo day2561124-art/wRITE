@@ -26,6 +26,7 @@ export const DEV_TEST_SUITES = Object.freeze([
   "mcp_reliability",
   "mcp_tunnel",
   "affected",
+  "communication",
   "world_simulation",
   "cognition",
   "memory_retrieval",
@@ -67,6 +68,11 @@ const productionSuiteDefinitions = Object.freeze({
     argv: Object.freeze(["tests/run-affected.mjs"]),
     timeoutMs: 7_200_000,
     cleanupPort: 8787,
+  }),
+  communication: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/run-communication.mjs"]),
+    timeoutMs: 1_800_000,
   }),
   world_simulation: Object.freeze({
     executable: process.execPath,
