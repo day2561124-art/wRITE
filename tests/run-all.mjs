@@ -924,6 +924,7 @@ const steps = [
   ["CC-6B native speech acoustic bridge", ["tests/communication/cc6-native-acoustic-bridge.test.mjs"]],
   ["CC-6C native listener recognition and subjective interpretation", ["tests/communication/cc6-native-listener-interpretation.test.mjs"]],
   ["CC-6D bounded speaker identification and testimony receipt", ["tests/communication/cc6-native-speaker-recognition.test.mjs"]],
+  ["CC-6E bounded conversational grounding evidence", ["tests/communication/cc6-native-grounding-evidence.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

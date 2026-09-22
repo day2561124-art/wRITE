@@ -16,6 +16,11 @@ import {
   projectCharacterCommunicationSpeakerRecognition,
 } from "./character-communication-speaker-recognition-service.mjs";
 import {
+  buildCharacterCommunicationGroundingEvidenceContract,
+  characterCommunicationGroundingEvidenceVersion,
+  projectCharacterCommunicationGroundingEvidence,
+} from "./character-communication-grounding-evidence-service.mjs";
+import {
   buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
   buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
@@ -4505,6 +4510,8 @@ export function buildWorldSimulationLoopContract() {
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
       buildCharacterCommunicationSpeakerRecognitionContract(),
+    character_listener_grounding_evidence:
+      buildCharacterCommunicationGroundingEvidenceContract(),
     built_in_causal_rule_engine: buildWorldSimulationCausalRuleContract(),
     custom_causal_adjudicator_override_supported: true,
     stale_state_commit_rejected: true,
@@ -4531,6 +4538,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const audibilityQueries = [];
   const communicationListenerUnderstandingProjections = [];
   const communicationSpeakerRecognitionProjections = [];
+  const communicationGroundingEvidenceProjections = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
@@ -4809,6 +4817,55 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         communication_listener_grounding_claimed: false,
       };
     }
+
+    // CC-6E turns same-listener interpretation + same-listener subjective
+    // speaker recognition into defeasible grounding EVIDENCE only. The
+    // character may use this evidence when planning a response, but neither
+    // the engine nor the character-facing projection may claim semantic
+    // equivalence, mutual understanding, agreement, belief, common ground,
+    // hidden speaker intent, or World truth.
+    const groundingEvidenceProjection =
+      projectCharacterCommunicationGroundingEvidence({
+        observer: character,
+        listener_understanding_projection: listenerUnderstandingProjection,
+        speaker_recognition_projection: speakerRecognitionProjection,
+      });
+    const groundingEvidence =
+      array(groundingEvidenceProjection.character_view?.grounding_evidence);
+    if (groundingEvidence.length > 0) {
+      characterPerception.audible = [
+        ...array(characterPerception.audible),
+        ...cloneJson(groundingEvidence),
+      ];
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        communication_listener_grounding_evidence_available: true,
+        communication_listener_grounding_evidence_subjective_only: true,
+        communication_listener_semantic_equivalence_verified: false,
+        communication_listener_mutual_understanding_claimed: false,
+        communication_listener_agreement_inferred: false,
+        communication_listener_belief_updated: false,
+        communication_listener_world_truth_claimed: false,
+        communication_listener_grounding_claimed: false,
+      };
+    }
+    communicationGroundingEvidenceProjections.push({
+      character,
+      version: characterCommunicationGroundingEvidenceVersion,
+      evidence_count: groundingEvidenceProjection.audit?.evidence_count ?? 0,
+      character_view_hash:
+        hashAgentRunValue(groundingEvidenceProjection.character_view),
+      audit: cloneJson(groundingEvidenceProjection.audit),
+      speaker_hidden_intent_exposed: false,
+      semantic_equivalence_verified: false,
+      mutual_understanding_claimed: false,
+      agreement_inferred: false,
+      repair_automatically_triggered: false,
+      belief_update_performed: false,
+      world_truth_claimed: false,
+      grounding_claimed: false,
+    });
+
     communicationSpeakerRecognitionProjections.push({
       character,
       version: characterCommunicationSpeakerRecognitionVersion,
@@ -6995,6 +7052,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationListenerUnderstandingProjections),
     communication_speaker_recognition_projections:
       cloneJson(communicationSpeakerRecognitionProjections),
+    communication_grounding_evidence_projections:
+      cloneJson(communicationGroundingEvidenceProjections),
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
@@ -7040,6 +7099,17 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_speaker_recognition_world_truth_claimed: false,
       communication_speaker_recognition_belief_update_performed: false,
       communication_speaker_recognition_grounding_claimed: false,
+      communication_grounding_evidence_version:
+        characterCommunicationGroundingEvidenceVersion,
+      communication_grounding_evidence_same_observer_required: true,
+      communication_grounding_evidence_interaction_function_subjective: true,
+      communication_grounding_evidence_semantic_equivalence_verified: false,
+      communication_grounding_evidence_mutual_understanding_claimed: false,
+      communication_grounding_evidence_agreement_inferred: false,
+      communication_grounding_evidence_repair_automatically_triggered: false,
+      communication_grounding_evidence_belief_update_performed: false,
+      communication_grounding_evidence_world_truth_claimed: false,
+      communication_grounding_evidence_grounding_claimed: false,
       visible_constraint_observation_version:
         worldSimulationVisibleConstraintObservationVersion,
       visible_constraint_observation_projection_version:
@@ -11910,6 +11980,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_speaker_recognition_projections: cloneJson(
         preparedTurn.communication_speaker_recognition_projections ?? [],
+      ),
+      communication_grounding_evidence_projections: cloneJson(
+        preparedTurn.communication_grounding_evidence_projections ?? [],
       ),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
 

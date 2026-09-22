@@ -215,6 +215,7 @@ const decisionKeys = new Set([
   "speech_candidate_id",
   "heard_surface",
   "interpreted_content",
+  "interpreted_interaction_function",
   "speech_content_intelligible",
   "understanding_attested",
 ]);
@@ -267,10 +268,22 @@ export function projectCharacterCommunicationListenerUnderstanding(input = {}) {
       },
     );
 
+    const interpretedInteractionFunction =
+      raw.interpreted_interaction_function == null
+        ? null
+        : boundedText(
+          raw.interpreted_interaction_function,
+          "interpreted_interaction_function",
+          240,
+        );
+
     characterViews.push({
       ...cloneJson(interpreted.character_view),
       schema_version: characterCommunicationListenerUnderstandingVersion,
       source: "listener_authored_speech_recognition",
+      interpreted_interaction_function: interpretedInteractionFunction,
+      interaction_function_interpretation_subjective:
+        interpretedInteractionFunction !== null,
       speaker_identity_recognized: false,
       perceived_speaker: null,
       cc2_understood_testimony_eligible: false,
@@ -283,6 +296,8 @@ export function projectCharacterCommunicationListenerUnderstanding(input = {}) {
       source_speaker: engine.source_speaker,
       reception_verified: true,
       interpretation_subjective_only: true,
+      interaction_function_interpretation_subjective:
+        interpretedInteractionFunction !== null,
       speaker_identity_recognized: false,
       understood_testimony_issued: false,
       grounding_claimed: false,
@@ -320,6 +335,7 @@ export function buildCharacterCommunicationListenerUnderstandingContract() {
     resolver_receives_source_action_identity: false,
     no_resolver_means_no_interpretation: true,
     mishearing_and_partial_interpretation_allowed: true,
+    subjective_interaction_function_interpretation_supported: true,
     speaker_identity_recognition_supported: false,
     understood_testimony_issued: false,
     belief_update_performed: false,
