@@ -28,10 +28,19 @@ fail-closed; no inferred PASS and no retry-as-stable-PASS. The validation
 report remains attached to the immutable candidate identity and is
 preserved after the temporary integration worktree is removed.
 
-This slice captures **formal integration** receipts, not yet all standalone
-`dev_run_tests` invocations. A later VA-6 slice must extend manifest
-coverage to standalone development gates without conflating working-tree
-snapshots with committed candidate identity.
+Formal integration receipts use exact candidate/source/target commit identity.
+Standalone `dev_run_tests` receipts use the *workspace snapshot ID* and
+snapshot HEAD, with `commit: null` and `evidence_identity: "workspace_snapshot"`.
+An uncommitted working tree is never presented as an exact validated commit.
+Standalone receipts contain actual suite outcome and Journal operation ID,
+suite-granularity selection, snapshot changed paths, and a SHA-256 of the
+manifest in the returned result, last-run record, and Journal terminal event.
+The suite runner does not emit per-file receipts, so no per-file coverage is
+claimed; a standalone run does not imply any skipped suite or certification.
+Early failures before a verified snapshot or Journal operation have no
+fabricated manifest and remain failed; persistent-result or Journal-terminal
+errors never produce stable PASS. These receipts do not replace integration
+preflight, exact candidate tests, Journal, or authoritative remote checks.
 
 Research reference: SLSA build provenance records exact input identities
 and resolved dependencies; GitHub attestation guidance distinguishes

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildIntegrationVerificationManifest,
+  buildDevelopmentVerificationManifest,
   VERIFICATION_MANIFEST_VERSION,
 } from "../../server/src/mcp-verification-manifest.mjs";
 
@@ -102,4 +103,54 @@ test("VA-6 carries certification/reliability requirements and rejects invented c
   assert.throws(() => manifest({
     candidate: { ...candidate, integration_commit: "main" },
   }), /Invalid exact commit/u);
+});
+
+const developmentSnapshot = {
+  workspace_snapshot_id: "d".repeat(64),
+  head: sha("a"),
+  changed_artifact_count: 2,
+  manifest: [{ path: "server/src/sample.mjs" }, { path: "tests/sample.test.mjs" }],
+};
+const developmentContext = { workspace_id: candidate.workspace_id, workstream_id: candidate.workstream_id };
+function developmentReceipt(suiteResult = passed, overrides = {}) {
+  return buildDevelopmentVerificationManifest({
+    workspaceSnapshot: developmentSnapshot,
+    workspaceContext: developmentContext,
+    suiteResult,
+    operationId: passed.operation_id,
+    completedAt: "2026-09-22T04:00:00.000Z",
+    ...overrides,
+  });
+}
+
+test("VA-6 development gate binds snapshot identity without claiming exact-commit verification", () => {
+  const receipt = developmentReceipt();
+  assert.equal(receipt.gate, "development");
+  assert.equal(receipt.evidence_identity, "workspace_snapshot");
+  assert.equal(receipt.commit, null);
+  assert.equal(receipt.head, developmentSnapshot.head);
+  assert.equal(receipt.workspace_snapshot_id, developmentSnapshot.workspace_snapshot_id);
+  assert.deepEqual(receipt.changed_files, ["server/src/sample.mjs", "tests/sample.test.mjs"]);
+  assert.equal(receipt.changed_artifact_count, 2);
+  assert.deepEqual(receipt.tests_selected, ["communication"]);
+  assert.equal(receipt.test_selection_granularity, "suite");
+  assert.deepEqual(receipt.tests_skipped, []);
+  assert.equal(receipt.suite_results[0].operation_id, passed.operation_id);
+  assert.equal(receipt.gate_result, "passed");
+  assert.equal(receipt.reliability_required, false);
+});
+
+test("VA-6 development gate fails closed and does not wash timeout or missing evidence", () => {
+  assert.equal(developmentReceipt({ ...passed, passed: false }).gate_result, "failed");
+  assert.equal(developmentReceipt({ ...passed, timed_out: true }).gate_result, "failed");
+  assert.equal(developmentReceipt({ ...passed, execution_ok: false }).gate_result, "failed");
+  assert.equal(developmentReceipt({ ...passed, exit_code: 1 }).gate_result, "failed");
+  assert.equal(developmentReceipt({ ...passed, suite: "mcp_reliability" }).reliability_required, true);
+  assert.throws(() => developmentReceipt(passed, { workspaceSnapshot: {
+    ...developmentSnapshot, workspace_snapshot_id: "missing",
+  } }), /snapshot identity/u);
+  assert.throws(() => developmentReceipt(passed, { workspaceSnapshot: {
+    ...developmentSnapshot, changed_artifact_count: 3,
+  } }), /Complete workspace snapshot/u);
+  assert.throws(() => developmentReceipt(passed, { operationId: null }), /Journal operation identity/u);
 });

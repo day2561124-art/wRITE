@@ -83,3 +83,75 @@ export function buildIntegrationVerificationManifest({
     completed_at: timestamp,
   });
 }
+
+const workspaceSnapshotPattern = /^[a-f0-9]{64}$/u;
+
+// A development receipt is bound to an immutable working-tree snapshot, not
+// an exact candidate commit. Never substitute HEAD for a validated tree.
+export function buildDevelopmentVerificationManifest({
+  workspaceSnapshot, workspaceContext, suiteResult, operationId, completedAt,
+} = {}) {
+  const snapshotId = workspaceSnapshot?.workspace_snapshot_id;
+  if (typeof snapshotId !== "string" || !workspaceSnapshotPattern.test(snapshotId)) {
+    throw new Error("Exact workspace snapshot identity is required.");
+  }
+  const head = exactSha(workspaceSnapshot.head, "workspace_head");
+  if (!Array.isArray(workspaceSnapshot.manifest)
+      || workspaceSnapshot.changed_artifact_count !== workspaceSnapshot.manifest.length) {
+    throw new Error("Complete workspace snapshot manifest is required.");
+  }
+  if (!workspaceContext?.workspace_id || typeof suiteResult?.suite !== "string"
+      || !suiteResult.suite || typeof operationId !== "string" || !operationId) {
+    throw new Error("Workspace, test suite and Journal operation identity are required.");
+  }
+  const changedFiles = workspaceSnapshot.manifest.map((item) => {
+    if (typeof item?.path !== "string" || !item.path) {
+      throw new Error("Workspace snapshot contains an invalid changed path.");
+    }
+    return item.path;
+  });
+  const result = {
+    suite: suiteResult.suite,
+    operation_id: operationId,
+    execution_ok: suiteResult.execution_ok === true,
+    passed: suiteResult.passed === true,
+    timed_out: suiteResult.timed_out === true,
+    exit_code: Number.isInteger(suiteResult.exit_code) ? suiteResult.exit_code : null,
+    duration_ms: Number.isFinite(suiteResult.duration_ms) && suiteResult.duration_ms >= 0
+      ? suiteResult.duration_ms : null,
+  };
+  const passed = result.execution_ok && result.passed && !result.timed_out
+    && result.exit_code === 0;
+  const timestamp = typeof completedAt === "string" && Number.isFinite(Date.parse(completedAt))
+    ? completedAt : null;
+  return Object.freeze({
+    schema_version: VERIFICATION_MANIFEST_VERSION,
+    gate: "development",
+    evidence_identity: "workspace_snapshot",
+    commit: null,
+    head,
+    workspace_snapshot_id: snapshotId,
+    workspace: workspaceContext.workspace_id,
+    workstream: workspaceContext.workstream_id ?? null,
+    changed_files: [...new Set(changedFiles)].sort(),
+    changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+    risk_class: "not_evaluated_standalone",
+    affected_components: [],
+    focused: suiteResult.suite === "affected",
+    fallback_reason: null,
+    tests_selected: [result.suite],
+    test_selection_granularity: "suite",
+    tests_skipped: [],
+    skip_reason: null,
+    suite_results: [result],
+    passed,
+    failed: !passed,
+    timed_out: result.timed_out,
+    duration_ms: result.duration_ms,
+    required_gate: "standalone_development",
+    gate_result: passed ? "passed" : "failed",
+    certification_required: false,
+    reliability_required: result.suite === "mcp_reliability",
+    completed_at: timestamp,
+  });
+}

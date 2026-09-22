@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
@@ -398,6 +399,14 @@ try {
   assert.equal(persistedFailure.passed, false);
   assert.equal(persistedFailure.exit_code, 1);
   assert.equal(persistedFailure.timed_out, false);
+  assert.equal(failed.verification_manifest.gate, "development");
+  assert.equal(failed.verification_manifest.commit, null);
+  assert.equal(failed.verification_manifest.gate_result, "failed");
+  assert.equal(failed.verification_manifest.workspace_snapshot_id, failed.workspace_snapshot_id);
+  assert.deepEqual(persistedFailure.verification_manifest, failed.verification_manifest);
+  assert.equal(persistedFailure.verification_manifest_sha256, failed.verification_manifest_sha256);
+  assert.equal(failed.verification_manifest_sha256, createHash("sha256")
+    .update(JSON.stringify(failed.verification_manifest), "utf8").digest("hex"));
   assert.match(persistedFailure.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
   assert.match(persistedFailure.head, /^[a-f0-9]{40}$/u);
   assert(Number.isFinite(persistedFailure.changed_artifact_count));
@@ -524,6 +533,9 @@ try {
   const busy = await concurrentRunner({ suite: "mcp" });
   const completed = await firstRun;
   assert.equal(completed.passed, true);
+  assert.equal(completed.verification_manifest.gate_result, "passed");
+  assert.equal(completed.verification_manifest.evidence_identity, "workspace_snapshot");
+  assert.equal(completed.verification_manifest.commit, null);
   assert.equal(busy.execution_ok, false);
   assert.equal(busy.passed, false);
   assert.match(busy.stderr, /already running/u);

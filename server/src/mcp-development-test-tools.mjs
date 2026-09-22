@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,7 @@ import {
   terminateProcessTree,
 } from "./process-control.mjs";
 import { projectRoot } from "./project-paths.mjs";
+import { buildDevelopmentVerificationManifest } from "./mcp-verification-manifest.mjs";
 import { workspaceExecutionProvenance } from "./mcp-development-readonly-tools.mjs";
 import { resolveDevWorkspaceExecutionContext } from "./mcp-development-workstream-tools.mjs";
 import {
@@ -279,6 +281,8 @@ async function persistLastRunResult(resultPath, result) {
     workspace_snapshot_id: typeof result.workspace_snapshot_id === "string" ? result.workspace_snapshot_id : null,
     head: typeof result.head === "string" ? result.head : null,
     changed_artifact_count: Number.isFinite(result.changed_artifact_count) ? result.changed_artifact_count : null,
+    verification_manifest: result.verification_manifest ?? null,
+    verification_manifest_sha256: result.verification_manifest_sha256 ?? null,
     ...snapshotJournalTelemetry({ diagnostics: result.snapshot_diagnostics }),
     stdout_truncated: result.stdout_truncated === true,
     stderr_truncated: result.stderr_truncated === true,
@@ -657,9 +661,37 @@ export function createDevTestRunner({
       };
     }
 
+    let verificationManifest = null;
+    let verificationManifestSha256 = null;
+    const refreshVerificationManifest = () => {
+      verificationManifest = buildDevelopmentVerificationManifest({
+        workspaceSnapshot,
+        workspaceContext: context,
+        suiteResult: result,
+        operationId: journalOperation.operation_id,
+        completedAt: new Date().toISOString(),
+      });
+      verificationManifestSha256 = createHash("sha256")
+        .update(JSON.stringify(verificationManifest), "utf8").digest("hex");
+    };
+    try {
+      refreshVerificationManifest();
+    } catch (error) {
+      result = {
+        ...result,
+        execution_ok: false,
+        passed: false,
+        stderr: [result.stderr, redactTestOutput(
+          `Could not build development verification manifest: ${error.message}`,
+        )].filter(Boolean).join("\n"),
+      };
+    }
+
     try {
       await persistLastRunResult(resultPath, {
         ...result,
+        verification_manifest: verificationManifest,
+        verification_manifest_sha256: verificationManifestSha256,
         total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
         workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
         head: workspaceSnapshot.head,
@@ -676,6 +708,8 @@ export function createDevTestRunner({
           redactTestOutput(`Could not persist test-run result: ${error.message}`),
         ].filter(Boolean).join("\n"),
       };
+      try { refreshVerificationManifest(); }
+      catch { verificationManifest = null; verificationManifestSha256 = null; }
     }
     try {
       await completeDevJournalOperation(journalOperation.operation_id, {
@@ -689,6 +723,8 @@ export function createDevTestRunner({
           workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
           head: workspaceSnapshot.head,
           changed_artifact_count: workspaceSnapshot.changed_artifact_count,
+          verification_manifest_sha256: verificationManifestSha256,
+          verification_manifest_gate_result: verificationManifest?.gate_result ?? "failed",
           ...snapshotJournalTelemetry(workspaceSnapshot),
         },
       });
@@ -707,6 +743,8 @@ export function createDevTestRunner({
     await releaseRunLock(lockHandle, lockPath);
     return {
       ...result,
+      verification_manifest: verificationManifest,
+      verification_manifest_sha256: verificationManifestSha256,
       operation_id: journalOperation.operation_id,
       workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
       snapshot_diagnostics: workspaceSnapshot.diagnostics ?? null,
