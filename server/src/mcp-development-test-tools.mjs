@@ -21,6 +21,9 @@ import {
 
 export const DEV_TEST_SUITES = Object.freeze([
   "mcp",
+  "mcp_core",
+  "mcp_infrastructure",
+  "mcp_reliability",
   "mcp_tunnel",
   "affected",
   "world_simulation",
@@ -35,6 +38,23 @@ const productionSuiteDefinitions = Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-contract.test.mjs"]),
     timeoutMs: 1_500_000,
+  }),
+  mcp_core: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),
+    timeoutMs: 900_000,
+  }),
+  mcp_infrastructure: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/tools/mcp-infrastructure.test.mjs"]),
+    timeoutMs: 1_500_000,
+    cleanupPort: 8787,
+  }),
+  mcp_reliability: Object.freeze({
+    executable: process.execPath,
+    argv: Object.freeze(["tests/tools/mcp-reliability.test.mjs"]),
+    timeoutMs: 1_500_000,
+    cleanupPort: 8787,
   }),
   mcp_tunnel: Object.freeze({
     executable: process.execPath,

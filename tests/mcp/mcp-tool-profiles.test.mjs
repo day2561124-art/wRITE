@@ -1084,6 +1084,9 @@ assert.deepEqual(Object.keys(developerTestSchema?.properties ?? {}), ["suite", "
 assert.equal(developerTestSchema.properties.suite.type, "string");
 assert.deepEqual(developerTestSchema.properties.suite.enum, [
   "mcp",
+  "mcp_core",
+  "mcp_infrastructure",
+  "mcp_reliability",
   "mcp_tunnel",
   "affected",
   "world_simulation",

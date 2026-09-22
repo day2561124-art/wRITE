@@ -83,6 +83,8 @@ function runTestScript(scriptPath) {
 }
 
 try {
+  // VA-4 additive safety contract: prove all original MCP scripts remain covered.
+  await runTestScript("tests/tools/mcp-suite-groups.test.mjs");
   for (const scriptPath of testScripts) {
     await runTestScript(scriptPath);
   }
