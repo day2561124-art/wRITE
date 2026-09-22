@@ -54,6 +54,8 @@ test("VA-6 records exact source/target/candidate identities and truthful skipped
   assert.equal(result.suite_results[0].operation_id, passed.operation_id);
   assert.equal(result.duration_ms, 15);
   assert.equal(result.gate_result, "passed");
+  assert.equal(result.failure_classification.classification, "PASS_STABLE");
+  assert.equal(result.failure_classification.original_gate_result, "passed");
   assert.equal(result.reliability_required, false);
   assert.equal(result.certification_required, false);
 });
@@ -67,6 +69,23 @@ test("VA-6 does not green-light missing, duplicate, timed-out, failed, or dirty 
   assert.equal(manifest({ suiteResults: [{ ...passed, execution_ok: false }] }).gate_result, "failed");
   assert.equal(manifest({ diffCheck: { passed: false } }).gate_result, "failed");
   assert.equal(manifest({ postTestWorktreeClean: false }).gate_result, "failed");
+});
+
+test("VA-7 integration receipt classifies observed timeout and typed infrastructure without washing FAIL", () => {
+  const timeout = manifest({ suiteResults: [{ ...passed, passed: false, timed_out: true }] });
+  assert.equal(timeout.gate_result, "failed");
+  assert.equal(timeout.failure_classification.classification, "TIMEOUT");
+  assert.equal(timeout.failure_classification.original_gate_result, "failed");
+  assert.equal(timeout.failure_classification.changes_gate_result, false);
+
+  const infra = manifest({ suiteResults: [{
+    ...passed, passed: false, execution_ok: false, failure_code: "TEST_PROCESS_SPAWN_FAILED",
+  }] });
+  assert.equal(infra.gate_result, "failed");
+  assert.equal(infra.failure_classification.classification, "INFRA_FAILURE");
+
+  const ambiguous = manifest({ suiteResults: [{ ...passed, passed: false, stderr: "TEST_PROCESS_SPAWN_FAILED" }] });
+  assert.equal(ambiguous.failure_classification.classification, "UNKNOWN");
 });
 
 test("VA-6 preserves unknown risk escalation and never marks required MCP gates skipped", () => {
@@ -137,7 +156,23 @@ test("VA-6 development gate binds snapshot identity without claiming exact-commi
   assert.deepEqual(receipt.tests_skipped, []);
   assert.equal(receipt.suite_results[0].operation_id, passed.operation_id);
   assert.equal(receipt.gate_result, "passed");
+  assert.equal(receipt.failure_classification.classification, "PASS_STABLE");
   assert.equal(receipt.reliability_required, false);
+});
+
+test("VA-7 development receipt retains original failure when classifying lock or timeout", () => {
+  const lock = developmentReceipt({
+    ...passed, passed: false, execution_ok: false, failure_code: "TEST_RUN_LOCK_BUSY",
+  });
+  assert.equal(lock.gate_result, "failed");
+  assert.equal(lock.failure_classification.classification, "LOCK_CONTENTION");
+  assert.equal(lock.failure_classification.original_gate_result, "failed");
+  assert.equal(lock.failure_classification.changes_gate_result, false);
+
+  const timeout = developmentReceipt({ ...passed, passed: false, timed_out: true });
+  assert.equal(timeout.gate_result, "failed");
+  assert.equal(timeout.failure_classification.classification, "TIMEOUT");
+  assert.equal(timeout.failure_classification.original_gate_result, "failed");
 });
 
 test("VA-6 development gate fails closed and does not wash timeout or missing evidence", () => {

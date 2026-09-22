@@ -1,3 +1,5 @@
+import { classifyVerificationFailure } from "./mcp-verification-failure-classifier.mjs";
+
 // VA-6: exact-candidate verification evidence. This is a trace of actual
 // execution, not a new authority or an alternative to Journal provenance.
 export const VERIFICATION_MANIFEST_VERSION = "verification-manifest-v1";
@@ -76,6 +78,12 @@ export function buildIntegrationVerificationManifest({
     duration_ms: totalDuration,
     required_gate: "exact_candidate_integration",
     gate_result: passed ? "passed" : "failed",
+    failure_classification: classifyVerificationFailure({
+      gatePassed: passed,
+      suiteResults,
+      diffCheckPassed: diffCheck?.passed === true,
+      postTestWorktreeClean,
+    }),
     certification_required: expected.includes("all"),
     reliability_required: expected.includes("mcp_reliability"),
     diff_check_passed: diffCheck?.passed === true,
@@ -150,6 +158,10 @@ export function buildDevelopmentVerificationManifest({
     duration_ms: result.duration_ms,
     required_gate: "standalone_development",
     gate_result: passed ? "passed" : "failed",
+    failure_classification: classifyVerificationFailure({
+      gatePassed: passed,
+      suiteResults: [suiteResult],
+    }),
     certification_required: false,
     reliability_required: result.suite === "mcp_reliability",
     completed_at: timestamp,

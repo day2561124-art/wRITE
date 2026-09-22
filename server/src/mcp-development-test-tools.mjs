@@ -502,6 +502,8 @@ async function runDefinition(suite, definition, outputMaxCharacters, lockHandle,
     suite,
     execution_ok: !spawnError && !cleanupError,
     passed: !spawnError && !cleanupError && !timedOut && exitCode === 0,
+    failure_code: spawnError ? "TEST_PROCESS_SPAWN_FAILED"
+      : cleanupError ? "TEST_PORT_CLEANUP_FAILED" : null,
     exit_code: exitCode,
     signal,
     timed_out: timedOut,
@@ -555,6 +557,7 @@ export function createDevTestRunner({
       return {
         ...baseResult(suite, startedAt),
         stderr: "Another dev_run_tests invocation is already running.",
+        failure_code: "TEST_RUN_LOCK_BUSY",
       };
     }
 

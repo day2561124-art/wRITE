@@ -42,6 +42,21 @@ fabricated manifest and remain failed; persistent-result or Journal-terminal
 errors never produce stable PASS. These receipts do not replace integration
 preflight, exact candidate tests, Journal, or authoritative remote checks.
 
+VA-7 first slice adds a bounded `failure_classification` to both integration
+and standalone manifests. The vocabulary is PASS_STABLE, REGRESSION, FLAKY,
+INFRA_FAILURE, ENVIRONMENT_FAILURE, TIMEOUT, LOCK_CONTENTION, UNKNOWN.
+It is diagnostic and preserves the original gate outcome. PASS_STABLE means
+only that this original gate passed, not a statistical guarantee of future
+stability. TIMEOUT uses an actual timeout receipt; lock, environment and
+infrastructure use explicit machine-readable error codes, not stderr text.
+FLAKY needs a verified same-snapshot, same-suite pass/fail comparison;
+REGRESSION needs a verified controlled baseline comparison with non-code
+confounds excluded. Neither comparison is fabricated from one run. VA-8
+controlled retries remain separate future diagnostic evidence, and may never
+turn the original FAIL into PASS. Missing or ambiguous evidence is UNKNOWN.
+The classifier is included in the existing manifest SHA-256 rather than
+creating a new gate, retry authority, or per-test evidence claim.
+
 Research reference: SLSA build provenance records exact input identities
 and resolved dependencies; GitHub attestation guidance distinguishes
 recording provenance from verifying it. This is an internal unsigned
