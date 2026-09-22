@@ -301,6 +301,8 @@ export async function commitWorldSimulationTurn(
             audibility_queries: input.audibility_queries ?? [],
             communication_listener_understanding_projections:
               input.communication_listener_understanding_projections ?? [],
+            communication_speaker_recognition_projections:
+              input.communication_speaker_recognition_projections ?? [],
             memory_accessibility_queries: input.memory_accessibility_queries ?? [],
             subjective_memory_encoding_decisions: input.subjective_memory_encoding_decisions ?? null,
             subjective_memory_episode_bindings: input.subjective_memory_episode_bindings ?? null,
