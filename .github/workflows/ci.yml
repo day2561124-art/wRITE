@@ -154,7 +154,6 @@ jobs:
             tests/.tmp/ci-selection-telemetry.last.json
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 14
 
   manual-full:
     if: github.event_name == 'workflow_dispatch'

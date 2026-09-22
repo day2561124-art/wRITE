@@ -6,7 +6,7 @@ VA-13 keeps the VA-12 Full ×3 scheduled regression matrix, but turns the Ubuntu
 
 The scheduled Ubuntu / Node 24 lane checks out full Git history and selects a bounded rolling range of at most 20 first-parent transitions. The oldest commit in that window becomes the audit base; the scheduled commit is the audit head.
 
-This is intentionally a rolling confidence window rather than a claim that the selected base is the exact previous scheduled run. VA-14 telemetry can later persist longitudinal run history without changing this gate.
+This is intentionally a rolling confidence window rather than a claim that the selected base is the exact previous scheduled run. VA-14 retains each scheduled audit as bounded workflow artifact evidence and can aggregate multiple retained receipts without changing this gate.
 
 ## Execution rules
 
@@ -47,4 +47,4 @@ Thus VA-13 adds selection validation without adding a fourth full-suite run.
 - A focused failure still fails the audit even when full passes.
 - A full failure always fails the audit.
 - Unknown/unscoped change remains a safe selector fallback to full.
-- The audit receipt is local CI evidence only; VA-14 is responsible for long-term telemetry aggregation.
+- VA-14 retains the audit receipt as bounded CI artifact evidence and aggregates one or more retained receipts without changing this gate.

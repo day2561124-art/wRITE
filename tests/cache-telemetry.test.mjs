@@ -52,7 +52,8 @@ const scheduled = workflow.slice(workflow.indexOf("  scheduled-full:\n"), workfl
 assert.match(scheduled, /actions\/upload-artifact@v7/u);
 assert.match(scheduled, /always\(\) && matrix\.selector_audit == true/u);
 assert.match(scheduled, /include-hidden-files: true/u);
-assert.match(scheduled, /retention-days: 14/u);
+assert.doesNotMatch(scheduled, /retention-days:/u,
+  "artifact retention must follow repository policy rather than shorten it in workflow code");
 assert.match(scheduled, /ci-selection-audit\.last\.json/u);
 assert.match(scheduled, /ci-selection-telemetry\.last\.json/u);
 assert.match(scheduled, /run-verification-telemetry\.mjs/u);
