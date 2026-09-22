@@ -67,7 +67,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(
-    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92|phase93|phase94|phase95|phase96|certification)\/[^"]+\.test\.mjs"/g,
+    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92|phase93|phase94|phase95|phase96)\/[^"]+\.test\.mjs"/g,
   ),
 ].map((match) => match[0].slice(1, -1));
 
@@ -115,6 +115,20 @@ const phase96Paths = pathsFor(phase96MemoryAffectLifecycleClosureSteps);
 const certificationPaths = pathsFor(characterMemoryCoreCertificationSteps);
 const phase62CognitionPaths = pathsFor(phase62CognitionIntegrationSteps);
 
+assert.deepEqual(
+  certificationPaths,
+  ["tests/certification/character-memory-core-certification.test.mjs"],
+  "Character Memory Core certification must remain available as an explicit standalone certification group.",
+);
+for (const dailyPaths of [worldPaths, cognitionPaths, memoryPaths]) {
+  for (const certificationPath of certificationPaths) {
+    assert.ok(
+      !dailyPaths.includes(certificationPath),
+      `Daily subsystem runner must not include certification test: ${certificationPath}`,
+    );
+  }
+}
+
 assertUnique("run-all active world-simulation inventory", activeRunAllPaths);
 assertUnique("world-simulation runner", worldPaths);
 assertUnique("cognition runner", cognitionPaths);
@@ -128,7 +142,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   memoryPaths,
-  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths, ...phase85Paths, ...phase86Paths, ...phase87Paths, ...phase88Paths, ...phase89Paths, ...phase90Paths, ...phase91Paths, ...phase92Paths, ...phase93Paths, ...phase94Paths, ...phase95Paths, ...phase96Paths, ...certificationPaths],
+  [...phase63Paths, ...phase64Paths, ...phase67Paths, ...phase68Paths, ...phase69Paths, ...phase70Paths, ...phase71Paths, ...phase72Paths, ...phase73Paths, ...phase76Paths, ...phase77Paths, ...phase78Paths, ...phase79Paths, ...phase80Paths, ...phase81CounterfactualReflectionReentryPaths, ...phase82Paths, ...phase83Paths, ...phase84Paths, ...phase85Paths, ...phase86Paths, ...phase87Paths, ...phase88Paths, ...phase89Paths, ...phase90Paths, ...phase91Paths, ...phase92Paths, ...phase93Paths, ...phase94Paths, ...phase95Paths, ...phase96Paths],
   "Memory-retrieval runner must cover Phase63 memory through Phase96 memory–affect lifecycle closure, including bounded source attribution, provenance-bound distortion evidence, and read-only memory/affect integration.",
 );
 
@@ -170,7 +184,6 @@ assert.deepEqual(
     ...phase94Paths,
     ...phase95Paths,
     ...phase96Paths,
-    ...certificationPaths,
   ],
   "Cognition runner must cover its Phase62 integration boundary plus all Phase63/64/65/66/67/68/69/70/71/72/73/74/75/76/77/78/79/80/81/82/83/84/85/86/87/88/89/90/91/92/93/94/95/96 cognition.",
 );

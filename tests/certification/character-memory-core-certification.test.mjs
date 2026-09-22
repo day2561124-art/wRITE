@@ -47,9 +47,12 @@ for (const [name, steps] of Object.entries({
   memory_retrieval: memoryRetrievalSteps,
 })) {
   const paths = steps.map(([, args]) => args[0]);
-  const auditIndex = paths.indexOf(certificationPath);
-  assert.equal(auditIndex, paths.length - 1, name + " must run certification after phase coverage");
-  assert.equal(paths.filter(path => path === certificationPath).length, 1);
+  assert.equal(
+    paths.includes(certificationPath),
+    false,
+    name + " must defer certification to the explicit certification gate",
+  );
+  assert.equal(paths.filter(path => path === certificationPath).length, 0);
   for (const path of phasePaths) assert.ok(paths.includes(path), name + " missing " + path);
 }
 const runAll = await readFile("tests/run-all.mjs", "utf8");

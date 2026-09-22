@@ -349,7 +349,6 @@ export const worldSimulationSteps = Object.freeze([
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
   ...phase95InterferenceBoundedMemoryDistortionSteps,
   ...phase96MemoryAffectLifecycleClosureSteps,
-  ...characterMemoryCoreCertificationSteps,
 ]);
 
 export const cognitionSteps = Object.freeze([
@@ -388,7 +387,6 @@ export const cognitionSteps = Object.freeze([
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
   ...phase95InterferenceBoundedMemoryDistortionSteps,
   ...phase96MemoryAffectLifecycleClosureSteps,
-  ...characterMemoryCoreCertificationSteps,
 ]);
 
 export const memoryRetrievalSteps = Object.freeze([
@@ -422,5 +420,4 @@ export const memoryRetrievalSteps = Object.freeze([
   ...phase94FamiliarityRecognitionSourceMonitoringSteps,
   ...phase95InterferenceBoundedMemoryDistortionSteps,
   ...phase96MemoryAffectLifecycleClosureSteps,
-  ...characterMemoryCoreCertificationSteps,
 ]);
