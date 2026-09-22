@@ -120,3 +120,52 @@ declared inputs and runner-guaranteed environment; Google's Hermetic
 Servers guidance recommends injected service connections and local fakes.
 Neither source justifies declaring existing process/network tests
 hermetic solely because their assertions use fixture data.
+
+## VA-11: fail-closed result cache (first development-only slice)
+
+Result reuse is stricter than both hermetic and parallel-safe classification.
+`reviewedCacheableTestPaths` is an explicit allowlist, and the cache runtime
+recomputes a complete local ESM dependency closure before every lookup.
+A reviewed file therefore cannot be reused merely because its own source
+looks pure.
+
+The first cacheable cohort contains only:
+
+- the two pure MCP verification-policy unit tests from VA-9;
+- `cc1-foundation.test.mjs`;
+- `cc6-listener-reception.test.mjs`.
+
+Two VA-10 parallel-safe tests were deliberately *not* promoted after
+transitive review:
+
+- `cc5-mandarin-surface-realization.test.mjs` reaches a clock-dependent
+  world-simulation module;
+- `communication-ir.test.mjs` reaches filesystem-dependent
+  `agent-run-service.mjs`.
+
+The cache key covers the exact test hash, transitive local dependency hash,
+source dependency hash, fixture hash, argv hash, Node/V8/module-ABI/platform
+runtime contract, and declared environment contract. Non-literal dynamic
+imports, undeclared external packages, filesystem/process/network/environment/
+clock/random/worker dependencies, oversized closures, or unavailable modules
+fail closed to a normal test execution instead of producing a cache hit.
+
+Only successful PASS evidence is persisted. The first implementation uses a
+bounded per-worktree local store under `tests/.tmp/verification-result-cache-v1`
+and refuses to add entries once the bounded entry limit is reached.
+
+Cache reuse is **development-only** in VA-11. `tests/run-affected.mjs` enables
+it only for a focused Communication affected plan using the private
+`--development-result-cache` opt-in flag. Direct subsystem execution remains
+uncached by default, which means formal exact-candidate integration validation
+continues to execute its routed suites for real. Full regression,
+certification, MCP reliability, tunnel/public-network checks, shared-port
+tests, Journal, transaction, checkpoint, process lifecycle, and other
+external-state validation are never cached by this slice.
+
+The regression contract proves that changing a transitive source changes the
+cache key, an old PASS no longer hits after that change, and an environment
+dependency is rejected as ineligible. A direct Communication run reports
+cache disabled; the first focused-cache run produces two misses and the
+second identical run produces two hits while non-cacheable parallel tests and
+all serial/native-loop tests continue to execute.

@@ -25,6 +25,13 @@ export const reviewedParallelSafeTestPaths = Object.freeze([
 ]);
 const reviewedParallelSafeSet = new Set(reviewedParallelSafeTestPaths);
 
+export const reviewedCacheableTestPaths = Object.freeze([
+  ...mcpHermeticCoreScripts,
+  "tests/communication/cc1-foundation.test.mjs",
+  "tests/communication/cc6-listener-reception.test.mjs",
+]);
+const reviewedCacheableSet = new Set(reviewedCacheableTestPaths);
+
 export const testClassificationVersion = "verification-test-classification-v1";
 
 export const TEST_KINDS = Object.freeze([
@@ -143,8 +150,9 @@ function evidenceFlags(testPath, source, kind, dependencies) {
   // VA-10 requires explicit review before a hermetic test may enter a
   // concurrent execution lane. Hermeticity is necessary but not sufficient.
   const parallelSafe = false;
-  const cacheable = hermetic
-    && !["certification", "reliability", "infrastructure", "e2e"].includes(kind);
+  // VA-11 requires an explicit declared-input review before result reuse.
+  // Hermeticity alone cannot prove a complete cache key.
+  const cacheable = false;
 
   return {
     external_state: externalState,
@@ -163,6 +171,7 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
 
   const reviewedHermeticCore = reviewedHermeticCoreSet.has(path);
   const reviewedParallelSafe = reviewedParallelSafeSet.has(path);
+  const reviewedCacheable = reviewedCacheableSet.has(path);
   const legacyExternalState = legacyMcpScriptSet.has(path);
   const kind = reviewedHermeticCore ? "unit" : classifyKind(path);
   const components = componentsFor(path);
@@ -177,15 +186,19 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
   if (reviewedParallelSafe && (!inferred.hermetic || inferred.external_state || dependencies.length > 0)) {
     throw new Error(`Reviewed parallel-safe test gained dependencies: ${path}: ${dependencies.join(", ") || "external state"}.`);
   }
+  if (reviewedCacheable && (!reviewedParallelSafe || !inferred.hermetic || inferred.external_state || dependencies.length > 0)) {
+    throw new Error(`Reviewed cacheable test lost deterministic eligibility: ${path}: ${dependencies.join(", ") || "external state"}.`);
+  }
   const flags = reviewedHermeticCore ? {
     hermetic: true, external_state: false, parallel_safe: reviewedParallelSafe,
-    cacheable: false, fixed_port_evidence: false,
+    cacheable: reviewedCacheable, fixed_port_evidence: false,
   } : legacyExternalState ? {
     ...inferred, hermetic: false, external_state: true,
     parallel_safe: false, cacheable: false,
   } : {
     ...inferred,
     parallel_safe: reviewedParallelSafe,
+    cacheable: reviewedCacheable,
   };
 
   return Object.freeze({
@@ -208,6 +221,7 @@ export function classifyTestFile({ testPath, source = "" } = {}) {
       ...(legacyExternalState ? ["legacy_mcp_external_state"] : []),
       ...(reviewedHermeticCore ? ["reviewed_hermetic_core_local_fixture"] : []),
       ...(reviewedParallelSafe ? ["reviewed_parallel_safe"] : []),
+      ...(reviewedCacheable ? ["reviewed_cacheable_declared_inputs"] : []),
     ]),
   });
 }

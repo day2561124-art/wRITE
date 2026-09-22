@@ -33,7 +33,12 @@ const requiredSuites = plan.required_suites ?? [plan.suite];
 const steps = requiredSuites.map((suite) => {
   const script = suiteScripts[suite];
   if (!script) throw new Error(`Affected selector returned unsupported suite: ${suite}`);
-  return [`Affected gate -> ${suite}`, [script]];
+  // VA-11 cache reuse is development-only. Formal integration invokes the
+  // routed subsystem script directly, without this private development flag.
+  const args = plan.focused === true && suite === "communication"
+    ? [script, "--development-result-cache"]
+    : [script];
+  return [`Affected gate -> ${suite}`, args];
 });
 
 const timeoutMs = plan.suite === "all" ? 7_200_000 : undefined;
