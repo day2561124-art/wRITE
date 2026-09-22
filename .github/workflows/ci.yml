@@ -73,6 +73,7 @@ jobs:
       - run: node tests/affected-test-selector.test.mjs
       - run: node tests/test-runner-core.test.mjs
       - run: node tests/ci-layering.test.mjs
+      - run: node tests/ci-selection-audit.test.mjs
 
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -97,22 +98,43 @@ jobs:
         include:
           - os: ubuntu-latest
             node: 18
+            selector_audit: false
           - os: windows-latest
             node: 18
+            selector_audit: false
           - os: ubuntu-latest
             node: 24
+            selector_audit: true
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: npm ci
-      - run: node tests/run-all.mjs
+      - name: Resolve scheduled selector-audit base
+        if: matrix.selector_audit == true
+        shell: bash
+        run: |
+          BASE_SHA="$(git rev-list --first-parent --max-count=21 HEAD | tail -n 1)"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "$GITHUB_SHA" ]; then
+            BASE_SHA="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          fi
+          echo "VA13_BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+      - name: Scheduled affected/full selector audit
+        if: matrix.selector_audit == true
+        run: >-
+          node tests/ci-selection-audit.mjs
+          --base "${{ env.VA13_BASE_SHA }}"
+          --head "${{ github.sha }}"
+      - name: Scheduled full regression
+        if: matrix.selector_audit == false
+        run: node tests/run-all.mjs
 
   manual-full:
     if: github.event_name == 'workflow_dispatch'
