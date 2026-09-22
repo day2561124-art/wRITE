@@ -74,6 +74,8 @@ jobs:
       - run: node tests/test-runner-core.test.mjs
       - run: node tests/ci-layering.test.mjs
       - run: node tests/ci-selection-audit.test.mjs
+      - run: node tests/verification-telemetry.test.mjs
+      - run: node tests/cache-telemetry.test.mjs
 
   main-regression:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -135,6 +137,24 @@ jobs:
       - name: Scheduled full regression
         if: matrix.selector_audit == false
         run: node tests/run-all.mjs
+      - name: Aggregate completed selector evidence
+        if: ${{ always() && matrix.selector_audit == true }}
+        shell: bash
+        run: |
+          if [ -f tests/.tmp/ci-selection-audit.last.json ]; then
+            node tests/run-verification-telemetry.mjs --audit tests/.tmp/ci-selection-audit.last.json > tests/.tmp/ci-selection-telemetry.last.json
+          fi
+      - name: Retain scheduled selector evidence
+        if: ${{ always() && matrix.selector_audit == true }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scheduled-selector-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tests/.tmp/ci-selection-audit.last.json
+            tests/.tmp/ci-selection-telemetry.last.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   manual-full:
     if: github.event_name == 'workflow_dispatch'

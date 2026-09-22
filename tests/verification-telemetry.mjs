@@ -35,8 +35,8 @@ function validResults(results) {
   });
 }
 
-export function aggregateVerificationTelemetry({ manifests = [], audits = [] } = {}) {
-  if (!Array.isArray(manifests) || !Array.isArray(audits)) {
+export function aggregateVerificationTelemetry({ manifests = [], audits = [], cacheReceipts = [] } = {}) {
+  if (!Array.isArray(manifests) || !Array.isArray(audits) || !Array.isArray(cacheReceipts)) {
     throw new Error("Telemetry inputs must be arrays.");
   }
   const seen = new Set();
@@ -127,9 +127,35 @@ export function aggregateVerificationTelemetry({ manifests = [], audits = [] } =
     planEvidence(raw, raw.focused !== true && !!raw.fallback_reason);
   }
 
+  for (const raw of cacheReceipts) {
+    record(raw, "test-result cache receipt");
+    if (raw.schema_version !== "verification-test-result-cache-receipt-v1"
+        || typeof raw.run_id !== "string"
+        || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(raw.run_id)
+        || raw.source_script !== "tests/run-communication.mjs"
+        || raw.enabled !== true || raw.passed !== true
+        || typeof raw.completed_at !== "string"
+        || !Number.isFinite(Date.parse(raw.completed_at))
+        || (raw.source_sha !== null && raw.source_sha !== undefined
+          && !/^[a-f0-9]{40}$/iu.test(raw.source_sha))) {
+      throw new Error("Unsupported or incomplete test-result cache receipt.");
+    }
+    unique("cache:" + raw.run_id);
+    const cache = record(raw.test_result_cache, "test-result cache");
+    if (cache.enabled !== true || ![cache.hits, cache.misses, cache.bypassed].every((n) =>
+      Number.isSafeInteger(n) && n >= 0)) {
+      throw new Error("Malformed test-result cache counters.");
+    }
+    cacheRuns++;
+    cacheHits += cache.hits;
+    cacheMisses += cache.misses;
+    cacheBypassed += cache.bypassed;
+  }
+
   return Object.freeze({
     schema_version: VERIFICATION_TELEMETRY_VERSION,
-    evidence: { manifest_count: manifests.length, audit_count: audits.length },
+    evidence: { manifest_count: manifests.length, audit_count: audits.length,
+      cache_receipt_count: cacheReceipts.length },
     durations_ms: {
       gate: gateDuration,
       suite: suiteDuration,

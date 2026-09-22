@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +25,9 @@ const cacheEnabled = process.argv.includes("--development-result-cache");
 const cacheablePaths = new Set(reviewedCacheableTestPaths);
 
 async function main() {
+  const startedAt = Date.now();
+  const receiptPath = path.join(rootDir, "tests", ".tmp", "communication-result-cache.last.json");
+  if (cacheEnabled) await rm(receiptPath, { force: true });
   await runTestSteps(
     [["Communication inventory contract", ["tests/test-suite-groups.test.mjs"]]],
     { suiteLabel: "Communication inventory preflight" },
@@ -90,6 +95,31 @@ async function main() {
 
   await runTestSteps(serial, { suiteLabel: "Communication serial shard" });
   console.log(`\nCommunication result cache: ${JSON.stringify(cacheStats)}`);
+  // A complete development-only run owns this receipt. Never publish an
+  // apparent PASS after a failed parallel or serial shard.
+  if (cacheEnabled) {
+    const receipt = {
+      schema_version: "verification-test-result-cache-receipt-v1",
+      run_id: randomUUID(),
+      suite: "communication",
+      source_script: "tests/run-communication.mjs",
+      source_sha: /^[a-f0-9]{40}$/iu.test(process.env.GITHUB_SHA ?? "")
+        ? process.env.GITHUB_SHA.toLowerCase() : null,
+      enabled: true,
+      passed: true,
+      test_result_cache: { ...cacheStats },
+      duration_ms: Math.max(0, Date.now() - startedAt),
+      completed_at: new Date().toISOString(),
+    };
+    await mkdir(path.dirname(receiptPath), { recursive: true });
+    const temporary = receiptPath + "." + process.pid + ".tmp";
+    try {
+      await writeFile(temporary, JSON.stringify(receipt, null, 2) + "\n", "utf8");
+      await rename(temporary, receiptPath);
+    } finally {
+      await rm(temporary, { force: true }).catch(() => {});
+    }
+  }
   console.log("\nCommunication test suite passed.");
 }
 

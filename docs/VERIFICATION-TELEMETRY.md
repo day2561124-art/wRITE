@@ -21,6 +21,14 @@ The CLI reads files and prints JSON; it does not overwrite evidence or change so
 - Cache hit/miss/bypass counts require explicit test_result_cache evidence. VA-6 currently has none; snapshot fingerprint-cache counters must NOT be substituted.
 - Per-test-file durations are unavailable from suite-level evidence and are null, not zero.
 
-The first batch does not persist long-term history or upload CI artifacts. These can be added using the same contract after provenance review. No network exporter, background process, or new runtime dependency is introduced.
+The first batch did not persist long-term history or upload CI artifacts. The second batch below adds bounded CI receipt retention; cross-run history remains future work. No network exporter, background process, or new runtime dependency is introduced.
 
 Design reference: OpenTelemetry separates duration observations (count and sum) from categorical counters and recommends stable metric dimensions.
+
+## Second batch: structured cache evidence and CI retention
+
+When a developer explicitly runs `node tests/run-communication.mjs --development-result-cache`, a successful full communication-suite run atomically writes `tests/.tmp/communication-result-cache.last.json`. It records an independent run UUID, optional CI commit SHA, completion time, enabled/PASS state, and the VA-11 parallel-shard hits/misses/bypasses. At the start of each cache-enabled run, a stale `last.json` is removed; a failing suite does not publish a new PASS receipt. Formal CI continues to run without development-result caching.
+
+Supply this receipt using `--cache-receipt tests/.tmp/communication-result-cache.last.json`; the telemetry aggregator validates its schema, identity and nonnegative integer counters, and refuses duplicates. The optional commit SHA is **not** a substitute for the Journal's exact snapshot identity. These counters cover the reviewed parallel communication shard, not all tests in every subsystem. An unavailable receipt remains `null`, never a fabricated zero.
+
+The scheduled Ubuntu/Node 24 selector-audit lane now derives a telemetry JSON summary from the VA-13 receipt and uploads **only** the audit and aggregate JSON files as a GitHub Actions artifact, including when the scheduled gate fails after writing its receipt. The artifact name includes run ID and attempt, with 14-day retention. Because files live in `tests/.tmp`, upload enables hidden-file handling only alongside two exact paths; unrelated temporary files are not included. If failure occurs before the audit receipt is produced, the uploader warns that there is no evidence rather than manufacturing one. The weekly Full x3 matrix and all formal validation gates remain intact.
