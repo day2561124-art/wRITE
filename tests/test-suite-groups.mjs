@@ -6,6 +6,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-6A bounded listener reception and interpretation", ["tests/communication/cc6-listener-reception.test.mjs"]]),
   Object.freeze(["CC-6B native speech acoustic bridge", ["tests/communication/cc6-native-acoustic-bridge.test.mjs"]]),
   Object.freeze(["CC-6C native listener recognition and subjective interpretation", ["tests/communication/cc6-native-listener-interpretation.test.mjs"]]),
+  Object.freeze(["CC-6D bounded speaker identification and testimony receipt", ["tests/communication/cc6-native-speaker-recognition.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
