@@ -57,6 +57,35 @@ turn the original FAIL into PASS. Missing or ambiguous evidence is UNKNOWN.
 The classifier is included in the existing manifest SHA-256 rather than
 creating a new gate, retry authority, or per-test evidence claim.
 
+VA-8 controlled retry (formal exact-candidate integration) runs at most one
+**diagnostic** re-execution of the first failed required suite. The initial
+suite's result and Journal operation remain the only gate-authoritative test
+evidence. A retry is permitted only when the first failed run has a Journal
+operation, exact candidate HEAD and workspace snapshot receipt; before the
+retry the server independently recaptures the same clean isolated
+integration worktree snapshot. The retry launches a fresh allowlisted test
+child, acquires its own run lock, and gets a separate Journal operation.
+A changed or dirty snapshot, missing provenance, or unavailable runner
+results in a recorded skipped/inconclusive diagnostic, not an invented retry.
+The suite plan still stops at the first required failure; retries never run
+on an initially passing suite or recursively rerun a diagnostic failure.
+
+The bounded `diagnostic_retries` and `diagnostic_attempt_count` appear in
+the existing exact-candidate verification manifest, its SHA-256, and the
+persisted validation report. FAIL then FAIL is recorded as
+`stable_failure_observed_twice` (a two-observation diagnosis, not a promise
+about all future runs); FAIL then PASS becomes
+`flaky_or_infra_unstable` only with verified same-suite/snapshot/commit
+and distinct Journal operation IDs. A second timeout or infrastructure
+failure stays inconclusive, rather than being called a stable assertion failure.
+The test runner returns the snapshot HEAD as well as recording it in its
+persisted receipt, so the exact-commit comparison can actually be enforced.
+Missing comparability is inconclusive.
+None changes the original FAIL or permits integration. Standalone
+`dev_run_tests` is unchanged and is not silently auto-retried. This
+implementation reuses the server-owned isolated integration worktree with
+a fresh child; it does not claim a separately materialized second worktree.
+
 Research reference: SLSA build provenance records exact input identities
 and resolved dependencies; GitHub attestation guidance distinguishes
 recording provenance from verifying it. This is an internal unsigned

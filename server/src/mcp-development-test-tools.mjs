@@ -750,6 +750,7 @@ export function createDevTestRunner({
       verification_manifest_sha256: verificationManifestSha256,
       operation_id: journalOperation.operation_id,
       workspace_snapshot_id: workspaceSnapshot.workspace_snapshot_id,
+      head: workspaceSnapshot.head,
       snapshot_diagnostics: workspaceSnapshot.diagnostics ?? null,
       total_wall_clock_ms: Math.max(0, Date.now() - startedAt),
       workspace_context: workspaceExecutionProvenance(context),

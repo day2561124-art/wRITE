@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { createDevTestRunner } from "./mcp-development-test-tools.mjs";
 import { selectIntegrationVerificationPlan } from "./mcp-integration-verification-router.mjs";
 import { buildIntegrationVerificationManifest } from "./mcp-verification-manifest.mjs";
+import { runControlledDiagnosticRetry } from "./mcp-verification-controlled-retry.mjs";
 import {
   DEV_WORKSTREAM_ID_PATTERN_SOURCE,
   dev_workspace_get_workspace,
@@ -28,6 +29,7 @@ import {
   DEV_OPERATION_ID_PATTERN_SOURCE,
   beginDevJournalOperation,
   completeDevJournalOperation,
+  computeWorkspaceSnapshot,
   failDevJournalOperation,
   markDevJournalDegraded,
 } from "./mcp-development-journal-tools.mjs";
@@ -491,13 +493,34 @@ async function productionValidationRunner(root, candidate) {
   const plan = await selectCandidateVerificationPlan(root, candidate);
   const runner = createDevTestRunner({ workspaceContextResolver: contextResolver });
   const results = [];
+  const diagnosticRetries = [];
   for (const suite of plan.required_suites) {
     const result = await runner({ suite, workspace_id: candidate.workspace_id });
     results.push(result);
-    // A required FAIL/timeout cannot be hidden by later green suites.
-    if (result.execution_ok !== true || result.passed !== true || result.timed_out === true) break;
+    // Keep the first failure as the *only* authoritative suite result. The
+    // extra fresh-child run is diagnostic, in the same exact-candidate isolated
+    // integration worktree, only after independently verifying its clean tree.
+    if (result.execution_ok !== true || result.passed !== true || result.timed_out === true) {
+      diagnosticRetries.push(await runControlledDiagnosticRetry({
+        originalResult: result,
+        exactCommit: candidate.integration_commit,
+        verifyIsolation: async () => {
+          const snapshot = await computeWorkspaceSnapshot(await contextResolver());
+          return {
+            workspace_snapshot_id: snapshot.workspace_snapshot_id,
+            head: snapshot.head,
+            changed_artifact_count: snapshot.changed_artifact_count,
+          };
+        },
+        runOnce: (failedSuite) => runner({
+          suite: failedSuite,
+          workspace_id: candidate.workspace_id,
+        }),
+      }));
+      break;
+    }
   }
-  return { plan, results };
+  return { plan, results, diagnostic_retries: diagnosticRetries };
 }
 
 export function createDevIntegrationService({
@@ -964,6 +987,7 @@ export function createDevIntegrationService({
     candidate = await updateCandidate(candidateId, candidate.revision, (record) => transitionCandidate(record, "testing"));
     let suites;
     let verificationPlan;
+    let diagnosticRetries = [];
     try {
       const output = await validationRunner(integrationPath, candidate);
       if (Array.isArray(output)) {
@@ -974,11 +998,19 @@ export function createDevIntegrationService({
       } else if (Array.isArray(output?.results) && output.plan) {
         suites = output.results;
         verificationPlan = output.plan;
+        if (output.diagnostic_retries !== undefined) {
+          if (!Array.isArray(output.diagnostic_retries)
+              || output.diagnostic_retries.length > 1) {
+            throw new Error("Controlled retry evidence must contain at most one diagnostic attempt.");
+          }
+          diagnosticRetries = output.diagnostic_retries;
+        }
       } else {
         throw new Error("Validation runner did not provide suite results and a verified plan.");
       }
     } catch (error) {
       suites = [{ suite: "validation_runner", execution_ok: false, passed: false, timed_out: false, stderr: error.message }];
+      diagnosticRetries = [];
       verificationPlan = {
         risk_class: "unknown_escalated",
         fallback_reason: "VERIFICATION_PLAN_OR_RUNNER_UNAVAILABLE",
@@ -993,6 +1025,7 @@ export function createDevIntegrationService({
       candidate,
       plan: verificationPlan,
       suiteResults: suites,
+      diagnosticRetries,
       diffCheck,
       postTestWorktreeClean: !afterStatus.dirty,
       completedAt,
@@ -1007,6 +1040,7 @@ export function createDevIntegrationService({
       source_head: candidate.source_head,
       verification_manifest: verificationManifest,
       verification_manifest_sha256: verificationManifestSha256,
+      diagnostic_retries: diagnosticRetries,
       suites: suites.map((result) => ({
         suite: result.suite,
         execution_ok: result.execution_ok === true,
@@ -1060,6 +1094,8 @@ export function createDevIntegrationService({
           suite_names: validationReport.suites.map((item) => item.suite),
           verification_manifest_sha256: verificationManifestSha256,
           verification_manifest_gate_result: verificationManifest.gate_result,
+          diagnostic_retry_count: diagnosticRetries.filter((item) => item.status === "executed").length,
+          diagnostic_retry_outcomes: diagnosticRetries.map((item) => item.outcome),
           verification_manifest_risk_class: verificationManifest.risk_class,
           cleanup_completed: cleanup.cleaned,
         },

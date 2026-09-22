@@ -88,6 +88,61 @@ test("VA-7 integration receipt classifies observed timeout and typed infrastruct
   assert.equal(ambiguous.failure_classification.classification, "UNKNOWN");
 });
 
+test("VA-8 diagnostic evidence is SHA-manifest-bound but never replaces the original FAIL", () => {
+  const original = {
+    ...passed, passed: false, exit_code: 1,
+    head: candidate.integration_commit, workspace_snapshot_id: "d".repeat(64),
+  };
+  const diagnostic = {
+    schema_version: "controlled-diagnostic-retry-v1",
+    status: "executed",
+    reason: "ONE_ISOLATED_DIAGNOSTIC_ATTEMPT",
+    exact_commit: candidate.integration_commit,
+    suite: original.suite,
+    original_operation_id: original.operation_id,
+    diagnostic_operation_id: "dev_operation_" + "f".repeat(32),
+    original_workspace_snapshot_id: original.workspace_snapshot_id,
+    diagnostic_workspace_snapshot_id: original.workspace_snapshot_id,
+    attempts_executed: 1,
+    verified_same_suite_snapshot_commit: true,
+    original_gate_result: "failed",
+    diagnostic_passed: true,
+    outcome: "flaky_or_infra_unstable",
+    changes_gate_result: false,
+  };
+  const result = manifest({
+    suiteResults: [original],
+    diagnosticRetries: [diagnostic],
+  });
+  assert.equal(result.gate_result, "failed");
+  assert.equal(result.passed, false);
+  assert.equal(result.suite_results[0].passed, false);
+  assert.equal(result.diagnostic_attempt_count, 1);
+  assert.equal(result.diagnostic_retries[0].outcome, "flaky_or_infra_unstable");
+  assert.equal(result.diagnostic_retries[0].changes_gate_result, false);
+  const repeated = manifest({
+    suiteResults: [original],
+    diagnosticRetries: [{ ...diagnostic, diagnostic_passed: false, outcome: "stable_failure_observed_twice" }],
+  });
+  assert.equal(repeated.gate_result, "failed");
+  assert.equal(repeated.diagnostic_retries[0].outcome, "stable_failure_observed_twice");
+  assert.throws(() => manifest({
+    suiteResults: [passed], diagnosticRetries: [diagnostic],
+  }), /original failed suite/u);
+  assert.throws(() => manifest({
+    suiteResults: [original],
+    diagnosticRetries: [{ ...diagnostic, exact_commit: "d".repeat(40) }],
+  }), /does not bind/u);
+  assert.throws(() => manifest({
+    suiteResults: [original],
+    diagnosticRetries: [{ ...diagnostic, diagnostic_workspace_snapshot_id: "e".repeat(64) }],
+  }), /does not bind/u);
+  assert.throws(() => manifest({
+    suiteResults: [original],
+    diagnosticRetries: [diagnostic, diagnostic],
+  }), /bounded array/u);
+});
+
 test("VA-6 preserves unknown risk escalation and never marks required MCP gates skipped", () => {
   const fallback = manifest({
     plan: {

@@ -13,7 +13,7 @@ function exactSha(value, field) {
 }
 
 export function buildIntegrationVerificationManifest({
-  candidate, plan, suiteResults, diffCheck, postTestWorktreeClean, completedAt,
+  candidate, plan, suiteResults, diagnosticRetries = [], diffCheck, postTestWorktreeClean, completedAt,
 } = {}) {
   const commit = exactSha(candidate?.integration_commit, "integration_commit");
   const sourceHead = exactSha(candidate?.source_head, "source_head");
@@ -27,12 +27,41 @@ export function buildIntegrationVerificationManifest({
   const results = suiteResults.map((result) => ({
     suite: String(result.suite ?? ""),
     operation_id: typeof result.operation_id === "string" ? result.operation_id : null,
+    workspace_snapshot_id: typeof result.workspace_snapshot_id === "string"
+      ? result.workspace_snapshot_id : null,
+    head: typeof result.head === "string" ? result.head : null,
     execution_ok: result.execution_ok === true,
     passed: result.passed === true,
     timed_out: result.timed_out === true,
     exit_code: Number.isInteger(result.exit_code) ? result.exit_code : null,
     duration_ms: Number.isFinite(result.duration_ms) && result.duration_ms >= 0 ? result.duration_ms : null,
   }));
+  if (!Array.isArray(diagnosticRetries) || diagnosticRetries.length > 1) {
+    throw new Error("Controlled diagnostic evidence must be a bounded array.");
+  }
+  if (diagnosticRetries.length > 0 && !suiteResults.some((result) =>
+    result?.passed !== true || result?.execution_ok !== true || result?.timed_out === true)) {
+    throw new Error("Controlled diagnostic retry requires an original failed suite.");
+  }
+  const retainedDiagnostics = diagnosticRetries.map((item) => {
+    const original = results.find((result) => result.suite === item?.suite
+      && result.operation_id === item?.original_operation_id
+      && (result.passed !== true || result.execution_ok !== true || result.timed_out));
+    if (!item || item.changes_gate_result !== false
+        || item.original_gate_result !== "failed" || item.exact_commit !== commit
+        || !original
+        || !["executed", "skipped"].includes(item.status)
+        || item.attempts_executed !== (item.status === "executed" ? 1 : 0)
+        || (item.status === "skipped" && item.outcome !== "inconclusive")
+        || (item.status === "executed" && item.verified_same_suite_snapshot_commit === true
+          && (item.diagnostic_operation_id === item.original_operation_id
+            || item.original_workspace_snapshot_id !== original.workspace_snapshot_id
+            || item.diagnostic_workspace_snapshot_id !== original.workspace_snapshot_id
+            || original.head !== commit))) {
+      throw new Error("Controlled diagnostic receipt does not bind the original failed exact candidate.");
+    }
+    return { ...item };
+  });
   const observed = results.map((result) => result.suite);
   const missingRequiredSuites = expected.filter((suite) => !observed.includes(suite));
   const duplicateResults = observed.length !== new Set(observed).size;
@@ -71,6 +100,8 @@ export function buildIntegrationVerificationManifest({
     tests_skipped: skipped,
     skip_reason: skipped.length ? skipped[0].reason : null,
     suite_results: results,
+    diagnostic_retries: retainedDiagnostics,
+    diagnostic_attempt_count: retainedDiagnostics.filter((item) => item.status === "executed").length,
     missing_required_suites: missingRequiredSuites,
     passed,
     failed: !passed && results.some((result) => !result.passed || !result.execution_ok),

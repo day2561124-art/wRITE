@@ -409,6 +409,7 @@ try {
     .update(JSON.stringify(failed.verification_manifest), "utf8").digest("hex"));
   assert.match(persistedFailure.workspace_snapshot_id, /^[a-f0-9]{64}$/u);
   assert.match(persistedFailure.head, /^[a-f0-9]{40}$/u);
+  assert.equal(failed.head, persistedFailure.head, "returned test receipt must expose the verified snapshot HEAD for VA-8");
   assert(Number.isFinite(persistedFailure.changed_artifact_count));
   assert(Number.isFinite(persistedFailure.snapshot_total_ms));
   assert(Number.isFinite(persistedFailure.snapshot_git_status_ms));
