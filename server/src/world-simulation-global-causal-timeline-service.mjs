@@ -92,6 +92,7 @@ function stableSort(entries) {
     ["movement_complete", 70],
     ["door_interaction_complete", 80],
     ["object_interaction_complete", 90],
+    ["communication_speech_increment", 95],
     ["action_complete", 100],
   ]);
   return [...entries].sort((left, right) => (
@@ -606,6 +607,31 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
   for (const outcome of array(input.spatial_action_outcomes)) {
     const durationMs = finiteNumber(outcome?.duration_ms);
     if (durationMs === null) continue;
+    const speechStream = object(outcome?.communication_speech_stream);
+    for (const increment of array(speechStream.increments)) {
+      const timeMs = finiteNumber(increment?.end_offset_ms);
+      if (timeMs === null || timeMs < 0 || timeMs > durationMs + 1e-9) continue;
+      entries.push({
+        kind: "communication_speech_increment",
+        actor: outcome.actor ?? null,
+        action_id: outcome.action_id ?? null,
+        stream_id: speechStream.stream_id ?? null,
+        increment_ref: increment.increment_ref ?? null,
+        increment_sequence: increment.sequence ?? null,
+        time_ms: timeMs,
+        surface_fragment: increment.surface_fragment ?? null,
+        signal_phase: increment.signal_phase ?? null,
+        technical_segmentation_only: true,
+        semantic_content_exposed: false,
+        private_purpose_exposed: false,
+        listener_audibility_inferred: false,
+        listener_understanding_inferred: false,
+        floor_claimed: false,
+        grounding_claimed: false,
+        result: "speech_increment_released",
+        source_layer: "communication_temporal_stream",
+      });
+    }
     let kind = "action_complete";
     if (outcome.result === "movement_completed") kind = "movement_complete";
     else if (String(outcome.result ?? "").startsWith("door_")) kind = "door_interaction_complete";

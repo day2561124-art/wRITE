@@ -8,6 +8,11 @@ import {
   worldSimulationCommunicationAcousticBridgeVersion,
 } from "./world-simulation-communication-acoustic-bridge-service.mjs";
 import {
+  buildWorldSimulationCommunicationSpeechStreamContract,
+  projectWorldSimulationCommunicationSpeechStream,
+  worldSimulationCommunicationSpeechStreamVersion,
+} from "./world-simulation-communication-speech-stream-service.mjs";
+import {
   adjudicateWorldSimulationCombat,
   buildWorldSimulationCombatCausalContract,
 } from "./world-simulation-combat-causal-service.mjs";
@@ -129,6 +134,18 @@ function parseDurationMs(candidate, fallbackMs = 0) {
     }
   }
   return fallbackMs;
+}
+
+function resolveCommunicationDurationMs(candidate, rules, channel) {
+  const defaultDurationMs =
+    positiveNumber(
+      rules.communication_action_seconds,
+      positiveNumber(rules.passive_action_seconds, 0.25),
+    ) * 1000;
+  const parsedDurationMs = parseDurationMs(candidate, defaultDurationMs);
+  return channel === "speech"
+    ? positiveNumber(parsedDurationMs, defaultDurationMs)
+    : parsedDurationMs;
 }
 
 function sceneForEvent(worldState, event) {
@@ -414,9 +431,10 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
   const channel = String(communication.channel ?? "").trim();
   const expressionMode = String(communication.expression_mode ?? "").trim();
   const message = object(communication.message);
-  const durationMs = parseDurationMs(
+  const durationMs = resolveCommunicationDurationMs(
     candidate,
-    positiveNumber(rules.communication_action_seconds, positiveNumber(rules.passive_action_seconds, 0.25)) * 1000,
+    rules,
+    channel,
   );
   if (!addressee || addressee === actor || !["speech", "nonverbal"].includes(channel)) {
     pushOutcome(outcomes, actor, candidate, "blocked", "communication intent requires a distinct addressee and supported channel");
@@ -908,6 +926,7 @@ export function buildWorldSimulationCausalRuleContract() {
       withheld_private_content_exposed_in_world_event: false,
       surface_realization_completed_here: false,
       recipient_comprehension_modeled_here: false,
+      speech_temporal_stream: buildWorldSimulationCommunicationSpeechStreamContract(),
       acoustic_bridge: buildWorldSimulationCommunicationAcousticBridgeContract(),
     },
     combat: {
@@ -1229,6 +1248,65 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   });
   next = postPhysicsActorProjection.projected_world_state;
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+
+  // CC-7B gives committed realized speech a deterministic engine-side
+  // temporal stream before the resolved global timeline is materialized.
+  // Increment boundaries are technical transport slices only; they do not
+  // claim prosodic, syntactic, psychological, turn-end, or listener meaning.
+  const communicationRules = object(snapshot.world_rules ?? snapshot.rules);
+  const speechStreamTechnicalMaxChars = positiveNumber(
+    communicationRules.communication_speech_stream_increment_max_chars,
+    6,
+  );
+  for (const spatialOutcome of spatialActionOutcomes) {
+    if (spatialOutcome?.result !== "communication_emitted"
+      || spatialOutcome?.communication_event?.channel !== "speech"
+      || spatialOutcome?.communication_event?.surface_realization_complete !== true
+      || suppressedActionIds.includes(String(spatialOutcome?.action_id ?? ""))) {
+      continue;
+    }
+    const selectedCommunication = selectedActionIntents.find(
+      (item) => item?.character === spatialOutcome.actor
+        && item?.candidate?.action_id === spatialOutcome.action_id,
+    );
+    const selectedCommunicationCandidate = object(selectedCommunication?.candidate);
+    const canonicalCommunicationDurationMs =
+      finiteNumber(spatialOutcome.duration_ms) > 0
+        ? finiteNumber(spatialOutcome.duration_ms)
+        : resolveCommunicationDurationMs(
+          selectedCommunicationCandidate,
+          communicationRules,
+          "speech",
+        );
+    const speechStream = projectWorldSimulationCommunicationSpeechStream({
+      outcome: {
+        ...spatialOutcome,
+        duration_ms: canonicalCommunicationDurationMs,
+      },
+      technical_increment_max_chars: speechStreamTechnicalMaxChars,
+    });
+    const streamRecord = {
+      schema_version: worldSimulationCommunicationSpeechStreamVersion,
+      stream_id: speechStream.stream_id,
+      source_action_id: speechStream.source_action_id,
+      duration_ms: speechStream.duration_ms,
+      increment_count: speechStream.increment_count,
+      technical_increment_max_chars: speechStream.technical_increment_max_chars,
+      increments: cloneJson(speechStream.increments),
+      boundaries: cloneJson(speechStream.boundaries),
+    };
+    spatialOutcome.duration_ms = speechStream.duration_ms;
+    spatialOutcome.communication_speech_stream = cloneJson(streamRecord);
+    const resolvedOutcome = outcomes.find(
+      (item) => item?.action_id === spatialOutcome.action_id
+        && item?.actor === spatialOutcome.actor
+        && item?.result === spatialOutcome.result,
+    );
+    if (resolvedOutcome) {
+      resolvedOutcome.duration_ms = speechStream.duration_ms;
+      resolvedOutcome.communication_speech_stream = cloneJson(streamRecord);
+    }
+  }
 
   // CC-6B turns only already-resolved, realized speech outcomes into a
   // short-lived physical sound source. The sound carries no wording or

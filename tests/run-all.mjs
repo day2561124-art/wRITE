@@ -931,6 +931,7 @@ const steps = [
   ["CC-6I original-speaker repair response", ["tests/communication/cc6-native-repair-response.test.mjs"]],
   ["CC-6J listener repair resolution evidence", ["tests/communication/cc6-native-repair-resolution.test.mjs"]],
   ["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]],
+  ["CC-7B speech temporal stream foundation", ["tests/communication/cc7-speech-temporal-stream.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
