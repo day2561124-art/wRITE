@@ -5,6 +5,10 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  buildWorldSimulationObserverTickSnapshotReadiness,
+  buildWorldSimulationObserverTickSnapshotReadinessContract,
+} from "./world-simulation-observer-tick-snapshot-readiness-service.mjs";
+import {
   buildWorldSimulationObserverMicrotickLedger,
   buildWorldSimulationObserverMicrotickLedgerContract,
 } from "./world-simulation-observer-microtick-ledger-service.mjs";
@@ -4536,6 +4540,8 @@ export function buildWorldSimulationLoopContract() {
     character_perception_audio_uses_programmatic_audibility: true,
     character_observer_microtick_ledger:
       buildWorldSimulationObserverMicrotickLedgerContract(),
+    engine_observer_tick_snapshot_readiness:
+      buildWorldSimulationObserverTickSnapshotReadinessContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -9952,6 +9958,12 @@ export async function resolveWorldSimulationTurn(
     causal_timeline: causalResolution.causal_timeline,
     admissions: array(causalResolution.communication_observer_increment_admissions),
   });
+  const observerTickSnapshotReadiness =
+    buildWorldSimulationObserverTickSnapshotReadiness({
+      ledger: observerMicrotickLedger,
+      chronological_mutation_queue: causalResolution.chronological_mutation_queue ?? null,
+      chronological_mutation_execution: causalResolution.chronological_mutation_execution ?? null,
+    });
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
       admissions: array(causalResolution.communication_observer_increment_admissions),
@@ -12307,6 +12319,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
+      ),
+      observer_tick_snapshot_readiness: cloneJson(
+        observerTickSnapshotReadiness,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),

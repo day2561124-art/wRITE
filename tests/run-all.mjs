@@ -935,6 +935,7 @@ const steps = [
   ["CC-7C observer speech increment acoustic admission", ["tests/communication/cc7-observer-increment-acoustic-admission.test.mjs"]],
   ["CC-7D native observer turn increment handoff", ["tests/communication/cc7-native-turn-increment-handoff.test.mjs"]],
   ["CC-7E observer microtick release ledger", ["tests/communication/cc7-observer-microtick-ledger.test.mjs"]],
+  ["CC-7F observer tick snapshot readiness", ["tests/communication/cc7-observer-tick-snapshot-readiness.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

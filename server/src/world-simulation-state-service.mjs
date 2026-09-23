@@ -288,6 +288,8 @@ export async function commitWorldSimulationTurn(
               input.communication_turn_increment_handoff ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
+            observer_tick_snapshot_readiness:
+              input.observer_tick_snapshot_readiness ?? null,
             chronological_mutation_queue: input.chronological_mutation_queue ?? null,
             chronological_mutation_execution: input.chronological_mutation_execution ?? null,
             mutation_proposal_boundary: input.mutation_proposal_boundary ?? null,
