@@ -12269,6 +12269,9 @@ export async function resolveWorldSimulationTurn(
       knowledge_transitions: array(causalResolution.knowledge_transitions),
       scheduled_events: array(causalResolution.scheduled_events),
       causal_timeline: cloneJson(causalResolution.causal_timeline ?? null),
+      communication_observer_increment_admissions: cloneJson(
+        causalResolution.communication_observer_increment_admissions ?? [],
+      ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),
       mutation_proposal_boundary: cloneJson(causalResolution.mutation_proposal_boundary ?? null),

@@ -13,6 +13,11 @@ import {
   worldSimulationCommunicationSpeechStreamVersion,
 } from "./world-simulation-communication-speech-stream-service.mjs";
 import {
+  buildWorldSimulationObserverSpeechIncrementContract,
+  projectWorldSimulationObserverSpeechIncrements,
+  worldSimulationObserverSpeechIncrementVersion,
+} from "./world-simulation-communication-observer-increment-service.mjs";
+import {
   adjudicateWorldSimulationCombat,
   buildWorldSimulationCombatCausalContract,
 } from "./world-simulation-combat-causal-service.mjs";
@@ -927,6 +932,7 @@ export function buildWorldSimulationCausalRuleContract() {
       surface_realization_completed_here: false,
       recipient_comprehension_modeled_here: false,
       speech_temporal_stream: buildWorldSimulationCommunicationSpeechStreamContract(),
+      observer_increment_acoustic_admission: buildWorldSimulationObserverSpeechIncrementContract(),
       acoustic_bridge: buildWorldSimulationCommunicationAcousticBridgeContract(),
     },
     combat: {
@@ -1365,6 +1371,65 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     physics_resolution: physicsResolution,
   });
 
+  // CC-7C: observer-scoped, release-time acoustic evidence is derived only
+  // from a registered CC-6B physical source and a released CC-7B increment.
+  // It never enters the already-completed Character Brain decision loop and
+  // never grants intelligibility, speaker recognition, grounding or the floor.
+  // For now dynamic positions/acoustic geometry are conservatively excluded:
+  // the Phase62Z query is evaluated at the static source/observer geometry.
+  const staticSpeechAcoustics = Object.keys(actorTrajectories).length === 0
+    && ["entity_positions", "doors", "sound_blockers", "obstacles",
+      "structures", "visibility_blockers"].every((field) =>
+      JSON.stringify(snapshotScene[field] ?? null)
+      === JSON.stringify(nextScene[field] ?? null));
+  const communicationObserverIncrementAdmissions = [];
+  const registeredSpeechSignals = new Map(
+    array(communicationAcousticBridge.next_sound_events)
+      .filter((signal) =>
+        signal?.schema_version === worldSimulationCommunicationAcousticBridgeVersion
+        && signal?.created_turn_id === (input.turn_id ?? null))
+      .map((signal) => [signal.communication_action_id, signal]),
+  );
+  if (staticSpeechAcoustics && sceneId) {
+    const observers = Object.keys(object(snapshotScene.entity_positions)).sort();
+    for (const outcome of outcomes) {
+      const signal = registeredSpeechSignals.get(outcome?.action_id);
+      const stream = object(outcome?.communication_speech_stream);
+      if (!signal || !array(stream.increments).length) continue;
+      for (const observer of observers) {
+        if (observer === outcome.actor) continue;
+        for (const increment of stream.increments) {
+          const admission = projectWorldSimulationObserverSpeechIncrements({
+            world_state: snapshot,
+            scene_state: snapshotScene,
+            scene_id: sceneId,
+            observer,
+            committed_outcome: outcome,
+            acoustic_signal: signal,
+            causal_timeline: causalTimeline,
+            released_through_ms: increment.end_offset_ms,
+            static_acoustics_verified: true,
+          });
+          // Store only the new cue released at this timestamp, not a
+          // cumulative prefix or any future stream content.
+          communicationObserverIncrementAdmissions.push({
+            schema_version: worldSimulationObserverSpeechIncrementVersion,
+            observer,
+            release_time_ms: increment.end_offset_ms,
+            admission_status: admission.admission_status,
+            observer_increment: admission.observer_increments.at(-1) ?? null,
+            audit: admission.audit,
+          });
+        }
+      }
+    }
+  }
+  communicationObserverIncrementAdmissions.sort((left, right) =>
+    left.release_time_ms - right.release_time_ms
+    || String(left.observer).localeCompare(String(right.observer), "en")
+    || String(left.audit.source_action_id).localeCompare(
+      String(right.audit.source_action_id), "en"));
+
   const previousTime = snapshot.simulation_time ?? event.simulation_time ?? null;
   if (typeof previousTime === "string" && elapsedMs > 0) {
     const nextTime = addMilliseconds(previousTime, elapsedMs);
@@ -1453,6 +1518,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     scheduled_events: scheduledEvents,
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
+    communication_observer_increment_admissions:
+      cloneJson(communicationObserverIncrementAdmissions),
     causal_epochs: cloneJson(causalTimeline.causal_epochs ?? null),
     fixed_point_convergence: cloneJson(causalTimeline.fixed_point_convergence ?? null),
     chronological_mutation_queue: chronologicalMutationQueue,
