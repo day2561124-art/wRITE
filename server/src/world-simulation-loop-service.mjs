@@ -5,6 +5,10 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  buildWorldSimulationObserverMicrotickLedger,
+  buildWorldSimulationObserverMicrotickLedgerContract,
+} from "./world-simulation-observer-microtick-ledger-service.mjs";
+import {
   runWorldSimulationTurnIncrementHandoff,
   buildWorldSimulationTurnIncrementHandoffContract,
   worldSimulationTurnIncrementHandoffVersion,
@@ -4530,6 +4534,8 @@ export function buildWorldSimulationLoopContract() {
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
     character_perception_audio_uses_programmatic_audibility: true,
+    character_observer_microtick_ledger:
+      buildWorldSimulationObserverMicrotickLedgerContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -9942,6 +9948,10 @@ export async function resolveWorldSimulationTurn(
   // gate. It never exposes future segments or the engine's speaker identity.
   // These projections are post-causal speculative evidence; they cannot
   // retroactively affect the already-selected actions or arbitrate the floor.
+  const observerMicrotickLedger = buildWorldSimulationObserverMicrotickLedger({
+    causal_timeline: causalResolution.causal_timeline,
+    admissions: array(causalResolution.communication_observer_increment_admissions),
+  });
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
       admissions: array(causalResolution.communication_observer_increment_admissions),
@@ -12294,6 +12304,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_turn_increment_handoff: cloneJson(
         communicationTurnIncrementHandoff,
+      ),
+      observer_microtick_release_ledger: cloneJson(
+        observerMicrotickLedger,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),
