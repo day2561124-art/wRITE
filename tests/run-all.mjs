@@ -927,6 +927,7 @@ const steps = [
   ["CC-6E bounded conversational grounding evidence", ["tests/communication/cc6-native-grounding-evidence.test.mjs"]],
   ["CC-6F bounded listener repair initiation contract", ["tests/communication/cc6-repair-initiation.test.mjs"]],
   ["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]],
+  ["CC-6H native listener repair speech action", ["tests/communication/cc6-native-repair-speech-action.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

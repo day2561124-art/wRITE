@@ -25,6 +25,11 @@ import {
   projectCharacterCommunicationRepairInitiation,
 } from "./character-communication-repair-initiation-service.mjs";
 import {
+  buildCharacterCommunicationRepairSpeechResolverView,
+  characterCommunicationRepairSpeechActionVersion,
+  projectCharacterCommunicationRepairSpeechAction,
+} from "./character-communication-repair-action-service.mjs";
+import {
   buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
   buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
@@ -4544,6 +4549,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationSpeakerRecognitionProjections = [];
   const communicationGroundingEvidenceProjections = [];
   const communicationRepairInitiationProjections = [];
+  const communicationRepairSpeechActionProjections = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
@@ -4922,6 +4928,54 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         hashAgentRunValue(listenerRepairProjection.character_view),
       audit: cloneJson(listenerRepairProjection.audit),
       source_engine_identity_exposed: false,
+      world_signal_emitted: false,
+      repair_completed: false,
+      grounding_claimed: false,
+    });
+
+    // CC-6H: recognize a possible addressee only through explicit
+    // same-listener voice evidence, then require a separate authored Mandarin
+    // realization decision. Neither step selects or emits an action.
+    const repairSpeechAssembly =
+      buildCharacterCommunicationRepairSpeechResolverView({
+        observer: character,
+        repair_initiation_projection: listenerRepairProjection,
+        listener_understanding_projection: listenerUnderstandingProjection,
+        character_state: characterState,
+      });
+    const repairSpeechResolver =
+      typeof options.characterCommunicationRepairSpeechResolver === "function"
+        ? options.characterCommunicationRepairSpeechResolver
+        : null;
+    const rawRepairSpeechDecisions =
+      repairSpeechResolver
+        && repairSpeechAssembly.resolver_view.repair_candidates.length > 0
+        ? await repairSpeechResolver(cloneJson(repairSpeechAssembly.resolver_view))
+        : [];
+    if (!Array.isArray(rawRepairSpeechDecisions)) {
+      const error = new Error(
+        "characterCommunicationRepairSpeechResolver must return an array of bounded speaker-authored realizations.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COMMUNICATION_REPAIR_SPEECH_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const repairSpeechProjection =
+      projectCharacterCommunicationRepairSpeechAction({
+        assembly: repairSpeechAssembly,
+        decisions: rawRepairSpeechDecisions,
+      });
+    const repairSpeechActionCandidates =
+      array(repairSpeechProjection.action_candidates);
+    communicationRepairSpeechActionProjections.push({
+      character,
+      version: characterCommunicationRepairSpeechActionVersion,
+      proposed_count: repairSpeechProjection.audit.proposed_count,
+      action_candidate_hashes:
+        repairSpeechActionCandidates.map((item) => hashAgentRunValue(item)),
+      audit: cloneJson(repairSpeechProjection.audit),
+      source_engine_identity_exposed: false,
+      action_automatically_selected: false,
       world_signal_emitted: false,
       repair_completed: false,
       grounding_claimed: false,
@@ -6581,7 +6635,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       "world_action_proposer",
       {
         character,
-        available_actions: availableActions,
+        available_actions: repairSpeechActionCandidates.length
+          ? [...availableActions.slice(0, 22), ...repairSpeechActionCandidates]
+          : availableActions,
         cognition: characterCognition,
         current_action: characterState.current_action ?? null,
       },
@@ -7117,6 +7173,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationGroundingEvidenceProjections),
     communication_repair_initiation_projections:
       cloneJson(communicationRepairInitiationProjections),
+    communication_repair_speech_action_projections:
+      cloneJson(communicationRepairSpeechActionProjections),
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
@@ -7179,6 +7237,13 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_repair_initiation_world_signal_emitted: false,
       communication_repair_initiation_completed: false,
       communication_repair_initiation_grounding_claimed: false,
+      communication_repair_speech_action_version:
+        characterCommunicationRepairSpeechActionVersion,
+      communication_repair_speech_requires_explicit_voice_identity: true,
+      communication_repair_speech_requires_explicit_authored_surface: true,
+      communication_repair_speech_character_brain_selects: true,
+      communication_repair_speech_no_automatic_world_signal: true,
+      communication_repair_speech_completion_claimed: false,
       visible_constraint_observation_version:
         worldSimulationVisibleConstraintObservationVersion,
       visible_constraint_observation_projection_version:
@@ -12055,6 +12120,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_repair_initiation_projections: cloneJson(
         preparedTurn.communication_repair_initiation_projections ?? [],
+      ),
+      communication_repair_speech_action_projections: cloneJson(
+        preparedTurn.communication_repair_speech_action_projections ?? [],
       ),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
 
