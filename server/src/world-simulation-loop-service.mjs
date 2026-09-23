@@ -35,6 +35,11 @@ import {
   projectCharacterCommunicationRepairResponseAction,
 } from "./character-communication-repair-response-service.mjs";
 import {
+  buildCharacterCommunicationRepairResolutionResolverView,
+  characterCommunicationRepairResolutionVersion,
+  projectCharacterCommunicationRepairResolution,
+} from "./character-communication-repair-resolution-service.mjs";
+import {
   buildWorldSimulationSubjectiveChoiceCommitmentReceiptContract,
   buildWorldSimulationSubjectiveChoiceCommitmentReceipts,
   worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
@@ -4556,6 +4561,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationRepairInitiationProjections = [];
   const communicationRepairSpeechActionProjections = [];
   const communicationRepairResponseProjections = [];
+  const communicationRepairResolutionProjections = [];
   const memoryAccessibilityQueries = [];
   const memoryRetrievalQueries = [];
   const memoryRetrievalProcesses = [];
@@ -4883,17 +4889,93 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       grounding_claimed: false,
     });
 
+    // CC-6J: a committed CC-6I response can be judged only by the same
+    // repair initiator after current audibility + subjective interpretation.
+    // Even an explicit "resolved" judgment is listener evidence only; it does
+    // not establish mutual grounding or World truth.
+    const repairResolutionAssembly =
+      buildCharacterCommunicationRepairResolutionResolverView({
+        observer: character,
+        listener_understanding_projection: listenerUnderstandingProjection,
+        character_state: characterState,
+        world_history: worldHistory,
+      });
+    const repairResolutionResolver =
+      typeof options.characterCommunicationRepairResolutionResolver === "function"
+        ? options.characterCommunicationRepairResolutionResolver
+        : null;
+    const rawRepairResolutionDecisions =
+      repairResolutionResolver
+        && repairResolutionAssembly.resolver_view.resolution_candidates.length > 0
+        ? await repairResolutionResolver(
+          cloneJson(repairResolutionAssembly.resolver_view),
+        )
+        : [];
+    if (!Array.isArray(rawRepairResolutionDecisions)) {
+      const error = new Error(
+        "characterCommunicationRepairResolutionResolver must return an array of bounded listener resolution decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_COMMUNICATION_REPAIR_RESOLUTION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const repairResolutionProjection =
+      projectCharacterCommunicationRepairResolution({
+        assembly: repairResolutionAssembly,
+        decisions: rawRepairResolutionDecisions,
+      });
+    const repairResolutionEvidence =
+      array(repairResolutionProjection.character_view?.repair_resolution_evidence);
+    if (repairResolutionEvidence.length > 0) {
+      characterPerception.communication_repair_resolution_evidence =
+        cloneJson(repairResolutionEvidence);
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        communication_repair_resolution_subjective_only: true,
+        communication_repair_resolution_mutual_understanding_claimed: false,
+        communication_repair_resolution_common_ground_updated: false,
+        communication_repair_resolution_world_truth_claimed: false,
+        communication_repair_resolution_grounding_claimed: false,
+      };
+    }
+    communicationRepairResolutionProjections.push({
+      character,
+      version: characterCommunicationRepairResolutionVersion,
+      candidate_count: repairResolutionProjection.audit.candidate_count,
+      decision_count: repairResolutionProjection.audit.decision_count,
+      evidence_count: repairResolutionProjection.audit.evidence_count,
+      character_view_hash:
+        hashAgentRunValue(repairResolutionProjection.character_view),
+      audit: cloneJson(repairResolutionProjection.audit),
+      engine_lineage_exposed_to_character: false,
+      automatic_repair_reinitiation_performed: false,
+      mutual_understanding_claimed: false,
+      grounding_claimed: false,
+      world_truth_claimed: false,
+    });
+    const resolvedRepairSpeechCandidateIds = new Set(
+      array(repairResolutionProjection.audit.resolved_speech_candidate_ids),
+    );
+    const repairInitiationResolverView =
+      cloneJson(listenerUnderstandingAssembly.resolver_view);
+    repairInitiationResolverView.speech_candidates =
+      array(repairInitiationResolverView.speech_candidates)
+        .filter((candidate) =>
+          !resolvedRepairSpeechCandidateIds.has(candidate?.speech_candidate_id));
+
     // CC-6G adopts a same-listener CHOICE to request repair, not a World
-    // communication action. The resolver sees the existing CC-6C public
-    // surface only; engine source identities and speaker intent stay hidden.
+    // communication action. A CC-6J-resolved response is omitted from this
+    // turn's re-initiation opportunity; "still_trouble" remains eligible but
+    // never auto-initiates another repair.
     const listenerRepairResolver =
       typeof options.characterCommunicationRepairInitiationResolver === "function"
         ? options.characterCommunicationRepairInitiationResolver
         : null;
     const rawListenerRepairDecisions =
-      listenerRepairResolver && listenerSpeechCandidates.length > 0
+      listenerRepairResolver
+        && repairInitiationResolverView.speech_candidates.length > 0
         ? await listenerRepairResolver(
-          cloneJson(listenerUnderstandingAssembly.resolver_view),
+          cloneJson(repairInitiationResolverView),
         )
         : [];
     if (!Array.isArray(rawListenerRepairDecisions)) {
@@ -7255,6 +7337,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationRepairSpeechActionProjections),
     communication_repair_response_projections:
       cloneJson(communicationRepairResponseProjections),
+    communication_repair_resolution_projections:
+      cloneJson(communicationRepairResolutionProjections),
     memory_accessibility_queries: memoryAccessibilityQueries,
     memory_retrieval_queries: memoryRetrievalQueries,
     memory_retrieval_processes: memoryRetrievalProcesses,
@@ -7331,6 +7415,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_repair_response_subjective_interpretation_required: true,
       communication_repair_response_character_brain_selects: true,
       communication_repair_response_completed_claimed: false,
+      communication_repair_resolution_version:
+        characterCommunicationRepairResolutionVersion,
+      communication_repair_resolution_current_audibility_required: true,
+      communication_repair_resolution_committed_response_lineage_required: true,
+      communication_repair_resolution_explicit_listener_attestation_required: true,
+      communication_repair_resolution_resolved_suppresses_same_turn_reinitiation: true,
+      communication_repair_resolution_still_trouble_auto_reinitiates: false,
+      communication_repair_resolution_mutual_grounding_claimed: false,
       visible_constraint_observation_version:
         worldSimulationVisibleConstraintObservationVersion,
       visible_constraint_observation_projection_version:
@@ -12213,6 +12305,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_repair_response_projections: cloneJson(
         preparedTurn.communication_repair_response_projections ?? [],
+      ),
+      communication_repair_resolution_projections: cloneJson(
+        preparedTurn.communication_repair_resolution_projections ?? [],
       ),
       memory_accessibility_queries: cloneJson(preparedTurn.memory_accessibility_queries ?? []),
 

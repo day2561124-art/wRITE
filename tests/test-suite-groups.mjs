@@ -12,6 +12,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]]),
   Object.freeze(["CC-6H native listener repair speech action", ["tests/communication/cc6-native-repair-speech-action.test.mjs"]]),
   Object.freeze(["CC-6I original-speaker repair response", ["tests/communication/cc6-native-repair-response.test.mjs"]]),
+  Object.freeze(["CC-6J listener repair resolution evidence", ["tests/communication/cc6-native-repair-resolution.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

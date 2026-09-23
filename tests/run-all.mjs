@@ -929,6 +929,7 @@ const steps = [
   ["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]],
   ["CC-6H native listener repair speech action", ["tests/communication/cc6-native-repair-speech-action.test.mjs"]],
   ["CC-6I original-speaker repair response", ["tests/communication/cc6-native-repair-response.test.mjs"]],
+  ["CC-6J listener repair resolution evidence", ["tests/communication/cc6-native-repair-resolution.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
