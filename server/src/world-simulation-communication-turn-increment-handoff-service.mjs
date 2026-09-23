@@ -1,6 +1,7 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { projectCharacterCommunicationTurnProjection } from "./character-communication-turn-projection-service.mjs";
 import { worldSimulationObserverSpeechIncrementVersion } from "./world-simulation-communication-observer-increment-service.mjs";
+import { worldSimulationObserverLexicalIncrementVersion } from "./world-simulation-communication-observer-lexical-increment-service.mjs";
 
 export const worldSimulationTurnIncrementHandoffVersion =
   "cc7d-native-observer-turn-increment-handoff-v1";
@@ -51,6 +52,46 @@ function admittedCue(receipt) {
   return cue;
 }
 
+function lexicalRecognitionKey(item) {
+  return JSON.stringify([
+    item.observer,
+    item.signal_ref,
+    item.increment_ref,
+    item.release_time_ms,
+  ]);
+}
+
+function lexicalRecognitionMap(value) {
+  if (!Array.isArray(value) || value.length > 4096)
+    invalid("lexical_recognitions must be a bounded list.");
+  const result = new Map();
+  for (const item of value) {
+    exactKeys(item, [
+      "schema_version", "observer", "signal_ref", "increment_ref",
+      "release_time_ms", "recognition_status", "heard_surface_fragment",
+      "lexical_intelligibility_attested", "subjective_only",
+    ], "CC-7J lexical recognition");
+    if (item.schema_version !== worldSimulationObserverLexicalIncrementVersion
+        || typeof item.observer !== "string" || !item.observer.trim()
+        || typeof item.signal_ref !== "string" || !item.signal_ref.trim()
+        || typeof item.increment_ref !== "string" || !item.increment_ref.trim()
+        || !Number.isFinite(item.release_time_ms) || item.release_time_ms < 0
+        || !["recognized", "partial", "uncertain", "unintelligible"].includes(item.recognition_status)
+        || item.subjective_only !== true
+        || (item.heard_surface_fragment === null
+          ? item.lexical_intelligibility_attested !== false
+          : (typeof item.heard_surface_fragment !== "string"
+            || !item.heard_surface_fragment.trim()
+            || [...item.heard_surface_fragment.trim()].length > 1200
+            || item.lexical_intelligibility_attested !== true)))
+      invalid("CC-7D received an invalid CC-7J lexical recognition.");
+    const key = lexicalRecognitionKey(item);
+    if (result.has(key)) invalid("Duplicate CC-7J lexical recognition.");
+    result.set(key, item);
+  }
+  return result;
+}
+
 export function buildWorldSimulationTurnIncrementHandoffContract() {
   return {
     version: worldSimulationTurnIncrementHandoffVersion,
@@ -59,7 +100,9 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
     observer_receives_future_releases: false,
     real_speaker_identity_forwarded: false,
     anonymous_speaker_ref_is_not_recognition: true,
-    lexical_content_forwarded: false,
+    engine_source_surface_forwarded_without_listener_recognition: false,
+    listener_authored_lexical_fragment_supported: true,
+    lexical_recognition_source_version: worldSimulationObserverLexicalIncrementVersion,
     no_resolver_means_no_subjective_projection: true,
     subjective_projection_decided_by_observer_resolver_only: true,
     projection_is_post_causal_speculative_evidence: true,
@@ -82,10 +125,12 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
  */
 export async function runWorldSimulationTurnIncrementHandoff({
   admissions = [],
+  lexical_recognitions = [],
   resolver = null,
 } = {}) {
   if (!Array.isArray(admissions) || admissions.length > 4096)
     invalid("admissions must be a bounded list.");
+  const lexicalByIncrement = lexicalRecognitionMap(lexical_recognitions);
   if (resolver != null && typeof resolver !== "function")
     invalid("resolver must be an observer-scoped function.");
   if (!resolver) return {
@@ -108,6 +153,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
   const seen = new Set();
   const priorBySignal = new Map();
   const projections = [];
+  const consumedLexicalRecognitionKeys = new Set();
 
   for (const { receipt, cue } of ordered) {
     const key = JSON.stringify([cue.observer, cue.signal_ref]);
@@ -124,13 +170,22 @@ export async function runWorldSimulationTurnIncrementHandoff({
       observer: cue.observer,
       signal_ref: cue.signal_ref,
     }).slice(0, 24)}`;
+    const lexicalKey = lexicalRecognitionKey({
+      observer: cue.observer,
+      signal_ref: cue.signal_ref,
+      increment_ref: cue.increment_ref,
+      release_time_ms: receipt.release_time_ms,
+    });
+    const lexicalRecognition = lexicalByIncrement.get(lexicalKey) ?? null;
+    if (lexicalRecognition) consumedLexicalRecognitionKeys.add(lexicalKey);
     const perceivedIncrement = {
       schema_version: "cc7-observer-speech-increment-v1",
       observer: cue.observer,
       speaker: anonymousSpeaker,
       signal_ref: cue.signal_ref,
       increment_ref: cue.increment_ref,
-      heard_surface_fragment: null,
+      heard_surface_fragment:
+        lexicalRecognition?.heard_surface_fragment ?? null,
       signal_phase: cue.signal_phase,
       perceived_cue_refs: copy(cue.perceived_cue_refs),
     };
@@ -143,7 +198,10 @@ export async function runWorldSimulationTurnIncrementHandoff({
       release_time_ms: receipt.release_time_ms,
       perceived_speech_increment: perceivedIncrement,
       prior_turn_projection: copy(prior),
-      evidence_is_nonlexical_only: true,
+      evidence_is_nonlexical_only:
+        lexicalRecognition?.heard_surface_fragment == null,
+      lexical_recognition_status:
+        lexicalRecognition?.recognition_status ?? null,
       world_action_replanning_available: false,
     };
     const raw = await resolver(copy(view));
@@ -167,6 +225,9 @@ export async function runWorldSimulationTurnIncrementHandoff({
       actual_world_action_replanned: false,
     });
   }
+
+  if (consumedLexicalRecognitionKeys.size !== lexicalByIncrement.size)
+    invalid("CC-7J lexical recognition does not match an admitted observer increment.");
 
   return copy({
     schema_version: worldSimulationTurnIncrementHandoffVersion,

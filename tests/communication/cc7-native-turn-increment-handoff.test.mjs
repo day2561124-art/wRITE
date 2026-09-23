@@ -268,17 +268,32 @@ try {
     }),
   });
   const delivered = [];
+  const lexicalDelivered = [];
   const result = await runWorldSimulationTurn({
     world_simulation_session_id: session.world_simulation_session_id,
     event_id: "evt-cc7c",
   }, {
     ...options,
     characterRuntimeManager: runtimeManager,
+    characterCommunicationLexicalIncrementResolver: async (packet) => {
+      lexicalDelivered.push(structuredClone(packet));
+      assert.equal(packet.observer, "B");
+      assert.equal(packet.boundaries.source_identity_available, false);
+      assert.equal(packet.boundaries.source_semantics_available, false);
+      assert.equal(packet.boundaries.future_fragment_available, false);
+      assert(!JSON.stringify(packet).includes(semantic));
+      return {
+        recognition_status: "recognized",
+        heard_surface_fragment: packet.emitted_surface_fragment,
+      };
+    },
     characterCommunicationTurnIncrementResolver: async (view) => {
       delivered.push(structuredClone(view));
       assert.equal(view.observer, "B");
       assert.equal(view.speaker_identity_recognized, false);
-      assert.equal(view.perceived_speech_increment.heard_surface_fragment, null);
+      assert.equal(typeof view.perceived_speech_increment.heard_surface_fragment, "string");
+      assert.equal(view.lexical_recognition_status, "recognized");
+      assert.equal(view.evidence_is_nonlexical_only, false);
       assert.equal(view.perceived_speech_increment.speaker, view.anonymous_speaker_ref);
       assert.notEqual(view.anonymous_speaker_ref, "A");
       assert(!JSON.stringify(view).includes(semantic));
@@ -304,12 +319,20 @@ try {
   });
   assert.equal(result.committed, true);
   assert(delivered.length > 1, "Native bridge must invoke one observer at each release.");
+  assert.equal(lexicalDelivered.length, delivered.length);
+  assert.equal(lexicalDelivered.map((item) => item.emitted_surface_fragment).join(""), surface);
   const history = await getWorldSimulationHistory(
     session.world_simulation_session_id, options);
   const turn = history.turns.at(-1);
   const speechOutcome = turn.action_outcomes.find(
     (item) => item.actor === "A" && item.result === "communication_emitted");
   assert.ok(speechOutcome?.communication_speech_stream);
+  const lexicalAudit = turn.observer_lexical_increment;
+  assert.equal(lexicalAudit.status, "observer_subjective_lexical_recognition");
+  assert.equal(lexicalAudit.recognition_count, lexicalDelivered.length);
+  assert.equal(JSON.stringify(lexicalAudit).includes(surface), false);
+  assert.equal(JSON.stringify(lexicalAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(lexicalAudit).includes('"emitted_surface_fragment"'), false);
   const handoff = turn.communication_turn_increment_handoff;
   assert.equal(handoff.resolver_used, true);
   assert.equal(handoff.projected_count, delivered.length);

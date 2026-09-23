@@ -9,6 +9,10 @@ import {
   buildWorldSimulationObserverTickBrainIngressContract,
 } from "./world-simulation-observer-tick-brain-ingress-service.mjs";
 import {
+  runWorldSimulationObserverLexicalIncrementAdmission,
+  buildWorldSimulationObserverLexicalIncrementContract,
+} from "./world-simulation-communication-observer-lexical-increment-service.mjs";
+import {
   projectWorldSimulationObserverTickPerceptions,
   buildWorldSimulationObserverTickPerceptionContract,
 } from "./world-simulation-observer-tick-perception-service.mjs";
@@ -4560,6 +4564,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationObserverTickPerceptionContract(),
     observer_tick_brain_ingress:
       buildWorldSimulationObserverTickBrainIngressContract(),
+    observer_lexical_increment:
+      buildWorldSimulationObserverLexicalIncrementContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -10012,9 +10018,20 @@ export async function resolveWorldSimulationTurn(
       perception: observerTickPerceptionProjection,
       resolver: options.characterObserverTickPerceptionResolver ?? null,
     });
+  const observerLexicalIncrementProjection =
+    await runWorldSimulationObserverLexicalIncrementAdmission({
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      resolver: options.characterCommunicationLexicalIncrementResolver ?? null,
+    });
+  // Persist audit only. Listener-authored lexical fragments remain transient
+  // engine-private evidence and are handed only to the matching CC-7D view.
+  const observerLexicalIncrement = observerLexicalIncrementProjection.audit;
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
       admissions: array(causalResolution.communication_observer_increment_admissions),
+      lexical_recognitions:
+        observerLexicalIncrementProjection.engine_private_lexical_increments,
       resolver: options.characterCommunicationTurnIncrementResolver ?? null,
     });
 
@@ -12379,6 +12396,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_tick_brain_ingress: cloneJson(
         observerTickBrainIngress,
+      ),
+      observer_lexical_increment: cloneJson(
+        observerLexicalIncrement,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),
