@@ -132,6 +132,8 @@ const handoffContract = buildWorldSimulationTurnIncrementHandoffContract();
 assert.equal(handoffContract.real_speaker_identity_forwarded, false);
 assert.equal(handoffContract.actual_mid_turn_world_action_replanning, false);
 assert.equal(handoffContract.one_release_per_observer_resolver_invocation, true);
+assert.equal(handoffContract.listener_authored_incremental_meaning_supported, true);
+assert.equal(handoffContract.meaning_interpretation_does_not_claim_grounding_or_belief, true);
 
 const admitted = full.observer_increments.map((cue) => ({
   schema_version: "cc7c-observer-speech-increment-acoustic-admission-v1",
@@ -269,6 +271,7 @@ try {
   });
   const delivered = [];
   const lexicalDelivered = [];
+  const meaningDelivered = [];
   const result = await runWorldSimulationTurn({
     world_simulation_session_id: session.world_simulation_session_id,
     event_id: "evt-cc7c",
@@ -287,6 +290,27 @@ try {
         heard_surface_fragment: packet.emitted_surface_fragment,
       };
     },
+    characterCommunicationIncrementalMeaningResolver: async (packet) => {
+      meaningDelivered.push(structuredClone(packet));
+      assert.equal(packet.observer, "B");
+      assert.equal(packet.boundaries.source_identity_available, false);
+      assert.equal(packet.boundaries.source_semantics_available, false);
+      assert.equal(packet.boundaries.future_fragment_available, false);
+      assert.equal(packet.boundaries.grounding_authority, false);
+      assert.equal(packet.boundaries.belief_write_authority, false);
+      assert.equal(packet.boundaries.world_action_replanning_available, false);
+      assert(!JSON.stringify(packet).includes(semantic));
+      if (meaningDelivered.length === 1) {
+        assert.equal(packet.heard_surface_prefix, packet.current_heard_surface_fragment);
+        assert.equal(packet.heard_surface_prefix.includes(surface), false);
+      }
+      return {
+        interpretation_status: "partial",
+        interpreted_content: `目前聽成：${packet.heard_surface_prefix}`,
+        interpreted_interaction_function: "ongoing_statement_candidate",
+        understanding_attested: false,
+      };
+    },
     characterCommunicationTurnIncrementResolver: async (view) => {
       delivered.push(structuredClone(view));
       assert.equal(view.observer, "B");
@@ -294,6 +318,10 @@ try {
       assert.equal(typeof view.perceived_speech_increment.heard_surface_fragment, "string");
       assert.equal(view.lexical_recognition_status, "recognized");
       assert.equal(view.evidence_is_nonlexical_only, false);
+      assert.equal(view.meaning_interpretation_status, "partial");
+      assert.equal(view.incremental_meaning_interpretation.subjective_only, true);
+      assert.equal(view.incremental_meaning_interpretation.grounding_claimed, false);
+      assert.equal(view.incremental_meaning_interpretation.belief_updated, false);
       assert.equal(view.perceived_speech_increment.speaker, view.anonymous_speaker_ref);
       assert.notEqual(view.anonymous_speaker_ref, "A");
       assert(!JSON.stringify(view).includes(semantic));
@@ -320,7 +348,9 @@ try {
   assert.equal(result.committed, true);
   assert(delivered.length > 1, "Native bridge must invoke one observer at each release.");
   assert.equal(lexicalDelivered.length, delivered.length);
+  assert.equal(meaningDelivered.length, delivered.length);
   assert.equal(lexicalDelivered.map((item) => item.emitted_surface_fragment).join(""), surface);
+  assert.equal(meaningDelivered.at(-1).heard_surface_prefix, surface);
   const history = await getWorldSimulationHistory(
     session.world_simulation_session_id, options);
   const turn = history.turns.at(-1);
@@ -333,6 +363,14 @@ try {
   assert.equal(JSON.stringify(lexicalAudit).includes(surface), false);
   assert.equal(JSON.stringify(lexicalAudit).includes(semantic), false);
   assert.equal(JSON.stringify(lexicalAudit).includes('"emitted_surface_fragment"'), false);
+  const meaningAudit = turn.observer_meaning_increment;
+  assert.equal(meaningAudit.status, "observer_subjective_incremental_meaning");
+  assert.equal(meaningAudit.interpretation_count, meaningDelivered.length);
+  assert.equal(JSON.stringify(meaningAudit).includes(surface), false);
+  assert.equal(JSON.stringify(meaningAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(meaningAudit).includes("目前聽成"), false);
+  assert.equal(meaningAudit.boundaries.grounding_claimed, false);
+  assert.equal(meaningAudit.boundaries.belief_updated, false);
   const handoff = turn.communication_turn_increment_handoff;
   assert.equal(handoff.resolver_used, true);
   assert.equal(handoff.projected_count, delivered.length);
@@ -349,7 +387,9 @@ try {
     handoff.projections[0].projection.projection_id);
   assert.equal(handoff.projections[1].projection.lineage.revises_prior_projection, true);
   assert(handoff.projections.every((item) =>
-    item.projection.boundaries.grounding_claimed === false
+    typeof item.source_meaning_interpretation_id === "string"
+    && item.projection.boundaries.grounding_claimed === false
+    && item.projection.boundaries.listener_belief_updated === false
     && item.projection.boundaries.floor_claimed === false
     && item.actual_world_action_replanned === false));
   const receipts = turn.communication_observer_increment_admissions;

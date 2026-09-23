@@ -2,6 +2,7 @@ import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { projectCharacterCommunicationTurnProjection } from "./character-communication-turn-projection-service.mjs";
 import { worldSimulationObserverSpeechIncrementVersion } from "./world-simulation-communication-observer-increment-service.mjs";
 import { worldSimulationObserverLexicalIncrementVersion } from "./world-simulation-communication-observer-lexical-increment-service.mjs";
+import { worldSimulationObserverMeaningIncrementVersion } from "./world-simulation-communication-observer-meaning-increment-service.mjs";
 
 export const worldSimulationTurnIncrementHandoffVersion =
   "cc7d-native-observer-turn-increment-handoff-v1";
@@ -92,6 +93,73 @@ function lexicalRecognitionMap(value) {
   return result;
 }
 
+function meaningInterpretationMap(value) {
+  if (!Array.isArray(value) || value.length > 4096)
+    invalid("meaning_interpretations must be a bounded list.");
+  const result = new Map();
+  for (const item of value) {
+    exactKeys(item, [
+      "schema_version", "interpretation_id", "observer", "signal_ref",
+      "increment_ref", "release_time_ms", "source_lexical_recognition_status",
+      "interpretation_status", "interpreted_content",
+      "interpreted_interaction_function", "understanding_attested",
+      "prior_interpretation_id", "revises_prior_interpretation",
+      "subjective_only", "interpretation_may_differ_from_speaker_intent",
+      "grounding_claimed", "belief_updated", "world_truth_claimed",
+    ], "CC-7K meaning interpretation");
+    const hasContent = typeof item.interpreted_content === "string"
+      && item.interpreted_content.trim()
+      && [...item.interpreted_content.trim()].length <= 1200;
+    const hasInteractionFunction = item.interpreted_interaction_function == null
+      || (typeof item.interpreted_interaction_function === "string"
+        && item.interpreted_interaction_function.trim()
+        && [...item.interpreted_interaction_function.trim()].length <= 240);
+    if (item.schema_version !== worldSimulationObserverMeaningIncrementVersion
+        || typeof item.interpretation_id !== "string" || !item.interpretation_id.trim()
+        || typeof item.observer !== "string" || !item.observer.trim()
+        || typeof item.signal_ref !== "string" || !item.signal_ref.trim()
+        || typeof item.increment_ref !== "string" || !item.increment_ref.trim()
+        || !Number.isFinite(item.release_time_ms) || item.release_time_ms < 0
+        || !["recognized", "partial", "uncertain"].includes(item.source_lexical_recognition_status)
+        || !["interpreted", "partial", "uncertain", "uninterpreted"].includes(item.interpretation_status)
+        || (item.interpretation_status === "uninterpreted"
+          ? item.interpreted_content !== null
+          : !hasContent)
+        || !hasInteractionFunction
+        || typeof item.understanding_attested !== "boolean"
+        || (item.understanding_attested && item.interpretation_status !== "interpreted")
+        || (item.prior_interpretation_id != null
+          && (typeof item.prior_interpretation_id !== "string"
+            || !item.prior_interpretation_id.trim()))
+        || typeof item.revises_prior_interpretation !== "boolean"
+        || item.subjective_only !== true
+        || item.interpretation_may_differ_from_speaker_intent !== true
+        || item.grounding_claimed !== false
+        || item.belief_updated !== false
+        || item.world_truth_claimed !== false)
+      invalid("CC-7D received an invalid CC-7K meaning interpretation.");
+    const expectedInterpretationId =
+      `observer_meaning_${hashAgentRunValue({
+        version: worldSimulationObserverMeaningIncrementVersion,
+        observer: item.observer,
+        signal_ref: item.signal_ref,
+        increment_ref: item.increment_ref,
+        release_time_ms: item.release_time_ms,
+        interpretation_status: item.interpretation_status,
+        interpreted_content: item.interpreted_content,
+        interpreted_interaction_function: item.interpreted_interaction_function,
+        understanding_attested: item.understanding_attested,
+        prior_interpretation_id: item.prior_interpretation_id,
+      }).slice(0, 24)}`;
+    if (item.interpretation_id !== expectedInterpretationId)
+      invalid("CC-7K meaning interpretation identity does not match its contents.");
+    const key = lexicalRecognitionKey(item);
+    if (result.has(key)) invalid("Duplicate CC-7K meaning interpretation.");
+    result.set(key, item);
+  }
+  return result;
+}
+
 export function buildWorldSimulationTurnIncrementHandoffContract() {
   return {
     version: worldSimulationTurnIncrementHandoffVersion,
@@ -103,6 +171,9 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
     engine_source_surface_forwarded_without_listener_recognition: false,
     listener_authored_lexical_fragment_supported: true,
     lexical_recognition_source_version: worldSimulationObserverLexicalIncrementVersion,
+    listener_authored_incremental_meaning_supported: true,
+    meaning_interpretation_source_version: worldSimulationObserverMeaningIncrementVersion,
+    meaning_interpretation_does_not_claim_grounding_or_belief: true,
     no_resolver_means_no_subjective_projection: true,
     subjective_projection_decided_by_observer_resolver_only: true,
     projection_is_post_causal_speculative_evidence: true,
@@ -126,11 +197,13 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
 export async function runWorldSimulationTurnIncrementHandoff({
   admissions = [],
   lexical_recognitions = [],
+  meaning_interpretations = [],
   resolver = null,
 } = {}) {
   if (!Array.isArray(admissions) || admissions.length > 4096)
     invalid("admissions must be a bounded list.");
   const lexicalByIncrement = lexicalRecognitionMap(lexical_recognitions);
+  const meaningByIncrement = meaningInterpretationMap(meaning_interpretations);
   if (resolver != null && typeof resolver !== "function")
     invalid("resolver must be an observer-scoped function.");
   if (!resolver) return {
@@ -152,8 +225,10 @@ export async function runWorldSimulationTurnIncrementHandoff({
   const lastTimeBySignal = new Map();
   const seen = new Set();
   const priorBySignal = new Map();
+  const priorMeaningBySignal = new Map();
   const projections = [];
   const consumedLexicalRecognitionKeys = new Set();
+  const consumedMeaningInterpretationKeys = new Set();
 
   for (const { receipt, cue } of ordered) {
     const key = JSON.stringify([cue.observer, cue.signal_ref]);
@@ -178,6 +253,25 @@ export async function runWorldSimulationTurnIncrementHandoff({
     });
     const lexicalRecognition = lexicalByIncrement.get(lexicalKey) ?? null;
     if (lexicalRecognition) consumedLexicalRecognitionKeys.add(lexicalKey);
+    const meaningInterpretation = meaningByIncrement.get(lexicalKey) ?? null;
+    if (meaningInterpretation) {
+      if (!lexicalRecognition
+          || meaningInterpretation.source_lexical_recognition_status
+            !== lexicalRecognition.recognition_status)
+        invalid("CC-7K meaning interpretation must match its CC-7J lexical recognition.");
+      const priorMeaning = priorMeaningBySignal.get(key) ?? null;
+      if (priorMeaning) {
+        if (meaningInterpretation.revises_prior_interpretation !== true
+            || meaningInterpretation.prior_interpretation_id
+              !== priorMeaning.interpretation_id)
+          invalid("CC-7K meaning interpretation must continue the same signal lineage.");
+      } else if (meaningInterpretation.revises_prior_interpretation !== false
+          || meaningInterpretation.prior_interpretation_id !== null) {
+        invalid("First CC-7K meaning interpretation cannot claim prior lineage.");
+      }
+      priorMeaningBySignal.set(key, meaningInterpretation);
+      consumedMeaningInterpretationKeys.add(lexicalKey);
+    }
     const perceivedIncrement = {
       schema_version: "cc7-observer-speech-increment-v1",
       observer: cue.observer,
@@ -202,6 +296,24 @@ export async function runWorldSimulationTurnIncrementHandoff({
         lexicalRecognition?.heard_surface_fragment == null,
       lexical_recognition_status:
         lexicalRecognition?.recognition_status ?? null,
+      incremental_meaning_interpretation: meaningInterpretation
+        ? {
+          interpretation_id: meaningInterpretation.interpretation_id,
+          interpretation_status: meaningInterpretation.interpretation_status,
+          interpreted_content: meaningInterpretation.interpreted_content,
+          interpreted_interaction_function:
+            meaningInterpretation.interpreted_interaction_function,
+          understanding_attested: meaningInterpretation.understanding_attested,
+          prior_interpretation_id: meaningInterpretation.prior_interpretation_id,
+          revises_prior_interpretation:
+            meaningInterpretation.revises_prior_interpretation,
+          subjective_only: true,
+          grounding_claimed: false,
+          belief_updated: false,
+        }
+        : null,
+      meaning_interpretation_status:
+        meaningInterpretation?.interpretation_status ?? null,
       world_action_replanning_available: false,
     };
     const raw = await resolver(copy(view));
@@ -221,6 +333,8 @@ export async function runWorldSimulationTurnIncrementHandoff({
       observer: cue.observer,
       release_time_ms: receipt.release_time_ms,
       projection: copy(projection),
+      source_meaning_interpretation_id:
+        meaningInterpretation?.interpretation_id ?? null,
       subjective_only: true,
       actual_world_action_replanned: false,
     });
@@ -228,6 +342,8 @@ export async function runWorldSimulationTurnIncrementHandoff({
 
   if (consumedLexicalRecognitionKeys.size !== lexicalByIncrement.size)
     invalid("CC-7J lexical recognition does not match an admitted observer increment.");
+  if (consumedMeaningInterpretationKeys.size !== meaningByIncrement.size)
+    invalid("CC-7K meaning interpretation does not match an admitted observer increment.");
 
   return copy({
     schema_version: worldSimulationTurnIncrementHandoffVersion,

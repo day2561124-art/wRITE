@@ -13,6 +13,10 @@ import {
   buildWorldSimulationObserverLexicalIncrementContract,
 } from "./world-simulation-communication-observer-lexical-increment-service.mjs";
 import {
+  runWorldSimulationObserverMeaningIncrementAdmission,
+  buildWorldSimulationObserverMeaningIncrementContract,
+} from "./world-simulation-communication-observer-meaning-increment-service.mjs";
+import {
   projectWorldSimulationObserverTickPerceptions,
   buildWorldSimulationObserverTickPerceptionContract,
 } from "./world-simulation-observer-tick-perception-service.mjs";
@@ -4566,6 +4570,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationObserverTickBrainIngressContract(),
     observer_lexical_increment:
       buildWorldSimulationObserverLexicalIncrementContract(),
+    observer_meaning_increment:
+      buildWorldSimulationObserverMeaningIncrementContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -10025,13 +10031,25 @@ export async function resolveWorldSimulationTurn(
       resolver: options.characterCommunicationLexicalIncrementResolver ?? null,
     });
   // Persist audit only. Listener-authored lexical fragments remain transient
-  // engine-private evidence and are handed only to the matching CC-7D view.
+  // engine-private evidence and feed only the matching observer's CC-7K
+  // meaning admission and CC-7D turn-projection view.
   const observerLexicalIncrement = observerLexicalIncrementProjection.audit;
+  const observerMeaningIncrementProjection =
+    await runWorldSimulationObserverMeaningIncrementAdmission({
+      lexical_recognitions:
+        observerLexicalIncrementProjection.engine_private_lexical_increments,
+      resolver: options.characterCommunicationIncrementalMeaningResolver ?? null,
+    });
+  // Persist audit only. Incremental interpreted content remains transient
+  // observer-authored evidence; it is not belief, grounding, or World truth.
+  const observerMeaningIncrement = observerMeaningIncrementProjection.audit;
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
       admissions: array(causalResolution.communication_observer_increment_admissions),
       lexical_recognitions:
         observerLexicalIncrementProjection.engine_private_lexical_increments,
+      meaning_interpretations:
+        observerMeaningIncrementProjection.engine_private_meaning_increments,
       resolver: options.characterCommunicationTurnIncrementResolver ?? null,
     });
 
@@ -12399,6 +12417,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_lexical_increment: cloneJson(
         observerLexicalIncrement,
+      ),
+      observer_meaning_increment: cloneJson(
+        observerMeaningIncrement,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),
