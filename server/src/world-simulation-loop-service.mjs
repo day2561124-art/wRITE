@@ -5,6 +5,11 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  runWorldSimulationTurnIncrementHandoff,
+  buildWorldSimulationTurnIncrementHandoffContract,
+  worldSimulationTurnIncrementHandoffVersion,
+} from "./world-simulation-communication-turn-increment-handoff-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4525,6 +4530,10 @@ export function buildWorldSimulationLoopContract() {
     character_perception_visuals_use_directional_height_visibility: true,
     character_perception_visuals_use_illumination_visibility: true,
     character_perception_audio_uses_programmatic_audibility: true,
+    character_turn_increment_handoff:
+      buildWorldSimulationTurnIncrementHandoffContract(),
+    character_turn_increment_handoff_version:
+      worldSimulationTurnIncrementHandoffVersion,
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -9928,6 +9937,17 @@ export async function resolveWorldSimulationTurn(
     };
   }
 
+  // CC-7D invokes an optional observer-scoped resolver ONCE per admitted
+  // acoustic release, in release-time order, after the causal consistency
+  // gate. It never exposes future segments or the engine's speaker identity.
+  // These projections are post-causal speculative evidence; they cannot
+  // retroactively affect the already-selected actions or arbitrate the floor.
+  const communicationTurnIncrementHandoff =
+    await runWorldSimulationTurnIncrementHandoff({
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      resolver: options.characterCommunicationTurnIncrementResolver ?? null,
+    });
+
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
   // the atomic world commit succeeds below.
@@ -12271,6 +12291,9 @@ export async function resolveWorldSimulationTurn(
       causal_timeline: cloneJson(causalResolution.causal_timeline ?? null),
       communication_observer_increment_admissions: cloneJson(
         causalResolution.communication_observer_increment_admissions ?? [],
+      ),
+      communication_turn_increment_handoff: cloneJson(
+        communicationTurnIncrementHandoff,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),

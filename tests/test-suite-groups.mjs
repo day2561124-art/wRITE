@@ -16,6 +16,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]]),
   Object.freeze(["CC-7B speech temporal stream foundation", ["tests/communication/cc7-speech-temporal-stream.test.mjs"]]),
   Object.freeze(["CC-7C observer speech increment acoustic admission", ["tests/communication/cc7-observer-increment-acoustic-admission.test.mjs"]]),
+  Object.freeze(["CC-7D native observer turn increment handoff", ["tests/communication/cc7-native-turn-increment-handoff.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

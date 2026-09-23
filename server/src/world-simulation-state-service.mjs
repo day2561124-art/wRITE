@@ -284,6 +284,8 @@ export async function commitWorldSimulationTurn(
             causal_timeline: input.causal_timeline ?? null,
             communication_observer_increment_admissions:
               input.communication_observer_increment_admissions ?? [],
+            communication_turn_increment_handoff:
+              input.communication_turn_increment_handoff ?? null,
             chronological_mutation_queue: input.chronological_mutation_queue ?? null,
             chronological_mutation_execution: input.chronological_mutation_execution ?? null,
             mutation_proposal_boundary: input.mutation_proposal_boundary ?? null,

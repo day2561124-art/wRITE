@@ -933,6 +933,7 @@ const steps = [
   ["CC-7A subjective turn projection and response preparation", ["tests/communication/cc7-turn-projection.test.mjs"]],
   ["CC-7B speech temporal stream foundation", ["tests/communication/cc7-speech-temporal-stream.test.mjs"]],
   ["CC-7C observer speech increment acoustic admission", ["tests/communication/cc7-observer-increment-acoustic-admission.test.mjs"]],
+  ["CC-7D native observer turn increment handoff", ["tests/communication/cc7-native-turn-increment-handoff.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

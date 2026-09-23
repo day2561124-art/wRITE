@@ -130,15 +130,22 @@ assert(communicationIr.affected_tests.includes(
 const communicationTurnProjection = await plan([
   "server/src/character-communication-turn-projection-service.mjs",
 ]);
+// CC-7D makes the native World loop a consumer of CC-7A projections.
+// A change to the projection service must now keep both native World and
+// Character Communication coverage; do not silently narrow the router.
 assert.equal(
   communicationTurnProjection.suite,
-  "communication",
+  "world_simulation",
   JSON.stringify(communicationTurnProjection, null, 2),
 );
-assert.deepEqual(communicationTurnProjection.required_suites, ["communication"]);
+assert.deepEqual(
+  communicationTurnProjection.required_suites,
+  ["world_simulation", "communication"],
+);
 assert.equal(communicationTurnProjection.focused, true);
 assert.equal(communicationTurnProjection.fallback_reason, null);
-assert.equal(communicationTurnProjection.certification_required, false);
+assert.equal(communicationTurnProjection.certification_required, true);
+assert(communicationTurnProjection.deferred_certification_tests.length > 0);
 assert(communicationTurnProjection.selected_group_tests.includes(
   "tests/communication/cc7-turn-projection.test.mjs",
 ));
