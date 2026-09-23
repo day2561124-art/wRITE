@@ -127,6 +127,22 @@ assert(communicationIr.affected_tests.includes(
   "tests/communication/communication-ir.test.mjs",
 ));
 
+const communicationTurnProjection = await plan([
+  "server/src/character-communication-turn-projection-service.mjs",
+]);
+assert.equal(
+  communicationTurnProjection.suite,
+  "communication",
+  JSON.stringify(communicationTurnProjection, null, 2),
+);
+assert.deepEqual(communicationTurnProjection.required_suites, ["communication"]);
+assert.equal(communicationTurnProjection.focused, true);
+assert.equal(communicationTurnProjection.fallback_reason, null);
+assert.equal(communicationTurnProjection.certification_required, false);
+assert(communicationTurnProjection.selected_group_tests.includes(
+  "tests/communication/cc7-turn-projection.test.mjs",
+));
+
 const unreviewedCommunicationSource = await plan([
   "server/src/character-communication-speaker-recognition-service.mjs",
 ]);

@@ -35,6 +35,7 @@ const communicationSources = new Set([
   "server/src/character-communication-mandarin-realization-service.mjs",
   "server/src/character-communication-listener-reception-service.mjs",
   "server/src/character-communication-listener-understanding-service.mjs",
+  "server/src/character-communication-turn-projection-service.mjs",
 ]);
 const groupedTests = new Set([
   ...communicationTests,
