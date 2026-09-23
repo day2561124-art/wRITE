@@ -5,6 +5,10 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  projectWorldSimulationObserverTickPerceptions,
+  buildWorldSimulationObserverTickPerceptionContract,
+} from "./world-simulation-observer-tick-perception-service.mjs";
+import {
   reconstructWorldSimulationObserverTickPrefixes,
   buildWorldSimulationObserverTickPrefixReconstructionContract,
 } from "./world-simulation-observer-tick-prefix-reconstruction-service.mjs";
@@ -4548,6 +4552,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationObserverTickSnapshotReadinessContract(),
     engine_observer_tick_prefix_reconstruction:
       buildWorldSimulationObserverTickPrefixReconstructionContract(),
+    engine_observer_tick_perception:
+      buildWorldSimulationObserverTickPerceptionContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -9972,7 +9978,7 @@ export async function resolveWorldSimulationTurn(
     });
   // Reconstruct only from the pre-turn World and authoritative Phase62K
   // queue. NEVER store or forward the private snapshot array to a Brain.
-  const { audit: observerTickPrefixReconstruction } =
+  const observerTickReconstruction =
     reconstructWorldSimulationObserverTickPrefixes({
       pre_turn_world_state: snapshot.state,
       authoritative_next_world_state: causalResolution.next_world_state,
@@ -9980,6 +9986,15 @@ export async function resolveWorldSimulationTurn(
       readiness: observerTickSnapshotReadiness,
       chronological_mutation_queue: causalResolution.chronological_mutation_queue ?? null,
       chronological_mutation_execution: causalResolution.chronological_mutation_execution ?? null,
+      scene_id: preparedTurn.event?.scene_id ?? null,
+    });
+  const observerTickPrefixReconstruction = observerTickReconstruction.audit;
+  // Views exist transiently engine-side; only the hash/lineage audit is
+  // persisted. No Character Brain ingress or retrospective action replanning.
+  const { audit: observerTickPerception } =
+    projectWorldSimulationObserverTickPerceptions({
+      ledger: observerMicrotickLedger,
+      reconstruction: observerTickReconstruction,
       scene_id: preparedTurn.event?.scene_id ?? null,
     });
   const communicationTurnIncrementHandoff =
@@ -12343,6 +12358,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_tick_prefix_reconstruction: cloneJson(
         observerTickPrefixReconstruction,
+      ),
+      observer_tick_perception: cloneJson(
+        observerTickPerception,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),

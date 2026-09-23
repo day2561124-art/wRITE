@@ -428,6 +428,14 @@ try {
   const speechOutcome = turn.action_outcomes.find(
     (item) => item.actor === "A" && item.result === "communication_emitted");
   assert.ok(speechOutcome?.communication_speech_stream);
+  const nativeObserverPerception = turn.observer_tick_perception;
+  assert.equal(nativeObserverPerception.boundaries.persistence_contains_character_views, false);
+  assert.equal(nativeObserverPerception.boundaries.character_brain_invoked, false);
+  assert.equal(nativeObserverPerception.boundaries.other_character_private_state_exposed, false);
+  assert.equal(JSON.stringify(nativeObserverPerception).includes(surface), false);
+  assert.equal(JSON.stringify(nativeObserverPerception).includes(semantic), false);
+  assert.equal(JSON.stringify(nativeObserverPerception).includes('"world_state":'), false);
+  assert.equal(JSON.stringify(nativeObserverPerception).includes('"visual":'), false);
   const nativePrefixAudit = turn.observer_tick_prefix_reconstruction;
   assert.equal(nativePrefixAudit.boundaries.snapshots_engine_private_only, true);
   assert.equal(nativePrefixAudit.boundaries.character_brain_invoked, false);

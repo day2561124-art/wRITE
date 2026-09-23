@@ -292,6 +292,8 @@ export async function commitWorldSimulationTurn(
               input.observer_tick_snapshot_readiness ?? null,
             observer_tick_prefix_reconstruction:
               input.observer_tick_prefix_reconstruction ?? null,
+            observer_tick_perception:
+              input.observer_tick_perception ?? null,
             chronological_mutation_queue: input.chronological_mutation_queue ?? null,
             chronological_mutation_execution: input.chronological_mutation_execution ?? null,
             mutation_proposal_boundary: input.mutation_proposal_boundary ?? null,

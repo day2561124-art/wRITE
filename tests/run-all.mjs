@@ -937,6 +937,7 @@ const steps = [
   ["CC-7E observer microtick release ledger", ["tests/communication/cc7-observer-microtick-ledger.test.mjs"]],
   ["CC-7F observer tick snapshot readiness", ["tests/communication/cc7-observer-tick-snapshot-readiness.test.mjs"]],
   ["CC-7G observer tick prefix reconstruction", ["tests/communication/cc7-observer-tick-prefix-reconstruction.test.mjs"]],
+  ["CC-7H observer tick perception", ["tests/communication/cc7-observer-tick-perception.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
