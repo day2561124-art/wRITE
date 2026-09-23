@@ -428,6 +428,16 @@ try {
   const speechOutcome = turn.action_outcomes.find(
     (item) => item.actor === "A" && item.result === "communication_emitted");
   assert.ok(speechOutcome?.communication_speech_stream);
+  const nativeBrainIngress = turn.observer_tick_brain_ingress;
+  assert.equal(nativeBrainIngress.boundaries.no_resolver_means_no_brain_invocation, true);
+  assert.equal(nativeBrainIngress.boundaries.actual_mid_turn_world_action_replanning, false);
+  assert.equal(nativeBrainIngress.boundaries.persistent_audit_contains_views_or_response_text, false);
+  assert.equal(nativeBrainIngress.resolver_used, false);
+  assert.equal(nativeBrainIngress.invocation_count, 0);
+  assert.equal(JSON.stringify(nativeBrainIngress).includes(surface), false);
+  assert.equal(JSON.stringify(nativeBrainIngress).includes(semantic), false);
+  assert.equal(JSON.stringify(nativeBrainIngress).includes('"world_state":'), false);
+  assert.equal(JSON.stringify(nativeBrainIngress).includes('"perception":'), false);
   const nativeObserverPerception = turn.observer_tick_perception;
   assert.equal(nativeObserverPerception.boundaries.persistence_contains_character_views, false);
   assert.equal(nativeObserverPerception.boundaries.character_brain_invoked, false);

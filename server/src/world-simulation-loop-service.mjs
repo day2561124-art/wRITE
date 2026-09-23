@@ -5,6 +5,10 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  runWorldSimulationObserverTickBrainIngress,
+  buildWorldSimulationObserverTickBrainIngressContract,
+} from "./world-simulation-observer-tick-brain-ingress-service.mjs";
+import {
   projectWorldSimulationObserverTickPerceptions,
   buildWorldSimulationObserverTickPerceptionContract,
 } from "./world-simulation-observer-tick-perception-service.mjs";
@@ -4554,6 +4558,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationObserverTickPrefixReconstructionContract(),
     engine_observer_tick_perception:
       buildWorldSimulationObserverTickPerceptionContract(),
+    observer_tick_brain_ingress:
+      buildWorldSimulationObserverTickBrainIngressContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -9990,12 +9996,21 @@ export async function resolveWorldSimulationTurn(
     });
   const observerTickPrefixReconstruction = observerTickReconstruction.audit;
   // Views exist transiently engine-side; only the hash/lineage audit is
-  // persisted. No Character Brain ingress or retrospective action replanning.
-  const { audit: observerTickPerception } =
+  // persisted. Any CC-7I observer-only Brain ingress is opt-in, post-causal,
+  // and cannot reopen the already-selected actions.
+  const observerTickPerceptionProjection =
     projectWorldSimulationObserverTickPerceptions({
       ledger: observerMicrotickLedger,
       reconstruction: observerTickReconstruction,
       scene_id: preparedTurn.event?.scene_id ?? null,
+    });
+  const observerTickPerception = observerTickPerceptionProjection.audit;
+  // Explicitly opt-in observer-only Brain adapter, called only after the
+  // causal consistency gate. Responses cannot replace selected actions.
+  const observerTickBrainIngress =
+    await runWorldSimulationObserverTickBrainIngress({
+      perception: observerTickPerceptionProjection,
+      resolver: options.characterObserverTickPerceptionResolver ?? null,
     });
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
@@ -12361,6 +12376,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_tick_perception: cloneJson(
         observerTickPerception,
+      ),
+      observer_tick_brain_ingress: cloneJson(
+        observerTickBrainIngress,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),

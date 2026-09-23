@@ -21,6 +21,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7F observer tick snapshot readiness", ["tests/communication/cc7-observer-tick-snapshot-readiness.test.mjs"]]),
   Object.freeze(["CC-7G observer tick prefix reconstruction", ["tests/communication/cc7-observer-tick-prefix-reconstruction.test.mjs"]]),
   Object.freeze(["CC-7H observer tick perception", ["tests/communication/cc7-observer-tick-perception.test.mjs"]]),
+  Object.freeze(["CC-7I observer tick Brain ingress", ["tests/communication/cc7-observer-tick-brain-ingress.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
