@@ -5,6 +5,10 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
+  reconstructWorldSimulationObserverTickPrefixes,
+  buildWorldSimulationObserverTickPrefixReconstructionContract,
+} from "./world-simulation-observer-tick-prefix-reconstruction-service.mjs";
+import {
   buildWorldSimulationObserverTickSnapshotReadiness,
   buildWorldSimulationObserverTickSnapshotReadinessContract,
 } from "./world-simulation-observer-tick-snapshot-readiness-service.mjs";
@@ -4542,6 +4546,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationObserverMicrotickLedgerContract(),
     engine_observer_tick_snapshot_readiness:
       buildWorldSimulationObserverTickSnapshotReadinessContract(),
+    engine_observer_tick_prefix_reconstruction:
+      buildWorldSimulationObserverTickPrefixReconstructionContract(),
     character_turn_increment_handoff:
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
@@ -9964,6 +9970,18 @@ export async function resolveWorldSimulationTurn(
       chronological_mutation_queue: causalResolution.chronological_mutation_queue ?? null,
       chronological_mutation_execution: causalResolution.chronological_mutation_execution ?? null,
     });
+  // Reconstruct only from the pre-turn World and authoritative Phase62K
+  // queue. NEVER store or forward the private snapshot array to a Brain.
+  const { audit: observerTickPrefixReconstruction } =
+    reconstructWorldSimulationObserverTickPrefixes({
+      pre_turn_world_state: snapshot.state,
+      authoritative_next_world_state: causalResolution.next_world_state,
+      ledger: observerMicrotickLedger,
+      readiness: observerTickSnapshotReadiness,
+      chronological_mutation_queue: causalResolution.chronological_mutation_queue ?? null,
+      chronological_mutation_execution: causalResolution.chronological_mutation_execution ?? null,
+      scene_id: preparedTurn.event?.scene_id ?? null,
+    });
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
       admissions: array(causalResolution.communication_observer_increment_admissions),
@@ -12322,6 +12340,9 @@ export async function resolveWorldSimulationTurn(
       ),
       observer_tick_snapshot_readiness: cloneJson(
         observerTickSnapshotReadiness,
+      ),
+      observer_tick_prefix_reconstruction: cloneJson(
+        observerTickPrefixReconstruction,
       ),
       chronological_mutation_queue: cloneJson(causalResolution.chronological_mutation_queue ?? null),
       chronological_mutation_execution: cloneJson(causalResolution.chronological_mutation_execution ?? null),

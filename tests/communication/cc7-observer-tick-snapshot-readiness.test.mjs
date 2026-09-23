@@ -428,6 +428,14 @@ try {
   const speechOutcome = turn.action_outcomes.find(
     (item) => item.actor === "A" && item.result === "communication_emitted");
   assert.ok(speechOutcome?.communication_speech_stream);
+  const nativePrefixAudit = turn.observer_tick_prefix_reconstruction;
+  assert.equal(nativePrefixAudit.boundaries.snapshots_engine_private_only, true);
+  assert.equal(nativePrefixAudit.boundaries.character_brain_invoked, false);
+  assert.equal(nativePrefixAudit.boundaries.persistent_audit_contains_world_state, false);
+  assert.equal(JSON.stringify(nativePrefixAudit).includes(surface), false);
+  assert.equal(JSON.stringify(nativePrefixAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(nativePrefixAudit).includes(actionId), false);
+  assert.equal(JSON.stringify(nativePrefixAudit).includes('"world_state":'), false);
   const nativeReadiness = turn.observer_tick_snapshot_readiness;
   assert.equal(nativeReadiness.schema_version, readinessContract.version);
   assert.equal(nativeReadiness.boundaries.world_action_replanned, false);
