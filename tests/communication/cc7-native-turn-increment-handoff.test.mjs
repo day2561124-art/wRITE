@@ -411,6 +411,23 @@ try {
   assert.equal(JSON.stringify(floorLedger).includes(semantic), false);
   assert.equal(JSON.stringify(floorLedger).includes("目前聽成"), false);
   assert.equal(JSON.stringify(floorLedger).includes(actionId), false);
+  const readinessAudit = turn.communication_turn_allocation_readiness;
+  assert.equal(readinessAudit.status, "subjective_readiness_evidence_only");
+  assert.equal(readinessAudit.latest_observer_signal_count, 1);
+  assert.equal(readinessAudit.active_request_count, 0);
+  assert.equal(readinessAudit.subjective_candidate_count, 0);
+  assert.equal(readinessAudit.competition_unresolved, false);
+  assert.equal(readinessAudit.entries.length, 1);
+  assert.equal(readinessAudit.entries[0].mode, "wait");
+  assert.equal(readinessAudit.entries[0].readiness, "not_seeking_floor");
+  assert.equal(readinessAudit.entries[0].actual_floor_claimed, false);
+  assert.equal(readinessAudit.boundaries.winner_selected, false);
+  assert.equal(readinessAudit.boundaries.actual_floor_claimed, false);
+  assert.equal(readinessAudit.boundaries.world_action_replanned, false);
+  assert.equal(JSON.stringify(readinessAudit).includes(surface), false);
+  assert.equal(JSON.stringify(readinessAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(readinessAudit).includes("目前聽成"), false);
+  assert.equal(JSON.stringify(readinessAudit).includes(actionId), false);
   assert(handoff.projections.every((item) =>
     item.participation_intent.actual_floor_claimed === false
     && item.participation_intent.backchannel_signal_emitted === false

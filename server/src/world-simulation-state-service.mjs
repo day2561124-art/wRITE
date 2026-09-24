@@ -288,6 +288,8 @@ export async function commitWorldSimulationTurn(
               input.communication_turn_increment_handoff ?? null,
             communication_floor_opportunity_ledger:
               input.communication_floor_opportunity_ledger ?? null,
+            communication_turn_allocation_readiness:
+              input.communication_turn_allocation_readiness ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
             observer_tick_snapshot_readiness:

@@ -42,6 +42,10 @@ import {
   buildWorldSimulationFloorOpportunityLedgerContract,
 } from "./world-simulation-communication-floor-opportunity-ledger-service.mjs";
 import {
+  buildWorldSimulationTurnAllocationReadiness,
+  buildWorldSimulationTurnAllocationReadinessContract,
+} from "./world-simulation-communication-turn-allocation-readiness-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4582,6 +4586,8 @@ export function buildWorldSimulationLoopContract() {
       worldSimulationTurnIncrementHandoffVersion,
     communication_floor_opportunity_ledger:
       buildWorldSimulationFloorOpportunityLedgerContract(),
+    communication_turn_allocation_readiness:
+      buildWorldSimulationTurnAllocationReadinessContract(),
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10065,6 +10071,12 @@ export async function resolveWorldSimulationTurn(
       handoff: communicationTurnIncrementHandoff,
     });
   const floorOpportunityLedger = floorOpportunityProjection.audit;
+  // CC-7N revalidates source CC-7D/7M lineage, then records observer-local
+  // readiness. A subjective completion is never an actual floor award.
+  const turnAllocationReadiness =
+    buildWorldSimulationTurnAllocationReadiness({
+      handoff: communicationTurnIncrementHandoff,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12415,6 +12427,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_floor_opportunity_ledger: cloneJson(
         floorOpportunityLedger,
+      ),
+      communication_turn_allocation_readiness: cloneJson(
+        turnAllocationReadiness,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
