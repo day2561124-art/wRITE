@@ -70,6 +70,9 @@ import {
   buildWorldSimulationNominatedTransitionAuthorization,
 } from "./world-simulation-communication-nominated-transition-authorization-service.mjs";
 import {
+  buildWorldSimulationOpenFloorTransitionAuthorization,
+} from "./world-simulation-communication-open-floor-transition-authorization-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10172,6 +10175,18 @@ export async function resolveWorldSimulationTurn(
       speaker_intent_projection: speakerNextTurnIntent,
       selected_action_intents: selected,
     }).audit;
+  // CC-7W handles the distinct open-floor path. It may select exactly one
+  // current self-selector only when CC-7S revalidates an explicit speaker
+  // yield_open_floor intention and that observer's live floor request.
+  // Competing self-selectors remain unresolved and no arrival-order tiebreak
+  // is allowed. Execution still belongs to a later future-turn boundary.
+  const openFloorTransitionAuthorization =
+    buildWorldSimulationOpenFloorTransitionAuthorization({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12546,6 +12561,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_nominated_transition_authorization: cloneJson(
         nominatedTransitionAuthorization,
+      ),
+      communication_open_floor_transition_authorization: cloneJson(
+        openFloorTransitionAuthorization,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
