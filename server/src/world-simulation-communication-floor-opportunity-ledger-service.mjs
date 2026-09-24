@@ -2,6 +2,7 @@ import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { worldSimulationTurnIncrementHandoffVersion } from "./world-simulation-communication-turn-increment-handoff-service.mjs";
 import { characterCommunicationTurnProjectionVersion } from "./character-communication-turn-projection-service.mjs";
 import { characterCommunicationTurnParticipationIntentVersion } from "./character-communication-turn-participation-intent-service.mjs";
+import { characterCommunicationTurnSelectionCueVersion } from "./character-communication-turn-selection-cue-service.mjs";
 
 export const worldSimulationFloorOpportunityLedgerVersion =
   "cc7m-floor-opportunity-evidence-ledger-v1";
@@ -37,6 +38,17 @@ const participationKeys = [
   "actual_floor_claimed", "backchannel_signal_emitted",
   "interruption_judged", "world_action_replanned",
 ];
+const selectionKeys = [
+  "schema_version", "selection_cue_id", "observer", "perceived_speaker",
+  "source_signal_ref", "source_increment_ref", "source_projection_id",
+  "source_meaning_interpretation_id", "status", "basis_refs",
+  "prior_selection_cue_id", "revises_prior_selection_cue", "subjective_only",
+  "actual_speaker_intent_claimed", "addressee_established",
+  "floor_awarded", "world_signal_emitted", "world_action_replanned",
+];
+const selectionStatuses = new Set([
+  "selected_me", "selected_other", "uncertain", "no_selection_evidence",
+]);
 const allowedModes = new Set([
   "wait", "remain_silent", "backchannel", "request_floor", "withdraw",
 ]);
@@ -92,6 +104,7 @@ export function buildWorldSimulationFloorOpportunityLedger({
   const ordered = [];
   const previousProjectionBySignal = new Map();
   const priorParticipationBySignal = new Map();
+  const priorSelectionBySignal = new Map();
   const latestModeBySignal = new Map();
   const auditEvents = [];
   const seen = new Set();
@@ -100,7 +113,7 @@ export function buildWorldSimulationFloorOpportunityLedger({
   for (const item of handoff.projections) {
     exact(item, [
       "schema_version", "observer", "release_time_ms", "projection",
-      "participation_intent", "source_meaning_interpretation_id",
+      "participation_intent", "selection_cue", "source_meaning_interpretation_id",
       "subjective_only", "actual_world_action_replanned",
     ], "CC-7D projection entry");
     const projection = item.projection;
@@ -215,6 +228,55 @@ export function buildWorldSimulationFloorOpportunityLedger({
       priorParticipationBySignal.set(group, participation);
     } else {
       priorParticipationBySignal.delete(group);
+    }
+    const selection = item.selection_cue ?? null;
+    const previousSelection = priorSelectionBySignal.get(group) ?? null;
+    if (selection !== null) {
+      exact(selection, selectionKeys, "CC-7O selection cue");
+      if (selection.schema_version !== characterCommunicationTurnSelectionCueVersion
+          || selection.observer !== observer
+          || selection.perceived_speaker !== speaker
+          || selection.source_signal_ref !== signal
+          || selection.source_increment_ref !== increment
+          || selection.source_projection_id !== projection.projection_id
+          || selection.source_meaning_interpretation_id
+            !== item.source_meaning_interpretation_id
+          || selection.prior_selection_cue_id
+            !== (previousSelection?.selection_cue_id ?? null)
+          || selection.revises_prior_selection_cue !== Boolean(previousSelection)
+          || !selectionStatuses.has(selection.status)
+          || !Array.isArray(selection.basis_refs)
+          || selection.basis_refs.length > 16
+          || new Set(selection.basis_refs).size !== selection.basis_refs.length
+          || selection.basis_refs.some((ref) => ref !== increment
+            && !projection.perceived_cue_refs.includes(ref)
+            && ref !== item.source_meaning_interpretation_id)
+          || (["selected_me", "selected_other"].includes(selection.status)
+            && selection.basis_refs.length === 0)
+          || selection.subjective_only !== true
+          || selection.actual_speaker_intent_claimed !== false
+          || selection.addressee_established !== false
+          || selection.floor_awarded !== false
+          || selection.world_signal_emitted !== false
+          || selection.world_action_replanned !== false)
+        reject("CC-7O selection cue is foreign or exceeds observer authority.");
+      const identity = {
+        version: characterCommunicationTurnSelectionCueVersion,
+        observer,
+        speaker,
+        signal_ref: signal,
+        increment_ref: increment,
+        projection_id: projection.projection_id,
+        meaning_ref: selection.source_meaning_interpretation_id,
+        status: selection.status,
+        basis_refs: selection.basis_refs,
+        prior_selection_cue_id: previousSelection?.selection_cue_id ?? null,
+      };
+      if (selection.selection_cue_id !== hash(identity, "cc7_selection_cue"))
+        reject("CC-7O selection cue identity does not match its contents.");
+      priorSelectionBySignal.set(group, selection);
+    } else {
+      priorSelectionBySignal.delete(group);
     }
     latestModeBySignal.set(group, {
       observer,

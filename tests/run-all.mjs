@@ -944,6 +944,7 @@ const steps = [
   ["CC-7L observer participation intent foundation", ["tests/communication/cc7-turn-participation-intent.test.mjs"]],
   ["CC-7M floor opportunity ledger", ["tests/communication/cc7-floor-opportunity-ledger.test.mjs"]],
   ["CC-7N subjective turn allocation readiness", ["tests/communication/cc7-turn-allocation-readiness.test.mjs"]],
+  ["CC-7O observer selection cue admission", ["tests/communication/cc7-turn-selection-cue.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

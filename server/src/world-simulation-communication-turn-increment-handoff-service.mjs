@@ -4,6 +4,10 @@ import {
   projectCharacterCommunicationTurnParticipationIntent,
   buildCharacterCommunicationTurnParticipationIntentContract,
 } from "./character-communication-turn-participation-intent-service.mjs";
+import {
+  projectCharacterCommunicationTurnSelectionCue,
+  buildCharacterCommunicationTurnSelectionCueContract,
+} from "./character-communication-turn-selection-cue-service.mjs";
 import { worldSimulationObserverSpeechIncrementVersion } from "./world-simulation-communication-observer-increment-service.mjs";
 import { worldSimulationObserverLexicalIncrementVersion } from "./world-simulation-communication-observer-lexical-increment-service.mjs";
 import { worldSimulationObserverMeaningIncrementVersion } from "./world-simulation-communication-observer-meaning-increment-service.mjs";
@@ -180,6 +184,8 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
     meaning_interpretation_does_not_claim_grounding_or_belief: true,
     observer_participation_intention:
       buildCharacterCommunicationTurnParticipationIntentContract(),
+    observer_selection_cue:
+      buildCharacterCommunicationTurnSelectionCueContract(),
     no_resolver_means_no_subjective_projection: true,
     subjective_projection_decided_by_observer_resolver_only: true,
     projection_is_post_causal_speculative_evidence: true,
@@ -233,6 +239,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
   const priorBySignal = new Map();
   const priorMeaningBySignal = new Map();
   const priorParticipationBySignal = new Map();
+  const priorSelectionBySignal = new Map();
   const projections = [];
   const consumedLexicalRecognitionKeys = new Set();
   const consumedMeaningInterpretationKeys = new Set();
@@ -300,6 +307,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
       perceived_speech_increment: perceivedIncrement,
       prior_turn_projection: copy(prior),
       prior_participation_intent: copy(priorParticipationBySignal.get(key) ?? null),
+      prior_selection_cue: copy(priorSelectionBySignal.get(key) ?? null),
       evidence_is_nonlexical_only:
         lexicalRecognition?.heard_surface_fragment == null,
       lexical_recognition_status:
@@ -328,7 +336,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
     if (raw == null) continue; // Observer may remain silent without projection.
     exactKeys(raw, [
       "listener_decision", "response_preparation_context",
-      "participation_decision",
+      "participation_decision", "selection_cue_decision",
     ], "observer decision");
     if (!record(raw.listener_decision)) invalid("Observer must supply a bounded CC-7A decision.");
     const projection = projectCharacterCommunicationTurnProjection({
@@ -346,15 +354,27 @@ export async function runWorldSimulationTurnIncrementHandoff({
         participation_decision: raw.participation_decision,
         prior_state: priorParticipationBySignal.get(key) ?? null,
       });
+    const selectionCue = raw.selection_cue_decision == null
+      ? null
+      : projectCharacterCommunicationTurnSelectionCue({
+        observer: cue.observer,
+        turn_projection: projection,
+        meaning_interpretation: view.incremental_meaning_interpretation,
+        selection_decision: raw.selection_cue_decision,
+        prior_state: priorSelectionBySignal.get(key) ?? null,
+      });
     priorBySignal.set(key, projection);
     if (participation) priorParticipationBySignal.set(key, participation);
     else priorParticipationBySignal.delete(key);
+    if (selectionCue) priorSelectionBySignal.set(key, selectionCue);
+    else priorSelectionBySignal.delete(key);
     projections.push({
       schema_version: worldSimulationTurnIncrementHandoffVersion,
       observer: cue.observer,
       release_time_ms: receipt.release_time_ms,
       projection: copy(projection),
       participation_intent: copy(participation),
+      selection_cue: copy(selectionCue),
       source_meaning_interpretation_id:
         meaningInterpretation?.interpretation_id ?? null,
       subjective_only: true,

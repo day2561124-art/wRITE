@@ -334,6 +334,12 @@ try {
           projection_basis_refs: [],
           response_preparation: "none",
         },
+        selection_cue_decision: delivered.length === 1
+          ? {
+            status: "selected_me",
+            basis_refs: [view.perceived_speech_increment.perceived_cue_refs[0]],
+          }
+          : { status: "uncertain", basis_refs: [] },
         participation_decision: delivered.length === 1
           ? {
             mode: "backchannel",
@@ -391,6 +397,12 @@ try {
   assert.equal(delivered[0].prior_turn_projection, null);
   assert.equal(delivered[0].prior_participation_intent, null);
   assert.equal(delivered[1].prior_participation_intent.mode, "backchannel");
+  assert.equal(delivered[0].prior_selection_cue, null);
+  assert.equal(delivered[1].prior_selection_cue.status, "selected_me");
+  assert.equal(handoff.projections[0].selection_cue.status, "selected_me");
+  assert.equal(handoff.projections[1].selection_cue.status, "uncertain");
+  assert.equal(handoff.projections[0].selection_cue.floor_awarded, false);
+  assert.equal(handoff.projections[0].selection_cue.actual_speaker_intent_claimed, false);
   assert.equal(delivered[1].prior_turn_projection.projection_id,
     handoff.projections[0].projection.projection_id);
   assert.equal(handoff.projections[1].projection.lineage.revises_prior_projection, true);
