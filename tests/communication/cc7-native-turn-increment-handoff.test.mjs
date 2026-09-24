@@ -555,4 +555,124 @@ try {
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
+
+// A selected speaker-authored invitation actually reaches World as speech.
+// B's admitted sound remains only a cue; C hears nothing and neither gets
+// hidden nomination intent or an automatically awarded floor.
+const positiveRoot = path.join(projectRoot, "tests", ".tmp",
+  `cc7t-native-invitation-${process.pid}-${Date.now()}`);
+const positiveOptions = { fixtureRoot: positiveRoot };
+await rm(positiveRoot, { recursive: true, force: true });
+try {
+  const invitation = "邀請 B 接續發言";
+  const invitationSession = await beginWorldSimulationSession({
+    simulation_label: "CC-7T native public invitation signal",
+    seed: "cc7t-native-public-invitation",
+    rules: {
+      event_driven: true, persistent_causality: true,
+      communication_action_seconds: 0.25,
+      communication_speech_stream_increment_max_chars: 3,
+    },
+    initial_world_state: {
+      simulation_time: "2026-09-23T00:00:00+08:00",
+      event_queue: [{
+        event_id: "evt-cc7t", type: "conversation", scene_id: "room",
+        participants: ["A", "B", "C"], summary: "A invites B to speak",
+      }],
+      scenes: { room: {
+        ...scene,
+        observable_by: {
+          A: { visual: [], audible: [] },
+          B: { visual: [], audible: [] },
+          C: { visual: [], audible: [] },
+        },
+      } },
+      characters: {
+        A: {
+          known: [], current_goal: "邀請 B 接續發言",
+          relationships: { B: "朋友" },
+          speech_acoustics: { sound_level_db_at_1m: 60 },
+          communication_goal: {
+            character: "A", purpose: "邀請 B 接續發言",
+            addressee: "B", mode: "direct", public_content: invitation,
+            turn_invitation_intent: {
+              addressee: "B", public_content: invitation,
+              explicit_public_invitation: true,
+            },
+            surface_realization: {
+              schema_version: "cc5-mandarin-clause-request-v1",
+              semantic_anchor: invitation,
+              clause: {
+                subject: "B", modal: "可以", predicate: "接續",
+                object: "發言", sentence_final_particle: "嗎",
+              },
+            },
+          },
+        },
+        B: { known: [], current_goal: "等待", relationships: { A: "朋友" } },
+        C: { known: [], current_goal: "等待" },
+      },
+      memories: { A: [], B: [], C: [] },
+      available_actions: { A: [], B: [], C: [] },
+    },
+  }, positiveOptions);
+  const manager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `character_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "cc7t_test_identity_resolver",
+      formal: true,
+    }),
+  });
+  const invitationViews = [];
+  const result = await runWorldSimulationTurn({
+    world_simulation_session_id: invitationSession.world_simulation_session_id,
+    event_id: "evt-cc7t",
+  }, {
+    ...positiveOptions,
+    characterRuntimeManager: manager,
+    characterCommunicationSpeakerNextTurnResolver: async (view) => {
+      assert.equal(view.actor, "A");
+      return { mode: "nominate_addressee", target: "B" };
+    },
+    characterCommunicationTurnIncrementResolver: async (view) => {
+      invitationViews.push(structuredClone(view));
+      return { listener_decision: {
+        turn_end_projection: "uncertain",
+        projection_basis_refs: [view.perceived_speech_increment.perceived_cue_refs[0]],
+        response_preparation: "none",
+      } };
+    },
+    characterBrain: async (packet) => {
+      if (packet.character !== "A") return "reject_all";
+      const candidate = packet.candidate_action_intents.find(
+        (item) => item.communication?.message?.speech_act === "invite_next_turn"
+          && item.communication?.surface_realization_complete === true,
+      );
+      assert.ok(candidate);
+      return { action_id: candidate.action_id };
+    },
+  });
+  assert.equal(result.committed, true);
+  const history = await getWorldSimulationHistory(
+    invitationSession.world_simulation_session_id, positiveOptions);
+  const turn = history.turns.at(-1);
+  assert(invitationViews.length > 0);
+  assert(invitationViews.every((view) => view.observer === "B"));
+  assert.equal(turn.communication_public_turn_invitation
+    .selected_public_invitation_source_count, 1);
+  assert.equal(turn.communication_public_turn_invitation.audible_invitation_count, 1);
+  assert.equal(turn.communication_public_turn_invitation.entries[0]
+    .acoustic_cue_admitted, true);
+  assert.equal(turn.communication_public_turn_invitation.entries[0]
+    .lexical_invitation_understood, false);
+  assert.equal(turn.communication_public_turn_invitation.entries[0]
+    .actual_floor_awarded, false);
+  assert.equal(JSON.stringify(turn.communication_public_turn_invitation)
+    .includes(invitation), false);
+  assert.equal(JSON.stringify(invitationViews)
+    .includes("nominate_addressee"), false);
+} finally {
+  await rm(positiveRoot, { recursive: true, force: true });
+}
 console.log("CC-7D native observer turn increment handoff tests passed.");
