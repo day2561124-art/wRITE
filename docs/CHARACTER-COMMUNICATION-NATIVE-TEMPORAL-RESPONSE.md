@@ -160,6 +160,17 @@ or represented as a durable original Phase74D choice. B can respond only to
 the replacement's newly admitted acoustic increment. This is NOT retroactive
 retraction of an already committed earlier sound.
 
+CC-7AF further provides the opt-in
+`characterNativeCommittedSourceDependency` for a NEW World turn:
+before speculative preparation and Character Brain ingress, the engine
+checks the exact prior committed speech/observer admission against
+append-only World history and current revision/hash. This check does
+NOT present past hearing as a fresh cue or grant B a response; the new
+turn still needs its own released acoustic increment and same-character
+Brain selection. The previous source's physical emissions remain
+immutable; stale/forged dependencies are refused before Brain ingress.
+See `docs/CHARACTER-COMMUNICATION-CAUSAL-EPOCH-INVALIDATION.md`.
+
 This opt-in stage does NOT yet implement automatic new-epoch re-planning
 after an already committed source, multiple successive World causal epochs
 with a complete cancellation or interruption lifecycle, nor does it make

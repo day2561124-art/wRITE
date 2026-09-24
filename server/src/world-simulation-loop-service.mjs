@@ -86,6 +86,9 @@ import {
   buildWorldSimulationNativePreparationEvidence,
 } from "./world-simulation-native-response-preparation-service.mjs";
 import {
+  assertWorldSimulationCommittedAcousticSource,
+} from "./world-simulation-native-committed-source-service.mjs";
+import {
   assessWorldSimulationNativeCausalEpochSupersession,
 } from "./world-simulation-native-causal-epoch-invalidation-service.mjs";
 import {
@@ -14788,7 +14791,61 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     error.code = "WORLD_SIMULATION_CHARACTER_BRAIN_REQUIRED";
     throw error;
   }
+  // CC-7AF: a past heard sound is an immutable fact, NOT a license to
+  // publish the listener's future response. For explicit new-turn native
+  // dependencies verify the authoritative history AND the current CAS
+  // before speculative preparation or ANY Character Brain invocation.
+  // The existing native observer replay must independently admit a fresh
+  // acoustic cue in this newly prepared turn before B may respond.
+  const historicalDependency =
+    options.characterNativeCommittedSourceDependency;
+  let historicalSourceAudit = null;
+  if (historicalDependency !== undefined) {
+    const expectedFields = [
+      "session_id", "source_turn_id", "source_turn_hash",
+      "source_action_id", "source_character", "observer",
+      "observer_increment_ref", "release_time_ms",
+      "expected_source_receipt_bundle_hash",
+      "expected_source_revision_to", "expected_source_next_state_hash",
+      "expected_current_revision", "expected_current_state_hash",
+    ];
+    if (!isObject(historicalDependency)
+        || Object.keys(historicalDependency).sort().join("|")
+          !== expectedFields.sort().join("|")
+        || historicalDependency.session_id
+          !== input.world_simulation_session_id
+        || historicalDependency.observer
+          !== options.characterNativeTemporalResponseObserver
+        || typeof options.characterNativeTemporalResponseInputResolver
+          !== "function"
+        || typeof options.characterNativeTemporalResponseSelectionResolver
+          !== "function") {
+      const error = new Error(
+        "CC-7AF new-turn dependency requires an exact old source, same native observer and paired fresh Brain resolvers.",
+      );
+      error.code = "CC7AF_NATIVE_COMMITTED_SOURCE_DEPENDENCY_INVALID";
+      throw error;
+    }
+    historicalSourceAudit =
+      await assertWorldSimulationCommittedAcousticSource(
+        historicalDependency, options);
+  }
   const prepared = await prepareWorldSimulationTurn(input, options);
+  if (historicalSourceAudit !== null) {
+    if (historicalDependency.source_turn_id === prepared.turn_id
+        || historicalSourceAudit.checked_current_revision
+          !== prepared.state_revision
+        || historicalSourceAudit.checked_current_state_hash
+          !== prepared.world_state_hash
+        || !prepared.decision_packets.some(packet =>
+          packet.character === historicalDependency.observer)) {
+      const error = new Error(
+        "CC-7AF new turn has no fresh broker/World revision or native listener.",
+      );
+      error.code = "CC7AF_NATIVE_COMMITTED_SOURCE_DEPENDENCY_INVALID";
+      throw error;
+    }
+  }
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.runCharacterTurn !== "function"

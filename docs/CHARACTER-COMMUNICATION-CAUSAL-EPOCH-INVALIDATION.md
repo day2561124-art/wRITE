@@ -258,6 +258,52 @@ guard BEFORE any new decision or atomic commit; actual fresh
 observation and explicit interruption interpretation remain
 separate evidence requirements.
 
+## CC-7AF slice 7 — native new-turn dependency ingress (opt-in)
+
+The real `runWorldSimulationTurn` accepts an **exact engine-only**
+`characterNativeCommittedSourceDependency` alongside its existing
+`characterNativeTemporalResponseObserver` and the native paired
+input/selection resolvers. The dependency points to an already
+committed earlier World turn and verified B acoustic cue, with an
+expected CURRENT World revision/hash. Before speculative preparation
+or any Character Brain invocation, World reads the authoritative
+history/state via the slice-6 guard. Wrong session, observer, history
+turn, forged reference, stale CAS, or invented `source_cancelled`
+field fails closed. After preparation, World checks the prepared
+snapshot is still the one authenticated by that guard and that the
+current broker-prepared participants contain B.
+
+The historical source audit remains ENGINE PRIVATE: it is never
+inserted into B's Brain packet or treated as a current audible cue,
+a fresh speech selection, a cancellation instruction, or a durable
+revision to the earlier Phase74D receipt. B can respond only if the
+**new event** independently includes an actually admitted, released
+acoustic cue in the existing native temporal replay. The ordinary
+new-turn Character Brain inputs, same-character selection, canonical
+re-adjudication, CAS, and atomic World commit still own the result.
+The existing CAS guards concurrent post-check changes before
+commit; no additional scheduler, duplicate action sink, or memory
+repository is installed.
+
+Real three-turn tests establish: A's first committed speech and B
+admission survive a later quiet turn; a dependency carrying the old
+CAS, forged increment, invented cancellation flag, or wrong
+observer fails before any new Brain invocation and leaves World
+unchanged; a valid prior source with a **quiet** next turn yields
+no native B input or speech; a fresh next-turn A sound allows one
+new B input/choice and one atomic commit, while the original first
+turn's hash and emitted source remain unchanged. These tests do not
+infer lexical recognition, physical interruption, or a past sound
+becoming unheard.
+
+**Remaining scope:** automatic cancellation/replanning of other
+pending future actions across multiple source epochs and explicit
+interruption/repair interpretation are separate lifecycle stages.
+This ingress only enforces committed-source lineage plus current
+CAS and requires fresh World-observed acoustic evidence; it does
+not turn historical hearing into an automatic response policy.
+
+
 ## Acceptance and adversarial matrix
 
 | Case | Required evidence/result |

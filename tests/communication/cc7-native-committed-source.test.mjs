@@ -42,7 +42,9 @@ try {
       event_queue:[{event_id:"talk",type:"conversation",scene_id:"room",
         participants:["A","B"],summary:"A speaks before B"},
         {event_id:"later",type:"conversation",scene_id:"room",
-          participants:["A","B"],summary:"A later quiet World turn"}],
+          participants:["A","B"],summary:"A later quiet World turn"},
+        {event_id:"renewed",type:"conversation",scene_id:"room",
+          participants:["A","B"],summary:"Fresh source may speak in new turn"}],
       scenes:{room:{
         scene_id:"room",simulation_time:"2026-09-24T00:00:00.000Z",
         dimensions:{width_m:6,depth_m:6},
@@ -152,13 +154,26 @@ try {
   // A subsequent *committed* World turn advances the CAS, but must
   // not erase the prior emitted A speech or turn its prior B admission
   // into an uncommitted/future fragment.
+  let quietInputs=0,quietChoices=0;
   const second=await runWorldSimulationTurn({
     world_simulation_session_id:sid,event_id:"later",
   },{
     ...options,characterRuntimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativeCommittedSourceDependency:dependency,
     characterBrain:async()=>"reject_all",
+    characterNativeTemporalResponseInputResolver:async()=>{
+      quietInputs++;
+      throw new Error("Historical hearing is not a new acoustic release.");
+    },
+    characterNativeTemporalResponseSelectionResolver:async()=>{
+      quietChoices++;
+      throw new Error("Historical hearing cannot reselect a reply.");
+    },
   });
   assert.equal(second.committed,true);
+  assert.equal(quietInputs,0);
+  assert.equal(quietChoices,0);
   const after=await getWorldSimulationState(sid,options);
   const afterHistory=await getWorldSimulationHistory(sid,options);
   assert.equal(after.revision,snapshot.revision+1);
@@ -208,6 +223,137 @@ try {
   }
   assert.equal(hashAgentRunValue((await getWorldSimulationHistory(
     sid,options)).turns[0]),dependency.source_turn_hash);
+
+  // CC-7AF native adoption: stale or false prior-turn lineage fails
+  // BEFORE the next Character Brain ingress or any new World commit.
+  let refusedBrainCalls=0,refusedListenerInputs=0;
+  const refusedNative={
+    ...options,characterRuntimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativeCommittedSourceDependency:dependency,
+    characterBrain:async()=>{
+      refusedBrainCalls++;throw new Error("No Brain on a stale source.");
+    },
+    characterNativeTemporalResponseInputResolver:async()=>{
+      refusedListenerInputs++;
+      throw new Error("No fresh listener input from stale source.");
+    },
+    characterNativeTemporalResponseSelectionResolver:async()=>{
+      throw new Error("No selection from stale source.");
+    },
+  };
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"renewed",
+  },refusedNative),/current World CAS/u);
+  assert.equal(refusedBrainCalls,0);
+  assert.equal(refusedListenerInputs,0);
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"renewed",
+  },{
+    ...refusedNative,
+    characterNativeCommittedSourceDependency:{
+      ...currentDependency,observer_increment_ref:"forged",
+    },
+  }),/exact committed acoustic source admission/u);
+  assert.equal(refusedBrainCalls,0);
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"renewed",
+  },{
+    ...refusedNative,
+    characterNativeCommittedSourceDependency:{
+      ...currentDependency,observer:"C",
+    },
+  }),/same native observer/u);
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"renewed",
+  },{
+    ...refusedNative,
+    characterNativeCommittedSourceDependency:{
+      ...currentDependency,source_cancelled:true,
+    },
+  }),/requires an exact old source/u);
+  assert.equal(refusedBrainCalls,0);
+  assert.equal((await getWorldSimulationState(sid,options)).revision,
+    after.revision);
+  assert.equal((await getWorldSimulationHistory(sid,options)).turns.length,2);
+
+  // The verified HISTORICAL cue alone cannot select a response. A
+  // completely new World event must emit its own source increment, on
+  // which B obtains one new, same-character Brain input and choice.
+  let newSpeakerChoices=0,newListenerInputs=0,newListenerChoices=0;
+  const renewed=await runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"renewed",
+  },{
+    ...options,characterRuntimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativeCommittedSourceDependency:currentDependency,
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      newSpeakerChoices++;
+      const candidate=packet.candidate_action_intents.find(item=>
+        item.communication?.channel==="speech"
+        &&item.communication?.surface_realization_complete===true);
+      assert(candidate);
+      return {action_id:candidate.action_id};
+    },
+    characterNativeTemporalResponseInputResolver:async(view)=>{
+      newListenerInputs++;
+      assert.equal(view.character,"B");
+      assert.equal(view.observer_view.future_release_exposed,false);
+      assert.equal(JSON.stringify(view).includes("男孩離開房子"),false);
+      return {character:"B",cognition:{
+        communication_goal:{
+          character:"B",purpose:"回應",addressee:"A",mode:"direct",
+          public_content:"我聽見了",
+          surface_realization:{
+            schema_version:"cc5-mandarin-clause-request-v1",
+            semantic_anchor:"我聽見了",
+            clause:{subject:"我",predicate:"聽見",object:"了"},
+          },
+        },
+        private_belief:"B_PRIVATE_NEW_TURN_ONLY",
+      }};
+    },
+    characterNativeTemporalResponseSelectionResolver:async(view)=>{
+      newListenerChoices++;
+      assert.equal(view.observer,"B");
+      assert.equal(JSON.stringify(view).includes("B_PRIVATE_NEW_TURN_ONLY"),false);
+      return {epoch_id:view.epoch_id,
+        action_id:view.candidate_action_intents[0].action_id};
+    },
+  });
+  assert.equal(renewed.committed,true);
+  assert.equal(newSpeakerChoices,1);
+  assert.equal(newListenerInputs,1);
+  assert.equal(newListenerChoices,1);
+  const finalHistory=await getWorldSimulationHistory(sid,options);
+  assert.equal(finalHistory.turns.length,3);
+  const freshTurn=finalHistory.turns[2];
+  const freshSource=freshTurn.action_outcomes.find(item=>
+    item.actor==="A"&&item.result==="communication_emitted");
+  const freshResponse=freshTurn.action_outcomes.find(item=>
+    item.actor==="B"&&item.result==="communication_emitted");
+  assert(freshSource&&freshResponse);
+  assert.equal(freshTurn.subjective_choice_commitment_receipts.receipts
+    .find(item=>item.character==="B").selection_kind,"reject_all");
+  assert.equal(freshTurn.native_temporal_choice_evidence.response_action_id,
+    freshResponse.action_id);
+  assert.equal(freshTurn.native_temporal_choice_evidence.response_release_time_ms,
+    freshResponse.start_time_ms);
+  const newAdmissions=freshTurn.communication_observer_increment_admissions
+    .filter(item=>item.observer==="B"
+      &&item.admission_status==="heard_acoustic_cues_only"
+      &&item.audit?.source_action_id===freshSource.action_id
+      &&item.release_time_ms===freshResponse.start_time_ms);
+  assert.equal(newAdmissions.length,1,
+    "New response requires a new release in the NEW World turn.");
+  assert.equal(Object.hasOwn(freshTurn,
+    "native_committed_source_dependency"),false);
+  assert.equal(hashAgentRunValue(finalHistory.turns[0]),
+    dependency.source_turn_hash);
+  assert.equal(finalHistory.turns[0].action_outcomes.some(item=>
+    item.action_id===source.action_id&&item.result==="communication_emitted"),true);
+  assert.equal(JSON.stringify(freshTurn).includes("B_PRIVATE_NEW_TURN_ONLY"),false);
   console.log("CC-7AF authoritative immutable committed source guard passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});
