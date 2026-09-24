@@ -10046,23 +10046,38 @@ export async function resolveWorldSimulationTurn(
     selected.splice(0, selected.length,
       ...cloneJson(nativeTemporalReplay.selected_action_intents));
   }
-  const causalResolution = assertCausalResolution(
-    nativeTemporalReplay?.status === "replayed_same_turn"
-      ? cloneJson(nativeTemporalReplay.causal_resolution)
-      : await causalAdjudicator({
-        world_simulation_session_id: sessionId,
-        turn_id: preparedTurn.turn_id,
-        world_state: cloneJson(snapshot.state),
-        world_state_revision: snapshot.revision,
-        world_state_hash: snapshot.state_hash,
-        event: cloneJson(preparedTurn.event),
-        scene_analysis: cloneJson(
-          preparedTurn.scene_analysis?.trusted_execution_view
-          ?? preparedTurn.scene_analysis,
-        ),
-        selected_action_intents: cloneJson(selected),
-      }),
-  );
+  const causalResolution = assertCausalResolution(await causalAdjudicator({
+    world_simulation_session_id: sessionId,
+    turn_id: preparedTurn.turn_id,
+    world_state: cloneJson(snapshot.state),
+    world_state_revision: snapshot.revision,
+    world_state_hash: snapshot.state_hash,
+    event: cloneJson(preparedTurn.event),
+    scene_analysis: cloneJson(
+      preparedTurn.scene_analysis?.trusted_execution_view
+      ?? preparedTurn.scene_analysis,
+    ),
+    selected_action_intents: cloneJson(selected),
+    ...(nativeTemporalReplay?.status === "replayed_same_turn"
+      ? { native_temporal_response: {
+          actor: nativeTemporalReplay.native_temporal_response.actor,
+          action_id: nativeTemporalReplay.native_temporal_response.action_id,
+          start_time_ms: nativeTemporalReplay.native_temporal_response.start_time_ms,
+        } }
+      : {}),
+  }));
+  // Re-adjudicate from the SAME unmodified pre-turn snapshot after pre-cue
+  // Phase74D/76F receipts. An intervening implementation change or stale
+  // speculative replay must fail closed before consistency or atomic commit.
+  if (nativeTemporalReplay?.status === "replayed_same_turn"
+      && hashAgentRunValue(causalResolution)
+        !== hashAgentRunValue(nativeTemporalReplay.causal_resolution)) {
+    const error = new Error(
+      "CC-7AD final World adjudication differs from verified original-state replay.",
+    );
+    error.code = "CC7AD_NATIVE_FINAL_REPLAY_DIVERGENCE";
+    throw error;
+  }
   if (hashAgentRunValue(snapshot.state) !== preAdjudicationHash) {
     throw new Error("causalAdjudicator mutated the persisted input snapshot in place.");
   }
