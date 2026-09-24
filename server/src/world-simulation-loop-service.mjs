@@ -13492,7 +13492,9 @@ export async function resolveWorldSimulationTurn(
     previous_state_hash: snapshot.state_hash,
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
-    native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence),
+    ...(nativeTemporalChoiceEvidence
+      ? { native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence) }
+      : {}),
     subjective_choice_commitment_receipt: {
       version: worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
       receipt_count: subjectiveChoiceCommitmentReceipts.receipt_count,

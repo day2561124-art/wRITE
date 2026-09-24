@@ -150,6 +150,38 @@ try {
   const serialized=JSON.stringify(turn);
   assert.equal(serialized.includes("B_SECRET_NEVER_PUBLIC"),false);
   assert.equal(result.native_temporal_choice_evidence.world_committed,false);
+
+  // The optional integration must not add a null CC-7AD field to ordinary
+  // pre-existing World history or to its returned native turn DTO.
+  const legacy=await beginWorldSimulationSession({
+    simulation_label:"CC7AD no-response backward compatibility",
+    seed:"cc7ad-no-response",
+    rules:{event_driven:true,persistent_causality:true},
+    initial_world_state:{
+      simulation_time:"2026-09-24T00:00:00.000Z",
+      event_queue:[{event_id:"legacy-talk",type:"conversation",
+        scene_id:"room",participants:["A"],summary:"No response"}],
+      scenes:{room:{
+        scene_id:"room",simulation_time:"2026-09-24T00:00:00.000Z",
+        dimensions:{width_m:6,depth_m:6},
+        entity_positions:{A:{x:1,y:1}},
+        observable_by:{A:{visual:[],audible:[]}},
+      }},
+      characters:{A:{known:[],current_goal:"等待"}},
+      memories:{A:[]},available_actions:{A:[]},
+    },
+  },options);
+  const legacyResult=await runWorldSimulationTurn({
+    world_simulation_session_id:legacy.world_simulation_session_id,
+    event_id:"legacy-talk",
+  },{...options,characterRuntimeManager:runtimeManager,
+    characterBrain:async()=>"reject_all"});
+  assert.equal(legacyResult.committed,true);
+  assert.equal(Object.hasOwn(legacyResult,"native_temporal_choice_evidence"),false);
+  const legacyHistory=await getWorldSimulationHistory(
+    legacy.world_simulation_session_id,options);
+  assert.equal(Object.hasOwn(legacyHistory.turns[0],
+    "native_temporal_choice_evidence"),false);
   console.log("CC-7AD native World same-turn commit and choice stages passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});

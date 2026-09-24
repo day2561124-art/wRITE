@@ -289,8 +289,10 @@ export async function commitWorldSimulationTurn(
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,
-            native_temporal_choice_evidence:
-              input.native_temporal_choice_evidence ?? null,
+            ...(input.native_temporal_choice_evidence != null
+              ? { native_temporal_choice_evidence:
+                  input.native_temporal_choice_evidence }
+              : {}),
             state_transitions: input.state_transitions ?? [],
             action_outcomes: input.action_outcomes ?? [],
             knowledge_transitions: input.knowledge_transitions ?? [],
