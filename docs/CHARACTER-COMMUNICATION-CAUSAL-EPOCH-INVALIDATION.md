@@ -124,6 +124,48 @@ Unreleased future increments and dependency invalidation still need
 live scheduler/restart evidence. There is no automatic cross-turn
 cancellation/replanning or interruption judgement in this slice.
 
+## CC-7AF slice 4 — actual Character Brain precommit source reconsideration
+
+The native `runWorldSimulationTurn` opt-in
+`characterNativePrecommitSourceReconsiderationCharacter` works only for
+a named speaker already present in the *broker-prepared decision packets*,
+alongside a separate named listener and the CC-7AD paired Brain resolvers.
+The same source Character Brain is invoked **twice** via the existing
+serialized Character Runtime. Both invocations receive the original
+single-source projected Brain packet; the second selection MUST match
+that speaker's exact broker candidate catalog. Neither the caller nor
+the World can create a new speech candidate or force the second choice.
+The initial source action is speculative and never emitted, persisted,
+or recorded as a durable Phase74D choice.
+
+Before the ordinary World native replay runs, the engine re-adjudicates
+the original and revised action sets against the same verified World
+snapshot, then admits the final choice only if the former acoustic
+source no longer exists in the revised causal execution. A second
+identical choice, absent/different character, unchanged source,
+non-speech replacement action or stale World revision is rejected.
+The final speaker choice alone travels into the established Phase74D
+receipt, CC-7AD native observer replay, World consistency checks and
+atomic turn commit. In the replacement-speech case B obtains ONE new
+observer cue and selects ONE fresh response. In the reject-all case
+no source acoustic cue exists and B cannot invent one. Neither branch
+uses an old B epoch, speculative proposal or private preparation.
+
+Full World tests verify first-speech/second-reject silent commit,
+same-choice fail-closed without history, and a different
+*broker-prepared* speech candidate whose final Phase74D receipt,
+physical source release, and B's emitted response are coherent;
+the old speculative A speech is absent from committed outcomes and
+acoustic timeline.
+
+This does **not** remove sound that was committed in an earlier turn,
+derive new proposals beyond the broker catalog, automatically react to
+an in-turn collision/interruption, or establish a cross-turn
+source-cancellation scheduler. It does not persist an extra
+"tentative Phase74D" receipt. Those require separate lifecycle
+evidence and cannot be inferred from this opt-in.
+
+
 
 ## Acceptance and adversarial matrix
 

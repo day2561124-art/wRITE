@@ -86,6 +86,9 @@ import {
   buildWorldSimulationNativePreparationEvidence,
 } from "./world-simulation-native-response-preparation-service.mjs";
 import {
+  assessWorldSimulationNativeCausalEpochSupersession,
+} from "./world-simulation-native-causal-epoch-invalidation-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -14798,6 +14801,10 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     );
   }
   const selections = {};
+  // CC-7AF: keep the exact, already projected per-character Brain ingress
+  // in private engine state. If this source character reconsiders BEFORE
+  // World commit, a second choice can only use this broker-issued packet.
+  const precommitSourceBrainInputs = new Map();
   const worldHistory = await getWorldSimulationHistory(
     prepared.world_simulation_session_id,
     options,
@@ -14953,6 +14960,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     brainInput.boundaries.counterfactual_linked_experience_reuse_action_authority = false;
     brainInput.boundaries.counterfactual_linked_experience_reuse_world_truth_authority = false;
 
+    precommitSourceBrainInputs.set(packet.character, cloneJson(brainInput));
     selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
       {
         world_simulation_session_id: prepared.world_simulation_session_id,
@@ -14962,6 +14970,106 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       },
       options,
     );
+  }
+  // CC-7AF opt-in PRECOMMIT source reconsideration. The old A selection is
+  // tentative: it has never entered a World outcome, observer ledger or
+  // Phase74D durable receipt. Only the same Character Brain, routed through
+  // its actual runtime and the original broker-issued candidate catalog,
+  // may make a fresh final choice. The World independently proves that the
+  // original would-be acoustic source is absent under that final choice.
+  // This is NOT a retroactive cancellation of already committed sound,
+  // nor does it synthesize a new speech candidate or a B response.
+  const reconsiderationCharacter =
+    options.characterNativePrecommitSourceReconsiderationCharacter;
+  if (reconsiderationCharacter !== undefined) {
+    const observer = options.characterNativeTemporalResponseObserver;
+    const packet = prepared.decision_packets.find(
+      item => item.character === reconsiderationCharacter);
+    const observerPacket = prepared.decision_packets.find(
+      item => item.character === observer);
+    if (typeof reconsiderationCharacter !== "string"
+        || !reconsiderationCharacter || !packet || !observerPacket
+        || reconsiderationCharacter === observer
+        || !precommitSourceBrainInputs.has(reconsiderationCharacter)
+        || typeof options.characterNativeTemporalResponseInputResolver !== "function"
+        || typeof options.characterNativeTemporalResponseSelectionResolver !== "function") {
+      const error = new Error(
+        "Precommit source reconsideration requires a broker-prepared speaker, distinct native listener and both Brain resolvers.");
+      error.code = "CC7AF_PRECOMMIT_SOURCE_RECONSIDERATION_INVALID";
+      throw error;
+    }
+    const initialSelected = prepared.decision_packets.map(item =>
+      candidateSelection(
+        { candidate_action_intents: item.candidate_action_intents },
+        characterMapValue(selections, item.character),
+        item.character,
+      ));
+    const priorSource = initialSelected.find(item =>
+      item.character === reconsiderationCharacter);
+    const priorListener = initialSelected.find(item =>
+      item.character === observer);
+    if (priorSource?.selection !== "candidate_action_intent"
+        || priorSource.candidate?.communication?.channel !== "speech"
+        || priorListener?.selection !== "reject_all") {
+      const error = new Error(
+        "Precommit source reconsideration needs tentative speech and a listening character who initially rejected speech.");
+      error.code = "CC7AF_PRECOMMIT_SOURCE_RECONSIDERATION_INVALID";
+      throw error;
+    }
+    const freshChoice = await characterRuntimeManager.runCharacterTurn({
+      world_simulation_session_id: prepared.world_simulation_session_id,
+      character: reconsiderationCharacter,
+      brain_input: cloneJson(precommitSourceBrainInputs.get(reconsiderationCharacter)),
+      characterBrain: options.characterBrain,
+    }, options);
+    const finalSource = candidateSelection(
+      { candidate_action_intents: packet.candidate_action_intents },
+      freshChoice,
+      reconsiderationCharacter,
+    );
+    if (finalSource.action_id === priorSource.action_id
+        || (finalSource.selection !== "reject_all"
+          && finalSource.candidate?.communication?.channel !== "speech")) {
+      const error = new Error(
+        "Fresh source choice must genuinely replace tentative speech with rejection or a different broker-prepared speech candidate.");
+      error.code = "CC7AF_PRECOMMIT_SOURCE_RECONSIDERATION_INVALID";
+      throw error;
+    }
+    const snapshot = await getWorldSimulationState(
+      prepared.world_simulation_session_id, options);
+    if (snapshot.revision !== prepared.state_revision
+        || snapshot.state_hash !== prepared.world_state_hash) {
+      const error = new Error("Precommit source rechoice saw a stale World snapshot.");
+      error.code = "CC7AF_PRECOMMIT_SOURCE_STALE";
+      throw error;
+    }
+    const revisedSelected = initialSelected.map(item =>
+      item.character === reconsiderationCharacter ? finalSource : item);
+    const supersession = await assessWorldSimulationNativeCausalEpochSupersession({
+      session_id: prepared.world_simulation_session_id,
+      turn_id: prepared.turn_id,
+      world_state: cloneJson(snapshot.state),
+      world_state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      event: cloneJson(prepared.event),
+      scene_analysis: cloneJson(
+        prepared.scene_analysis?.trusted_execution_view
+        ?? prepared.scene_analysis,
+      ),
+      original_selected_action_intents: initialSelected,
+      revised_selected_action_intents: revisedSelected,
+      observer,
+    });
+    if (supersession.status !== "source_not_released_in_revised_execution"
+        || !supersession.obsolete_preparation_must_not_authorize_new_action) {
+      const error = new Error(
+        "Fresh source selection did not replace the original canonical acoustic source.");
+      error.code = "CC7AF_PRECOMMIT_SOURCE_RECONSIDERATION_INVALID";
+      throw error;
+    }
+    // No old B perception, preparation, proposal or action is transported:
+    // the downstream native replay is built only after final A selection.
+    selections[reconsiderationCharacter] = freshChoice;
   }
   return resolveWorldSimulationTurn(
     prepared,

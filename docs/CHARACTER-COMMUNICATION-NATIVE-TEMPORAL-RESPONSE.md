@@ -151,10 +151,20 @@ no historical sound is erased. The challenge never authorizes a replacement
 character action, nor is it automatically evidence of a real source change.
 See `docs/CHARACTER-COMMUNICATION-CAUSAL-EPOCH-INVALIDATION.md`.
 
-This opt-in stage does NOT yet implement automatic new-epoch re-planning,
-multiple successive World causal epochs with a complete cancellation or
-interruption lifecycle, nor does it make a fixed gap threshold a behavioral
-decision. Those require separate later acceptance evidence.
+CC-7AF also allows actual **precommit source reconsideration** when
+explicitly enabled. Only the same speaker's fresh Character Brain choice
+from its broker-prepared candidate catalog may replace the first tentative
+source. The canonical World re-adjudicates both selections before committing
+the final Phase74D receipt and CC-7AD replay; the old speech is never emitted
+or represented as a durable original Phase74D choice. B can respond only to
+the replacement's newly admitted acoustic increment. This is NOT retroactive
+retraction of an already committed earlier sound.
+
+This opt-in stage does NOT yet implement automatic new-epoch re-planning
+after an already committed source, multiple successive World causal epochs
+with a complete cancellation or interruption lifecycle, nor does it make
+a fixed gap threshold a behavioral decision. Those require separate later
+acceptance evidence.
 
 Research basis: Levinson and Torreira (2015),
 https://doi.org/10.3389/fpsyg.2015.00731, on response preparation during

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { projectRoot } from "../../server/src/project-paths.mjs";
@@ -426,7 +427,174 @@ try {
       canceledSession.world_simulation_session_id,options);
     assert.equal(failedHistory.turns.length,0);
   }
+  // CC-7AF: the real source Character Brain reconsiders before ANY World
+  // commit. Its original selected speech was speculative and cannot be
+  // treated as emitted or heard. The final reject_all uses the ordinary
+  // Phase74D/World atomic commit; B is never called without a real cue.
+  const reconsideredSession=await beginWorldSimulationSession({
+    ...structuredClone(delayedSessionInput),
+    seed:"cc7af-precommit-reconsidered",
+    simulation_label:"CC7AF actual source Brain precommit reconsideration",
+  },options);
+  let speakerChoices=0, listenerInputs=0, listenerChoices=0;
+  const reconsidered=await runWorldSimulationTurn({
+    world_simulation_session_id:reconsideredSession.world_simulation_session_id,
+    event_id:"delayed-talk",
+  },{
+    ...options, characterRuntimeManager:runtimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativePrecommitSourceReconsiderationCharacter:"A",
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      speakerChoices++;
+      if(speakerChoices===2)return "reject_all";
+      const candidate=packet.candidate_action_intents.find(item=>
+        item.communication?.channel==="speech"
+        &&item.communication?.surface_realization_complete===true);
+      assert(candidate);
+      return {action_id:candidate.action_id};
+    },
+    characterNativeTemporalResponseInputResolver:async()=>{
+      listenerInputs++;
+      throw new Error("Canceled source cannot create a listener cue.");
+    },
+    characterNativeTemporalResponseSelectionResolver:async()=>{
+      listenerChoices++;
+      throw new Error("Canceled source cannot choose a listener response.");
+    },
+  });
+  assert.equal(reconsidered.committed,true);
+  assert.equal(speakerChoices,2);
+  assert.equal(listenerInputs,0);
+  assert.equal(listenerChoices,0);
+  assert.equal(reconsidered.selected_action_intents.find(x=>
+    x.character==="A").selection,"reject_all");
+  assert.equal(reconsidered.selected_action_intents.find(x=>
+    x.character==="B").selection,"reject_all");
+  const reconsideredHistory=await getWorldSimulationHistory(
+    reconsideredSession.world_simulation_session_id,options);
+  assert.equal(reconsideredHistory.turns.length,1);
+  assert(reconsideredHistory.turns[0].subjective_choice_commitment_receipts
+    .receipts.every(x=>x.selection_kind==="reject_all"));
+  assert.equal(reconsideredHistory.turns[0].action_outcomes.some(x=>
+    x.result==="communication_emitted"),false);
+  assert.equal(Object.hasOwn(reconsideredHistory.turns[0],
+    "native_temporal_choice_evidence"),false);
+  // Without a different current Brain choice, the source can never be
+  // declared "superseded"; fail before Word commit and do not create a
+  // synthetic alternative speech candidate.
+  const sameSession=await beginWorldSimulationSession({
+    ...structuredClone(delayedSessionInput),
+    seed:"cc7af-precommit-same-choice",
+    simulation_label:"CC7AF source Brain same action is not a revision",
+  },options);
+  let sameBrainCalls=0;
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:sameSession.world_simulation_session_id,
+    event_id:"delayed-talk",
+  },{
+    ...options,characterRuntimeManager:runtimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativePrecommitSourceReconsiderationCharacter:"A",
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      sameBrainCalls++;
+      const candidate=packet.candidate_action_intents.find(x=>
+        x.communication?.channel==="speech"
+        &&x.communication?.surface_realization_complete===true);
+      return {action_id:candidate.action_id};
+    },
+    characterNativeTemporalResponseInputResolver:async()=>
+      {throw new Error("No B input before source revision.");},
+    characterNativeTemporalResponseSelectionResolver:async()=>
+      {throw new Error("No B choice before source revision.");},
+  }),/genuinely replace tentative speech/u);
+  assert.equal(sameBrainCalls,2);
+  assert.equal((await getWorldSimulationHistory(
+    sameSession.world_simulation_session_id,options)).turns.length,0);
+  // A genuinely different *broker-prepared* alternate speech candidate
+  // supports actual precommit replacement: A's second Brain invocation
+  // selects it; B receives only that source's new admitted cue, makes one
+  // fresh choice and the ordinary World commits one coherent new timeline.
+  const alternativeGoal={
+    ...goalA,public_content:"男孩走進房子",
+    surface_realization:{
+      schema_version:"cc5-mandarin-clause-request-v1",
+      semantic_anchor:"男孩走進房子",
+      clause:{subject:"男孩",predicate:"走進",object:"房子"},
+    },
+  };
+  // This is a non-factual alternative intention; a bare alternate
+  // `sincere_assertion` would require its own accessible belief evidence.
+  delete alternativeGoal.claim_kind;
+  const alternateAction=buildCharacterCommunicationActionCandidate({
+    character:"A",cognition:{communication_goal:alternativeGoal},
+  });
+  assert(alternateAction?.communication?.surface_realization_complete);
+  const replacedInput=structuredClone(delayedSessionInput);
+  replacedInput.seed="cc7af-precommit-replaced-source";
+  replacedInput.simulation_label="CC7AF precommit fresh authorized speech";
+  replacedInput.initial_world_state.available_actions.A=[alternateAction];
+  const replacedSession=await beginWorldSimulationSession(replacedInput,options);
+  let changedSpeakerCalls=0,replacedBrainInputs=0,replacedBrainChoices=0;
+  const replaced=await runWorldSimulationTurn({
+    world_simulation_session_id:replacedSession.world_simulation_session_id,
+    event_id:"delayed-talk",
+  },{
+    ...options,characterRuntimeManager:runtimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterNativePrecommitSourceReconsiderationCharacter:"A",
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      changedSpeakerCalls++;
+      const actions=packet.candidate_action_intents;
+      const alternate=actions.find(x=>x.action_id===alternateAction.action_id);
+      const initial=actions.find(x=>
+        x.communication?.surface_realization_complete===true
+        &&x.action_id!==alternateAction.action_id);
+      assert(alternate&&initial);
+      return {action_id:changedSpeakerCalls===1
+        ?initial.action_id:alternate.action_id};
+    },
+    characterNativeTemporalResponseInputResolver:async(view)=>{
+      replacedBrainInputs++;
+      assert.equal(view.character,"B");
+      assert.equal(view.observer_view.future_release_exposed,false);
+      return {character:"B",cognition:{communication_goal:goalB}};
+    },
+    characterNativeTemporalResponseSelectionResolver:async(view)=>{
+      replacedBrainChoices++;
+      return {epoch_id:view.epoch_id,
+        action_id:view.candidate_action_intents[0].action_id};
+    },
+  });
+  assert.equal(replaced.committed,true);
+  assert.equal(changedSpeakerCalls,2);
+  assert.equal(replacedBrainInputs,1);
+  assert.equal(replacedBrainChoices,1);
+  const replacedTurn=(await getWorldSimulationHistory(
+    replacedSession.world_simulation_session_id,options)).turns[0];
+  const finalReceipt=replacedTurn.subjective_choice_commitment_receipts
+    .receipts.find(x=>x.character==="A");
+  assert.equal(finalReceipt.action_id,alternateAction.action_id);
+  const finalizedSource=replacedTurn.action_outcomes.find(x=>
+    x.actor==="A"&&x.result==="communication_emitted");
+  const finalizedResponse=replacedTurn.action_outcomes.find(x=>
+    x.actor==="B"&&x.result==="communication_emitted");
+  assert(finalizedSource&&finalizedResponse);
+  assert.equal(finalizedSource.action_id,alternateAction.action_id);
+  assert.equal(finalizedResponse.start_time_ms,
+    replacedTurn.native_temporal_choice_evidence.response_release_time_ms);
+  assert.equal(replacedTurn.action_outcomes.some(x=>
+    x.actor==="A"&&x.action_id!==alternateAction.action_id
+    &&x.result==="communication_emitted"),false);
+  assert.equal(replacedTurn.causal_timeline.entries.some(x=>
+    x.actor==="A"&&x.action_id!==alternateAction.action_id
+    &&x.kind==="communication_speech_increment"),false);
+  assert.equal(replacedTurn.subjective_choice_commitment_receipts
+    .receipts.find(x=>x.character==="B").selection_kind,"reject_all");
   console.log("CC-7AD native World same-turn commit and choice stages passed.");
+  console.log("CC-7AF actual source Brain precommit cancellation passed.");
   console.log("CC-7AE native World wait-then-later-response commit passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});
