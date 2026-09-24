@@ -298,6 +298,8 @@ export async function commitWorldSimulationTurn(
               input.communication_source_lineage_reconciliation ?? null,
             communication_floor_transition_admission:
               input.communication_floor_transition_admission ?? null,
+            communication_public_turn_invitation:
+              input.communication_public_turn_invitation ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
             observer_tick_snapshot_readiness:

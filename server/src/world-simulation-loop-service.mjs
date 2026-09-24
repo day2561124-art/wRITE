@@ -61,6 +61,9 @@ import {
   buildWorldSimulationFloorTransitionAdmission,
 } from "./world-simulation-communication-floor-transition-admission-service.mjs";
 import {
+  buildWorldSimulationPublicTurnInvitation,
+} from "./world-simulation-communication-public-turn-invitation-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10130,6 +10133,16 @@ export async function resolveWorldSimulationTurn(
       action_outcomes: array(causalResolution.action_outcomes),
       speaker_intent_projection: speakerNextTurnIntent,
     }).audit;
+  // CC-7T accepts only an actually selected and audible public speech act
+  // aligned with the same speaker's nomination. Listener receipt stays acoustic.
+  const publicTurnInvitation =
+    buildWorldSimulationPublicTurnInvitation({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+      selected_action_intents: selected,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12495,6 +12508,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_floor_transition_admission: cloneJson(
         floorTransitionAdmission,
+      ),
+      communication_public_turn_invitation: cloneJson(
+        publicTurnInvitation,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

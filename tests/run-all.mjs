@@ -949,6 +949,7 @@ const steps = [
   ["CC-7Q speaker next-turn intention", ["tests/communication/cc7-speaker-next-turn-intent.test.mjs"]],
   ["CC-7R World source lineage reconciliation", ["tests/communication/cc7-source-lineage-reconciliation.test.mjs"]],
   ["CC-7S World floor transition admission", ["tests/communication/cc7-floor-transition-admission.test.mjs"]],
+  ["CC-7T selected public turn invitation", ["tests/communication/cc7-public-turn-invitation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

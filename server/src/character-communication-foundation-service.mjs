@@ -251,6 +251,8 @@ export function planCharacterCommunication(characterInput = {}) {
   const mode = goal.mode;
   if (!["direct", "indirect", "silence", "nonverbal"].includes(mode))
     fail("Communication mode must be an explicit character-goal decision.");
+  if (goal.turn_invitation_intent != null && mode !== "direct")
+    fail("A public turn invitation requires direct speech.");
   if (goal.surface_realization != null
     && (!["direct", "indirect"].includes(mode) || !isRecord(goal.surface_realization)))
     fail("Mandarin surface realization must be a structured speech-goal request.");
@@ -343,6 +345,18 @@ export function planCharacterCommunication(characterInput = {}) {
       && !["sincere_assertion", "uncertain_hypothesis", "deliberate_deception",
         "explicit_assumption", "attributed_testimony"].includes(claimKind))
       fail("Unsupported or ungrounded communication claim kind.");
+    // The actor must author the invitation as PUBLIC direct content before
+    // selection. A later private next-turn intention cannot rewrite speech.
+    const turnInvitation = goal.turn_invitation_intent ?? null;
+    if (turnInvitation !== null
+      && (claimKind !== null
+        || !isRecord(turnInvitation)
+        || Object.keys(turnInvitation).some((key) =>
+          !["addressee", "public_content", "explicit_public_invitation"].includes(key))
+        || string(turnInvitation.addressee, 240) !== addressee
+        || string(turnInvitation.public_content) !== content
+        || turnInvitation.explicit_public_invitation !== true))
+      fail("Turn invitation requires exact actor-authored public direct content.");
     // A testimony report attributes an understood utterance to its speaker.
     // It neither adopts the proposition nor infers the speaker's belief.
     const testimony = claimKind === "attributed_testimony"
@@ -500,7 +514,8 @@ export function planCharacterCommunication(characterInput = {}) {
       ...opportunityField,
       external_action: "speech",
       message: {
-        speech_act: claimKind === "attributed_testimony"
+        speech_act: turnInvitation ? "invite_next_turn"
+          : claimKind === "attributed_testimony"
           ? "report_testimony"
           : claimKind === "explicit_assumption"
             ? "suppose" : claimKind ? "assert" : "inform_or_request",

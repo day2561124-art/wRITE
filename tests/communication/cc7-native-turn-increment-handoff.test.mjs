@@ -435,6 +435,14 @@ try {
   assert.equal(transitionAdmission.entries[0].public_invitation_observed, false);
   assert.equal(transitionAdmission.boundaries.cc7r_source_lineage_revalidated, true);
   assert.equal(transitionAdmission.boundaries.public_invitation_emitted, false);
+  const publicInvitation = turn.communication_public_turn_invitation;
+  assert.equal(publicInvitation.status, "public_invitation_signal_evidence_only");
+  assert.equal(publicInvitation.selected_public_invitation_source_count, 0);
+  assert.equal(publicInvitation.audible_invitation_count, 0);
+  assert.equal(publicInvitation.boundaries.private_nomination_alone_not_public, true);
+  assert.equal(publicInvitation.boundaries.invitation_not_floor_award, true);
+  assert.equal(JSON.stringify(publicInvitation).includes(surface), false);
+  assert.equal(JSON.stringify(publicInvitation).includes(semantic), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(surface), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(semantic), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(actionId), false);
