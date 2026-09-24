@@ -71,6 +71,7 @@ const run = () => replayWorldSimulationNativeTemporalResponse({
   ...input,selection_resolver:choose,
 });
 const first=await run();
+assert.equal(seen.length,1,"one observer epoch must invoke Character Brain selection only once");
 assert.equal(first.status,"replayed_same_turn");
 assert.equal(first.native_temporal_response.response_emitted,true);
 assert.equal(first.native_temporal_response.world_committed,false);

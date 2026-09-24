@@ -160,7 +160,13 @@ export async function replayWorldSimulationNativeTemporalResponse({
     response_proposal: proposed,
     chronological_timeline: initial.causal_timeline,
     observer_admissions: initial.communication_observer_increment_admissions,
-    selected_action_intents, selection_resolver,
+    selected_action_intents,
+    // CC-7AD revalidates the exact proposal without a second Character Brain
+    // decision. Reinvoking a nondeterministic Brain would create a new choice
+    // rather than verify the decision made at this observer release.
+    selection_resolver: async (view) => proposed.proposal_status === "rejected_all"
+      ? { epoch_id: view.epoch_id, reject_all: true }
+      : { epoch_id: view.epoch_id, action_id: proposed.selected_candidate.action_id },
   });
   if (scheduled.schedule_status === "no_response")
     return {
