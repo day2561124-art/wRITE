@@ -963,6 +963,7 @@ const steps = [
   ["CC-7AD source-verified causal replay", ["tests/communication/cc7-native-temporal-replay.test.mjs"]],
   ["CC-7AD native World same-turn commit", ["tests/communication/cc7-native-world-turn.test.mjs"]],
   ["CC-7AE native nonemitting preparation revision", ["tests/communication/cc7-native-response-revision.test.mjs"]],
+  ["CC-7AF canonical source supersession dry-run", ["tests/communication/cc7-native-causal-epoch-invalidation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
