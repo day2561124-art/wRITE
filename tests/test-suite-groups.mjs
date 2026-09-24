@@ -45,6 +45,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7AD anchored causal re-adjudication", ["tests/communication/cc7-native-temporal-causal-recompute.test.mjs"]]),
   Object.freeze(["CC-7AD source-verified causal replay", ["tests/communication/cc7-native-temporal-replay.test.mjs"]]),
   Object.freeze(["CC-7AD native World same-turn commit", ["tests/communication/cc7-native-world-turn.test.mjs"]]),
+  Object.freeze(["CC-7AE native nonemitting preparation revision", ["tests/communication/cc7-native-response-revision.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

@@ -97,6 +97,33 @@ A technical cap on epochs/queued releases is an execution safety budget,
 never a psychological rule for yielding the floor. Wall-clock gaps or a
 fixed 200 ms threshold must not select a speaker.
 
+## CC-7AE staged response-preparation evidence (implementation status)
+
+The first CC-7AE slice reuses the existing CC-7AB one-use
+`wait` / `revise_preparation` receipt and verified next-release gate.
+`world-simulation-native-response-preparation-service.mjs` records a
+bounded engine-private audit across successive actual releases for ONE
+observer. The previous private epoch is passed only to the next World-owned
+step; only cue-free ticks may be skipped. Public signal emission,
+Character Brain action selection, World mutation, and long-term memory
+writes are all **absent** from this slice. Its audit intentionally contains
+no current/future speech surface, cognition, or World snapshot. A technical
+32-epoch receipt budget remains an execution guard, not a psychological
+turn-taking threshold.
+
+This is not yet a native World turn hookup. Before a later CC-7AE slice
+may allow a deferred selected response, it must prove the next fresh
+same-character candidate is selected only after the later admitted cue,
+revalidate the changed prefix and causal timeline, and commit a single
+coherent final turn with no speculative earlier speech or false grounding.
+
+Research basis: Levinson and Torreira (2015),
+https://doi.org/10.3389/fpsyg.2015.00731, on response preparation during
+continued comprehension; Goodwin (1986),
+https://doi.org/10.1007/BF00148127, on different sequential treatments
+of continuers and assessments. These motivate separate preparation and
+public-response decisions; neither supplies an automatic timing threshold.
+
 ## Stage gates
 
 The first read-only epoch slice must show that B hears only a released
