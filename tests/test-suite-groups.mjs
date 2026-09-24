@@ -41,6 +41,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7Z simultaneous speech evidence", ["tests/communication/cc7-speech-overlap.test.mjs"]]),
   Object.freeze(["CC-7AB read-only prepared epoch", ["tests/communication/cc7-observer-prepared-epoch.test.mjs"]]),
   Object.freeze(["CC-7AC observer response proposal", ["tests/communication/cc7-observer-response-proposal.test.mjs"]]),
+  Object.freeze(["CC-7AD World-owned native temporal schedule", ["tests/communication/cc7-native-temporal-schedule.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
