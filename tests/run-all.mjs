@@ -957,6 +957,7 @@ const steps = [
   ["CC-7Y authorized floor claim execution", ["tests/communication/cc7-authorized-floor-claim.test.mjs"]],
   ["CC-7Z simultaneous speech evidence", ["tests/communication/cc7-speech-overlap.test.mjs"]],
   ["CC-7AB read-only prepared epoch", ["tests/communication/cc7-observer-prepared-epoch.test.mjs"]],
+  ["CC-7AC observer response proposal", ["tests/communication/cc7-observer-response-proposal.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
