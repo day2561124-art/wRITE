@@ -336,6 +336,34 @@ without this explicit lineage are not automatically inferred to
 depend on an old acoustic source, and source-epoch interruption
 interpretation remains separate.
 
+## CC-7AF slice 9 — pending cancellation assessment, no queue writes
+
+A separate World queue-head event may explicitly declare
+`native_acoustic_cancellation_requests`: a bounded list of
+`{event_id,source_character,observer}` targeting *future* entries.
+`assessWorldSimulationPendingAcousticCancellation` reads the
+authoritative state/CAS and verifies that each requested target
+appears EXACTLY ONCE strictly AFTER the queue head, has a matching
+CC-7AF engine-issued acoustic-source marker, and still matches the
+originally committed source turn, originating follow-up request,
+Phase74D receipt, actual emitted sound, and CC-7C observer increment.
+No character-facing title, surface text, timestamp approximation, or
+caller-authored source/cancellation flag can substitute for lineage.
+A request against an unrelated event is rejected, not interpreted
+as broad permission to clear the queue.
+
+The result is an engine-private hash-linked **assessment only** with
+precise future target IDs and source hashes. `world_queue_mutated`,
+`world_committed`, `prior_sound_retracted`, `brain_invoked`
+and `interruption_inferred` are all false. A later slice must thread
+that assessment through normal canonical queue transition, revision/
+state-hash CAS and atomic World commit; it must separately prevent
+the cancellation event from leaking source IDs to a Character Brain.
+Do not claim actual cancellation or automatic replanning from this
+read-only result. The original source remains physically committed,
+and unrelated queued events remain untouched.
+
+
 
 
 ## Acceptance and adversarial matrix

@@ -49,6 +49,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7AF canonical source supersession dry-run", ["tests/communication/cc7-native-causal-epoch-invalidation.test.mjs"]]),
   Object.freeze(["CC-7AF provisional fresh-source reentry", ["tests/communication/cc7-native-source-reentry.test.mjs"]]),
   Object.freeze(["CC-7AF authoritative committed source guard", ["tests/communication/cc7-native-committed-source.test.mjs"]]),
+  Object.freeze(["CC-7AF pending queued cancellation assessment", ["tests/communication/cc7-native-pending-cancellation.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

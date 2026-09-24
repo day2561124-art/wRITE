@@ -283,10 +283,12 @@ export function buildWorldSimulationNativeQueuedAcousticSource({
  */
 export async function assertWorldSimulationQueuedAcousticSource({
   session_id, event_id, expected_current_revision,
-  expected_current_state_hash,
+  expected_current_state_hash, queue_index = 0,
 } = {}, options = {}) {
   required(session_id,"session_id");
   required(event_id,"event_id");
+  if (!Number.isSafeInteger(queue_index) || queue_index < 0)
+    reject("Queued source requires a bounded World queue index.");
   const [snapshot,history] = await Promise.all([
     getWorldSimulationState(session_id,options),
     getWorldSimulationHistory(session_id,options),
@@ -294,7 +296,7 @@ export async function assertWorldSimulationQueuedAcousticSource({
   if (snapshot.revision !== expected_current_revision
       || snapshot.state_hash !== expected_current_state_hash)
     reject("Queued dependency is stale against current World CAS.");
-  const event = snapshot.state?.event_queue?.[0];
+  const event = snapshot.state?.event_queue?.[queue_index];
   const marker = event?.native_acoustic_source_lineage;
   if ((event?.event_id ?? event?.id) !== event_id
       || !record(marker)
@@ -356,4 +358,83 @@ export async function assertWorldSimulationQueuedAcousticSource({
     checked_current_state_hash:audit.checked_current_state_hash,
     prior_sound_retracted:false,
     authorizes_current_speech:false});
+}
+
+export const worldSimulationNativePendingCancellationVersion =
+  "cc7af-pending-queued-acoustic-cancellation-plan-v1";
+
+/**
+ * ENGINE ONLY, read-only: an actual World queue-head event explicitly
+ * declares which not-yet-executed dependent event it wants to invalidate.
+ * Re-check each target's complete committed-source lineage before planning.
+ * The caller cannot name a target or decide that old sound was cancelled.
+ * Applying the plan remains a separate canonical World CAS/commit slice.
+ */
+export async function assessWorldSimulationPendingAcousticCancellation({
+  session_id, event_id, expected_current_revision,
+  expected_current_state_hash,
+} = {}, options = {}) {
+  required(session_id,"session_id");
+  required(event_id,"event_id");
+  const snapshot=await getWorldSimulationState(session_id,options);
+  if (snapshot.revision!==expected_current_revision
+      || snapshot.state_hash!==expected_current_state_hash)
+    reject("Pending cancellation is stale against current World CAS.");
+  const queue=snapshot.state?.event_queue;
+  if (!Array.isArray(queue) || queue.length>4096 || queue.length<2)
+    reject("Pending cancellation requires a real future World queue entry.");
+  const current=queue[0];
+  if ((current?.event_id??current?.id)!==event_id
+      || !Array.isArray(current.native_acoustic_cancellation_requests)
+      || current.native_acoustic_cancellation_requests.length<1
+      || current.native_acoustic_cancellation_requests.length>16)
+    reject("World queue head has no bounded pending cancellation request.");
+  const targets=[];
+  const seen=new Set();
+  for (const request of current.native_acoustic_cancellation_requests) {
+    if (!record(request)
+        || Object.keys(request).sort().join("|")
+          !== "event_id|observer|source_character"
+        || typeof request.event_id!=="string" || !request.event_id
+        || typeof request.source_character!=="string"
+        || !request.source_character
+        || typeof request.observer!=="string" || !request.observer
+        || request.observer===request.source_character
+        || seen.has(request.event_id))
+      reject("Cancellation request must name one distinct real future source.");
+    seen.add(request.event_id);
+    const matches=queue.slice(1).map((value,index)=>({
+      value,index:index+1,
+    })).filter(({value})=>
+      (value?.event_id??value?.id)===request.event_id);
+    if (matches.length!==1)
+      reject("Requested cancellation target must exist once after queue head.");
+    const {value:future,index}=matches[0];
+    const lineage=future.native_acoustic_source_lineage;
+    if (!record(lineage)
+        || lineage.source_character!==request.source_character
+        || lineage.observer!==request.observer)
+      reject("Cancellation target must carry a matching actual acoustic source.");
+    const verified=await assertWorldSimulationQueuedAcousticSource({
+      session_id,event_id:request.event_id,queue_index:index,
+      expected_current_revision,expected_current_state_hash,
+    },options);
+    targets.push({
+      event_id:request.event_id,source_lineage_hash:lineage.lineage_hash,
+      source_turn_hash:verified.source_turn_hash,
+      source_observer_increment_ref_hash:
+        verified.source_observer_increment_ref_hash,
+    });
+  }
+  const audit={
+    schema_version:worldSimulationNativePendingCancellationVersion,
+    status:"verified_future_dependency_invalidation_plan_only",
+    session_id,event_id,expected_current_revision,
+    expected_current_state_hash,
+    target_count:targets.length,targets,
+    world_queue_mutated:false,world_committed:false,
+    prior_sound_retracted:false,
+    brain_invoked:false,interruption_inferred:false,
+  };
+  return copy({...audit,audit_hash:hashAgentRunValue(audit)});
 }
