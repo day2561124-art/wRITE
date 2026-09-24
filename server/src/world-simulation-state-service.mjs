@@ -306,6 +306,8 @@ export async function commitWorldSimulationTurn(
               input.communication_nominated_transition_authorization ?? null,
             communication_open_floor_transition_authorization:
               input.communication_open_floor_transition_authorization ?? null,
+            communication_authorized_floor_claim:
+              input.communication_authorized_floor_claim ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
             observer_tick_snapshot_readiness:

@@ -37,6 +37,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7V nominated public turn transition authorization", ["tests/communication/cc7-nominated-transition-authorization.test.mjs"]]),
   Object.freeze(["CC-7W open-floor self-selection authorization", ["tests/communication/cc7-open-floor-transition-authorization.test.mjs"]]),
   Object.freeze(["CC-7X committed turn authorization re-entry", ["tests/communication/cc7-turn-authorization-reentry.test.mjs"]]),
+  Object.freeze(["CC-7Y authorized floor claim execution", ["tests/communication/cc7-authorized-floor-claim.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

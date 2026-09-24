@@ -73,6 +73,9 @@ import {
   buildWorldSimulationOpenFloorTransitionAuthorization,
 } from "./world-simulation-communication-open-floor-transition-authorization-service.mjs";
 import {
+  buildWorldSimulationAuthorizedFloorClaim,
+} from "./world-simulation-communication-authorized-floor-claim-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10187,6 +10190,19 @@ export async function resolveWorldSimulationTurn(
       action_outcomes: array(causalResolution.action_outcomes),
       speaker_intent_projection: speakerNextTurnIntent,
     }).audit;
+  // CC-7Y is the actual floor-award boundary. A prior committed CC-7V/W
+  // authorization is consumed only when the same character actually selected
+  // speech and World confirmed that exact communication action emitted.
+  const authorizedFloorClaim =
+    buildWorldSimulationAuthorizedFloorClaim({
+      world_history: await getWorldSimulationHistory(sessionId, options),
+      current_turn_id: preparedTurn.turn_id,
+      current_characters: array(preparedTurn.decision_packets)
+        .map((packet) => packet.character),
+      prepared_reentry: preparedTurn.communication_turn_authorization_reentry ?? null,
+      selected_action_intents: selected,
+      action_outcomes: array(causalResolution.action_outcomes),
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12564,6 +12580,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_open_floor_transition_authorization: cloneJson(
         openFloorTransitionAuthorization,
+      ),
+      communication_authorized_floor_claim: cloneJson(
+        authorizedFloorClaim,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
