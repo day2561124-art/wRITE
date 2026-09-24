@@ -182,7 +182,102 @@ try {
     legacy.world_simulation_session_id,options);
   assert.equal(Object.hasOwn(legacyHistory.turns[0],
     "native_temporal_choice_evidence"),false);
+  // CC-7AE native World adoption: first acoustic cue allows a private wait;
+  // only the second actually heard cue permits one later selected response.
+  const delayedSession=await beginWorldSimulationSession({
+    simulation_label:"CC7AE native delayed observer response",
+    seed:"cc7ae-native-delayed",
+    rules:{event_driven:true,persistent_causality:true,
+      communication_action_seconds:0.3,
+      communication_speech_stream_increment_max_chars:2},
+    initial_world_state:{
+      simulation_time:"2026-09-24T00:00:00.000Z",
+      event_queue:[{event_id:"delayed-talk",type:"conversation",scene_id:"room",
+        participants:["A","B"],summary:"A speaks before B responds"}],
+      scenes:{room:{
+        scene_id:"room",simulation_time:"2026-09-24T00:00:00.000Z",
+        dimensions:{width_m:6,depth_m:6},
+        entity_positions:{A:{x:1,y:1},B:{x:2,y:1}},
+        audibility_profiles:{A:{minimum_audible_db:35},
+          B:{minimum_audible_db:35}},
+        observable_by:{A:{visual:[],audible:[]},
+          B:{visual:[],audible:[]}},
+      }},
+      characters:{
+        A:{known:["男孩離開房子"],current_goal:"告知B",
+          relationships:{B:"朋友"},
+          speech_acoustics:{sound_level_db_at_1m:65},
+          communication_goal:goalA},
+        B:{known:[],current_goal:"聽A說話",relationships:{A:"朋友"},
+          speech_acoustics:{sound_level_db_at_1m:65}},
+      },
+      memories:{A:[],B:[]},available_actions:{A:[],B:[]},
+    },
+  },options);
+  const preparationViews=[];
+  let delayedInputCount=0,delayedChoiceCount=0;
+  const delayedResult=await runWorldSimulationTurn({
+    world_simulation_session_id:delayedSession.world_simulation_session_id,
+    event_id:"delayed-talk",
+  },{
+    ...options,characterRuntimeManager:runtimeManager,
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      const candidate=packet.candidate_action_intents.find(
+        item=>item.communication?.surface_realization_complete===true);
+      assert(candidate);return {action_id:candidate.action_id};
+    },
+    characterNativeTemporalResponseObserver:"B",
+    characterNativeTemporalResponsePreparationResolver:async(view)=>{
+      preparationViews.push(view);
+      assert.equal(view.character,"B");
+      assert.equal(view.observer_view.future_release_exposed,false);
+      assert.equal(view.boundaries.no_future_cue,true);
+      assert.equal(JSON.stringify(view).includes("男孩離開房子"),false);
+      assert.equal(JSON.stringify(view).includes("B_SECRET_DELAYED"),false);
+      return {epoch_id:view.epoch_id,
+        decision:preparationViews.length===1?"wait":"select_response"};
+    },
+    characterNativeTemporalResponseInputResolver:async(view)=>{
+      delayedInputCount++;
+      assert.equal(view.character,"B");
+      assert.equal(view.observer_view.future_release_exposed,false);
+      assert.equal(view.observer_view.release_time_ms,
+        preparationViews[1].release_time_ms);
+      return {character:"B",cognition:{
+        communication_goal:goalB,private_belief:"B_SECRET_DELAYED",
+      }};
+    },
+    characterNativeTemporalResponseSelectionResolver:async(view)=>{
+      delayedChoiceCount++;
+      assert.equal(view.observer,"B");
+      assert.equal(view.release_time_ms,preparationViews[1].release_time_ms);
+      assert.equal(JSON.stringify(view).includes("B_SECRET_DELAYED"),false);
+      return {epoch_id:view.epoch_id,
+        action_id:view.candidate_action_intents[0].action_id};
+    },
+  });
+  assert.equal(delayedResult.committed,true);
+  assert.equal(preparationViews.length,2);
+  assert.equal(delayedInputCount,1);
+  assert.equal(delayedChoiceCount,1);
+  assert(preparationViews[1].release_time_ms
+    >preparationViews[0].release_time_ms);
+  const delayedHistory=await getWorldSimulationHistory(
+    delayedSession.world_simulation_session_id,options);
+  const delayedTurn=delayedHistory.turns[0];
+  assert.equal(delayedTurn.subjective_choice_commitment_receipts.receipts.find(
+    item=>item.character==="B").selection_kind,"reject_all");
+  const delayedReply=delayedTurn.action_outcomes.find(item=>
+    item.actor==="B"&&item.result==="communication_emitted");
+  assert(delayedReply);
+  assert.equal(delayedReply.start_time_ms,
+    preparationViews[1].release_time_ms);
+  assert.equal(delayedTurn.native_temporal_choice_evidence.response_action_id,
+    delayedReply.action_id);
+  assert.equal(JSON.stringify(delayedTurn).includes("B_SECRET_DELAYED"),false);
   console.log("CC-7AD native World same-turn commit and choice stages passed.");
+  console.log("CC-7AE native World wait-then-later-response commit passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});
 }

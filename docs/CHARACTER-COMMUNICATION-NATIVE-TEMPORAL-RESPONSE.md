@@ -111,11 +111,31 @@ no current/future speech surface, cognition, or World snapshot. A technical
 32-epoch receipt budget remains an execution guard, not a psychological
 turn-taking threshold.
 
-This is not yet a native World turn hookup. Before a later CC-7AE slice
-may allow a deferred selected response, it must prove the next fresh
-same-character candidate is selected only after the later admitted cue,
-revalidate the changed prefix and causal timeline, and commit a single
-coherent final turn with no speculative earlier speech or false grounding.
+CC-7AE slice 2 adds **opt-in native World turn adoption** via
+`characterNativeTemporalResponsePreparationResolver`, which requires the
+paired input/selection resolvers from CC-7AD. The World iterates actual
+admitted releases for one observer, consumes private CC-7AB wait/revision
+receipts, and prepares a fresh later epoch using the previous consumed
+private epoch. Only `select_response` opens the existing canonical
+Character Brain proposal and World causal replay; the Character Brain's
+action-selection resolver is called just once at that later release.
+Without this opt-in, the sealed first-cue CC-7AD behavior remains unchanged.
+
+The replay preserves all previously released source events including the
+chosen release time and all strictly **earlier** completed World mutation
+batches. At the chosen same-timestamp release, the atomic batch may be
+re-coalesced because the new response begins then; this does not authorize
+changing the earlier source acoustic admission or any prior World mutation.
+Existing Phase74D pre-cue `reject_all` and later emitted response evidence
+remain distinct, and the ordinary World consistency gate/atomic commit are
+still authoritative. Tests exercise the actual wait-then-later-response
+commit and verify one later input/selection, no future/private content in
+the World history, and the original rejected pre-cue choice.
+
+This opt-in stage does NOT yet model multiple successive World causal epochs
+with cancellation or interruption effects, nor does it make a fixed gap
+threshold a behavioral decision. Those require separate later acceptance
+evidence.
 
 Research basis: Levinson and Torreira (2015),
 https://doi.org/10.3389/fpsyg.2015.00731, on response preparation during

@@ -98,6 +98,86 @@ assert.equal(first.boundaries.world_commit_performed_here,false);
 assert.equal(buildWorldSimulationNativeTemporalReplayContract().observer_must_have_rejected_initial_action,true);
 assert(seen.length>=1);
 assert.deepEqual(first,await run());
+// CC-7AE: the observer can wait without ANY Brain action selection; only
+// a subsequent physically admitted cue permits a fresh same-character
+// response at that later World-owned timestamp.
+const delayedViews=[];
+const delayedBrainInputs=[];
+const delayedSelections=[];
+const delayed=await replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  character_input_resolver:async(view)=>{
+    delayedBrainInputs.push(view);
+    assert.equal(view.character,"B");
+    assert.equal(view.observer_view.future_release_exposed,false);
+    assert.equal(JSON.stringify(view).includes("B_ONLY_PRIVATE"),false);
+    return input.character_input;
+  },
+  preparation_decision_resolver:async(view)=>{
+    delayedViews.push(view);
+    assert.equal(view.character,"B");
+    assert.equal(view.boundaries.no_future_cue,true);
+    assert.equal(view.boundaries.no_public_signal_from_wait_or_revision,true);
+    assert.equal(JSON.stringify(view).includes("男孩離開"),false);
+    return {epoch_id:view.epoch_id,
+      decision:delayedViews.length===1?"wait":"select_response"};
+  },
+  selection_resolver:async(view)=>{
+    delayedSelections.push(view);
+    assert.equal(view.observer,"B");
+    assert.equal(view.observer_view.future_release_exposed,false);
+    return {epoch_id:view.epoch_id,
+      action_id:view.candidate_action_intents[0].action_id};
+  },
+});
+assert.equal(delayed.status,"replayed_same_turn");
+assert.equal(delayedViews.length,2);
+assert.equal(delayedBrainInputs.length,1);
+assert.equal(delayedSelections.length,1);
+assert.notEqual(delayedViews[0].epoch_id,delayedViews[1].epoch_id);
+assert(delayedViews[1].release_time_ms>delayedViews[0].release_time_ms);
+assert.equal(delayed.native_temporal_response.start_time_ms,
+  delayedViews[1].release_time_ms);
+assert(delayed.native_temporal_response.start_time_ms
+  >first.native_temporal_response.start_time_ms);
+assert.equal(delayed.preparation_audit.wait_count,1);
+assert.equal(delayed.preparation_audit.revision_count,0);
+assert.equal(delayed.native_temporal_response.source_preparation_audit_hash,
+  delayed.preparation_audit.audit_hash);
+assert.equal(JSON.stringify(delayed.preparation_audit).includes("B_ONLY_PRIVATE"),false);
+assert.equal(JSON.stringify(delayed.preparation_audit).includes("男孩離開"),false);
+assert.equal(delayed.causal_resolution.action_outcomes.find(x=>
+  x.action_id===speechB.action_id).start_time_ms,
+  delayedViews[1].release_time_ms);
+let allWaitInputs=0,allWaitSelections=0;
+const waiting=await replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  character_input_resolver:async()=>{
+    allWaitInputs++;throw new Error("Waiting must not ask for a new Brain action");
+  },
+  selection_resolver:async()=>{
+    allWaitSelections++;throw new Error("Waiting must not choose a Brain action");
+  },
+  preparation_decision_resolver:async(view)=>({
+    epoch_id:view.epoch_id,decision:"wait",
+  }),
+});
+assert.equal(waiting.status,"awaiting_later_cue");
+assert.equal(waiting.native_temporal_response,null);
+assert.equal(waiting.selected_action_intents[1].selection,"reject_all");
+assert(waiting.preparation_audit.wait_count>delayedViews.length);
+assert.equal(waiting.preparation_audit.wait_count,
+  waiting.preparation_audit.consumed_count);
+assert.equal(allWaitInputs,0);
+assert.equal(allWaitSelections,0);
+await assert.rejects(()=>replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  character_input_resolver:async()=>input.character_input,
+  selection_resolver:choose,
+  preparation_decision_resolver:async()=>({
+    epoch_id:"forged",decision:"select_response",
+  }),
+}),/exact current observer epoch/u);
 const originalReceipts = buildWorldSimulationSubjectiveChoiceCommitmentReceipts({
   world_simulation_session_id: input.session_id, turn_id: input.turn_id,
   state_revision:input.world_state_revision, world_state_hash:input.world_state_hash,

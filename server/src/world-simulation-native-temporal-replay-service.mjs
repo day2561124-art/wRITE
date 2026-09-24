@@ -6,6 +6,7 @@ import { reconstructWorldSimulationObserverTickPrefixes } from "./world-simulati
 import { prepareWorldSimulationObserverTemporalEpoch } from "./world-simulation-observer-prepared-epoch-service.mjs";
 import { runWorldSimulationObserverResponseProposal } from "./world-simulation-observer-response-proposal-service.mjs";
 import { scheduleWorldSimulationNativeTemporalResponse } from "./world-simulation-native-temporal-schedule-service.mjs";
+import { stepWorldSimulationNativeResponsePreparation } from "./world-simulation-native-response-preparation-service.mjs";
 import { assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle } from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
 
 export const worldSimulationNativeTemporalReplayVersion =
@@ -62,7 +63,10 @@ function earlierEvents(resolution, releaseTime) {
 
 function earlierMutationBatches(resolution, releaseTime) {
   return (resolution.chronological_mutation_queue?.batches ?? [])
-    .filter((batch) => batch.time_ms <= releaseTime)
+    // The response starts in the release-time batch; its final clock/queue
+    // mutation may legitimately re-coalesce that SAME timestamp. Earlier
+    // completed batches must be byte-for-byte unchanged.
+    .filter((batch) => batch.time_ms < releaseTime)
     .map((batch) => clone(batch));
 }
 
@@ -77,6 +81,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   session_id, turn_id, world_state, world_state_revision, world_state_hash,
   event, scene_analysis, selected_action_intents, observer,
   character_input, character_input_resolver, selection_resolver,
+  preparation_decision_resolver,
 } = {}) {
   if (!record(world_state) || hashAgentRunValue(world_state) !== world_state_hash
       || !Array.isArray(selected_action_intents)
@@ -85,7 +90,9 @@ export async function replayWorldSimulationNativeTemporalResponse({
       || (typeof character_input_resolver !== "function"
         && (!record(character_input) || character_input.character !== observer
           || !record(character_input.cognition)))
-      || typeof selection_resolver !== "function")
+      || typeof selection_resolver !== "function"
+      || (preparation_decision_resolver !== undefined
+        && typeof preparation_decision_resolver !== "function"))
     refuse("World replay requires exact original snapshot and one same-character Brain resolver.");
   if (selected_action_intents.filter((item) => item?.character === observer).length !== 1
       || !selected_action_intents.some((item) =>
@@ -127,24 +134,82 @@ export async function replayWorldSimulationNativeTemporalResponse({
       refusal_reason: reconstruction.audit.reason ?? readiness.status,
       boundaries: buildWorldSimulationNativeTemporalReplayContract(),
     };
-  const cursor = ledger.ticks.findIndex((tick) =>
-    tick.observer_cues.some((cue) => cue.observer === observer));
-  if (cursor < 0)
-    return {
-      status: "no_admitted_cue", selected_action_intents: clone(selected_action_intents),
-      causal_resolution: initial, native_temporal_response: null,
-      boundaries: buildWorldSimulationNativeTemporalReplayContract(),
-    };
   if (ledger.tick_count > 32)
     refuse("Native response cannot bypass bounded verified snapshot budget.");
-  const context = {
-    session_id, turn_id, world_state_revision,
-    pre_turn_world_state: clone(world_state),
-    ledger, reconstruction, scene_id: event?.scene_id ?? event?.location_id ?? null,
-    observer, cursor,
-  };
-  const epoch = prepareWorldSimulationObserverTemporalEpoch(context);
-  if (!epoch) refuse("Admitted observer cue has no canonical prepared epoch.");
+  // The legacy CC-7AD path still selects at the first actual admitted cue.
+  // Opt-in CC-7AE may wait/revise privately, but every later decision is
+  // attached to a new, World-reconstructed observer epoch; skipped ticks
+  // may never contain a cue for this observer.
+  let cursor = -1;
+  let context = null;
+  let epoch = null;
+  let preparation = null;
+  for (let i = 0; i < ledger.ticks.length; i += 1) {
+    if (!ledger.ticks[i].observer_cues.some((cue) => cue.observer === observer))
+      continue;
+    const nextContext = {
+      session_id, turn_id, world_state_revision,
+      pre_turn_world_state: clone(world_state),
+      ledger, reconstruction, scene_id: event?.scene_id ?? event?.location_id ?? null,
+      observer, cursor: i,
+    };
+    const nextEpoch = prepareWorldSimulationObserverTemporalEpoch({
+      ...nextContext,
+      previous_epoch: preparation?.engine_private_last_epoch ?? null,
+    });
+    if (!nextEpoch)
+      refuse("Admitted observer cue has no canonical prepared epoch.");
+    if (preparation_decision_resolver) {
+      const answer = await preparation_decision_resolver(clone({
+        schema_version: "cc7ae-native-preparation-decision-view-v1",
+        character: observer,
+        epoch_id: nextEpoch.epoch_id,
+        release_time_ms: nextEpoch.release_time_ms,
+        observer_view: nextEpoch.observer_view,
+        previous_preparation_audit_hash: preparation?.audit.audit_hash ?? null,
+        boundaries: {
+          only_current_released_cue: true,
+          no_world_snapshot: true,
+          no_other_observer: true,
+          no_future_cue: true,
+          no_public_signal_from_wait_or_revision: true,
+          no_fixed_response_latency: true,
+        },
+      }));
+      if (!record(answer)
+          || Object.keys(answer).sort().join("|") !== "decision|epoch_id"
+          || answer.epoch_id !== nextEpoch.epoch_id
+          || !["wait", "revise_preparation", "select_response"].includes(answer.decision))
+        refuse("Native preparation decision must bind the exact current observer epoch.");
+      if (answer.decision !== "select_response") {
+        preparation = stepWorldSimulationNativeResponsePreparation({
+          epoch_context: nextContext, presented_epoch: nextEpoch,
+          decision: answer.decision, previous: preparation,
+        });
+        continue;
+      }
+    }
+    cursor = i;
+    // CC-7AC and the CC-7AD scheduler independently re-prepare the epoch;
+    // both MUST see the last consumed private epoch. Otherwise the later
+    // cue would appear to skip an earlier actually admitted release.
+    context = {
+      ...nextContext,
+      ...(preparation ? {
+        previous_epoch: preparation.engine_private_last_epoch,
+      } : {}),
+    };
+    epoch = nextEpoch;
+    break;
+  }
+  if (cursor < 0)
+    return {
+      status: preparation ? "awaiting_later_cue" : "no_admitted_cue",
+      selected_action_intents: clone(selected_action_intents),
+      causal_resolution: initial, native_temporal_response: null,
+      ...(preparation ? { preparation_audit: clone(preparation.audit) } : {}),
+      boundaries: buildWorldSimulationNativeTemporalReplayContract(),
+    };
   const freshInput = typeof character_input_resolver === "function"
     ? await character_input_resolver(clone({
       character: observer,
@@ -167,6 +232,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   const proposed = await runWorldSimulationObserverResponseProposal({
     epoch_context: context, presented_epoch: epoch,
     character_input: freshInput, character_input_binding: binding, selection_resolver,
+    consumed_epoch_ids: preparation?.engine_private_consumed_epoch_ids ?? [],
   });
   const scheduled = await scheduleWorldSimulationNativeTemporalResponse({
     epoch_context: context, presented_epoch: epoch,
@@ -175,6 +241,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
     chronological_timeline: initial.causal_timeline,
     observer_admissions: initial.communication_observer_increment_admissions,
     selected_action_intents,
+    consumed_epoch_ids: preparation?.engine_private_consumed_epoch_ids ?? [],
     // CC-7AD revalidates the exact proposal without a second Character Brain
     // decision. Reinvoking a nondeterministic Brain would create a new choice
     // rather than verify the decision made at this observer release.
@@ -215,7 +282,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
       !== JSON.stringify(earlierEvents(replay, releaseTime))
       || JSON.stringify(earlierMutationBatches(initial, releaseTime))
       !== JSON.stringify(earlierMutationBatches(replay, releaseTime)))
-    refuse("Native replay changed the World timeline or mutation prefix before the response.");
+    refuse("Native replay changed the World timeline or completed mutation prefix before the response.");
   const sourceRefs = new Set(ledger.ticks[cursor].observer_cues
     .filter((item) => item.observer === observer)
     .map((item) => item.observer_increment.increment_ref));
@@ -256,11 +323,16 @@ export async function replayWorldSimulationNativeTemporalResponse({
     causal_resolution_id: replay.causal_resolution_id,
     response_emitted: true, world_committed: false,
     private_cognition_persisted: false,
+    ...(preparation ? {
+      source_preparation_audit_hash: preparation.audit.audit_hash,
+      source_preparation_consumed_count: preparation.audit.consumed_count,
+    } : {}),
   };
   return {
     status: "replayed_same_turn", selected_action_intents: replayedSelected,
     initial_selected_action_intents: clone(selected_action_intents),
     causal_resolution: replay,
+    ...(preparation ? { preparation_audit: clone(preparation.audit) } : {}),
     native_temporal_response: {
       ...audit,
       audit_hash: hashAgentRunValue(audit),
