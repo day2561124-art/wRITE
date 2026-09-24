@@ -94,9 +94,14 @@ export function buildWorldSimulationAuthorizedFloorClaim({
       fail("Authorized speech action has duplicate World outcomes.");
     if(matches.length===1) {
       const outcome=matches[0];
+      const event=outcome?.communication_event;
       if(outcome?.result==="communication_emitted"&&
-          outcome?.communication_event?.channel==="speech"&&
-          outcome?.communication_event?.actor===selectedSpeech.character) {
+          event?.channel==="speech"&&
+          event?.actor===selectedSpeech.character&&
+          event?.surface_realization_complete===true&&
+          nonblank(event?.surface_text)&&
+          event?.surface_realization?.source_action_id===selectedSpeech.action_id&&
+          event.surface_realization.surface_text===event.surface_text) {
         emittedOutcome=outcome;
       }
     }

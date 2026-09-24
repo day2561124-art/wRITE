@@ -61,6 +61,11 @@ const emitted=[{
   actor:"B",action_id:actionId,result:"communication_emitted",
   communication_event:{
     actor:"B",channel:"speech",surface_text:"公開內容",
+    surface_realization_complete:true,
+    surface_realization:{
+      source_action_id:actionId,
+      surface_text:"公開內容",
+    },
   },
 }];
 
@@ -95,6 +100,31 @@ assert.equal(awarded.audit.boundaries.overlap_or_interruption_judged,false);
 assert.equal(awarded.audit.boundaries.response_content_inferred,false);
 assert.equal(JSON.stringify(awarded.audit).includes('"B"'),false);
 assert.equal(JSON.stringify(awarded.audit).includes("公開內容"),false);
+
+// A custom World adjudicator cannot turn a nominal emission into a floor
+// claim when the public speech surface is absent or belongs to another action.
+for(const event of [
+  {...emitted[0].communication_event,surface_realization_complete:false},
+  {...emitted[0].communication_event,surface_text:""},
+  {...emitted[0].communication_event,surface_realization:{
+    source_action_id:"foreign_action",surface_text:"公開內容",
+  }},
+  {...emitted[0].communication_event,surface_realization:{
+    source_action_id:actionId,surface_text:"另一句話",
+  }},
+]) {
+  const unverified=build({
+    world_history:worldHistory,
+    current_turn_id:"turn_2",
+    current_characters:["A","B"],
+    prepared_reentry:reentry,
+    selected_action_intents:selectedSpeech,
+    action_outcomes:[{...emitted[0],communication_event:event}],
+  });
+  assert.equal(unverified.audit.actual_floor_awarded,false);
+  assert.equal(unverified.audit.communication_emitted,false);
+  assert.equal(unverified.audit.status,"authorized_floor_claim_not_exercised");
+}
 
 // Authorization never forces expression. Rejecting all candidates consumes the
 // one-turn opportunity without awarding the floor.
