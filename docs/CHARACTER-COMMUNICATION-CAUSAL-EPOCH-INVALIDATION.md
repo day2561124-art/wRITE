@@ -167,6 +167,58 @@ evidence and cannot be inferred from this opt-in.
 
 
 
+## CC-7AF cross-turn commit-boundary audit (next acceptance gate)
+
+The repository's authoritative `commitWorldSimulationTurn` commits ONE
+complete World turn with expected state revision/hash compare-and-swap,
+an append-only history turn, and a duplicate-turn check inside the
+existing file transaction. The canonical acoustic microtick ledger is
+engine-private reconstruction **within that completed turn**; it is not
+an independently durable microtick transaction. Consequently the
+phrase "committed first sound but cancel unreleased later fragments of
+the same turn" must NOT be claimed under the CURRENT architecture:
+after a full turn commit, all of that turn's emitted increments belong
+to its immutable causal history. A later re-adjudication of the old
+pre-turn snapshot is counterfactual only; it is not authority to modify
+the committed source, observer admission, Phase74D receipt, or
+already-realized tail of that stream.
+
+This is different from a **still-uncommitted later dependency**. Such a
+dependency can be rejected before its own World turn commits when its
+cited prior-turn source/reference or current World revision/hash is
+stale. A new correction, renewed source utterance, or listener
+response must be scheduled as a NEW event/turn with its own broker
+preparation, newly admitted observation, same-character Brain choice,
+canonical causal resolution, and atomic commit. It may incorporate
+earlier committed hearing as historical evidence, but must never
+pretend that hearing was retroactively unheard.
+
+Engineering acceptance therefore separates:
+
+1. **Committed-source guard:** derive source identity and acoustic
+   observer admission from authoritative append-only World history,
+   bind pending dependency to that committed turn/hash, and reject a
+   wrong turn, fabricated release, mismatched observer, or attempt to
+   rewrite its Phase74D/physical outcome. This guard is read-only; its
+   output does not cancel a committed source.
+2. **Uncommitted-dependency guard:** reject a speculative future action
+   if the World CAS revision/hash or cited source/dependency lineage
+   no longer matches, with no new public signal or stale Brain choice.
+3. **New-turn reentry:** obtain a newly valid event and actual newly
+   released cue; no reuse of the prior observer epoch or one-use
+   receipt. Distinguish physical overlap evidence from an explicit
+   listener/speaker interpretation of interruption.
+4. **Recovery:** continue using existing Journal/transaction/atomic
+   duplicate-turn protections. No new persistent scheduler or memory
+   repository may be introduced merely to represent this boundary.
+
+The first four CC-7AF slices do NOT establish these cross-turn
+acceptance results. Slice 4 instead proves legitimate **precommit**
+source reconsideration where the first speech never entered World
+history. Future work must inspect and test the real history shape,
+the current queued-event model, and the atomic state transition
+rather than assuming per-microtick durable acknowledgements.
+
 ## Acceptance and adversarial matrix
 
 | Case | Required evidence/result |
