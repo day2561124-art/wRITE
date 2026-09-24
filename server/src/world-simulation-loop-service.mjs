@@ -50,6 +50,10 @@ import {
   buildWorldSimulationSelectionAwareReadinessContract,
 } from "./world-simulation-communication-selection-aware-readiness-service.mjs";
 import {
+  runWorldSimulationSpeakerNextTurnIntent,
+  buildWorldSimulationSpeakerNextTurnIntentContract,
+} from "./world-simulation-communication-speaker-next-turn-intent-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4594,6 +4598,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationTurnAllocationReadinessContract(),
     communication_selection_aware_readiness:
       buildWorldSimulationSelectionAwareReadinessContract(),
+    communication_speaker_next_turn_intent:
+      buildWorldSimulationSpeakerNextTurnIntentContract(),
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10089,6 +10095,12 @@ export async function resolveWorldSimulationTurn(
     buildWorldSimulationSelectionAwareReadiness({
       handoff: communicationTurnIncrementHandoff,
     }).audit;
+  // CC-7Q is explicitly opted-in speaker-scoped intention evidence from
+  // already-selected speech outcomes. Only the text-free audit is persisted.
+  const speakerNextTurnIntent = await runWorldSimulationSpeakerNextTurnIntent({
+    action_outcomes: array(causalResolution.action_outcomes),
+    resolver: options.characterCommunicationSpeakerNextTurnResolver ?? null,
+  });
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12445,6 +12457,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_selection_aware_readiness: cloneJson(
         selectionAwareReadiness,
+      ),
+      communication_speaker_next_turn_intent: cloneJson(
+        speakerNextTurnIntent.audit,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

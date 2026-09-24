@@ -292,6 +292,8 @@ export async function commitWorldSimulationTurn(
               input.communication_turn_allocation_readiness ?? null,
             communication_selection_aware_readiness:
               input.communication_selection_aware_readiness ?? null,
+            communication_speaker_next_turn_intent:
+              input.communication_speaker_next_turn_intent ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
             observer_tick_snapshot_readiness:

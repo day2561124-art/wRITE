@@ -272,12 +272,24 @@ try {
   const delivered = [];
   const lexicalDelivered = [];
   const meaningDelivered = [];
+  const speakerDelivered = [];
   const result = await runWorldSimulationTurn({
     world_simulation_session_id: session.world_simulation_session_id,
     event_id: "evt-cc7c",
   }, {
     ...options,
     characterRuntimeManager: runtimeManager,
+    characterCommunicationSpeakerNextTurnResolver: async (packet) => {
+      speakerDelivered.push(structuredClone(packet));
+      assert.equal(packet.actor, "A");
+      assert.equal(packet.current_public_addressee, "B");
+      assert.equal(packet.world_turn_status, "post_causal_precommit");
+      assert.equal(packet.boundaries.addressee_is_not_automatic_nomination, true);
+      assert.equal(packet.boundaries.actual_floor_awarded, false);
+      assert.equal(JSON.stringify(packet).includes(surface), false);
+      assert.equal(JSON.stringify(packet).includes(semantic), false);
+      return { mode: "nominate_addressee", target: "B" };
+    },
     characterCommunicationLexicalIncrementResolver: async (packet) => {
       lexicalDelivered.push(structuredClone(packet));
       assert.equal(packet.observer, "B");
@@ -363,6 +375,7 @@ try {
   assert.equal(meaningDelivered.length, delivered.length);
   assert.equal(lexicalDelivered.map((item) => item.emitted_surface_fragment).join(""), surface);
   assert.equal(meaningDelivered.at(-1).heard_surface_prefix, surface);
+  assert.equal(speakerDelivered.length, 1);
   const history = await getWorldSimulationHistory(
     session.world_simulation_session_id, options);
   const turn = history.turns.at(-1);
@@ -383,6 +396,17 @@ try {
   assert.equal(JSON.stringify(meaningAudit).includes("目前聽成"), false);
   assert.equal(meaningAudit.boundaries.grounding_claimed, false);
   assert.equal(meaningAudit.boundaries.belief_updated, false);
+  const speakerNextTurnAudit = turn.communication_speaker_next_turn_intent;
+  assert.equal(speakerNextTurnAudit.status, "speaker_provisional_intentions_only");
+  assert.equal(speakerNextTurnAudit.eligible_emitted_speech_count, 1);
+  assert.equal(speakerNextTurnAudit.decision_count, 1);
+  assert.equal(speakerNextTurnAudit.nomination_count, 1);
+  assert.equal(speakerNextTurnAudit.decisions[0].world_floor_awarded, false);
+  assert.equal(speakerNextTurnAudit.decisions[0].public_invitation_emitted, false);
+  assert.equal(speakerNextTurnAudit.boundaries.actual_floor_awarded, false);
+  assert.equal(JSON.stringify(speakerNextTurnAudit).includes(surface), false);
+  assert.equal(JSON.stringify(speakerNextTurnAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(speakerNextTurnAudit).includes("男孩已離開房子"), false);
   const handoff = turn.communication_turn_increment_handoff;
   assert.equal(handoff.resolver_used, true);
   assert.equal(handoff.projected_count, delivered.length);
