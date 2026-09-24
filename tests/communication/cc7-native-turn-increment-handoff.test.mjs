@@ -407,6 +407,25 @@ try {
   assert.equal(JSON.stringify(speakerNextTurnAudit).includes(surface), false);
   assert.equal(JSON.stringify(speakerNextTurnAudit).includes(semantic), false);
   assert.equal(JSON.stringify(speakerNextTurnAudit).includes("男孩已離開房子"), false);
+  const sourceLineageAudit = turn.communication_source_lineage_reconciliation;
+  assert.equal(sourceLineageAudit.status, "world_source_lineage_evidence_only");
+  assert.equal(sourceLineageAudit.eligible_source_count, 1);
+  assert.equal(sourceLineageAudit.emitted_speaker_intention_count, 1);
+  assert.equal(sourceLineageAudit.audible_receipt_count, delivered.length);
+  assert.equal(sourceLineageAudit.linked_latest_observer_count, 1);
+  assert.equal(sourceLineageAudit.unmatched_intention_count, 0);
+  assert.equal(sourceLineageAudit.entries[0].speaker_intent_relation,
+    "speaker_intends_nominate_this_observer");
+  assert.equal(sourceLineageAudit.entries[0].listener_evidence_state,
+    "not_seeking_floor");
+  assert.equal(sourceLineageAudit.entries[0].actual_floor_awarded, false);
+  assert.equal(sourceLineageAudit.boundaries.floor_winner_selected, false);
+  assert.equal(sourceLineageAudit.boundaries.actual_floor_awarded, false);
+  assert.equal(sourceLineageAudit.boundaries.public_invitation_emitted, false);
+  assert.equal(JSON.stringify(sourceLineageAudit).includes(surface), false);
+  assert.equal(JSON.stringify(sourceLineageAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(sourceLineageAudit).includes(actionId), false);
+  assert.equal(JSON.stringify(sourceLineageAudit).includes("目前聽成"), false);
   const handoff = turn.communication_turn_increment_handoff;
   assert.equal(handoff.resolver_used, true);
   assert.equal(handoff.projected_count, delivered.length);

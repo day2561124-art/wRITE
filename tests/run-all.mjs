@@ -947,6 +947,7 @@ const steps = [
   ["CC-7O observer selection cue admission", ["tests/communication/cc7-turn-selection-cue.test.mjs"]],
   ["CC-7P selection-aware turn readiness", ["tests/communication/cc7-selection-aware-readiness.test.mjs"]],
   ["CC-7Q speaker next-turn intention", ["tests/communication/cc7-speaker-next-turn-intent.test.mjs"]],
+  ["CC-7R World source lineage reconciliation", ["tests/communication/cc7-source-lineage-reconciliation.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

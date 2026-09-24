@@ -54,6 +54,10 @@ import {
   buildWorldSimulationSpeakerNextTurnIntentContract,
 } from "./world-simulation-communication-speaker-next-turn-intent-service.mjs";
 import {
+  buildWorldSimulationSourceLineageReconciliation,
+  buildWorldSimulationSourceLineageReconciliationContract,
+} from "./world-simulation-communication-source-lineage-reconciliation-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4600,6 +4604,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSelectionAwareReadinessContract(),
     communication_speaker_next_turn_intent:
       buildWorldSimulationSpeakerNextTurnIntentContract(),
+    communication_source_lineage_reconciliation:
+      buildWorldSimulationSourceLineageReconciliationContract(),
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10101,6 +10107,15 @@ export async function resolveWorldSimulationTurn(
     action_outcomes: array(causalResolution.action_outcomes),
     resolver: options.characterCommunicationSpeakerNextTurnResolver ?? null,
   });
+  // CC-7R joins World-private release lineage, not the observer resolver
+  // views. Only opaque text-free evidence reaches the committed history.
+  const sourceLineageReconciliation =
+    buildWorldSimulationSourceLineageReconciliation({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12460,6 +12475,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_speaker_next_turn_intent: cloneJson(
         speakerNextTurnIntent.audit,
+      ),
+      communication_source_lineage_reconciliation: cloneJson(
+        sourceLineageReconciliation,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

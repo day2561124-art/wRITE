@@ -30,6 +30,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7O observer selection cue admission", ["tests/communication/cc7-turn-selection-cue.test.mjs"]]),
   Object.freeze(["CC-7P selection-aware turn readiness", ["tests/communication/cc7-selection-aware-readiness.test.mjs"]]),
   Object.freeze(["CC-7Q speaker next-turn intention", ["tests/communication/cc7-speaker-next-turn-intent.test.mjs"]]),
+  Object.freeze(["CC-7R World source lineage reconciliation", ["tests/communication/cc7-source-lineage-reconciliation.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
