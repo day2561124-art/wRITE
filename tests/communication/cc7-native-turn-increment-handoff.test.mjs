@@ -334,6 +334,12 @@ try {
           projection_basis_refs: [],
           response_preparation: "none",
         },
+        participation_decision: delivered.length === 1
+          ? {
+            mode: "backchannel",
+            basis_refs: [view.perceived_speech_increment.perceived_cue_refs[0]],
+          }
+          : { mode: "wait", basis_refs: [] },
       };
     },
     characterBrain: async (packet) => {
@@ -383,9 +389,19 @@ try {
   assert(delivered.every((view) =>
     view.anonymous_speaker_ref === delivered[0].anonymous_speaker_ref));
   assert.equal(delivered[0].prior_turn_projection, null);
+  assert.equal(delivered[0].prior_participation_intent, null);
+  assert.equal(delivered[1].prior_participation_intent.mode, "backchannel");
   assert.equal(delivered[1].prior_turn_projection.projection_id,
     handoff.projections[0].projection.projection_id);
   assert.equal(handoff.projections[1].projection.lineage.revises_prior_projection, true);
+  assert.equal(handoff.projections[0].participation_intent.mode, "backchannel");
+  assert(handoff.projections.slice(1).every((item) =>
+    item.participation_intent.mode === "wait"));
+  assert(handoff.projections.every((item) =>
+    item.participation_intent.actual_floor_claimed === false
+    && item.participation_intent.backchannel_signal_emitted === false
+    && item.participation_intent.interruption_judged === false
+    && item.participation_intent.world_action_replanned === false));
   assert(handoff.projections.every((item) =>
     typeof item.source_meaning_interpretation_id === "string"
     && item.projection.boundaries.grounding_claimed === false

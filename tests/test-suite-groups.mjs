@@ -24,6 +24,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7I observer tick Brain ingress", ["tests/communication/cc7-observer-tick-brain-ingress.test.mjs"]]),
   Object.freeze(["CC-7J observer incremental lexical admission", ["tests/communication/cc7-observer-lexical-increment.test.mjs"]]),
   Object.freeze(["CC-7K observer incremental meaning admission", ["tests/communication/cc7-observer-meaning-increment.test.mjs"]]),
+  Object.freeze(["CC-7L observer participation intent foundation", ["tests/communication/cc7-turn-participation-intent.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

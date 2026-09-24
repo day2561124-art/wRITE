@@ -1,5 +1,9 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { projectCharacterCommunicationTurnProjection } from "./character-communication-turn-projection-service.mjs";
+import {
+  projectCharacterCommunicationTurnParticipationIntent,
+  buildCharacterCommunicationTurnParticipationIntentContract,
+} from "./character-communication-turn-participation-intent-service.mjs";
 import { worldSimulationObserverSpeechIncrementVersion } from "./world-simulation-communication-observer-increment-service.mjs";
 import { worldSimulationObserverLexicalIncrementVersion } from "./world-simulation-communication-observer-lexical-increment-service.mjs";
 import { worldSimulationObserverMeaningIncrementVersion } from "./world-simulation-communication-observer-meaning-increment-service.mjs";
@@ -174,6 +178,8 @@ export function buildWorldSimulationTurnIncrementHandoffContract() {
     listener_authored_incremental_meaning_supported: true,
     meaning_interpretation_source_version: worldSimulationObserverMeaningIncrementVersion,
     meaning_interpretation_does_not_claim_grounding_or_belief: true,
+    observer_participation_intention:
+      buildCharacterCommunicationTurnParticipationIntentContract(),
     no_resolver_means_no_subjective_projection: true,
     subjective_projection_decided_by_observer_resolver_only: true,
     projection_is_post_causal_speculative_evidence: true,
@@ -226,6 +232,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
   const seen = new Set();
   const priorBySignal = new Map();
   const priorMeaningBySignal = new Map();
+  const priorParticipationBySignal = new Map();
   const projections = [];
   const consumedLexicalRecognitionKeys = new Set();
   const consumedMeaningInterpretationKeys = new Set();
@@ -292,6 +299,7 @@ export async function runWorldSimulationTurnIncrementHandoff({
       release_time_ms: receipt.release_time_ms,
       perceived_speech_increment: perceivedIncrement,
       prior_turn_projection: copy(prior),
+      prior_participation_intent: copy(priorParticipationBySignal.get(key) ?? null),
       evidence_is_nonlexical_only:
         lexicalRecognition?.heard_surface_fragment == null,
       lexical_recognition_status:
@@ -318,7 +326,10 @@ export async function runWorldSimulationTurnIncrementHandoff({
     };
     const raw = await resolver(copy(view));
     if (raw == null) continue; // Observer may remain silent without projection.
-    exactKeys(raw, ["listener_decision", "response_preparation_context"], "observer decision");
+    exactKeys(raw, [
+      "listener_decision", "response_preparation_context",
+      "participation_decision",
+    ], "observer decision");
     if (!record(raw.listener_decision)) invalid("Observer must supply a bounded CC-7A decision.");
     const projection = projectCharacterCommunicationTurnProjection({
       observer: cue.observer,
@@ -327,12 +338,23 @@ export async function runWorldSimulationTurnIncrementHandoff({
       response_preparation_context: raw.response_preparation_context ?? null,
       prior_state: prior,
     });
+    const participation = raw.participation_decision == null
+      ? null
+      : projectCharacterCommunicationTurnParticipationIntent({
+        observer: cue.observer,
+        turn_projection: projection,
+        participation_decision: raw.participation_decision,
+        prior_state: priorParticipationBySignal.get(key) ?? null,
+      });
     priorBySignal.set(key, projection);
+    if (participation) priorParticipationBySignal.set(key, participation);
+    else priorParticipationBySignal.delete(key);
     projections.push({
       schema_version: worldSimulationTurnIncrementHandoffVersion,
       observer: cue.observer,
       release_time_ms: receipt.release_time_ms,
       projection: copy(projection),
+      participation_intent: copy(participation),
       source_meaning_interpretation_id:
         meaningInterpretation?.interpretation_id ?? null,
       subjective_only: true,
