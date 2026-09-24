@@ -87,6 +87,7 @@ import {
 } from "./world-simulation-native-response-preparation-service.mjs";
 import {
   assertWorldSimulationCommittedAcousticSource,
+  assertWorldSimulationQueuedAcousticSource,
 } from "./world-simulation-native-committed-source-service.mjs";
 import {
   assessWorldSimulationNativeCausalEpochSupersession,
@@ -3240,7 +3241,11 @@ function currentEvent(worldState, requestedEventId = null) {
       throw error;
     }
   }
-  return { ...cloneJson(event), event_id: eventId };
+  const safeEvent=cloneJson(event);
+  // Generated queue provenance is engine-only; do not project the
+  // authoritative source action/observer identities as a character cue.
+  delete safeEvent.native_acoustic_source_lineage;
+  return { ...safeEvent, event_id: eventId };
 }
 
 function currentScene(worldState, event) {
@@ -14800,6 +14805,32 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const historicalDependency =
     options.characterNativeCommittedSourceDependency;
   let historicalSourceAudit = null;
+  const queuedSnapshot=await getWorldSimulationState(
+    input.world_simulation_session_id,options);
+  const queuedEvent=queuedSnapshot.state?.event_queue?.[0];
+  if (queuedEvent?.native_acoustic_source_lineage !== undefined) {
+    const queuedObserver=queuedEvent.native_acoustic_source_lineage?.observer;
+    if (historicalDependency !== undefined
+        || typeof queuedObserver !== "string"
+        || queuedObserver !== options.characterNativeTemporalResponseObserver
+        || typeof options.characterNativeTemporalResponseInputResolver
+          !== "function"
+        || typeof options.characterNativeTemporalResponseSelectionResolver
+          !== "function") {
+      const error=new Error(
+        "CC-7AF queued source requires one native observer and paired fresh Brain resolvers; no caller source override.");
+      error.code="CC7AF_QUEUED_SOURCE_INVALID";
+      throw error;
+    }
+    historicalSourceAudit =
+      await assertWorldSimulationQueuedAcousticSource({
+        session_id:input.world_simulation_session_id,
+        event_id:input.event_id
+          ??queuedEvent.event_id??queuedEvent.id,
+        expected_current_revision:queuedSnapshot.revision,
+        expected_current_state_hash:queuedSnapshot.state_hash,
+      },options);
+  }
   if (historicalDependency !== undefined) {
     const expectedFields = [
       "session_id", "source_turn_id", "source_turn_hash",
@@ -14832,13 +14863,16 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   }
   const prepared = await prepareWorldSimulationTurn(input, options);
   if (historicalSourceAudit !== null) {
-    if (historicalDependency.source_turn_id === prepared.turn_id
+    if ((historicalDependency?.source_turn_id
+          ??queuedEvent?.native_acoustic_source_lineage?.source_turn_id)
+          === prepared.turn_id
         || historicalSourceAudit.checked_current_revision
           !== prepared.state_revision
         || historicalSourceAudit.checked_current_state_hash
           !== prepared.world_state_hash
         || !prepared.decision_packets.some(packet =>
-          packet.character === historicalDependency.observer)) {
+          packet.character === (historicalDependency?.observer
+            ??queuedEvent?.native_acoustic_source_lineage?.observer))) {
       const error = new Error(
         "CC-7AF new turn has no fresh broker/World revision or native listener.",
       );

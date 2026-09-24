@@ -303,6 +303,40 @@ This ingress only enforces committed-source lineage plus current
 CAS and requires fresh World-observed acoustic evidence; it does
 not turn historical hearing into an automatic response policy.
 
+## CC-7AF slice 8 — World-owned queued acoustic source binding
+
+A source event may opt-in one `next_events` item through an exact
+`native_acoustic_dependency_request` naming source character and
+observer. The request does not supply an action, stream, sound, cue
+reference or cancellation flag. During canonical World adjudication,
+only an actually selected/emitted speech action plus a real admitted
+observer increment can produce the queue entry's
+`native_acoustic_source_lineage` (event ID, session, source turn,
+prestate hash/revision, source action, listener cue ref/time and
+deterministic lineage hash). Caller-authored source lineage is refused,
+and a requested follow-up without actual source speech/hearing fails
+the origin turn atomically; ordinary unrequested `next_events`
+retain prior behavior.
+
+At the future queue head, the native World entrypoint validates the
+stored marker, the originating *committed* event request, the original
+causal speech/admission and the current World CAS **before** speculative
+preparation or Character Brain. Its provenance is removed from the
+Character-facing event. No historical cue is re-presented as current:
+a quiet follow-up makes no additional B response; a new public B
+response still needs a fresh current-turn acoustic release. The
+existing original World transaction and queue-head ordering remain
+the only persistent scheduler and commit authority.
+
+This is a bounded queued-source **binding and admission** stage, not
+a generic queue deletion/cancellation mechanism. An already
+committed sound (including its entire stream under the current
+whole-turn atomic model) cannot be canceled. Future pending events
+without this explicit lineage are not automatically inferred to
+depend on an old acoustic source, and source-epoch interruption
+interpretation remains separate.
+
+
 
 ## Acceptance and adversarial matrix
 

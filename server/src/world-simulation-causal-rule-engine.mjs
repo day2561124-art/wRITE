@@ -1,6 +1,9 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import {
+  buildWorldSimulationNativeQueuedAcousticSource,
+} from "./world-simulation-native-committed-source-service.mjs";
 import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
 import {
   buildWorldSimulationCommunicationAcousticBridgeContract,
@@ -1493,7 +1496,35 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     error.code = "WORLD_SIMULATION_CAUSAL_EVENT_ORDER_VIOLATION";
     throw error;
   }
-  const followUps = array(event.next_events ?? event.follow_up_events).map(cloneJson);
+  const followUps = array(event.next_events ?? event.follow_up_events)
+    .map((raw) => {
+      const followUp=cloneJson(raw);
+      // CC-7AF: only the canonical adjudicator may attach lineage to an
+      // actual future queue entry. An authored request cannot supply its
+      // own source, cancel an emitted stream, or mint a hypothetical cue.
+      if (Object.hasOwn(object(followUp),"native_acoustic_source_lineage")) {
+        const error=new Error("Caller may not forge a future acoustic source.");
+        error.code="CC7AF_QUEUED_SOURCE_INVALID";
+        throw error;
+      }
+      if (!Object.hasOwn(object(followUp),
+        "native_acoustic_dependency_request")) return followUp;
+      const eventId=String(followUp?.event_id ?? followUp?.id ?? "");
+      const lineage=buildWorldSimulationNativeQueuedAcousticSource({
+        request:followUp.native_acoustic_dependency_request,
+        event_id:eventId,
+        session_id:input.world_simulation_session_id,
+        source_turn_id:input.turn_id,
+        source_world_state_hash:input.world_state_hash,
+        source_revision_to:input.world_state_revision+1,
+        selected_action_intents:selectedActionIntents,
+        action_outcomes:outcomes,
+        observer_admissions:communicationObserverIncrementAdmissions,
+      });
+      delete followUp.native_acoustic_dependency_request;
+      followUp.native_acoustic_source_lineage=lineage;
+      return followUp;
+    });
   next.event_queue = [...queue.slice(1), ...followUps];
   pushTransition(
     transitions,

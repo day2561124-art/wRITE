@@ -354,6 +354,187 @@ try {
   assert.equal(finalHistory.turns[0].action_outcomes.some(item=>
     item.action_id===source.action_id&&item.result==="communication_emitted"),true);
   assert.equal(JSON.stringify(freshTurn).includes("B_PRIVATE_NEW_TURN_ONLY"),false);
+
+  // CC-7AF: the broker-authored next_events request itself has NO source
+  // action, stream, sound or B increment ref. The actual World causal
+  // result fills the queue entry ONLY if A emits and B really hears.
+  const queuedSession=await beginWorldSimulationSession({
+    simulation_label:"CC7AF World-owned future acoustic dependency",
+    seed:"cc7af-queue-authority",
+    rules:{event_driven:true,persistent_causality:true,
+      communication_action_seconds:0.3,
+      communication_speech_stream_increment_max_chars:2},
+    initial_world_state:{
+      simulation_time:"2026-09-24T00:00:00.000Z",
+      event_queue:[{
+        event_id:"source",type:"conversation",scene_id:"room",
+        participants:["A","B"],summary:"A speaks and schedules quiet follow-up",
+        next_events:[{
+          event_id:"follow-up",type:"conversation",scene_id:"room",
+          participants:["A","B"],summary:"B can check prior sound, not answer it",
+          native_acoustic_dependency_request:{
+            schema_version:"cc7af-queued-acoustic-source-request-v1",
+            source_character:"A",observer:"B",
+          },
+        }],
+      }],
+      scenes:{room:{
+        scene_id:"room",simulation_time:"2026-09-24T00:00:00.000Z",
+        dimensions:{width_m:6,depth_m:6},
+        entity_positions:{A:{x:1,y:1},B:{x:2,y:1}},
+        audibility_profiles:{A:{minimum_audible_db:35},
+          B:{minimum_audible_db:35}},
+        observable_by:{A:{visual:[],audible:[]},
+          B:{visual:[],audible:[]}},
+      }},
+      characters:{
+        A:{known:["男孩離開房子"],current_goal:"告知B",
+          speech_acoustics:{sound_level_db_at_1m:65},
+          communication_goal:goalA},
+        B:{known:[],current_goal:"聽A說話",
+          speech_acoustics:{sound_level_db_at_1m:65}},
+      },
+      memories:{A:[],B:[]},available_actions:{A:[],B:[]},
+    },
+  },options);
+  const queueSid=queuedSession.world_simulation_session_id;
+  const emittedSource=await runWorldSimulationTurn({
+    world_simulation_session_id:queueSid,event_id:"source",
+  },{
+    ...options,characterRuntimeManager,
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A")return "reject_all";
+      const c=packet.candidate_action_intents.find(x=>
+        x.communication?.surface_realization_complete===true
+        &&x.communication?.channel==="speech");
+      assert(c);return {action_id:c.action_id};
+    },
+  });
+  assert.equal(emittedSource.committed,true);
+  const queuedBefore=await getWorldSimulationState(queueSid,options);
+  const marker=queuedBefore.state.event_queue[0]
+    .native_acoustic_source_lineage;
+  assert.equal(marker.schema_version,
+    "cc7af-queued-acoustic-source-lineage-v1");
+  assert.equal(marker.source_character,"A");
+  assert.equal(marker.observer,"B");
+  assert.equal(typeof marker.observer_increment_ref,"string");
+  assert.equal(Object.hasOwn(queuedBefore.state.event_queue[0],
+    "native_acoustic_dependency_request"),false);
+  let queueBrainCalls=0,queueListenerInputs=0,queueListenerChoices=0;
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:queueSid,event_id:"follow-up",
+  },{
+    ...options,characterRuntimeManager,
+    characterBrain:async()=>{
+      queueBrainCalls++;throw new Error("Queued cue requires native listener");
+    },
+  }),/requires one native observer/u);
+  assert.equal(queueBrainCalls,0);
+  const quietQueue=await runWorldSimulationTurn({
+    world_simulation_session_id:queueSid,event_id:"follow-up",
+  },{
+    ...options,characterRuntimeManager,
+    characterNativeTemporalResponseObserver:"B",
+    characterBrain:async(packet)=>{
+      queueBrainCalls++;
+      assert.equal(JSON.stringify(packet)
+        .includes("native_acoustic_source_lineage"),false);
+      return "reject_all";
+    },
+    characterNativeTemporalResponseInputResolver:async()=>{
+      queueListenerInputs++;
+      throw new Error("Historical queue dependency is not a fresh sound.");
+    },
+    characterNativeTemporalResponseSelectionResolver:async()=>{
+      queueListenerChoices++;
+      throw new Error("History does not choose a current reply.");
+    },
+  });
+  assert.equal(quietQueue.committed,true);
+  assert.equal(queueBrainCalls,2);
+  assert.equal(queueListenerInputs,0);
+  assert.equal(queueListenerChoices,0);
+  const queueHistory=await getWorldSimulationHistory(queueSid,options);
+  assert.equal(queueHistory.turns.length,2);
+  assert.equal(queueHistory.turns[1].action_outcomes.some(x=>
+    x.result==="communication_emitted"),false);
+  assert.equal(queueHistory.turns[0].action_outcomes.some(x=>
+    x.actor==="A"&&x.result==="communication_emitted"),true);
+
+  // If the requested source never emitted speech, the World must refuse
+  // creation of that future dependency IN THE ORIGIN TURN. In particular
+  // there is no queue-head event that can later masquerade as B's hearing.
+  const noSoundState=JSON.parse(JSON.stringify({
+    simulation_time:"2026-09-24T00:00:00.000Z",
+    event_queue:[{
+      event_id:"unsounded",type:"conversation",scene_id:"room",
+      participants:["A","B"],summary:"No source speech",
+      next_events:[{
+        event_id:"phantom",type:"conversation",scene_id:"room",
+        participants:["A","B"],
+        native_acoustic_dependency_request:{
+          schema_version:"cc7af-queued-acoustic-source-request-v1",
+          source_character:"A",observer:"B",
+        },
+      }],
+    }],
+    scenes:{room:{
+      scene_id:"room",simulation_time:"2026-09-24T00:00:00.000Z",
+      dimensions:{width_m:6,depth_m:6},
+      entity_positions:{A:{x:1,y:1},B:{x:2,y:1}},
+      audibility_profiles:{A:{minimum_audible_db:35},
+        B:{minimum_audible_db:35}},
+      observable_by:{A:{visual:[],audible:[]},
+        B:{visual:[],audible:[]}},
+    }},
+    characters:{
+      A:{known:["男孩離開房子"],current_goal:"等待",
+        speech_acoustics:{sound_level_db_at_1m:65},
+        communication_goal:goalA},
+      B:{known:[],current_goal:"等待",
+        speech_acoustics:{sound_level_db_at_1m:65}},
+    },
+    memories:{A:[],B:[]},available_actions:{A:[],B:[]},
+  }));
+  const noSound=await beginWorldSimulationSession({
+    simulation_label:"CC7AF no phantom acoustic follow-up",
+    seed:"cc7af-no-sound",
+    rules:{event_driven:true,persistent_causality:true},
+    initial_world_state:noSoundState,
+  },options);
+  const noSoundSid=noSound.world_simulation_session_id;
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:noSoundSid,event_id:"unsounded",
+  },{
+    ...options,characterRuntimeManager,
+    characterBrain:async()=>"reject_all",
+  }),/no unique actually emitted speech/u);
+  assert.equal((await getWorldSimulationHistory(
+    noSoundSid,options)).turns.length,0);
+  assert.equal((await getWorldSimulationState(
+    noSoundSid,options)).revision,0);
+
+  // An authored follow-up may REQUEST binding, but may never set its
+  // own source identities. A fake marker is rejected before origin commit.
+  const forgedState=JSON.parse(JSON.stringify(noSoundState));
+  forgedState.event_queue[0].next_events[0]
+    .native_acoustic_source_lineage={source_action_id:"invented"};
+  const forged=await beginWorldSimulationSession({
+    simulation_label:"CC7AF no caller-forged lineage",
+    seed:"cc7af-forged-future",
+    rules:{event_driven:true,persistent_causality:true},
+    initial_world_state:forgedState,
+  },options);
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:forged.world_simulation_session_id,
+    event_id:"unsounded",
+  },{
+    ...options,characterRuntimeManager,
+    characterBrain:async()=>"reject_all",
+  }),/Caller may not forge a future acoustic source/u);
+  assert.equal((await getWorldSimulationHistory(
+    forged.world_simulation_session_id,options)).turns.length,0);
   console.log("CC-7AF authoritative immutable committed source guard passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});

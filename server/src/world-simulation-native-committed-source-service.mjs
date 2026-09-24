@@ -209,3 +209,151 @@ export async function assertWorldSimulationCommittedAcousticSource({
   };
   return copy({...audit,audit_hash:hashAgentRunValue(audit)});
 }
+
+// CC-7AF: a broker-authored follow-up REQUEST is not a source receipt.
+// Only the canonical causal resolution can stamp a scheduled queue entry
+// after it has actually emitted speech and admitted an acoustic increment.
+export const worldSimulationNativeQueuedSourceVersion =
+  "cc7af-queued-acoustic-source-lineage-v1";
+export const worldSimulationNativeQueuedSourceRequestVersion =
+  "cc7af-queued-acoustic-source-request-v1";
+
+export function buildWorldSimulationNativeQueuedAcousticSource({
+  request, event_id, session_id, source_turn_id,
+  source_world_state_hash, source_revision_to,
+  selected_action_intents, action_outcomes, observer_admissions,
+} = {}) {
+  if (!record(request)
+      || Object.keys(request).sort().join("|")
+        !== "observer|schema_version|source_character"
+      || request.schema_version
+        !== worldSimulationNativeQueuedSourceRequestVersion
+      || typeof event_id !== "string" || !event_id
+      || typeof session_id !== "string" || !session_id
+      || typeof source_turn_id !== "string" || !source_turn_id
+      || typeof source_world_state_hash !== "string"
+      || !source_world_state_hash
+      || !Number.isSafeInteger(source_revision_to)
+      || source_revision_to < 1
+      || typeof request.source_character !== "string"
+      || !request.source_character.trim()
+      || typeof request.observer !== "string"
+      || !request.observer.trim()
+      || request.source_character === request.observer)
+    reject("Queued source request must name a bounded real speaker and observer.");
+  const selected = (selected_action_intents ?? []).filter(item =>
+    item.character === request.source_character
+      && item.selection === "candidate_action_intent");
+  const emitted = (action_outcomes ?? []).filter(item =>
+    item.actor === request.source_character
+      && item.result === "communication_emitted"
+      && item.communication_event?.channel === "speech");
+  if (selected.length !== 1 || emitted.length !== 1
+      || selected[0].action_id !== emitted[0].action_id)
+    reject("Requested future source has no unique actually emitted speech.");
+  const admissions = (observer_admissions ?? []).filter(item =>
+    item.observer === request.observer
+      && item.admission_status === "heard_acoustic_cues_only"
+      && item.audit?.source_action_id === emitted[0].action_id
+      && item.audit?.source_speaker === request.source_character
+      && typeof item.observer_increment?.increment_ref === "string");
+  if (!admissions.length)
+    reject("Requested future dependency has no actual observer acoustic release.");
+  admissions.sort((a,b) => a.release_time_ms-b.release_time_ms
+    || a.observer_increment.increment_ref.localeCompare(
+      b.observer_increment.increment_ref,"en"));
+  const first = admissions[0];
+  const payload = {
+    schema_version:worldSimulationNativeQueuedSourceVersion,
+    event_id,session_id,source_turn_id,
+    source_world_state_hash,source_revision_to,
+    source_character:request.source_character,observer:request.observer,
+    source_action_id:emitted[0].action_id,
+    observer_increment_ref:first.observer_increment.increment_ref,
+    release_time_ms:first.release_time_ms,
+  };
+  return copy({...payload,lineage_hash:hashAgentRunValue(payload)});
+}
+
+/**
+ * Read the ACTUAL queue head from World State. The event object supplied
+ * by a caller never serves as provenance. Verify the origin event's
+ * originally requested follow-up before interpreting the immutable
+ * committed acoustic source; reject all caller-rehashed substitutions.
+ */
+export async function assertWorldSimulationQueuedAcousticSource({
+  session_id, event_id, expected_current_revision,
+  expected_current_state_hash,
+} = {}, options = {}) {
+  required(session_id,"session_id");
+  required(event_id,"event_id");
+  const [snapshot,history] = await Promise.all([
+    getWorldSimulationState(session_id,options),
+    getWorldSimulationHistory(session_id,options),
+  ]);
+  if (snapshot.revision !== expected_current_revision
+      || snapshot.state_hash !== expected_current_state_hash)
+    reject("Queued dependency is stale against current World CAS.");
+  const event = snapshot.state?.event_queue?.[0];
+  const marker = event?.native_acoustic_source_lineage;
+  if ((event?.event_id ?? event?.id) !== event_id
+      || !record(marker)
+      || marker.schema_version !== worldSimulationNativeQueuedSourceVersion
+      || marker.session_id !== session_id
+      || marker.event_id !== event_id
+      || marker.lineage_hash !== hashAgentRunValue(
+        Object.fromEntries(Object.entries(marker).filter(
+          ([key])=>key!=="lineage_hash"))))
+    reject("Queued event has no valid engine-generated acoustic dependency.");
+  const origin = (history.turns ?? []).filter(item =>
+    item.turn_id === marker.source_turn_id
+      && item.revision_to === marker.source_revision_to
+      && item.previous_state_hash === marker.source_world_state_hash);
+  if (origin.length !== 1)
+    reject("Queued event is not bound to one committed originating turn.");
+  const requests=(origin[0].event?.next_events
+    ?? origin[0].event?.follow_up_events ?? []).filter(item =>
+      (item.event_id ?? item.id) === event_id
+      && JSON.stringify(item.native_acoustic_dependency_request) ===
+        JSON.stringify({
+          schema_version:worldSimulationNativeQueuedSourceRequestVersion,
+          source_character:marker.source_character,
+          observer:marker.observer,
+        }));
+  if (requests.length !== 1)
+    reject("Queued acoustic dependency was not requested by the originating event.");
+  const rebuilt=buildWorldSimulationNativeQueuedAcousticSource({
+    request:requests[0].native_acoustic_dependency_request,
+    event_id,session_id,source_turn_id:origin[0].turn_id,
+    source_world_state_hash:origin[0].previous_state_hash,
+    source_revision_to:origin[0].revision_to,
+    selected_action_intents:origin[0].selected_action_intents,
+    action_outcomes:origin[0].action_outcomes,
+    observer_admissions:origin[0].communication_observer_increment_admissions,
+  });
+  if (JSON.stringify(marker)!==JSON.stringify(rebuilt))
+    reject("Queued source identity is not the originating World causal result.");
+  const source=origin[0];
+  const audit=await assertWorldSimulationCommittedAcousticSource({
+    session_id,source_turn_id:source.turn_id,
+    source_turn_hash:hashAgentRunValue(source),
+    source_action_id:marker.source_action_id,
+    source_character:marker.source_character,observer:marker.observer,
+    observer_increment_ref:marker.observer_increment_ref,
+    release_time_ms:marker.release_time_ms,
+    expected_source_receipt_bundle_hash:
+      source.subjective_choice_commitment_receipts?.receipt_bundle_hash,
+    expected_source_revision_to:source.revision_to,
+    expected_source_next_state_hash:source.next_state_hash,
+    expected_current_revision,expected_current_state_hash,
+  },options);
+  return copy({event_id,observer:marker.observer,
+    source_turn_hash:audit.source_turn_hash,
+    source_observer_increment_ref_hash:
+      audit.source_observer_increment_ref_hash,
+    source_release_time_ms:audit.source_release_time_ms,
+    checked_current_revision:audit.checked_current_revision,
+    checked_current_state_hash:audit.checked_current_state_hash,
+    prior_sound_retracted:false,
+    authorizes_current_speech:false});
+}
