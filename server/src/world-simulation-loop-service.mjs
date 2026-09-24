@@ -38,6 +38,10 @@ import {
   worldSimulationTurnIncrementHandoffVersion,
 } from "./world-simulation-communication-turn-increment-handoff-service.mjs";
 import {
+  buildWorldSimulationFloorOpportunityLedger,
+  buildWorldSimulationFloorOpportunityLedgerContract,
+} from "./world-simulation-communication-floor-opportunity-ledger-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4576,6 +4580,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationTurnIncrementHandoffContract(),
     character_turn_increment_handoff_version:
       worldSimulationTurnIncrementHandoffVersion,
+    communication_floor_opportunity_ledger:
+      buildWorldSimulationFloorOpportunityLedgerContract(),
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10052,6 +10058,13 @@ export async function resolveWorldSimulationTurn(
         observerMeaningIncrementProjection.engine_private_meaning_increments,
       resolver: options.characterCommunicationTurnIncrementResolver ?? null,
     });
+  // CC-7M is a passive post-causal opportunity ledger. Only the text-free
+  // audit reaches World history; private observer entries remain transient.
+  const floorOpportunityProjection =
+    buildWorldSimulationFloorOpportunityLedger({
+      handoff: communicationTurnIncrementHandoff,
+    });
+  const floorOpportunityLedger = floorOpportunityProjection.audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12399,6 +12412,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_turn_increment_handoff: cloneJson(
         communicationTurnIncrementHandoff,
+      ),
+      communication_floor_opportunity_ledger: cloneJson(
+        floorOpportunityLedger,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

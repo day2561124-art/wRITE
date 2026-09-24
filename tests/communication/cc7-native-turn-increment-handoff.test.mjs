@@ -397,6 +397,20 @@ try {
   assert.equal(handoff.projections[0].participation_intent.mode, "backchannel");
   assert(handoff.projections.slice(1).every((item) =>
     item.participation_intent.mode === "wait"));
+  const floorLedger = turn.communication_floor_opportunity_ledger;
+  assert.equal(floorLedger.status, "opportunity_evidence_only");
+  assert.equal(floorLedger.entry_count, delivered.length);
+  assert.equal(floorLedger.participation_count, delivered.length);
+  assert.equal(floorLedger.active_request_count, 0);
+  assert.equal(floorLedger.backchannel_intent_count, 1);
+  assert.equal(floorLedger.unresolved_competition_observed, false);
+  assert.equal(floorLedger.boundaries.floor_winner_selected, false);
+  assert.equal(floorLedger.boundaries.actual_floor_claimed, false);
+  assert.equal(floorLedger.boundaries.world_action_replanned, false);
+  assert.equal(JSON.stringify(floorLedger).includes(surface), false);
+  assert.equal(JSON.stringify(floorLedger).includes(semantic), false);
+  assert.equal(JSON.stringify(floorLedger).includes("目前聽成"), false);
+  assert.equal(JSON.stringify(floorLedger).includes(actionId), false);
   assert(handoff.projections.every((item) =>
     item.participation_intent.actual_floor_claimed === false
     && item.participation_intent.backchannel_signal_emitted === false

@@ -942,6 +942,7 @@ const steps = [
   ["CC-7J observer incremental lexical admission", ["tests/communication/cc7-observer-lexical-increment.test.mjs"]],
   ["CC-7K observer incremental meaning admission", ["tests/communication/cc7-observer-meaning-increment.test.mjs"]],
   ["CC-7L observer participation intent foundation", ["tests/communication/cc7-turn-participation-intent.test.mjs"]],
+  ["CC-7M floor opportunity ledger", ["tests/communication/cc7-floor-opportunity-ledger.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
