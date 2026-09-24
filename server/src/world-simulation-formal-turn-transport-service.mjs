@@ -49,6 +49,10 @@ import {
   getWorldSimulationState,
 } from "./world-simulation-state-service.mjs";
 import {
+  buildWorldSimulationTurnAuthorizationReentry,
+  prioritizeWorldSimulationAuthorizedSpeakerDecision,
+} from "./world-simulation-communication-turn-authorization-reentry-service.mjs";
+import {
   projectWorldSimulationEffectiveActionCommitment,
 } from "./world-simulation-effective-action-commitment-projection-service.mjs";
 import {
@@ -211,6 +215,12 @@ async function assertReceiptFresh(receipt, options) {
 
 async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions) {
   const worldHistory = await getWorldSimulationHistory(sessionId, loopOptions);
+  const communicationTurnAuthorizationReentry =
+    buildWorldSimulationTurnAuthorizationReentry({
+      world_history: worldHistory,
+      current_turn_id: prepared.turn_id,
+      current_characters: prepared.decision_packets.map((packet) => packet.character),
+    });
   const decisionInputs = [];
   const counterfactualReflectionReentryProjections = [];
   const counterfactualLinkedExperienceReentryProjections = [];
@@ -517,8 +527,15 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       characterInput.boundaries.counterfactual_linked_experience_longitudinal_case_deliberative_reuse_world_truth_authority = false;
     }
   }
+  const prioritizedDecisionInputs =
+    prioritizeWorldSimulationAuthorizedSpeakerDecision({
+      decision_inputs: decisionInputs,
+      reentry: communicationTurnAuthorizationReentry,
+    });
   return {
-    decision_inputs: decisionInputs,
+    decision_inputs: prioritizedDecisionInputs,
+    communication_turn_authorization_reentry:
+      communicationTurnAuthorizationReentry,
     counterfactual_reflection_reentry_projections:
       counterfactualReflectionReentryProjections,
     counterfactual_linked_experience_reentry_projections:
@@ -574,6 +591,8 @@ async function prepareFormalDecisionRound(
   );
   const preparedWithPreActionDeliberation = {
     ...prepared,
+    communication_turn_authorization_reentry:
+      cloneJson(actionBundle.communication_turn_authorization_reentry),
     counterfactual_reflection_reentry_projections:
       cloneJson(actionBundle.counterfactual_reflection_reentry_projections),
     counterfactual_linked_experience_reentry_projections:
