@@ -951,6 +951,7 @@ const steps = [
   ["CC-7S World floor transition admission", ["tests/communication/cc7-floor-transition-admission.test.mjs"]],
   ["CC-7T selected public turn invitation", ["tests/communication/cc7-public-turn-invitation.test.mjs"]],
   ["CC-7U public invitation observer uptake", ["tests/communication/cc7-public-invitation-uptake.test.mjs"]],
+  ["CC-7V nominated public turn transition authorization", ["tests/communication/cc7-nominated-transition-authorization.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

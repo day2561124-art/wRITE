@@ -67,6 +67,9 @@ import {
   buildWorldSimulationPublicInvitationUptake,
 } from "./world-simulation-communication-public-invitation-uptake-service.mjs";
 import {
+  buildWorldSimulationNominatedTransitionAuthorization,
+} from "./world-simulation-communication-nominated-transition-authorization-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10157,6 +10160,18 @@ export async function resolveWorldSimulationTurn(
       speaker_intent_projection: speakerNextTurnIntent,
       selected_action_intents: selected,
     }).audit;
+  // CC-7V is the first World-owned next-speaker selection boundary. It
+  // authorizes only one future nominated transition when CC-7U has a matching
+  // public invitation and the same observer's current floor request. Execution
+  // remains deferred; the already-resolved turn is never reopened.
+  const nominatedTransitionAuthorization =
+    buildWorldSimulationNominatedTransitionAuthorization({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+      selected_action_intents: selected,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12528,6 +12543,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_public_invitation_uptake: cloneJson(
         publicInvitationUptake,
+      ),
+      communication_nominated_transition_authorization: cloneJson(
+        nominatedTransitionAuthorization,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

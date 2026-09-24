@@ -107,6 +107,11 @@ assert.equal(accepted.audit.entries[0].evidence_relation,
   "public_invitation_and_subjective_request_coincide");
 assert.equal(accepted.audit.entries[0].lexical_invitation_understood,false);
 assert.equal(accepted.audit.entries[0].actual_floor_awarded,false);
+assert.equal(accepted.engine_private_evidence.entries.length,1);
+assert.equal(accepted.engine_private_evidence.entries[0].observer,observer);
+assert.equal(accepted.engine_private_evidence.entries[0].response_plan_ref,"reply_B");
+assert.equal(accepted.engine_private_evidence.entries[0].evidence_relation,
+  "public_invitation_and_subjective_request_coincide");
 assert.equal(accepted.engine_private_evidence.next_speaker_selected,null);
 assert.equal(accepted.engine_private_evidence.world_action_replanned,false);
 for(const secret of [actionId,actor,observer,soundId,streamId,surface,semantic,

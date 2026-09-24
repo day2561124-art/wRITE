@@ -644,11 +644,28 @@ try {
     },
     characterCommunicationTurnIncrementResolver: async (view) => {
       invitationViews.push(structuredClone(view));
-      return { listener_decision: {
-        turn_end_projection: "uncertain",
-        projection_basis_refs: [view.perceived_speech_increment.perceived_cue_refs[0]],
-        response_preparation: "none",
-      } };
+      const cue = view.perceived_speech_increment.perceived_cue_refs[0];
+      return {
+        listener_decision: {
+          turn_end_projection: "possible_completion",
+          projection_basis_refs: [cue],
+          response_preparation: "ready",
+          response_plan_ref: "cc7v_reply_B",
+        },
+        response_preparation_context: {
+          observer: view.observer,
+          available_response_plan_refs: ["cc7v_reply_B"],
+        },
+        participation_decision: {
+          mode: "request_floor",
+          basis_refs: [cue],
+          response_plan_ref: "cc7v_reply_B",
+        },
+        selection_cue_decision: {
+          status: "selected_me",
+          basis_refs: [cue],
+        },
+      };
     },
     characterBrain: async (packet) => {
       if (packet.character !== "A") return "reject_all";
@@ -683,11 +700,23 @@ try {
   assert.equal(uptake.status, "public_and_subjective_evidence_join_only");
   assert.equal(uptake.audible_invitation_count, 1);
   assert.equal(uptake.current_observer_projection_count, 1);
-  assert.equal(uptake.convergent_request_count, 0);
+  assert.equal(uptake.convergent_request_count, 1);
   assert.equal(uptake.entries[0].target_relation, "nominated_observer");
   assert.equal(uptake.entries[0].actual_floor_awarded, false);
   assert.equal(uptake.entries[0].lexical_invitation_understood, false);
   assert.equal(JSON.stringify(uptake).includes(invitation), false);
+  const transition = turn.communication_nominated_transition_authorization;
+  assert.equal(transition.status, "nominated_future_transition_authorized");
+  assert.equal(transition.convergent_nomination_candidate_count, 1);
+  assert.equal(transition.next_speaker_selected, true);
+  assert.equal(transition.selected_transition.authorization,
+    "future_nominated_turn_selected");
+  assert.equal(transition.selected_transition.actual_floor_awarded, false);
+  assert.equal(transition.selected_transition.response_emitted, false);
+  assert.equal(transition.boundaries.current_turn_world_action_replanned, false);
+  assert.equal(transition.boundaries.open_floor_self_selection_deferred, true);
+  assert.equal(JSON.stringify(transition).includes("cc7v_reply_B"), false);
+  assert.equal(JSON.stringify(transition).includes(invitation), false);
 } finally {
   await rm(positiveRoot, { recursive: true, force: true });
 }

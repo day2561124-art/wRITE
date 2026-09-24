@@ -61,7 +61,16 @@ export function buildWorldSimulationPublicInvitationUptake({
   }
   const intentions = new Map(speaker_intent_projection.engine_private_intentions
     .map((item) => [item.intention_id, item]));
+  const projectionById = new Map();
+  for (const item of handoff?.projections ?? []) {
+    const projectionId = item?.projection?.projection_id;
+    if (typeof projectionId !== "string" || !projectionId) continue;
+    if (projectionById.has(projectionId))
+      fail("One projection identity cannot appear twice.");
+    projectionById.set(projectionId, item);
+  }
   const entries = [];
+  const privateEntries = [];
   for (const signal of publicInvitation.engine_private_signals.entries) {
     const group = key(signal.source_action_id, signal.observer);
     const released = latestAcoustic.get(group);
@@ -89,6 +98,12 @@ export function buildWorldSimulationPublicInvitationUptake({
         relation = "public_invitation_and_subjective_request_coincide";
       else relation = "independent_subjective_evidence";
     }
+    const handoffEntry = current
+      ? projectionById.get(projection.source_projection_id) ?? null
+      : null;
+    if (current && !handoffEntry)
+      fail("Current observer projection is missing its CC-7D handoff entry.");
+    const participation = handoffEntry?.participation_intent ?? null;
     entries.push({
       observer_ref: ref("observer", signal.observer),
       source_ref: ref("source", signal.source_action_id),
@@ -100,6 +115,22 @@ export function buildWorldSimulationPublicInvitationUptake({
       evidence_relation: relation,
       lexical_invitation_understood: false,
       actual_floor_awarded: false,
+    });
+    privateEntries.push({
+      observer: signal.observer,
+      source_action_id: signal.source_action_id,
+      public_signal_id: signal.signal_id,
+      speaker_intent_id: signal.speaker_intent_id,
+      source_projection_id: current ? projection.source_projection_id : null,
+      participation_intent_id: current
+        ? participation?.intention_id ?? null : null,
+      response_plan_ref: current
+        ? participation?.response_plan_ref ?? null : null,
+      release_time_ms: released,
+      target_relation: targetRelation,
+      subjective_selection: selection,
+      subjective_readiness: readiness,
+      evidence_relation: relation,
     });
   }
   return copy({
@@ -126,6 +157,7 @@ export function buildWorldSimulationPublicInvitationUptake({
       },
     },
     engine_private_evidence: {
+      entries: privateEntries,
       actual_floor_awarded: false,
       next_speaker_selected: null,
       world_action_replanned: false,
