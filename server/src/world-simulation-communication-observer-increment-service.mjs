@@ -108,12 +108,12 @@ export function projectWorldSimulationObserverSpeechIncrements({
       && entry.actor === speaker
       && entry.increment_ref === increment.increment_ref
       && entry.increment_sequence === increment.sequence
-      && entry.time_ms === increment.end_offset_ms
+      && entry.time_ms === (increment.release_time_ms ?? increment.end_offset_ms)
       && entry.surface_fragment === increment.surface_fragment
       && entry.signal_phase === increment.signal_phase);
     if (matching.length !== 1)
       reject("Each release must match exactly one authoritative causal timeline entry.");
-    if (increment.end_offset_ms <= released_through_ms)
+    if ((increment.release_time_ms ?? increment.end_offset_ms) <= released_through_ms)
       releaseEntries.push(increment);
   }
 
@@ -152,7 +152,7 @@ export function projectWorldSimulationObserverSpeechIncrements({
     perceived_speaker: null,
     lexical_intelligibility_attested: false,
     speaker_identity_recognized: false,
-    release_time_ms: increment.end_offset_ms,
+    release_time_ms: increment.release_time_ms ?? increment.end_offset_ms,
     no_future_increment_exposed: true,
   })) : [];
 

@@ -788,6 +788,7 @@ function resolveSpatialRulePreview(input = {}) {
   const next = cloneJson(snapshot);
   const event = object(input.event);
   const selectedActionIntents = array(input.selected_action_intents);
+  const nativeResponse = object(input.native_temporal_response);
   const sceneId = String(input.scene_id ?? event.scene_id ?? event.location_id ?? "").trim();
   const snapshotScene = object(object(snapshot.scenes)[sceneId] ?? snapshot.scene_state);
   const nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
@@ -809,7 +810,18 @@ function resolveSpatialRulePreview(input = {}) {
     const kind = actionKind(candidate);
     if (kind === "communication") {
       const durationMs = resolveCommunicationIntent(actor, candidate, rules, outcomes);
-      elapsedMs = Math.max(elapsedMs, durationMs);
+      const nativeStartMs = nativeResponse.actor === actor
+        && nativeResponse.action_id === candidate.action_id
+        ? nativeResponse.start_time_ms : 0;
+      if (nativeStartMs > 0) {
+        const emitted = outcomes.at(-1);
+        if (emitted?.result !== "communication_emitted"
+            || emitted.action_id !== candidate.action_id
+            || emitted.communication_event?.channel !== "speech")
+          throw new Error("Native temporal response must resolve to emitted speech.");
+        emitted.start_time_ms = nativeStartMs;
+      }
+      elapsedMs = Math.max(elapsedMs, durationMs + nativeStartMs);
       continue;
     }
     if (kind === "movement") {
@@ -967,6 +979,19 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   let next = cloneJson(snapshot);
   const event = object(input.event);
   const selectedActionIntents = array(input.selected_action_intents);
+  const nativeResponse = object(input.native_temporal_response);
+  if (Object.keys(nativeResponse).length) {
+    const keys = Object.keys(nativeResponse).sort().join("|");
+    if (keys !== "action_id|actor|start_time_ms"
+        || !Number.isFinite(nativeResponse.start_time_ms)
+        || nativeResponse.start_time_ms <= 0
+        || nativeResponse.start_time_ms > 3600000
+        || selectedActionIntents.filter((selected) =>
+          selected?.character === nativeResponse.actor
+          && selected?.candidate?.action_id === nativeResponse.action_id
+          && selected?.candidate?.communication?.channel === "speech").length !== 1)
+      throw new Error("Invalid World-owned native temporal response anchor.");
+  }
   const { sceneId, scene: snapshotScene } = sceneForEvent(snapshot, event);
   let nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   const transitions = [];
@@ -995,6 +1020,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       event,
       scene_id: sceneId,
       selected_action_intents: selectedActionIntents,
+      native_temporal_response: nativeResponse,
     }),
   });
   transitions.push(...array(spatialProduced.proposal_package.mutation_proposals));
@@ -1290,12 +1316,14 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
         duration_ms: canonicalCommunicationDurationMs,
       },
       technical_increment_max_chars: speechStreamTechnicalMaxChars,
+      start_time_ms: spatialOutcome.start_time_ms ?? 0,
     });
     const streamRecord = {
       schema_version: worldSimulationCommunicationSpeechStreamVersion,
       stream_id: speechStream.stream_id,
       source_action_id: speechStream.source_action_id,
       duration_ms: speechStream.duration_ms,
+      ...(speechStream.start_time_ms > 0 ? { start_time_ms: speechStream.start_time_ms } : {}),
       increment_count: speechStream.increment_count,
       technical_increment_max_chars: speechStream.technical_increment_max_chars,
       increments: cloneJson(speechStream.increments),
@@ -1407,7 +1435,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
             committed_outcome: outcome,
             acoustic_signal: signal,
             causal_timeline: causalTimeline,
-            released_through_ms: increment.end_offset_ms,
+            released_through_ms: increment.release_time_ms ?? increment.end_offset_ms,
             static_acoustics_verified: true,
           });
           // Store only the new cue released at this timestamp, not a
@@ -1415,7 +1443,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
           communicationObserverIncrementAdmissions.push({
             schema_version: worldSimulationObserverSpeechIncrementVersion,
             observer,
-            release_time_ms: increment.end_offset_ms,
+            release_time_ms: increment.release_time_ms ?? increment.end_offset_ms,
             admission_status: admission.admission_status,
             observer_increment: admission.observer_increments.at(-1) ?? null,
             audit: admission.audit,

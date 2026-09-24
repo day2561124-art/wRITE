@@ -20,8 +20,9 @@ function ref(kind, value) {
 }
 
 /**
- * Observe physical simultaneity only. Current CC-7B speech streams start at
- * turn-relative zero; their duration bounds an interval. Neither a pair of
+ * Observe physical simultaneity only. Default CC-7B streams begin at zero;
+ * a World-owned native temporal response may begin at its verified release
+ * anchor. Neither a pair of
  * overlapping intervals nor their release order says who interrupted whom.
  */
 export function buildWorldSimulationSpeechOverlapEvidence({
@@ -45,6 +46,7 @@ export function buildWorldSimulationSpeechOverlapEvidence({
     const canonical = projectWorldSimulationCommunicationSpeechStream({
       outcome,
       technical_increment_max_chars: stream.technical_increment_max_chars,
+      start_time_ms: outcome.start_time_ms ?? 0,
     });
     const {source_actor: _privateActor, ...committedStream} = canonical;
     if (JSON.stringify(stream) !== JSON.stringify(committedStream))
@@ -59,7 +61,7 @@ export function buildWorldSimulationSpeechOverlapEvidence({
         entry?.action_id === outcome.action_id &&
         entry?.stream_id === stream.stream_id &&
         entry?.increment_ref === increment.increment_ref &&
-        entry?.time_ms === increment.end_offset_ms &&
+        entry?.time_ms === (increment.release_time_ms ?? increment.end_offset_ms) &&
         entry?.surface_fragment === increment.surface_fragment &&
         entry?.signal_phase === increment.signal_phase);
       if (matches.length !== 1)
@@ -68,8 +70,8 @@ export function buildWorldSimulationSpeechOverlapEvidence({
     speeches.push({
       actor: outcome.actor,
       action_id: outcome.action_id,
-      start_ms: 0,
-      end_ms: stream.duration_ms,
+      start_ms: stream.start_time_ms ?? 0,
+      end_ms: (stream.start_time_ms ?? 0) + stream.duration_ms,
     });
   }
   if (speeches.length > 64)

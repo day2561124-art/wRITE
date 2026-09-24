@@ -609,8 +609,10 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     if (durationMs === null) continue;
     const speechStream = object(outcome?.communication_speech_stream);
     for (const increment of array(speechStream.increments)) {
-      const timeMs = finiteNumber(increment?.end_offset_ms);
-      if (timeMs === null || timeMs < 0 || timeMs > durationMs + 1e-9) continue;
+      const timeMs = finiteNumber(increment?.release_time_ms ?? increment?.end_offset_ms);
+      const startMs = finiteNumber(outcome?.start_time_ms, 0) ?? 0;
+      if (timeMs === null || timeMs < startMs
+          || timeMs > startMs + durationMs + 1e-9) continue;
       entries.push({
         kind: "communication_speech_increment",
         actor: outcome.actor ?? null,
@@ -640,7 +642,7 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
       kind,
       actor: outcome.actor ?? null,
       action_id: outcome.action_id ?? null,
-      time_ms: durationMs,
+      time_ms: durationMs + (finiteNumber(outcome?.start_time_ms, 0) ?? 0),
       result: outcome.result ?? null,
       source_layer: "spatial_rules",
     });

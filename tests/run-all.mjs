@@ -959,6 +959,7 @@ const steps = [
   ["CC-7AB read-only prepared epoch", ["tests/communication/cc7-observer-prepared-epoch.test.mjs"]],
   ["CC-7AC observer response proposal", ["tests/communication/cc7-observer-response-proposal.test.mjs"]],
   ["CC-7AD World-owned native temporal schedule", ["tests/communication/cc7-native-temporal-schedule.test.mjs"]],
+  ["CC-7AD anchored causal re-adjudication", ["tests/communication/cc7-native-temporal-causal-recompute.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

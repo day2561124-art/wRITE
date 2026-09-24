@@ -75,6 +75,7 @@ export function buildWorldSimulationCommunicationSpeechStreamContract() {
     exact_public_surface_reconstructed: true,
     technical_increment_segmentation_only: true,
     engine_holds_complete_release_schedule: true,
+    world_owned_start_time_anchor_supported: true,
     observer_release_gate_required: true,
     listener_increment_consumption_implemented_here: false,
     segmentation_is_psychological_boundary: false,
@@ -106,6 +107,7 @@ export function buildWorldSimulationCommunicationSpeechStreamContract() {
 export function projectWorldSimulationCommunicationSpeechStream({
   outcome,
   technical_increment_max_chars = 6,
+  start_time_ms = 0,
 } = {}) {
   if (!validCommittedSpeechOutcome(outcome))
     fail("CC-7B requires one committed realized speech outcome.");
@@ -119,6 +121,9 @@ export function projectWorldSimulationCommunicationSpeechStream({
     technical_increment_max_chars,
     "technical_increment_max_chars",
   );
+  if (!Number.isFinite(start_time_ms) || start_time_ms < 0
+      || start_time_ms > 3600000)
+    fail("start_time_ms must be a bounded World-owned release anchor.");
 
   const fragments = technicalFragments(surfaceText, maxChars);
   if (fragments.length === 0)
@@ -131,6 +136,7 @@ export function projectWorldSimulationCommunicationSpeechStream({
     duration_ms: durationMs,
     surface_text: surfaceText,
     technical_increment_max_chars: maxChars,
+    ...(start_time_ms > 0 ? { start_time_ms } : {}),
   };
   const streamId =
     `communication_speech_stream_${hashAgentRunValue(streamIdentity).slice(0, 24)}`;
@@ -145,6 +151,7 @@ export function projectWorldSimulationCommunicationSpeechStream({
     const endOffsetMs = index === fragments.length - 1
       ? durationMs
       : durationMs * (consumedUnits / totalUnits);
+    const releaseTimeMs = start_time_ms + endOffsetMs;
     const incrementRef =
       `speech_increment_${hashAgentRunValue({
         version: worldSimulationCommunicationSpeechStreamVersion,
@@ -153,6 +160,7 @@ export function projectWorldSimulationCommunicationSpeechStream({
         surface_fragment: fragment,
         start_offset_ms: startOffsetMs,
         end_offset_ms: endOffsetMs,
+        ...(start_time_ms > 0 ? { release_time_ms: releaseTimeMs } : {}),
       }).slice(0, 24)}`;
 
     return {
@@ -162,6 +170,7 @@ export function projectWorldSimulationCommunicationSpeechStream({
       sequence: index + 1,
       start_offset_ms: startOffsetMs,
       end_offset_ms: endOffsetMs,
+      ...(start_time_ms > 0 ? { release_time_ms: releaseTimeMs } : {}),
       surface_fragment: fragment,
       signal_phase:
         index === fragments.length - 1 ? "acoustic_segment_ended" : "ongoing",
@@ -184,6 +193,7 @@ export function projectWorldSimulationCommunicationSpeechStream({
     source_action_id: actionId,
     source_actor: actor,
     duration_ms: durationMs,
+    ...(start_time_ms > 0 ? { start_time_ms } : {}),
     increment_count: increments.length,
     technical_increment_max_chars: maxChars,
     increments,
