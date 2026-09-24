@@ -945,6 +945,7 @@ const steps = [
   ["CC-7M floor opportunity ledger", ["tests/communication/cc7-floor-opportunity-ledger.test.mjs"]],
   ["CC-7N subjective turn allocation readiness", ["tests/communication/cc7-turn-allocation-readiness.test.mjs"]],
   ["CC-7O observer selection cue admission", ["tests/communication/cc7-turn-selection-cue.test.mjs"]],
+  ["CC-7P selection-aware turn readiness", ["tests/communication/cc7-selection-aware-readiness.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

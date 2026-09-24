@@ -440,6 +440,23 @@ try {
   assert.equal(JSON.stringify(readinessAudit).includes(semantic), false);
   assert.equal(JSON.stringify(readinessAudit).includes("目前聽成"), false);
   assert.equal(JSON.stringify(readinessAudit).includes(actionId), false);
+  const selectionAwareAudit = turn.communication_selection_aware_readiness;
+  assert.equal(selectionAwareAudit.status, "selection_and_readiness_evidence_only");
+  assert.equal(selectionAwareAudit.latest_observer_signal_count, 1);
+  assert.equal(selectionAwareAudit.active_request_count, 0);
+  assert.equal(selectionAwareAudit.subjective_selected_me_request_count, 0);
+  assert.equal(selectionAwareAudit.selection_hint_without_floor_request_count, 0);
+  assert.equal(selectionAwareAudit.entries[0].mode, "wait");
+  assert.equal(selectionAwareAudit.entries[0].subjective_selection_status, "uncertain");
+  assert.equal(selectionAwareAudit.entries[0].evidence_state, "not_seeking_floor");
+  assert.equal(selectionAwareAudit.entries[0].floor_awarded, false);
+  assert.equal(selectionAwareAudit.boundaries.actual_next_speaker_selected, false);
+  assert.equal(selectionAwareAudit.boundaries.world_floor_awarded, false);
+  assert.equal(selectionAwareAudit.boundaries.spoken_signal_emitted, false);
+  assert.equal(JSON.stringify(selectionAwareAudit).includes(surface), false);
+  assert.equal(JSON.stringify(selectionAwareAudit).includes(semantic), false);
+  assert.equal(JSON.stringify(selectionAwareAudit).includes("目前聽成"), false);
+  assert.equal(JSON.stringify(selectionAwareAudit).includes(actionId), false);
   assert(handoff.projections.every((item) =>
     item.participation_intent.actual_floor_claimed === false
     && item.participation_intent.backchannel_signal_emitted === false

@@ -46,6 +46,10 @@ import {
   buildWorldSimulationTurnAllocationReadinessContract,
 } from "./world-simulation-communication-turn-allocation-readiness-service.mjs";
 import {
+  buildWorldSimulationSelectionAwareReadiness,
+  buildWorldSimulationSelectionAwareReadinessContract,
+} from "./world-simulation-communication-selection-aware-readiness-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4588,6 +4592,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationFloorOpportunityLedgerContract(),
     communication_turn_allocation_readiness:
       buildWorldSimulationTurnAllocationReadinessContract(),
+    communication_selection_aware_readiness:
+      buildWorldSimulationSelectionAwareReadinessContract(),
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10077,6 +10083,12 @@ export async function resolveWorldSimulationTurn(
     buildWorldSimulationTurnAllocationReadiness({
       handoff: communicationTurnIncrementHandoff,
     }).audit;
+  // CC-7P joins already-validated observer selection hypotheses with
+  // participation/subjective completion; no actual World floor transfer.
+  const selectionAwareReadiness =
+    buildWorldSimulationSelectionAwareReadiness({
+      handoff: communicationTurnIncrementHandoff,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12430,6 +12442,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_turn_allocation_readiness: cloneJson(
         turnAllocationReadiness,
+      ),
+      communication_selection_aware_readiness: cloneJson(
+        selectionAwareReadiness,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
