@@ -89,6 +89,42 @@ continuing. A caller-provided challenge is not evidence that the real
 World's source has changed, nor permission to rewrite earlier selected
 public actions. Both claims require separate authoritative evidence.
 
+## CC-7AF slice 3 — provisional replacement-source reentry proof
+
+`world-simulation-native-source-reentry-service.mjs` is an **engine-private
+dry run**, NOT a second native World loop or a source mutation tool.
+Both pre-revision and post-revision A/B action sets must match their own
+complete decision packets, exact selected candidates, and recomputed
+Phase74D receipt bundles against the SAME verified original pre-turn
+World state. A changed source is accepted for this proof only when the
+original A release is ABSENT from the revised canonical acoustic
+admissions; a different sentence with the same clock time is not the
+same source. B must retain a distinct pre-cue `reject_all` receipt in
+BOTH decision stages.
+
+The revised branch then uses the existing CC-7AD replay on its OWN
+canonical World observer ledger: old private epochs, consumed receipts
+and speculative Character Brain packet are not accepted as input.
+A fresh B input and new B response selection are required for the new
+source. Tests compare the two resulting epoch identities and reject
+wrong/forged Phase74D bundles, stale World state hash, switched
+candidate bodies and unchanged source before B's input runs. The
+returned audit contains only hashes and source/response references;
+the full revised causal resolution remains ENGINE PRIVATE.
+
+**Authority boundary:** this helper proves consistency of a
+*proposed, separately deliberated* source replacement. It DOES NOT
+prove the caller was authorized to revise a committed source,
+does not persist or replace the original Phase74D receipt, and does not
+commit either the original or replacement branch. The real broker,
+World state revision, chronological mutation executor and atomic commit
+must independently authorize the revised stage before adopting it.
+Already committed earlier sound cannot be retroactively replaced.
+Unreleased future increments and dependency invalidation still need
+live scheduler/restart evidence. There is no automatic cross-turn
+cancellation/replanning or interruption judgement in this slice.
+
+
 ## Acceptance and adversarial matrix
 
 | Case | Required evidence/result |
