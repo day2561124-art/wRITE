@@ -79,6 +79,10 @@ import {
   buildWorldSimulationSpeechOverlapEvidence,
 } from "./world-simulation-communication-speech-overlap-service.mjs";
 import {
+  replayWorldSimulationNativeTemporalResponse,
+  reconcileWorldSimulationNativeTemporalChoiceLineage,
+} from "./world-simulation-native-temporal-replay-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -9821,6 +9825,53 @@ export async function resolveWorldSimulationTurn(
     ));
   }
 
+  // CC-7AD: an explicitly enabled World-owned replay runs BEFORE Phase74D
+  // captures the pre-cue choice. The post-cue choice is a distinct stage,
+  // never a retroactive rewrite of the original character decision.
+  const nativeResponseEnabled =
+    typeof options.characterNativeTemporalResponseInputResolver === "function"
+    && typeof options.characterNativeTemporalResponseSelectionResolver === "function";
+  if ((options.characterNativeTemporalResponseInputResolver !== undefined
+      || options.characterNativeTemporalResponseSelectionResolver !== undefined)
+      && !nativeResponseEnabled) {
+    const error = new Error(
+      "Native temporal response requires BOTH observer input and selection resolvers.",
+    );
+    error.code = "CC7AD_NATIVE_RESPONSE_RESOLVER_PAIR_REQUIRED";
+    throw error;
+  }
+  if (nativeResponseEnabled && typeof options.causalAdjudicator === "function") {
+    const error = new Error(
+      "Native temporal replay requires the canonical programmatic causal adjudicator.",
+    );
+    error.code = "CC7AD_NATIVE_CUSTOM_ADJUDICATOR_UNSUPPORTED";
+    throw error;
+  }
+  const nativeObserver = nativeResponseEnabled
+    ? (options.characterNativeTemporalResponseObserver
+      ?? selected.find((choice) => choice.selection === "reject_all")?.character)
+    : null;
+  const nativeTemporalReplay = nativeObserver
+    ? await replayWorldSimulationNativeTemporalResponse({
+      session_id: sessionId,
+      turn_id: preparedTurn.turn_id,
+      world_state: cloneJson(snapshot.state),
+      world_state_revision: snapshot.revision,
+      world_state_hash: snapshot.state_hash,
+      event: cloneJson(preparedTurn.event),
+      scene_analysis: cloneJson(
+        preparedTurn.scene_analysis?.trusted_execution_view
+        ?? preparedTurn.scene_analysis,
+      ),
+      selected_action_intents: cloneJson(selected),
+      observer: nativeObserver,
+      character_input_resolver:
+        options.characterNativeTemporalResponseInputResolver,
+      selection_resolver:
+        options.characterNativeTemporalResponseSelectionResolver,
+    })
+    : null;
+
   const subjectiveChoiceCommitmentReceipts =
     buildWorldSimulationSubjectiveChoiceCommitmentReceipts({
       world_simulation_session_id: sessionId,
@@ -9830,6 +9881,13 @@ export async function resolveWorldSimulationTurn(
       decision_packets: preparedTurn.decision_packets,
       selected_action_intents: selected,
     });
+
+  const nativeTemporalChoiceEvidence =
+    nativeTemporalReplay?.status === "replayed_same_turn"
+      ? reconcileWorldSimulationNativeTemporalChoiceLineage({
+        original_receipts: subjectiveChoiceCommitmentReceipts,
+        native_replay: nativeTemporalReplay,
+      }) : null;
 
   const copingIntentionCommitments = buildWorldSimulationCopingIntentionCommitments({
     world_history: await getWorldSimulationHistory(sessionId, options),
@@ -9981,19 +10039,30 @@ export async function resolveWorldSimulationTurn(
     });
 
   const preAdjudicationHash = hashAgentRunValue(snapshot.state);
-  const causalResolution = assertCausalResolution(await causalAdjudicator({
-    world_simulation_session_id: sessionId,
-    turn_id: preparedTurn.turn_id,
-    world_state: cloneJson(snapshot.state),
-    world_state_revision: snapshot.revision,
-    world_state_hash: snapshot.state_hash,
-    event: cloneJson(preparedTurn.event),
-    scene_analysis: cloneJson(
-      preparedTurn.scene_analysis?.trusted_execution_view
-      ?? preparedTurn.scene_analysis,
-    ),
-    selected_action_intents: cloneJson(selected),
-  }));
+  // Earlier subjective-choice and cross-option lineage above remain pre-cue.
+  // The final World action ledger below contains the separate post-cue
+  // response only after its exact original-state causal recomputation.
+  if (nativeTemporalReplay?.status === "replayed_same_turn") {
+    selected.splice(0, selected.length,
+      ...cloneJson(nativeTemporalReplay.selected_action_intents));
+  }
+  const causalResolution = assertCausalResolution(
+    nativeTemporalReplay?.status === "replayed_same_turn"
+      ? cloneJson(nativeTemporalReplay.causal_resolution)
+      : await causalAdjudicator({
+        world_simulation_session_id: sessionId,
+        turn_id: preparedTurn.turn_id,
+        world_state: cloneJson(snapshot.state),
+        world_state_revision: snapshot.revision,
+        world_state_hash: snapshot.state_hash,
+        event: cloneJson(preparedTurn.event),
+        scene_analysis: cloneJson(
+          preparedTurn.scene_analysis?.trusted_execution_view
+          ?? preparedTurn.scene_analysis,
+        ),
+        selected_action_intents: cloneJson(selected),
+      }),
+  );
   if (hashAgentRunValue(snapshot.state) !== preAdjudicationHash) {
     throw new Error("causalAdjudicator mutated the persisted input snapshot in place.");
   }
@@ -12556,6 +12625,7 @@ export async function resolveWorldSimulationTurn(
       selected_action_intents: selected,
       subjective_choice_commitment_receipts:
         cloneJson(subjectiveChoiceCommitmentReceipts),
+      native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence),
       state_transitions: array(causalResolution.state_transitions),
       action_outcomes: array(causalResolution.action_outcomes),
       knowledge_transitions: array(causalResolution.knowledge_transitions),
@@ -13422,6 +13492,7 @@ export async function resolveWorldSimulationTurn(
     previous_state_hash: snapshot.state_hash,
     next_state_hash: committed.state.state_hash,
     selected_action_intents: selected,
+    native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence),
     subjective_choice_commitment_receipt: {
       version: worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
       receipt_count: subjectiveChoiceCommitmentReceipts.receipt_count,

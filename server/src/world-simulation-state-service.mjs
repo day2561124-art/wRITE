@@ -14,6 +14,9 @@ import {
 import {
   assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle,
 } from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
+import {
+  assertWorldSimulationNativeTemporalChoiceEvidence,
+} from "./world-simulation-native-temporal-replay-service.mjs";
 
 export const worldSimulationStateVersion = "phase62c-world-state-v1";
 
@@ -209,6 +212,15 @@ export async function commitWorldSimulationTurn(
       },
     );
   }
+  if (input.native_temporal_choice_evidence != null) {
+    assertWorldSimulationNativeTemporalChoiceEvidence({
+      evidence: input.native_temporal_choice_evidence,
+      original_receipts: input.subjective_choice_commitment_receipts,
+      selected_action_intents: input.selected_action_intents,
+      action_outcomes: input.action_outcomes,
+      causal_timeline: input.causal_timeline,
+    });
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -277,6 +289,8 @@ export async function commitWorldSimulationTurn(
             selected_action_intents: input.selected_action_intents ?? [],
             subjective_choice_commitment_receipts:
               input.subjective_choice_commitment_receipts ?? null,
+            native_temporal_choice_evidence:
+              input.native_temporal_choice_evidence ?? null,
             state_transitions: input.state_transitions ?? [],
             action_outcomes: input.action_outcomes ?? [],
             knowledge_transitions: input.knowledge_transitions ?? [],

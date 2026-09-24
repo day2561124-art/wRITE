@@ -76,14 +76,15 @@ function earlierMutationBatches(resolution, releaseTime) {
 export async function replayWorldSimulationNativeTemporalResponse({
   session_id, turn_id, world_state, world_state_revision, world_state_hash,
   event, scene_analysis, selected_action_intents, observer,
-  character_input, selection_resolver,
+  character_input, character_input_resolver, selection_resolver,
 } = {}) {
   if (!record(world_state) || hashAgentRunValue(world_state) !== world_state_hash
       || !Array.isArray(selected_action_intents)
       || selected_action_intents.length > 128
       || typeof observer !== "string" || !observer
-      || !record(character_input) || character_input.character !== observer
-      || !record(character_input.cognition)
+      || (typeof character_input_resolver !== "function"
+        && (!record(character_input) || character_input.character !== observer
+          || !record(character_input.cognition)))
       || typeof selection_resolver !== "function")
     refuse("World replay requires exact original snapshot and one same-character Brain resolver.");
   if (selected_action_intents.filter((item) => item?.character === observer).length !== 1
@@ -144,19 +145,32 @@ export async function replayWorldSimulationNativeTemporalResponse({
   };
   const epoch = prepareWorldSimulationObserverTemporalEpoch(context);
   if (!epoch) refuse("Admitted observer cue has no canonical prepared epoch.");
+  const freshInput = typeof character_input_resolver === "function"
+    ? await character_input_resolver(clone({
+      character: observer,
+      observer_view: epoch.observer_view,
+      boundaries: {
+        same_character_only: true, no_world_truth_exposed: true,
+        no_future_cues_exposed: true,
+        private_observer_response_only: true,
+      },
+    })) : character_input;
+  if (!record(freshInput) || freshInput.character !== observer
+      || !record(freshInput.cognition))
+    refuse("Native observer response requires fresh same-character cognition.");
   const binding = {
     session_id, turn_id, world_state_revision,
     epoch_id: epoch.epoch_id,
     source_prefix_hash: epoch.source_prefix_hash,
-    character_input_hash: hashAgentRunValue(character_input),
+    character_input_hash: hashAgentRunValue(freshInput),
   };
   const proposed = await runWorldSimulationObserverResponseProposal({
     epoch_context: context, presented_epoch: epoch,
-    character_input, character_input_binding: binding, selection_resolver,
+    character_input: freshInput, character_input_binding: binding, selection_resolver,
   });
   const scheduled = await scheduleWorldSimulationNativeTemporalResponse({
     epoch_context: context, presented_epoch: epoch,
-    character_input, character_input_binding: binding,
+    character_input: freshInput, character_input_binding: binding,
     response_proposal: proposed,
     chronological_timeline: initial.causal_timeline,
     observer_admissions: initial.communication_observer_increment_admissions,
@@ -253,6 +267,75 @@ export async function replayWorldSimulationNativeTemporalResponse({
     },
     boundaries: buildWorldSimulationNativeTemporalReplayContract(),
   };
+}
+
+/**
+ * Atomic-commit admission: the compact post-cue choice evidence must remain
+ * tied to the actual original Phase74D receipt AND the finalized emitted
+ * speech. The Engine may not persist a caller-authored or stale choice claim.
+ */
+export function assertWorldSimulationNativeTemporalChoiceEvidence({
+  evidence, original_receipts, selected_action_intents,
+  action_outcomes, causal_timeline,
+} = {}) {
+  if (evidence === null || evidence === undefined) return null;
+  const original = assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle(
+    original_receipts,
+  );
+  if (!record(evidence)
+      || evidence.schema_version !== "cc7ad-native-temporal-choice-stage-evidence-v1"
+      || Object.keys(evidence).sort().join("|") !== [
+        "schema_version", "source_original_receipt_id",
+        "source_original_receipt_bundle_hash",
+        "source_native_replay_audit_hash", "character",
+        "initial_selection_kind", "initial_selection_scope",
+        "response_selection_kind", "response_action_id",
+        "response_release_time_ms", "original_phase74d_receipt_unchanged",
+        "post_cue_phase74a_b_c_lineage_fabricated", "world_committed",
+        "persist_only_with_atomic_world_commit", "evidence_hash",
+      ].sort().join("|"))
+    refuse("Native response commit evidence has invalid contract fields.");
+  const { evidence_hash: hash, ...payload } = evidence;
+  if (hash !== hashAgentRunValue(payload)
+      || evidence.source_original_receipt_bundle_hash !== original.receipt_bundle_hash
+      || evidence.initial_selection_kind !== "reject_all"
+      || evidence.initial_selection_scope !== "pre_observer_cue_only"
+      || evidence.response_selection_kind !== "candidate_action_intent"
+      || evidence.original_phase74d_receipt_unchanged !== true
+      || evidence.post_cue_phase74a_b_c_lineage_fabricated !== false
+      || evidence.world_committed !== false
+      || evidence.persist_only_with_atomic_world_commit !== true
+      || !Number.isFinite(evidence.response_release_time_ms)
+      || evidence.response_release_time_ms <= 0
+      || typeof evidence.source_native_replay_audit_hash !== "string")
+    refuse("Native response commit evidence failed exact stage provenance.");
+  const prior = original.receipts.filter((receipt) =>
+    receipt.character === evidence.character
+    && receipt.receipt_id === evidence.source_original_receipt_id
+    && receipt.selection_kind === "reject_all"
+    && receipt.action_id === null);
+  const selected = (Array.isArray(selected_action_intents)
+    ? selected_action_intents : []).filter((item) =>
+    item.character === evidence.character
+    && item.action_id === evidence.response_action_id
+    && item.selection === "candidate_action_intent");
+  const outcomes = (Array.isArray(action_outcomes)
+    ? action_outcomes : []).filter((item) =>
+    item.actor === evidence.character
+    && item.action_id === evidence.response_action_id
+    && item.result === "communication_emitted"
+    && item.communication_event?.channel === "speech"
+    && item.start_time_ms === evidence.response_release_time_ms);
+  const releases = (Array.isArray(causal_timeline?.entries)
+    ? causal_timeline.entries : []).filter((entry) =>
+    entry.kind === "communication_speech_increment"
+    && entry.action_id === evidence.response_action_id
+    && entry.actor === evidence.character
+    && entry.time_ms > evidence.response_release_time_ms);
+  if (prior.length !== 1 || selected.length !== 1
+      || outcomes.length !== 1 || releases.length === 0)
+    refuse("Native response must commit one source-linked selected emitted speech.");
+  return clone(evidence);
 }
 
 /**

@@ -168,7 +168,7 @@ export function buildWorldSimulationSourceLineageReconciliation({
       observer: item.observer, sound_id: source.sound_id,
     }, "observer_signal");
     const matching = source.stream.increments.filter((increment) =>
-      increment.end_offset_ms === item.release_time_ms
+      (increment.release_time_ms ?? increment.end_offset_ms) === item.release_time_ms
       && cue.increment_ref === hash({
         version: worldSimulationObserverSpeechIncrementVersion,
         signal_ref: signal, increment_ref: increment.increment_ref,

@@ -158,7 +158,7 @@ function exactReleasedSource(receipt, cue, actionOutcomes) {
   const released = increments.filter((increment) =>
     record(increment)
     && increment.stream_id === streamId
-    && increment.end_offset_ms === cue.release_time_ms
+    && (increment.release_time_ms ?? increment.end_offset_ms) === cue.release_time_ms
     && increment.signal_phase === cue.signal_phase);
   if (released.length !== 1)
     reject("CC-7J receipt must bind to one exact released source increment.");
