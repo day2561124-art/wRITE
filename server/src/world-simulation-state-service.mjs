@@ -300,6 +300,8 @@ export async function commitWorldSimulationTurn(
               input.communication_floor_transition_admission ?? null,
             communication_public_turn_invitation:
               input.communication_public_turn_invitation ?? null,
+            communication_public_invitation_uptake:
+              input.communication_public_invitation_uptake ?? null,
             observer_microtick_release_ledger:
               input.observer_microtick_release_ledger ?? null,
             observer_tick_snapshot_readiness:

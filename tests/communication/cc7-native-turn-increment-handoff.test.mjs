@@ -443,6 +443,13 @@ try {
   assert.equal(publicInvitation.boundaries.invitation_not_floor_award, true);
   assert.equal(JSON.stringify(publicInvitation).includes(surface), false);
   assert.equal(JSON.stringify(publicInvitation).includes(semantic), false);
+  const uptake = turn.communication_public_invitation_uptake;
+  assert.equal(uptake.status, "public_and_subjective_evidence_join_only");
+  assert.equal(uptake.audible_invitation_count, 0);
+  assert.equal(uptake.convergent_request_count, 0);
+  assert.equal(uptake.boundaries.public_invitation_not_floor_award, true);
+  assert.equal(JSON.stringify(uptake).includes(surface), false);
+  assert.equal(JSON.stringify(uptake).includes(semantic), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(surface), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(semantic), false);
   assert.equal(JSON.stringify(transitionAdmission).includes(actionId), false);
@@ -672,6 +679,15 @@ try {
     .includes(invitation), false);
   assert.equal(JSON.stringify(invitationViews)
     .includes("nominate_addressee"), false);
+  const uptake = turn.communication_public_invitation_uptake;
+  assert.equal(uptake.status, "public_and_subjective_evidence_join_only");
+  assert.equal(uptake.audible_invitation_count, 1);
+  assert.equal(uptake.current_observer_projection_count, 1);
+  assert.equal(uptake.convergent_request_count, 0);
+  assert.equal(uptake.entries[0].target_relation, "nominated_observer");
+  assert.equal(uptake.entries[0].actual_floor_awarded, false);
+  assert.equal(uptake.entries[0].lexical_invitation_understood, false);
+  assert.equal(JSON.stringify(uptake).includes(invitation), false);
 } finally {
   await rm(positiveRoot, { recursive: true, force: true });
 }

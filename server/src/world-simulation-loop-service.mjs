@@ -64,6 +64,9 @@ import {
   buildWorldSimulationPublicTurnInvitation,
 } from "./world-simulation-communication-public-turn-invitation-service.mjs";
 import {
+  buildWorldSimulationPublicInvitationUptake,
+} from "./world-simulation-communication-public-invitation-uptake-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10143,6 +10146,17 @@ export async function resolveWorldSimulationTurn(
       speaker_intent_projection: speakerNextTurnIntent,
       selected_action_intents: selected,
     }).audit;
+  // CC-7U privately joins revalidated physical invitation evidence with the
+  // SAME observer's latest subjective selection/readiness. Persist audit only;
+  // neither invitation nor convergence selects a speaker or awards the floor.
+  const publicInvitationUptake =
+    buildWorldSimulationPublicInvitationUptake({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+      selected_action_intents: selected,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12511,6 +12525,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_public_turn_invitation: cloneJson(
         publicTurnInvitation,
+      ),
+      communication_public_invitation_uptake: cloneJson(
+        publicInvitationUptake,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

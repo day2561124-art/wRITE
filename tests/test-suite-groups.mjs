@@ -33,6 +33,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-7R World source lineage reconciliation", ["tests/communication/cc7-source-lineage-reconciliation.test.mjs"]]),
   Object.freeze(["CC-7S World floor transition admission", ["tests/communication/cc7-floor-transition-admission.test.mjs"]]),
   Object.freeze(["CC-7T selected public turn invitation", ["tests/communication/cc7-public-turn-invitation.test.mjs"]]),
+  Object.freeze(["CC-7U public invitation observer uptake", ["tests/communication/cc7-public-invitation-uptake.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
