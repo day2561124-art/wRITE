@@ -219,6 +219,45 @@ history. Future work must inspect and test the real history shape,
 the current queued-event model, and the atomic state transition
 rather than assuming per-microtick durable acknowledgements.
 
+## CC-7AF slice 6 — committed acoustic source and pending-dependency CAS
+
+`world-simulation-native-committed-source-service.mjs` retrieves
+authoritative history AND current World state via the existing state
+service. A pending caller supplies exact source turn/hash/revision,
+Phase74D receipt-bundle hash, speaker/action, observer acoustic cue
+reference/time and current expected World revision/hash. The guard
+checks the entire append-only turn revision/hash chain, that the
+source is exactly one committed turn, and that it has exactly one
+selected speaker action, Phase74D receipt and emitted speech outcome.
+The observer's actual CC-7C acoustic admission must match the same
+causal timeline release and emitted speech stream. Its signal,
+increment and perceived cue identities are independently RECOMPUTED
+from the registered sound and authoritative stream increment.
+Nothing in the caller's claimed `source_cancelled` or text/timestamp
+equivalence is treated as World authority.
+
+The returned audit contains only bound source hashes/refs, observer
+identity hash and revision, not speech text or private cognition.
+It explicitly denies authorization to speak and reports no World
+mutation, hearing retraction or interruption inference. Both
+physical source lookup and the current-revision CAS are READ ONLY.
+The same historical sound remains discoverable after a later
+committed quiet turn; a dependency carrying the old World CAS is
+rejected until evaluated against the new snapshot. Adversarial
+fixture tests forge action, observer, turn, release time, receipt
+bundle, state, and stored CC-7C increment identities (even while
+recomputing the caller's source-turn hash), and confirm refusal.
+The test-only history file is restored after the corruption probe.
+
+This guard is NOT yet a native, broker-scheduled, future action:
+it proves its cited past physical source and that the current CAS is
+fresh, but deliberately does not call Character Brain, create an
+event, cancel or replan future actions, or allow retroactive changes
+to the committed stream. Later World integration must consume this
+guard BEFORE any new decision or atomic commit; actual fresh
+observation and explicit interruption interpretation remain
+separate evidence requirements.
+
 ## Acceptance and adversarial matrix
 
 | Case | Required evidence/result |
