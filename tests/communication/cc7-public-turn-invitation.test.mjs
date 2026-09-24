@@ -125,6 +125,47 @@ const noFloorRequestHandoff=await runWorldSimulationTurnIncrementHandoff({
 assert.equal(run({handoff:noFloorRequestHandoff}).audit.audible_invitation_count,1);
 assert.equal(run({handoff:noFloorRequestHandoff})
   .engine_private_signals.actual_floor_awarded,false);
+// Actual sound does not depend on installing a listener turn resolver.
+const noResolver=await runWorldSimulationTurnIncrementHandoff({
+  admissions:[admission],
+});
+const noResolverSignal=run({handoff:noResolver});
+assert.equal(noResolver.projected_count,0);
+assert.equal(noResolverSignal.audit.audible_invitation_count,1);
+assert.equal(noResolverSignal.engine_private_signals.entries[0].source_projection_id,null);
+const noReceiptHandoff=await runWorldSimulationTurnIncrementHandoff({
+  admissions:[],
+});
+assert.equal(run({handoff:noReceiptHandoff,admissions:[]})
+  .audit.audible_invitation_count,0);
+// An audible bystander hears the signal but is not nominated or awarded floor.
+const overhearer="C";
+const overheardSignal=h({version:cc7c,observer:overhearer,sound_id:soundId},
+  "observer_signal");
+const overheardIncrement=h({version:cc7c,signal_ref:overheardSignal,
+  increment_ref:sourceIncrement},"observer_increment");
+const overheardCue=h({version:cc7c,signal_ref:overheardSignal,
+  increment_ref:sourceIncrement},"audible_cue");
+const overheard={
+  ...admission,observer:overhearer,
+  observer_increment:{...admission.observer_increment,
+    observer:overhearer,signal_ref:overheardSignal,
+    increment_ref:overheardIncrement,perceived_cue_refs:[overheardCue]},
+};
+const bothAdmissions=[admission,overheard];
+const bothHandoff=await runWorldSimulationTurnIncrementHandoff({
+  admissions:bothAdmissions,
+});
+const bothSignals=run({handoff:bothHandoff,admissions:bothAdmissions});
+assert.equal(bothSignals.audit.audible_invitation_count,2);
+assert.deepEqual(bothSignals.engine_private_signals.entries.map((item)=>item.observer),
+  [observer,overhearer]);
+assert(bothSignals.engine_private_signals.entries.every((item)=>
+  item.actual_floor_awarded===false &&
+  item.lexical_invitation_understood===false));
+assert.throws(()=>run({handoff:bothHandoff,admissions:[admission,
+  {...overheard,audit:{...overheard.audit,source_sound_id:"foreign"}}]}),
+/acoustic receipt is foreign/u);
 assert.throws(()=>run({selected_action_intents:[]}),/selected emitted audible speech/u);
 assert.throws(()=>run({selected_action_intents:[{
   ...selected[0],character:"C",

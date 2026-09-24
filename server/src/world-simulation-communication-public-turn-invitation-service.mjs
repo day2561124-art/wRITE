@@ -80,31 +80,47 @@ export function buildWorldSimulationPublicTurnInvitation({
       .filter((intent) => intent.mode === "nominate_addressee")
       .map((intent) => [intent.source_action_id, intent]),
   );
+  // CC-7S revalidates every audible CC-7C admission via CC-7R, including
+  // releases for listeners who never authored a CC-7D turn projection.
+  // Keep the latest physical receipt per source and observer; an overhearer
+  // can hear speech without becoming the nominated next speaker.
+  const latestReceipts = new Map();
+  for (const admission of admissions ?? []) {
+    if (admission?.admission_status !== "heard_acoustic_cues_only") continue;
+    const sourceActionId = admission.audit.source_action_id;
+    if (!emitted.has(sourceActionId)) continue;
+    const key = JSON.stringify([sourceActionId, admission.observer]);
+    const prior = latestReceipts.get(key);
+    if (!prior || admission.release_time_ms > prior.release_time_ms ||
+        (admission.release_time_ms === prior.release_time_ms &&
+         admission.observer_increment.increment_ref > prior.increment_ref)) {
+      latestReceipts.set(key, {
+        source_action_id: sourceActionId,
+        observer: admission.observer,
+        release_time_ms: admission.release_time_ms,
+        increment_ref: admission.observer_increment.increment_ref,
+      });
+    }
+  }
   const signals = [];
-  for (const entry of transition.engine_private_admissions.entries) {
-    // A selected public invitation can be audible even if the recipient has
-    // not requested the floor or has misunderstood the cue. CC-7S's listener
-    // participation category cannot suppress the physical speech signal.
-    const outcome = emitted.get(entry.source_action_id);
-    if (!outcome) continue;
-    const nomination = nominations.get(entry.source_action_id);
+  for (const receipt of latestReceipts.values()) {
+    const outcome = emitted.get(receipt.source_action_id);
+    const nomination = nominations.get(receipt.source_action_id);
     if (!nomination) continue;
-    if (outcome.communication_event.addressee !== entry.observer ||
-        nomination.intended_next_speaker !== entry.observer ||
-        nomination.intention_id !== entry.speaker_intent_id)
+    if (outcome.communication_event.addressee !==
+        nomination.intended_next_speaker)
       fail("Public invitation target differs from the revalidated nomination.");
     const identity = {
-      source_action_id: entry.source_action_id,
-      source_projection_id: entry.source_projection_id,
-      speaker_intent_id: entry.speaker_intent_id,
-      observer: entry.observer,
+      source_action_id: receipt.source_action_id,
+      observer: receipt.observer,
+      increment_ref: receipt.increment_ref,
     };
     signals.push({
       signal_id: ref("public_turn_invitation", identity),
-      source_action_id: entry.source_action_id,
-      observer: entry.observer,
-      source_projection_id: entry.source_projection_id,
-      speaker_intent_id: entry.speaker_intent_id,
+      source_action_id: receipt.source_action_id,
+      observer: receipt.observer,
+      source_projection_id: null,
+      speaker_intent_id: nomination.intention_id,
       physical_speech_emitted: true,
       acoustic_cue_admitted: true,
       lexical_invitation_understood: false,
