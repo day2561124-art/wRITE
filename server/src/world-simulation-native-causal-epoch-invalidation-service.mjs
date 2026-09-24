@@ -71,6 +71,7 @@ export async function assessWorldSimulationNativeCausalEpochSupersession({
   session_id, turn_id, world_state, world_state_revision, world_state_hash,
   event, scene_analysis, original_selected_action_intents,
   revised_selected_action_intents, observer, original_release_cursor = 0,
+  expected_original_execution_hash, expected_original_ledger_hash,
 } = {}) {
   if (typeof session_id !== "string" || !session_id
       || typeof turn_id !== "string" || !turn_id
@@ -120,6 +121,11 @@ export async function assessWorldSimulationNativeCausalEpochSupersession({
   if (typeof originalExecutionHash !== "string" || !originalExecutionHash
       || typeof revisedExecutionHash !== "string" || !revisedExecutionHash)
     reject("Both canonical executions require verified exact execution hashes.");
+  if ((expected_original_execution_hash !== undefined
+        && expected_original_execution_hash !== originalExecutionHash)
+      || (expected_original_ledger_hash !== undefined
+        && expected_original_ledger_hash !== oldLedger.ledger_hash))
+    reject("Pending response belongs to a stale original observer causal epoch.");
   const sameEpoch=originalExecutionHash===revisedExecutionHash
     &&oldLedger.ledger_hash===nextLedger.ledger_hash;
   const status=surviving.length === 0?"source_not_released_in_revised_execution"

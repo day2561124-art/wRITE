@@ -143,10 +143,18 @@ are NOT saved. The absence of a later response means there is no
 fabricated committed preparation-as-speech evidence; all-wait World turns
 still commit without B's signal or a synthetic post-cue selection receipt.
 
-This opt-in stage does NOT yet model multiple successive World causal epochs
-with cancellation or interruption effects, nor does it make a fixed gap
-threshold a behavioral decision. Those require separate later acceptance
-evidence.
+CC-7AF adds a separate, opt-in, **refusal-only** causal epoch challenge:
+World re-adjudicates the old source against a revised action-set challenge
+before fresh response input and after tentative action selection. If the
+source epoch changes, old private preparation/choice cannot be committed;
+no historical sound is erased. The challenge never authorizes a replacement
+character action, nor is it automatically evidence of a real source change.
+See `docs/CHARACTER-COMMUNICATION-CAUSAL-EPOCH-INVALIDATION.md`.
+
+This opt-in stage does NOT yet implement automatic new-epoch re-planning,
+multiple successive World causal epochs with a complete cancellation or
+interruption lifecycle, nor does it make a fixed gap threshold a behavioral
+decision. Those require separate later acceptance evidence.
 
 Research basis: Levinson and Torreira (2015),
 https://doi.org/10.3389/fpsyg.2015.00731, on response preparation during

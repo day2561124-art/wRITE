@@ -7,6 +7,7 @@ import { prepareWorldSimulationObserverTemporalEpoch } from "./world-simulation-
 import { runWorldSimulationObserverResponseProposal } from "./world-simulation-observer-response-proposal-service.mjs";
 import { scheduleWorldSimulationNativeTemporalResponse } from "./world-simulation-native-temporal-schedule-service.mjs";
 import { stepWorldSimulationNativeResponsePreparation } from "./world-simulation-native-response-preparation-service.mjs";
+import { assessWorldSimulationNativeCausalEpochSupersession } from "./world-simulation-native-causal-epoch-invalidation-service.mjs";
 import { assertWorldSimulationSubjectiveChoiceCommitmentReceiptBundle } from "./world-simulation-subjective-choice-commitment-receipt-service.mjs";
 
 export const worldSimulationNativeTemporalReplayVersion =
@@ -81,7 +82,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   session_id, turn_id, world_state, world_state_revision, world_state_hash,
   event, scene_analysis, selected_action_intents, observer,
   character_input, character_input_resolver, selection_resolver,
-  preparation_decision_resolver,
+  preparation_decision_resolver, causal_epoch_revalidation_resolver,
 } = {}) {
   if (!record(world_state) || hashAgentRunValue(world_state) !== world_state_hash
       || !Array.isArray(selected_action_intents)
@@ -92,7 +93,9 @@ export async function replayWorldSimulationNativeTemporalResponse({
           || !record(character_input.cognition)))
       || typeof selection_resolver !== "function"
       || (preparation_decision_resolver !== undefined
-        && typeof preparation_decision_resolver !== "function"))
+        && typeof preparation_decision_resolver !== "function")
+      || (causal_epoch_revalidation_resolver !== undefined
+        && typeof causal_epoch_revalidation_resolver !== "function"))
     refuse("World replay requires exact original snapshot and one same-character Brain resolver.");
   if (selected_action_intents.filter((item) => item?.character === observer).length !== 1
       || !selected_action_intents.some((item) =>
@@ -215,6 +218,51 @@ export async function replayWorldSimulationNativeTemporalResponse({
       } : {}),
       boundaries: buildWorldSimulationNativeTemporalReplayContract(),
     };
+  // CC-7AF optional engine-only challenge: re-adjudicate BOTH source
+  // action sets from the same verified pre-turn World state. A changed
+  // execution must invalidate this epoch, not silently adopt a new
+  // character's action or use the old observer preparation as permission.
+  // Never pass the revised World selection or execution to Character Brain.
+  const fence = async (stage) => {
+    if (!causal_epoch_revalidation_resolver) return;
+    const view = clone({
+      schema_version: "cc7af-engine-only-causal-revalidation-v1",
+      stage, observer, session_id, turn_id,
+      source_epoch_id: epoch.epoch_id,
+      source_execution_hash: epoch.causal_epoch_hash,
+      source_ledger_hash: epoch.ledger_hash,
+      source_pre_turn_state_hash: world_state_hash,
+      original_selected_action_intents_hash:
+        hashAgentRunValue(selected_action_intents),
+      source_release_time_ms: epoch.release_time_ms,
+      boundaries: {
+        engine_only_not_character_view: true,
+        refusal_only_never_authorizes_replacement_action: true,
+        cannot_retract_committed_sound: true,
+        canonical_world_re_adjudication_required: true,
+      },
+    });
+    const answer = await causal_epoch_revalidation_resolver(view);
+    if (!record(answer)
+        || Object.keys(answer).sort().join("|")
+          !== "revised_selected_action_intents|source_epoch_id"
+        || answer.source_epoch_id !== epoch.epoch_id
+        || !Array.isArray(answer.revised_selected_action_intents))
+      refuse("CC-7AF World revalidation challenge must bind the exact current epoch.");
+    const assessment = await assessWorldSimulationNativeCausalEpochSupersession({
+      session_id, turn_id, world_state, world_state_revision,
+      world_state_hash, event, scene_analysis,
+      original_selected_action_intents: selected_action_intents,
+      revised_selected_action_intents: answer.revised_selected_action_intents,
+      observer, original_release_cursor: cursor,
+      expected_original_execution_hash: epoch.causal_epoch_hash,
+      expected_original_ledger_hash: epoch.ledger_hash,
+    });
+    if (assessment.status !== "unchanged_epoch"
+        || assessment.obsolete_preparation_must_not_authorize_new_action)
+      refuse("CC-7AF native response invalidated by a superseded source causal epoch.");
+  };
+  await fence("before_fresh_character_input");
   const freshInput = typeof character_input_resolver === "function"
     ? await character_input_resolver(clone({
       character: observer,
@@ -260,6 +308,10 @@ export async function replayWorldSimulationNativeTemporalResponse({
       causal_resolution: initial, native_temporal_response: null,
       boundaries: buildWorldSimulationNativeTemporalReplayContract(),
     };
+  // A source can be superseded after the character tentatively selects a
+  // response, too. This second fence fails the whole speculative turn:
+  // neither the old proposal nor its scheduled signal may be committed.
+  await fence("after_tentative_selection_before_world_replay");
   const anchor = scheduled.scheduled_response;
   if (anchor.actor !== observer
       || anchor.action_id !== proposed.selected_candidate?.action_id

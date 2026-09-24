@@ -9852,6 +9852,16 @@ export async function resolveWorldSimulationTurn(
     error.code = "CC7AE_NATIVE_PREPARATION_RESOLVER_INVALID";
     throw error;
   }
+  if (options.characterNativeTemporalResponseCausalRevalidationResolver !== undefined
+      && (!nativeResponseEnabled
+        || typeof options.characterNativeTemporalResponseCausalRevalidationResolver
+          !== "function")) {
+    const error = new Error(
+      "CC-7AF causal revalidation requires the paired native response resolvers.",
+    );
+    error.code = "CC7AF_NATIVE_CAUSAL_REVALIDATION_RESOLVER_INVALID";
+    throw error;
+  }
   if (nativeResponseEnabled && typeof options.causalAdjudicator === "function") {
     const error = new Error(
       "Native temporal replay requires the canonical programmatic causal adjudicator.",
@@ -9883,6 +9893,8 @@ export async function resolveWorldSimulationTurn(
         options.characterNativeTemporalResponseSelectionResolver,
       preparation_decision_resolver:
         options.characterNativeTemporalResponsePreparationResolver,
+      causal_epoch_revalidation_resolver:
+        options.characterNativeTemporalResponseCausalRevalidationResolver,
     })
     : null;
 

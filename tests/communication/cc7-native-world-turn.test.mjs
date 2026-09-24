@@ -6,7 +6,7 @@ import {
   createWorldSimulationCharacterRuntimeManager, runWorldSimulationTurn,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
-import { getWorldSimulationHistory } from "../../server/src/world-simulation-state-service.mjs";
+import { getWorldSimulationHistory, getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { assertWorldSimulationNativeTemporalChoiceEvidence } from "../../server/src/world-simulation-native-temporal-replay-service.mjs";
 import { assertWorldSimulationNativePreparationEvidence } from "../../server/src/world-simulation-native-response-preparation-service.mjs";
 
@@ -357,6 +357,75 @@ try {
     x.actor==="B"&&x.result==="communication_emitted"),false);
   assert.equal(allWaitTurn.subjective_choice_commitment_receipts.receipts.find(x=>
     x.character==="B").selection_kind,"reject_all");
+  // CC-7AF refusal gate: a newly discovered source supersession may
+  // invalidate the current acoustic epoch BEFORE fresh Brain input OR
+  // AFTER a tentative Brain response. Neither stage commits a turn.
+  for (const cancelStage of [1,2]) {
+    const canceledSession=await beginWorldSimulationSession({
+      ...structuredClone(delayedSessionInput),
+      seed:"cc7af-source-superseded-"+cancelStage,
+      simulation_label:"CC7AF fail-closed source cancellation",
+    },options);
+    const before=await getWorldSimulationState(
+      canceledSession.world_simulation_session_id,options);
+    let sourceCandidate=null,challengeCount=0,brainInputCount=0,brainChoiceCount=0;
+    await assert.rejects(()=>runWorldSimulationTurn({
+      world_simulation_session_id:canceledSession.world_simulation_session_id,
+      event_id:"delayed-talk",
+    },{
+      ...options,characterRuntimeManager:runtimeManager,
+      characterBrain:async(packet)=>{
+        if(packet.character!=="A") return "reject_all";
+        sourceCandidate=packet.candidate_action_intents.find(x=>
+          x.communication?.surface_realization_complete===true);
+        assert(sourceCandidate);
+        return {action_id:sourceCandidate.action_id};
+      },
+      characterNativeTemporalResponseObserver:"B",
+      characterNativeTemporalResponsePreparationResolver:async(view)=>({
+        epoch_id:view.epoch_id,decision:"select_response",
+      }),
+      characterNativeTemporalResponseInputResolver:async()=>{
+        brainInputCount++;
+        return {character:"B",cognition:{communication_goal:goalB}};
+      },
+      characterNativeTemporalResponseSelectionResolver:async(view)=>{
+        brainChoiceCount++;
+        return {epoch_id:view.epoch_id,
+          action_id:view.candidate_action_intents[0].action_id};
+      },
+      characterNativeTemporalResponseCausalRevalidationResolver:async(view)=>{
+        challengeCount++;
+        assert.equal(view.observer,"B");
+        assert.equal(view.boundaries.engine_only_not_character_view,true);
+        assert.equal(view.boundaries.refusal_only_never_authorizes_replacement_action,true);
+        assert.equal(JSON.stringify(view).includes("男孩離開房子"),false);
+        const original=[
+          {character:"A",selection:"candidate_action_intent",
+            action_id:sourceCandidate.action_id,
+            intent:sourceCandidate.intent,candidate:sourceCandidate},
+          {character:"B",selection:"reject_all",
+            action_id:null,intent:null,candidate:null},
+        ];
+        return {source_epoch_id:view.source_epoch_id,
+          revised_selected_action_intents:challengeCount===cancelStage
+            ? original.map(x=>x.character==="A"
+              ? {character:"A",selection:"reject_all",
+                  action_id:null,intent:null,candidate:null} : x)
+            : original};
+      },
+    }),/superseded source causal epoch/u);
+    assert.equal(challengeCount,cancelStage);
+    assert.equal(brainInputCount,cancelStage===1?0:1);
+    assert.equal(brainChoiceCount,cancelStage===1?0:1);
+    const after=await getWorldSimulationState(
+      canceledSession.world_simulation_session_id,options);
+    assert.equal(after.revision,before.revision);
+    assert.equal(after.state_hash,before.state_hash);
+    const failedHistory=await getWorldSimulationHistory(
+      canceledSession.world_simulation_session_id,options);
+    assert.equal(failedHistory.turns.length,0);
+  }
   console.log("CC-7AD native World same-turn commit and choice stages passed.");
   console.log("CC-7AE native World wait-then-later-response commit passed.");
 } finally {

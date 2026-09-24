@@ -218,6 +218,81 @@ await assert.rejects(()=>replayWorldSimulationNativeTemporalResponse({
     epoch_id:"forged",decision:"select_response",
   }),
 }),/exact current observer epoch/u);
+// CC-7AF World-only epoch fence: check source once before requesting fresh
+// cognition and again after the tentative proposal. A source cancellation
+// at either boundary invalidates the old private decision; neither result
+// may re-author old speech or pretend the old epoch is a new observer cue.
+const canceledSource = input.selected_action_intents.map((item) =>
+  item.character === "A"
+    ? { character:"A",selection:"reject_all",action_id:null,
+        intent:null,candidate:null }
+    : structuredClone(item));
+let validFenceCalls=0;
+const fenced=await replayWorldSimulationNativeTemporalResponse({
+  ...input,selection_resolver:choose,
+  causal_epoch_revalidation_resolver:async(view)=>{
+    validFenceCalls++;
+    assert.equal(view.observer,"B");
+    assert.equal(view.boundaries.engine_only_not_character_view,true);
+    assert.equal(view.boundaries.refusal_only_never_authorizes_replacement_action,true);
+    assert.equal(JSON.stringify(view).includes("B_ONLY_PRIVATE"),false);
+    assert.equal(JSON.stringify(view).includes("男孩離開"),false);
+    return {source_epoch_id:view.source_epoch_id,
+      revised_selected_action_intents:structuredClone(input.selected_action_intents)};
+  },
+});
+assert.equal(fenced.status,"replayed_same_turn");
+assert.equal(validFenceCalls,2);
+let beforeBrainInputs=0,beforeBrainChoices=0;
+await assert.rejects(()=>replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  character_input_resolver:async()=>{
+    beforeBrainInputs++;
+    return input.character_input;
+  },
+  selection_resolver:async()=>{
+    beforeBrainChoices++;
+    throw new Error("Canceled source must not prompt a Character Brain choice");
+  },
+  preparation_decision_resolver:async(view)=>({
+    epoch_id:view.epoch_id,decision:"select_response",
+  }),
+  causal_epoch_revalidation_resolver:async(view)=>({
+    source_epoch_id:view.source_epoch_id,
+    revised_selected_action_intents:canceledSource,
+  }),
+}),/superseded source causal epoch/u);
+assert.equal(beforeBrainInputs,0);
+assert.equal(beforeBrainChoices,0);
+let afterBrainInputs=0,afterBrainChoices=0,challengeCalls=0;
+await assert.rejects(()=>replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  character_input_resolver:async()=>{
+    afterBrainInputs++;
+    return input.character_input;
+  },
+  selection_resolver:async(view)=>{
+    afterBrainChoices++;
+    return {epoch_id:view.epoch_id,
+      action_id:view.candidate_action_intents[0].action_id};
+  },
+  causal_epoch_revalidation_resolver:async(view)=>{
+    challengeCalls++;
+    return {source_epoch_id:view.source_epoch_id,
+      revised_selected_action_intents:challengeCalls===1
+        ? input.selected_action_intents : canceledSource};
+  },
+}),/superseded source causal epoch/u);
+assert.equal(challengeCalls,2);
+assert.equal(afterBrainInputs,1);
+assert.equal(afterBrainChoices,1);
+await assert.rejects(()=>replayWorldSimulationNativeTemporalResponse({
+  ...input,selection_resolver:choose,
+  causal_epoch_revalidation_resolver:async()=>({
+    source_epoch_id:"forged",
+    revised_selected_action_intents:input.selected_action_intents,
+  }),
+}),/bind the exact current epoch/u);
 const originalReceipts = buildWorldSimulationSubjectiveChoiceCommitmentReceipts({
   world_simulation_session_id: input.session_id, turn_id: input.turn_id,
   state_revision:input.world_state_revision, world_state_hash:input.world_state_hash,

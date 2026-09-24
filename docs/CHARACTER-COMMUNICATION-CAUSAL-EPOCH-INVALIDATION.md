@@ -57,7 +57,37 @@ invalidation claims may be used.
 The first slice is a **dry-run invalidation assessment**, not a World
 commit, turn-taking arbiter, or public signal. It cannot retroactively
 erase an emitted source; it reports what future dependent work must be
-replanned. Later slices wire this into opt-in native World execution.
+replanned.
+
+## CC-7AF slice 2 — optional native refusal fence
+
+A separate, explicitly opt-in World-only resolver
+`characterNativeTemporalResponseCausalRevalidationResolver` requires the
+existing native Brain input/selection pair. The World calls it at two
+boundaries: (1) after finding an actually admitted current observer epoch,
+BEFORE obtaining new same-character Brain input; (2) after a tentative
+selected response is scheduled but BEFORE the original-state causal replay
+and the later atomic World commit. The resolver may provide an engine-only
+**revised-action challenge** bound to the exact source epoch; it is NOT a
+replacement Character Brain selection or a trusted source-cancellation
+command. The canonical adjudicator independently reruns original and
+challenged action sets from the verified pre-turn snapshot. Changed
+execution/ledger/source, stale epoch identity, or malformed challenge
+refuses the speculative response; the old preparation/choice/schedule
+cannot authorize emission. This mode cannot silently adopt another
+character's revised action, reset Phase74D, or remove a historical sound.
+
+Full native World tests assert that source cancellation at either fence
+leaves World revision/state hash/history unchanged. They separately check
+that a first-fence cancellation never obtains fresh Brain input, and a
+second-fence cancellation invalidates the single tentative choice.
+Unchanged challenges may proceed through the existing canonical World
+replay and commit path. Because this is refusal-only, **automatic fresh
+replanning after cancellation is not implemented**; later work must obtain
+an actually new released cue and new character action authority before
+continuing. A caller-provided challenge is not evidence that the real
+World's source has changed, nor permission to rewrite earlier selected
+public actions. Both claims require separate authoritative evidence.
 
 ## Acceptance and adversarial matrix
 

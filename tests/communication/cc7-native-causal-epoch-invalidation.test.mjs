@@ -95,6 +95,12 @@ for(const hidden of ["男孩離開房子","男孩走進房子",'"world_state":',
 assert.equal(hashAgentRunValue(world),input.world_state_hash);
 await assert.rejects(()=>assess({world_state_hash:"forged"}),
   /Exact original World state/u);
+await assert.rejects(()=>assess({
+  expected_original_execution_hash:"forged",
+}),/stale original observer causal epoch/u);
+await assert.rejects(()=>assess({
+  expected_original_ledger_hash:"forged",
+}),/stale original observer causal epoch/u);
 await assert.rejects(()=>assess({original_release_cursor:999}),
   /actually admitted World tick/u);
 await assert.rejects(()=>assess({observer:"A"}),
