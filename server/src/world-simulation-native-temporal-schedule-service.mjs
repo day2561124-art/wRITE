@@ -1,6 +1,7 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
 import { runWorldSimulationObserverResponseProposal } from "./world-simulation-observer-response-proposal-service.mjs";
 import { prepareWorldSimulationObserverTemporalEpoch } from "./world-simulation-observer-prepared-epoch-service.mjs";
+import { worldSimulationObserverSpeechIncrementVersion } from "./world-simulation-communication-observer-increment-service.mjs";
 
 export const worldSimulationNativeTemporalScheduleVersion =
   "cc7ad-world-owned-temporal-schedule-v1";
@@ -40,7 +41,8 @@ export function buildWorldSimulationNativeTemporalScheduleContract() {
 
 export async function scheduleWorldSimulationNativeTemporalResponse({
   epoch_context, presented_epoch, character_input, character_input_binding,
-  response_proposal, chronological_timeline, selected_action_intents = [],
+  response_proposal, chronological_timeline, observer_admissions = [],
+  selected_action_intents = [],
   selection_resolver, consumed_epoch_ids = [],
 } = {}) {
   const current = prepareWorldSimulationObserverTemporalEpoch(epoch_context);
@@ -84,19 +86,55 @@ export async function scheduleWorldSimulationNativeTemporalResponse({
     (item) => item?.observer === current.observer);
   if (observed.length !== cues.length)
     refuse("Observer release and World admission counts disagree.");
+  if (!Array.isArray(observer_admissions) || observer_admissions.length > 4096)
+    refuse("World scheduling requires bounded authoritative acoustic admissions.");
+  const seenAdmissions = new Set();
   for (const item of observed) {
     const cue = item.observer_increment;
-    const entry = entries.find((event) =>
+    const matches = observer_admissions.filter((admission) =>
+      admission?.observer === current.observer
+      && admission?.release_time_ms === release
+      && admission?.observer_increment?.increment_ref === cue?.increment_ref);
+    if (matches.length !== 1 || JSON.stringify(matches[0].observer_increment) !== JSON.stringify(cue)
+        || matches[0].admission_status !== "heard_acoustic_cues_only"
+        || matches[0].schema_version !== worldSimulationObserverSpeechIncrementVersion)
+      refuse("Observer epoch has no unique exact authoritative acoustic admission.");
+    const audit = matches[0].audit;
+    if (!record(audit) || audit.registered_sound_link_verified !== true
+        || audit.static_acoustics_scope_verified !== true
+        || audit.source_content_forwarded_to_observer !== false
+        || cue.signal_ref !== `observer_signal_${hashAgentRunValue({
+          version: worldSimulationObserverSpeechIncrementVersion,
+          observer: current.observer, sound_id: audit.source_sound_id,
+        }).slice(0, 24)}`)
+      refuse("Observer acoustic source audit cannot be verified.");
+    const matching = entries.filter((event) =>
       event.kind === "communication_speech_increment"
-      && event.increment_ref === cue?.increment_ref
+      && event.stream_id === audit.source_stream_id
+      && event.action_id === audit.source_action_id
+      && event.actor === audit.source_speaker
       && event.time_ms === release
-      && event.result === "speech_increment_released");
-    if (!entry || entry.action_id === expected.selected_candidate.action_id
-        || entry.actor === current.observer)
+      && event.result === "speech_increment_released"
+      && cue.increment_ref === `observer_increment_${hashAgentRunValue({
+        version: worldSimulationObserverSpeechIncrementVersion,
+        signal_ref: cue.signal_ref, increment_ref: event.increment_ref,
+      }).slice(0, 24)}`
+      && cue.perceived_cue_refs?.length === 1
+      && cue.perceived_cue_refs[0] === `audible_cue_${hashAgentRunValue({
+        version: worldSimulationObserverSpeechIncrementVersion,
+        signal_ref: cue.signal_ref, increment_ref: event.increment_ref,
+      }).slice(0, 24)}`);
+    if (matching.length !== 1 || matching[0].actor === current.observer
+        || matching[0].action_id === expected.selected_candidate.action_id)
       refuse("Observer epoch has no matching earlier released World speech increment.");
+    if (seenAdmissions.has(cue.increment_ref))
+      refuse("One observer acoustic increment cannot be consumed twice.");
+    seenAdmissions.add(cue.increment_ref);
+    const entry = matching[0];
     const selectedSpeech = selected_action_intents.some((selection) =>
       selection?.character === entry.actor
-      && selection?.candidate?.action_id === entry.action_id);
+      && selection?.candidate?.action_id === entry.action_id
+      && selection?.candidate?.communication?.channel === "speech");
     if (!selectedSpeech)
       refuse("Observer source speech must belong to an actually selected World action.");
   }

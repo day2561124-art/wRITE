@@ -10211,7 +10211,13 @@ export async function resolveWorldSimulationTurn(
   const speechOverlapEvidence =
     buildWorldSimulationSpeechOverlapEvidence({
       action_outcomes: array(causalResolution.action_outcomes),
-      causal_timeline: causalResolution.causal_timeline,
+      // Legacy/custom adjudicators can return a no-speech turn without a
+      // timeline. Never invent a speech timeline when any speech was emitted.
+      causal_timeline: causalResolution.causal_timeline ??
+        (array(causalResolution.action_outcomes).some((outcome) =>
+          outcome?.result === "communication_emitted"
+          && outcome?.communication_event?.channel === "speech")
+          ? null : { entries: [] }),
     });
 
   // Phase76A is computed as soon as the authoritative causal resolution has

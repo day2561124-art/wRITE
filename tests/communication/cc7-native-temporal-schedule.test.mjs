@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { worldSimulationObserverMicrotickLedgerVersion } from "../../server/src/world-simulation-observer-microtick-ledger-service.mjs";
+import { worldSimulationObserverSpeechIncrementVersion } from "../../server/src/world-simulation-communication-observer-increment-service.mjs";
 import { worldSimulationObserverTickPrefixReconstructionVersion } from "../../server/src/world-simulation-observer-tick-prefix-reconstruction-service.mjs";
 import { prepareWorldSimulationObserverTemporalEpoch } from "../../server/src/world-simulation-observer-prepared-epoch-service.mjs";
 import { runWorldSimulationObserverResponseProposal } from "../../server/src/world-simulation-observer-response-proposal-service.mjs";
@@ -10,9 +11,21 @@ import {
 } from "../../server/src/world-simulation-native-temporal-schedule-service.mjs";
 
 const pre = { scene_state: { scene_id: "room" }, secret: "WORLD_HIDDEN" };
+const sourceIncrementRef = "speech_increment_A1";
+const sourceSoundId = "sound-A1";
+const sourceStreamId = "speech-stream-A";
+const observerSignalRef = `observer_signal_${hashAgentRunValue({
+  version: worldSimulationObserverSpeechIncrementVersion,
+  observer: "B", sound_id: sourceSoundId,
+}).slice(0, 24)}`;
+const cueHash = hashAgentRunValue({
+  version: worldSimulationObserverSpeechIncrementVersion,
+  signal_ref: observerSignalRef, increment_ref: sourceIncrementRef,
+}).slice(0, 24);
 const cue = {
-  observer: "B", signal_ref: "signal-A", increment_ref: "increment-A1",
-  signal_phase: "ongoing", perceived_cue_refs: ["increment-A1"],
+  observer: "B", signal_ref: observerSignalRef,
+  increment_ref: `observer_increment_${cueHash}`,
+  signal_phase: "ongoing", perceived_cue_refs: [`audible_cue_${cueHash}`],
   heard_surface_fragment: null, perceived_speaker: null,
   lexical_intelligibility_attested: false, speaker_identity_recognized: false,
   no_future_increment_exposed: true,
@@ -69,15 +82,32 @@ const proposed = await runWorldSimulationObserverResponseProposal({
 });
 const rawTimeline = { version: "real-world-timeline", entries: [{
   kind: "communication_speech_increment", actor: "A",
-  action_id: "communication_source", increment_ref: "increment-A1",
+  action_id: "communication_source", stream_id: sourceStreamId,
+  increment_ref: sourceIncrementRef,
   time_ms: 100, result: "speech_increment_released",
 }] };
 const timeline = { ...rawTimeline, timeline_hash: hashAgentRunValue(rawTimeline) };
-const selected = [{ character: "A", candidate: { action_id: "communication_source" } }];
+const selected = [{ character: "A", candidate: {
+  action_id: "communication_source", communication: { channel: "speech" },
+} }];
+const admissions = [{
+  schema_version: worldSimulationObserverSpeechIncrementVersion,
+  observer: "B", release_time_ms: 100,
+  admission_status: "heard_acoustic_cues_only", observer_increment: cue,
+  audit: {
+    source_stream_id: sourceStreamId,
+    source_action_id: "communication_source",
+    source_sound_id: sourceSoundId, source_speaker: "A",
+    registered_sound_link_verified: true,
+    static_acoustics_scope_verified: true,
+    source_content_forwarded_to_observer: false,
+  },
+}];
 const args = {
   epoch_context: context, presented_epoch: epoch,
   character_input: brain, character_input_binding: binding,
   response_proposal: proposed, chronological_timeline: timeline,
+  observer_admissions: admissions,
   selected_action_intents: selected, selection_resolver: choose,
 };
 const scheduled = await scheduleWorldSimulationNativeTemporalResponse(args);
@@ -105,6 +135,11 @@ await bad({
   chronological_timeline: { ...earlier, timeline_hash: hashAgentRunValue(earlier) },
 }, /matching earlier released/u);
 await bad({ selected_action_intents: [] }, /actually selected/u);
+await bad({ observer_admissions: [] }, /authoritative acoustic admission/u);
+await bad({ observer_admissions: [...admissions, admissions[0]] }, /unique exact/u);
+await bad({ observer_admissions: [{...admissions[0],audit: {
+  ...admissions[0].audit,source_action_id:"forged",
+}}] }, /matching earlier released/u);
 const wrongSource = {
   ...rawTimeline, entries: [{ ...rawTimeline.entries[0], actor: "B" }],
 };

@@ -68,6 +68,7 @@ assert.equal(alone.status,"no_simultaneous_realized_speech");
 assert.equal(alone.overlapping_pair_count,0);
 const noSpeech=build({action_outcomes:[],causal_timeline:{entries:[]}});
 assert.equal(noSpeech.validated_speech_count,0);
+assert.throws(()=>build({action_outcomes:[a]}),/authoritative timeline/u);
 
 assert.throws(()=>build({
   action_outcomes:[a,b],
