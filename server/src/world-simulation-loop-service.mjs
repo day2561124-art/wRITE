@@ -58,6 +58,9 @@ import {
   buildWorldSimulationSourceLineageReconciliationContract,
 } from "./world-simulation-communication-source-lineage-reconciliation-service.mjs";
 import {
+  buildWorldSimulationFloorTransitionAdmission,
+} from "./world-simulation-communication-floor-transition-admission-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -4606,6 +4609,8 @@ export function buildWorldSimulationLoopContract() {
       buildWorldSimulationSpeakerNextTurnIntentContract(),
     communication_source_lineage_reconciliation:
       buildWorldSimulationSourceLineageReconciliationContract(),
+    communication_floor_transition_admission:
+      "cc7s-world-floor-transition-admission-v1",
     character_listener_speech_understanding:
       buildCharacterCommunicationListenerUnderstandingContract(),
     character_listener_speaker_recognition:
@@ -10116,6 +10121,15 @@ export async function resolveWorldSimulationTurn(
       action_outcomes: array(causalResolution.action_outcomes),
       speaker_intent_projection: speakerNextTurnIntent,
     }).audit;
+  // CC-7S revalidates World-side source/observer lineage and records only
+  // deferred floor-transition admissions. No public invitation or award.
+  const floorTransitionAdmission =
+    buildWorldSimulationFloorTransitionAdmission({
+      handoff: communicationTurnIncrementHandoff,
+      admissions: array(causalResolution.communication_observer_increment_admissions),
+      action_outcomes: array(causalResolution.action_outcomes),
+      speaker_intent_projection: speakerNextTurnIntent,
+    }).audit;
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12478,6 +12492,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_source_lineage_reconciliation: cloneJson(
         sourceLineageReconciliation,
+      ),
+      communication_floor_transition_admission: cloneJson(
+        floorTransitionAdmission,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,

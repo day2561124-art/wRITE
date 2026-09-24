@@ -426,6 +426,18 @@ try {
   assert.equal(JSON.stringify(sourceLineageAudit).includes(semantic), false);
   assert.equal(JSON.stringify(sourceLineageAudit).includes(actionId), false);
   assert.equal(JSON.stringify(sourceLineageAudit).includes("目前聽成"), false);
+  const transitionAdmission = turn.communication_floor_transition_admission;
+  assert.equal(transitionAdmission.status, "pretransition_evidence_only");
+  assert.equal(transitionAdmission.observer_count, 1);
+  assert.equal(transitionAdmission.nomination_pending_count, 0);
+  assert.equal(transitionAdmission.entries[0].admission, "no_floor_request");
+  assert.equal(transitionAdmission.entries[0].actual_floor_awarded, false);
+  assert.equal(transitionAdmission.entries[0].public_invitation_observed, false);
+  assert.equal(transitionAdmission.boundaries.cc7r_source_lineage_revalidated, true);
+  assert.equal(transitionAdmission.boundaries.public_invitation_emitted, false);
+  assert.equal(JSON.stringify(transitionAdmission).includes(surface), false);
+  assert.equal(JSON.stringify(transitionAdmission).includes(semantic), false);
+  assert.equal(JSON.stringify(transitionAdmission).includes(actionId), false);
   const handoff = turn.communication_turn_increment_handoff;
   assert.equal(handoff.resolver_used, true);
   assert.equal(handoff.projected_count, delivered.length);
