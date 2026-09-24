@@ -144,6 +144,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   let context = null;
   let epoch = null;
   let preparation = null;
+  const preparationAudits = [];
   for (let i = 0; i < ledger.ticks.length; i += 1) {
     if (!ledger.ticks[i].observer_cues.some((cue) => cue.observer === observer))
       continue;
@@ -186,6 +187,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
           epoch_context: nextContext, presented_epoch: nextEpoch,
           decision: answer.decision, previous: preparation,
         });
+        preparationAudits.push(clone(preparation.audit));
         continue;
       }
     }
@@ -207,7 +209,10 @@ export async function replayWorldSimulationNativeTemporalResponse({
       status: preparation ? "awaiting_later_cue" : "no_admitted_cue",
       selected_action_intents: clone(selected_action_intents),
       causal_resolution: initial, native_temporal_response: null,
-      ...(preparation ? { preparation_audit: clone(preparation.audit) } : {}),
+      ...(preparation ? {
+        preparation_audit: clone(preparation.audit),
+        preparation_audits: clone(preparationAudits),
+      } : {}),
       boundaries: buildWorldSimulationNativeTemporalReplayContract(),
     };
   const freshInput = typeof character_input_resolver === "function"
@@ -332,7 +337,10 @@ export async function replayWorldSimulationNativeTemporalResponse({
     status: "replayed_same_turn", selected_action_intents: replayedSelected,
     initial_selected_action_intents: clone(selected_action_intents),
     causal_resolution: replay,
-    ...(preparation ? { preparation_audit: clone(preparation.audit) } : {}),
+    ...(preparation ? {
+      preparation_audit: clone(preparation.audit),
+      preparation_audits: clone(preparationAudits),
+    } : {}),
     native_temporal_response: {
       ...audit,
       audit_hash: hashAgentRunValue(audit),
@@ -365,6 +373,8 @@ export function assertWorldSimulationNativeTemporalChoiceEvidence({
         "response_release_time_ms", "original_phase74d_receipt_unchanged",
         "post_cue_phase74a_b_c_lineage_fabricated", "world_committed",
         "persist_only_with_atomic_world_commit", "evidence_hash",
+        ...(evidence?.source_preparation_audit_hash !== undefined
+          ? ["source_preparation_audit_hash", "preparation_decision_count"] : []),
       ].sort().join("|"))
     refuse("Native response commit evidence has invalid contract fields.");
   const { evidence_hash: hash, ...payload } = evidence;
@@ -379,7 +389,12 @@ export function assertWorldSimulationNativeTemporalChoiceEvidence({
       || evidence.persist_only_with_atomic_world_commit !== true
       || !Number.isFinite(evidence.response_release_time_ms)
       || evidence.response_release_time_ms <= 0
-      || typeof evidence.source_native_replay_audit_hash !== "string")
+      || typeof evidence.source_native_replay_audit_hash !== "string"
+      || (evidence.source_preparation_audit_hash !== undefined
+        && (typeof evidence.source_preparation_audit_hash !== "string"
+          || !Number.isSafeInteger(evidence.preparation_decision_count)
+          || evidence.preparation_decision_count < 1
+          || evidence.preparation_decision_count > 32)))
     refuse("Native response commit evidence failed exact stage provenance.");
   const prior = original.receipts.filter((receipt) =>
     receipt.character === evidence.character
@@ -472,6 +487,10 @@ export function reconcileWorldSimulationNativeTemporalChoiceLineage({
     post_cue_phase74a_b_c_lineage_fabricated: false,
     world_committed: false,
     persist_only_with_atomic_world_commit: true,
+    ...(response.source_preparation_audit_hash ? {
+      source_preparation_audit_hash: response.source_preparation_audit_hash,
+      preparation_decision_count: response.source_preparation_consumed_count,
+    } : {}),
   };
   return {
     ...evidence,

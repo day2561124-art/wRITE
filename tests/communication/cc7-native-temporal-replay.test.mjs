@@ -3,6 +3,10 @@ import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { buildWorldSimulationSubjectiveChoiceCommitmentReceipts } from "../../server/src/world-simulation-subjective-choice-commitment-receipt-service.mjs";
 import {
+  buildWorldSimulationNativePreparationEvidence,
+  assertWorldSimulationNativePreparationEvidence,
+} from "../../server/src/world-simulation-native-response-preparation-service.mjs";
+import {
   replayWorldSimulationNativeTemporalResponse,
   buildWorldSimulationNativeTemporalReplayContract,
   reconcileWorldSimulationNativeTemporalChoiceLineage,
@@ -149,6 +153,42 @@ assert.equal(JSON.stringify(delayed.preparation_audit).includes("男孩離開"),
 assert.equal(delayed.causal_resolution.action_outcomes.find(x=>
   x.action_id===speechB.action_id).start_time_ms,
   delayedViews[1].release_time_ms);
+const revisedViews=[];
+let revisedInputCalls=0;
+let revisedSelectionCalls=0;
+const revised=await replayWorldSimulationNativeTemporalResponse({
+  ...input,
+  preparation_decision_resolver:async(view)=>{
+    revisedViews.push(view);
+    return {epoch_id:view.epoch_id,
+      decision:revisedViews.length===1?"wait":
+        revisedViews.length===2?"revise_preparation":"select_response"};
+  },
+  character_input_resolver:async(view)=>{
+    revisedInputCalls++;
+    assert.equal(view.observer_view.release_time_ms,
+      revisedViews[2].release_time_ms);
+    assert.equal(view.observer_view.future_release_exposed,false);
+    return input.character_input;
+  },
+  selection_resolver:async(view)=>{
+    revisedSelectionCalls++;
+    return {epoch_id:view.epoch_id,
+      action_id:view.candidate_action_intents[0].action_id};
+  },
+});
+assert.equal(revised.status,"replayed_same_turn");
+assert.equal(revisedViews.length,3);
+assert.equal(revisedInputCalls,1);
+assert.equal(revisedSelectionCalls,1);
+assert.equal(revised.preparation_audit.wait_count,1);
+assert.equal(revised.preparation_audit.revision_count,1);
+assert.equal(revised.preparation_audit.consumed_count,2);
+assert(revisedViews[0].release_time_ms<revisedViews[1].release_time_ms);
+assert(revisedViews[1].release_time_ms<revisedViews[2].release_time_ms);
+assert.equal(revised.native_temporal_response.start_time_ms,
+  revisedViews[2].release_time_ms);
+assert.equal(revised.native_temporal_response.source_preparation_consumed_count,2);
 let allWaitInputs=0,allWaitSelections=0;
 const waiting=await replayWorldSimulationNativeTemporalResponse({
   ...input,
@@ -188,6 +228,46 @@ const originalReceipts = buildWorldSimulationSubjectiveChoiceCommitmentReceipts(
   selected_action_intents:input.selected_action_intents,
 });
 const originalHash = hashAgentRunValue(originalReceipts);
+const revisedChoice = reconcileWorldSimulationNativeTemporalChoiceLineage({
+  original_receipts: originalReceipts,
+  native_replay: revised,
+});
+assert.equal(revisedChoice.preparation_decision_count,2);
+assert.equal(revisedChoice.source_preparation_audit_hash,
+  revised.preparation_audit.audit_hash);
+const revisedProof = buildWorldSimulationNativePreparationEvidence({
+  native_replay: revised, choice_evidence: revisedChoice,
+  original_receipts: originalReceipts,
+});
+assert.equal(revisedProof.preparation_audits.length,2);
+assert.deepEqual(revisedProof.preparation_audits.map(a=>a.latest_decision),
+  ["wait","revise_preparation"]);
+assert.equal(revisedProof.preparation_audits[1].previous_audit_hash,
+  revisedProof.preparation_audits[0].audit_hash);
+assert.equal(revisedProof.last_preparation_audit_hash,
+  revisedChoice.source_preparation_audit_hash);
+const checkRevisedProof=(evidence,choice_evidence=revisedChoice)=>
+  assertWorldSimulationNativePreparationEvidence({
+    evidence, choice_evidence, original_receipts:originalReceipts,
+    action_outcomes:revised.causal_resolution.action_outcomes,
+  });
+assert.deepEqual(checkRevisedProof(revisedProof),revisedProof);
+const forgedChain=structuredClone(revisedProof);
+forgedChain.preparation_audits[1].previous_audit_hash="forged";
+const {audit_hash:ignoredAuditHash,...forgedAuditPayload}=
+  forgedChain.preparation_audits[1];
+forgedChain.preparation_audits[1].audit_hash=
+  hashAgentRunValue(forgedAuditPayload);
+forgedChain.last_preparation_audit_hash=
+  forgedChain.preparation_audits[1].audit_hash;
+const {evidence_hash:ignoredEvidenceHash,...forgedPayload}=forgedChain;
+forgedChain.evidence_hash=hashAgentRunValue(forgedPayload);
+assert.throws(()=>checkRevisedProof(forgedChain),
+  /stale, forged|provenance disagree/u);
+assert.throws(()=>checkRevisedProof(revisedProof,{
+  ...revisedChoice,source_preparation_audit_hash:"forged",
+}),/stale, forged|provenance disagree|matching later committed speech/u);
+assert.throws(()=>checkRevisedProof(null),/must carry its linked/u);
 const choice = reconcileWorldSimulationNativeTemporalChoiceLineage({
   original_receipts:originalReceipts,native_replay:first,
 });

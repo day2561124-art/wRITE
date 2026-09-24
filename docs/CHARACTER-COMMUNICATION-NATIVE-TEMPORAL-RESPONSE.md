@@ -132,6 +132,17 @@ still authoritative. Tests exercise the actual wait-then-later-response
 commit and verify one later input/selection, no future/private content in
 the World history, and the original rejected pre-cue choice.
 
+CC-7AE slice 3 persists ONLY a compact, hash-linked preparation audit
+chain when an actual later response is selected and emitted in the same
+atomic World commit. A bounded chain tracks `wait` / `revise_preparation`
+at different admitted release cursors, ties its final hash to the later
+choice evidence and source pre-turn World hash, and verifies both count and
+causal-release order against the emitted speech. The full private epoch,
+unreleased speech, hidden cognition, and the speculative Brain inputs
+are NOT saved. The absence of a later response means there is no
+fabricated committed preparation-as-speech evidence; all-wait World turns
+still commit without B's signal or a synthetic post-cue selection receipt.
+
 This opt-in stage does NOT yet model multiple successive World causal epochs
 with cancellation or interruption effects, nor does it make a fixed gap
 threshold a behavioral decision. Those require separate later acceptance

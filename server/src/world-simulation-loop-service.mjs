@@ -83,6 +83,9 @@ import {
   reconcileWorldSimulationNativeTemporalChoiceLineage,
 } from "./world-simulation-native-temporal-replay-service.mjs";
 import {
+  buildWorldSimulationNativePreparationEvidence,
+} from "./world-simulation-native-response-preparation-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -9899,6 +9902,14 @@ export async function resolveWorldSimulationTurn(
         original_receipts: subjectiveChoiceCommitmentReceipts,
         native_replay: nativeTemporalReplay,
       }) : null;
+  const nativeTemporalPreparationEvidence =
+    nativeTemporalReplay?.status === "replayed_same_turn"
+    && nativeTemporalReplay.preparation_audits?.length
+      ? buildWorldSimulationNativePreparationEvidence({
+        native_replay: nativeTemporalReplay,
+        choice_evidence: nativeTemporalChoiceEvidence,
+        original_receipts: subjectiveChoiceCommitmentReceipts,
+      }) : null;
 
   const copingIntentionCommitments = buildWorldSimulationCopingIntentionCommitments({
     world_history: await getWorldSimulationHistory(sessionId, options),
@@ -12652,6 +12663,9 @@ export async function resolveWorldSimulationTurn(
       subjective_choice_commitment_receipts:
         cloneJson(subjectiveChoiceCommitmentReceipts),
       native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence),
+      ...(nativeTemporalPreparationEvidence
+        ? { native_temporal_preparation_evidence:
+            cloneJson(nativeTemporalPreparationEvidence) } : {}),
       state_transitions: array(causalResolution.state_transitions),
       action_outcomes: array(causalResolution.action_outcomes),
       knowledge_transitions: array(causalResolution.knowledge_transitions),
@@ -13521,6 +13535,9 @@ export async function resolveWorldSimulationTurn(
     ...(nativeTemporalChoiceEvidence
       ? { native_temporal_choice_evidence: cloneJson(nativeTemporalChoiceEvidence) }
       : {}),
+    ...(nativeTemporalPreparationEvidence
+      ? { native_temporal_preparation_evidence:
+          cloneJson(nativeTemporalPreparationEvidence) } : {}),
     subjective_choice_commitment_receipt: {
       version: worldSimulationSubjectiveChoiceCommitmentReceiptVersion,
       receipt_count: subjectiveChoiceCommitmentReceipts.receipt_count,

@@ -8,6 +8,7 @@ import {
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { getWorldSimulationHistory } from "../../server/src/world-simulation-state-service.mjs";
 import { assertWorldSimulationNativeTemporalChoiceEvidence } from "../../server/src/world-simulation-native-temporal-replay-service.mjs";
+import { assertWorldSimulationNativePreparationEvidence } from "../../server/src/world-simulation-native-response-preparation-service.mjs";
 
 const fixtureRoot=path.join(projectRoot,"tests",".tmp",
   "cc7ad-native-world-"+process.pid+"-"+Date.now());
@@ -184,7 +185,7 @@ try {
     "native_temporal_choice_evidence"),false);
   // CC-7AE native World adoption: first acoustic cue allows a private wait;
   // only the second actually heard cue permits one later selected response.
-  const delayedSession=await beginWorldSimulationSession({
+  const delayedSessionInput={
     simulation_label:"CC7AE native delayed observer response",
     seed:"cc7ae-native-delayed",
     rules:{event_driven:true,persistent_causality:true,
@@ -213,7 +214,9 @@ try {
       },
       memories:{A:[],B:[]},available_actions:{A:[],B:[]},
     },
-  },options);
+  };
+  const delayedSession=await beginWorldSimulationSession(
+    delayedSessionInput,options);
   const preparationViews=[];
   let delayedInputCount=0,delayedChoiceCount=0;
   const delayedResult=await runWorldSimulationTurn({
@@ -275,7 +278,85 @@ try {
     preparationViews[1].release_time_ms);
   assert.equal(delayedTurn.native_temporal_choice_evidence.response_action_id,
     delayedReply.action_id);
+  const delayedProof=delayedTurn.native_temporal_preparation_evidence;
+  assert(delayedProof,"Committed delayed response needs bounded preparation provenance.");
+  assert.equal(delayedProof.preparation_audits.length,1);
+  assert.equal(delayedProof.preparation_audits[0].latest_decision,"wait");
+  assert.equal(delayedProof.source_response_action_id,delayedReply.action_id);
+  assert.equal(delayedProof.source_response_release_time_ms,
+    delayedReply.start_time_ms);
+  assert.equal(delayedProof.last_preparation_audit_hash,
+    delayedTurn.native_temporal_choice_evidence.source_preparation_audit_hash);
+  const verifyPreparation=(evidence,choice_evidence=
+    delayedTurn.native_temporal_choice_evidence)=>assertWorldSimulationNativePreparationEvidence({
+    evidence,choice_evidence,
+    original_receipts:delayedTurn.subjective_choice_commitment_receipts,
+    action_outcomes:delayedTurn.action_outcomes,
+  });
+  assert.deepEqual(verifyPreparation(delayedProof),delayedProof);
+  assert.throws(()=>verifyPreparation({
+    ...delayedProof,evidence_hash:"forged",
+  }),/provenance disagree/u);
+  assert.throws(()=>verifyPreparation({
+    ...delayedProof,preparation_audits:delayedProof.preparation_audits.map(
+      audit=>({...audit,wait_count:999})),
+  }),/provenance disagree|stale, forged/u);
+  assert.throws(()=>verifyPreparation(null),/must carry its linked/u);
   assert.equal(JSON.stringify(delayedTurn).includes("B_SECRET_DELAYED"),false);
+  assert.equal(JSON.stringify(delayedProof).includes("男孩離開房子"),false);
+
+  // Every admitted release may be heard without choosing to speak.
+  const allWaitSession=await beginWorldSimulationSession({
+    ...structuredClone(delayedSessionInput),
+    seed:"cc7ae-native-all-wait",
+    simulation_label:"CC7AE all-wait World commit without B speech",
+  },options);
+  let allWaitReleases=0;
+  let allWaitInputCalls=0;
+  let allWaitSelectionCalls=0;
+  const allWaitResult=await runWorldSimulationTurn({
+    world_simulation_session_id:allWaitSession.world_simulation_session_id,
+    event_id:"delayed-talk",
+  },{
+    ...options,characterRuntimeManager:runtimeManager,
+    characterBrain:async(packet)=>{
+      if(packet.character!=="A") return "reject_all";
+      const speech=packet.candidate_action_intents.find(x=>
+        x.communication?.surface_realization_complete===true);
+      assert(speech);return {action_id:speech.action_id};
+    },
+    characterNativeTemporalResponseObserver:"B",
+    characterNativeTemporalResponsePreparationResolver:async(view)=>{
+      allWaitReleases++;
+      assert.equal(view.character,"B");
+      assert.equal(view.observer_view.future_release_exposed,false);
+      return {epoch_id:view.epoch_id,decision:"wait"};
+    },
+    characterNativeTemporalResponseInputResolver:async()=>{
+      allWaitInputCalls++;
+      throw new Error("All-wait must not invoke new Brain input.");
+    },
+    characterNativeTemporalResponseSelectionResolver:async()=>{
+      allWaitSelectionCalls++;
+      throw new Error("All-wait must not select a response.");
+    },
+  });
+  assert.equal(allWaitResult.committed,true);
+  assert(allWaitReleases>=2);
+  assert.equal(allWaitInputCalls,0);
+  assert.equal(allWaitSelectionCalls,0);
+  assert.equal(allWaitResult.selected_action_intents.find(x=>
+    x.character==="B").selection,"reject_all");
+  assert.equal(Object.hasOwn(allWaitResult,"native_temporal_choice_evidence"),false);
+  const allWaitHistory=await getWorldSimulationHistory(
+    allWaitSession.world_simulation_session_id,options);
+  const allWaitTurn=allWaitHistory.turns[0];
+  assert.equal(Object.hasOwn(allWaitTurn,"native_temporal_choice_evidence"),false);
+  assert.equal(Object.hasOwn(allWaitTurn,"native_temporal_preparation_evidence"),false);
+  assert.equal(allWaitTurn.action_outcomes.some(x=>
+    x.actor==="B"&&x.result==="communication_emitted"),false);
+  assert.equal(allWaitTurn.subjective_choice_commitment_receipts.receipts.find(x=>
+    x.character==="B").selection_kind,"reject_all");
   console.log("CC-7AD native World same-turn commit and choice stages passed.");
   console.log("CC-7AE native World wait-then-later-response commit passed.");
 } finally {

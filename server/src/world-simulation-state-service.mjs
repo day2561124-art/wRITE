@@ -17,6 +17,9 @@ import {
 import {
   assertWorldSimulationNativeTemporalChoiceEvidence,
 } from "./world-simulation-native-temporal-replay-service.mjs";
+import {
+  assertWorldSimulationNativePreparationEvidence,
+} from "./world-simulation-native-response-preparation-service.mjs";
 
 export const worldSimulationStateVersion = "phase62c-world-state-v1";
 
@@ -221,6 +224,16 @@ export async function commitWorldSimulationTurn(
       causal_timeline: input.causal_timeline,
     });
   }
+  if (input.native_temporal_preparation_evidence != null
+      || input.native_temporal_choice_evidence?.source_preparation_audit_hash
+        !== undefined) {
+    assertWorldSimulationNativePreparationEvidence({
+      evidence: input.native_temporal_preparation_evidence,
+      choice_evidence: input.native_temporal_choice_evidence,
+      original_receipts: input.subjective_choice_commitment_receipts,
+      action_outcomes: input.action_outcomes,
+    });
+  }
   const nextWorldState = requireObject(input.next_world_state, "next_world_state");
   const paths = worldSimulationStatePaths(sessionId, options);
   let committedEnvelope = null;
@@ -292,6 +305,10 @@ export async function commitWorldSimulationTurn(
             ...(input.native_temporal_choice_evidence != null
               ? { native_temporal_choice_evidence:
                   input.native_temporal_choice_evidence }
+              : {}),
+            ...(input.native_temporal_preparation_evidence != null
+              ? { native_temporal_preparation_evidence:
+                  input.native_temporal_preparation_evidence }
               : {}),
             state_transitions: input.state_transitions ?? [],
             action_outcomes: input.action_outcomes ?? [],
