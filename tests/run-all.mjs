@@ -955,6 +955,7 @@ const steps = [
   ["CC-7W open-floor self-selection authorization", ["tests/communication/cc7-open-floor-transition-authorization.test.mjs"]],
   ["CC-7X committed turn authorization re-entry", ["tests/communication/cc7-turn-authorization-reentry.test.mjs"]],
   ["CC-7Y authorized floor claim execution", ["tests/communication/cc7-authorized-floor-claim.test.mjs"]],
+  ["CC-7Z simultaneous speech evidence", ["tests/communication/cc7-speech-overlap.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];

@@ -382,6 +382,12 @@ try {
   const speechOutcome = turn.action_outcomes.find(
     (item) => item.actor === "A" && item.result === "communication_emitted");
   assert.ok(speechOutcome?.communication_speech_stream);
+  assert.equal(turn.communication_speech_overlap_evidence
+    .status, "no_simultaneous_realized_speech");
+  assert.equal(turn.communication_speech_overlap_evidence
+    .validated_speech_count, 1);
+  assert.equal(turn.communication_speech_overlap_evidence
+    .boundaries.interruption_judged, false);
   const lexicalAudit = turn.observer_lexical_increment;
   assert.equal(lexicalAudit.status, "observer_subjective_lexical_recognition");
   assert.equal(lexicalAudit.recognition_count, lexicalDelivered.length);

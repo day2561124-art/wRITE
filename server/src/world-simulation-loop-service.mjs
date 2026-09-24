@@ -76,6 +76,9 @@ import {
   buildWorldSimulationAuthorizedFloorClaim,
 } from "./world-simulation-communication-authorized-floor-claim-service.mjs";
 import {
+  buildWorldSimulationSpeechOverlapEvidence,
+} from "./world-simulation-communication-speech-overlap-service.mjs";
+import {
   buildCharacterCommunicationListenerUnderstandingContract,
   buildCharacterCommunicationListenerUnderstandingResolverView,
   characterCommunicationListenerUnderstandingVersion,
@@ -10203,6 +10206,13 @@ export async function resolveWorldSimulationTurn(
       selected_action_intents: selected,
       action_outcomes: array(causalResolution.action_outcomes),
     }).audit;
+  // CC-7Z records only physical co-occurrence of verified, emitted speech
+  // intervals. The World does not classify interruption or grant priority.
+  const speechOverlapEvidence =
+    buildWorldSimulationSpeechOverlapEvidence({
+      action_outcomes: array(causalResolution.action_outcomes),
+      causal_timeline: causalResolution.causal_timeline,
+    });
 
   // Phase76A is computed as soon as the authoritative causal resolution has
   // passed the hard consistency gate. It remains speculative evidence until
@@ -12583,6 +12593,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_authorized_floor_claim: cloneJson(
         authorizedFloorClaim,
+      ),
+      communication_speech_overlap_evidence: cloneJson(
+        speechOverlapEvidence,
       ),
       observer_microtick_release_ledger: cloneJson(
         observerMicrotickLedger,
