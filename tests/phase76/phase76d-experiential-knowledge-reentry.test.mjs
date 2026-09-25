@@ -21,6 +21,9 @@ import {
   buildWorldSimulationPersonalSemanticMemoryResolverView,
 } from "../../server/src/world-simulation-personal-semantic-memory-service.mjs";
 import {
+  createWorldSimulationCharacterRuntimeManager,
+} from "../../server/src/world-simulation-loop-service.mjs";
+import {
   buildWorldSimulationExperientialKnowledgeReentryContract,
   buildWorldSimulationExperientialKnowledgeReentryResolverView,
   projectWorldSimulationExperientialKnowledgeReentry,
@@ -272,6 +275,50 @@ assert.equal(
   knowledge.semantic_descriptor.object_ref,
   "alternative-route-method",
 );
+
+// The canonical Native Runtime wrapper must deliver the actual Phase76D result
+// to Current Mind. A direct reducer test would miss a dropped wrapper field.
+const currentMindManager = createWorldSimulationCharacterRuntimeManager({
+  identityResolver: async () => ({
+    entity_id: "phase76d-test-character",
+    canonical_name: character,
+    identity_source: "phase76d_test_identity_resolver",
+    formal: true,
+  }),
+});
+const currentMindInput = {
+  world_simulation_session_id: "phase76d-knowledge-lineage",
+  turn_id: currentTurn,
+  character,
+  simulation_time: "2026-09-01T10:00:00+08:00",
+  perception: { observed: [], audible: [], other_senses: [] },
+  recovered_memories: [],
+  experiential_knowledge: reentry.character_view.experiential_knowledge,
+  current_action: null,
+  compatibility_state: {},
+};
+const knowledgeMind = await currentMindManager.prepareSpeculativeCurrentMind(currentMindInput);
+const repeatedKnowledgeMind = await currentMindManager.prepareSpeculativeCurrentMind(currentMindInput);
+assert.deepEqual(repeatedKnowledgeMind, knowledgeMind);
+assert.equal(
+  knowledgeMind.projection.source_refs.some((ref) => ref.kind === "experiential_knowledge"),
+  true,
+  "committed prior-turn experiential knowledge must reach Current Mind through the default manager",
+);
+assert.equal(
+  knowledgeMind.projection.resolver_audit.focus_resolution_evidence.selected_candidate_source_kind,
+  "experiential_knowledge",
+);
+assert.equal(
+  JSON.stringify(knowledgeMind.working_context).includes("when_direct_route_blocked_seek_alternative_route"),
+  true,
+);
+const emptyKnowledgeMind = await currentMindManager.prepareSpeculativeCurrentMind({
+  ...currentMindInput,
+  experiential_knowledge: [],
+});
+assert.equal(emptyKnowledgeMind.projection.source_refs.length, 0);
+assert.equal(emptyKnowledgeMind.projection.focus_transition.to, null);
 assert.equal(JSON.stringify(reentry.character_view).includes(candidate.semantic_ref), false);
 assert.equal(reentry.audit.resolver_authored_semantic_content, false);
 assert.equal(reentry.audit.existing_current_mind_gating_targeted, true);

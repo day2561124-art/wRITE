@@ -2851,6 +2851,7 @@ export function createWorldSimulationCharacterRuntimeManager(config = {}) {
       simulation_time: input.simulation_time ?? null,
       perception: cloneJson(input.perception ?? {}),
       recovered_memories: cloneJson(input.recovered_memories ?? []),
+      experiential_knowledge: cloneJson(input.experiential_knowledge ?? []),
       current_action: cloneJson(input.current_action ?? null),
       compatibility_state: cloneJson(input.compatibility_state ?? {}),
     });
