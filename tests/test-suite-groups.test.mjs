@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  cbC2AutonomousCognitionSteps,
   cognitionSteps,
   communicationSteps,
   memoryRetrievalSteps,
@@ -67,7 +68,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(
-    /"tests\/(phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92|phase93|phase94|phase95|phase96)\/[^"]+\.test\.mjs"/g,
+    /"tests\/(cb-c2|phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92|phase93|phase94|phase95|phase96)\/[^"]+\.test\.mjs"/g,
   ),
 ].map((match) => match[0].slice(1, -1));
 
@@ -149,6 +150,7 @@ assert.deepEqual(
 assert.deepEqual(
   cognitionPaths,
   [
+    ...pathsFor(cbC2AutonomousCognitionSteps),
     ...phase62CognitionPaths,
     ...phase63Paths,
     ...phase64Paths,
@@ -197,7 +199,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/(?:phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\//,
+    /^tests\/(?:cb-c2|phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\//,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

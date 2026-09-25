@@ -480,6 +480,11 @@ import {
   worldSimulationGoalImplementationIntentionVersion,
 } from "./world-simulation-goal-to-plan-implementation-intention-service.mjs";
 import {
+  buildWorldSimulationAutonomousCognitionSchedulerContract,
+  projectWorldSimulationAutonomousCognitionOpportunities,
+  worldSimulationAutonomousCognitionSchedulerVersion,
+} from "./world-simulation-autonomous-cognition-scheduler-service.mjs";
+import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
   projectWorldSimulationGoalImplementationIntentionActivation,
@@ -3613,6 +3618,8 @@ export function buildWorldSimulationLoopContract() {
   return {
     version: worldSimulationLoopVersion,
     scheduling: "event_driven",
+    autonomous_cognition_scheduler:
+      buildWorldSimulationAutonomousCognitionSchedulerContract(),
     world_state_owner: "programmatic_world_simulator",
     character_choice_owner: "chatgpt_character_brain",
     character_runtime: {
@@ -4732,6 +4739,147 @@ export function buildWorldSimulationLoopContract() {
     stale_state_commit_rejected: true,
     replay_chain_uses_state_hashes: true,
   };
+}
+
+export async function scheduleWorldSimulationAutonomousCognitionOpportunities(
+  input = {},
+  options = {},
+) {
+  const sessionId = nonEmptyString(
+    input.world_simulation_session_id,
+    "world_simulation_session_id",
+  );
+  await assertWorldSimulationSession(sessionId, options);
+  const snapshot = await getWorldSimulationState(sessionId, options);
+  const projection = projectWorldSimulationAutonomousCognitionOpportunities({
+    world_state: snapshot.state,
+    simulation_time:
+      input.simulation_time
+      ?? snapshot.state?.simulation_time
+      ?? null,
+    runtime_context_by_character:
+      input.runtime_context_by_character
+      ?? options.autonomousCognitionRuntimeContextByCharacter
+      ?? {},
+    consumed_opportunity_ids:
+      input.consumed_opportunity_ids
+      ?? options.autonomousCognitionConsumedOpportunityIds
+      ?? [],
+  });
+  return Object.freeze({
+    version: worldSimulationAutonomousCognitionSchedulerVersion,
+    world_simulation_session_id: sessionId,
+    state_revision: snapshot.revision,
+    world_state_hash: snapshot.state_hash,
+    scheduler_projection: cloneJson(projection),
+    event_queue_empty: array(snapshot.state?.event_queue).length === 0,
+    external_world_event_required_for_projection: false,
+    world_state_mutated: false,
+  });
+}
+
+export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
+  input = {},
+  options = {},
+) {
+  const scheduled =
+    await scheduleWorldSimulationAutonomousCognitionOpportunities(input, options);
+
+  if (scheduled.scheduler_projection.opportunity_count === 0) {
+    return Object.freeze({
+      version: worldSimulationAutonomousCognitionSchedulerVersion,
+      world_simulation_session_id: scheduled.world_simulation_session_id,
+      state_revision: scheduled.state_revision,
+      world_state_hash: scheduled.world_state_hash,
+      event_queue_empty: scheduled.event_queue_empty,
+      dispatch_count: 0,
+      dispatches: [],
+      consumed_opportunity_ids: [],
+      raw_character_brain_results_exposed: false,
+      durable_cognitive_write_performed: false,
+      action_selection_performed: false,
+      world_mutation_performed: false,
+    });
+  }
+
+  if (typeof options.characterBrain !== "function") {
+    const error = new Error(
+      "CB-C2 autonomous cognition dispatch requires a characterBrain function when an opportunity exists.",
+    );
+    error.code = "WORLD_SIMULATION_AUTONOMOUS_COGNITION_CHARACTER_BRAIN_REQUIRED";
+    throw error;
+  }
+
+  const characterRuntimeManager = options.characterRuntimeManager
+    ?? defaultWorldSimulationCharacterRuntimeManager;
+  if (typeof characterRuntimeManager?.runCharacterTurn !== "function"
+      || typeof characterRuntimeManager?.inspectRuntime !== "function") {
+    throw new Error(
+      "characterRuntimeManager must provide runCharacterTurn() and inspectRuntime() for CB-C2 dispatch.",
+    );
+  }
+
+  const dispatches = [];
+  for (const opportunity of scheduled.scheduler_projection.opportunities) {
+    const runtimeSnapshot = await characterRuntimeManager.inspectRuntime({
+      world_simulation_session_id: scheduled.world_simulation_session_id,
+      character: opportunity.character,
+    }, options);
+    const brainInput = {
+      character: opportunity.character,
+      cognition: {
+        autonomous_opportunity: {
+          present: true,
+          trigger_kinds: cloneJson(opportunity.trigger_kinds),
+          current_mind: cloneJson(
+            runtimeSnapshot?.current_mind?.character_facing_view ?? {},
+          ),
+        },
+      },
+      boundaries: {
+        autonomous_cognition_opportunity_only: true,
+        external_world_event_present: false,
+        world_truth_exposed: false,
+        scheduler_thought_content_authority: false,
+        scheduler_belief_revision_authority: false,
+        scheduler_action_selection_authority: false,
+        scheduler_world_mutation_authority: false,
+        engine_opportunity_refs_exposed: false,
+      },
+    };
+    await characterRuntimeManager.runCharacterTurn({
+      world_simulation_session_id: scheduled.world_simulation_session_id,
+      character: opportunity.character,
+      brain_input: brainInput,
+      characterBrain: options.characterBrain,
+    }, options);
+
+    dispatches.push({
+      character: opportunity.character,
+      opportunity_id: opportunity.opportunity_id,
+      trigger_kinds: cloneJson(opportunity.trigger_kinds),
+      character_brain_turn_completed: true,
+      raw_character_brain_result_exposed: false,
+      durable_cognitive_write_performed: false,
+      action_selection_performed: false,
+      world_mutation_performed: false,
+    });
+  }
+
+  return Object.freeze({
+    version: worldSimulationAutonomousCognitionSchedulerVersion,
+    world_simulation_session_id: scheduled.world_simulation_session_id,
+    state_revision: scheduled.state_revision,
+    world_state_hash: scheduled.world_state_hash,
+    event_queue_empty: scheduled.event_queue_empty,
+    dispatch_count: dispatches.length,
+    dispatches,
+    consumed_opportunity_ids: dispatches.map((item) => item.opportunity_id),
+    raw_character_brain_results_exposed: false,
+    durable_cognitive_write_performed: false,
+    action_selection_performed: false,
+    world_mutation_performed: false,
+  });
 }
 
 export async function prepareWorldSimulationTurn(input = {}, options = {}) {

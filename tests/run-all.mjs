@@ -727,6 +727,7 @@ const steps = [
   ["Phase 59B ephemeral draft review MCP", ["tests/phase59/phase59b-ephemeral-draft-review-mcp.test.mjs"]],
   ["Phase 60A highest creative authority contract", ["tests/phase60/phase60a-highest-creative-authority-contract.test.mjs"]],
   ["Phase 61A temporal medical current-state guard", ["tests/phase61/phase61a-temporal-medical-current-state-guard.test.mjs"]],
+  ["CB-C2 Autonomous Cognition Scheduler", ["tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

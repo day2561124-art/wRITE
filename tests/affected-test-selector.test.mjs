@@ -70,6 +70,37 @@ assert.equal(sharedWorldLoop.focused, true);
 assert(sharedWorldLoop.affected_tests.some((item) => item.includes("phase62z-audibility-propagation")));
 assert(sharedWorldLoop.affected_tests.some((item) => item.includes("phase65b-subjective-claim-conflict")));
 
+const cbC2IntegrationBundle = await plan(
+  [
+    "server/src/world-simulation-autonomous-cognition-scheduler-service.mjs",
+    "server/src/world-simulation-loop-service.mjs",
+    "tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs",
+    "tests/run-all.mjs",
+    "tests/test-suite-groups.mjs",
+    "tests/test-suite-groups.test.mjs",
+  ],
+  {
+    runAllDiffText: [
+      "diff --git a/tests/run-all.mjs b/tests/run-all.mjs",
+      "--- a/tests/run-all.mjs",
+      "+++ b/tests/run-all.mjs",
+      "@@ -729,0 +730 @@ const steps = [",
+      "+  [\"CB-C2 Autonomous Cognition Scheduler\", [\"tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs\"]],",
+    ].join("\n"),
+  },
+);
+assert.equal(cbC2IntegrationBundle.suite, "world_simulation");
+assert.deepEqual(
+  cbC2IntegrationBundle.required_suites,
+  ["world_simulation", "communication"],
+);
+assert.equal(cbC2IntegrationBundle.focused, true);
+assert.equal(cbC2IntegrationBundle.fallback_reason, null);
+assert(cbC2IntegrationBundle.selected_group_tests.includes(
+  "tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs",
+));
+assert.equal(cbC2IntegrationBundle.certification_required, true);
+
 const communicationNativeIntegration = await plan([
   "server/src/character-communication-listener-understanding-service.mjs",
 ]);

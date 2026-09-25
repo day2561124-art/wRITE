@@ -349,6 +349,13 @@ export const phase96MemoryAffectLifecycleClosureSteps = Object.freeze([
   Object.freeze(["Phase 96 memory–affect integration + lifecycle closure", Object.freeze(["tests/phase96/phase96-memory-affect-lifecycle-closure.test.mjs"])]),
 ]);
 
+export const cbC2AutonomousCognitionSteps = Object.freeze([
+  Object.freeze([
+    "CB-C2 Autonomous Cognition Scheduler",
+    Object.freeze(["tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -358,6 +365,7 @@ export const phase62CognitionIntegrationSteps = Object.freeze(
 );
 
 export const worldSimulationSteps = Object.freeze([
+  ...cbC2AutonomousCognitionSteps,
   ...phase62WorldSimulationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
@@ -396,6 +404,7 @@ export const worldSimulationSteps = Object.freeze([
 ]);
 
 export const cognitionSteps = Object.freeze([
+  ...cbC2AutonomousCognitionSteps,
   ...phase62CognitionIntegrationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
