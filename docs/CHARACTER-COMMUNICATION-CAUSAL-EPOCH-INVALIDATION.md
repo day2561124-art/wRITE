@@ -1,7 +1,8 @@
 # CC-7AF — Causal Epoch Supersession and Dependent Response Invalidation
 
-Status: research + bounded engineering contract (NOT implemented/accepted)
+Status: bounded implementation complete; acceptance gated by exact integration + canonical remote verification
 Baseline: `a3b59f00b6512d3b617ead3b73477d418a825e6c` (sealed CC-7AE)
+Scope: explicit source supersession, fresh-cue reentry, and bounded invalidation of verified uncommitted acoustic-dependent future events; not a general interruption controller
 
 ## Why this phase exists
 
