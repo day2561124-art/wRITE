@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import {
@@ -237,5 +238,62 @@ const replayB = projectWorldSimulationEffectiveGoalImplementationIntentions({ wo
 assert.equal(replayA.projection_hash, replayB.projection_hash);
 assert.equal(Object.hasOwn(world, "selected_action"), false);
 assert.equal(Object.hasOwn(world, "plan_tree"), false);
+
+// A goal committed only in this turn cannot acquire a plan retroactively.
+const proposedOnly = {
+  motivational_goal_events: { [proposed.goal_event_id]: proposed },
+  motivational_goal_history: [goalRef(proposed)],
+};
+const priorViewWithoutCommit = buildWorldSimulationGoalImplementationIntentionResolverView({
+  world_state: proposedOnly, turn_id: turn1,
+});
+assert.throws(() => buildWorldSimulationGoalImplementationIntentionEvents({
+  world_state: world,
+  resolver_world_state: proposedOnly,
+  turn_id: turn1,
+  implementation_intention_decisions: [{
+    character: elias, goal_id: goalId,
+    cue_descriptor: { cue_kind: "obstacle", label: "companion_is_threatened" },
+    response_descriptor: { response_kind: "seek_support", label: "coordinate_with_ally" },
+    resolver_view_hash: priorViewWithoutCommit.resolver_view_hash,
+  }],
+}), (error) => error?.code === "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_SOURCE_GOAL_NOT_COMMITTED");
+
+// A prior committed goal suspended in the current state is no longer a plan source.
+const committedWorld = clone(world);
+committedWorld.motivational_goal_history.pop();
+delete committedWorld.motivational_goal_events[suspended.goal_event_id];
+const priorCommittedView = buildWorldSimulationGoalImplementationIntentionResolverView({
+  world_state: committedWorld, turn_id: "world_turn_phase69a_suspended_source",
+});
+assert.throws(() => buildWorldSimulationGoalImplementationIntentionEvents({
+  world_state: world,
+  resolver_world_state: committedWorld,
+  turn_id: "world_turn_phase69a_suspended_source",
+  implementation_intention_decisions: [{
+    character: elias, goal_id: goalId,
+    cue_descriptor: { cue_kind: "opportunity", label: "safe_opening" },
+    response_descriptor: { response_kind: "communication", label: "signal_ally" },
+    resolver_view_hash: priorCommittedView.resolver_view_hash,
+  }],
+}), (error) => error?.code === "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_SOURCE_GOAL_NOT_COMMITTED");
+
+const loopSource = readFileSync(
+  new URL("../../server/src/world-simulation-loop-service.mjs", import.meta.url), "utf8");
+const formationIndex = loopSource.indexOf("const goalImplementationIntentionFormationDecisionResolution =");
+const formationExecutionIndex = loopSource.indexOf(
+  "const goalImplementationIntentionFormationMutationExecution =", formationIndex);
+const goalFormationIndex = loopSource.indexOf("const motivationalGoalDecisionResolution =", formationExecutionIndex);
+const commitIndex = loopSource.indexOf("const committed = await commitWorldSimulationTurn", goalFormationIndex);
+assert.ok(formationIndex >= 0 && formationExecutionIndex > formationIndex
+  && goalFormationIndex > formationExecutionIndex && commitIndex > goalFormationIndex);
+assert.match(loopSource.slice(formationIndex, formationExecutionIndex),
+  /resolveGoalImplementationIntentionFormationDecisions\(\s*snapshot\.state/);
+assert.match(loopSource.slice(formationIndex, goalFormationIndex),
+  /resolver_world_state: snapshot\.state/);
+assert.match(loopSource.slice(goalFormationIndex, commitIndex),
+  /goalImplementationIntentionFormationMutationExecution\.next_world_state/);
+assert.match(loopSource.slice(commitIndex, commitIndex + 400),
+  /next_world_state: motivationalGoalMutationExecution\.next_world_state/);
 
 console.log("Phase69A goal-to-plan implementation-intention tests passed.");

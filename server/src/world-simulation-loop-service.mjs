@@ -475,6 +475,11 @@ import {
   worldSimulationMotivationGoalIntegrationVersion,
 } from "./world-simulation-motivation-goal-integration-service.mjs";
 import {
+  buildWorldSimulationGoalImplementationIntentionEvents,
+  buildWorldSimulationGoalImplementationIntentionResolverView,
+  worldSimulationGoalImplementationIntentionVersion,
+} from "./world-simulation-goal-to-plan-implementation-intention-service.mjs";
+import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
   projectWorldSimulationGoalImplementationIntentionActivation,
@@ -8581,6 +8586,36 @@ async function resolveStructuredSelfModelRevisionDecisions(
   };
 }
 
+async function resolveGoalImplementationIntentionFormationDecisions(
+  priorCommittedWorldState, preparedTurn, options,
+) {
+  const resolverView = buildWorldSimulationGoalImplementationIntentionResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+  });
+  const resolver = typeof options.goalImplementationIntentionResolver === "function"
+    ? options.goalImplementationIntentionResolver : null;
+  if (!resolver) {
+    return {
+      decisions: [], resolver_view: resolverView,
+      audit: { resolver_used: false, missing_resolver_means_no_plan_event: true,
+        prior_turn_committed_goal_only: true, world_state_exposed_to_resolver: false },
+    };
+  }
+  const raw = await resolver(cloneJson(resolverView));
+  if (!Array.isArray(raw)) {
+    const error = new Error("goalImplementationIntentionResolver must return an array of bounded Phase69A formation decisions.");
+    error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  return {
+    decisions: cloneJson(raw), resolver_view: resolverView,
+    audit: { resolver_used: true, decision_count: raw.length,
+      input_context_hash: hashAgentRunValue(resolverView),
+      prior_turn_committed_goal_only: true, world_state_exposed_to_resolver: false },
+  };
+}
+
 async function resolveMotivationalGoalDecisions(priorCommittedWorldState, preparedTurn, options) {
   const resolverView = buildWorldSimulationMotivationalGoalResolverView({
     world_state: priorCommittedWorldState,
@@ -12658,13 +12693,45 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase69A forms prospective IF-cue/THEN-response plans only for a goal
+  // committed before this turn. New Phase68D goals become eligible next turn.
+  const goalImplementationIntentionFormationDecisionResolution =
+    await resolveGoalImplementationIntentionFormationDecisions(
+      snapshot.state, preparedTurn, options);
+  const goalImplementationIntentionFormation =
+    buildWorldSimulationGoalImplementationIntentionEvents({
+      world_state: visibleConstraintObservationMutationExecution.next_world_state,
+      resolver_world_state: snapshot.state,
+      turn_id: preparedTurn.turn_id,
+      implementation_intention_decisions:
+        goalImplementationIntentionFormationDecisionResolution.decisions,
+    });
+  const goalImplementationIntentionFormationMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:goal_implementation_intention_formation`,
+      world_state_hash: hashAgentRunValue(
+        visibleConstraintObservationMutationExecution.next_world_state),
+      state_transitions:
+        goalImplementationIntentionFormation.result.state_transitions,
+      elapsed_ms: 0,
+    });
+  const goalImplementationIntentionFormationMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: visibleConstraintObservationMutationExecution.next_world_state,
+      preview_world_state:
+        goalImplementationIntentionFormation.result.preview_world_state,
+      queue: goalImplementationIntentionFormationMutationQueue,
+      scene_id: preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id ?? null,
+    });
+
   // Phase68D writes after all existing goal lifecycle decisions. Its resolver
   // reads only the state committed before this turn, so today's Self/Belief
   // writes cannot become retroactive motivation evidence or action authority.
   const motivationalGoalDecisionResolution =
     await resolveMotivationalGoalDecisions(snapshot.state, preparedTurn, options);
   const motivationalGoal = buildWorldSimulationMotivationalGoalEvents({
-    world_state: visibleConstraintObservationMutationExecution.next_world_state,
+    world_state: goalImplementationIntentionFormationMutationExecution.next_world_state,
     resolver_world_state: snapshot.state,
     turn_id: preparedTurn.turn_id,
     goal_decisions: motivationalGoalDecisionResolution.decisions,
@@ -12672,13 +12739,13 @@ export async function resolveWorldSimulationTurn(
   const motivationalGoalMutationQueue = buildWorldSimulationChronologicalMutationQueue({
     turn_id: `${preparedTurn.turn_id}:motivational_goal_integration`,
     world_state_hash: hashAgentRunValue(
-      visibleConstraintObservationMutationExecution.next_world_state),
+      goalImplementationIntentionFormationMutationExecution.next_world_state),
     state_transitions: motivationalGoal.result.state_transitions,
     elapsed_ms: 0,
   });
   const motivationalGoalMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
-      world_state: visibleConstraintObservationMutationExecution.next_world_state,
+      world_state: goalImplementationIntentionFormationMutationExecution.next_world_state,
       preview_world_state: motivationalGoal.result.preview_world_state,
       queue: motivationalGoalMutationQueue,
       scene_id: preparedTurn.event?.scene_id
@@ -13501,6 +13568,22 @@ export async function resolveWorldSimulationTurn(
         cloneJson(visibleConstraintObservationMutationQueue),
       visible_constraint_observation_mutation_execution:
         cloneJson(visibleConstraintObservationMutationExecution.execution),
+      goal_implementation_intention_formation_decision_resolution: {
+        version: worldSimulationGoalImplementationIntentionVersion,
+        decisions: cloneJson(
+          goalImplementationIntentionFormationDecisionResolution.decisions),
+        resolver_view_hash:
+          goalImplementationIntentionFormationDecisionResolution
+            .resolver_view.resolver_view_hash,
+        audit: cloneJson(
+          goalImplementationIntentionFormationDecisionResolution.audit),
+      },
+      goal_implementation_intention_formation:
+        cloneJson(goalImplementationIntentionFormation),
+      goal_implementation_intention_formation_mutation_queue:
+        cloneJson(goalImplementationIntentionFormationMutationQueue),
+      goal_implementation_intention_formation_mutation_execution:
+        cloneJson(goalImplementationIntentionFormationMutationExecution.execution),
       motivational_goal_decision_resolution: {
         version: worldSimulationMotivationGoalIntegrationVersion,
         decisions: cloneJson(motivationalGoalDecisionResolution.decisions),

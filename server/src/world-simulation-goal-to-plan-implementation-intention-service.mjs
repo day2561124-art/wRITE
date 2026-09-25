@@ -427,11 +427,33 @@ export function buildWorldSimulationGoalImplementationIntentionEvents(input = {}
   const worldState = cloneJson(object(input.world_state));
   const turnId = boundedString(input.turn_id, "turn_id", 240);
   const rawDecisions = array(input.implementation_intention_decisions);
-  const inputSnapshot = cloneJson({ world_state: worldState, turn_id: turnId, implementation_intention_decisions: rawDecisions });
+  // Native resolution can contain same-turn goal and cognition writes. Formation
+  // must use a source goal already committed before this turn.
+  const resolverWorldState = input.resolver_world_state === undefined
+    ? worldState
+    : cloneJson(object(input.resolver_world_state));
+  const inputSnapshot = cloneJson({ world_state: worldState, resolver_world_state: resolverWorldState,
+    turn_id: turnId, implementation_intention_decisions: rawDecisions });
   const inputHash = hashAgentRunValue(inputSnapshot);
   const existing = validateHistory(worldState);
-  const resolverView = buildWorldSimulationGoalImplementationIntentionResolverView({ world_state: worldState, turn_id: turnId });
+  const resolverView = buildWorldSimulationGoalImplementationIntentionResolverView({
+    world_state: resolverWorldState, turn_id: turnId,
+  });
+  const currentView = buildWorldSimulationGoalImplementationIntentionResolverView({
+    world_state: worldState, turn_id: turnId,
+  });
   const decisions = rawDecisions.map((decision) => normalizeDecision(decision, resolverView, existing));
+  for (const decision of decisions) {
+    if (!currentView.committed_goal_sources.some((source) =>
+      source.goal_id === decision.goal_id
+      && sameCharacter(source.character, decision.character)
+      && source.source_event_id === decision.source_goal_event_id
+      && source.source_event_hash === decision.source_goal_event_hash)) {
+      const error = new Error(`Phase69A source goal ${decision.goal_id} is no longer committed.`);
+      error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_SOURCE_GOAL_NOT_COMMITTED";
+      throw error;
+    }
+  }
   const existingTurnKeys = new Set(existing.history
     .map((ref) => existing.events[ref.implementation_intention_event_id])
     .filter((event) => event?.source_turn_id === turnId)
