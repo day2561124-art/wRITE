@@ -282,6 +282,54 @@ assert.throws(
   (error) => error?.code === "WORLD_SIMULATION_MOTIVATIONAL_GOAL_CROSS_CHARACTER_SOURCE_FORBIDDEN",
 );
 
+// Native late writes may contain a new self-model source from this turn.
+// Resolver admission must remain pinned to the prior committed snapshot.
+const turn5 = "world_turn_phase68d_native_005";
+const priorCommitted = {};
+const turn5Interpretation = makeInterpretation(elias, turn5);
+const turn5SelfWorld = {
+  autobiographical_self_interpretation_events: {
+    [turn5Interpretation.interpretation_event_id]: turn5Interpretation,
+  },
+  autobiographical_self_interpretation_history: [interpretationRef(turn5Interpretation)],
+};
+const sameTurnSelfView = buildWorldSimulationStructuredSelfModelResolverView({
+  world_state: turn5SelfWorld, turn_id: turn5,
+});
+const sameTurnSelf = buildWorldSimulationStructuredSelfModelAspects({
+  world_state: turn5SelfWorld, turn_id: turn5,
+  aspect_decisions: [{
+    character: elias, operation: "form", aspect_type: "value_orientation",
+    aspect_key: "learning_together",
+    descriptor: { subject_scope: "self", domain: "learning", relation: "values",
+      object_ref: "learning_with_companions", qualifiers: ["personally_endorsed"] },
+    source_refs: [interpretationSource(turn5Interpretation)],
+    resolver_view_hash: sameTurnSelfView.resolver_view_hash,
+  }],
+});
+const currentWithSameTurnSelf = executeBuilt(turn5SelfWorld, turn5, "structured_self_model", sameTurnSelf);
+const lateView = buildWorldSimulationMotivationalGoalResolverView({
+  world_state: currentWithSameTurnSelf, turn_id: turn5,
+});
+const lateSource = lateView.available_motivation_basis_refs.find((ref) =>
+  ref.source_event_id === sameTurnSelf.result.aspect_events_created[0].aspect_event_id);
+assert.ok(lateSource);
+assert.throws(() => buildWorldSimulationMotivationalGoalEvents({
+  world_state: currentWithSameTurnSelf,
+  resolver_world_state: priorCommitted,
+  turn_id: turn5,
+  goal_decisions: [{
+    character: elias, operation: "propose", goal_kind: "maintain_state",
+    domain: "learning", target_descriptor: { label: "learn_together" },
+    motivation_basis_refs: [{ source_kind: lateSource.source_kind,
+      source_event_id: lateSource.source_event_id,
+      source_event_hash: lateSource.source_event_hash }],
+    resolver_view_hash: buildWorldSimulationMotivationalGoalResolverView({
+      world_state: priorCommitted, turn_id: turn5,
+    }).resolver_view_hash,
+  }],
+}), (error) => error?.code === "WORLD_SIMULATION_MOTIVATIONAL_GOAL_SOURCE_OUT_OF_VIEW");
+
 const queueContract = buildWorldSimulationChronologicalMutationQueueContract();
 assert.equal(queueContract.execution.phase68d_motivational_goal_event_write_once_enforced, true);
 assert.equal(queueContract.execution.phase68d_explicit_goal_state_transition_enforced, true);

@@ -540,11 +540,19 @@ export function buildWorldSimulationMotivationalGoalEvents(input = {}) {
   const worldState = cloneJson(object(input.world_state));
   const turnId = boundedString(input.turn_id, "turn_id", 240);
   const rawDecisions = array(input.goal_decisions);
-  const inputSnapshot = cloneJson({ world_state: worldState, turn_id: turnId, goal_decisions: rawDecisions });
+  // Native resolution may already contain this turn's other cognitive writes.
+  // Pin admissible motivation sources to the committed state before the turn.
+  const resolverWorldState = input.resolver_world_state === undefined
+    ? worldState
+    : cloneJson(object(input.resolver_world_state));
+  const inputSnapshot = cloneJson({ world_state: worldState, resolver_world_state: resolverWorldState,
+    turn_id: turnId, goal_decisions: rawDecisions });
   const inputHash = hashAgentRunValue(inputSnapshot);
   const existing = validateGoalHistory(worldState);
   const effective = projectWorldSimulationEffectiveMotivationalGoals({ world_state: worldState });
-  const resolverView = buildWorldSimulationMotivationalGoalResolverView({ world_state: worldState, turn_id: turnId });
+  const resolverView = buildWorldSimulationMotivationalGoalResolverView({
+    world_state: resolverWorldState, turn_id: turnId,
+  });
   const decisions = rawDecisions.map((decision) => normalizeDecision(decision, resolverView, effective));
   const existingTurnGoalKeys = new Set(existing.history
     .map((ref) => existing.events[ref.goal_event_id])

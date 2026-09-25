@@ -737,7 +737,7 @@ assert.match(
 );
 assert.match(
   loopSource,
-  /next_world_state:\s*visibleConstraintObservationMutationExecution\.next_world_state/,
+  /next_world_state:\s*motivationalGoalMutationExecution\.next_world_state/,
   "Atomic commit should still use the final authoritative Phase73A state, which transitively contains Phase73C linkage state.",
 );
 

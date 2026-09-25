@@ -407,7 +407,7 @@ assert.match(
 );
 assert.match(
   loopSource.slice(commitIndex, commitIndex + 1400),
-  /next_world_state:\s*visibleConstraintObservationMutationExecution\.next_world_state/,
+  /next_world_state:\s*motivationalGoalMutationExecution\.next_world_state/,
 );
 const prepareProjectionIndex = loopSource.indexOf(
   "const visibleConstraintObservationProjection =",

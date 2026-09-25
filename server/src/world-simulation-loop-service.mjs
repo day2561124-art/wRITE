@@ -470,6 +470,11 @@ import {
   worldSimulationStructuredSelfModelRevisionVersion,
 } from "./world-simulation-structured-self-model-revision-service.mjs";
 import {
+  buildWorldSimulationMotivationalGoalEvents,
+  buildWorldSimulationMotivationalGoalResolverView,
+  worldSimulationMotivationGoalIntegrationVersion,
+} from "./world-simulation-motivation-goal-integration-service.mjs";
+import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
   projectWorldSimulationGoalImplementationIntentionActivation,
@@ -8576,6 +8581,34 @@ async function resolveStructuredSelfModelRevisionDecisions(
   };
 }
 
+async function resolveMotivationalGoalDecisions(priorCommittedWorldState, preparedTurn, options) {
+  const resolverView = buildWorldSimulationMotivationalGoalResolverView({
+    world_state: priorCommittedWorldState,
+    turn_id: preparedTurn.turn_id,
+  });
+  const resolver = typeof options.motivationalGoalResolver === "function"
+    ? options.motivationalGoalResolver : null;
+  if (!resolver) {
+    return {
+      decisions: [], resolver_view: resolverView,
+      audit: { resolver_used: false, missing_resolver_means_no_goal_event: true,
+        prior_turn_committed_motivation_only: true, world_state_exposed_to_resolver: false },
+    };
+  }
+  const raw = await resolver(cloneJson(resolverView));
+  if (!Array.isArray(raw)) {
+    const error = new Error("motivationalGoalResolver must return an array of bounded Phase68D decisions.");
+    error.code = "WORLD_SIMULATION_MOTIVATIONAL_GOAL_RESOLVER_INVALID_OUTPUT";
+    throw error;
+  }
+  return {
+    decisions: cloneJson(raw), resolver_view: resolverView,
+    audit: { resolver_used: true, decision_count: raw.length,
+      input_context_hash: hashAgentRunValue(resolverView),
+      prior_turn_committed_motivation_only: true, world_state_exposed_to_resolver: false },
+  };
+}
+
 async function resolveImplementationIntentionExecutionFeedbackDecisions(
   priorCommittedWorldState,
   preparedTurn,
@@ -12625,6 +12658,33 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // Phase68D writes after all existing goal lifecycle decisions. Its resolver
+  // reads only the state committed before this turn, so today's Self/Belief
+  // writes cannot become retroactive motivation evidence or action authority.
+  const motivationalGoalDecisionResolution =
+    await resolveMotivationalGoalDecisions(snapshot.state, preparedTurn, options);
+  const motivationalGoal = buildWorldSimulationMotivationalGoalEvents({
+    world_state: visibleConstraintObservationMutationExecution.next_world_state,
+    resolver_world_state: snapshot.state,
+    turn_id: preparedTurn.turn_id,
+    goal_decisions: motivationalGoalDecisionResolution.decisions,
+  });
+  const motivationalGoalMutationQueue = buildWorldSimulationChronologicalMutationQueue({
+    turn_id: `${preparedTurn.turn_id}:motivational_goal_integration`,
+    world_state_hash: hashAgentRunValue(
+      visibleConstraintObservationMutationExecution.next_world_state),
+    state_transitions: motivationalGoal.result.state_transitions,
+    elapsed_ms: 0,
+  });
+  const motivationalGoalMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: visibleConstraintObservationMutationExecution.next_world_state,
+      preview_world_state: motivationalGoal.result.preview_world_state,
+      queue: motivationalGoalMutationQueue,
+      scene_id: preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id ?? null,
+    });
+
   const characterRuntimeManager = options.characterRuntimeManager
     ?? defaultWorldSimulationCharacterRuntimeManager;
   if (typeof characterRuntimeManager?.inspectRuntime !== "function"
@@ -12687,7 +12747,7 @@ export async function resolveWorldSimulationTurn(
       expected_revision: snapshot.revision,
       expected_state_hash: snapshot.state_hash,
       turn_id: preparedTurn.turn_id,
-      next_world_state: visibleConstraintObservationMutationExecution.next_world_state,
+      next_world_state: motivationalGoalMutationExecution.next_world_state,
       event: preparedTurn.event,
       selected_action_intents: selected,
       subjective_choice_commitment_receipts:
@@ -13441,6 +13501,17 @@ export async function resolveWorldSimulationTurn(
         cloneJson(visibleConstraintObservationMutationQueue),
       visible_constraint_observation_mutation_execution:
         cloneJson(visibleConstraintObservationMutationExecution.execution),
+      motivational_goal_decision_resolution: {
+        version: worldSimulationMotivationGoalIntegrationVersion,
+        decisions: cloneJson(motivationalGoalDecisionResolution.decisions),
+        resolver_view_hash:
+          motivationalGoalDecisionResolution.resolver_view.resolver_view_hash,
+        audit: cloneJson(motivationalGoalDecisionResolution.audit),
+      },
+      motivational_goal_integration: cloneJson(motivationalGoal),
+      motivational_goal_mutation_queue: cloneJson(motivationalGoalMutationQueue),
+      motivational_goal_mutation_execution:
+        cloneJson(motivationalGoalMutationExecution.execution),
       committed_character_current_mind_projection:
         cloneJson(committedCharacterCurrentMindProjection),
       post_outcome_subjective_perception_projection:
