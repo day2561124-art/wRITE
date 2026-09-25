@@ -3,6 +3,7 @@ import {
 } from "./agent-run-service.mjs";
 import {
   buildWorldSimulationNativeQueuedAcousticSource,
+  applyWorldSimulationPendingAcousticCancellation,
 } from "./world-simulation-native-committed-source-service.mjs";
 import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
 import {
@@ -1525,7 +1526,23 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       followUp.native_acoustic_source_lineage=lineage;
       return followUp;
     });
-  next.event_queue = [...queue.slice(1), ...followUps];
+  const cancellation = input.pending_acoustic_cancellation_plan
+    ? applyWorldSimulationPendingAcousticCancellation({
+      world_state:snapshot,
+      world_state_revision:input.world_state_revision,
+      world_state_hash:input.world_state_hash,
+      event_id:currentEventId,
+      plan:input.pending_acoustic_cancellation_plan,
+    }) : null;
+  if (queue[0]?.native_acoustic_cancellation_requests!==undefined
+      && !cancellation) {
+    const error=new Error(
+      "Pending acoustic cancellation requires current verified source and World CAS.");
+    error.code="CC7AF_PENDING_CANCELLATION_UNVERIFIED";
+    throw error;
+  }
+  next.event_queue = [
+    ...(cancellation?.remaining_queue ?? queue.slice(1)),...followUps];
   pushTransition(
     transitions,
     "world",
@@ -1575,6 +1592,9 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     action_outcomes: outcomes,
     knowledge_transitions: knowledgeTransitions,
     scheduled_events: scheduledEvents,
+    ...(cancellation
+      ? {native_acoustic_cancellation_evidence:cancellation.evidence}
+      : {}),
     object_holders: finalObjectHolders(next),
     causal_timeline: causalTimeline,
     communication_observer_increment_admissions:

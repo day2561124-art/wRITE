@@ -310,6 +310,10 @@ export async function commitWorldSimulationTurn(
               ? { native_temporal_preparation_evidence:
                   input.native_temporal_preparation_evidence }
               : {}),
+            ...(input.native_acoustic_cancellation_evidence != null
+              ? { native_acoustic_cancellation_evidence:
+                  input.native_acoustic_cancellation_evidence }
+              : {}),
             state_transitions: input.state_transitions ?? [],
             action_outcomes: input.action_outcomes ?? [],
             knowledge_transitions: input.knowledge_transitions ?? [],

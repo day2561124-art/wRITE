@@ -155,6 +155,76 @@ try {
     expected_current_state_hash:wrongState.state_hash,
   },options),/matching actual acoustic source/u);
   assert.equal((await getWorldSimulationHistory(wrong,options)).turns.length,1);
+
+  // Native execution: the VERIFIED queue-head request, never caller-provided
+  // removal IDs, is adopted by existing World adjudication and atomic CAS.
+  let cancellationBrainCalls=0;
+  const canceled=await runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"cancel",
+  },{
+    ...options,characterRuntimeManager:runtime,
+    characterBrain:async(packet)=>{
+      cancellationBrainCalls++;
+      assert.equal(JSON.stringify(packet)
+        .includes("native_acoustic_cancellation_requests"),false);
+      assert.equal(JSON.stringify(packet)
+        .includes("native_acoustic_source_lineage"),false);
+      return "reject_all";
+    },
+  });
+  assert.equal(canceled.committed,true);
+  assert.equal(cancellationBrainCalls,2);
+  const after=await getWorldSimulationState(sid,options);
+  const history=await getWorldSimulationHistory(sid,options);
+  assert.equal(after.revision,before.revision+1);
+  assert.deepEqual(after.state.event_queue.map(e=>e.event_id),
+    ["independent"]);
+  assert.equal(history.turns.length,2);
+  assert.equal(hashAgentRunValue(history.turns[0]),
+    hashAgentRunValue(prior.turns[0]));
+  assert.equal(history.turns[0].action_outcomes.some(x=>
+    x.actor==="A"&&x.result==="communication_emitted"),true);
+  const evidence=history.turns[1].native_acoustic_cancellation_evidence;
+  assert.equal(evidence.target_count,1);
+  assert.equal(evidence.canceled_future_event_refs[0].event_id,
+    "dependent");
+  assert.equal(evidence.source_assessment_audit_hash,plan.audit_hash);
+  assert.equal(evidence.prior_sound_retracted,false);
+  assert.equal(evidence.only_uncommitted_future_events_removed,true);
+  assert.equal(evidence.interruption_inferred,false);
+  assert.equal(evidence.evidence_hash,hashAgentRunValue(
+    Object.fromEntries(Object.entries(evidence).filter(
+      ([key])=>key!=="evidence_hash"))));
+  assert.equal(JSON.stringify(history.turns[1].event)
+    .includes("native_acoustic_cancellation_requests"),false);
+  assert.equal(history.turns[1].action_outcomes.some(x=>
+    x.result==="communication_emitted"),false);
+  assert.equal(history.turns[1].state_transitions.some(x=>
+    x.field==="event_queue"),true);
+
+  // Cancel request aimed at an unrelated event fails BEFORE any Brain
+  // and has no World commit, deletion, or new sound.
+  let wrongBrainCalls=0;
+  await assert.rejects(()=>runWorldSimulationTurn({
+    world_simulation_session_id:wrong,event_id:"cancel",
+  },{
+    ...options,characterRuntimeManager:runtime,
+    characterBrain:async()=>{
+      wrongBrainCalls++;throw new Error("Invalid queue cannot invoke Brain");
+    },
+  }),/matching actual acoustic source/u);
+  assert.equal(wrongBrainCalls,0);
+  assert.equal((await getWorldSimulationHistory(wrong,options)).turns.length,1);
+
+  // The independently retained queue head must still be runnable.
+  const independent=await runWorldSimulationTurn({
+    world_simulation_session_id:sid,event_id:"independent",
+  },{
+    ...options,characterRuntimeManager:runtime,
+    characterBrain:async()=>"reject_all",
+  });
+  assert.equal(independent.committed,true);
+  assert.equal((await getWorldSimulationHistory(sid,options)).turns.length,3);
   console.log("CC-7AF pending queued cancellation plan tests passed.");
 } finally {
   await rm(fixtureRoot,{recursive:true,force:true});

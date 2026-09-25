@@ -438,3 +438,89 @@ export async function assessWorldSimulationPendingAcousticCancellation({
   };
   return copy({...audit,audit_hash:hashAgentRunValue(audit)});
 }
+/** Canonical World-only queue projection from the verified CURRENT CAS.
+ * This verifies the original exact target list again; never removes a
+ * historical acoustic release, a current event, or an unrelated future.
+ */
+export function applyWorldSimulationPendingAcousticCancellation({
+  world_state,world_state_revision,world_state_hash,event_id,plan,
+} = {}) {
+  const queue=world_state?.event_queue;
+  if (!record(world_state)
+      || hashAgentRunValue(world_state)!==world_state_hash
+      || !Array.isArray(queue) || queue.length<2
+      || !record(plan)
+      || plan.schema_version!==worldSimulationNativePendingCancellationVersion
+      || plan.status!=="verified_future_dependency_invalidation_plan_only"
+      || plan.expected_current_revision!==world_state_revision
+      || plan.expected_current_state_hash!==world_state_hash
+      || plan.event_id!==event_id
+      || plan.target_count!==plan.targets?.length
+      || !Array.isArray(plan.targets)
+      || plan.targets.length<1 || plan.targets.length>16
+      || plan.world_queue_mutated!==false || plan.world_committed!==false
+      || plan.prior_sound_retracted!==false || plan.brain_invoked!==false
+      || plan.interruption_inferred!==false
+      || plan.audit_hash!==hashAgentRunValue(Object.fromEntries(
+        Object.entries(plan).filter(([key])=>key!=="audit_hash"))))
+    reject("Canonical cancellation requires the exact verified World assessment.");
+  const head=queue[0];
+  if ((head?.event_id??head?.id)!==event_id
+      || !Array.isArray(head.native_acoustic_cancellation_requests)
+      || head.native_acoustic_cancellation_requests.length!==plan.targets.length)
+    reject("World queue head no longer declares exactly this cancellation.");
+  const requests=new Map();
+  for (const r of head.native_acoustic_cancellation_requests) {
+    if (!record(r)
+        || Object.keys(r).sort().join("|")!=="event_id|observer|source_character"
+        || requests.has(r.event_id))
+      reject("World cancellation request changed.");
+    requests.set(r.event_id,r);
+  }
+  const matched=new Set();
+  const targets=new Map();
+  for (const target of plan.targets) {
+    if (!record(target)
+        || Object.keys(target).sort().join("|")!=="event_id|source_lineage_hash|source_observer_increment_ref_hash|source_turn_hash"
+        || !requests.has(target.event_id)
+        || matched.has(target.event_id))
+      reject("Cancellation plan differs from the queue-head requests.");
+    matched.add(target.event_id);
+    const found=queue.slice(1).filter(item=>
+      (item?.event_id??item?.id)===target.event_id);
+    if (found.length!==1)
+      reject("Cancellation target is no longer a unique pending event.");
+    const marker=found[0].native_acoustic_source_lineage;
+    const request=requests.get(target.event_id);
+    if (!record(marker)
+        || marker.schema_version!==worldSimulationNativeQueuedSourceVersion
+        || marker.lineage_hash!==target.source_lineage_hash
+        || marker.source_character!==request.source_character
+        || marker.observer!==request.observer
+        || marker.lineage_hash!==hashAgentRunValue(Object.fromEntries(
+          Object.entries(marker).filter(([key])=>key!=="lineage_hash"))))
+      reject("Pending source changed since verified cancellation assessment.");
+    targets.set(target.event_id,marker.lineage_hash);
+  }
+  const remaining=queue.slice(1).filter(item=>
+    !targets.has(item?.event_id??item?.id));
+  if (remaining.length!==queue.length-1-plan.targets.length)
+    reject("Pending cancellation cardinality changed.");
+  const evidence={
+    schema_version:"cc7af-pending-queued-acoustic-cancellation-commit-v1",
+    source_assessment_audit_hash:plan.audit_hash,
+    cancellation_event_id:event_id,
+    prior_world_state_hash:world_state_hash,
+    target_count:plan.targets.length,
+    canceled_future_event_refs:plan.targets.map(item=>({
+      event_id:item.event_id,
+      source_lineage_hash:item.source_lineage_hash,
+      source_turn_hash:item.source_turn_hash,
+    })),
+    prior_sound_retracted:false,
+    only_uncommitted_future_events_removed:true,
+    interruption_inferred:false,
+  };
+  return copy({remaining_queue:remaining,
+    evidence:{...evidence,evidence_hash:hashAgentRunValue(evidence)}});
+}

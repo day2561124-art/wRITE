@@ -88,6 +88,7 @@ import {
 import {
   assertWorldSimulationCommittedAcousticSource,
   assertWorldSimulationQueuedAcousticSource,
+  assessWorldSimulationPendingAcousticCancellation,
 } from "./world-simulation-native-committed-source-service.mjs";
 import {
   assessWorldSimulationNativeCausalEpochSupersession,
@@ -3245,6 +3246,7 @@ function currentEvent(worldState, requestedEventId = null) {
   // Generated queue provenance is engine-only; do not project the
   // authoritative source action/observer identities as a character cue.
   delete safeEvent.native_acoustic_source_lineage;
+  delete safeEvent.native_acoustic_cancellation_requests;
   return { ...safeEvent, event_id: eventId };
 }
 
@@ -10103,6 +10105,10 @@ export async function resolveWorldSimulationTurn(
       ?? preparedTurn.scene_analysis,
     ),
     selected_action_intents: cloneJson(selected),
+    ...(options.characterNativePendingAcousticCancellationPlan
+      ? {pending_acoustic_cancellation_plan: cloneJson(
+        options.characterNativePendingAcousticCancellationPlan)}
+      : {}),
     ...(nativeTemporalReplay?.status === "replayed_same_turn"
       ? { native_temporal_response: {
           actor: nativeTemporalReplay.native_temporal_response.actor,
@@ -12689,6 +12695,9 @@ export async function resolveWorldSimulationTurn(
       ...(nativeTemporalPreparationEvidence
         ? { native_temporal_preparation_evidence:
             cloneJson(nativeTemporalPreparationEvidence) } : {}),
+      ...(causalResolution.native_acoustic_cancellation_evidence
+        ? {native_acoustic_cancellation_evidence:cloneJson(
+          causalResolution.native_acoustic_cancellation_evidence)} : {}),
       state_transitions: array(causalResolution.state_transitions),
       action_outcomes: array(causalResolution.action_outcomes),
       knowledge_transitions: array(causalResolution.knowledge_transitions),
@@ -14805,9 +14814,19 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const historicalDependency =
     options.characterNativeCommittedSourceDependency;
   let historicalSourceAudit = null;
+  let pendingAcousticCancellationPlan = null;
   const queuedSnapshot=await getWorldSimulationState(
     input.world_simulation_session_id,options);
   const queuedEvent=queuedSnapshot.state?.event_queue?.[0];
+  if (queuedEvent?.native_acoustic_cancellation_requests !== undefined) {
+    pendingAcousticCancellationPlan =
+      await assessWorldSimulationPendingAcousticCancellation({
+        session_id:input.world_simulation_session_id,
+        event_id:input.event_id??queuedEvent.event_id??queuedEvent.id,
+        expected_current_revision:queuedSnapshot.revision,
+        expected_current_state_hash:queuedSnapshot.state_hash,
+      },options);
+  }
   if (queuedEvent?.native_acoustic_source_lineage !== undefined) {
     const queuedObserver=queuedEvent.native_acoustic_source_lineage?.observer;
     if (historicalDependency !== undefined
@@ -14862,6 +14881,15 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         historicalDependency, options);
   }
   const prepared = await prepareWorldSimulationTurn(input, options);
+  if (pendingAcousticCancellationPlan &&
+      (pendingAcousticCancellationPlan.expected_current_revision
+        !== prepared.state_revision
+        || pendingAcousticCancellationPlan.expected_current_state_hash
+          !== prepared.world_state_hash)) {
+    const error=new Error("Pending cancellation lost its current World CAS.");
+    error.code="CC7AF_PENDING_CANCELLATION_STALE";
+    throw error;
+  }
   if (historicalSourceAudit !== null) {
     if ((historicalDependency?.source_turn_id
           ??queuedEvent?.native_acoustic_source_lineage?.source_turn_id)
@@ -15167,6 +15195,9 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     selections,
     {
       ...options,
+      ...(pendingAcousticCancellationPlan
+        ? { characterNativePendingAcousticCancellationPlan:
+            pendingAcousticCancellationPlan } : {}),
       characterRuntimeManager,
       counterfactualReflectionReentryProjections,
       counterfactualLinkedExperienceReentryProjections,

@@ -363,6 +363,43 @@ Do not claim actual cancellation or automatic replanning from this
 read-only result. The original source remains physically committed,
 and unrelated queued events remain untouched.
 
+## CC-7AF slice 10 — bounded atomic future-queue invalidation
+
+The existing `runWorldSimulationTurn` now calls the exact history/
+source/queue assessment **before** speculative preparation or Character
+Brain ingress for a queue-head event carrying explicit
+`native_acoustic_cancellation_requests`. The requests are removed
+from the Character-facing event, and the engine-private assessment is
+passed to the original causal adjudicator. In the ORIGINAL pre-turn
+World snapshot, the adjudicator revalidates its hash, revision, queue
+head, precise future target IDs, source-lineage hashes and bounded
+cardinality. It removes ONLY those verified, still-pending entries
+from its ordinary `event_queue` transition, preserving all unrelated
+entries and the standard `next_events` append. A missing/changed
+target, altered assessment, unknown source, absent plan or stale
+World snapshot refuses the speculative turn; the usual chronological
+mutation executor and World consistency/atomic CAS remain the ONLY
+way to persist a changed queue.
+
+The compact `native_acoustic_cancellation_evidence` is persisted in
+the same atomic World history turn with source-assessment hash, target
+IDs/source hashes and flags that no prior sound was retracted and no
+interruption inferred. Original emitted source speech, observer
+admissions and Phase74D remain in their earlier committed history.
+A real World test verifies the target disappears only after commit,
+the unrelated future queue event can still execute, an invalid
+cancellation fails before Brain without a new World turn, and no
+synthetic B response occurs. No new scheduler or independent file
+write channel is introduced.
+
+**CC-7AF bounded scope:** cancellation is limited to explicit
+World-authored, not-yet-executed, acoustic-source-bound future event
+dependencies. It is not retroactive cancellation of the committed
+source stream and does not establish a general-purpose concurrent
+interruption/turn-taking controller; physical overlap and subjective
+interruption still require separate evidence.
+
+
 
 
 
