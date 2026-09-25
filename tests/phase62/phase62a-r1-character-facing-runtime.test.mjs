@@ -338,6 +338,50 @@ try {
     ["b", "a"],
   );
 
+  const directPerceptionSalience = await useWorldSimulationCapability(
+    "world_perception_filter",
+    {
+      world_simulation_session_id: sessionId,
+      capability_input: {
+        character: "伊萊亞斯・諾爾",
+        scene_state: {
+          scene_id: "direct-salience-scene",
+          observable_by: {
+            "伊萊亞斯・諾爾": {
+              visual: [{ perceptual_label: "牆上的微弱指示燈", salience: "low" }],
+            },
+          },
+        },
+      },
+    },
+    {
+      ...options,
+      adapter: async (envelope) => ({
+        salience_annotations: [{
+          source_ref: envelope.authorized_source_refs[0],
+          salience: "high",
+        }],
+      }),
+    },
+  );
+  assert.deepEqual(
+    directPerceptionSalience.output.observed,
+    [{ perceptual_label: "牆上的微弱指示燈", salience: "low" }],
+    "Neural salience must not replace the trusted observation payload.",
+  );
+  assert.deepEqual(
+    directPerceptionSalience.output.neural_extension.salience_annotations,
+    [{
+      observation: { perceptual_label: "牆上的微弱指示燈", salience: "low" },
+      salience: "high",
+    }],
+    "Salience advisory must be materialized back onto one trusted observation.",
+  );
+  assert.deepEqual(
+    directPerceptionSalience.output.character_view.neural_extension.salience_annotations,
+    directPerceptionSalience.output.neural_extension.salience_annotations,
+  );
+
   const nativeFallback = await runWorldSimulationNativeCapability(
     "world_perception_filter",
     {

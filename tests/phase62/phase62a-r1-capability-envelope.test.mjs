@@ -292,6 +292,58 @@ const validPerceptionExtension = validateWorldSimulationCapabilityNeuralExtensio
 );
 assert.equal(validPerceptionExtension.ok, true);
 
+const validPerceptionSalienceExtension =
+  validateWorldSimulationCapabilityNeuralExtension(
+    perceptionA.adapter_envelope,
+    {
+      salience_annotations: [{
+        source_ref: eliasRef,
+        salience: "high",
+      }],
+    },
+  );
+assert.equal(validPerceptionSalienceExtension.ok, true);
+assert.deepEqual(
+  validPerceptionSalienceExtension.extension.salience_annotations,
+  [{ source_ref: eliasRef, salience: "high" }],
+);
+assert.throws(
+  () => validateWorldSimulationCapabilityNeuralExtension(
+    perceptionA.adapter_envelope,
+    {
+      salience_annotations: [{
+        source_ref: "not_a_scoped_ref",
+        salience: "high",
+      }],
+    },
+  ),
+  (error) => error?.code === "WORLD_SIMULATION_CAPABILITY_SOURCE_REF_UNKNOWN",
+);
+assert.throws(
+  () => validateWorldSimulationCapabilityNeuralExtension(
+    perceptionA.adapter_envelope,
+    {
+      salience_annotations: [{
+        source_ref: liaoRef,
+        salience: "high",
+      }],
+    },
+  ),
+  (error) => error?.code === "WORLD_SIMULATION_CAPABILITY_CROSS_ENVELOPE_REF_FORBIDDEN",
+);
+assert.throws(
+  () => validateWorldSimulationCapabilityNeuralExtension(
+    perceptionA.adapter_envelope,
+    {
+      salience_annotations: [{
+        source_ref: eliasRef,
+        salience: "extreme_unbounded",
+      }],
+    },
+  ),
+  (error) => error?.code === "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+);
+
 assert.throws(
   () => validateWorldSimulationCapabilityNeuralExtension(
     perceptionA.adapter_envelope,

@@ -796,6 +796,27 @@ function currentMindExplicitRank(value, categories = {}) {
   return categories[normalized] ?? 1;
 }
 
+function currentMindNeuralPerceptualSalienceRank(perception, observation) {
+  const observationHash = hashAgentRunValue(sanitizeCurrentMindValue(observation));
+  const annotations = array(object(perception?.neural_extension).salience_annotations);
+  let rank = 0;
+  for (const annotation of annotations) {
+    if (!isObject(annotation)
+      || hashAgentRunValue(sanitizeCurrentMindValue(annotation.observation))
+        !== observationHash) {
+      continue;
+    }
+    rank = Math.max(
+      rank,
+      currentMindExplicitRank(
+        annotation.salience,
+        { low: 1, normal: 1, medium: 2, high: 3, critical: 3 },
+      ),
+    );
+  }
+  return rank;
+}
+
 function currentMindGoalTexts(compatibilityState, currentAction) {
   const state = object(compatibilityState);
   return [
@@ -915,6 +936,7 @@ const currentMindCharacterHiddenMetadataKeys = new Set([
   "suspension_reason",
   "salience",
   "perceptual_salience",
+  "neural_perceptual_salience_rank",
   "goal_relevance",
   "intention_relevance",
   "relevance",
@@ -1067,12 +1089,17 @@ function currentMindDecayMetadata(candidate, currentMindSequence, simulationTime
 function currentMindPriorityEvidence(candidate, context) {
   const raw = object(candidate.raw_evidence);
   const sourceKind = candidate.source_kind;
+  const programmaticPerceptualSalience = currentMindExplicitRank(
+    raw.salience ?? raw.perceptual_salience,
+    { low: 1, normal: 1, medium: 2, high: 3, critical: 3 },
+  );
+  const neuralPerceptualSalience = sourceKind === "perception"
+    && Number.isSafeInteger(raw.neural_perceptual_salience_rank)
+    ? Math.max(0, Math.min(3, raw.neural_perceptual_salience_rank))
+    : 0;
   const perceptualSalience = sourceKind === "perception"
-    ? Math.max(1, currentMindExplicitRank(
-      raw.salience ?? raw.perceptual_salience,
-      { low: 1, normal: 1, medium: 2, high: 3, critical: 3 },
-    ))
-    : currentMindExplicitRank(raw.salience ?? raw.perceptual_salience);
+    ? Math.max(1, programmaticPerceptualSalience, neuralPerceptualSalience)
+    : programmaticPerceptualSalience;
   const retrievalTargetRelevance = sourceKind === "recovered_memory"
     && currentMindStableText(raw.target_relation ?? null) === "target_related"
     ? 2
@@ -1443,18 +1470,27 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
     ["auditory", array(perception.audible)],
     ["other", array(perception.other_senses)],
   ]) {
-    values.forEach((observation, senseIndex) => addCandidate(currentMindCandidate({
-      sourceKind: "perception",
-      content: observation,
-      activationOrder,
-      currentMindSequence,
-      simulationTime,
-      sourceRef: currentMindSourceRef("perception", observation, {
-        sense,
-        sense_index: senseIndex,
-      }),
-      rawEvidence: isObject(observation) ? observation : {},
-    })));
+    values.forEach((observation, senseIndex) => {
+      const neuralPerceptualSalienceRank =
+        currentMindNeuralPerceptualSalienceRank(perception, observation);
+      addCandidate(currentMindCandidate({
+        sourceKind: "perception",
+        content: observation,
+        activationOrder,
+        currentMindSequence,
+        simulationTime,
+        sourceRef: currentMindSourceRef("perception", observation, {
+          sense,
+          sense_index: senseIndex,
+        }),
+        rawEvidence: {
+          ...(isObject(observation) ? observation : {}),
+          ...(neuralPerceptualSalienceRank > 0
+            ? { neural_perceptual_salience_rank: neuralPerceptualSalienceRank }
+            : {}),
+        },
+      }));
+    });
   }
 
   recoveredMemories.forEach((memory, memoryIndex) => {
@@ -1646,6 +1682,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       goal_texts: goalTexts,
     })
   ));
+  const neuralSalienceConsumptionCount = prioritized.filter((candidate) => (
+    candidate.source_kind === "perception"
+    && Number(candidate.raw_evidence?.neural_perceptual_salience_rank ?? 0) > 0
+  )).length;
   const freshCurrentActionId = prioritized.find(
     (candidate) => candidate.source_kind === "current_action" && candidate.fresh === true,
   )?.candidate_id ?? null;
@@ -1904,6 +1944,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
         "focus_continuity",
       ],
       selective_input_gating_installed: true,
+      neural_perception_salience_annotation_consumption_installed: true,
+      neural_salience_consumption_count: neuralSalienceConsumptionCount,
+      neural_salience_can_create_perception_candidate: false,
+      neural_salience_can_lower_programmatic_salience: false,
       input_gate_closed_by_default: true,
       gate_outcomes: ["admit", "maintain", "reject", "clear", "decay"],
       admission_hysteresis: "fresh_entry_requires_more_support_than_prior_maintenance",
@@ -1944,6 +1988,10 @@ function buildWorldSimulationCharacterCurrentMindTransition(input = {}) {
       gpt_hidden_reasoning_included: false,
       character_brain_authors_projection: false,
       selective_current_mind_input_gating_installed: true,
+      neural_salience_annotation_is_attention_advisory_only: true,
+      neural_salience_annotation_requires_existing_perception: true,
+      neural_salience_annotation_can_create_perception_candidate: false,
+      neural_salience_annotation_can_lower_programmatic_salience: false,
       rejected_perception_means_not_admitted_not_unperceived: true,
       current_mind_clear_does_not_mutate_source_memory: true,
       output_gating_installed: true,
@@ -3285,9 +3333,15 @@ function participantsForEvent(worldState, event) {
   return [...new Set(active)];
 }
 
-function runOptions(options, sessionId, source) {
+function runOptions(options, sessionId, source, capabilityName = null) {
+  const perceptionSalienceAdapter =
+    capabilityName === "world_perception_filter"
+    && typeof options.worldPerceptionSalienceAdapter === "function"
+      ? options.worldPerceptionSalienceAdapter
+      : null;
   return {
     ...(options.fixtureRoot ? { fixtureRoot: options.fixtureRoot } : {}),
+    ...(perceptionSalienceAdapter ? { adapter: perceptionSalienceAdapter } : {}),
     run_id: sessionId,
     source,
   };
@@ -3420,7 +3474,7 @@ async function capability(sessionId, name, input, options, traceIds) {
   const result = await runWorldSimulationNativeCapability(
     name,
     input,
-    runOptions(options, sessionId, `world_simulation_loop:${name}`),
+    runOptions(options, sessionId, `world_simulation_loop:${name}`, name),
   );
   traceIds.push(result.trace.trace_id);
   return result.output;
@@ -3636,6 +3690,13 @@ export function buildWorldSimulationLoopContract() {
       attention_internal_state_exposed_to_character_brain: false,
       character_facing_attention_view_exposed_to_character_brain: true,
       selective_working_memory_input_gating_v4_installed: true,
+      neural_perception_salience_annotation_consumption_installed: true,
+      native_world_perception_salience_adapter_supported: true,
+      generic_native_capability_adapter_forwarding: false,
+      neural_salience_annotation_is_attention_advisory_only: true,
+      neural_salience_annotation_requires_existing_perception: true,
+      neural_salience_annotation_can_create_perception_candidate: false,
+      neural_salience_annotation_can_lower_programmatic_salience: false,
       input_gate_closed_by_default: true,
       gate_outcomes: ["admit", "maintain", "reject", "clear", "decay"],
       rejected_perception_remains_bounded_perception: true,

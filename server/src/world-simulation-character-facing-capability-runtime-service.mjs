@@ -207,6 +207,21 @@ function materializedPayloads(prepared, refs) {
   }).map((entry) => cloneJson(entry.payload));
 }
 
+function materializedPerceptionSalienceAnnotations(prepared, annotations) {
+  return array(annotations).map((annotation) => {
+    const [entry] = materializeWorldSimulationCapabilitySourceRefs({
+      envelope: prepared.adapter_envelope,
+      trusted_materialization_context:
+        prepared.trusted_materialization_context,
+      source_refs: [annotation.source_ref],
+    });
+    return {
+      observation: cloneJson(entry.payload),
+      salience: cloneJson(annotation.salience),
+    };
+  });
+}
+
 function idsFromMaterialized(entries, field) {
   return entries
     .map((entry) => text(object(entry)[field]))
@@ -223,7 +238,10 @@ function materializeExtension(prepared, validatedExtension) {
           prepared,
           extension.attended_observation_refs,
         ),
-        salience_annotations: cloneJson(extension.salience_annotations ?? []),
+        salience_annotations: materializedPerceptionSalienceAnnotations(
+          prepared,
+          extension.salience_annotations,
+        ),
         ambiguity_annotations: cloneJson(extension.ambiguity_annotations ?? []),
       };
     case "world_memory_retriever": {

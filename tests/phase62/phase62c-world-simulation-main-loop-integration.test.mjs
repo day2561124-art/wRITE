@@ -224,6 +224,14 @@ try {
   assert.equal(contract.character_current_mind.wall_clock_decay_used, false);
   assert.equal(contract.character_current_mind.fixed_four_item_working_memory_assumed, false);
   assert.equal(contract.character_current_mind.attention_internal_state_exposed_to_character_brain, false);
+  assert.equal(
+    contract.character_current_mind.native_world_perception_salience_adapter_supported,
+    true,
+  );
+  assert.equal(
+    contract.character_current_mind.generic_native_capability_adapter_forwarding,
+    false,
+  );
   assert.equal(contract.character_current_mind.focus_directly_equals_encode, false);
   assert.equal(contract.character_current_mind.non_focus_encoding_evidence_allowed, true);
   assert.equal(contract.character_current_mind.historical_replay_runs_current_attention_algorithm, false);
@@ -1361,6 +1369,134 @@ try {
     "rejected perception must remain distinct from peripheral Current Mind placement",
   );
 
+  const neuralSalienceRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: `neural_salience_${character.toLowerCase()}`,
+      canonical_name: character,
+      identity_source: "cb_c1_d_neural_salience_fixture",
+      formal: true,
+    }),
+  });
+  const lowSalienceObservation = {
+    perceptual_label: "遠處低亮指示燈",
+    salience: "low",
+  };
+  const neuralSalienceTurn = await neuralSalienceRuntimeManager
+    .prepareSpeculativeCurrentMind({
+      world_simulation_session_id: "neural-salience-lineage",
+      turn_id: "neural-salience-turn-1",
+      character: "Alpha",
+      simulation_time: "2026-09-01T12:06:10+08:00",
+      perception: {
+        observed: [lowSalienceObservation],
+        audible: [],
+        other_senses: [],
+        neural_extension: {
+          salience_annotations: [{
+            observation: lowSalienceObservation,
+            salience: "high",
+          }],
+        },
+      },
+      recovered_memories: [],
+      current_action: null,
+      compatibility_state: { goals: ["等待完全無關的通知"] },
+    });
+  assert.equal(
+    neuralSalienceTurn.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "perception"
+        && decision.gate_outcome === "admit"
+        && decision.reason_codes.includes("meaningful_perceptual_salience"),
+    ),
+    true,
+    "a bound neural salience advisory may raise an existing observation through the normal Current Mind gate",
+  );
+  assert.equal(
+    neuralSalienceTurn.projection.resolver_audit
+      .neural_perception_salience_annotation_consumption_installed,
+    true,
+  );
+  assert.equal(
+    neuralSalienceTurn.projection.resolver_audit.neural_salience_consumption_count,
+    1,
+  );
+  assert.equal(
+    neuralSalienceTurn.projection.boundaries
+      .neural_salience_annotation_requires_existing_perception,
+    true,
+  );
+  assert.equal(
+    neuralSalienceTurn.projection.boundaries
+      .neural_salience_annotation_can_create_perception_candidate,
+    false,
+  );
+  assert.equal(
+    neuralSalienceTurn.projection.boundaries
+      .neural_salience_annotation_can_lower_programmatic_salience,
+    false,
+  );
+  const neuralSalienceBid = neuralSalienceTurn.internal_attention_state.bids.find(
+    (bid) => bid.priority_evidence?.perceptual_salience === 3,
+  );
+  assert.equal(Boolean(neuralSalienceBid), true);
+  assert.equal(
+    JSON.stringify(neuralSalienceTurn.projection.character_view_after)
+      .includes("neural_perceptual_salience_rank"),
+    false,
+    "internal advisory rank must not leak into the character-facing Current Mind projection",
+  );
+
+  const unmatchedNeuralSalienceTurn = await neuralSalienceRuntimeManager
+    .prepareSpeculativeCurrentMind({
+      world_simulation_session_id: "neural-salience-lineage",
+      turn_id: "neural-salience-turn-unmatched",
+      character: "Alpha",
+      simulation_time: "2026-09-01T12:06:11+08:00",
+      perception: {
+        observed: [lowSalienceObservation],
+        audible: [],
+        other_senses: [],
+        neural_extension: {
+          salience_annotations: [{
+            observation: { perceptual_label: "不存在的模型虛構觀察" },
+            salience: "high",
+          }],
+        },
+      },
+      recovered_memories: [],
+      current_action: null,
+      compatibility_state: { goals: ["等待完全無關的通知"] },
+    });
+  assert.equal(
+    unmatchedNeuralSalienceTurn.projection.resolver_audit
+      .neural_salience_consumption_count,
+    0,
+  );
+  assert.equal(
+    unmatchedNeuralSalienceTurn.projection.admission_decisions.some(
+      (decision) => decision.source_kind === "perception"
+        && decision.gate_outcome === "reject",
+    ),
+    true,
+    "an unmatched neural annotation must not change admission of the real low-salience observation",
+  );
+  assert.equal(
+    JSON.stringify(unmatchedNeuralSalienceTurn.projection)
+      .includes("不存在的模型虛構觀察"),
+    false,
+    "an unmatched neural annotation must not leak into the persisted Current Mind projection; replay lineage remains represented by source_snapshot_hash",
+  );
+  assert.equal(
+    typeof unmatchedNeuralSalienceTurn.projection.source_snapshot_hash,
+    "string",
+  );
+  assert.equal(
+    JSON.stringify(unmatchedNeuralSalienceTurn.projection.character_view_after)
+      .includes("不存在的模型虛構觀察"),
+    false,
+    "an unmatched neural annotation must never create character-visible perception content",
+  );
+
   const outputGateRuntimeManager = createWorldSimulationCharacterRuntimeManager({
     identityResolver: async (character) => ({
       entity_id: `output_gate_${character.toLowerCase()}`,
@@ -2031,6 +2167,19 @@ try {
       formal: true,
     }),
   });
+  let perceptionSalienceAdapterInvocations = 0;
+  const worldPerceptionSalienceAdapter = async (envelope) => {
+    perceptionSalienceAdapterInvocations += 1;
+    assert.equal(envelope.capability_name, "world_perception_filter");
+    assert.equal(Array.isArray(envelope.authorized_source_refs), true);
+    assert.equal(envelope.authorized_source_refs.length > 0, true);
+    return {
+      salience_annotations: [{
+        source_ref: envelope.authorized_source_refs[0],
+        salience: "high",
+      }],
+    };
+  };
   const firstTurn = await runWorldSimulationTurn(
     {
       world_simulation_session_id: session.world_simulation_session_id,
@@ -2039,6 +2188,7 @@ try {
     {
       ...options,
       characterRuntimeManager: integrationRuntimeManager,
+      worldPerceptionSalienceAdapter,
       characterBrain: async (packet) => {
         brainInputs.push(packet);
         assert.equal(Object.hasOwn(packet, "world_state"), false);
@@ -2089,6 +2239,7 @@ try {
           "source_kind",
           "salience",
           "perceptual_salience",
+          "neural_perceptual_salience_rank",
           "goal_relevance",
           "urgency",
           "expectation_violation",
@@ -2196,6 +2347,7 @@ try {
   assert.equal(firstTurn.consistency.hard_conflict_count, 0);
   assert.equal(firstTurn.trace_ids.length, 10);
   assert.equal(brainInputs.length, 2);
+  assert.equal(perceptionSalienceAdapterInvocations, 2);
   assert.equal(adjudicatorInputs.length, 1);
   assert.equal(
     firstTurn.committed_character_experience.experience_contract_version,
@@ -2347,6 +2499,16 @@ try {
     worldSimulationCharacterCurrentMindProjectionVersion,
   );
   assert.equal(persistedCurrentMindProjection.character_projections.length, 2);
+  assert.equal(
+    persistedCurrentMindProjection.character_projections.every((projection) => (
+      projection.resolver_audit.neural_salience_consumption_count === 1
+      && projection.boundaries.neural_salience_annotation_is_attention_advisory_only === true
+      && projection.boundaries.neural_salience_annotation_can_create_perception_candidate === false
+      && projection.boundaries.neural_salience_annotation_can_lower_programmatic_salience === false
+    )),
+    true,
+    "canonical Native perception must consume exactly one bounded salience advisory per participant without transferring perception authority",
+  );
   assert.equal(
     persistedCurrentMindProjection.projection_hash,
     firstTurn.committed_character_current_mind.projection_hash,

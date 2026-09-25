@@ -958,6 +958,72 @@ function assertReferenceFields(policy, envelope, extension) {
   }
 }
 
+function assertPerceptionSalienceAnnotations(envelope, extension) {
+  if (envelope.capability_name !== "world_perception_filter"
+    || !Object.hasOwn(extension, "salience_annotations")) {
+    return;
+  }
+  const annotations = extension.salience_annotations;
+  if (!Array.isArray(annotations)) {
+    throw errorWithCode(
+      "salience_annotations must be an array of envelope-scoped observation annotations.",
+      "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+      { field: "salience_annotations" },
+    );
+  }
+  const allowedRefs = new Set(array(envelope.authorized_source_refs));
+  const allowedLevels = new Set(["low", "normal", "medium", "high", "critical"]);
+  annotations.forEach((annotation, index) => {
+    if (!isObject(annotation)) {
+      throw errorWithCode(
+        `salience_annotations[${index}] must be an object.`,
+        "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+        { field: "salience_annotations", index },
+      );
+    }
+    const unknown = Object.keys(annotation)
+      .filter((key) => key !== "source_ref" && key !== "salience");
+    if (unknown.length) {
+      throw errorWithCode(
+        `salience_annotations[${index}] contains unregistered fields: ${unknown.join(", ")}.`,
+        "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+        { field: "salience_annotations", index, unknown_fields: unknown },
+      );
+    }
+    const sourceRef = nonEmptyString(annotation.source_ref);
+    if (!sourceRef || !allowedRefs.has(sourceRef)) {
+      const crossEnvelope = Boolean(sourceRef?.startsWith("envsrc_"));
+      throw errorWithCode(
+        crossEnvelope
+          ? `Source ref ${sourceRef} belongs to another or unavailable capability envelope.`
+          : `salience_annotations[${index}] must reference one authorized observation source.`,
+        crossEnvelope
+          ? "WORLD_SIMULATION_CAPABILITY_CROSS_ENVELOPE_REF_FORBIDDEN"
+          : "WORLD_SIMULATION_CAPABILITY_SOURCE_REF_UNKNOWN",
+        {
+          field: "salience_annotations",
+          index,
+          source_ref: sourceRef ?? annotation.source_ref ?? null,
+        },
+      );
+    }
+    const salience = annotation.salience;
+    const validNumeric = typeof salience === "number"
+      && Number.isFinite(salience)
+      && salience >= 0
+      && salience <= 1;
+    const validLevel = typeof salience === "string"
+      && allowedLevels.has(salience.trim().toLowerCase());
+    if (!validNumeric && !validLevel) {
+      throw errorWithCode(
+        `salience_annotations[${index}].salience must be a bounded 0..1 number or registered level.`,
+        "WORLD_SIMULATION_CAPABILITY_NEURAL_OUTPUT_SCHEMA_INVALID",
+        { field: "salience_annotations", index },
+      );
+    }
+  });
+}
+
 export function validateWorldSimulationCapabilityNeuralExtension(
   envelope,
   extension,
@@ -976,6 +1042,7 @@ export function validateWorldSimulationCapabilityNeuralExtension(
   assertAllowedExtensionFields(policy, extension);
   assertNeuralAdvisoryVocabulary(policy, extension);
   assertReferenceFields(policy, envelope, extension);
+  assertPerceptionSalienceAnnotations(envelope, extension);
   const normalized = cloneJson(extension);
   return {
     ok: true,
