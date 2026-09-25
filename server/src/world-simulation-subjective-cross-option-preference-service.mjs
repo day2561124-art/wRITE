@@ -72,14 +72,18 @@ function compareText(left, right) {
 
 const groundingDimensionByKind = Object.freeze({
   active_goal: "goal",
+  need_context: "need",
   value_context: "value",
   known_context: "belief",
   uncertain_context: "belief",
+  subjective_belief_context: "belief",
   current_action: "commitment",
   effective_action_commitment: "commitment",
+  structured_self_model_context: "self_model",
   relationship_context: "relationship",
   decision_pressure: "pressure",
   emotion_context: "emotion",
+  persistent_mood_context: "mood",
   working_memory_focus: "working_memory",
   working_memory_active_context: "working_memory",
 });
@@ -87,12 +91,15 @@ const groundingDimensionByKind = Object.freeze({
 function emptyDimensionRefs() {
   return {
     goal: [],
+    need: [],
     value: [],
     belief: [],
     commitment: [],
+    self_model: [],
     relationship: [],
     pressure: [],
     emotion: [],
+    mood: [],
     working_memory: [],
   };
 }
@@ -124,6 +131,9 @@ function buildDeliberationBasisCatalog(character, groundings) {
     grounding_refs: uniqueGroundingRefs,
     semantic_content_duplicated: false,
     goal_value_belief_commitment_dimensions_explicit: true,
+    need_self_model_mood_dimensions_explicit: true,
+    subjective_belief_grounding_maps_to_belief_dimension: true,
+    new_groundings_remain_advisory_non_binding: true,
     commitment_source_is_current_action_context: true,
     implementation_intention_commitment_directly_exposed: false,
     commitment_is_defeasible_not_absolute: true,
@@ -256,6 +266,11 @@ export function buildWorldSimulationSubjectiveCrossOptionPreferenceContract() {
     phase74b_canonical_prospection_required: true,
     pairwise_comparison_workspace_complete_for_bounded_candidate_set: true,
     goal_value_belief_commitment_basis_catalog_installed: true,
+    c1e_cognition_grounding_convergence_installed: true,
+    needs_basis_dimension_installed: true,
+    subjective_belief_basis_dimension_installed: true,
+    structured_self_model_basis_dimension_installed: true,
+    persistent_mood_basis_dimension_installed: true,
     implementation_intention_commitment_directly_exposed: false,
     current_action_used_as_bounded_commitment_context: true,
     commitment_is_defeasible_not_absolute: true,

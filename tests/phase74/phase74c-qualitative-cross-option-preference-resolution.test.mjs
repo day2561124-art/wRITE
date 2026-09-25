@@ -21,11 +21,26 @@ import {
 const CHARACTER = "千夜測試角色";
 const cognition = {
   goals: ["保護同伴", "離開危險區域"],
+  needs: { safety: "urgent" },
   values: { loyalty: "high", caution: "important" },
+  subjective_cognition: {
+    beliefs: [{ proposition: "東側出口仍可能可用", stance: "accepted" }],
+  },
+  self_model_context: {
+    aspects: [{ aspect: "我會優先保護同伴" }],
+  },
   relationship_cognition: { 同伴甲: { relation: "trusted" } },
   decision_pressures: ["出口正在關閉"],
   current_action: "守住入口",
   emotion: { state: "緊張" },
+  persistent_mood_context: {
+    status: "subjective_persistent_mood_context_available",
+    persistent_mood: {
+      label: "uneasy",
+      interpretation: "Repeated obstruction remains unsettling.",
+    },
+    advisory_only: true,
+  },
   working_context: {
     focus: { content: "出口正在關閉" },
     active_context: [{ content: "同伴仍在身後" }],
@@ -79,6 +94,11 @@ assert.equal(contract.version, worldSimulationSubjectiveCrossOptionPreferenceVer
 assert.equal(contract.phase74a_canonical_grounding_required, true);
 assert.equal(contract.phase74b_canonical_prospection_required, true);
 assert.equal(contract.pairwise_comparison_workspace_complete_for_bounded_candidate_set, true);
+assert.equal(contract.c1e_cognition_grounding_convergence_installed, true);
+assert.equal(contract.needs_basis_dimension_installed, true);
+assert.equal(contract.subjective_belief_basis_dimension_installed, true);
+assert.equal(contract.structured_self_model_basis_dimension_installed, true);
+assert.equal(contract.persistent_mood_basis_dimension_installed, true);
 assert.equal(contract.partial_preference_order_allowed, true);
 assert.equal(contract.incomparability_or_unresolved_preference_allowed, true);
 assert.equal(contract.indifference_allowed, true);
@@ -114,13 +134,37 @@ assert.equal(view.expected_complete_pairwise_comparison_count, 3);
 assert.deepEqual(view.supported_relations, subjectiveCrossOptionPreferenceRelations);
 assert.deepEqual(view.supported_impasse_kinds, subjectiveCrossOptionPreferenceImpasseKinds);
 assert.match(view.deliberation_basis_catalog.basis_catalog_ref, /^phase74c_basis_/);
-for (const dimension of ["goal", "value", "belief", "commitment"]) {
+for (const dimension of [
+  "goal",
+  "need",
+  "value",
+  "belief",
+  "commitment",
+  "self_model",
+  "mood",
+]) {
   assert.ok(
     view.deliberation_basis_catalog.refs_by_dimension[dimension].length > 0,
     `Phase74C basis catalog must expose ${dimension} references when source cognition provides them.`,
   );
 }
 assert.equal(view.deliberation_basis_catalog.semantic_content_duplicated, false);
+assert.equal(view.deliberation_basis_catalog.need_self_model_mood_dimensions_explicit, true);
+assert.equal(
+  view.deliberation_basis_catalog.subjective_belief_grounding_maps_to_belief_dimension,
+  true,
+);
+assert.equal(view.deliberation_basis_catalog.new_groundings_remain_advisory_non_binding, true);
+const subjectiveBeliefGrounding = deliberation.cognition_grounding_catalog.find(
+  entry => entry.source_path === "cognition.subjective_cognition.beliefs",
+);
+assert.ok(subjectiveBeliefGrounding);
+assert.equal(
+  view.deliberation_basis_catalog.refs_by_dimension.belief
+    .includes(subjectiveBeliefGrounding.grounding_ref),
+  true,
+  "C1-E effective subjective belief grounding must enter the existing qualitative belief dimension.",
+);
 assert.equal(view.deliberation_basis_catalog.commitment_is_defeasible_not_absolute, true);
 assert.ok(view.cross_option_preference_view_hash);
 assert.equal(JSON.stringify({ cognition, candidates, deliberation, prospection }), inputSnapshot);

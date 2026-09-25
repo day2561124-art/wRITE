@@ -216,7 +216,20 @@ function buildCognitionGroundingCatalog(character, cognition) {
   const working = isObject(source.working_context) ? source.working_context : {};
   const candidates = [
     ["active_goal", "cognition.goals", source.goals],
+    ["need_context", "cognition.needs", source.needs],
     ["value_context", "cognition.values", source.values],
+    [
+      "subjective_belief_context",
+      "cognition.subjective_cognition.beliefs",
+      isObject(source.subjective_cognition)
+        ? source.subjective_cognition.beliefs
+        : null,
+    ],
+    [
+      "structured_self_model_context",
+      "cognition.self_model_context",
+      source.self_model_context,
+    ],
     ["relationship_context", "cognition.relationship_cognition", source.relationship_cognition],
     ["communication_intention", "cognition.communication_goal", source.communication_goal],
     ["decision_pressure", "cognition.decision_pressures", source.decision_pressures],
@@ -238,6 +251,11 @@ function buildCognitionGroundingCatalog(character, cognition) {
     ],
     ["emotion_context", "cognition.emotion", source.emotion],
     ["emotion_context", "cognition.affective_context", source.affective_context],
+    [
+      "persistent_mood_context",
+      "cognition.persistent_mood_context",
+      source.persistent_mood_context,
+    ],
     ["working_memory_focus", "cognition.working_context.focus", working.focus],
     ["working_memory_active_context", "cognition.working_context.active_context", working.active_context],
     ["known_context", "cognition.known", source.known],
@@ -265,6 +283,11 @@ export function buildWorldSimulationSubjectiveActionDeliberationContract() {
     plan_commitment_may_constrain_later_deliberation: true,
     experiential_method_guidance_may_ground_deliberation: true,
     experiential_method_guidance_remains_advisory: true,
+    needs_may_ground_deliberation: true,
+    subjective_belief_may_ground_deliberation: true,
+    structured_self_model_may_ground_deliberation: true,
+    persistent_mood_may_ground_deliberation: true,
+    cognition_grounding_remains_non_binding: true,
     retrieval_conditioned_memory_interpretation_may_ground_deliberation: true,
     retrieval_conditioned_memory_interpretation_remains_subjective: true,
     retrieval_conditioned_memory_interpretation_belief_adoption_implied: false,

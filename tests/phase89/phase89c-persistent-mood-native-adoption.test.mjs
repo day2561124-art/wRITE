@@ -247,8 +247,8 @@ try {
   assert.equal(
     directBrainInput.subjective_action_deliberation.cognition_grounding_catalog
       .some(grounding => grounding.source_path === "cognition.persistent_mood_context"),
-    false,
-    "Phase89C must not silently promote persistent mood into Phase74A grounding.",
+    true,
+    "C1-E must expose the already-sanitized Phase89C mood context only as an opaque Phase74A grounding reference.",
   );
 
   const aliceResolverView = directPrepared.persistent_mood_interpretation_resolver_views
@@ -320,7 +320,8 @@ try {
   assert.equal(
     formalAliceInput.subjective_action_deliberation.cognition_grounding_catalog
       .some(grounding => grounding.source_path === "cognition.persistent_mood_context"),
-    false,
+    true,
+    "Direct and formal routes must converge on the same C1-E persistent-mood grounding edge.",
   );
   assert.equal(
     JSON.stringify(formalAliceInput.cognition.persistent_mood_context)
@@ -345,7 +346,7 @@ try {
   assert.equal(contract.personality_revision_authority, false);
   assert.equal(contract.world_truth_authority, false);
   assert.equal(contract.same_turn_phase86_feedback_allowed, false);
-  assert.equal(contract.deliberation_grounding_installed, false);
+  assert.equal(contract.deliberation_grounding_installed, true);
 } finally {
   assert.equal(path.dirname(fixtureRoot), path.join(projectRoot, "tests", ".tmp"));
   await rm(fixtureRoot, { recursive: true, force: true });

@@ -75,7 +75,7 @@ export function buildWorldSimulationPersistentMoodNativeAdoptionContract() {
     personality_revision_authority: false,
     world_truth_authority: false,
     same_turn_phase86_feedback_allowed: false,
-    deliberation_grounding_installed: false,
+    deliberation_grounding_installed: true,
   });
 }
 

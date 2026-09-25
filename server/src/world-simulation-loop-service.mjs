@@ -6943,8 +6943,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
 
     // Phase89C adopts only the sanitized Phase89B character view as an
     // independent medium-term cognition context. Phase86B affective_context is
-    // intentionally preserved as the recent appraisal continuity owner. Mood is
-    // not yet an explicit Phase74A grounding source in this phase.
+    // intentionally preserved as the recent appraisal continuity owner. C1-E
+    // allows this already-sanitized mood context to contribute only an opaque
+    // Phase74A grounding reference; it gains no action or world-truth authority.
     delete characterCognition.persistent_mood_context;
     if (persistentMoodNativeAdoption
         ?.character_view
@@ -7278,7 +7279,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           false,
 
         persistent_mood_deliberation_grounding_installed:
-          false,
+          true,
+
+        phase74a_cognition_grounding_convergence_installed:
+          true,
+
+        phase74a_needs_grounding_installed:
+          true,
+
+        phase74a_subjective_belief_grounding_installed:
+          true,
+
+        phase74a_structured_self_model_grounding_installed:
+          true,
 
         phase96_memory_affect_lifecycle_closure_installed:
           true,

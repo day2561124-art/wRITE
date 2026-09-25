@@ -14,9 +14,27 @@ const CHARACTER = "千夜測試角色";
 
 const cognition = {
   goals: ["保護同伴", "離開危險區域"],
+  needs: {
+    safety: "urgent",
+    affiliation: "important",
+  },
   values: {
     loyalty: "high",
     caution: "important",
+  },
+  subjective_cognition: {
+    beliefs: [{
+      proposition: "東側出口仍可能可用",
+      stance: "accepted",
+      claim_event_id: "must_not_leak",
+    }],
+  },
+  self_model_context: {
+    aspects: [{
+      aspect: "我會優先保護同伴",
+      source_event_id: "must_not_leak",
+    }],
+    projection_hash: "must_not_leak",
   },
   relationship_cognition: {
     同伴甲: {
@@ -33,6 +51,21 @@ const cognition = {
     state: "緊張",
     intensity: "high",
     engine_emotion_id: "must_not_leak",
+  },
+  persistent_mood_context: {
+    status: "subjective_persistent_mood_context_available",
+    persistent_mood: {
+      label: "uneasy",
+      interpretation: "持續受阻讓她仍感不安",
+      supporting_evidence_count: 2,
+      subjective_not_world_truth: true,
+      evidence_backed: true,
+      reversible_interpretation: true,
+      objective_emotion_label_established: false,
+      numeric_intensity_established: false,
+      numeric_decay_rate_established: false,
+    },
+    advisory_only: true,
   },
   working_context: {
     focus: {
@@ -82,6 +115,11 @@ assert.equal(contract.character_brain_remains_final_action_choice_owner, true);
 assert.equal(contract.prepared_turn_broker_remains_membership_and_submission_authority, true);
 assert.equal(contract.action_outcome_owner, "causal_simulator");
 assert.equal(contract.qualitative_grounding_only, true);
+assert.equal(contract.needs_may_ground_deliberation, true);
+assert.equal(contract.subjective_belief_may_ground_deliberation, true);
+assert.equal(contract.structured_self_model_may_ground_deliberation, true);
+assert.equal(contract.persistent_mood_may_ground_deliberation, true);
+assert.equal(contract.cognition_grounding_remains_non_binding, true);
 assert.equal(contract.explicit_impasse_or_reject_all_preserved, true);
 assert.equal(contract.deterministic_action_winner_computed, false);
 assert.equal(contract.subjective_prospective_consequence_simulation_modeled, false);
@@ -143,11 +181,15 @@ const groundingKinds = new Set(
 );
 for (const expected of [
   "active_goal",
+  "need_context",
   "value_context",
+  "subjective_belief_context",
+  "structured_self_model_context",
   "relationship_context",
   "decision_pressure",
   "current_action",
   "emotion_context",
+  "persistent_mood_context",
   "working_memory_focus",
   "working_memory_active_context",
   "known_context",
@@ -173,6 +215,18 @@ assert.deepEqual(
   "Each Phase74A action option must bind to the same bounded same-character cognition catalog without copying cognition content.",
 );
 const groundingText = JSON.stringify(view.cognition_grounding_catalog);
+for (const expectedPath of [
+  "cognition.needs",
+  "cognition.subjective_cognition.beliefs",
+  "cognition.self_model_context",
+  "cognition.persistent_mood_context",
+]) {
+  assert.equal(
+    view.cognition_grounding_catalog.some(entry => entry.source_path === expectedPath),
+    true,
+    `C1-E must expose an opaque Phase74A grounding ref for ${expectedPath}.`,
+  );
+}
 assert.equal(groundingText.includes("must_not_leak"), false);
 assert.equal(groundingText.includes("internal_person_id"), false);
 assert.equal(groundingText.includes("source_event_id"), false);
@@ -180,6 +234,9 @@ assert.equal(groundingText.includes("projection_hash"), false);
 assert.equal(groundingText.includes("engine_emotion_id"), false);
 assert.equal(groundingText.includes("出口正在關閉"), false);
 assert.equal(groundingText.includes("保護同伴"), false);
+assert.equal(groundingText.includes("東側出口仍可能可用"), false);
+assert.equal(groundingText.includes("我會優先保護同伴"), false);
+assert.equal(groundingText.includes("持續受阻讓她仍感不安"), false);
 assert.equal(JSON.stringify(view).includes(candidates[0].intent), false);
 
 const repeated = buildWorldSimulationSubjectiveActionDeliberationView({
@@ -293,5 +350,18 @@ assert.equal(
   false,
   "Phase74A must not preselect an action for Character Brain.",
 );
+for (const expectedPath of [
+  "cognition.needs",
+  "cognition.subjective_cognition.beliefs",
+  "cognition.self_model_context",
+  "cognition.persistent_mood_context",
+]) {
+  assert.equal(
+    brainInput.subjective_action_deliberation.cognition_grounding_catalog
+      .some(entry => entry.source_path === expectedPath),
+    true,
+    `Final Character Brain ingress must preserve C1-E grounding edge ${expectedPath}.`,
+  );
+}
 
 console.log("Phase74A subjective action deliberation grounding tests passed.");
