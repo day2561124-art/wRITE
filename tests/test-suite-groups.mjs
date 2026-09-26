@@ -364,6 +364,13 @@ export const cbC2AutonomousCognitionSteps = Object.freeze([
   ]),
 ]);
 
+export const cbC5SubjectiveAffordanceEvidenceSteps = Object.freeze([
+  Object.freeze([
+    "CB-C5-B Subjective Affordance Evidence Catalog",
+    Object.freeze(["tests/cb-c5/cb-c5-subjective-affordance-evidence.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -374,6 +381,7 @@ export const phase62CognitionIntegrationSteps = Object.freeze(
 
 export const worldSimulationSteps = Object.freeze([
   ...cbC2AutonomousCognitionSteps,
+  ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
@@ -413,6 +421,7 @@ export const worldSimulationSteps = Object.freeze([
 
 export const cognitionSteps = Object.freeze([
   ...cbC2AutonomousCognitionSteps,
+  ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62CognitionIntegrationSteps,
   ...phase63MemorySteps,
   ...phase64RetrievalCognitionSteps,
