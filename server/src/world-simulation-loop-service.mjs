@@ -472,6 +472,8 @@ import {
 import {
   buildWorldSimulationMotivationalGoalEvents,
   buildWorldSimulationMotivationalGoalResolverView,
+  buildWorldSimulationNativeGoalDecisionView,
+  resolveWorldSimulationNativeGoalDecisionIntents,
   worldSimulationMotivationGoalIntegrationVersion,
 } from "./world-simulation-motivation-goal-integration-service.mjs";
 import {
@@ -3560,7 +3562,8 @@ async function resolveMemoryRetrievalResolution(
 
 function candidateSelection(candidateOutput, selection, character) {
   const candidates = array(candidateOutput.candidate_action_intents);
-  if (selection === null || selection === undefined || selection === "reject_all") {
+  if (selection === null || selection === undefined || selection === "reject_all"
+      || (isObject(selection) && selection.action_id === "reject_all")) {
     return {
       character,
       selection: "reject_all",
@@ -12959,7 +12962,7 @@ export async function resolveWorldSimulationTurn(
     goal_decisions: motivationalGoalDecisionResolution.decisions,
   });
   const motivationalGoalMutationQueue = buildWorldSimulationChronologicalMutationQueue({
-    turn_id: `${preparedTurn.turn_id}:motivational_goal_integration`,
+    turn_id: `${preparedTurn.turn_id}:motivation_goal_integration`,
     world_state_hash: hashAgentRunValue(
       goalImplementationIntentionFormationMutationExecution.next_world_state),
     state_transitions: motivationalGoal.result.state_transitions,
@@ -15258,6 +15261,19 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         historicalDependency, options);
   }
   const prepared = await prepareWorldSimulationTurn(input, options);
+  // The Brain's goal handles must come from precisely the committed World
+  // revision used by the prepared action turn. A concurrent change fails
+  // before any Character Brain receives an obsolete decision view.
+  const nativeGoalSnapshot = queuedSnapshot.revision === prepared.state_revision
+    && queuedSnapshot.state_hash === prepared.world_state_hash
+    ? queuedSnapshot
+    : await getWorldSimulationState(input.world_simulation_session_id, options);
+  if (nativeGoalSnapshot.revision !== prepared.state_revision
+      || nativeGoalSnapshot.state_hash !== prepared.world_state_hash) {
+    const stale = new Error("Native goal decision view requires the prepared World revision.");
+    stale.code = "WORLD_SIMULATION_PREPARED_TURN_STALE";
+    throw stale;
+  }
   if (pendingAcousticCancellationPlan &&
       (pendingAcousticCancellationPlan.expected_current_revision
         !== prepared.state_revision
@@ -15321,6 +15337,18 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
         include_native_coping_response_contract: true,
       },
     );
+
+    // CB-C3: the same Character Brain can author an explicit goal decision
+    // alongside its action choice. Only same-character, opaque handles enter
+    // this view; Phase68D remains the authority for any durable transition.
+    brainInput.native_goal_decision = buildWorldSimulationNativeGoalDecisionView({
+      world_state: nativeGoalSnapshot.state,
+      character: packet.character,
+      turn_id: prepared.turn_id,
+    });
+    brainInput.boundaries.native_goal_decision_explicit_intent_only = true;
+    brainInput.boundaries.native_goal_decision_world_write_authority = false;
+    brainInput.boundaries.native_goal_decision_action_authority = false;
 
     // Phase81I retrieves prior committed Phase81H linked-experience cases only
     // after the final candidate universe and canonical Phase74A view exist. The
@@ -15567,11 +15595,35 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     // the downstream native replay is built only after final A selection.
     selections[reconsiderationCharacter] = freshChoice;
   }
+  // Admit only explicit intents from the final Brain reply for each prepared
+  // character. Rebuild handles from the prior committed snapshot; selected
+  // actions never imply a goal, and a superseded Brain reply cannot write one.
+  const nativeGoalDecisions = [];
+  for (const packet of prepared.decision_packets) {
+    const selection = selections[packet.character];
+    if (!isObject(selection) || !Object.hasOwn(selection, "goal_intents")) continue;
+    const admitted = resolveWorldSimulationNativeGoalDecisionIntents({
+      world_state: nativeGoalSnapshot.state,
+      character: packet.character,
+      turn_id: prepared.turn_id,
+      context_token: selection.goal_context_token,
+      goal_intents: selection.goal_intents,
+    });
+    nativeGoalDecisions.push(...admitted.goal_decisions);
+  }
+  if (nativeGoalDecisions.length && typeof options.motivationalGoalResolver === "function") {
+    const error = new Error("Native goal intents and the legacy motivationalGoalResolver cannot both author this turn.");
+    error.code = "WORLD_SIMULATION_NATIVE_GOAL_RESOLVER_CONFLICT";
+    throw error;
+  }
   return resolveWorldSimulationTurn(
     prepared,
     selections,
     {
       ...options,
+      ...(nativeGoalDecisions.length
+        ? { motivationalGoalResolver: async () => cloneJson(nativeGoalDecisions) }
+        : {}),
       ...(pendingAcousticCancellationPlan
         ? { characterNativePendingAcousticCancellationPlan:
             pendingAcousticCancellationPlan } : {}),

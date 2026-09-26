@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+
+import { projectRoot } from "../../server/src/project-paths.mjs";
+import {
+  createWorldSimulationCharacterRuntimeManager,
+  runWorldSimulationTurn,
+} from "../../server/src/world-simulation-loop-service.mjs";
+import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
+import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
@@ -505,5 +515,120 @@ assert.deepEqual(
   [],
   "unreferenced belief events cannot become motivation sources",
 );
+
+// CB-C3-C: a real Character Runtime Brain reply supplies explicit goal
+// intentions while World still owns Phase68D admission and durable writes.
+const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
+  `cbc3-native-goal-${process.pid}-${Date.now()}`);
+const sessionOptions = { fixtureRoot };
+await rm(fixtureRoot, { recursive: true, force: true });
+try {
+  const session = await beginWorldSimulationSession({
+    simulation_label: "CB-C3 Native goal decision turn",
+    seed: "cbc3-native-goal-turn",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: {
+      ...clone(beliefOnlyWorld),
+      simulation_time: "2026-09-26T00:00:00.000Z",
+      event_queue: [1, 2, 3].map((n) => ({
+        event_id: `cbc3-goal-${n}`, type: "observation",
+        scene_id: "room", participants: [rio], summary: `Goal turn ${n}`,
+      })),
+      scenes: { room: {
+        scene_id: "room", simulation_time: "2026-09-26T00:00:00.000Z",
+        dimensions: { width_m: 6, depth_m: 6 },
+        entity_positions: { [rio]: { x: 1, y: 1 } },
+        observable_by: { [rio]: { visual: [], audible: [] } },
+      } },
+      characters: { [rio]: { known: [], current_goal: "等待同伴" } },
+      available_actions: { [rio]: [] },
+    },
+  }, sessionOptions);
+  const characterRuntimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: "character_rio", canonical_name: character,
+      formal: true, identity_source: "cbc3_native_goal_test",
+    }),
+  });
+  let mode = "bad_context";
+  let brainCalls = 0;
+  const characterBrain = async (packet) => {
+    brainCalls++;
+    assert.equal(packet.character, rio);
+    const view = packet.native_goal_decision;
+    assert.equal(view.character, rio);
+    assert.equal(view.world_truth_exposed, false);
+    assert.equal(view.source_event_ids_exposed, false);
+    assert.equal(packet.boundaries.native_goal_decision_action_authority, false);
+    assert.equal(JSON.stringify(view).includes(beliefSource.source_event_id), false);
+    if (mode === "idle") return "reject_all";
+    if (mode === "commit") {
+      assert.equal(view.existing_goals.length, 1);
+      return { action_id: "reject_all", goal_context_token: view.context_token,
+        goal_intents: [{
+          operation: "commit", goal_token: view.existing_goals[0].goal_token,
+        }] };
+    }
+    assert.equal(view.motivation_basis.length, 1);
+    return { action_id: "reject_all",
+      goal_context_token: mode === "bad_context" ? "forged" : view.context_token,
+      goal_intents: [{
+        operation: "propose", goal_kind: "achieve_state",
+        domain: "relationships", target_descriptor: { label: "meet_companion" },
+        motivation_basis_tokens: [view.motivation_basis[0].source_token],
+        motivation_relations: ["self_concordant_with"],
+      }] };
+  };
+  const run = (n, extra = {}) => runWorldSimulationTurn({
+    world_simulation_session_id: session.world_simulation_session_id,
+    event_id: `cbc3-goal-${n}`,
+  }, { ...sessionOptions, characterRuntimeManager, characterBrain, ...extra });
+  const before = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  await assert.rejects(run(1), (error) =>
+    error?.code === "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH");
+  const rejected = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  assert.equal(rejected.revision, before.revision);
+  assert.equal(rejected.state.motivational_goal_history?.length ?? 0, 0);
+  mode = "propose";
+  await assert.rejects(run(1, { motivationalGoalResolver: async () => [] }),
+    (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_RESOLVER_CONFLICT");
+  assert.equal((await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions)).revision, before.revision);
+  const proposedTurn = await run(1);
+  assert.equal(proposedTurn.committed, true);
+  assert.equal(proposedTurn.selected_action_intents[0].selection, "reject_all");
+  const afterPropose = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  const proposedGoals = Object.values(
+    projectWorldSimulationEffectiveMotivationalGoals({
+      world_state: afterPropose.state,
+    }).goals_by_character[rio] ?? {},
+  );
+  assert.equal(proposedGoals.length, 1);
+  assert.equal(proposedGoals[0].state, "proposed");
+  mode = "commit";
+  const committedTurn = await run(2);
+  assert.equal(committedTurn.committed, true);
+  const afterCommit = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  const committedGoals = Object.values(
+    projectWorldSimulationEffectiveMotivationalGoals({
+      world_state: afterCommit.state,
+    }).goals_by_character[rio] ?? {},
+  );
+  assert.equal(committedGoals[0].state, "committed");
+  mode = "idle";
+  const idleTurn = await run(3);
+  assert.equal(idleTurn.committed, true);
+  const afterIdle = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  assert.equal(afterIdle.state.motivational_goal_history.length,
+    afterCommit.state.motivational_goal_history.length);
+  assert.equal(brainCalls, 5);
+} finally {
+  await rm(fixtureRoot, { recursive: true, force: true });
+}
 
 console.log("Phase68D motivation / goal integration tests passed.");
