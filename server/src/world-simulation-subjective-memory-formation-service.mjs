@@ -1,6 +1,9 @@
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
+import {
+  worldSimulationSocialAppraisalExperienceBridgeVersion,
+} from "./world-simulation-social-appraisal-memory-bridge-service.mjs";
 
 export const worldSimulationSubjectiveMemoryFormationVersion = "phase63a-subjective-memory-formation-v2";
 
@@ -464,10 +467,29 @@ function memoryRecordFor({
   const postOutcomeActionExperience =
     isObject(observation)
     && nonEmptyString(observation.kind) === "post_outcome_action_experience";
+  const subjectiveSocialExperience =
+    isObject(observation)
+    && nonEmptyString(observation.kind)
+      === "person_targeted_subjective_social_experience";
+  if (subjectiveSocialExperience
+    && (observation.internal_social_bridge_version
+        !== worldSimulationSocialAppraisalExperienceBridgeVersion
+      || observation.internal_social_source_turn_id !== turnId
+      || !/^[a-f0-9]{64}$/.test(observation.internal_social_appraisal_hash ?? "")
+      || !/^[a-f0-9]{64}$/.test(observation.internal_social_interpretation_hash ?? "")
+      || observation.attribution_subjective !== true
+      || observation.target_identity_verified !== false
+      || observation.world_truth_claimed !== false)) {
+    const error = new Error("Subjective social experience requires canonical C4 bridge lineage.");
+    error.code = "WORLD_SIMULATION_SOCIAL_EXPERIENCE_MEMORY_LINEAGE_INVALID";
+    throw error;
+  }
 
-  const memoryType = postOutcomeActionExperience
-    ? "episodic_action_experience"
-    : "episodic_direct_perception";
+  const memoryType = subjectiveSocialExperience
+    ? "episodic_social_experience"
+    : postOutcomeActionExperience
+      ? "episodic_action_experience"
+      : "episodic_direct_perception";
   const contentHash = hashAgentRunValue({
     sense,
     content: sanitized,
@@ -505,9 +527,11 @@ function memoryRecordFor({
     // Subjectively meaningful source features only.
     // Engine lineage belongs in internal_provenance below.
     source: {
-      kind: postOutcomeActionExperience
-        ? "post_outcome_subjective_experience"
-        : "direct_perception",
+      kind: subjectiveSocialExperience
+        ? "subjective_social_experience"
+        : postOutcomeActionExperience
+          ? "post_outcome_subjective_experience"
+          : "direct_perception",
       sense,
     },
 
@@ -518,6 +542,16 @@ function memoryRecordFor({
       observation_hash: contentHash,
       formation_version:
         worldSimulationSubjectiveMemoryFormationVersion,
+      ...(subjectiveSocialExperience
+        ? {
+            social_appraisal_hash:
+              observation.internal_social_appraisal_hash,
+            social_interpretation_hash:
+              observation.internal_social_interpretation_hash,
+            social_bridge_version:
+              observation.internal_social_bridge_version,
+          }
+        : {}),
       ...(postOutcomeActionExperience
         ? {
             post_outcome_subjective_perception_ref:

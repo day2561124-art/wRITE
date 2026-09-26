@@ -115,6 +115,10 @@ import {
   worldSimulationListenerSocialInterpretationVersion,
 } from "./world-simulation-listener-social-interpretation-service.mjs";
 import {
+  bridgeWorldSimulationSocialAppraisalsToSubjectiveExperience,
+  worldSimulationSocialAppraisalExperienceBridgeVersion,
+} from "./world-simulation-social-appraisal-memory-bridge-service.mjs";
+import {
   buildWorldSimulationPersonTargetedSocialAppraisalResolverView,
   projectWorldSimulationPersonTargetedSocialAppraisals,
   worldSimulationPersonTargetedSocialAppraisalVersion,
@@ -11653,15 +11657,61 @@ export async function resolveWorldSimulationTurn(
     adaptiveMemoryConsolidationMutationExecution
       .next_world_state;
 
+  // CB-C4 admits only the exact prepared same-character social appraisal
+  // projection into the ordinary Phase63 encoding decision and mutation path.
+  // The bridge never writes a memory; the Phase63 writer owns admission.
+  const socialAppraisalExperienceBridge =
+    bridgeWorldSimulationSocialAppraisalsToSubjectiveExperience({
+      turn_id: preparedTurn.turn_id,
+      decision_packets: preparedTurn.decision_packets,
+      person_targeted_social_appraisal_projections:
+        preparedTurn.person_targeted_social_appraisal_projections ?? [],
+    });
+  const socialExperienceByCharacter = new Map(
+    socialAppraisalExperienceBridge.experience_packets.map((packet) => [
+      packet.character, packet.perception.other_senses,
+    ]),
+  );
+  const socialMemoryPreparedTurn = {
+    ...preparedTurn,
+    decision_packets: array(preparedTurn.decision_packets).map((packet) => ({
+      ...packet,
+      perception: {
+        ...object(packet.perception),
+        other_senses: [
+          ...array(packet.perception?.other_senses),
+          ...array(socialExperienceByCharacter.get(packet.character)),
+        ],
+      },
+    })),
+  };
+  // Encoding and episode resolvers see the subjective observation but never
+  // engine-only social lineage. The Phase63 writer receives the intact source.
+  const socialMemoryDeciderTurn = {
+    ...socialMemoryPreparedTurn,
+    decision_packets: socialMemoryPreparedTurn.decision_packets.map((packet) => ({
+      ...packet,
+      perception: {
+        ...packet.perception,
+        other_senses: array(packet.perception.other_senses).map((observation) =>
+          observation?.kind === "person_targeted_subjective_social_experience"
+            ? Object.fromEntries(
+              Object.entries(observation)
+                .filter(([key]) => !key.startsWith("internal_")),
+            )
+            : observation),
+      },
+    })),
+  };
   const subjectiveMemoryEncodingDecisions =
     await resolveMemoryEncodingDecisions(
-      preparedTurn,
+      socialMemoryDeciderTurn,
       options,
     );
 
   const subjectiveMemoryEpisodeBindings =
     await resolveMemoryEpisodeBindings(
-      preparedTurn,
+      socialMemoryDeciderTurn,
       subjectiveMemoryEncodingDecisions,
       options,
     );
@@ -11678,7 +11728,7 @@ export async function resolveWorldSimulationTurn(
         preparedTurn.event,
 
       decision_packets:
-        preparedTurn.decision_packets,
+        socialMemoryPreparedTurn.decision_packets,
 
       encoding_decisions:
         subjectiveMemoryEncodingDecisions.decisions,
@@ -13428,6 +13478,8 @@ export async function resolveWorldSimulationTurn(
       adaptive_memory_consolidation_mutation_execution:
         cloneJson(adaptiveMemoryConsolidationMutationExecution.execution),
 
+      social_appraisal_experience_bridge:
+        cloneJson(socialAppraisalExperienceBridge),
       subjective_memory_formation:
         cloneJson(
           subjectiveMemoryFormation,
@@ -14520,6 +14572,12 @@ export async function resolveWorldSimulationTurn(
         false,
     },
 
+    social_appraisal_experience_bridge: {
+      version: worldSimulationSocialAppraisalExperienceBridgeVersion,
+      source_count: socialAppraisalExperienceBridge.source_entries.length,
+      bridge_hash: socialAppraisalExperienceBridge.bridge_hash,
+      phase63_admission_performed_by_existing_memory_writer: true,
+    },
     subjective_memory_formation: {
       version: worldSimulationSubjectiveMemoryFormationVersion,
       created_memory_count: subjectiveMemoryFormation.result.created_memory_count,

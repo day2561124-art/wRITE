@@ -121,6 +121,7 @@ export function bridgeWorldSimulationSocialAppraisalsToSubjectiveExperience(inpu
         internal_social_appraisal_hash: appraisal.appraisal_hash,
         internal_social_interpretation_hash: appraisal.source_interpretation_hash,
         internal_social_source_turn_id: turnId,
+        internal_social_bridge_version: worldSimulationSocialAppraisalExperienceBridgeVersion,
       });
       entries.push({
         character,

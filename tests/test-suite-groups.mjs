@@ -13,6 +13,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CB-C4 person-targeted social appraisal", ["tests/communication/cb-c4-person-targeted-social-appraisal.test.mjs"]]),
   Object.freeze(["CB-C4 Native person-targeted social appraisal", ["tests/communication/cb-c4-native-person-targeted-social-appraisal.test.mjs"]]),
   Object.freeze(["CB-C4 social appraisal experience bridge", ["tests/communication/cb-c4-social-appraisal-memory-bridge.test.mjs"]]),
+  Object.freeze(["CB-C4 Native subjective social memory admission", ["tests/communication/cb-c4-native-social-memory-admission.test.mjs"]]),
   Object.freeze(["CC-6F bounded listener repair initiation contract", ["tests/communication/cc6-repair-initiation.test.mjs"]]),
   Object.freeze(["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]]),
   Object.freeze(["CC-6H native listener repair speech action", ["tests/communication/cc6-native-repair-speech-action.test.mjs"]]),

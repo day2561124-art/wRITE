@@ -396,6 +396,8 @@ export async function commitWorldSimulationTurn(
               input.communication_repair_response_projections ?? [],
             communication_repair_resolution_projections:
               input.communication_repair_resolution_projections ?? [],
+            social_appraisal_experience_bridge:
+              input.social_appraisal_experience_bridge ?? null,
             memory_accessibility_queries: input.memory_accessibility_queries ?? [],
             subjective_memory_encoding_decisions: input.subjective_memory_encoding_decisions ?? null,
             subjective_memory_episode_bindings: input.subjective_memory_episode_bindings ?? null,
