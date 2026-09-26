@@ -11,7 +11,15 @@ Status: implementation contract candidate, baseline `a385b0862a2386968298b3f19c2
 | Conversational evidence | `character-communication-grounding-evidence-service.mjs` joins same-observer CC-6C and CC-6D receipts, with explicit `grounding_claimed: false`. | It proves neither speaker intent, agreement, belief update nor social appraisal. |
 | Future cognition read | `world-simulation-neural-service.mjs` reads `state.relationships ?? state.relationship_cognition ?? {}` into `relationship_cognition`; Phase74A references `cognition.relationship_cognition`. | This is a read path. It does not prove a native durable social writer or which legacy state is authoritative. |
 
-The C-line registry BR-16 classifies the Native durable social writer as absent. CC0–CC7, Memory, Belief, Affect and World chronology remain sealed integration boundaries.
+The C-line registry BR-16 classifies the Native durable social writer as absent **at the stated historical baseline**. CC0–CC7, Memory, Belief, Affect and World chronology remain sealed integration boundaries.
+
+## Implementation evidence after the baseline
+
+- C4-F (`6d8e8872a683aa4a644869fb035a9d9c27fb82cc`) admits bounded, same-observer social appraisal through ordinary Phase63 subjective memory formation. Explicit do-not-encode remains authoritative.
+- C4-G (`1aa86e092a8a29799c064161d527368c6e21ac62`) writes relationship evidence only from a committed matching Phase63 memory. The character's relationship projection preserves earlier descriptions and contrary evidence, deduplicates exact replay, and exposes subjective meaning without engine lineage. It assigns no trust score or World truth.
+- C4-H's Native regression `tests/communication/cb-c4-native-divergent-social-readback.test.mjs` exercises one signal, friendly and adverse listener interpretations, an unheard observer, distinct durable projections, and different next-turn Character Brain action selections. The choices belong to the characters' Brain callback; the World does not infer a response from the appraisal.
+
+These implementation statements describe the tested causal path. The historical baseline classification above remains useful for interpreting the original gap matrix.
 
 ## C4 ownership and ordering
 
