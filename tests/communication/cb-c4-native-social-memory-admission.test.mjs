@@ -320,7 +320,14 @@ try {
   assert.equal(socialProjection.relationship_write_performed, false);
   assert.equal(socialProjection.world_state_mutation_performed, false);
   const snapshot = await getWorldSimulationState(session.world_simulation_session_id, options);
-  assert.equal(snapshot.state.characters.B.relationships.A, "朋友");
+  const relationship = snapshot.state.characters.B.relationships.A;
+  assert.equal(relationship.prior_description, "朋友");
+  assert.equal(relationship.social_evidence.length, 1);
+  assert.equal(relationship.social_evidence[0].appraisal_kind, "affiliative");
+  assert.equal(relationship.social_evidence[0].subjective, true);
+  assert.equal(relationship.social_evidence[0].target_identity_verified, false);
+  assert.equal(relationship.social_evidence[0].world_truth_claimed, false);
+  assert.equal(snapshot.state.characters.A.relationships.B, "朋友");
   const bSocialMemories = snapshot.state.memories.B.filter(
     (item) => item.memory_type === "episodic_social_experience",
   );

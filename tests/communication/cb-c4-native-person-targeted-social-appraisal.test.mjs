@@ -302,7 +302,9 @@ try {
   assert.equal(socialProjection.relationship_write_performed, false);
   assert.equal(socialProjection.world_state_mutation_performed, false);
   const snapshot = await getWorldSimulationState(session.world_simulation_session_id, options);
-  assert.equal(snapshot.state.characters.B.relationships.A, "朋友");
+  assert.equal(snapshot.state.characters.B.relationships.A.prior_description, "朋友");
+  assert.equal(snapshot.state.characters.B.relationships.A.social_evidence.length, 1);
+  assert.equal(snapshot.state.characters.B.relationships.A.social_evidence[0].appraisal_kind, "affiliative");
   const projection =
     secondTurn.communication_grounding_evidence_projections.find(
       (item) => item.character === "B",

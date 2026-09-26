@@ -119,6 +119,10 @@ import {
   worldSimulationSocialAppraisalExperienceBridgeVersion,
 } from "./world-simulation-social-appraisal-memory-bridge-service.mjs";
 import {
+  buildWorldSimulationCommittedSocialRelationshipEvidence,
+  worldSimulationSocialRelationshipEvidenceVersion,
+} from "./world-simulation-social-relationship-evidence-service.mjs";
+import {
   buildWorldSimulationPersonTargetedSocialAppraisalResolverView,
   projectWorldSimulationPersonTargetedSocialAppraisals,
   worldSimulationPersonTargetedSocialAppraisalVersion,
@@ -11803,6 +11807,33 @@ export async function resolveWorldSimulationTurn(
         ?? null,
     });
 
+  // C4 relationship evidence is admitted only after the exact Phase63
+  // subjective social memory has been committed through the mutation queue.
+  const socialRelationshipEvidence =
+    buildWorldSimulationCommittedSocialRelationshipEvidence({
+      world_state: postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+      turn_id: preparedTurn.turn_id,
+      social_appraisal_experience_bridge: socialAppraisalExperienceBridge,
+      subjective_memory_formation: subjectiveMemoryFormation,
+    });
+  const socialRelationshipEvidenceMutationQueue =
+    buildWorldSimulationChronologicalMutationQueue({
+      turn_id: `${preparedTurn.turn_id}:social_relationship_evidence`,
+      world_state_hash: hashAgentRunValue(
+        postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+      ),
+      state_transitions: socialRelationshipEvidence.state_transitions,
+      elapsed_ms: 0,
+    });
+  const socialRelationshipEvidenceMutationExecution =
+    executeWorldSimulationChronologicalMutationQueue({
+      world_state: postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+      preview_world_state: socialRelationshipEvidence.preview_world_state,
+      queue: socialRelationshipEvidenceMutationQueue,
+      scene_id: preparedTurn.event?.scene_id
+        ?? preparedTurn.event?.location_id ?? null,
+    });
+
   const subjectiveClaimSourceMemories = [
     ...subjectiveClaimSourceMemoryRecords(
       subjectiveMemoryFormation,
@@ -11815,7 +11846,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveEpisodeSegmentation =
     buildWorldSimulationSubjectiveEpisodeSegmentations({
       world_state:
-        postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+        socialRelationshipEvidenceMutationExecution.next_world_state,
       turn_id:
         preparedTurn.turn_id,
       source_memory_records:
@@ -11828,7 +11859,7 @@ export async function resolveWorldSimulationTurn(
         `${preparedTurn.turn_id}:subjective_episode_segmentation`,
       world_state_hash:
         hashAgentRunValue(
-          postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+          socialRelationshipEvidenceMutationExecution.next_world_state,
         ),
       state_transitions:
         subjectiveEpisodeSegmentation
@@ -11840,7 +11871,7 @@ export async function resolveWorldSimulationTurn(
   const subjectiveEpisodeSegmentationMutationExecution =
     executeWorldSimulationChronologicalMutationQueue({
       world_state:
-        postOutcomeSubjectiveMemoryMutationExecution.next_world_state,
+        socialRelationshipEvidenceMutationExecution.next_world_state,
       preview_world_state:
         subjectiveEpisodeSegmentation
           .result
