@@ -46,6 +46,11 @@ export function buildWorldSimulationPersonTargetedSocialAppraisalResolverView(in
     throw new Error("Appraisal requires a same-observer read-only social interpretation projection.");
   }
   const interpretations = list(source.character_view.social_interpretations);
+  const contextByPerson = input.subjective_context_by_person ?? {};
+  if (!object(contextByPerson) || Object.keys(contextByPerson).length > 16) {
+    throw new Error("Social appraisal target contexts must be bounded.");
+  }
+  for (const value of Object.values(contextByPerson)) contextFor(value);
   if (interpretations.length > 16) throw new Error("Too many social interpretations.");
   const seen = new Set();
   const candidates = interpretations.map((item) => {
@@ -65,12 +70,16 @@ export function buildWorldSimulationPersonTargetedSocialAppraisalResolverView(in
     const evidenceRef = bounded(item.evidence_ref, "evidence_ref", 120);
     if (seen.has(evidenceRef)) throw new Error("Duplicate appraisal source.");
     seen.add(evidenceRef);
+    const perceivedPerson = bounded(item.perceived_speaker, "perceived_person", 240);
     return {
       evidence_ref: evidenceRef,
-      perceived_person: bounded(item.perceived_speaker, "perceived_person", 240),
+      perceived_person: perceivedPerson,
       interpreted_social_meaning: bounded(item.social_meaning, "social_meaning"),
       interpretation_kind: bounded(item.interpretation_kind, "interpretation_kind", 40),
-      subjective_context: contextFor(input.subjective_context),
+      subjective_context: contextFor(
+        Object.hasOwn(contextByPerson, perceivedPerson)
+          ? contextByPerson[perceivedPerson] : input.subjective_context,
+      ),
       target_identity_verified: false,
       hidden_intent_available: false,
       world_truth_available: false,

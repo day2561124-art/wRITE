@@ -115,6 +115,11 @@ import {
   worldSimulationListenerSocialInterpretationVersion,
 } from "./world-simulation-listener-social-interpretation-service.mjs";
 import {
+  buildWorldSimulationPersonTargetedSocialAppraisalResolverView,
+  projectWorldSimulationPersonTargetedSocialAppraisals,
+  worldSimulationPersonTargetedSocialAppraisalVersion,
+} from "./world-simulation-person-targeted-social-appraisal-service.mjs";
+import {
   characterCommunicationRepairInitiationVersion,
   projectCharacterCommunicationRepairInitiation,
 } from "./character-communication-repair-initiation-service.mjs";
@@ -4916,6 +4921,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationSpeakerRecognitionProjections = [];
   const communicationGroundingEvidenceProjections = [];
   const listenerSocialInterpretationProjections = [];
+  const personTargetedSocialAppraisalProjections = [];
   const communicationRepairInitiationProjections = [];
   const communicationRepairSpeechActionProjections = [];
   const communicationRepairResponseProjections = [];
@@ -5299,6 +5305,75 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(socialInterpretationProjection.audit),
       character_view_hash:
         hashAgentRunValue(socialInterpretationProjection.character_view),
+      relationship_write_performed: false,
+      memory_write_performed: false,
+      world_state_mutation_performed: false,
+    });
+
+    // CB-C4: provide only this observer's existing person-specific
+    // relationship description as optional context. A missing or nontext
+    // relationship is unknown; the appraiser cannot establish target truth.
+    const appraisalContextsByPerson = {};
+    const ownRelationships = object(characterState.relationships);
+    for (const candidate of socialInterpretationAssembly.resolver_view.candidates) {
+      const description = ownRelationships[candidate.perceived_speaker];
+      if (typeof description === "string"
+        && description.trim()
+        && [...description.trim()].length <= 300) {
+        appraisalContextsByPerson[candidate.perceived_speaker] = {
+          prior_relationship: description.trim(),
+        };
+      }
+    }
+    const socialAppraisalAssembly =
+      buildWorldSimulationPersonTargetedSocialAppraisalResolverView({
+        observer: character,
+        social_interpretation_projection: socialInterpretationProjection,
+        subjective_context_by_person: appraisalContextsByPerson,
+      });
+    const socialAppraisalResolver =
+      typeof options.personTargetedSocialAppraisalResolver === "function"
+        ? options.personTargetedSocialAppraisalResolver
+        : null;
+    const rawSocialAppraisalDecisions =
+      socialAppraisalResolver
+        && socialAppraisalAssembly.resolver_view.candidates.length > 0
+        ? await socialAppraisalResolver(
+          cloneJson(socialAppraisalAssembly.resolver_view),
+        )
+        : [];
+    if (!Array.isArray(rawSocialAppraisalDecisions)) {
+      const error = new Error(
+        "personTargetedSocialAppraisalResolver must return an array of bounded listener appraisals.",
+      );
+      error.code = "WORLD_SIMULATION_PERSON_TARGETED_SOCIAL_APPRAISAL_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const socialAppraisalProjection =
+      projectWorldSimulationPersonTargetedSocialAppraisals({
+        assembly: socialAppraisalAssembly,
+        decisions: rawSocialAppraisalDecisions,
+      });
+    const socialAppraisals =
+      array(socialAppraisalProjection.character_view.social_appraisals);
+    if (socialAppraisals.length > 0) {
+      characterPerception.social_appraisals = cloneJson(socialAppraisals);
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        person_targeted_social_appraisal_subjective_only: true,
+        person_targeted_social_appraisal_relationship_updated: false,
+        person_targeted_social_appraisal_memory_written: false,
+        person_targeted_social_appraisal_world_truth_claimed: false,
+      };
+    }
+    personTargetedSocialAppraisalProjections.push({
+      character,
+      version: worldSimulationPersonTargetedSocialAppraisalVersion,
+      resolver_used: Boolean(socialAppraisalResolver),
+      resolver_view_hash: socialAppraisalAssembly.resolver_view_hash,
+      character_view_hash:
+        hashAgentRunValue(socialAppraisalProjection.character_view),
+      audit: cloneJson(socialAppraisalProjection.audit),
       relationship_write_performed: false,
       memory_write_performed: false,
       world_state_mutation_performed: false,
@@ -7803,6 +7878,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationGroundingEvidenceProjections),
     listener_social_interpretation_projections:
       cloneJson(listenerSocialInterpretationProjections),
+    person_targeted_social_appraisal_projections:
+      cloneJson(personTargetedSocialAppraisalProjections),
     communication_repair_initiation_projections:
       cloneJson(communicationRepairInitiationProjections),
     communication_repair_speech_action_projections:
@@ -7873,6 +7950,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       listener_social_interpretation_explicit_decision_required: true,
       listener_social_interpretation_relationship_write_allowed: false,
       listener_social_interpretation_world_truth_claimed: false,
+      person_targeted_social_appraisal_version:
+        worldSimulationPersonTargetedSocialAppraisalVersion,
+      person_targeted_social_appraisal_explicit_decision_required: true,
+      person_targeted_social_appraisal_relationship_write_allowed: false,
+      person_targeted_social_appraisal_memory_write_allowed: false,
       communication_repair_initiation_version:
         characterCommunicationRepairInitiationVersion,
       communication_repair_initiation_explicit_listener_choice_required: true,
@@ -13267,6 +13349,9 @@ export async function resolveWorldSimulationTurn(
       ),
       listener_social_interpretation_projections: cloneJson(
         preparedTurn.listener_social_interpretation_projections ?? [],
+      ),
+      person_targeted_social_appraisal_projections: cloneJson(
+        preparedTurn.person_targeted_social_appraisal_projections ?? [],
       ),
       communication_repair_initiation_projections: cloneJson(
         preparedTurn.communication_repair_initiation_projections ?? [],

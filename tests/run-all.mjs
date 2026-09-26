@@ -929,6 +929,7 @@ const steps = [
   ["CB-C4 listener social interpretation evidence", ["tests/communication/cb-c4-listener-social-interpretation.test.mjs"]],
   ["CB-C4 Native listener social interpretation", ["tests/communication/cb-c4-native-listener-social-interpretation.test.mjs"]],
   ["CB-C4 person-targeted social appraisal", ["tests/communication/cb-c4-person-targeted-social-appraisal.test.mjs"]],
+  ["CB-C4 Native person-targeted social appraisal", ["tests/communication/cb-c4-native-person-targeted-social-appraisal.test.mjs"]],
   ["CC-6F bounded listener repair initiation contract", ["tests/communication/cc6-repair-initiation.test.mjs"]],
   ["CC-6G native listener repair candidate adoption", ["tests/communication/cc6-native-repair-initiation.test.mjs"]],
   ["CC-6H native listener repair speech action", ["tests/communication/cc6-native-repair-speech-action.test.mjs"]],

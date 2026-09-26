@@ -38,8 +38,12 @@ function source(observer, perceivedPerson, meaning) {
 const b = buildWorldSimulationPersonTargetedSocialAppraisalResolverView({
   observer: "B",
   social_interpretation_projection: source("B", "mistaken_X", "像是在安慰我"),
+  subjective_context_by_person: {
+    mistaken_X: { prior_relationship: "先前互動讓我稍有戒心",
+      expectation: "預期會受到批評", affect: "目前感到不安" },
+  },
   subjective_context: {
-    prior_relationship: "先前互動讓我稍有戒心",
+    prior_relationship: "備用關係描述",
     expectation: "預期會受到批評",
     affect: "目前感到不安",
   },
