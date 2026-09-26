@@ -2,6 +2,14 @@ import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
 import {
+  buildWorldSimulationSubjectiveAffordanceEvidenceCatalog,
+} from "./world-simulation-subjective-affordance-evidence-service.mjs";
+import {
+  admitWorldSimulationSubjectiveAffordanceProposal,
+  nativeSubjectiveAffordanceProposalCapability,
+  resolveWorldSimulationNativeSubjectiveAffordanceProposal,
+} from "./world-simulation-subjective-affordance-proposal-service.mjs";
+import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import {
@@ -7324,21 +7332,97 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       );
     }
 
+    const menuActions = repairSpeechActionCandidates.length
+      || repairResponseActionCandidates.length
+      ? [
+          ...availableActions.slice(0, Math.max(0, 22
+            - repairSpeechActionCandidates.length
+            - repairResponseActionCandidates.length)),
+          ...repairSpeechActionCandidates,
+          ...repairResponseActionCandidates,
+        ]
+      : availableActions;
+    // The character may propose exact current evidence refs before the trusted
+    // candidate universe is assembled. The resolver sees no raw World state.
+    const affordanceResolver = typeof options.subjectiveAffordanceProposalResolver
+      === "function" ? options.subjectiveAffordanceProposalResolver : null;
+    let candidateActions = menuActions;
+    const nativeAffordanceBrain =
+      typeof options.characterBrain === "function"
+      && array(options.characterBrainNativeCapabilities)
+        .includes(nativeSubjectiveAffordanceProposalCapability);
+    if (affordanceResolver || nativeAffordanceBrain) {
+      const affordanceCatalog =
+        buildWorldSimulationSubjectiveAffordanceEvidenceCatalog({
+          character,
+          current_turn_id: turnId,
+          perception: characterPerception,
+          cognition: characterCognition,
+        });
+      if (affordanceCatalog.status === "subjective_affordance_evidence_ready") {
+        let proposal = null;
+        if (affordanceResolver) {
+          proposal = await affordanceResolver(cloneJson(affordanceCatalog));
+        } else {
+          if (typeof characterRuntimeManager?.runCharacterTurn !== "function") {
+            throw new Error(
+              "characterRuntimeManager must provide runCharacterTurn() for CB-C5 native proposal.",
+            );
+          }
+          const brainResult = await characterRuntimeManager.runCharacterTurn({
+            world_simulation_session_id: sessionId,
+            character,
+            brain_input: {
+              character,
+              cognition: {
+                subjective_affordance_evidence: cloneJson(affordanceCatalog),
+              },
+              boundaries: {
+                native_subjective_affordance_proposal_only: true,
+                current_same_character_evidence_refs_only: true,
+                world_truth_exposed: false,
+                action_selection_authority: false,
+                objective_feasibility_authority: false,
+                causal_outcome_authority: false,
+                durable_write_authority: false,
+                world_mutation_authority: false,
+              },
+            },
+            characterBrain: options.characterBrain,
+          }, options);
+          proposal = resolveWorldSimulationNativeSubjectiveAffordanceProposal(
+            affordanceCatalog, brainResult,
+          );
+        }
+        if (proposal != null) {
+          const admission = admitWorldSimulationSubjectiveAffordanceProposal({
+            character,
+            current_turn_id: turnId,
+            evidence_catalog: affordanceCatalog,
+            proposal,
+            available_actions: menuActions,
+          });
+          if (admission.admitted) {
+            candidateActions = admission.available_actions;
+            characterCognition.subjective_affordance_proposal = {
+              catalog_hash: admission.catalog_hash,
+              observation_ref: admission.observation_ref,
+              means_ref: admission.means_ref,
+              action_id: admission.candidate.action_id,
+              advisory_only: true,
+              selected_action_authority: false,
+              objective_feasibility_verified: false,
+            };
+          }
+        }
+      }
+    }
     const actionCandidates = await capability(
       sessionId,
       "world_action_proposer",
       {
         character,
-        available_actions: repairSpeechActionCandidates.length
-          || repairResponseActionCandidates.length
-          ? [
-              ...availableActions.slice(0, Math.max(0, 22
-                - repairSpeechActionCandidates.length
-                - repairResponseActionCandidates.length)),
-              ...repairSpeechActionCandidates,
-              ...repairResponseActionCandidates,
-            ]
-          : availableActions,
+        available_actions: candidateActions,
         cognition: characterCognition,
         current_action: characterState.current_action ?? null,
       },

@@ -369,6 +369,10 @@ export const cbC5SubjectiveAffordanceEvidenceSteps = Object.freeze([
     "CB-C5-B Subjective Affordance Evidence Catalog",
     Object.freeze(["tests/cb-c5/cb-c5-subjective-affordance-evidence.test.mjs"]),
   ]),
+  Object.freeze([
+    "CB-C5-C Subjective Affordance Proposal Admission",
+    Object.freeze(["tests/cb-c5/cb-c5-subjective-affordance-proposal.test.mjs"]),
+  ]),
 ]);
 
 export const characterMemoryCoreCertificationSteps = Object.freeze([

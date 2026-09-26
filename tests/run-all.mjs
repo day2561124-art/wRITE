@@ -729,6 +729,7 @@ const steps = [
   ["Phase 61A temporal medical current-state guard", ["tests/phase61/phase61a-temporal-medical-current-state-guard.test.mjs"]],
   ["CB-C2 Autonomous Cognition Scheduler", ["tests/cb-c2/cb-c2-autonomous-cognition-scheduler.test.mjs"]],
   ["CB-C5-B Subjective Affordance Evidence Catalog", ["tests/cb-c5/cb-c5-subjective-affordance-evidence.test.mjs"]],
+  ["CB-C5-C Subjective Affordance Proposal Admission", ["tests/cb-c5/cb-c5-subjective-affordance-proposal.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

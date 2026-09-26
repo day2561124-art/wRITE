@@ -281,7 +281,11 @@ function implementationGuidanceRecords(character, currentTurnId, cognition, gaps
   const raw = cognition.implementation_intention_guidance;
   const guidance = Array.isArray(raw)
     ? raw
-    : array(object(raw).implementation_intention_guidance);
+    : object(raw).source === "committed_prior_turn_cue_applicable_implementation_intentions"
+      && object(raw).advisory_only === true
+      && object(raw).selected_action_authority === false
+      ? array(object(raw).implementation_intentions)
+      : [];
   const records = [];
   for (let index = 0; index < guidance.length; index += 1) {
     const item = object(guidance[index]);
