@@ -282,6 +282,101 @@ export function buildWorldSimulationGoalImplementationIntentionResolverView(inpu
   return deepFreeze(view);
 }
 
+// CB-C3: a character receives only opaque handles for its prior committed
+// goals. The engine reconstructs Phase69A source identity from the exact
+// committed snapshot before admitting any explicit Brain plan intention.
+export const nativeImplementationIntentionViewVersion =
+  "cb-c3-native-implementation-intention-view-v1";
+
+function nativePlanContext(input) {
+  const character = boundedString(input.character, "character", 240);
+  const turnId = boundedString(input.turn_id, "turn_id", 240);
+  const resolverView = buildWorldSimulationGoalImplementationIntentionResolverView({
+    world_state: input.world_state, turn_id: turnId,
+  });
+  const sources = resolverView.committed_goal_sources
+    .filter((source) => sameCharacter(source.character, character))
+    .slice(0, goalImplementationIntentionMaxCharacterItems)
+    .map((source) => ({
+      source,
+      token: `goal_${hashAgentRunValue({
+        version: nativeImplementationIntentionViewVersion,
+        character: characterKey(character), turn_id: turnId,
+        goal_id: source.goal_id, source_event_hash: source.source_event_hash,
+      }).slice(0, 24)}`,
+    }));
+  const contextToken = `plan_${hashAgentRunValue({
+    version: nativeImplementationIntentionViewVersion,
+    character: characterKey(character), turn_id: turnId,
+    resolver_view_hash: resolverView.resolver_view_hash,
+  }).slice(0, 24)}`;
+  return { character, turnId, resolverView, sources, contextToken };
+}
+
+export function buildWorldSimulationNativeImplementationIntentionView(input = {}) {
+  const { character, turnId, sources, contextToken } = nativePlanContext(input);
+  return deepFreeze({
+    version: nativeImplementationIntentionViewVersion,
+    character, turn_id: turnId, context_token: contextToken,
+    committed_goals: sources.map(({ source, token }) => ({
+      goal_token: token,
+      goal_kind: source.character_view.goal_kind,
+      domain: source.character_view.domain,
+      target_descriptor: cloneJson(source.character_view.target),
+      subjective_not_world_truth: true,
+    })),
+    supported_cue_kinds: [...supportedCueKinds],
+    supported_response_kinds: [...supportedResponseKinds],
+    prior_turn_committed_goal_only: true,
+    goal_ids_exposed: false,
+    source_event_ids_exposed: false,
+    action_selection_requested: false,
+    world_truth_exposed: false,
+  });
+}
+
+export function resolveWorldSimulationNativeImplementationIntentionIntents(input = {}) {
+  const { character, turnId, resolverView, sources, contextToken } =
+    nativePlanContext(input);
+  if (input.plan_intents !== undefined && !Array.isArray(input.plan_intents)) {
+    const error = new Error("CB-C3 plan intents must be an array.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_INTENT_INVALID";
+    throw error;
+  }
+  const intents = array(input.plan_intents);
+  if (intents.length > goalImplementationIntentionMaxCharacterItems) {
+    const error = new Error("CB-C3 plan intents exceed the bounded character view.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_INTENTS_OUT_OF_BOUNDS";
+    throw error;
+  }
+  if (intents.length && input.context_token !== contextToken) {
+    const error = new Error("CB-C3 plan intents do not pin the committed goal view.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_CONTEXT_MISMATCH";
+    throw error;
+  }
+  const sourceByToken = new Map(sources.map(({ source, token }) => [token, source]));
+  const decisions = intents.map((raw) => {
+    if (!isObject(raw) || !sourceByToken.has(raw.goal_token)) {
+      const error = new Error("CB-C3 plan intent requires a visible same-character committed goal.");
+      error.code = "WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID";
+      throw error;
+    }
+    const source = sourceByToken.get(raw.goal_token);
+    return {
+      character, operation: "form", goal_id: source.goal_id,
+      cue_descriptor: cloneJson(raw.cue_descriptor),
+      response_descriptor: cloneJson(raw.response_descriptor),
+      resolver_view_hash: resolverView.resolver_view_hash,
+    };
+  });
+  return deepFreeze({
+    version: nativeImplementationIntentionViewVersion,
+    character, turn_id: turnId, implementation_intention_decisions: decisions,
+    explicit_intent_count: intents.length, durable_write_performed: false,
+    action_selection_authority: false, world_truth_authority: false,
+  });
+}
+
 function normalizeDecision(raw, resolverView, existing) {
   if (!isObject(raw)) {
     const error = new Error("Phase69A implementation-intention decision must be an object.");

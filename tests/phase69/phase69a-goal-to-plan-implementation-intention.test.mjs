@@ -16,6 +16,8 @@ import {
   buildWorldSimulationGoalImplementationIntentionContract,
   buildWorldSimulationGoalImplementationIntentionEvents,
   buildWorldSimulationGoalImplementationIntentionResolverView,
+  buildWorldSimulationNativeImplementationIntentionView,
+  resolveWorldSimulationNativeImplementationIntentionIntents,
   projectWorldSimulationEffectiveGoalImplementationIntentions,
   projectWorldSimulationGoalImplementationIntentionsForCharacter,
 } from "../../server/src/world-simulation-goal-to-plan-implementation-intention-service.mjs";
@@ -295,5 +297,52 @@ assert.match(loopSource.slice(goalFormationIndex, commitIndex),
   /goalImplementationIntentionFormationMutationExecution\.next_world_state/);
 assert.match(loopSource.slice(commitIndex, commitIndex + 400),
   /next_world_state: motivationalGoalMutationExecution\.next_world_state/);
+
+// CB-C3-D Native bridge exposes only same-character committed goal handles.
+const nativePlanTurn = "world_turn_cbc3_native_plan";
+const nativePlanView = buildWorldSimulationNativeImplementationIntentionView({
+  world_state: committedWorld, character: elias, turn_id: nativePlanTurn,
+});
+assert.equal(nativePlanView.committed_goals.length, 1);
+assert.equal(JSON.stringify(nativePlanView).includes(goalId), false);
+assert.equal(JSON.stringify(nativePlanView).includes(committed.goal_event_id), false);
+assert.equal(nativePlanView.world_truth_exposed, false);
+assert.equal(nativePlanView.action_selection_requested, false);
+const planIntent = {
+  goal_token: nativePlanView.committed_goals[0].goal_token,
+  cue_descriptor: { cue_kind: "opportunity", label: "companion_requests_help" },
+  response_descriptor: { response_kind: "seek_support", label: "ask_trusted_ally" },
+};
+const admittedPlan = resolveWorldSimulationNativeImplementationIntentionIntents({
+  world_state: committedWorld, character: elias, turn_id: nativePlanTurn,
+  context_token: nativePlanView.context_token, plan_intents: [planIntent],
+});
+assert.equal(admittedPlan.implementation_intention_decisions.length, 1);
+assert.equal(admittedPlan.durable_write_performed, false);
+const builtNativePlan = buildWorldSimulationGoalImplementationIntentionEvents({
+  world_state: committedWorld, turn_id: nativePlanTurn,
+  implementation_intention_decisions: admittedPlan.implementation_intention_decisions,
+});
+assert.equal(builtNativePlan.result.implementation_intention_events_created.length, 1);
+assert.equal(builtNativePlan.result.implementation_intention_events_created[0].selected_action_authority, false);
+const uncommittedView = buildWorldSimulationNativeImplementationIntentionView({
+  world_state: proposedOnly, character: elias, turn_id: nativePlanTurn,
+});
+assert.deepEqual(uncommittedView.committed_goals, []);
+const otherView = buildWorldSimulationNativeImplementationIntentionView({
+  world_state: committedWorld, character: "里歐", turn_id: nativePlanTurn,
+});
+assert.throws(() => resolveWorldSimulationNativeImplementationIntentionIntents({
+  world_state: committedWorld, character: "里歐", turn_id: nativePlanTurn,
+  context_token: otherView.context_token, plan_intents: [planIntent],
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_PLAN_GOAL_TOKEN_INVALID");
+assert.throws(() => resolveWorldSimulationNativeImplementationIntentionIntents({
+  world_state: committedWorld, character: elias, turn_id: nativePlanTurn,
+  context_token: "forged", plan_intents: [planIntent],
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_PLAN_CONTEXT_MISMATCH");
+assert.throws(() => resolveWorldSimulationNativeImplementationIntentionIntents({
+  world_state: committedWorld, character: elias, turn_id: nativePlanTurn,
+  plan_intents: { ...planIntent },
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_PLAN_INTENT_INVALID");
 
 console.log("Phase69A goal-to-plan implementation-intention tests passed.");

@@ -9,6 +9,7 @@ import {
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
+import { projectWorldSimulationEffectiveGoalImplementationIntentions } from "../../server/src/world-simulation-goal-to-plan-implementation-intention-service.mjs";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
@@ -530,7 +531,7 @@ try {
     initial_world_state: {
       ...clone(beliefOnlyWorld),
       simulation_time: "2026-09-26T00:00:00.000Z",
-      event_queue: [1, 2, 3].map((n) => ({
+      event_queue: [1, 2, 3, 4].map((n) => ({
         event_id: `cbc3-goal-${n}`, type: "observation",
         scene_id: "room", participants: [rio], summary: `Goal turn ${n}`,
       })),
@@ -567,6 +568,23 @@ try {
       return { action_id: "reject_all", goal_context_token: view.context_token,
         goal_intents: [{
           operation: "commit", goal_token: view.existing_goals[0].goal_token,
+        }] };
+    }
+    if (mode === "plan") {
+      const planView = packet.native_plan_decision;
+      assert.equal(planView.committed_goals.length, 1);
+      assert.equal(planView.world_truth_exposed, false);
+      assert.equal(planView.action_selection_requested, false);
+      assert.equal(packet.boundaries.native_plan_decision_action_authority, false);
+      return { action_id: "reject_all", plan_context_token: planView.context_token,
+        plan_intents: [{
+          goal_token: planView.committed_goals[0].goal_token,
+          cue_descriptor: {
+            cue_kind: "opportunity", label: "companion_requests_help",
+          },
+          response_descriptor: {
+            response_kind: "seek_support", label: "ask_trusted_ally",
+          },
         }] };
     }
     assert.equal(view.motivation_basis.length, 1);
@@ -619,14 +637,36 @@ try {
     }).goals_by_character[rio] ?? {},
   );
   assert.equal(committedGoals[0].state, "committed");
+  mode = "plan";
+  await assert.rejects(run(3, {
+    goalImplementationIntentionResolver: async () => [],
+  }), (error) => error?.code === "WORLD_SIMULATION_NATIVE_PLAN_RESOLVER_CONFLICT");
+  assert.equal((await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions)).revision,
+  afterCommit.revision);
+  const plannedTurn = await run(3);
+  assert.equal(plannedTurn.committed, true);
+  assert.equal(plannedTurn.selected_action_intents[0].selection, "reject_all");
+  const afterPlan = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  const activePlans = Object.values(
+    projectWorldSimulationEffectiveGoalImplementationIntentions({
+      world_state: afterPlan.state,
+    }).plans_by_character[rio] ?? {},
+  );
+  assert.equal(activePlans.length, 1);
+  assert.equal(activePlans[0].state, "active");
+  assert.equal(activePlans[0].selected_action_authority, false);
   mode = "idle";
-  const idleTurn = await run(3);
+  const idleTurn = await run(4);
   assert.equal(idleTurn.committed, true);
   const afterIdle = await getWorldSimulationState(
     session.world_simulation_session_id, sessionOptions);
   assert.equal(afterIdle.state.motivational_goal_history.length,
-    afterCommit.state.motivational_goal_history.length);
-  assert.equal(brainCalls, 5);
+    afterPlan.state.motivational_goal_history.length);
+  assert.equal(afterIdle.state.goal_implementation_intention_history.length,
+    afterPlan.state.goal_implementation_intention_history.length);
+  assert.equal(brainCalls, 7);
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

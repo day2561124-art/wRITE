@@ -479,6 +479,8 @@ import {
 import {
   buildWorldSimulationGoalImplementationIntentionEvents,
   buildWorldSimulationGoalImplementationIntentionResolverView,
+  buildWorldSimulationNativeImplementationIntentionView,
+  resolveWorldSimulationNativeImplementationIntentionIntents,
   worldSimulationGoalImplementationIntentionVersion,
 } from "./world-simulation-goal-to-plan-implementation-intention-service.mjs";
 import {
@@ -12933,7 +12935,7 @@ export async function resolveWorldSimulationTurn(
     });
   const goalImplementationIntentionFormationMutationQueue =
     buildWorldSimulationChronologicalMutationQueue({
-      turn_id: `${preparedTurn.turn_id}:goal_implementation_intention_formation`,
+      turn_id: `${preparedTurn.turn_id}:goal_implementation_intention`,
       world_state_hash: hashAgentRunValue(
         visibleConstraintObservationMutationExecution.next_world_state),
       state_transitions:
@@ -15349,6 +15351,15 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     brainInput.boundaries.native_goal_decision_explicit_intent_only = true;
     brainInput.boundaries.native_goal_decision_world_write_authority = false;
     brainInput.boundaries.native_goal_decision_action_authority = false;
+    brainInput.native_plan_decision =
+      buildWorldSimulationNativeImplementationIntentionView({
+        world_state: nativeGoalSnapshot.state,
+        character: packet.character,
+        turn_id: prepared.turn_id,
+      });
+    brainInput.boundaries.native_plan_decision_explicit_intent_only = true;
+    brainInput.boundaries.native_plan_decision_world_write_authority = false;
+    brainInput.boundaries.native_plan_decision_action_authority = false;
 
     // Phase81I retrieves prior committed Phase81H linked-experience cases only
     // after the final candidate universe and canonical Phase74A view exist. The
@@ -15616,11 +15627,35 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     error.code = "WORLD_SIMULATION_NATIVE_GOAL_RESOLVER_CONFLICT";
     throw error;
   }
+  // Plans are authored by the final Brain reply only for goals already
+  // committed before this turn. The Phase69A writer rechecks that lineage.
+  const nativePlanDecisions = [];
+  for (const packet of prepared.decision_packets) {
+    const selection = selections[packet.character];
+    if (!isObject(selection) || !Object.hasOwn(selection, "plan_intents")) continue;
+    const admitted = resolveWorldSimulationNativeImplementationIntentionIntents({
+      world_state: nativeGoalSnapshot.state,
+      character: packet.character,
+      turn_id: prepared.turn_id,
+      context_token: selection.plan_context_token,
+      plan_intents: selection.plan_intents,
+    });
+    nativePlanDecisions.push(...admitted.implementation_intention_decisions);
+  }
+  if (nativePlanDecisions.length
+      && typeof options.goalImplementationIntentionResolver === "function") {
+    const error = new Error("Native plan intents and the legacy goalImplementationIntentionResolver cannot both author this turn.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_RESOLVER_CONFLICT";
+    throw error;
+  }
   return resolveWorldSimulationTurn(
     prepared,
     selections,
     {
       ...options,
+      ...(nativePlanDecisions.length
+        ? { goalImplementationIntentionResolver: async () => cloneJson(nativePlanDecisions) }
+        : {}),
       ...(nativeGoalDecisions.length
         ? { motivationalGoalResolver: async () => cloneJson(nativeGoalDecisions) }
         : {}),
