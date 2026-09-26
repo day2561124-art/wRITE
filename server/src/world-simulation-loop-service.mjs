@@ -110,6 +110,11 @@ import {
   projectCharacterCommunicationGroundingEvidence,
 } from "./character-communication-grounding-evidence-service.mjs";
 import {
+  buildWorldSimulationListenerSocialInterpretationResolverView,
+  projectWorldSimulationListenerSocialInterpretations,
+  worldSimulationListenerSocialInterpretationVersion,
+} from "./world-simulation-listener-social-interpretation-service.mjs";
+import {
   characterCommunicationRepairInitiationVersion,
   projectCharacterCommunicationRepairInitiation,
 } from "./character-communication-repair-initiation-service.mjs";
@@ -4910,6 +4915,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const communicationListenerUnderstandingProjections = [];
   const communicationSpeakerRecognitionProjections = [];
   const communicationGroundingEvidenceProjections = [];
+  const listenerSocialInterpretationProjections = [];
   const communicationRepairInitiationProjections = [];
   const communicationRepairSpeechActionProjections = [];
   const communicationRepairResponseProjections = [];
@@ -5239,6 +5245,63 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       belief_update_performed: false,
       world_truth_claimed: false,
       grounding_claimed: false,
+    });
+
+    // CB-C4: the listener can assign a defeasible social meaning only to
+    // same-observer CC-6E evidence. Keep the interpretation separate from
+    // audible signals and from durable relationship or World state.
+    const socialInterpretationAssembly =
+      buildWorldSimulationListenerSocialInterpretationResolverView({
+        observer: character,
+        listener_understanding_projection: listenerUnderstandingProjection,
+        speaker_recognition_projection: speakerRecognitionProjection,
+      });
+    const socialInterpretationResolver =
+      typeof options.listenerSocialInterpretationResolver === "function"
+        ? options.listenerSocialInterpretationResolver
+        : null;
+    const rawSocialInterpretationDecisions =
+      socialInterpretationResolver
+        && socialInterpretationAssembly.resolver_view.candidates.length > 0
+        ? await socialInterpretationResolver(
+          cloneJson(socialInterpretationAssembly.resolver_view),
+        )
+        : [];
+    if (!Array.isArray(rawSocialInterpretationDecisions)) {
+      const error = new Error(
+        "listenerSocialInterpretationResolver must return an array of bounded listener decisions.",
+      );
+      error.code =
+        "WORLD_SIMULATION_LISTENER_SOCIAL_INTERPRETATION_RESOLVER_INVALID_OUTPUT";
+      throw error;
+    }
+    const socialInterpretationProjection =
+      projectWorldSimulationListenerSocialInterpretations({
+        assembly: socialInterpretationAssembly,
+        decisions: rawSocialInterpretationDecisions,
+      });
+    const socialInterpretations =
+      array(socialInterpretationProjection.character_view.social_interpretations);
+    if (socialInterpretations.length > 0) {
+      characterPerception.social_interpretations = cloneJson(socialInterpretations);
+      characterPerception.information_boundary = {
+        ...object(characterPerception.information_boundary),
+        listener_social_interpretation_subjective_only: true,
+        listener_social_interpretation_relationship_updated: false,
+        listener_social_interpretation_world_truth_claimed: false,
+      };
+    }
+    listenerSocialInterpretationProjections.push({
+      character,
+      version: worldSimulationListenerSocialInterpretationVersion,
+      resolver_view_hash: socialInterpretationAssembly.resolver_view_hash,
+      resolver_used: Boolean(socialInterpretationResolver),
+      audit: cloneJson(socialInterpretationProjection.audit),
+      character_view_hash:
+        hashAgentRunValue(socialInterpretationProjection.character_view),
+      relationship_write_performed: false,
+      memory_write_performed: false,
+      world_state_mutation_performed: false,
     });
 
     // CC-6J: a committed CC-6I response can be judged only by the same
@@ -7738,6 +7801,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       cloneJson(communicationSpeakerRecognitionProjections),
     communication_grounding_evidence_projections:
       cloneJson(communicationGroundingEvidenceProjections),
+    listener_social_interpretation_projections:
+      cloneJson(listenerSocialInterpretationProjections),
     communication_repair_initiation_projections:
       cloneJson(communicationRepairInitiationProjections),
     communication_repair_speech_action_projections:
@@ -7802,6 +7867,12 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       communication_grounding_evidence_belief_update_performed: false,
       communication_grounding_evidence_world_truth_claimed: false,
       communication_grounding_evidence_grounding_claimed: false,
+      listener_social_interpretation_version:
+        worldSimulationListenerSocialInterpretationVersion,
+      listener_social_interpretation_same_observer_evidence_required: true,
+      listener_social_interpretation_explicit_decision_required: true,
+      listener_social_interpretation_relationship_write_allowed: false,
+      listener_social_interpretation_world_truth_claimed: false,
       communication_repair_initiation_version:
         characterCommunicationRepairInitiationVersion,
       communication_repair_initiation_explicit_listener_choice_required: true,
@@ -13193,6 +13264,9 @@ export async function resolveWorldSimulationTurn(
       ),
       communication_grounding_evidence_projections: cloneJson(
         preparedTurn.communication_grounding_evidence_projections ?? [],
+      ),
+      listener_social_interpretation_projections: cloneJson(
+        preparedTurn.listener_social_interpretation_projections ?? [],
       ),
       communication_repair_initiation_projections: cloneJson(
         preparedTurn.communication_repair_initiation_projections ?? [],

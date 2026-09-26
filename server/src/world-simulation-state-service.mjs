@@ -384,6 +384,8 @@ export async function commitWorldSimulationTurn(
               input.communication_speaker_recognition_projections ?? [],
             communication_grounding_evidence_projections:
               input.communication_grounding_evidence_projections ?? [],
+            listener_social_interpretation_projections:
+              input.listener_social_interpretation_projections ?? [],
             communication_repair_initiation_projections:
               input.communication_repair_initiation_projections ?? [],
             communication_repair_speech_action_projections:
