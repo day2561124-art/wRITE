@@ -872,6 +872,28 @@ function stateList(state, ...keys) {
   return uniqueStrings(keys.flatMap((key) => array(state[key])));
 }
 
+function characterFacingRelationships(source) {
+  return Object.fromEntries(Object.entries(object(source)).map(([person, prior]) => {
+    if (!isObject(prior) || !Object.hasOwn(prior, "social_evidence")) {
+      return [person, cloneJson(prior)];
+    }
+    const relationship = cloneJson(prior);
+    relationship.social_evidence = array(prior.social_evidence).map((item) => {
+      const evidence = object(item);
+      return {
+        appraisal_kind: evidence.appraisal_kind ?? null,
+        interpretation: evidence.interpretation ?? null,
+        expectedness: evidence.expectedness ?? null,
+        significance: evidence.significance ?? null,
+        subjective: evidence.subjective === true,
+        target_identity_verified: false,
+        world_truth_claimed: false,
+      };
+    });
+    return [person, relationship];
+  }));
+}
+
 function buildWorldCharacterCognition(input = {}) {
   const state = object(input.character_state);
   const character = suppliedCharacter(input);
@@ -925,7 +947,7 @@ function buildWorldCharacterCognition(input = {}) {
     input.current_goal ? [input.current_goal] : [],
   ]);
   const values = cloneJson(state.values ?? state.value_priorities ?? {});
-  const relationships = cloneJson(
+  const relationships = characterFacingRelationships(
     state.relationships
       ?? state.relationship_cognition
       ?? {},

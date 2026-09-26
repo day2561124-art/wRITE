@@ -45,6 +45,13 @@ try {
           scene_id: "room",
           participants: ["B"],
           summary: "B interprets the prior contribution",
+          next_events: [{
+            event_id: "evt-cc6e-reflect",
+            type: "continue_conversation",
+            scene_id: "room",
+            participants: ["B"],
+            summary: "B revisits the relationship on the next turn",
+          }],
         }],
       }],
       scenes: {
@@ -347,6 +354,11 @@ try {
     (item) => item.memory_type === "episodic_social_experience").length, 0);
   assert.equal(secondTurn.social_appraisal_experience_bridge.source_entries.length, 1);
   assert.equal(secondTurn.social_appraisal_experience_bridge.experience_packets[0].character, "B");
+  assert.equal(secondTurn.social_relationship_evidence.evidence_created.length, 1);
+  assert.equal(secondTurn.social_relationship_evidence.evidence_created[0].character, "B");
+  assert.equal(secondTurn.social_relationship_evidence.evidence_created[0].source_memory_id,
+    memory.memory_id);
+  assert.equal(secondTurn.social_relationship_evidence_mutation_queue.mutation_count, 1);
   const projection =
     secondTurn.communication_grounding_evidence_projections.find(
       (item) => item.character === "B",
@@ -362,6 +374,31 @@ try {
   assert.equal(projection.belief_update_performed, false);
   assert.equal(projection.world_truth_claimed, false);
   assert.equal(projection.grounding_claimed, false);
+
+  let nextTurnRelationship = null;
+  const third = await runWorldSimulationTurn({
+    world_simulation_session_id: session.world_simulation_session_id,
+    event_id: "evt-cc6e-reflect",
+  }, {
+    ...options,
+    characterRuntimeManager: runtimeManager,
+    characterBrain: async (packet) => {
+      assert.equal(packet.character, "B");
+      nextTurnRelationship = packet.cognition.relationship_cognition.A;
+      return "reject_all";
+    },
+  });
+  assert.equal(third.ok, true);
+  assert.equal(third.committed, true);
+  assert.equal(nextTurnRelationship.prior_description, "朋友");
+  assert.equal(nextTurnRelationship.social_evidence.length, 1);
+  assert.equal(nextTurnRelationship.social_evidence[0].appraisal_kind, "affiliative");
+  for (const field of ["evidence_id", "source_memory_id", "social_appraisal_hash",
+    "social_interpretation_hash", "turn_id"]) {
+    assert.equal(Object.hasOwn(nextTurnRelationship.social_evidence[0], field), false);
+  }
+  const afterThird = await getWorldSimulationState(session.world_simulation_session_id, options);
+  assert.deepEqual(afterThird.state.characters.B.relationships.A, relationship);
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

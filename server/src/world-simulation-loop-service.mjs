@@ -13517,6 +13517,11 @@ export async function resolveWorldSimulationTurn(
         ),
       subjective_memory_mutation_queue: cloneJson(subjectiveMemoryMutationQueue),
       subjective_memory_mutation_execution: cloneJson(subjectiveMemoryMutationExecution.execution),
+      social_relationship_evidence: cloneJson(socialRelationshipEvidence),
+      social_relationship_evidence_mutation_queue:
+        cloneJson(socialRelationshipEvidenceMutationQueue),
+      social_relationship_evidence_mutation_execution:
+        cloneJson(socialRelationshipEvidenceMutationExecution.execution),
 
       subjective_episode_segmentation:
         cloneJson(subjectiveEpisodeSegmentation),
@@ -14608,6 +14613,13 @@ export async function resolveWorldSimulationTurn(
       source_count: socialAppraisalExperienceBridge.source_entries.length,
       bridge_hash: socialAppraisalExperienceBridge.bridge_hash,
       phase63_admission_performed_by_existing_memory_writer: true,
+    },
+    social_relationship_evidence: {
+      version: worldSimulationSocialRelationshipEvidenceVersion,
+      evidence_created_count: socialRelationshipEvidence.evidence_created.length,
+      mutation_count: socialRelationshipEvidenceMutationQueue.mutation_count,
+      authoritative_executor: socialRelationshipEvidenceMutationExecution.execution.version,
+      same_turn_character_brain_feedback_allowed: false,
     },
     subjective_memory_formation: {
       version: worldSimulationSubjectiveMemoryFormationVersion,
