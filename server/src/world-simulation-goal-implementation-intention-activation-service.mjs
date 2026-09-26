@@ -144,15 +144,135 @@ export function buildWorldSimulationGoalImplementationIntentionActivationResolve
   return deepFreeze(view);
 }
 
-export function projectWorldSimulationGoalImplementationIntentionActivation(input = {}) {
-  const resolverView = cloneJson(object(input.resolver_view));
+export const nativeImplementationIntentionActivationViewVersion =
+  "cb-c3-native-implementation-intention-activation-view-v1";
+export const nativeImplementationIntentionActivationCapability =
+  "implementation_intention_cue_activation_v1";
+
+function assertCanonicalActivationResolverView(raw) {
+  const resolverView = cloneJson(object(raw));
   if (resolverView.version !== worldSimulationGoalImplementationIntentionActivationVersion
       || !optionalString(resolverView.resolver_view_hash)
-      || hashAgentRunValue(Object.fromEntries(Object.entries(resolverView).filter(([key]) => key !== "resolver_view_hash"))) !== resolverView.resolver_view_hash) {
+      || hashAgentRunValue(Object.fromEntries(Object.entries(resolverView)
+        .filter(([key]) => key !== "resolver_view_hash"))) !== resolverView.resolver_view_hash) {
     const error = new Error("Phase69C activation requires an exact canonical resolver view.");
     error.code = "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_ACTIVATION_RESOLVER_VIEW_INVALID";
     throw error;
   }
+  return resolverView;
+}
+
+function nativeActivationContext(rawResolverView) {
+  const resolverView = assertCanonicalActivationResolverView(rawResolverView);
+  const plans = array(resolverView.plans)
+    .slice(0, goalImplementationIntentionActivationMaxItems)
+    .map((plan) => ({
+      plan,
+      token: `plan_${hashAgentRunValue({
+        version: nativeImplementationIntentionActivationViewVersion,
+        resolver_view_hash: resolverView.resolver_view_hash,
+        character: resolverView.character,
+        plan_ref: plan.plan_ref,
+      }).slice(0, 24)}`,
+    }));
+  const contextToken = `activation_${hashAgentRunValue({
+    version: nativeImplementationIntentionActivationViewVersion,
+    resolver_view_hash: resolverView.resolver_view_hash,
+    character: resolverView.character,
+  }).slice(0, 24)}`;
+  return { resolverView, plans, contextToken };
+}
+
+// CB-C3-E: the Character Brain may judge only whether a bounded prior plan's
+// cue applies now. Engine plan refs stay private; Phase69C remains the
+// admission authority and the resulting guidance stays advisory to proposer.
+export function buildWorldSimulationNativeImplementationIntentionActivationView(input = {}) {
+  const { resolverView, plans, contextToken } =
+    nativeActivationContext(input.resolver_view);
+  return deepFreeze({
+    version: nativeImplementationIntentionActivationViewVersion,
+    character: resolverView.character,
+    context_token: contextToken,
+    current_context: cloneJson(resolverView.current_context),
+    plans: plans.map(({ plan, token }) => ({
+      plan_token: token,
+      if_cue: cloneJson(plan.if_cue),
+      then_response: cloneJson(plan.then_response),
+      reconsideration_state: plan.reconsideration_state,
+      subjective_prospective_plan: true,
+    })),
+    cue_applicability_judgment_only: true,
+    action_selection_requested: false,
+    causal_outcome_requested: false,
+    feasibility_judgment_requested: false,
+    world_truth_judgment_requested: false,
+    durable_write_requested: false,
+    engine_plan_refs_exposed: false,
+  });
+}
+
+export function resolveWorldSimulationNativeImplementationIntentionActivationIntent(input = {}) {
+  const { resolverView, plans, contextToken } =
+    nativeActivationContext(input.resolver_view);
+  const brainResult = input.brain_result;
+  if (!isObject(brainResult) || !Object.hasOwn(brainResult, "activated_plan_tokens")) {
+    return deepFreeze({
+      version: nativeImplementationIntentionActivationViewVersion,
+      character: resolverView.character,
+      activated_plan_refs: [],
+      explicit_activation_intent_present: false,
+      durable_write_performed: false,
+      action_selection_authority: false,
+      causal_outcome_authority: false,
+      world_truth_authority: false,
+    });
+  }
+  if (!Array.isArray(brainResult.activated_plan_tokens)) {
+    const error = new Error("CB-C3 native plan activation tokens must be an array.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_INTENT_INVALID";
+    throw error;
+  }
+  const tokens = brainResult.activated_plan_tokens
+    .map((value) => boundedString(value, "activated_plan_token", 160));
+  if (tokens.length > goalImplementationIntentionActivationMaxItems) {
+    const error = new Error("CB-C3 native plan activation exceeds the bounded plan view.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_OUT_OF_BOUNDS";
+    throw error;
+  }
+  if (brainResult.plan_activation_context_token !== contextToken) {
+    const error = new Error("CB-C3 native plan activation does not pin the exact Phase69C view.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_CONTEXT_MISMATCH";
+    throw error;
+  }
+  if (new Set(tokens).size !== tokens.length) {
+    const error = new Error("CB-C3 native plan activation tokens must be unique.");
+    error.code = "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_DUPLICATE_TOKEN";
+    throw error;
+  }
+  const planByToken = new Map(plans.map(({ plan, token }) => [token, plan]));
+  const activatedPlanRefs = tokens.map((token) => {
+    const plan = planByToken.get(token);
+    if (!plan) {
+      const error = new Error("CB-C3 native plan activation requires a visible plan token.");
+      error.code = "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_TOKEN_INVALID";
+      throw error;
+    }
+    return plan.plan_ref;
+  });
+  return deepFreeze({
+    version: nativeImplementationIntentionActivationViewVersion,
+    character: resolverView.character,
+    activated_plan_refs: activatedPlanRefs,
+    explicit_activation_intent_present: true,
+    durable_write_performed: false,
+    action_selection_authority: false,
+    causal_outcome_authority: false,
+    world_truth_authority: false,
+  });
+}
+
+export function projectWorldSimulationGoalImplementationIntentionActivation(input = {}) {
+  const resolverView = assertCanonicalActivationResolverView(input.resolver_view);
   const planByRef = new Map(array(resolverView.plans).map((plan) => [plan.plan_ref, plan]));
   const activatedRefs = array(input.activated_plan_refs).map((value) => boundedString(value, "activated_plan_ref", 160));
   if (new Set(activatedRefs).size !== activatedRefs.length) {

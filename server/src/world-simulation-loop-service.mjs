@@ -491,7 +491,10 @@ import {
 import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
+  buildWorldSimulationNativeImplementationIntentionActivationView,
+  nativeImplementationIntentionActivationCapability,
   projectWorldSimulationGoalImplementationIntentionActivation,
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent,
   worldSimulationGoalImplementationIntentionActivationVersion,
 } from "./world-simulation-goal-implementation-intention-activation-service.mjs";
 import {
@@ -7054,18 +7057,60 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       typeof options.implementationIntentionCueActivationResolver === "function"
         ? options.implementationIntentionCueActivationResolver
         : null;
-    const rawActivatedPlanRefs = implementationIntentionActivationResolver
-      ? await implementationIntentionActivationResolver(
+    let rawActivatedPlanRefs = [];
+    if (implementationIntentionActivationResolver) {
+      rawActivatedPlanRefs = await implementationIntentionActivationResolver(
         cloneJson(implementationIntentionActivationResolverView),
-      )
-      : [];
-    if (!Array.isArray(rawActivatedPlanRefs)) {
-      const error = new Error(
-        "implementationIntentionCueActivationResolver must return an array of opaque plan refs.",
       );
-      error.code =
-        "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_ACTIVATION_RESOLVER_INVALID_OUTPUT";
-      throw error;
+      if (!Array.isArray(rawActivatedPlanRefs)) {
+        const error = new Error(
+          "implementationIntentionCueActivationResolver must return an array of opaque plan refs.",
+        );
+        error.code =
+          "WORLD_SIMULATION_GOAL_IMPLEMENTATION_INTENTION_ACTIVATION_RESOLVER_INVALID_OUTPUT";
+        throw error;
+      }
+    } else if (implementationIntentionActivationResolverView.plans.length > 0
+        && typeof options.characterBrain === "function"
+        && array(options.characterBrainNativeCapabilities)
+          .includes(nativeImplementationIntentionActivationCapability)) {
+      if (typeof characterRuntimeManager?.runCharacterTurn !== "function") {
+        throw new Error(
+          "characterRuntimeManager must provide runCharacterTurn() for CB-C3 native cue activation.",
+        );
+      }
+      const nativeActivationView =
+        buildWorldSimulationNativeImplementationIntentionActivationView({
+          resolver_view: implementationIntentionActivationResolverView,
+        });
+      const nativeActivationBrainResult =
+        await characterRuntimeManager.runCharacterTurn({
+          world_simulation_session_id: sessionId,
+          character,
+          brain_input: {
+            character,
+            cognition: {
+              implementation_intention_activation: nativeActivationView,
+            },
+            boundaries: {
+              native_implementation_intention_activation_only: true,
+              prior_turn_committed_plan_only: true,
+              world_truth_exposed: false,
+              engine_plan_refs_exposed: false,
+              action_selection_authority: false,
+              causal_outcome_authority: false,
+              feasibility_world_truth_authority: false,
+              durable_write_authority: false,
+              world_mutation_authority: false,
+            },
+          },
+          characterBrain: options.characterBrain,
+        }, options);
+      rawActivatedPlanRefs =
+        resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+          resolver_view: implementationIntentionActivationResolverView,
+          brain_result: nativeActivationBrainResult,
+        }).activated_plan_refs;
     }
     const implementationIntentionActivation =
       projectWorldSimulationGoalImplementationIntentionActivation({

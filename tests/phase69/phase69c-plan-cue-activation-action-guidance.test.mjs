@@ -24,9 +24,17 @@ import {
 import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
+  buildWorldSimulationNativeImplementationIntentionActivationView,
+  nativeImplementationIntentionActivationCapability,
   projectWorldSimulationGoalImplementationIntentionActivation,
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent,
   worldSimulationGoalImplementationIntentionActivationVersion,
 } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
+import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
+import {
+  createWorldSimulationCharacterRuntimeManager,
+  prepareWorldSimulationTurn,
+} from "../../server/src/world-simulation-loop-service.mjs";
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function goalHash(event) { const body = clone(event); delete body.goal_event_hash; return hashAgentRunValue(body); }
@@ -191,6 +199,69 @@ assert.equal(resolverView.action_selection_requested, false);
 assert.equal(resolverView.feasibility_judgment_requested, false);
 
 const ref = resolverView.plans[0].plan_ref;
+
+// CB-C3-E Native adoption: Character Brain receives a second opaque token
+// layer, not Phase69C engine plan refs, and can only admit cue applicability.
+const nativeActivationView =
+  buildWorldSimulationNativeImplementationIntentionActivationView({
+    resolver_view: resolverView,
+  });
+assert.equal(nativeActivationView.plans.length, 1);
+assert.equal(nativeActivationView.cue_applicability_judgment_only, true);
+assert.equal(nativeActivationView.action_selection_requested, false);
+assert.equal(nativeActivationView.world_truth_judgment_requested, false);
+assert.equal(nativeActivationView.engine_plan_refs_exposed, false);
+assert.equal(JSON.stringify(nativeActivationView).includes(ref), false);
+assert.equal(nativeActivationView.plans[0].if_cue.label, "companion_is_threatened");
+const admittedNativeActivation =
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+    resolver_view: resolverView,
+    brain_result: {
+      plan_activation_context_token: nativeActivationView.context_token,
+      activated_plan_tokens: [nativeActivationView.plans[0].plan_token],
+    },
+  });
+assert.deepEqual(admittedNativeActivation.activated_plan_refs, [ref]);
+assert.equal(admittedNativeActivation.durable_write_performed, false);
+assert.equal(admittedNativeActivation.action_selection_authority, false);
+assert.equal(
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+    resolver_view: resolverView,
+    brain_result: "reject_all",
+  }).explicit_activation_intent_present,
+  false,
+);
+assert.throws(() =>
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+    resolver_view: resolverView,
+    brain_result: {
+      plan_activation_context_token: "forged",
+      activated_plan_tokens: [nativeActivationView.plans[0].plan_token],
+    },
+  }), (error) =>
+  error?.code === "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_CONTEXT_MISMATCH");
+assert.throws(() =>
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+    resolver_view: resolverView,
+    brain_result: {
+      plan_activation_context_token: nativeActivationView.context_token,
+      activated_plan_tokens: ["plan_unknown"],
+    },
+  }), (error) =>
+  error?.code === "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_TOKEN_INVALID");
+assert.throws(() =>
+  resolveWorldSimulationNativeImplementationIntentionActivationIntent({
+    resolver_view: resolverView,
+    brain_result: {
+      plan_activation_context_token: nativeActivationView.context_token,
+      activated_plan_tokens: [
+        nativeActivationView.plans[0].plan_token,
+        nativeActivationView.plans[0].plan_token,
+      ],
+    },
+  }), (error) =>
+  error?.code === "WORLD_SIMULATION_NATIVE_PLAN_ACTIVATION_DUPLICATE_TOKEN");
+
 const activation = projectWorldSimulationGoalImplementationIntentionActivation({
   resolver_view: resolverView,
   activated_plan_refs: [ref],
@@ -247,6 +318,98 @@ assert.throws(
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Canonical prepare-path regression: with no legacy Phase69C resolver, the
+// same Character Runtime performs a bounded cue-applicability cognition pass.
+// Its admitted guidance reaches Action Proposer cognition without creating an
+// action, mutating World, or exposing Phase69C engine plan refs.
+const fixtureRoot = path.resolve(
+  __dirname,
+  "../.tmp",
+  `cbc3-native-phase69c-${process.pid}-${Date.now()}`,
+);
+fs.rmSync(fixtureRoot, { recursive: true, force: true });
+try {
+  const session = await beginWorldSimulationSession({
+    simulation_label: "CB-C3 native Phase69C cue activation",
+    seed: "cbc3-native-phase69c",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: {
+      ...clone(world),
+      simulation_time: "2026-09-26T00:00:00.000Z",
+      event_queue: [{
+        event_id: "cbc3-phase69c-native-event",
+        type: "observation",
+        scene_id: "room",
+        participants: [elias],
+        summary: "A companion is under pressure.",
+      }],
+      scenes: {
+        room: {
+          scene_id: "room",
+          simulation_time: "2026-09-26T00:00:00.000Z",
+          dimensions: { width_m: 6, depth_m: 6 },
+          entity_positions: { [elias]: { x: 1, y: 1 } },
+          observable_by: { [elias]: { visual: [], audible: [] } },
+        },
+      },
+      characters: {
+        [elias]: { known: [], uncertain: [], current_goal: "保護同伴" },
+      },
+      available_actions: { [elias]: [] },
+    },
+  }, { fixtureRoot });
+  const runtimeManager = createWorldSimulationCharacterRuntimeManager({
+    identityResolver: async (character) => ({
+      entity_id: "character_elias",
+      canonical_name: character,
+      formal: true,
+      identity_source: "cbc3_phase69c_native_test",
+    }),
+  });
+  let nativeActivationBrainCalls = 0;
+  const prepared = await prepareWorldSimulationTurn({
+    world_simulation_session_id: session.world_simulation_session_id,
+    event_id: "cbc3-phase69c-native-event",
+  }, {
+    fixtureRoot,
+    characterRuntimeManager: runtimeManager,
+    characterBrainNativeCapabilities: [
+      nativeImplementationIntentionActivationCapability,
+    ],
+    characterBrain: async (packet) => {
+      nativeActivationBrainCalls += 1;
+      const view = packet?.cognition?.implementation_intention_activation;
+      assert.ok(view);
+      assert.equal(view.plans.length, 1);
+      assert.equal(view.engine_plan_refs_exposed, false);
+      assert.equal(packet.boundaries.action_selection_authority, false);
+      assert.equal(JSON.stringify(view).includes(ref), false);
+      return {
+        plan_activation_context_token: view.context_token,
+        activated_plan_tokens: [view.plans[0].plan_token],
+      };
+    },
+  });
+  assert.equal(nativeActivationBrainCalls, 1);
+  assert.equal(prepared.decision_packets.length, 1);
+  const nativeGuidance =
+    prepared.decision_packets[0].cognition.implementation_intention_guidance;
+  assert.equal(nativeGuidance.implementation_intentions.length, 1);
+  assert.equal(nativeGuidance.advisory_only, true);
+  assert.equal(nativeGuidance.selected_action_authority, false);
+  assert.equal(
+    nativeGuidance.implementation_intentions[0].then_response.label,
+    "coordinate_with_nearby_ally",
+  );
+  assert.equal(
+    Object.hasOwn(nativeGuidance.implementation_intentions[0], "plan_ref"),
+    false,
+  );
+} finally {
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+}
+
 const loopSource = fs.readFileSync(path.resolve(__dirname, "../../server/src/world-simulation-loop-service.mjs"), "utf8");
 assert.match(loopSource, /implementationIntentionCueActivationResolver/);
 assert.match(loopSource, /characterCognition\.implementation_intention_guidance\s*=/);
