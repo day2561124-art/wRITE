@@ -10,6 +10,7 @@ import {
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
 import { getWorldSimulationState } from "../../server/src/world-simulation-state-service.mjs";
 import { projectWorldSimulationEffectiveGoalImplementationIntentions } from "../../server/src/world-simulation-goal-to-plan-implementation-intention-service.mjs";
+import { nativeImplementationIntentionActivationCapability } from "../../server/src/world-simulation-goal-implementation-intention-activation-service.mjs";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
 import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
@@ -531,18 +532,26 @@ try {
     initial_world_state: {
       ...clone(beliefOnlyWorld),
       simulation_time: "2026-09-26T00:00:00.000Z",
-      event_queue: [1, 2, 3, 4].map((n) => ({
+      event_queue: [1, 2, 3, 4, 5].map((n) => ({
         event_id: `cbc3-goal-${n}`, type: "observation",
-        scene_id: "room", participants: [rio], summary: `Goal turn ${n}`,
+        scene_id: n === 5 ? "room-reentry" : "room",
+        participants: [rio], summary: `Goal turn ${n}`,
       })),
       scenes: { room: {
         scene_id: "room", simulation_time: "2026-09-26T00:00:00.000Z",
         dimensions: { width_m: 6, depth_m: 6 },
         entity_positions: { [rio]: { x: 1, y: 1 } },
         observable_by: { [rio]: { visual: [], audible: [] } },
+      }, "room-reentry": {
+        scene_id: "room-reentry", simulation_time: "2026-09-26T00:00:00.000Z",
+        dimensions: { width_m: 6, depth_m: 6 },
+        entity_positions: { [rio]: { x: 1, y: 1 } },
+        observable_by: { [rio]: { visual: ["同伴請求協助"], audible: [] } },
       } },
       characters: { [rio]: { known: [], current_goal: "等待同伴" } },
-      available_actions: { [rio]: [] },
+      available_actions: { [rio]: [{
+        action_id: "ask-trusted-ally", intent: "向可信任的同伴求助", duration_ms: 100,
+      }] },
     },
   }, sessionOptions);
   const characterRuntimeManager = createWorldSimulationCharacterRuntimeManager({
@@ -556,13 +565,43 @@ try {
   const characterBrain = async (packet) => {
     brainCalls++;
     assert.equal(packet.character, rio);
+    if (packet.cognition?.implementation_intention_activation) {
+      assert.ok(["idle", "reentry"].includes(mode));
+      const activation = packet.cognition.implementation_intention_activation;
+      assert.equal(activation.plans.length, 1);
+      assert.equal(activation.plans[0].if_cue.label, "companion_requests_help");
+      assert.equal(activation.engine_plan_refs_exposed, false);
+      const cueObserved = JSON.stringify(activation.current_context.perception)
+        .includes("同伴請求協助");
+      assert.equal(cueObserved, mode === "reentry");
+      return {
+        plan_activation_context_token: activation.context_token,
+        activated_plan_tokens: cueObserved
+          ? [activation.plans[0].plan_token] : [],
+      };
+    }
     const view = packet.native_goal_decision;
     assert.equal(view.character, rio);
     assert.equal(view.world_truth_exposed, false);
     assert.equal(view.source_event_ids_exposed, false);
     assert.equal(packet.boundaries.native_goal_decision_action_authority, false);
     assert.equal(JSON.stringify(view).includes(beliefSource.source_event_id), false);
-    if (mode === "idle") return "reject_all";
+    if (mode === "idle") {
+      assert.deepEqual(packet.cognition.implementation_intention_guidance
+        .implementation_intentions, []);
+      return "reject_all";
+    }
+    if (mode === "reentry") {
+      const guidance = packet.cognition.implementation_intention_guidance;
+      assert.equal(guidance.implementation_intentions.length, 1);
+      assert.equal(guidance.implementation_intentions[0].then_response.label,
+        "ask_trusted_ally");
+      assert.equal(guidance.advisory_only, true);
+      assert.equal(guidance.selected_action_authority, false);
+      assert.ok(packet.candidate_action_intents.some(
+        (candidate) => candidate.action_id === "ask-trusted-ally"));
+      return { action_id: "ask-trusted-ally" };
+    }
     if (mode === "commit") {
       assert.equal(view.existing_goals.length, 1);
       return { action_id: "reject_all", goal_context_token: view.context_token,
@@ -658,7 +697,9 @@ try {
   assert.equal(activePlans[0].state, "active");
   assert.equal(activePlans[0].selected_action_authority, false);
   mode = "idle";
-  const idleTurn = await run(4);
+  const idleTurn = await run(4, {
+    characterBrainNativeCapabilities: [nativeImplementationIntentionActivationCapability],
+  });
   assert.equal(idleTurn.committed, true);
   const afterIdle = await getWorldSimulationState(
     session.world_simulation_session_id, sessionOptions);
@@ -666,7 +707,31 @@ try {
     afterPlan.state.motivational_goal_history.length);
   assert.equal(afterIdle.state.goal_implementation_intention_history.length,
     afterPlan.state.goal_implementation_intention_history.length);
-  assert.equal(brainCalls, 7);
+  // A committed turn without the cue leaves the goal and plan available for
+  // a later observed cue to activate through Phase69C.
+  assert.equal(Object.values(projectWorldSimulationEffectiveMotivationalGoals({
+    world_state: afterIdle.state,
+  }).goals_by_character[rio] ?? {})[0].state, "committed");
+  assert.equal(Object.values(projectWorldSimulationEffectiveGoalImplementationIntentions({
+    world_state: afterIdle.state,
+  }).plans_by_character[rio] ?? {})[0].state, "active");
+  mode = "reentry";
+  const reentryTurn = await run(5, {
+    characterBrainNativeCapabilities: [nativeImplementationIntentionActivationCapability],
+  });
+  assert.equal(reentryTurn.committed, true);
+  assert.equal(reentryTurn.selected_action_intents[0].selection,
+    "candidate_action_intent");
+  assert.equal(reentryTurn.selected_action_intents[0].action_id,
+    "ask-trusted-ally");
+  const afterReentry = await getWorldSimulationState(
+    session.world_simulation_session_id, sessionOptions);
+  assert.equal(afterReentry.revision, afterIdle.revision + 1);
+  assert.equal(afterReentry.state.motivational_goal_history.length,
+    afterIdle.state.motivational_goal_history.length);
+  assert.equal(afterReentry.state.goal_implementation_intention_history.length,
+    afterIdle.state.goal_implementation_intention_history.length);
+  assert.equal(brainCalls, 10);
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
