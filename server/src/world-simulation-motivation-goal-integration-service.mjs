@@ -638,6 +638,148 @@ export function buildWorldSimulationMotivationalGoalEvents(input = {}) {
   });
 }
 
+// CB-C3: the Brain sees bounded, character-specific evidence handles. The
+// resolver view and its durable IDs remain engine-side and are rebuilt from
+// the same prior committed snapshot when an explicit Brain intent is admitted.
+export const nativeGoalDecisionViewVersion = "cb-c3-native-goal-decision-view-v1";
+
+function nativeGoalToken(kind, turnId, character, identity) {
+  return `${kind}_${hashAgentRunValue({
+    version: nativeGoalDecisionViewVersion,
+    kind, turn_id: turnId, character: characterKey(character), identity,
+  }).slice(0, 24)}`;
+}
+
+function nativeGoalDecisionContext(input) {
+  const character = boundedString(input.character, "character", 240);
+  const turnId = boundedString(input.turn_id, "turn_id", 240);
+  const resolverView = buildWorldSimulationMotivationalGoalResolverView({
+    world_state: input.world_state, turn_id: turnId,
+  });
+  const sources = resolverView.available_motivation_basis_refs
+    .filter((ref) => sameCharacter(ref.character, character))
+    .slice(0, 16)
+    .map((ref) => ({
+      token: nativeGoalToken("motivation", turnId, character, sourceRefKey(ref)),
+      ref,
+    }));
+  const characterGoals = Object.entries(resolverView.effective_goals)
+    .find(([name]) => sameCharacter(name, character))?.[1] ?? {};
+  const goals = Object.values(characterGoals)
+    .filter((goal) => ["proposed", "committed", "suspended"].includes(goal.state))
+    .sort((left, right) => compareText(left.goal_id, right.goal_id))
+    .slice(0, 8)
+    .map((goal) => ({
+      token: nativeGoalToken("goal", turnId, character, goal.goal_id),
+      goal,
+    }));
+  const contextToken = nativeGoalToken("context", turnId, character, resolverView.resolver_view_hash);
+  return { character, turnId, resolverView, sources, goals, contextToken };
+}
+
+export function buildWorldSimulationNativeGoalDecisionView(input = {}) {
+  const { character, turnId, sources, goals, contextToken } = nativeGoalDecisionContext(input);
+  return deepFreeze({
+    version: nativeGoalDecisionViewVersion,
+    character, turn_id: turnId, context_token: contextToken,
+    motivation_basis: sources.map(({ token, ref }) => ({
+      source_token: token,
+      evidence: cloneJson(ref.character_view),
+    })),
+    existing_goals: goals.map(({ token, goal }) => ({
+      goal_token: token,
+      goal_kind: goal.goal_kind,
+      domain: goal.domain,
+      target_descriptor: cloneJson(goal.target_descriptor),
+      state: goal.state,
+      subjective_not_world_truth: true,
+    })),
+    bounded_view_only: true,
+    source_event_ids_exposed: false,
+    goal_ids_exposed: false,
+    world_truth_exposed: false,
+    action_selection_requested: false,
+    absence_of_intent_means_no_goal_transition: true,
+  });
+}
+
+export function resolveWorldSimulationNativeGoalDecisionIntents(input = {}) {
+  const { character, turnId, resolverView, sources, goals, contextToken } =
+    nativeGoalDecisionContext(input);
+  if (input.goal_intents !== undefined && !Array.isArray(input.goal_intents)) {
+    const error = new Error("CB-C3 goal intents must be an array.");
+    error.code = "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID";
+    throw error;
+  }
+  const intents = array(input.goal_intents);
+  if (intents.length && input.context_token !== contextToken) {
+    const error = new Error("CB-C3 goal intents do not pin the prior committed decision view.");
+    error.code = "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH";
+    throw error;
+  }
+  if (intents.length > 8) {
+    const error = new Error("CB-C3 permits at most eight explicit goal intents per turn.");
+    error.code = "WORLD_SIMULATION_NATIVE_GOAL_INTENTS_OUT_OF_BOUNDS";
+    throw error;
+  }
+  const sourceByToken = new Map(sources.map((item) => [item.token, item.ref]));
+  const goalByToken = new Map(goals.map((item) => [item.token, item.goal]));
+  const decisions = intents.map((raw) => {
+    if (!isObject(raw)) {
+      const error = new Error("CB-C3 goal intent must be an object.");
+      error.code = "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID";
+      throw error;
+    }
+    const operation = boundedString(raw.operation, "goal_intent.operation", 80,
+      "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID");
+    if (operation === "propose") {
+      const tokens = array(raw.motivation_basis_tokens);
+      if (!tokens.length || tokens.length > 12 || new Set(tokens).size !== tokens.length
+          || tokens.some((token) => !sourceByToken.has(token))) {
+        const error = new Error("CB-C3 proposed goal must cite unique same-character visible motivation sources.");
+        error.code = "WORLD_SIMULATION_NATIVE_GOAL_SOURCE_TOKEN_INVALID";
+        throw error;
+      }
+      return {
+        character, operation,
+        goal_kind: raw.goal_kind,
+        domain: raw.domain,
+        target_descriptor: cloneJson(raw.target_descriptor),
+        motivation_basis_refs: tokens.map((token) => {
+          const ref = sourceByToken.get(token);
+          return {
+            source_kind: ref.source_kind,
+            source_event_id: ref.source_event_id,
+            source_event_hash: ref.source_event_hash,
+          };
+        }),
+        motivation_relations: cloneJson(raw.motivation_relations ?? []),
+        resolver_view_hash: resolverView.resolver_view_hash,
+      };
+    }
+    if (!["commit", "suspend", "abandon"].includes(operation)
+        || !goalByToken.has(raw.goal_token)) {
+      const error = new Error("CB-C3 goal transition requires a visible same-character goal token.");
+      error.code = "WORLD_SIMULATION_NATIVE_GOAL_TOKEN_INVALID";
+      throw error;
+    }
+    return {
+      character, operation,
+      goal_id: goalByToken.get(raw.goal_token).goal_id,
+      resolver_view_hash: resolverView.resolver_view_hash,
+    };
+  });
+  return deepFreeze({
+    version: nativeGoalDecisionViewVersion,
+    turn_id: turnId, character,
+    goal_decisions: decisions,
+    explicit_intent_count: intents.length,
+    selected_action_authority: false,
+    world_truth_authority: false,
+    durable_write_performed: false,
+  });
+}
+
 function assertNoSameTurnWrites(worldState, character, currentTurnId) {
   for (const ref of array(worldState.motivational_goal_history)) {
     if (sameCharacter(ref?.character, character) && ref?.source_turn_id === currentTurnId) {

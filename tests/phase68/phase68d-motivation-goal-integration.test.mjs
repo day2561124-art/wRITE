@@ -22,6 +22,8 @@ import {
   buildWorldSimulationMotivationGoalIntegrationContract,
   buildWorldSimulationMotivationalGoalEvents,
   buildWorldSimulationMotivationalGoalResolverView,
+  buildWorldSimulationNativeGoalDecisionView,
+  resolveWorldSimulationNativeGoalDecisionIntents,
   projectWorldSimulationEffectiveMotivationalGoals,
   projectWorldSimulationMotivationalGoalsForCharacter,
   worldSimulationMotivationGoalIntegrationVersion,
@@ -406,6 +408,84 @@ const beliefGoal = buildWorldSimulationMotivationalGoalEvents({
 });
 assert.equal(beliefGoal.result.goal_events_created[0].operation, "propose");
 assert.equal(beliefGoal.result.goal_events_created[0].committed_goal_is_selected_action, false);
+
+// CB-C3 Native bridge: character-facing tokens carry no durable event/goal
+// identities; only an explicit selection can be translated on the engine
+// side and Phase68D still validates the resulting decision.
+const nativeTurn = "world_turn_cbc3_native";
+const nativeView = buildWorldSimulationNativeGoalDecisionView({
+  world_state: beliefOnlyWorld, character: rio, turn_id: nativeTurn,
+});
+assert.equal(nativeView.motivation_basis.length, 1);
+assert.equal(JSON.stringify(nativeView).includes(beliefSource.source_event_id), false);
+assert.equal(nativeView.source_event_ids_exposed, false);
+const noNativeIntent = resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: beliefOnlyWorld, character: rio, turn_id: nativeTurn,
+});
+assert.deepEqual(noNativeIntent.goal_decisions, []);
+const nativeProposal = resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: beliefOnlyWorld, character: rio, turn_id: nativeTurn,
+  context_token: nativeView.context_token,
+  goal_intents: [{
+    operation: "propose", goal_kind: "achieve_state", domain: "relationships",
+    target_descriptor: { label: "meet_companion" },
+    motivation_basis_tokens: [nativeView.motivation_basis[0].source_token],
+    motivation_relations: ["self_concordant_with"],
+  }],
+});
+assert.equal(nativeProposal.goal_decisions.length, 1);
+assert.equal(nativeProposal.durable_write_performed, false);
+const nativeGoalEvent = buildWorldSimulationMotivationalGoalEvents({
+  world_state: beliefOnlyWorld, turn_id: nativeTurn,
+  goal_decisions: nativeProposal.goal_decisions,
+});
+assert.equal(nativeGoalEvent.result.goal_events_created[0].operation, "propose");
+const nativeProposedWorld = executeBuilt(beliefOnlyWorld, nativeTurn, "motivation_goal_integration", nativeGoalEvent);
+const nativeCommitTurn = "world_turn_cbc3_native_commit";
+const commitView = buildWorldSimulationNativeGoalDecisionView({
+  world_state: nativeProposedWorld, character: rio, turn_id: nativeCommitTurn,
+});
+assert.equal(commitView.existing_goals.length, 1);
+assert.equal(JSON.stringify(commitView).includes(nativeGoalEvent.result.goal_events_created[0].goal_id), false);
+const nativeCommit = resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: nativeProposedWorld, character: rio, turn_id: nativeCommitTurn,
+  context_token: commitView.context_token,
+  goal_intents: [{ operation: "commit", goal_token: commitView.existing_goals[0].goal_token }],
+});
+const nativeCommittedGoal = buildWorldSimulationMotivationalGoalEvents({
+  world_state: nativeProposedWorld, turn_id: nativeCommitTurn,
+  goal_decisions: nativeCommit.goal_decisions,
+});
+assert.equal(nativeCommittedGoal.result.goal_events_created[0].operation, "commit");
+const eliasNativeView = buildWorldSimulationNativeGoalDecisionView({
+  world_state: beliefOnlyWorld, character: elias, turn_id: nativeTurn,
+});
+assert.throws(() => resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: beliefOnlyWorld, character: elias, turn_id: nativeTurn,
+  context_token: eliasNativeView.context_token,
+  goal_intents: [{
+    operation: "propose", goal_kind: "achieve_state", domain: "relationships",
+    target_descriptor: { label: "borrow_another_character_evidence" },
+    motivation_basis_tokens: [nativeView.motivation_basis[0].source_token],
+  }],
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_SOURCE_TOKEN_INVALID");
+const eliasCommitView = buildWorldSimulationNativeGoalDecisionView({
+  world_state: nativeProposedWorld, character: elias, turn_id: nativeCommitTurn,
+});
+assert.throws(() => resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: nativeProposedWorld, character: elias, turn_id: nativeCommitTurn,
+  context_token: eliasCommitView.context_token,
+  goal_intents: [{ operation: "commit", goal_token: commitView.existing_goals[0].goal_token }],
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_TOKEN_INVALID");
+assert.throws(() => resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: nativeProposedWorld, character: rio, turn_id: nativeCommitTurn,
+  context_token: nativeView.context_token,
+  goal_intents: [{ operation: "commit", goal_token: commitView.existing_goals[0].goal_token }],
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_CONTEXT_MISMATCH");
+assert.throws(() => resolveWorldSimulationNativeGoalDecisionIntents({
+  world_state: beliefOnlyWorld, character: rio, turn_id: nativeTurn,
+  goal_intents: { operation: "propose" },
+}), (error) => error?.code === "WORLD_SIMULATION_NATIVE_GOAL_INTENT_INVALID");
 const tamperedBeliefWorld = clone(beliefOnlyWorld);
 const tamperedBeliefEventId = tamperedBeliefWorld.subjective_belief_revision_history[0]
   .belief_revision_event_id;
