@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import { buildWorldSimulationSubjectiveClaims } from "../../server/src/world-simulation-subjective-claim-projection-service.mjs";
+import { resolveWorldSimulationSubjectiveBeliefs } from "../../server/src/world-simulation-subjective-belief-resolution-service.mjs";
+import { buildWorldSimulationSubjectiveBeliefRevisions } from "../../server/src/world-simulation-subjective-belief-revision-service.mjs";
 import {
   buildWorldSimulationChronologicalMutationQueue,
   buildWorldSimulationChronologicalMutationQueueContract,
@@ -340,5 +343,87 @@ const replayB = projectWorldSimulationEffectiveMotivationalGoals({ world_state: 
 assert.equal(replayA.projection_hash, replayB.projection_hash);
 assert.equal(Object.hasOwn(world, "goal_plan"), false);
 assert.equal(Object.hasOwn(world, "utility_function"), false);
+
+// CB-C3: belief-only characters have a legitimate motivation basis even
+// before any autobiographical interpretation or structured self aspect exists.
+const beliefTurn = "world_turn_cbc3_belief_source";
+const beliefMemory = {
+  memory_id: "memory_cbc3_belief_source",
+  memory_type: "episodic_direct_perception",
+  content: { kind: "visual_observation", description: "看見同伴在門口等待。" },
+  source: { kind: "direct_perception", sense: "visual" },
+  internal_provenance: {
+    event_id: "event_cbc3_belief_source", scene_id: "scene_cbc3",
+    turn_id: beliefTurn, observation_hash: "observation_cbc3",
+    formation_version: "phase63a-subjective-memory-formation-v1",
+  },
+  formation_stage: "encoded_unconsolidated",
+  engine_persisted_trace: true, last_recalled_at: null,
+  accessible: true, suppressed: false, possibly_incorrect: false,
+  source_confused: false, subjective_memory_not_world_truth: true,
+};
+let beliefOnlyWorld = { memories: { [rio]: [beliefMemory] } };
+const beliefClaim = buildWorldSimulationSubjectiveClaims({
+  world_state: beliefOnlyWorld, turn_id: beliefTurn,
+  source_memory_records: [{ character: rio, memory_record: beliefMemory }],
+  claim_proposals: [{
+    proposal_ref: "cbc3-companion-waiting", character: rio,
+    proposition: "同伴可能正在等我。",
+    evidence: [{ source_memory_ref: beliefMemory.memory_id, relation: "supports" }],
+  }],
+});
+beliefOnlyWorld = executeBuilt(beliefOnlyWorld, beliefTurn, "subjective_claim", beliefClaim);
+const beliefResolution = resolveWorldSimulationSubjectiveBeliefs({
+  world_state: beliefOnlyWorld, turn_id: beliefTurn,
+});
+const beliefRevision = buildWorldSimulationSubjectiveBeliefRevisions({
+  world_state: beliefOnlyWorld, turn_id: beliefTurn,
+  resolution: beliefResolution.result,
+});
+beliefOnlyWorld = executeBuilt(beliefOnlyWorld, beliefTurn, "subjective_belief_revision", beliefRevision);
+assert.equal(beliefOnlyWorld.autobiographical_self_interpretation_history, undefined);
+assert.equal(beliefOnlyWorld.structured_self_model_aspect_history, undefined);
+const beliefGoalView = buildWorldSimulationMotivationalGoalResolverView({
+  world_state: beliefOnlyWorld, turn_id: "world_turn_cbc3_next",
+});
+const beliefSource = beliefGoalView.available_motivation_basis_refs.find(
+  (ref) => ref.character === rio && ref.source_kind === "phase66_subjective_belief_revision_event",
+);
+assert.ok(beliefSource, "active belief is visible without any prior self-model record");
+assert.equal(beliefSource.character_view.subjective_not_world_truth, true);
+const beliefGoal = buildWorldSimulationMotivationalGoalEvents({
+  world_state: beliefOnlyWorld, turn_id: "world_turn_cbc3_next",
+  goal_decisions: [{
+    character: rio, operation: "propose", goal_kind: "achieve_state",
+    domain: "relationships", target_descriptor: { label: "meet_companion" },
+    motivation_basis_refs: [{
+      source_kind: beliefSource.source_kind,
+      source_event_id: beliefSource.source_event_id,
+      source_event_hash: beliefSource.source_event_hash,
+    }],
+    resolver_view_hash: beliefGoalView.resolver_view_hash,
+  }],
+});
+assert.equal(beliefGoal.result.goal_events_created[0].operation, "propose");
+assert.equal(beliefGoal.result.goal_events_created[0].committed_goal_is_selected_action, false);
+const tamperedBeliefWorld = clone(beliefOnlyWorld);
+const tamperedBeliefEventId = tamperedBeliefWorld.subjective_belief_revision_history[0]
+  .belief_revision_event_id;
+tamperedBeliefWorld.subjective_belief_revision_events[tamperedBeliefEventId]
+  .resolution_reason = "forged";
+assert.throws(
+  () => buildWorldSimulationMotivationalGoalResolverView({
+    world_state: tamperedBeliefWorld, turn_id: "world_turn_cbc3_tampered",
+  }),
+  (error) => error?.code === "WORLD_SIMULATION_EFFECTIVE_SUBJECTIVE_BELIEF_REVISION_EVENT_HASH_MISMATCH",
+);
+assert.deepEqual(
+  buildWorldSimulationMotivationalGoalResolverView({
+    world_state: { subjective_belief_revision_events: beliefOnlyWorld.subjective_belief_revision_events },
+    turn_id: "world_turn_cbc3_orphan",
+  }).available_motivation_basis_refs,
+  [],
+  "unreferenced belief events cannot become motivation sources",
+);
 
 console.log("Phase68D motivation / goal integration tests passed.");

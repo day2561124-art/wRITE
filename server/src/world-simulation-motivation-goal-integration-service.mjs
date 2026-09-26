@@ -119,29 +119,30 @@ function canonicalMotivationSources(worldState) {
       });
     }
   }
+  // A committed subjective belief can motivate a goal before this character
+  // has formed any autobiographical interpretation or structured self aspect.
+  // Discover characters from the authoritative revision history, then let the
+  // Phase66 effective projection validate the event chain and active state.
   const characters = new Set(result.map((item) => item.character));
+  for (const ref of array(worldState.subjective_belief_revision_history)) {
+    if (optionalString(ref?.character)) characters.add(ref.character);
+  }
   for (const character of characters) {
-    try {
-      const beliefs = projectWorldSimulationEffectiveSubjectiveBeliefs({ world_state: worldState, character });
-      for (const belief of array(beliefs.projection?.active_beliefs)) {
-        const claimId = optionalString(belief.claim_event_id ?? belief.claim_id);
-        if (!claimId) continue;
-        const revisionEventId = optionalString(belief.latest_revision_event_id);
-        const revisionEventHash = optionalString(belief.latest_revision_event_hash);
-        if (!revisionEventId || !revisionEventHash) continue;
-        result.push({
-          source_kind: "phase66_subjective_belief_revision_event",
-          source_event_id: revisionEventId,
-          source_event_hash: revisionEventHash,
-          character,
-          character_view: {
-            claim_type: optionalString(belief.claim_type) ?? "subjective_belief",
-            subjective_not_world_truth: true,
-          },
-        });
-      }
-    } catch {
-      // A character can have self-state without Phase66 belief history. Absence is not an error here.
+    const beliefs = projectWorldSimulationEffectiveSubjectiveBeliefs({ world_state: worldState, character });
+    for (const belief of array(beliefs.projection?.active_beliefs)) {
+      const revisionEventId = optionalString(belief.latest_revision_event_id);
+      const revisionEventHash = optionalString(belief.latest_revision_event_hash);
+      if (!revisionEventId || !revisionEventHash) continue;
+      result.push({
+        source_kind: "phase66_subjective_belief_revision_event",
+        source_event_id: revisionEventId,
+        source_event_hash: revisionEventHash,
+        character,
+        character_view: {
+          claim_type: optionalString(belief.claim_type) ?? "subjective_belief",
+          subjective_not_world_truth: true,
+        },
+      });
     }
   }
   return result.sort((left, right) => characterKey(left.character).localeCompare(characterKey(right.character))
