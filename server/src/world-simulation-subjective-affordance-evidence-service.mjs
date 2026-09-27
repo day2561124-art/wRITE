@@ -112,6 +112,7 @@ function gapRecord(kind, sourcePath, reason, extra = {}) {
 }
 
 const observationIdentifierFields = Object.freeze([
+  ["perceptual_object_ref", "object"],
   ["object_id", "object"],
   ["entity_id", "entity"],
   ["target_id", "target"],

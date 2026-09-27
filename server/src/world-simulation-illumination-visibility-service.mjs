@@ -7,6 +7,7 @@ import {
 } from "./world-simulation-directional-height-visibility-service.mjs";
 
 export const worldSimulationIlluminationVisibilityVersion = "phase62y-illumination-visibility-v1";
+export const worldSimulationPerceptualObjectRefVersion = "cb-c5d-perceptual-object-ref-v1";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -45,6 +46,18 @@ function rounded(value, digits = 6) {
 }
 function stableCompare(left, right) {
   return String(left).localeCompare(String(right), "en", { sensitivity: "base" });
+}
+
+function perceptualObjectRef({ observer, sceneId, simulationTime, objectId }) {
+  const hash = hashAgentRunValue({
+    version: worldSimulationPerceptualObjectRefVersion,
+    observer,
+    scene_id: sceneId,
+    simulation_time: simulationTime ?? null,
+    target_kind: "object",
+    target_id: objectId,
+  });
+  return `cb_c5d_object_${hash.slice(0, 24)}`;
 }
 
 const TIER_RANK = Object.freeze({ unresolved: 0, silhouette: 1, dim: 2, clear: 3 });
@@ -419,6 +432,7 @@ function solveIlluminationVisibility(context) {
   const dimObjects = [];
   const silhouetteObjects = [];
   const safeObservations = [];
+  const perceptualObjectBindings = [];
   const observerPosition = point(object(scene.entity_positions)[observer]);
 
   const process = (kind, geometryMap, finalMap, visibleIds, occludedItems, tierBuckets) => {
@@ -452,16 +466,33 @@ function solveIlluminationVisibility(context) {
       const targetPos = targetPosition(worldState, scene, sceneId, kind, targetId);
       const label = perceptionLabel(scene, worldState, observer, targetId, kind, tier);
       if (label) {
+        const currentPerceptualObjectRef = kind === "object"
+          ? perceptualObjectRef({
+              observer,
+              sceneId,
+              simulationTime: worldState.simulation_time ?? scene.simulation_time ?? null,
+              objectId: targetId,
+            })
+          : null;
         safeObservations.push({
           sense: "visual",
           kind: kind === "entity" ? "visible_entity" : "visible_object",
           perceptual_label: label,
+          ...(currentPerceptualObjectRef
+            ? { perceptual_object_ref: currentPerceptualObjectRef }
+            : {}),
           illumination_tier: tier,
           target_illumination_lux: illumination.total_lux,
           visibility_extent: geometry.visibility_extent,
           ...(geometry.visible_fraction === null ? {} : { visible_fraction: geometry.visible_fraction }),
           ...(observerPosition && targetPos ? { relative_position: { dx_m: rounded(targetPos.x - observerPosition.x), dy_m: rounded(targetPos.y - observerPosition.y) } } : {}),
         });
+        if (currentPerceptualObjectRef) {
+          perceptualObjectBindings.push({
+            perceptual_object_ref: currentPerceptualObjectRef,
+            object_id: targetId,
+          });
+        }
       }
     }
   };
@@ -491,6 +522,7 @@ function solveIlluminationVisibility(context) {
     silhouette_objects: silhouetteObjects,
     occluded_objects: occludedObjects,
     perception_visual_observations: [...declared.visible.map(cloneJson), ...safeObservations],
+    perceptual_object_bindings: perceptualObjectBindings.map(cloneJson),
     filtered_declared_visual_count: declared.dropped.length,
     dropped_declared_visuals: declared.dropped,
     illumination_boundary: {
@@ -503,6 +535,8 @@ function solveIlluminationVisibility(context) {
       vertical_light_transport_modeled: false,
       clear_visual_identity_labels_not_reused_for_dim_or_silhouette_without_explicit_low_light_label: true,
       target_bound_declared_visuals_default_to_clear_illumination_requirement: true,
+      perceptual_object_refs_are_opaque_current_visibility_handles: true,
+      perceptual_object_bindings_engine_side_only: true,
       stealth_camouflage_modeled: false,
       sound_propagation_modeled: false,
     },
@@ -571,6 +605,9 @@ export function buildWorldSimulationIlluminationVisibilityContract() {
     clear_dim_silhouette_unresolved_tiers_supported: true,
     low_light_identity_detail_requires_explicit_low_light_label: true,
     target_bound_declared_visuals_default_to_clear_requirement: true,
+    perceptual_object_ref_version: worldSimulationPerceptualObjectRefVersion,
+    opaque_current_visibility_object_refs_supported: true,
+    perceptual_object_bindings_engine_side_only: true,
     brain_receives_engine_target_ids: false,
     stealth_camouflage_modeled: false,
     sound_propagation_modeled: false,

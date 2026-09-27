@@ -6,6 +6,7 @@ import {
 } from "./world-simulation-subjective-affordance-evidence-service.mjs";
 import {
   admitWorldSimulationSubjectiveAffordanceProposal,
+  materializeWorldSimulationSubjectiveAffordanceCausalSelection,
   nativeSubjectiveAffordanceProposalCapability,
   resolveWorldSimulationNativeSubjectiveAffordanceProposal,
 } from "./world-simulation-subjective-affordance-proposal-service.mjs";
@@ -4977,6 +4978,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   );
 
   const decisionPackets = [];
+  const subjectiveAffordancePrivateBindings = [];
   const attentionEncodingEvidence = [];
   const currentMindTransitionProjections = [];
   const subjectiveCognitionProjections = [];
@@ -7401,9 +7403,16 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             evidence_catalog: affordanceCatalog,
             proposal,
             available_actions: menuActions,
+            perceptual_object_bindings:
+              illuminationVisibilityQuery.result.perceptual_object_bindings ?? [],
           });
           if (admission.admitted) {
             candidateActions = admission.available_actions;
+            if (admission.private_binding) {
+              subjectiveAffordancePrivateBindings.push(
+                cloneJson(admission.private_binding),
+              );
+            }
             characterCognition.subjective_affordance_proposal = {
               catalog_hash: admission.catalog_hash,
               observation_ref: admission.observation_ref,
@@ -7897,6 +7906,8 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     event,
     scene_analysis: cloneJson(sceneAnalysis),
     decision_packets: decisionPackets,
+    subjective_affordance_private_bindings:
+      cloneJson(subjectiveAffordancePrivateBindings),
     attention_encoding_evidence: cloneJson(attentionEncodingEvidence),
     current_mind_transition_projections: cloneJson(currentMindTransitionProjections),
     subjective_cognition_projections: cloneJson(subjectiveCognitionProjections),
@@ -10679,6 +10690,22 @@ export async function resolveWorldSimulationTurn(
     selected.splice(0, selected.length,
       ...cloneJson(nativeTemporalReplay.selected_action_intents));
   }
+  const subjectiveAffordanceCausalBindingAudits = [];
+  const causalSelected = selected.map((selectedActionIntent) => {
+    const materialized =
+      materializeWorldSimulationSubjectiveAffordanceCausalSelection({
+        selected_action_intent: selectedActionIntent,
+        current_turn_id: preparedTurn.turn_id,
+        private_bindings:
+          preparedTurn.subjective_affordance_private_bindings ?? [],
+      });
+    if (materialized.audit) {
+      subjectiveAffordanceCausalBindingAudits.push(
+        cloneJson(materialized.audit),
+      );
+    }
+    return materialized.selected_action_intent;
+  });
   const causalResolution = assertCausalResolution(await causalAdjudicator({
     world_simulation_session_id: sessionId,
     turn_id: preparedTurn.turn_id,
@@ -10690,7 +10717,7 @@ export async function resolveWorldSimulationTurn(
       preparedTurn.scene_analysis?.trusted_execution_view
       ?? preparedTurn.scene_analysis,
     ),
-    selected_action_intents: cloneJson(selected),
+    selected_action_intents: cloneJson(causalSelected),
     ...(options.characterNativePendingAcousticCancellationPlan
       ? {pending_acoustic_cancellation_plan: cloneJson(
         options.characterNativePendingAcousticCancellationPlan)}
