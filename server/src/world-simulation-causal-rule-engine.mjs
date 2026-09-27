@@ -319,6 +319,7 @@ function actionKind(candidate) {
   if (isObject(candidate.communication)) return "communication";
   if (isObject(candidate.door_interaction)) return "door_interaction";
   if (isObject(candidate.object_interaction)) return "object_interaction";
+  if (isObject(candidate.gustatory_sampling)) return "gustatory_sampling";
   if (isObject(candidate.projectile)) return "projectile";
   if (isObject(candidate.ability)) return "ability";
   if (isObject(candidate.attack)) return "attack";
@@ -745,6 +746,30 @@ function resolveObjectInteraction(snapshot, next, sceneId, snapshotScene, nextSc
   return durationMs;
 }
 
+function resolveGustatorySampling(snapshot, scene, actor, candidate, rules, outcomes) {
+  const sampling = object(candidate.gustatory_sampling);
+  const objectId = String(sampling.object_id ?? "").trim();
+  const actorState = object(object(snapshot.characters)[actor]);
+  const physical = object(actorState.physical_state);
+  const receptor = object(physical.gustatory_reception);
+  const item = object(object(snapshot.objects)[objectId]);
+  const durationMs = parseDurationMs(candidate,
+    positiveNumber(rules.gustatory_sampling_seconds, 0.5) * 1000);
+  if (!objectId || !Object.hasOwn(object(snapshot.objects), objectId)
+      || !positionFor(scene, actor) || item.holder !== actor
+      || physical.unconscious === true || physical.incapacitated === true
+      || receptor.oral_contact_functional !== true
+      || object(item.gustatory_profile).sampleable !== true) {
+    pushOutcome(outcomes, actor, candidate, "gustatory_contact_blocked",
+      "oral contact requires a conscious positioned holder, an available receptor and an explicitly sampleable object");
+    return durationMs;
+  }
+  pushOutcome(outcomes, actor, candidate, "gustatory_contact_completed",
+    "held sampleable object contacted the functional oral receptor",
+    { sampled_object_id: objectId, ingestion_asserted: false });
+  return durationMs;
+}
+
 function resolveAttack(snapshot, snapshotScene, actor, candidate, rules, outcomes) {
   const attack = object(candidate.attack);
   const target = String(attack.target_character ?? attack.target ?? candidate.target ?? "").trim();
@@ -885,6 +910,11 @@ function resolveSpatialRulePreview(input = {}) {
     }
     if (kind === "door_interaction") {
       const durationMs = resolveDoorInteraction(snapshotScene, nextScene, actor, candidate, rules, outcomes, transitions);
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      continue;
+    }
+    if (kind === "gustatory_sampling") {
+      const durationMs = resolveGustatorySampling(snapshot, snapshotScene, actor, candidate, rules, outcomes);
       elapsedMs = Math.max(elapsedMs, durationMs);
       continue;
     }
