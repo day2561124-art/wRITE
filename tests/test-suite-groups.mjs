@@ -411,6 +411,13 @@ export const body0RecoveryAuthoritySteps = Object.freeze([
   ]),
 ]);
 
+export const body1SensorimotorReentrySteps = Object.freeze([
+  Object.freeze([
+    "BODY-1A Committed Motor to Visual Reentry",
+    Object.freeze(["tests/body-1-sensorimotor-reentry.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -424,6 +431,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body0HistorySteps,
   ...body0BrainBodyContractSteps,
   ...body0RecoveryAuthoritySteps,
+  ...body1SensorimotorReentrySteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
