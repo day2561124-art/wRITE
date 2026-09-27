@@ -446,6 +446,13 @@ export const body1AuditoryReentrySteps = Object.freeze([
   ]),
 ]);
 
+export const body1OlfactoryReentrySteps = Object.freeze([
+  Object.freeze([
+    "BODY-1F Programmatic Olfaction and Committed Reentry",
+    Object.freeze(["tests/body-1-olfactory-reentry.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -464,6 +471,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1TactileContactSteps,
   ...body1ProprioceptiveFeedbackSteps,
   ...body1AuditoryReentrySteps,
+  ...body1OlfactoryReentrySteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,

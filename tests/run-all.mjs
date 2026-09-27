@@ -741,6 +741,7 @@ const steps = [
   ["BODY-1C Committed Grasp Contact and Tactile Input", ["tests/body-1-tactile-contact.test.mjs"]],
   ["BODY-1D Committed Proprioceptive and Movement Feedback", ["tests/body-1-proprioceptive-feedback.test.mjs"]],
   ["BODY-1E Committed Movement to Auditory Reentry", ["tests/body-1-auditory-reentry.test.mjs"]],
+  ["BODY-1F Programmatic Olfaction and Committed Reentry", ["tests/body-1-olfactory-reentry.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

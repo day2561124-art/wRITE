@@ -378,6 +378,7 @@ export async function commitWorldSimulationTurn(
             directional_height_visibility_queries: input.directional_height_visibility_queries ?? [],
             illumination_visibility_queries: input.illumination_visibility_queries ?? [],
             audibility_queries: input.audibility_queries ?? [],
+            olfaction_queries: input.olfaction_queries ?? [],
             communication_listener_understanding_projections:
               input.communication_listener_understanding_projections ?? [],
             communication_speaker_recognition_projections:
