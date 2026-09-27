@@ -377,6 +377,10 @@ export const cbC5SubjectiveAffordanceEvidenceSteps = Object.freeze([
     "CB-C5-D Native Grounded Selection and Causal Adjudication",
     Object.freeze(["tests/cb-c5/cb-c5-native-grounded-selection-adjudication.test.mjs"]),
   ]),
+  Object.freeze([
+    "CB-C5-E Paired Longitudinal Native Affordance",
+    Object.freeze(["tests/cb-c5/cb-c5-native-longitudinal-affordance.test.mjs"]),
+  ]),
 ]);
 
 export const characterMemoryCoreCertificationSteps = Object.freeze([
