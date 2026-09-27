@@ -734,6 +734,7 @@ const steps = [
   ["CB-C5-E Paired Longitudinal Native Affordance", ["tests/cb-c5/cb-c5-native-longitudinal-affordance.test.mjs"]],
   ["BODY-0A Objective Body Authority Boundary", ["tests/body-0-authority.test.mjs"]],
   ["BODY-0B Committed Body History", ["tests/body-0-history.test.mjs"]],
+  ["BODY-0C Brain-Body Command and Sensory Evidence Contract", ["tests/body-0-brain-body-contract.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

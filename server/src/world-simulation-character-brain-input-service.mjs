@@ -22,6 +22,9 @@ import {
 import {
   buildWorldSimulationActionCommitmentExperienceGroundedReconsideration,
 } from "./world-simulation-action-commitment-experience-grounded-reconsideration-service.mjs";
+import {
+  assertWorldSimulationBodyToBrainSensoryEvidence,
+} from "./world-simulation-body-brain-contract-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -204,6 +207,18 @@ export function buildWorldSimulationCharacterBrainInput(
         ?? {},
       ),
   };
+
+  const bodySensoryEvidence = options.body_sensory_evidence;
+  if (bodySensoryEvidence !== undefined && bodySensoryEvidence !== null) {
+    input.body_sensory_evidence =
+      assertWorldSimulationBodyToBrainSensoryEvidence(
+        bodySensoryEvidence,
+        { character: input.character },
+      );
+    input.boundaries.body_sensory_evidence_v1_installed = true;
+    input.boundaries.body_sensory_evidence_objective_truth_exposed = false;
+    input.boundaries.body_sensory_evidence_is_character_belief = false;
+  }
 
   const commitmentExposure =
     options.effective_action_commitment_character_exposure;
