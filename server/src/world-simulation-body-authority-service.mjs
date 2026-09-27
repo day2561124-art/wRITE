@@ -25,7 +25,8 @@ function injuryEvidence(injury) {
   const record = object(injury);
   return {
     region: typeof record.region === "string" ? record.region : null,
-    severity: finite(record.severity),
+    severity: typeof record.severity === "string" && ["none", "minor", "moderate", "severe", "critical"].includes(record.severity)
+      ? record.severity : finite(record.severity),
     source_action_id: typeof record.source_action_id === "string"
       ? record.source_action_id : null,
   };

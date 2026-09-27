@@ -29,6 +29,13 @@ assert.equal(projection.authority, "derived_world_causal_state");
 assert.deepEqual(projection.objective_body_state.actual_position, { x: 2, y: 3 });
 assert.equal(projection.objective_body_state.health_current, 70);
 assert.equal(projection.objective_body_state.injuries[0].severity, 0.7);
+const canonicalSeverityWorld = structuredClone(world);
+canonicalSeverityWorld.characters.aria.physical_state.injuries[0].severity = "severe";
+const canonicalSeverity = projectWorldSimulationBodyAuthority({
+  world_state: canonicalSeverityWorld, scene_id: "yard", character: "aria",
+});
+assert.equal(canonicalSeverity.objective_body_state.injuries[0].severity, "severe");
+assert.equal(JSON.stringify(canonicalSeverity.brain_evidence).includes("severe"), false);
 assert.equal(projection.brain_evidence.nociceptive_signal, "injury_signal_possible");
 assert.equal(projection.brain_evidence.subjective_pain_asserted, false);
 assert.equal(projection.brain_evidence.movement_completed_asserted, false);

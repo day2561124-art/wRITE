@@ -390,6 +390,13 @@ export const body0AuthoritySteps = Object.freeze([
   ]),
 ]);
 
+export const body0HistorySteps = Object.freeze([
+  Object.freeze([
+    "BODY-0B Committed Body History",
+    Object.freeze(["tests/body-0-history.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -400,6 +407,7 @@ export const phase62CognitionIntegrationSteps = Object.freeze(
 
 export const worldSimulationSteps = Object.freeze([
   ...body0AuthoritySteps,
+  ...body0HistorySteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
