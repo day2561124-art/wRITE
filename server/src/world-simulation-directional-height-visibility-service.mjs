@@ -248,10 +248,10 @@ function facingDegrees(worldState, scene, observer) {
   const state = object(object(worldState.characters)[observer]);
   const mapped = object(scene.entity_facing_degrees)[observer];
   const degrees = normalizeDegrees(
-    profile.facing_degrees
-      ?? profile.heading_degrees
+    state.facing_degrees
       ?? mapped
-      ?? state.facing_degrees
+      ?? profile.facing_degrees
+      ?? profile.heading_degrees
       ?? state.heading_degrees,
   );
   if (degrees !== null) return { degrees, source: "degrees" };

@@ -737,6 +737,7 @@ const steps = [
   ["BODY-0C Brain-Body Command and Sensory Evidence Contract", ["tests/body-0-brain-body-contract.test.mjs"]],
   ["BODY-0D Basic Recovery Authority and BODY-0 Gate", ["tests/body-0-recovery-authority.test.mjs"]],
   ["BODY-1A Committed Motor to Visual Reentry", ["tests/body-1-sensorimotor-reentry.test.mjs"]],
+  ["BODY-1B Head Orientation and Next Visual Sample", ["tests/body-1-head-orientation.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

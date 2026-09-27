@@ -418,6 +418,13 @@ export const body1SensorimotorReentrySteps = Object.freeze([
   ]),
 ]);
 
+export const body1HeadOrientationSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1B Head Orientation and Next Visual Sample",
+    Object.freeze(["tests/body-1-head-orientation.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -432,6 +439,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body0BrainBodyContractSteps,
   ...body0RecoveryAuthoritySteps,
   ...body1SensorimotorReentrySteps,
+  ...body1HeadOrientationSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,

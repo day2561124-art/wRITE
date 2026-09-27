@@ -323,6 +323,8 @@ function actionKind(candidate) {
   if (isObject(candidate.ability)) return "ability";
   if (isObject(candidate.attack)) return "attack";
   if (isObject(candidate.movement)) return "movement";
+  if (isObject(candidate.motor_command)
+      && candidate.motor_command.type === "orient_head") return "head_orientation";
   if (isObject(candidate.defense)) return "defense";
   return "passive";
 }
@@ -826,6 +828,30 @@ function resolveSpatialRulePreview(input = {}) {
         emitted.start_time_ms = nativeStartMs;
       }
       elapsedMs = Math.max(elapsedMs, durationMs + nativeStartMs);
+      continue;
+    }
+    if (kind === "head_orientation") {
+      const command = object(candidate.motor_command);
+      const degrees = command.facing_degrees;
+      const physical = object(object(object(snapshot.characters)[actor]).physical_state);
+      const durationMs = parseDurationMs(candidate, 250);
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !positionFor(snapshotScene, actor)
+          || physical.unconscious === true
+          || physical.incapacitated === true
+          || typeof degrees !== "number" || !Number.isFinite(degrees)
+          || degrees < 0 || degrees >= 360) {
+        pushOutcome(outcomes, actor, candidate, "head_orientation_blocked",
+          "orientation requires a conscious positioned actor and a finite facing angle in [0, 360)");
+        continue;
+      }
+      const before = object(snapshot.characters[actor]).facing_degrees ?? null;
+      next.characters[actor].facing_degrees = degrees;
+      pushTransition(transitions, actor, "facing_degrees", before, degrees,
+        "validated head orientation", { scene_id: sceneId });
+      pushOutcome(outcomes, actor, candidate, "head_orientation_completed",
+        "World committed the actor facing direction; later sensory sampling remains separate");
       continue;
     }
     if (kind === "movement") {
