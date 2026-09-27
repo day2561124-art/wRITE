@@ -460,6 +460,13 @@ export const body1GustatoryContactSteps = Object.freeze([
   ]),
 ]);
 
+export const body1InteroceptiveSignalSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1H Basic Interoceptive Signal Foundation",
+    Object.freeze(["tests/body-1-interoceptive-signal.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -480,6 +487,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1AuditoryReentrySteps,
   ...body1OlfactoryReentrySteps,
   ...body1GustatoryContactSteps,
+  ...body1InteroceptiveSignalSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
