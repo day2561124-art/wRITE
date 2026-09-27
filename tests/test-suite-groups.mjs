@@ -439,6 +439,13 @@ export const body1ProprioceptiveFeedbackSteps = Object.freeze([
   ]),
 ]);
 
+export const body1AuditoryReentrySteps = Object.freeze([
+  Object.freeze([
+    "BODY-1E Committed Movement to Auditory Reentry",
+    Object.freeze(["tests/body-1-auditory-reentry.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -456,6 +463,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1HeadOrientationSteps,
   ...body1TactileContactSteps,
   ...body1ProprioceptiveFeedbackSteps,
+  ...body1AuditoryReentrySteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
