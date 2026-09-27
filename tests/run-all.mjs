@@ -732,6 +732,7 @@ const steps = [
   ["CB-C5-C Subjective Affordance Proposal Admission", ["tests/cb-c5/cb-c5-subjective-affordance-proposal.test.mjs"]],
   ["CB-C5-D Native Grounded Selection and Causal Adjudication", ["tests/cb-c5/cb-c5-native-grounded-selection-adjudication.test.mjs"]],
   ["CB-C5-E Paired Longitudinal Native Affordance", ["tests/cb-c5/cb-c5-native-longitudinal-affordance.test.mjs"]],
+  ["BODY-0A Objective Body Authority Boundary", ["tests/body-0-authority.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],
