@@ -739,6 +739,7 @@ const steps = [
   ["BODY-1A Committed Motor to Visual Reentry", ["tests/body-1-sensorimotor-reentry.test.mjs"]],
   ["BODY-1B Head Orientation and Next Visual Sample", ["tests/body-1-head-orientation.test.mjs"]],
   ["BODY-1C Committed Grasp Contact and Tactile Input", ["tests/body-1-tactile-contact.test.mjs"]],
+  ["BODY-1D Committed Proprioceptive and Movement Feedback", ["tests/body-1-proprioceptive-feedback.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],
