@@ -1,6 +1,9 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
+import {
+  projectWorldSimulationBasicRecoveryAuthority,
+} from "./world-simulation-body-recovery-authority-service.mjs";
 
-export const worldSimulationBodyAuthorityVersion = "body-0a-objective-boundary-v1";
+export const worldSimulationBodyAuthorityVersion = "body-0d-objective-boundary-v2";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -59,7 +62,11 @@ export function projectWorldSimulationBodyAuthority({
     character: actor,
     actual_position: actualPosition,
     health_current: finite(physical.health_current),
+    health_max: finite(physical.health_max),
     injuries,
+    recovery_state: projectWorldSimulationBasicRecoveryAuthority({
+      physical_state: physical,
+    }),
     movement_restricted: movementRestricted,
     movement_multiplier: finite(physical.movement_multiplier),
   };
@@ -120,6 +127,10 @@ export function buildWorldSimulationBodyAuthorityContract() {
     brain_may_infer_injury_diagnosis_from_signal: false,
     injury_is_subjective_pain: false,
     motor_intention_is_completed_movement: false,
-    scope: "BODY-0A read boundary; history, effectors and full interoception pending",
+    basic_recovery_authority_installed: true,
+    fixed_hp_regeneration_prohibited: true,
+    elapsed_time_alone_causes_recovery: false,
+    body0_authority_gate_closed: true,
+    scope: "BODY-0 authority gate closed; full physiology, active sampling and effectors remain deferred",
   };
 }
