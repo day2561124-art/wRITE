@@ -35,6 +35,9 @@ assert.deepEqual(result.head_rotation_feedback, [{
   modality: "vestibular", signal: "head_rotation_detected", source_world_revision: 1,
 }]);
 assert.equal(JSON.stringify(result).includes("90"), false);
+assert.equal(project(turned, { turns: [{ ...history.turns[0],
+  state_transitions: Array.from({ length: 100 }, () => transition),
+}] }).head_rotation_feedback.length, 1);
 assert.equal(result.boundaries.angular_velocity_or_acceleration_inferred, false);
 assert.equal(buildWorldSimulationBodyVestibularFeedbackContract()
   .subjective_orientation_belief_asserted, false);

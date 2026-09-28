@@ -46,6 +46,7 @@ export function projectWorldSimulationBodyVestibularFeedback({
         signal: "head_rotation_detected",
         source_world_revision: world_state_revision,
       }));
+      break; // One bounded head-rotation cue per committed turn.
     }
   }
   return Object.freeze({
