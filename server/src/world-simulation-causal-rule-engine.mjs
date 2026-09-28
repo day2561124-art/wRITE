@@ -441,7 +441,72 @@ export function validateCommunicationSurfaceRealization(actor, candidate, commun
   };
 }
 
-function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
+function resolveEmbodiedCommunicationDisplay({
+  actor, addressee, candidate, communication, snapshot, next,
+  snapshotScene, sceneId, transitions,
+}) {
+  const request = object(communication.embodied_display_request);
+  if (!Object.keys(request).length) {
+    return { ok: true, realization: null };
+  }
+  if (request.schema_version !== "cc8a-embodied-display-request-v1"
+      || request.modality !== "gaze"
+      || request.target_relation !== "addressee"
+      || communication.channel !== "nonverbal"
+      || candidate.target !== addressee) {
+    return { ok: false, reason: "invalid embodied communication display request" };
+  }
+  const actorPosition = positionFor(snapshotScene, actor);
+  const targetPosition = positionFor(snapshotScene, addressee);
+  const actorState = object(object(snapshot.characters)[actor]);
+  const physical = object(actorState.physical_state);
+  if (!Object.hasOwn(object(snapshot.characters), actor)
+      || !Object.hasOwn(object(snapshot.characters), addressee)
+      || !actorPosition || !targetPosition
+      || physical.unconscious === true
+      || physical.incapacitated === true) {
+    return {
+      ok: false,
+      reason: "gaze display requires conscious positioned actor and positioned addressee",
+    };
+  }
+  const dx = targetPosition.x - actorPosition.x;
+  const dy = targetPosition.y - actorPosition.y;
+  if (dx === 0 && dy === 0) {
+    return { ok: false, reason: "gaze display target has no resolvable direction" };
+  }
+  const rawDegrees = Math.atan2(dy, dx) * 180 / Math.PI;
+  const degrees = ((rawDegrees % 360) + 360) % 360;
+  const before = actorState.facing_degrees ?? null;
+  next.characters[actor].facing_degrees = degrees;
+  pushTransition(
+    transitions,
+    actor,
+    "facing_degrees",
+    before,
+    degrees,
+    "validated CC-8A gaze display toward committed communication addressee",
+    { scene_id: sceneId, source_action_id: candidate.action_id ?? null },
+  );
+  return {
+    ok: true,
+    realization: {
+      schema_version: "cc8a-embodied-display-realization-v1",
+      modality: "gaze",
+      target_relation: "addressee",
+      effector: "head_orientation",
+      realized: true,
+      source_action_id: candidate.action_id ?? null,
+      private_intended_meaning_exposed: false,
+      objective_target_coordinates_exposed: false,
+    },
+  };
+}
+
+function resolveCommunicationIntent(
+  actor, candidate, rules, outcomes,
+  snapshot, next, snapshotScene, sceneId, transitions,
+) {
   const communication = object(candidate.communication);
   const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
   const channel = String(communication.channel ?? "").trim();
@@ -477,6 +542,27 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
     );
     return durationMs;
   }
+  const embodiedDisplay = resolveEmbodiedCommunicationDisplay({
+    actor,
+    addressee,
+    candidate,
+    communication,
+    snapshot,
+    next,
+    snapshotScene,
+    sceneId,
+    transitions,
+  });
+  if (!embodiedDisplay.ok) {
+    pushOutcome(
+      outcomes,
+      actor,
+      candidate,
+      "blocked",
+      embodiedDisplay.reason ?? "embodied display could not be physically realized",
+    );
+    return durationMs;
+  }
   const publicIrLineage = publicCommunicationIrLineage(
     actor, addressee, channel, expressionMode, message, candidate,
   );
@@ -505,6 +591,8 @@ function resolveCommunicationIntent(actor, candidate, rules, outcomes) {
       surface_realization: surfaceValidation.realization,
     } : {}),
     surface_realization_complete: surfaceValidation.realization !== null,
+    ...(embodiedDisplay.realization
+      ? { embodied_display: embodiedDisplay.realization } : {}),
     private_purpose_exposed: false,
     withheld_private_content_exposed: false,
     world_truth_claimed: false,
@@ -844,7 +932,17 @@ function resolveSpatialRulePreview(input = {}) {
     }
     const kind = actionKind(candidate);
     if (kind === "communication") {
-      const durationMs = resolveCommunicationIntent(actor, candidate, rules, outcomes);
+      const durationMs = resolveCommunicationIntent(
+        actor,
+        candidate,
+        rules,
+        outcomes,
+        snapshot,
+        next,
+        snapshotScene,
+        sceneId,
+        transitions,
+      );
       const nativeStartMs = nativeResponse.actor === actor
         && nativeResponse.action_id === candidate.action_id
         ? nativeResponse.start_time_ms : 0;
@@ -1069,6 +1167,14 @@ export function buildWorldSimulationCausalRuleContract() {
       withheld_private_content_exposed_in_world_event: false,
       surface_realization_completed_here: false,
       recipient_comprehension_modeled_here: false,
+      embodied_nonverbal_gaze: {
+        explicit_same_character_display_request_required: true,
+        semantic_text_parsing_for_effector_selection: false,
+        world_resolves_addressee_geometry: true,
+        head_orientation_committed_only_after_body_preconditions: true,
+        private_intended_meaning_exposed: false,
+        listener_perception_inferred: false,
+      },
       speech_temporal_stream: buildWorldSimulationCommunicationSpeechStreamContract(),
       observer_increment_acoustic_admission: buildWorldSimulationObserverSpeechIncrementContract(),
       acoustic_bridge: buildWorldSimulationCommunicationAcousticBridgeContract(),

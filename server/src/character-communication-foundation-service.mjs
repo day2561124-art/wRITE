@@ -655,6 +655,20 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
   const communicationIr = buildCharacterCommunicationIr(plan, { publicOnly: true });
   const communicationGoal = isRecord(characterInput.cognition?.communication_goal)
     ? characterInput.cognition.communication_goal : {};
+  // CC-8A: reuse only the already-authored same-character display request.
+  // The public action carries no private intended meaning and no objective
+  // angle/position. World/Body resolves the current physical orientation.
+  const intentionalDisplay = isRecord(plan.ir_context?.intentional_display)
+    ? plan.ir_context.intentional_display : null;
+  const embodiedDisplayRequest = channel === "nonverbal" && intentionalDisplay
+    && string(intentionalDisplay.modality, 120) === "gaze"
+    && string(intentionalDisplay.target, 240) === plan.addressee
+    ? {
+        schema_version: "cc8a-embodied-display-request-v1",
+        modality: "gaze",
+        target_relation: "addressee",
+      }
+    : null;
   const surfaceRealization = channel === "speech" && communicationGoal.surface_realization != null
     ? realizeCharacterCommunicationMandarin({
         ...plan,
@@ -669,6 +683,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
     channel,
     public_message: publicMessage,
     communication_ir: communicationIr,
+    embodied_display_request: embodiedDisplayRequest,
     surface_realization: surfaceRealization,
   };
   return copy({
@@ -685,6 +700,8 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
       expression_mode: plan.mode,
       message: publicMessage,
       ir: communicationIr,
+      ...(embodiedDisplayRequest
+        ? { embodied_display_request: embodiedDisplayRequest } : {}),
       ...(surfaceRealization ? { surface_realization: surfaceRealization } : {}),
       surface_realization_complete: surfaceRealization !== null,
       private_purpose_exposed: false,

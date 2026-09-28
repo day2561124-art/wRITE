@@ -1005,6 +1005,7 @@ const steps = [
   ["CC-7AF provisional fresh-source reentry", ["tests/communication/cc7-native-source-reentry.test.mjs"]],
   ["CC-7AF authoritative committed source guard", ["tests/communication/cc7-native-committed-source.test.mjs"]],
   ["CC-7AF pending queued cancellation assessment", ["tests/communication/cc7-native-pending-cancellation.test.mjs"]],
+  ["CC-8A embodied gaze effector foundation", ["tests/communication/cc8-embodied-gaze-effector.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
