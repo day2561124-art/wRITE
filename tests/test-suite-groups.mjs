@@ -534,6 +534,13 @@ export const body1HomeostaticBrainIngressSteps = Object.freeze([
   ]),
 ]);
 
+export const body1TactileBrainIngressSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1S Committed Tactile Brain Ingress",
+    Object.freeze(["tests/body-1-tactile-brain-ingress.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -564,6 +571,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1BodyOrientationSteps,
   ...body1HomeostaticCueSteps,
   ...body1HomeostaticBrainIngressSteps,
+  ...body1TactileBrainIngressSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,

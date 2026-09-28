@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-simulation-body-interoceptive-signal-service.mjs";
 import { readCommittedWorldSimulationBodyHomeostaticCues } from "./world-simulation-body-homeostatic-cue-service.mjs";
+import { readCommittedWorldSimulationBodyTactileContact } from "./world-simulation-body-tactile-contact-service.mjs";
 import { projectWorldSimulationBodySpeechEffectorFeedback } from "./world-simulation-body-speech-effector-feedback-service.mjs";
 import { readCommittedWorldSimulationBodyProprioceptiveFeedback } from "./world-simulation-body-proprioceptive-feedback-service.mjs";
 import { readCommittedWorldSimulationBodyVestibularFeedback } from "./world-simulation-body-vestibular-feedback-service.mjs";
@@ -267,6 +268,13 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
         expected_revision: prepared.state_revision,
         expected_state_hash: prepared.world_state_hash,
       }, formalLoopOptions(loopOptions));
+    const bodyTactileContact =
+      await readCommittedWorldSimulationBodyTactileContact({
+        session_id: sessionId,
+        character: packet.character,
+        expected_revision: prepared.state_revision,
+        expected_state_hash: prepared.world_state_hash,
+      }, formalLoopOptions(loopOptions));
     const bodyHomeostaticCues =
       await readCommittedWorldSimulationBodyHomeostaticCues({
         session_id: sessionId,
@@ -295,6 +303,7 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
       }, formalLoopOptions(loopOptions));
     const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
       body_interoceptive_signals: bodyInteroceptiveSignals,
+      body_tactile_contact: bodyTactileContact,
       body_homeostatic_cues: bodyHomeostaticCues,
       body_speech_effector_feedback: bodySpeechEffectorFeedback,
       body_proprioceptive_feedback: bodyProprioceptiveFeedback,

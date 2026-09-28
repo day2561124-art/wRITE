@@ -33,6 +33,10 @@ import {
   readCommittedWorldSimulationBodyHomeostaticCues,
   worldSimulationBodyHomeostaticCueVersion,
 } from "./world-simulation-body-homeostatic-cue-service.mjs";
+import {
+  readCommittedWorldSimulationBodyTactileContact,
+  worldSimulationBodyTactileContactVersion,
+} from "./world-simulation-body-tactile-contact-service.mjs";
 import { worldSimulationBodySpeechEffectorFeedbackVersion } from "./world-simulation-body-speech-effector-feedback-service.mjs";
 import {
   readCommittedWorldSimulationBodyProprioceptiveFeedback,
@@ -321,6 +325,68 @@ function boundedCommittedSpeechFeedback(projection, character) {
   };
 }
 
+const TACTILE_SIGNAL_KEYS = new Set([
+  "modality", "signal", "contact_ref", "source_action_id",
+  "source_world_revision", "material_identity_asserted",
+  "texture_asserted", "temperature_asserted", "pain_asserted",
+]);
+function boundedCommittedTactileContact(projection, character) {
+  const source = isObject(projection) ? projection : {};
+  const signals = source.tactile_signals;
+  const boundaries = source.boundaries;
+  const invalid = (code) => {
+    const error = new Error(code);
+    error.code = code;
+    throw error;
+  };
+  if (source.version !== worldSimulationBodyTactileContactVersion
+      || source.authority !== "committed_world_contact_and_body_receptor"
+      || source.character !== character
+      || !Number.isSafeInteger(source.source_world_revision)
+      || source.source_world_revision < 0
+      || !["available", "unavailable"].includes(source.receptor_status)
+      || !Array.isArray(signals) || signals.length > 32
+      || source.receptor_status === "unavailable" && signals.length !== 0
+      || !isObject(boundaries)
+      || boundaries.intention_is_not_contact !== true
+      || boundaries.world_outcome_alone_is_not_body_signal !== true
+      || boundaries.body_receptor_required !== true
+      || boundaries.object_identity_exposed !== false
+      || boundaries.subjective_touch_asserted !== false) {
+    invalid("BODY1S_TACTILE_EVIDENCE_INVALID");
+  }
+  const seen = new Set();
+  for (const item of signals) {
+    if (!isObject(item)
+        || Object.keys(item).some((key) => !TACTILE_SIGNAL_KEYS.has(key))
+        || item.modality !== "cutaneous_contact"
+        || item.signal !== "hand_contact_detected"
+        || typeof item.contact_ref !== "string"
+        || !/^contact_[a-f0-9]{32}$/.test(item.contact_ref)
+        || seen.has(item.contact_ref)
+        || typeof item.source_action_id !== "string"
+        || !item.source_action_id.trim()
+        || item.source_world_revision !== source.source_world_revision
+        || item.material_identity_asserted !== false
+        || item.texture_asserted !== false
+        || item.temperature_asserted !== false
+        || item.pain_asserted !== false) {
+      invalid("BODY1S_TACTILE_SIGNAL_INVALID");
+    }
+    seen.add(item.contact_ref);
+  }
+  return {
+    version: source.version,
+    character,
+    source_world_revision: source.source_world_revision,
+    receptor_status: source.receptor_status,
+    tactile_signals: signals.map(({ modality, signal, contact_ref,
+      source_action_id, source_world_revision }) =>
+      ({ modality, signal, contact_ref, source_action_id,
+        source_world_revision })),
+  };
+}
+
 const HOMEOSTATIC_CHANNELS = ["hunger", "fullness", "fatigue"];
 const HOMEOSTATIC_FEEDBACK_KEYS = new Set([
   "modality", "channel", "signal", "source_world_revision",
@@ -535,6 +601,16 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_interoceptive_evidence_is_character_belief = false;
   }
 
+  if (options.body_tactile_contact !== undefined) {
+    input.body_tactile_evidence = boundedCommittedTactileContact(
+      options.body_tactile_contact, input.character,
+    );
+    input.boundaries.body_tactile_evidence_v1_installed = true;
+    input.boundaries.body_tactile_object_identity_exposed = false;
+    input.boundaries.body_tactile_evidence_is_subjective_touch = false;
+    input.boundaries.body_tactile_evidence_is_character_belief = false;
+  }
+
   if (options.body_homeostatic_cues !== undefined) {
     input.body_homeostatic_evidence = boundedCommittedHomeostaticCues(
       options.body_homeostatic_cues, input.character,
@@ -727,6 +803,9 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const committed = await readCommittedWorldSimulationBodyInteroceptiveSignals({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
+  const tactile = await readCommittedWorldSimulationBodyTactileContact({
+    session_id, character, expected_revision, expected_state_hash,
+  }, options);
   const homeostatic = await readCommittedWorldSimulationBodyHomeostaticCues({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
@@ -739,6 +818,7 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
     body_interoceptive_signals: committed,
+    body_tactile_contact: tactile,
     body_homeostatic_cues: homeostatic,
     body_proprioceptive_feedback: proprioception,
     body_vestibular_feedback: vestibular,
