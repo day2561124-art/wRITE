@@ -752,6 +752,7 @@ const steps = [
   ["BODY-1N Committed Vestibular Brain Ingress", ["tests/body-1-vestibular-brain-ingress.test.mjs"]],
   ["BODY-1O Committed Respiratory Activity Interface", ["tests/body-1-respiratory-state.test.mjs"]],
   ["BODY-1P Body Orientation Effector Foundation", ["tests/body-1-body-orientation.test.mjs"]],
+  ["BODY-1Q Committed Homeostatic Cue Foundation", ["tests/body-1-homeostatic-cue.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

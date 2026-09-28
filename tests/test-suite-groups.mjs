@@ -520,6 +520,13 @@ export const body1BodyOrientationSteps = Object.freeze([
   ]),
 ]);
 
+export const body1HomeostaticCueSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1Q Committed Homeostatic Cue Foundation",
+    Object.freeze(["tests/body-1-homeostatic-cue.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -548,6 +555,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1VestibularBrainIngressSteps,
   ...body1RespiratoryStateSteps,
   ...body1BodyOrientationSteps,
+  ...body1HomeostaticCueSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
