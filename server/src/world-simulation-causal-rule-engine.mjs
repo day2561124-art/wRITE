@@ -325,6 +325,8 @@ function actionKind(candidate) {
   if (isObject(candidate.attack)) return "attack";
   if (isObject(candidate.movement)) return "movement";
   if (isObject(candidate.motor_command)
+      && candidate.motor_command.type === "orient_body") return "body_orientation";
+  if (isObject(candidate.motor_command)
       && candidate.motor_command.type === "orient_head") return "head_orientation";
   if (isObject(candidate.motor_command)
       && candidate.motor_command.type === "orient_eyes") return "eye_orientation";
@@ -857,6 +859,30 @@ function resolveSpatialRulePreview(input = {}) {
       elapsedMs = Math.max(elapsedMs, durationMs + nativeStartMs);
       continue;
     }
+    if (kind === "body_orientation") {
+      const command = object(candidate.motor_command);
+      const degrees = command.body_facing_degrees;
+      const physical = object(object(object(snapshot.characters)[actor]).physical_state);
+      const durationMs = parseDurationMs(candidate, 300);
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !positionFor(snapshotScene, actor)
+          || physical.unconscious === true
+          || physical.incapacitated === true
+          || typeof degrees !== "number" || !Number.isFinite(degrees)
+          || degrees < 0 || degrees >= 360) {
+        pushOutcome(outcomes, actor, candidate, "body_orientation_blocked",
+          "body orientation requires a conscious positioned actor and a finite body angle in [0, 360)");
+        continue;
+      }
+      const before = object(snapshot.characters[actor]).body_facing_degrees ?? null;
+      next.characters[actor].body_facing_degrees = degrees;
+      pushTransition(transitions, actor, "body_facing_degrees", before, degrees,
+        "validated body orientation", { scene_id: sceneId });
+      pushOutcome(outcomes, actor, candidate, "body_orientation_completed",
+        "World committed body orientation without changing head orientation");
+      continue;
+    }
     if (kind === "head_orientation") {
       const command = object(candidate.motor_command);
       const degrees = command.facing_degrees;
@@ -1022,6 +1048,13 @@ export function buildWorldSimulationCausalRuleContract() {
       route_door_state_enforced: true,
       rectangular_obstacle_intersection_enforced: true,
       end_position_collision_enforced: true,
+    },
+    orientation: {
+      body_orientation_supported: true,
+      body_orientation_field: "body_facing_degrees",
+      head_orientation_field: "facing_degrees",
+      body_orientation_does_not_rewrite_head_orientation: true,
+      world_commit_required: true,
     },
     objects: {
       exclusive_holder_enforced: true,
