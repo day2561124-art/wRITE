@@ -29,6 +29,10 @@ import {
   readCommittedWorldSimulationBodyInteroceptiveSignals,
   worldSimulationBodyInteroceptiveSignalVersion,
 } from "./world-simulation-body-interoceptive-signal-service.mjs";
+import {
+  readCommittedWorldSimulationBodyHomeostaticCues,
+  worldSimulationBodyHomeostaticCueVersion,
+} from "./world-simulation-body-homeostatic-cue-service.mjs";
 import { worldSimulationBodySpeechEffectorFeedbackVersion } from "./world-simulation-body-speech-effector-feedback-service.mjs";
 import {
   readCommittedWorldSimulationBodyProprioceptiveFeedback,
@@ -317,6 +321,72 @@ function boundedCommittedSpeechFeedback(projection, character) {
   };
 }
 
+const HOMEOSTATIC_CHANNELS = ["hunger", "fullness", "fatigue"];
+const HOMEOSTATIC_FEEDBACK_KEYS = new Set([
+  "modality", "channel", "signal", "source_world_revision",
+]);
+function boundedCommittedHomeostaticCues(projection, character) {
+  const source = isObject(projection) ? projection : {};
+  const senses = source.cue_sense;
+  const feedback = source.cue_feedback;
+  const boundaries = source.boundaries;
+  const invalid = (code) => {
+    const error = new Error(code);
+    error.code = code;
+    throw error;
+  };
+  if (source.version !== worldSimulationBodyHomeostaticCueVersion
+      || source.authority !== "committed_world_body_state_and_history"
+      || source.character !== character
+      || !Number.isSafeInteger(source.source_world_revision)
+      || source.source_world_revision < 0
+      || !isObject(senses)
+      || Object.keys(senses).length !== HOMEOSTATIC_CHANNELS.length
+      || !Array.isArray(feedback) || feedback.length > HOMEOSTATIC_CHANNELS.length
+      || !isObject(boundaries)
+      || boundaries.explicit_world_owned_cue_required !== true
+      || boundaries.transition_requires_committed_history_and_current_state_match !== true
+      || boundaries.energy_state_does_not_imply_hunger_or_fatigue !== true
+      || boundaries.food_history_does_not_imply_hunger_or_fullness !== true
+      || boundaries.elapsed_time_does_not_imply_homeostatic_state !== true
+      || boundaries.raw_proxy_values_exposed !== false
+      || boundaries.cue_is_subjective_feeling !== false
+      || boundaries.cue_is_character_belief !== false) {
+    invalid("BODY1R_HOMEOSTATIC_EVIDENCE_INVALID");
+  }
+  for (const channel of HOMEOSTATIC_CHANNELS) {
+    const sense = senses[channel];
+    if (!isObject(sense) || Object.keys(sense).length !== 1
+        || !["cue_active", "cue_inactive", "unavailable"].includes(sense.status)) {
+      invalid("BODY1R_HOMEOSTATIC_SENSE_INVALID");
+    }
+  }
+  const seen = new Set();
+  for (const signal of feedback) {
+    if (!isObject(signal)
+        || Object.keys(signal).some((key) => !HOMEOSTATIC_FEEDBACK_KEYS.has(key))
+        || signal.modality !== "interoception"
+        || !HOMEOSTATIC_CHANNELS.includes(signal.channel)
+        || seen.has(signal.channel)
+        || signal.source_world_revision !== source.source_world_revision
+        || signal.signal !== (senses[signal.channel].status === "cue_active"
+          ? "homeostatic_cue_activated" : "homeostatic_cue_deactivated")
+        || senses[signal.channel].status === "unavailable") {
+      invalid("BODY1R_HOMEOSTATIC_FEEDBACK_INVALID");
+    }
+    seen.add(signal.channel);
+  }
+  return {
+    version: source.version,
+    character,
+    source_world_revision: source.source_world_revision,
+    cue_sense: Object.fromEntries(HOMEOSTATIC_CHANNELS.map((channel) =>
+      [channel, { status: senses[channel].status }])),
+    cue_feedback: feedback.map(({ modality, channel, signal, source_world_revision }) =>
+      ({ modality, channel, signal, source_world_revision })),
+  };
+}
+
 const INTEROCEPTIVE_SIGNAL_KEYS = new Set([
   "modality", "channel", "signal", "direction", "source_world_revision",
   "objective_energy_value_exposed", "change_magnitude_exposed",
@@ -463,6 +533,16 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_interoceptive_evidence_v1_installed = true;
     input.boundaries.body_interoceptive_objective_state_exposed = false;
     input.boundaries.body_interoceptive_evidence_is_character_belief = false;
+  }
+
+  if (options.body_homeostatic_cues !== undefined) {
+    input.body_homeostatic_evidence = boundedCommittedHomeostaticCues(
+      options.body_homeostatic_cues, input.character,
+    );
+    input.boundaries.body_homeostatic_evidence_v1_installed = true;
+    input.boundaries.body_homeostatic_proxy_values_exposed = false;
+    input.boundaries.body_homeostatic_evidence_is_subjective_feeling = false;
+    input.boundaries.body_homeostatic_evidence_is_character_belief = false;
   }
 
   if (options.body_proprioceptive_feedback !== undefined) {
@@ -647,6 +727,9 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const committed = await readCommittedWorldSimulationBodyInteroceptiveSignals({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
+  const homeostatic = await readCommittedWorldSimulationBodyHomeostaticCues({
+    session_id, character, expected_revision, expected_state_hash,
+  }, options);
   const proprioception = await readCommittedWorldSimulationBodyProprioceptiveFeedback({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
@@ -656,6 +739,7 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
     body_interoceptive_signals: committed,
+    body_homeostatic_cues: homeostatic,
     body_proprioceptive_feedback: proprioception,
     body_vestibular_feedback: vestibular,
   });
