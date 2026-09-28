@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-simulation-body-interoceptive-signal-service.mjs";
+
 import {
   buildWorldSimulationCharacterBrainInput,
   worldSimulationCharacterBrainInputVersion,
@@ -254,7 +256,15 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
         execution_feedback_projection: executionFeedback,
         world_history: worldHistory,
       });
+    const bodyInteroceptiveSignals =
+      await readCommittedWorldSimulationBodyInteroceptiveSignals({
+        session_id: sessionId,
+        character: packet.character,
+        expected_revision: prepared.state_revision,
+        expected_state_hash: prepared.world_state_hash,
+      }, formalLoopOptions(loopOptions));
     const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
+      body_interoceptive_signals: bodyInteroceptiveSignals,
       effective_action_commitment_character_exposure: commitmentExposure,
       action_commitment_subjective_execution_experience:
         subjectiveExecutionExperience,

@@ -25,6 +25,10 @@ import {
 import {
   assertWorldSimulationBodyToBrainSensoryEvidence,
 } from "./world-simulation-body-brain-contract-service.mjs";
+import {
+  readCommittedWorldSimulationBodyInteroceptiveSignals,
+  worldSimulationBodyInteroceptiveSignalVersion,
+} from "./world-simulation-body-interoceptive-signal-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -141,6 +145,65 @@ function characterBrainCognition(packet, recollectionV3, outputGatingV5) {
   return cognition;
 }
 
+const INTEROCEPTIVE_SIGNAL_KEYS = new Set([
+  "modality", "channel", "signal", "direction", "source_world_revision",
+  "objective_energy_value_exposed", "change_magnitude_exposed",
+  "subjective_fatigue_asserted", "subjective_hunger_asserted",
+  "subjective_feeling_asserted", "character_belief_asserted",
+]);
+
+function boundedCommittedInteroception(projection, character) {
+  const evidence = isObject(projection) ? projection : {};
+  const signals = evidence.signals;
+  if (evidence.version !== worldSimulationBodyInteroceptiveSignalVersion
+      || evidence.authority !== "committed_internal_body_state_change"
+      || evidence.character !== character
+      || !Number.isSafeInteger(evidence.source_world_revision)
+      || evidence.source_world_revision < 0
+      || evidence.channel_status !== "available"
+        && evidence.channel_status !== "unavailable"
+      || !Array.isArray(signals)
+      || signals.length > 32
+      || evidence.channel_status === "unavailable" && signals.length !== 0
+      || !isObject(evidence.boundaries)
+      || evidence.boundaries.objective_energy_value_exposed !== false
+      || evidence.boundaries.physiological_fatigue_inferred !== false
+      || evidence.boundaries.hunger_inferred !== false
+      || evidence.boundaries.subjective_feeling_inferred !== false
+      || evidence.boundaries.character_belief_inferred !== false) {
+    const error = new Error("BODY1I_INTEROCEPTIVE_EVIDENCE_INVALID");
+    error.code = "BODY1I_INTEROCEPTIVE_EVIDENCE_INVALID";
+    throw error;
+  }
+  for (const signal of signals) {
+    if (!isObject(signal)
+        || Object.keys(signal).some((key) => !INTEROCEPTIVE_SIGNAL_KEYS.has(key))
+        || signal.modality !== "interoception"
+        || signal.channel !== "internal_energy_state"
+        || signal.signal !== "internal_energy_change_detected"
+        || !["increase", "decrease"].includes(signal.direction)
+        || signal.source_world_revision !== evidence.source_world_revision
+        || signal.objective_energy_value_exposed !== false
+        || signal.change_magnitude_exposed !== false
+        || signal.subjective_fatigue_asserted !== false
+        || signal.subjective_hunger_asserted !== false
+        || signal.subjective_feeling_asserted !== false
+        || signal.character_belief_asserted !== false) {
+      const error = new Error("BODY1I_INTEROCEPTIVE_SIGNAL_INVALID");
+      error.code = "BODY1I_INTEROCEPTIVE_SIGNAL_INVALID";
+      throw error;
+    }
+  }
+  return {
+    version: evidence.version,
+    character,
+    source_world_revision: evidence.source_world_revision,
+    channel_status: evidence.channel_status,
+    signals: signals.map(({ modality, channel, signal, direction, source_world_revision }) =>
+      ({ modality, channel, signal, direction, source_world_revision })),
+  };
+}
+
 export function buildWorldSimulationCharacterBrainInput(
   decisionPacket = {},
   options = {},
@@ -218,6 +281,16 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_sensory_evidence_v1_installed = true;
     input.boundaries.body_sensory_evidence_objective_truth_exposed = false;
     input.boundaries.body_sensory_evidence_is_character_belief = false;
+  }
+
+  if (options.body_interoceptive_signals !== undefined) {
+    input.body_interoceptive_evidence = boundedCommittedInteroception(
+      options.body_interoceptive_signals,
+      input.character,
+    );
+    input.boundaries.body_interoceptive_evidence_v1_installed = true;
+    input.boundaries.body_interoceptive_objective_state_exposed = false;
+    input.boundaries.body_interoceptive_evidence_is_character_belief = false;
   }
 
   const commitmentExposure =
@@ -355,4 +428,24 @@ export function buildWorldSimulationCharacterBrainInput(
     delete input.cognition.coping_context.response_contract;
   }
   return input;
+}
+
+// Read the committed World snapshot before admitting any internal-body signal
+// into a Character Brain input. The pure builder keeps its existing callers.
+export async function buildCommittedWorldSimulationCharacterBrainInput({
+  session_id, decision_packet, expected_revision, expected_state_hash,
+} = {}, options = {}) {
+  const character = decision_packet?.character;
+  if (typeof character !== "string" || !character.trim()) {
+    const error = new Error("BODY1I_CHARACTER_REQUIRED");
+    error.code = "BODY1I_CHARACTER_REQUIRED";
+    throw error;
+  }
+  const committed = await readCommittedWorldSimulationBodyInteroceptiveSignals({
+    session_id, character, expected_revision, expected_state_hash,
+  }, options);
+  return buildWorldSimulationCharacterBrainInput(decision_packet, {
+    ...options,
+    body_interoceptive_signals: committed,
+  });
 }

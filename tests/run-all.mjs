@@ -744,6 +744,7 @@ const steps = [
   ["BODY-1F Programmatic Olfaction and Committed Reentry", ["tests/body-1-olfactory-reentry.test.mjs"]],
   ["BODY-1G Committed Gustatory Contact", ["tests/body-1-gustatory-contact.test.mjs"]],
   ["BODY-1H Basic Interoceptive Signal Foundation", ["tests/body-1-interoceptive-signal.test.mjs"]],
+  ["BODY-1I Committed Interoceptive Brain Ingress", ["tests/body-1-interoceptive-brain-ingress.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

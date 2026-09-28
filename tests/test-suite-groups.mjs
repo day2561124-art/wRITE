@@ -465,6 +465,10 @@ export const body1InteroceptiveSignalSteps = Object.freeze([
     "BODY-1H Basic Interoceptive Signal Foundation",
     Object.freeze(["tests/body-1-interoceptive-signal.test.mjs"]),
   ]),
+  Object.freeze([
+    "BODY-1I Committed Interoceptive Brain Ingress",
+    Object.freeze(["tests/body-1-interoceptive-brain-ingress.test.mjs"]),
+  ]),
 ]);
 
 export const characterMemoryCoreCertificationSteps = Object.freeze([
