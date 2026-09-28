@@ -29,6 +29,7 @@ import {
   readCommittedWorldSimulationBodyInteroceptiveSignals,
   worldSimulationBodyInteroceptiveSignalVersion,
 } from "./world-simulation-body-interoceptive-signal-service.mjs";
+import { worldSimulationBodySpeechEffectorFeedbackVersion } from "./world-simulation-body-speech-effector-feedback-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -143,6 +144,56 @@ function characterBrainCognition(packet, recollectionV3, outputGatingV5) {
     );
   }
   return cognition;
+}
+
+const SPEECH_FEEDBACK_KEYS = new Set([
+  "action_id", "status", "temporal_stream_registered",
+  "physical_sound_registered", "source_world_revision",
+]);
+function boundedCommittedSpeechFeedback(projection, character) {
+  const source = isObject(projection) ? projection : {};
+  const boundaries = isObject(source.boundaries) ? source.boundaries : {};
+  if (source.version !== worldSimulationBodySpeechEffectorFeedbackVersion
+      || source.authority !== "committed_world_speech_outcome"
+      || source.character !== character
+      || !Number.isSafeInteger(source.source_world_revision)
+      || source.source_world_revision < 0
+      || !Array.isArray(source.feedback) || source.feedback.length > 16
+      || boundaries.selection_is_not_emission !== true
+      || boundaries.emission_is_not_acoustic_registration !== true
+      || boundaries.acoustic_registration_is_not_listener_audibility !== true
+      || boundaries.surface_text_exposed !== false
+      || boundaries.semantic_content_exposed !== false
+      || boundaries.respiratory_capacity_inferred !== false
+      || boundaries.subjective_belief_asserted !== false) {
+    const error = new Error("BODY1J_SPEECH_FEEDBACK_INVALID");
+    error.code = "BODY1J_SPEECH_FEEDBACK_INVALID";
+    throw error;
+  }
+  for (const item of source.feedback) {
+    if (!isObject(item)
+        || Object.keys(item).some((key) => !SPEECH_FEEDBACK_KEYS.has(key))
+        || typeof item.action_id !== "string" || !item.action_id.trim()
+        || !["speech_emitted", "speech_not_emitted", "emission_unconfirmed"].includes(item.status)
+        || typeof item.temporal_stream_registered !== "boolean"
+        || typeof item.physical_sound_registered !== "boolean"
+        || item.source_world_revision !== source.source_world_revision
+        || item.status !== "speech_emitted"
+          && (item.temporal_stream_registered || item.physical_sound_registered)) {
+      const error = new Error("BODY1J_SPEECH_FEEDBACK_ITEM_INVALID");
+      error.code = "BODY1J_SPEECH_FEEDBACK_ITEM_INVALID";
+      throw error;
+    }
+  }
+  return {
+    version: source.version, character,
+    source_world_revision: source.source_world_revision,
+    feedback: source.feedback.map((item) => ({
+      action_id: item.action_id,
+      status: item.status,
+      source_world_revision: item.source_world_revision,
+    })),
+  };
 }
 
 const INTEROCEPTIVE_SIGNAL_KEYS = new Set([
@@ -291,6 +342,17 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_interoceptive_evidence_v1_installed = true;
     input.boundaries.body_interoceptive_objective_state_exposed = false;
     input.boundaries.body_interoceptive_evidence_is_character_belief = false;
+  }
+
+  if (options.body_speech_effector_feedback !== undefined) {
+    input.body_speech_effector_feedback = boundedCommittedSpeechFeedback(
+      options.body_speech_effector_feedback, input.character,
+    );
+    input.boundaries.body_speech_effector_feedback_v1_installed = true;
+    input.boundaries.body_speech_feedback_is_character_belief = false;
+    input.boundaries.body_speech_feedback_is_listener_hearing = false;
+    input.boundaries.body_speech_feedback_acoustic_registration_exposed = false;
+    input.boundaries.body_speech_feedback_technical_stream_exposed = false;
   }
 
   const commitmentExposure =
