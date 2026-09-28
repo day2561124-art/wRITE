@@ -82,6 +82,7 @@ const activeRunAllPaths = [
   ...runAllSource.matchAll(/"tests\/body-1-interoceptive-signal\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-1-interoceptive-brain-ingress\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-1-speech-effector-feedback\.test\.mjs"/g),
+  ...runAllSource.matchAll(/"tests\/body-1-eye-orientation\.test\.mjs"/g),
   ...runAllSource.matchAll(
     /"tests\/(cb-c2|cb-c5|phase62|phase63|phase64|phase65|phase66|phase67|phase68|phase69|phase70|phase71|phase72|phase73|phase74|phase75|phase76|phase77|phase78|phase79|phase80|phase81|phase82|phase83|phase84|phase85|phase86|phase87|phase88|phase89|phase90|phase91|phase92|phase93|phase94|phase95|phase96)\/[^"]+\.test\.mjs"/g,
   ),
@@ -215,7 +216,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/(?:body-0-authority\.test\.mjs$|body-0-history\.test\.mjs$|body-0-brain-body-contract\.test\.mjs$|body-0-recovery-authority\.test\.mjs$|body-1-sensorimotor-reentry\.test\.mjs$|body-1-head-orientation\.test\.mjs$|body-1-tactile-contact\.test\.mjs$|body-1-proprioceptive-feedback\.test\.mjs$|body-1-auditory-reentry\.test\.mjs$|body-1-olfactory-reentry\.test\.mjs$|body-1-gustatory-contact\.test\.mjs$|body-1-interoceptive-signal\.test\.mjs$|body-1-interoceptive-brain-ingress\.test\.mjs$|body-1-speech-effector-feedback\.test\.mjs$|(?:cb-c2|cb-c5|phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\/)/,
+    /^tests\/(?:body-0-authority\.test\.mjs$|body-0-history\.test\.mjs$|body-0-brain-body-contract\.test\.mjs$|body-0-recovery-authority\.test\.mjs$|body-1-sensorimotor-reentry\.test\.mjs$|body-1-head-orientation\.test\.mjs$|body-1-tactile-contact\.test\.mjs$|body-1-proprioceptive-feedback\.test\.mjs$|body-1-auditory-reentry\.test\.mjs$|body-1-olfactory-reentry\.test\.mjs$|body-1-gustatory-contact\.test\.mjs$|body-1-interoceptive-signal\.test\.mjs$|body-1-interoceptive-brain-ingress\.test\.mjs$|body-1-speech-effector-feedback\.test\.mjs$|body-1-eye-orientation\.test\.mjs$|(?:cb-c2|cb-c5|phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\/)/,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

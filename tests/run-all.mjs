@@ -746,6 +746,7 @@ const steps = [
   ["BODY-1H Basic Interoceptive Signal Foundation", ["tests/body-1-interoceptive-signal.test.mjs"]],
   ["BODY-1I Committed Interoceptive Brain Ingress", ["tests/body-1-interoceptive-brain-ingress.test.mjs"]],
   ["BODY-1J Committed Speech Effector Feedback", ["tests/body-1-speech-effector-feedback.test.mjs"]],
+  ["BODY-1K Configured Ocular Orientation and Visual Reentry", ["tests/body-1-eye-orientation.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

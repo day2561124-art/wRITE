@@ -326,6 +326,8 @@ function actionKind(candidate) {
   if (isObject(candidate.movement)) return "movement";
   if (isObject(candidate.motor_command)
       && candidate.motor_command.type === "orient_head") return "head_orientation";
+  if (isObject(candidate.motor_command)
+      && candidate.motor_command.type === "orient_eyes") return "eye_orientation";
   if (isObject(candidate.defense)) return "defense";
   return "passive";
 }
@@ -877,6 +879,37 @@ function resolveSpatialRulePreview(input = {}) {
         "validated head orientation", { scene_id: sceneId });
       pushOutcome(outcomes, actor, candidate, "head_orientation_completed",
         "World committed the actor facing direction; later sensory sampling remains separate");
+      continue;
+    }
+    if (kind === "eye_orientation") {
+      const command = object(candidate.motor_command);
+      const yaw = command.eye_yaw_degrees;
+      const physical = object(object(object(snapshot.characters)[actor]).physical_state);
+      const limit = physical.eye_yaw_limit_degrees;
+      const durationMs = parseDurationMs(candidate, 100);
+      elapsedMs = Math.max(elapsedMs, durationMs);
+      if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !positionFor(snapshotScene, actor)
+          || physical.unconscious === true
+          || physical.incapacitated === true
+          || typeof object(snapshot.characters[actor]).facing_degrees !== "number"
+          || !Number.isFinite(object(snapshot.characters[actor]).facing_degrees)
+          || object(snapshot.characters[actor]).facing_degrees < 0
+          || object(snapshot.characters[actor]).facing_degrees >= 360
+          || typeof limit !== "number" || !Number.isFinite(limit)
+          || limit < 0 || limit >= 180
+          || typeof yaw !== "number" || !Number.isFinite(yaw)
+          || Math.abs(yaw) > limit) {
+        pushOutcome(outcomes, actor, candidate, "eye_orientation_blocked",
+          "eye orientation requires a conscious positioned actor and an explicit body eye yaw range");
+        continue;
+      }
+      const before = object(snapshot.characters[actor]).eye_yaw_degrees ?? null;
+      next.characters[actor].eye_yaw_degrees = yaw;
+      pushTransition(transitions, actor, "eye_yaw_degrees", before, yaw,
+        "validated eye orientation relative to head", { scene_id: sceneId });
+      pushOutcome(outcomes, actor, candidate, "eye_orientation_completed",
+        "World committed eye yaw; later visual sampling remains separate");
       continue;
     }
     if (kind === "movement") {

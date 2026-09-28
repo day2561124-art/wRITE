@@ -254,19 +254,33 @@ function facingDegrees(worldState, scene, observer) {
       ?? profile.heading_degrees
       ?? state.heading_degrees,
   );
-  if (degrees !== null) return { degrees, source: "degrees" };
-  const vector = point(profile.facing_vector ?? object(scene.entity_facing_vectors)[observer] ?? state.facing_vector);
-  if (!vector) return null;
-  const magnitude = Math.hypot(vector.x, vector.y);
-  if (magnitude <= 1e-12) {
-    const error = new Error("Configured observer facing vector must be non-zero.");
-    error.code = "WORLD_SIMULATION_VISIBILITY_FACING_INVALID";
+  let head = degrees === null ? null : { degrees, source: "degrees" };
+  if (!head) {
+    const vector = point(profile.facing_vector ?? object(scene.entity_facing_vectors)[observer] ?? state.facing_vector);
+    if (vector) {
+      const magnitude = Math.hypot(vector.x, vector.y);
+      if (magnitude <= 1e-12) {
+        const error = new Error("Configured observer facing vector must be non-zero.");
+        error.code = "WORLD_SIMULATION_VISIBILITY_FACING_INVALID";
+        throw error;
+      }
+      head = {
+        degrees: normalizeDegrees(Math.atan2(vector.y, vector.x) * 180 / Math.PI),
+        source: "vector",
+      };
+    }
+  }
+  if (!Object.hasOwn(state, "eye_yaw_degrees")) return head;
+  const yaw = state.eye_yaw_degrees;
+  const limit = object(state.physical_state).eye_yaw_limit_degrees;
+  if (!head || typeof yaw !== "number" || !Number.isFinite(yaw)
+      || typeof limit !== "number" || !Number.isFinite(limit)
+      || limit < 0 || limit >= 180 || Math.abs(yaw) > limit) {
+    const error = new Error("Committed eye yaw requires valid head orientation and configured body range.");
+    error.code = "WORLD_SIMULATION_VISIBILITY_EYE_YAW_INVALID";
     throw error;
   }
-  return {
-    degrees: normalizeDegrees(Math.atan2(vector.y, vector.x) * 180 / Math.PI),
-    source: "vector",
-  };
+  return { degrees: normalizeDegrees(head.degrees + yaw), source: "eye_head" };
 }
 
 function observerFovDegrees(worldState, scene, observer) {
