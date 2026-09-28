@@ -30,6 +30,10 @@ import {
   worldSimulationBodyInteroceptiveSignalVersion,
 } from "./world-simulation-body-interoceptive-signal-service.mjs";
 import { worldSimulationBodySpeechEffectorFeedbackVersion } from "./world-simulation-body-speech-effector-feedback-service.mjs";
+import {
+  readCommittedWorldSimulationBodyProprioceptiveFeedback,
+  worldSimulationBodyProprioceptiveFeedbackVersion,
+} from "./world-simulation-body-proprioceptive-feedback-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -144,6 +148,66 @@ function characterBrainCognition(packet, recollectionV3, outputGatingV5) {
     );
   }
   return cognition;
+}
+
+const PROPRIOCEPTIVE_FEEDBACK_KEYS = new Set([
+  "modality", "signal", "source_world_revision",
+  "exact_world_position_exposed", "exact_displacement_exposed",
+  "world_axis_direction_exposed", "subjective_movement_belief_asserted",
+]);
+function boundedCommittedProprioception(projection, character) {
+  const source = isObject(projection) ? projection : {};
+  const position = isObject(source.position_sense) ? source.position_sense : {};
+  const boundaries = isObject(source.boundaries) ? source.boundaries : {};
+  if (source.version !== worldSimulationBodyProprioceptiveFeedbackVersion
+      || source.authority !== "committed_world_body_state_and_history"
+      || source.character !== character
+      || !Number.isSafeInteger(source.source_world_revision)
+      || source.source_world_revision < 0
+      || !Array.isArray(source.movement_feedback)
+      || source.movement_feedback.length > 32
+      || Object.keys(position).some((key) =>
+        !["status", "exact_world_position_exposed"].includes(key))
+      || !["whole_body_position_signal_available", "unavailable"].includes(position.status)
+      || position.exact_world_position_exposed !== false
+      || position.status === "unavailable" && source.movement_feedback.length !== 0
+      || boundaries.motor_intention_is_not_movement_feedback !== true
+      || boundaries.action_outcome_alone_is_not_movement_feedback !== true
+      || boundaries.movement_feedback_requires_committed_position_transition !== true
+      || boundaries.movement_feedback_requires_current_state_match !== true
+      || boundaries.objective_world_coordinates_exposed !== false
+      || boundaries.world_axis_direction_exposed !== false
+      || boundaries.subjective_body_belief_asserted !== false) {
+    const error = new Error("BODY1L_PROPRIOCEPTIVE_EVIDENCE_INVALID");
+    error.code = "BODY1L_PROPRIOCEPTIVE_EVIDENCE_INVALID";
+    throw error;
+  }
+  for (const signal of source.movement_feedback) {
+    if (!isObject(signal)
+        || Object.keys(signal).some((key) => !PROPRIOCEPTIVE_FEEDBACK_KEYS.has(key))
+        || signal.modality !== "proprioception"
+        || signal.signal !== "whole_body_translation_detected"
+        || signal.source_world_revision !== source.source_world_revision
+        || signal.exact_world_position_exposed !== false
+        || signal.exact_displacement_exposed !== false
+        || signal.world_axis_direction_exposed !== false
+        || signal.subjective_movement_belief_asserted !== false) {
+      const error = new Error("BODY1L_PROPRIOCEPTIVE_SIGNAL_INVALID");
+      error.code = "BODY1L_PROPRIOCEPTIVE_SIGNAL_INVALID";
+      throw error;
+    }
+  }
+  return {
+    version: source.version,
+    character,
+    source_world_revision: source.source_world_revision,
+    position_sense: { status: position.status },
+    movement_feedback: source.movement_feedback.map((signal) => ({
+      modality: signal.modality,
+      signal: signal.signal,
+      source_world_revision: signal.source_world_revision,
+    })),
+  };
 }
 
 const SPEECH_FEEDBACK_KEYS = new Set([
@@ -344,6 +408,16 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_interoceptive_evidence_is_character_belief = false;
   }
 
+  if (options.body_proprioceptive_feedback !== undefined) {
+    input.body_proprioceptive_evidence = boundedCommittedProprioception(
+      options.body_proprioceptive_feedback, input.character,
+    );
+    input.boundaries.body_proprioceptive_evidence_v1_installed = true;
+    input.boundaries.body_proprioceptive_world_coordinates_exposed = false;
+    input.boundaries.body_proprioceptive_exact_displacement_exposed = false;
+    input.boundaries.body_proprioceptive_evidence_is_character_belief = false;
+  }
+
   if (options.body_speech_effector_feedback !== undefined) {
     input.body_speech_effector_feedback = boundedCommittedSpeechFeedback(
       options.body_speech_effector_feedback, input.character,
@@ -506,8 +580,12 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const committed = await readCommittedWorldSimulationBodyInteroceptiveSignals({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
+  const proprioception = await readCommittedWorldSimulationBodyProprioceptiveFeedback({
+    session_id, character, expected_revision, expected_state_hash,
+  }, options);
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
     body_interoceptive_signals: committed,
+    body_proprioceptive_feedback: proprioception,
   });
 }

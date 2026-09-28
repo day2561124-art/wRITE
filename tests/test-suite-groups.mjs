@@ -485,6 +485,13 @@ export const body1EyeOrientationSteps = Object.freeze([
   ]),
 ]);
 
+export const body1ProprioceptiveBrainIngressSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1L Committed Proprioceptive Brain Ingress",
+    Object.freeze(["tests/body-1-proprioceptive-brain-ingress.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -508,6 +515,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1InteroceptiveSignalSteps,
   ...body1SpeechEffectorFeedbackSteps,
   ...body1EyeOrientationSteps,
+  ...body1ProprioceptiveBrainIngressSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
