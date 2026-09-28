@@ -749,6 +749,7 @@ const steps = [
   ["BODY-1K Configured Ocular Orientation and Visual Reentry", ["tests/body-1-eye-orientation.test.mjs"]],
   ["BODY-1L Committed Proprioceptive Brain Ingress", ["tests/body-1-proprioceptive-brain-ingress.test.mjs"]],
   ["BODY-1M Committed Vestibular Head Rotation", ["tests/body-1-vestibular-head-rotation.test.mjs"]],
+  ["BODY-1N Committed Vestibular Brain Ingress", ["tests/body-1-vestibular-brain-ingress.test.mjs"]],
   ["Phase 62A-R1 capability envelope", ["tests/phase62/phase62a-r1-capability-envelope.test.mjs"]],
   ["Phase 62A-R1 character-facing runtime", ["tests/phase62/phase62a-r1-character-facing-runtime.test.mjs"]],
   ["Phase 62A-R1 engine-integrity runtime", ["tests/phase62/phase62a-r1-engine-integrity-runtime.test.mjs"]],

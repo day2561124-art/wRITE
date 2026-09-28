@@ -34,6 +34,10 @@ import {
   readCommittedWorldSimulationBodyProprioceptiveFeedback,
   worldSimulationBodyProprioceptiveFeedbackVersion,
 } from "./world-simulation-body-proprioceptive-feedback-service.mjs";
+import {
+  readCommittedWorldSimulationBodyVestibularFeedback,
+  worldSimulationBodyVestibularFeedbackVersion,
+} from "./world-simulation-body-vestibular-feedback-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -203,6 +207,59 @@ function boundedCommittedProprioception(projection, character) {
     source_world_revision: source.source_world_revision,
     position_sense: { status: position.status },
     movement_feedback: source.movement_feedback.map((signal) => ({
+      modality: signal.modality,
+      signal: signal.signal,
+      source_world_revision: signal.source_world_revision,
+    })),
+  };
+}
+
+const VESTIBULAR_FEEDBACK_KEYS = new Set([
+  "modality", "signal", "source_world_revision",
+]);
+function boundedCommittedVestibularFeedback(projection, character) {
+  const source = isObject(projection) ? projection : {};
+  const orientation = isObject(source.head_orientation_sense)
+    ? source.head_orientation_sense : {};
+  const boundaries = isObject(source.boundaries) ? source.boundaries : {};
+  const invalid = (code) => {
+    const error = new Error(code);
+    error.code = code;
+    throw error;
+  };
+  if (source.version !== worldSimulationBodyVestibularFeedbackVersion
+      || source.authority !== "committed_world_body_state_and_history"
+      || source.character !== character
+      || !Number.isSafeInteger(source.source_world_revision)
+      || source.source_world_revision < 0
+      || !Array.isArray(source.head_rotation_feedback)
+      || source.head_rotation_feedback.length > 1
+      || Object.keys(orientation).some((key) => key !== "status")
+      || !["head_orientation_signal_available", "unavailable"].includes(orientation.status)
+      || orientation.status === "unavailable" && source.head_rotation_feedback.length !== 0
+      || boundaries.motor_intention_is_not_rotation_feedback !== true
+      || boundaries.action_outcome_alone_is_not_rotation_feedback !== true
+      || boundaries.rotation_requires_committed_facing_transition_and_current_state_match !== true
+      || boundaries.exact_world_angle_exposed !== false
+      || boundaries.angular_velocity_or_acceleration_inferred !== false
+      || boundaries.subjective_orientation_belief_asserted !== false) {
+    invalid("BODY1N_VESTIBULAR_EVIDENCE_INVALID");
+  }
+  for (const signal of source.head_rotation_feedback) {
+    if (!isObject(signal)
+        || Object.keys(signal).some((key) => !VESTIBULAR_FEEDBACK_KEYS.has(key))
+        || signal.modality !== "vestibular"
+        || signal.signal !== "head_rotation_detected"
+        || signal.source_world_revision !== source.source_world_revision) {
+      invalid("BODY1N_VESTIBULAR_SIGNAL_INVALID");
+    }
+  }
+  return {
+    version: source.version,
+    character,
+    source_world_revision: source.source_world_revision,
+    head_orientation_sense: { status: orientation.status },
+    head_rotation_feedback: source.head_rotation_feedback.map((signal) => ({
       modality: signal.modality,
       signal: signal.signal,
       source_world_revision: signal.source_world_revision,
@@ -418,6 +475,16 @@ export function buildWorldSimulationCharacterBrainInput(
     input.boundaries.body_proprioceptive_evidence_is_character_belief = false;
   }
 
+  if (options.body_vestibular_feedback !== undefined) {
+    input.body_vestibular_evidence = boundedCommittedVestibularFeedback(
+      options.body_vestibular_feedback, input.character,
+    );
+    input.boundaries.body_vestibular_evidence_v1_installed = true;
+    input.boundaries.body_vestibular_exact_world_angle_exposed = false;
+    input.boundaries.body_vestibular_angular_dynamics_inferred = false;
+    input.boundaries.body_vestibular_evidence_is_character_belief = false;
+  }
+
   if (options.body_speech_effector_feedback !== undefined) {
     input.body_speech_effector_feedback = boundedCommittedSpeechFeedback(
       options.body_speech_effector_feedback, input.character,
@@ -583,9 +650,13 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const proprioception = await readCommittedWorldSimulationBodyProprioceptiveFeedback({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
+  const vestibular = await readCommittedWorldSimulationBodyVestibularFeedback({
+    session_id, character, expected_revision, expected_state_hash,
+  }, options);
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
     body_interoceptive_signals: committed,
     body_proprioceptive_feedback: proprioception,
+    body_vestibular_feedback: vestibular,
   });
 }
