@@ -492,6 +492,13 @@ export const body1ProprioceptiveBrainIngressSteps = Object.freeze([
   ]),
 ]);
 
+export const body1VestibularHeadRotationSteps = Object.freeze([
+  Object.freeze([
+    "BODY-1M Committed Vestibular Head Rotation",
+    Object.freeze(["tests/body-1-vestibular-head-rotation.test.mjs"]),
+  ]),
+]);
+
 export const characterMemoryCoreCertificationSteps = Object.freeze([
   Object.freeze(["Character Memory Core Certification Final Audit", Object.freeze(["tests/certification/character-memory-core-certification.test.mjs"])]),
 ]);
@@ -516,6 +523,7 @@ export const worldSimulationSteps = Object.freeze([
   ...body1SpeechEffectorFeedbackSteps,
   ...body1EyeOrientationSteps,
   ...body1ProprioceptiveBrainIngressSteps,
+  ...body1VestibularHeadRotationSteps,
   ...cbC2AutonomousCognitionSteps,
   ...cbC5SubjectiveAffordanceEvidenceSteps,
   ...phase62WorldSimulationSteps,
