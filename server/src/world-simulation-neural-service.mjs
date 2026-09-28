@@ -385,6 +385,8 @@ function buildWorldPerceptionPacket(input = {}) {
     && programmaticVisibility.illumination_visibility_enforced === true;
   const programmaticAudibility = object(input.programmatic_audibility);
   const audibilityEnforced = programmaticAudibility.enforced === true;
+  const programmaticOlfaction = object(input.programmatic_olfaction);
+  const olfactionEnforced = programmaticOlfaction.enforced === true;
 
   const observed = [
     ...array(observations.visual),
@@ -405,7 +407,9 @@ function buildWorldPerceptionPacket(input = {}) {
   const otherSenses = [
     ...array(observations.other_senses),
     ...array(sensory.other_senses),
-    ...array(scoped.other_senses),
+    ...array(programmaticOlfaction.olfactory_observations),
+    ...array(scoped.other_senses).filter((entry) =>
+      !olfactionEnforced || object(entry).sense !== "olfactory"),
   ].map(cloneJson);
 
   return {
@@ -429,6 +433,11 @@ function buildWorldPerceptionPacket(input = {}) {
       directional_height_visibility_enforced: directionalHeightVisibilityEnforced,
       illumination_visibility_enforced: illuminationVisibilityEnforced,
       programmatic_audibility_enforced: audibilityEnforced,
+      programmatic_olfaction_enforced: olfactionEnforced,
+      raw_scoped_olfactory_sources_bypassed_when_olfaction_enforced: olfactionEnforced,
+      olfactory_rule: olfactionEnforced
+        ? "Olfactory observations use the current observer's bounded programmatic query; raw scoped olfactory entries are bypassed."
+        : "Olfactory entries remain observer-scoped inputs.",
       raw_scene_visual_sources_bypassed_when_visibility_enforced: visibilityEnforced,
       raw_scene_audio_sources_bypassed_when_audibility_enforced: audibilityEnforced,
       rule: visibilityEnforced && audibilityEnforced

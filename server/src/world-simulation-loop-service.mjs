@@ -324,6 +324,9 @@ import {
   worldSimulationAudibilityQueryVersion,
 } from "./world-simulation-audibility-query-service.mjs";
 import {
+  queryWorldSimulationObserverOlfaction,
+} from "./world-simulation-olfaction-query-service.mjs";
+import {
   buildWorldSimulationChronologicalMutationQueue,
   executeWorldSimulationChronologicalMutationQueue,
 } from "./world-simulation-chronological-mutation-queue-service.mjs";
@@ -4934,6 +4937,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const directionalHeightVisibilityQueries = [];
   const illuminationVisibilityQueries = [];
   const audibilityQueries = [];
+  const olfactionQueries = [];
   const communicationListenerUnderstandingProjections = [];
   const communicationSpeakerRecognitionProjections = [];
   const communicationGroundingEvidenceProjections = [];
@@ -5089,6 +5093,18 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       result: cloneJson(audibilityQuery.result),
       audit: cloneJson(audibilityQuery.audit),
     });
+    const olfactionQuery = queryWorldSimulationObserverOlfaction({
+      world_state: worldState,
+      scene_state: sceneState,
+      scene_id: sceneState.scene_id ?? event.scene_id ?? event.location_id ?? null,
+      observer: character,
+    });
+    olfactionQueries.push({
+      observer: character,
+      version: olfactionQuery.olfaction_query_version,
+      result: cloneJson(olfactionQuery.result),
+      audit: cloneJson(olfactionQuery.audit),
+    });
     const perception = await capability(
       sessionId,
       "world_perception_filter",
@@ -5112,6 +5128,14 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           version: audibilityQuery.audibility_query_version,
           auditory_observations: cloneJson(
             audibilityQuery.result.perception_auditory_observations,
+          ),
+        },
+        programmatic_olfaction: {
+          enforced: true,
+          version: olfactionQuery.olfaction_query_version,
+          receptor_available: olfactionQuery.result.olfaction_enforced === true,
+          olfactory_observations: cloneJson(
+            olfactionQuery.result.perception_olfactory_observations,
           ),
         },
       },
@@ -7542,6 +7566,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         directional_height_visibility_enforced: true,
         illumination_visibility_enforced: illuminationVisibilityQuery.result.lighting_enforced === true,
         programmatic_audibility_enforced: audibilityQuery.result.audibility_enforced === true,
+        programmatic_olfaction_enforced: true,
         phase73a_visible_constraint_observation_installed: true,
         phase73a_visible_constraint_observation_projection_version:
           visibleConstraintObservationCharacterProjectionVersion,
@@ -7973,6 +7998,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     directional_height_visibility_queries: directionalHeightVisibilityQueries,
     illumination_visibility_queries: illuminationVisibilityQueries,
     audibility_queries: audibilityQueries,
+    olfaction_queries: olfactionQueries,
     communication_listener_understanding_projections:
       cloneJson(communicationListenerUnderstandingProjections),
     communication_speaker_recognition_projections:
@@ -13530,6 +13556,7 @@ export async function resolveWorldSimulationTurn(
       ),
       illumination_visibility_queries: cloneJson(preparedTurn.illumination_visibility_queries ?? []),
       audibility_queries: cloneJson(preparedTurn.audibility_queries ?? []),
+      olfaction_queries: cloneJson(preparedTurn.olfaction_queries ?? []),
       communication_listener_understanding_projections: cloneJson(
         preparedTurn.communication_listener_understanding_projections ?? [],
       ),
