@@ -13,6 +13,7 @@ import {
 import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
+import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
 import {
   runWorldSimulationObserverTickBrainIngress,
   buildWorldSimulationObserverTickBrainIngressContract,
@@ -15771,6 +15772,25 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
   const counterfactualLinkedExperienceReuseProjections = [];
   const counterfactualPreparativeRevalidationProjections = [];
   for (const packet of prepared.decision_packets) {
+    // CC-8D: native action choice receives only an observer-specific physical
+    // cue from the immediately prior committed same-scene World turn. The
+    // reader rechecks the exact revision/hash; its actor/action audit stays
+    // engine-side, and the shared Brain projector enforces the cue allowlist.
+    const priorTurn = worldHistory?.turns?.at(-1);
+    const sceneId = prepared.event?.scene_id ?? prepared.event?.location_id;
+    const priorSceneId = priorTurn?.event?.scene_id
+      ?? priorTurn?.event?.location_id;
+    const observerCommittedGaze = sceneId && priorSceneId === sceneId
+      && priorTurn?.revision_to === prepared.state_revision
+      && priorTurn?.next_state_hash === prepared.world_state_hash
+      ? await readCommittedWorldSimulationObserverGaze({
+          session_id: prepared.world_simulation_session_id,
+          observer: packet.character,
+          scene_id: sceneId,
+          expected_revision: prepared.state_revision,
+          expected_state_hash: prepared.world_state_hash,
+        }, options)
+      : undefined;
     // Single-source Character Brain ingress projector. Runtime identity and
     // world-lineage metadata remain engine-side and are never added here.
     // Formal transport uses the same projector without the historical
@@ -15778,6 +15798,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     const brainInput = buildWorldSimulationCharacterBrainInput(
       packet,
       {
+        observer_committed_gaze: observerCommittedGaze,
         include_legacy_retrieved_memories_alias: true,
         include_native_coping_response_contract: true,
       },

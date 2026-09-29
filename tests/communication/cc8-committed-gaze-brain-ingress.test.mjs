@@ -10,6 +10,7 @@ import { readCommittedWorldSimulationObserverGaze } from "../../server/src/world
 import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
 import { prepareFormalWorldSimulationTurn } from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
+import { createWorldSimulationCharacterRuntimeManager, runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
 
 const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `cc8c-${process.pid}-${Date.now()}`);
@@ -42,7 +43,7 @@ const initial = {
     A: { facing_degrees: 0, physical_state: {}, current_goal: "觀察 B" },
     B: { facing_degrees: 270, physical_state: {}, current_goal: "等候" },
   },
-  objects: {},
+  objects: {}, memories: { A: [], B: [] }, available_actions: { A: [], B: [] },
 };
 try {
   const session = await beginWorldSimulationSession({
@@ -101,7 +102,36 @@ try {
   assert.equal(formalText.includes(action.action_id), false);
   assert.equal(formalText.includes("不希望 B 離開"), false);
   assert.equal(formalText.includes('"source_actor"'), false);
-  console.log("CC-8C committed gaze formal Brain ingress tests passed.");
+
+  // The separate native World turn route must admit the same committed cue.
+  // A reject-all decision suffices: this checks the actual Brain callback
+  // before any new World outcome can feed back into its own input.
+  const nativeInputs = [];
+  const nativeResult = await runWorldSimulationTurn({
+    world_simulation_session_id: id, event_id: "observe",
+  }, {
+    ...options,
+    characterRuntimeManager: createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (character) => ({
+        entity_id: "character_" + character.toLowerCase(),
+        canonical_name: character, formal: true,
+        identity_source: "cc8d_native_test",
+      }),
+    }),
+    characterBrain: async (packet) => {
+      nativeInputs.push(packet);
+      return "reject_all";
+    },
+  });
+  assert.equal(nativeResult.committed, true);
+  assert.equal(nativeInputs.length, 1);
+  assert.equal(nativeInputs[0].character, "B");
+  assert.deepEqual(nativeInputs[0].observed_gaze_cues, built.observed_gaze_cues);
+  const nativeText = JSON.stringify(nativeInputs[0]);
+  assert.equal(nativeText.includes(action.action_id), false);
+  assert.equal(nativeText.includes("不希望 B 離開"), false);
+  assert.equal(nativeText.includes('"source_action_id"'), false);
+  console.log("CC-8C/D committed gaze formal and native Brain ingress tests passed.");
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
