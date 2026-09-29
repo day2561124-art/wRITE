@@ -46,6 +46,8 @@ import {
   readCommittedWorldSimulationBodyVestibularFeedback,
   worldSimulationBodyVestibularFeedbackVersion,
 } from "./world-simulation-body-vestibular-feedback-service.mjs";
+import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
+import { getWorldSimulationHistory, getWorldSimulationState } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
   "character-runtime-v5-working-memory-output-gating-v1";
@@ -901,8 +903,34 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const vestibular = await readCommittedWorldSimulationBodyVestibularFeedback({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
+  const hasEmbeddedGaze = [decision_packet?.cognition?.perception,
+    decision_packet?.perception].some((view) => isObject(view)
+      && Object.hasOwn(view, "observed_gaze_cues"));
+  let observerCommittedGaze;
+  if (hasEmbeddedGaze) {
+    const snapshot = await getWorldSimulationState(session_id, options);
+    const history = await getWorldSimulationHistory(session_id, options);
+    const currentEvent = snapshot.state?.event_queue?.[0];
+    const lastTurn = history.turns?.at(-1);
+    const sceneId = currentEvent?.scene_id ?? currentEvent?.location_id;
+    const lastSceneId = lastTurn?.event?.scene_id ?? lastTurn?.event?.location_id;
+    if (typeof sceneId !== "string" || !sceneId.trim()
+        || sceneId !== lastSceneId
+        || lastTurn?.revision_to !== snapshot.revision
+        || lastTurn?.next_state_hash !== snapshot.state_hash) {
+      const error = new Error("CC8F_COMMITTED_GAZE_HELPER_SOURCE_INVALID");
+      error.code = "CC8F_COMMITTED_GAZE_HELPER_SOURCE_INVALID";
+      throw error;
+    }
+    observerCommittedGaze = await readCommittedWorldSimulationObserverGaze({
+      session_id, observer: character, scene_id: sceneId,
+      expected_revision: expected_revision ?? snapshot.revision,
+      expected_state_hash: expected_state_hash ?? snapshot.state_hash,
+    }, options);
+  }
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
+    observer_committed_gaze: observerCommittedGaze,
     body_interoceptive_signals: committed,
     body_tactile_contact: tactile,
     body_homeostatic_cues: homeostatic,

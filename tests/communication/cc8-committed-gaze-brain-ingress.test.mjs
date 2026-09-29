@@ -7,7 +7,7 @@ import { commitWorldSimulationTurn, getWorldSimulationState } from "../../server
 import { buildCharacterCommunicationActionCandidate } from "../../server/src/character-communication-foundation-service.mjs";
 import { adjudicateWorldSimulationCausality } from "../../server/src/world-simulation-causal-rule-engine.mjs";
 import { readCommittedWorldSimulationObserverGaze } from "../../server/src/world-simulation-communication-gaze-observer-service.mjs";
-import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
+import { buildCommittedWorldSimulationCharacterBrainInput, buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
 import { prepareFormalWorldSimulationTurn } from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
 import { createWorldSimulationCharacterRuntimeManager, prepareWorldSimulationTurn, runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
@@ -118,6 +118,23 @@ try {
   assert.throws(() => buildWorldSimulationCharacterBrainInput(tamperedEarly,
     { observer_committed_gaze: committed }),
   { code: "CC8C_GAZE_BRAIN_INGRESS_INVALID" });
+  const committedInput = await buildCommittedWorldSimulationCharacterBrainInput({
+    session_id: id, decision_packet: earlyPacket, expected_revision: 1,
+  }, options);
+  assert.deepEqual(committedInput.observed_gaze_cues, built.observed_gaze_cues);
+  assert.equal(Object.hasOwn(committedInput.cognition.perception,
+    "observed_gaze_cues"), false);
+  assert.equal(committedInput.boundaries.committed_gaze_early_cognition_duplicate_removed,
+    true);
+  const committedText = JSON.stringify(committedInput);
+  assert.equal(committedText.includes(action.action_id), false);
+  assert.equal(committedText.includes("不希望 B 離開"), false);
+  await assert.rejects(buildCommittedWorldSimulationCharacterBrainInput({
+    session_id: id, decision_packet: tamperedEarly, expected_revision: 1,
+  }, options), { code: "CC8C_GAZE_BRAIN_INGRESS_INVALID" });
+  await assert.rejects(buildCommittedWorldSimulationCharacterBrainInput({
+    session_id: id, decision_packet: earlyPacket, expected_revision: 0,
+  }, options), { code: "BODY1H_STATE_REVISION_CHANGED" });
 
   const prepared = await prepareFormalWorldSimulationTurn({
     world_simulation_session_id: id,
