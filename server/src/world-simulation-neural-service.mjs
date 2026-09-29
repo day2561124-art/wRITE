@@ -974,6 +974,10 @@ function buildWorldCharacterCognition(input = {}) {
       ...(Object.hasOwn(perception, "observed_gaze_cues")
         ? { observed_gaze_cues: perception.observed_gaze_cues }
         : {}),
+      ...(Object.hasOwn(perception, "observed_body_orientation_cues")
+        ? { observed_body_orientation_cues:
+            perception.observed_body_orientation_cues }
+        : {}),
     }),
     recovered_memories:
       memories,
@@ -1378,7 +1382,9 @@ async function executeWorldSimulationCapability(
     if (capabilityName === "world_character_cognition"
         && assuranceMode !== worldSimulationCharacterFacingAssuranceModes
           .NATIVE_ENGINE_VERIFIED
-        && Object.hasOwn(object(input.perception), "observed_gaze_cues")) {
+        && (Object.hasOwn(object(input.perception), "observed_gaze_cues")
+          || Object.hasOwn(object(input.perception),
+            "observed_body_orientation_cues"))) {
       const error = new Error("Committed gaze cues require native World admission.");
       error.code = "CC8E_GAZE_EARLY_COGNITION_SOURCE_INVALID";
       throw error;

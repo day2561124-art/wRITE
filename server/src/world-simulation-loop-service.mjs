@@ -14,6 +14,7 @@ import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
 import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
+import { readCommittedWorldSimulationObserverBodyOrientation } from "./world-simulation-communication-body-orientation-observer-service.mjs";
 import {
   runWorldSimulationObserverTickBrainIngress,
   buildWorldSimulationObserverTickBrainIngressContract,
@@ -6730,10 +6731,26 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           expected_state_hash: snapshot.state_hash,
         }, options)
       : undefined;
-    const cognitionPerception = cognitionGaze
-      ? { ...characterPerception,
-          observed_gaze_cues: cloneJson(cognitionGaze.character_view) }
-      : characterPerception;
+    const cognitionBodyOrientation = cognitionSceneId
+      && priorCognitionSceneId === cognitionSceneId
+      && priorCognitionTurn?.revision_to === snapshot.revision
+      && priorCognitionTurn?.next_state_hash === snapshot.state_hash
+      ? await readCommittedWorldSimulationObserverBodyOrientation({
+          session_id: sessionId,
+          observer: character,
+          scene_id: cognitionSceneId,
+          expected_revision: snapshot.revision,
+          expected_state_hash: snapshot.state_hash,
+        }, options)
+      : undefined;
+    const cognitionPerception = {
+      ...characterPerception,
+      ...(cognitionGaze
+        ? { observed_gaze_cues: cloneJson(cognitionGaze.character_view) } : {}),
+      ...(cognitionBodyOrientation
+        ? { observed_body_orientation_cues:
+            cloneJson(cognitionBodyOrientation.character_view) } : {}),
+    };
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
@@ -15814,6 +15831,17 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
           expected_state_hash: prepared.world_state_hash,
         }, options)
       : undefined;
+    const observerCommittedBodyOrientation = sceneId && priorSceneId === sceneId
+      && priorTurn?.revision_to === prepared.state_revision
+      && priorTurn?.next_state_hash === prepared.world_state_hash
+      ? await readCommittedWorldSimulationObserverBodyOrientation({
+          session_id: prepared.world_simulation_session_id,
+          observer: packet.character,
+          scene_id: sceneId,
+          expected_revision: prepared.state_revision,
+          expected_state_hash: prepared.world_state_hash,
+        }, options)
+      : undefined;
     // Single-source Character Brain ingress projector. Runtime identity and
     // world-lineage metadata remain engine-side and are never added here.
     // Formal transport uses the same projector without the historical
@@ -15822,6 +15850,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       packet,
       {
         observer_committed_gaze: observerCommittedGaze,
+        observer_committed_body_orientation: observerCommittedBodyOrientation,
         include_legacy_retrieved_memories_alias: true,
         include_native_coping_response_contract: true,
       },

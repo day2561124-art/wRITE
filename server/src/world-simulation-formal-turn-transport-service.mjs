@@ -5,6 +5,7 @@ import { readCommittedWorldSimulationBodyHomeostaticCues } from "./world-simulat
 import { readCommittedWorldSimulationBodyTactileContact } from "./world-simulation-body-tactile-contact-service.mjs";
 import { projectWorldSimulationBodySpeechEffectorFeedback } from "./world-simulation-body-speech-effector-feedback-service.mjs";
 import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
+import { readCommittedWorldSimulationObserverBodyOrientation } from "./world-simulation-communication-body-orientation-observer-service.mjs";
 import { readCommittedWorldSimulationBodyProprioceptiveFeedback } from "./world-simulation-body-proprioceptive-feedback-service.mjs";
 import { readCommittedWorldSimulationBodyVestibularFeedback } from "./world-simulation-body-vestibular-feedback-service.mjs";
 
@@ -320,8 +321,20 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
           expected_state_hash: prepared.world_state_hash,
         }, formalLoopOptions(loopOptions))
       : undefined;
+    const observerCommittedBodyOrientation = sceneId && priorSceneId === sceneId
+      && priorTurn?.revision_to === prepared.state_revision
+      && priorTurn?.next_state_hash === prepared.world_state_hash
+      ? await readCommittedWorldSimulationObserverBodyOrientation({
+          session_id: sessionId,
+          observer: packet.character,
+          scene_id: sceneId,
+          expected_revision: prepared.state_revision,
+          expected_state_hash: prepared.world_state_hash,
+        }, formalLoopOptions(loopOptions))
+      : undefined;
     const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
       observer_committed_gaze: observerCommittedGaze,
+      observer_committed_body_orientation: observerCommittedBodyOrientation,
       body_interoceptive_signals: bodyInteroceptiveSignals,
       body_tactile_contact: bodyTactileContact,
       body_homeostatic_cues: bodyHomeostaticCues,
