@@ -451,7 +451,7 @@ function resolveEmbodiedCommunicationDisplay({
     return { ok: true, realization: null };
   }
   if (request.schema_version !== "cc8a-embodied-display-request-v1"
-      || request.modality !== "gaze"
+      || !["gaze", "body"].includes(request.modality)
       || request.target_relation !== "addressee"
       || !["speech", "nonverbal"].includes(communication.channel)
       || candidate.target !== addressee
@@ -469,34 +469,37 @@ function resolveEmbodiedCommunicationDisplay({
       || physical.incapacitated === true) {
     return {
       ok: false,
-      reason: "gaze display requires conscious positioned actor and positioned addressee",
+      reason: "embodied display requires conscious positioned actor and positioned addressee",
     };
   }
   const dx = targetPosition.x - actorPosition.x;
   const dy = targetPosition.y - actorPosition.y;
   if (dx === 0 && dy === 0) {
-    return { ok: false, reason: "gaze display target has no resolvable direction" };
+    return { ok: false, reason: "embodied display target has no resolvable direction" };
   }
   const rawDegrees = Math.atan2(dy, dx) * 180 / Math.PI;
   const degrees = ((rawDegrees % 360) + 360) % 360;
-  const before = actorState.facing_degrees ?? null;
-  next.characters[actor].facing_degrees = degrees;
+  const body = request.modality === "body";
+  const field = body ? "body_facing_degrees" : "facing_degrees";
+  const before = actorState[field] ?? null;
+  next.characters[actor][field] = degrees;
   pushTransition(
     transitions,
     actor,
-    "facing_degrees",
+    field,
     before,
     degrees,
-    "validated CC-8A gaze display toward committed communication addressee",
+    body ? "validated CC-8J body display toward committed communication addressee"
+      : "validated CC-8A gaze display toward committed communication addressee",
     { scene_id: sceneId, source_action_id: candidate.action_id ?? null },
   );
   return {
     ok: true,
     realization: {
       schema_version: "cc8a-embodied-display-realization-v1",
-      modality: "gaze",
+      modality: request.modality,
       target_relation: "addressee",
-      effector: "head_orientation",
+      effector: body ? "body_orientation" : "head_orientation",
       realized: true,
       source_action_id: candidate.action_id ?? null,
       private_intended_meaning_exposed: false,

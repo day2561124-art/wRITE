@@ -684,12 +684,13 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
   // angle/position. World/Body resolves the current physical orientation.
   const intentionalDisplay = isRecord(plan.ir_context?.intentional_display)
     ? plan.ir_context.intentional_display : null;
+  const displayModality = string(intentionalDisplay?.modality, 120);
   const embodiedDisplayRequest = intentionalDisplay
-    && string(intentionalDisplay.modality, 120) === "gaze"
+    && ["gaze", "body"].includes(displayModality)
     && string(intentionalDisplay.target, 240) === plan.addressee
     ? {
         schema_version: "cc8a-embodied-display-request-v1",
-        modality: "gaze",
+        modality: displayModality,
         target_relation: "addressee",
       }
     : null;
