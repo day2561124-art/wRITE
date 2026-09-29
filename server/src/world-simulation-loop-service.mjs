@@ -13,8 +13,7 @@ import {
 import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
-import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
-import { readCommittedWorldSimulationObserverBodyOrientation } from "./world-simulation-communication-body-orientation-observer-service.mjs";
+import { readCommittedWorldSimulationObserverOrientations } from "./world-simulation-communication-orientation-observer-service.mjs";
 import {
   runWorldSimulationObserverTickBrainIngress,
   buildWorldSimulationObserverTickBrainIngressContract,
@@ -6712,18 +6711,19 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(revisedStructuredSelfModelCharacterProjection.audit),
     });
 
-    // CC-8E: admit the immediately prior committed same-scene visual cue
-    // into cognition before candidate proposal. Keep the source audit private
-    // and leave the general perception/memory-retrieval channels untouched.
+    // CC-8N: early cognition consumes the existing CC-8L converged
+    // orientation receipt from one exact committed snapshot. Gaze and body
+    // cues remain independent observations; this does not fuse or interpret
+    // their communicative meaning.
     const priorCognitionTurn = worldHistory?.turns?.at(-1);
     const cognitionSceneId = event.scene_id ?? event.location_id;
     const priorCognitionSceneId = priorCognitionTurn?.event?.scene_id
       ?? priorCognitionTurn?.event?.location_id;
-    const cognitionGaze = cognitionSceneId
+    const cognitionOrientations = cognitionSceneId
       && priorCognitionSceneId === cognitionSceneId
       && priorCognitionTurn?.revision_to === snapshot.revision
       && priorCognitionTurn?.next_state_hash === snapshot.state_hash
-      ? await readCommittedWorldSimulationObserverGaze({
+      ? await readCommittedWorldSimulationObserverOrientations({
           session_id: sessionId,
           observer: character,
           scene_id: cognitionSceneId,
@@ -6731,25 +6731,21 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           expected_state_hash: snapshot.state_hash,
         }, options)
       : undefined;
-    const cognitionBodyOrientation = cognitionSceneId
-      && priorCognitionSceneId === cognitionSceneId
-      && priorCognitionTurn?.revision_to === snapshot.revision
-      && priorCognitionTurn?.next_state_hash === snapshot.state_hash
-      ? await readCommittedWorldSimulationObserverBodyOrientation({
-          session_id: sessionId,
-          observer: character,
-          scene_id: cognitionSceneId,
-          expected_revision: snapshot.revision,
-          expected_state_hash: snapshot.state_hash,
-        }, options)
-      : undefined;
+    const cognitionOrientationViews = Array.isArray(cognitionOrientations?.character_view)
+      ? cognitionOrientations.character_view
+      : [];
     const cognitionPerception = {
       ...characterPerception,
-      ...(cognitionGaze
-        ? { observed_gaze_cues: cloneJson(cognitionGaze.character_view) } : {}),
-      ...(cognitionBodyOrientation
-        ? { observed_body_orientation_cues:
-            cloneJson(cognitionBodyOrientation.character_view) } : {}),
+      ...(cognitionOrientations
+        ? {
+            observed_gaze_cues: cloneJson(cognitionOrientationViews.filter((cue) =>
+              cue?.schema_version === "cc8b-committed-gaze-observer-cue-v1"
+              && cue?.kind === "visible_head_orientation_change")),
+            observed_body_orientation_cues: cloneJson(cognitionOrientationViews.filter((cue) =>
+              cue?.schema_version === "cc8k-committed-body-orientation-observer-cue-v1"
+              && cue?.kind === "visible_body_orientation_change")),
+          }
+        : {}),
     };
     const cognition = await capability(
       sessionId,
@@ -15820,21 +15816,10 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     const sceneId = prepared.event?.scene_id ?? prepared.event?.location_id;
     const priorSceneId = priorTurn?.event?.scene_id
       ?? priorTurn?.event?.location_id;
-    const observerCommittedGaze = sceneId && priorSceneId === sceneId
+    const observerCommittedOrientations = sceneId && priorSceneId === sceneId
       && priorTurn?.revision_to === prepared.state_revision
       && priorTurn?.next_state_hash === prepared.world_state_hash
-      ? await readCommittedWorldSimulationObserverGaze({
-          session_id: prepared.world_simulation_session_id,
-          observer: packet.character,
-          scene_id: sceneId,
-          expected_revision: prepared.state_revision,
-          expected_state_hash: prepared.world_state_hash,
-        }, options)
-      : undefined;
-    const observerCommittedBodyOrientation = sceneId && priorSceneId === sceneId
-      && priorTurn?.revision_to === prepared.state_revision
-      && priorTurn?.next_state_hash === prepared.world_state_hash
-      ? await readCommittedWorldSimulationObserverBodyOrientation({
+      ? await readCommittedWorldSimulationObserverOrientations({
           session_id: prepared.world_simulation_session_id,
           observer: packet.character,
           scene_id: sceneId,
@@ -15849,8 +15834,7 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     const brainInput = buildWorldSimulationCharacterBrainInput(
       packet,
       {
-        observer_committed_gaze: observerCommittedGaze,
-        observer_committed_body_orientation: observerCommittedBodyOrientation,
+        observer_committed_orientations: observerCommittedOrientations,
         include_legacy_retrieved_memories_alias: true,
         include_native_coping_response_contract: true,
       },

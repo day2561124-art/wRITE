@@ -46,8 +46,7 @@ import {
   readCommittedWorldSimulationBodyVestibularFeedback,
   worldSimulationBodyVestibularFeedbackVersion,
 } from "./world-simulation-body-vestibular-feedback-service.mjs";
-import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
-import { readCommittedWorldSimulationObserverBodyOrientation } from "./world-simulation-communication-body-orientation-observer-service.mjs";
+import { readCommittedWorldSimulationObserverOrientations } from "./world-simulation-communication-orientation-observer-service.mjs";
 import { getWorldSimulationHistory, getWorldSimulationState } from "./world-simulation-state-service.mjs";
 
 export const worldSimulationCharacterBrainInputVersion =
@@ -515,6 +514,55 @@ function boundedCommittedInteroception(projection, character) {
   };
 }
 
+function splitCommittedOrientationProjection(projection, character) {
+  const cues = projection?.character_view;
+  if (!isObject(projection)
+      || projection.schema_version
+        !== "cc8l-committed-orientation-observer-convergence-v1"
+      || projection.observer !== character
+      || !["visible_physical_cues_only", "no_admitted_visual_cue"]
+        .includes(projection.admission_status)
+      || !Array.isArray(cues)
+      || cues.length > 128
+      || new Set(cues.map((cue) => cue?.cue_ref)).size !== cues.length
+      || (cues.length > 0)
+        !== (projection.admission_status === "visible_physical_cues_only")) {
+    const error = new Error("CC8N_ORIENTATION_BRAIN_INGRESS_INVALID");
+    error.code = "CC8N_ORIENTATION_BRAIN_INGRESS_INVALID";
+    throw error;
+  }
+  const gaze = [];
+  const body = [];
+  for (const cue of cues) {
+    if (cue?.schema_version === "cc8b-committed-gaze-observer-cue-v1"
+        && cue?.kind === "visible_head_orientation_change") {
+      gaze.push(cue);
+      continue;
+    }
+    if (cue?.schema_version
+          === "cc8k-committed-body-orientation-observer-cue-v1"
+        && cue?.kind === "visible_body_orientation_change") {
+      body.push(cue);
+      continue;
+    }
+    const error = new Error("CC8N_ORIENTATION_BRAIN_INGRESS_INVALID");
+    error.code = "CC8N_ORIENTATION_BRAIN_INGRESS_INVALID";
+    throw error;
+  }
+  const wrap = (schemaVersion, items) => ({
+    schema_version: schemaVersion,
+    observer: character,
+    admission_status: items.length
+      ? "visible_physical_cue_only"
+      : "no_admitted_visual_cue",
+    character_view: items,
+  });
+  return {
+    gaze: wrap("cc8b-committed-gaze-observer-cue-v1", gaze),
+    body: wrap("cc8k-committed-body-orientation-observer-cue-v1", body),
+  };
+}
+
 export function buildWorldSimulationCharacterBrainInput(
   decisionPacket = {},
   options = {},
@@ -582,12 +630,34 @@ export function buildWorldSimulationCharacterBrainInput(
       ),
   };
 
+  let observerCommittedGaze = options.observer_committed_gaze;
+  let observerCommittedBodyOrientation =
+    options.observer_committed_body_orientation;
+  if (options.observer_committed_orientations !== undefined) {
+    if (observerCommittedGaze !== undefined
+        || observerCommittedBodyOrientation !== undefined) {
+      const error = new Error("CC8N_ORIENTATION_BRAIN_INGRESS_INVALID");
+      error.code = "CC8N_ORIENTATION_BRAIN_INGRESS_INVALID";
+      throw error;
+    }
+    const split = splitCommittedOrientationProjection(
+      options.observer_committed_orientations,
+      input.character,
+    );
+    observerCommittedGaze = split.gaze;
+    observerCommittedBodyOrientation = split.body;
+    input.boundaries.committed_orientation_converged_snapshot_v1_installed = true;
+    input.boundaries.committed_orientation_cue_fusion_performed = false;
+    input.boundaries.committed_orientation_intent_inference_performed = false;
+    input.boundaries.committed_orientation_engine_audit_exposed = false;
+  }
+
   // An early-cognition cue may only reach the final Brain through the exact
   // committed observer projection supplied by trusted transport.
   const hasEmbeddedGaze = [input.cognition?.perception, input.perception]
     .some((view) => isObject(view)
       && Object.hasOwn(view, "observed_gaze_cues"));
-  if (hasEmbeddedGaze && options.observer_committed_gaze === undefined) {
+  if (hasEmbeddedGaze && observerCommittedGaze === undefined) {
     const error = new Error("CC8C_GAZE_BRAIN_INGRESS_INVALID");
     error.code = "CC8C_GAZE_BRAIN_INGRESS_INVALID";
     throw error;
@@ -595,8 +665,8 @@ export function buildWorldSimulationCharacterBrainInput(
   // CC-8C: only the observer's admitted physical cue crosses the Brain
   // boundary. The projector audit contains source actor/action lineage and
   // must never be copied into character-facing input.
-  if (options.observer_committed_gaze !== undefined) {
-    const projection = options.observer_committed_gaze;
+  if (observerCommittedGaze !== undefined) {
+    const projection = observerCommittedGaze;
     const cues = projection?.character_view;
     if (!isObject(projection)
         || projection.schema_version !== "cc8b-committed-gaze-observer-cue-v1"
@@ -674,15 +744,15 @@ export function buildWorldSimulationCharacterBrainInput(
     .some((view) => isObject(view)
       && Object.hasOwn(view, "observed_body_orientation_cues"));
   if (hasEmbeddedBodyOrientation
-      && options.observer_committed_body_orientation === undefined) {
+      && observerCommittedBodyOrientation === undefined) {
     const error = new Error("CC8M_BODY_ORIENTATION_BRAIN_INGRESS_INVALID");
     error.code = "CC8M_BODY_ORIENTATION_BRAIN_INGRESS_INVALID";
     throw error;
   }
   // CC-8M admits only the observer's independently gated, committed body
   // orientation cue. The engine-side action lineage never enters this packet.
-  if (options.observer_committed_body_orientation !== undefined) {
-    const projection = options.observer_committed_body_orientation;
+  if (observerCommittedBodyOrientation !== undefined) {
+    const projection = observerCommittedBodyOrientation;
     const cues = projection?.character_view;
     if (!isObject(projection)
         || projection.schema_version !== "cc8k-committed-body-orientation-observer-cue-v1"
@@ -986,55 +1056,26 @@ export async function buildCommittedWorldSimulationCharacterBrainInput({
   const vestibular = await readCommittedWorldSimulationBodyVestibularFeedback({
     session_id, character, expected_revision, expected_state_hash,
   }, options);
-  const hasEmbeddedGaze = [decision_packet?.cognition?.perception,
-    decision_packet?.perception].some((view) => isObject(view)
-      && Object.hasOwn(view, "observed_gaze_cues"));
-  let observerCommittedGaze;
-  if (hasEmbeddedGaze) {
-    const snapshot = await getWorldSimulationState(session_id, options);
-    const history = await getWorldSimulationHistory(session_id, options);
-    const currentEvent = snapshot.state?.event_queue?.[0];
-    const lastTurn = history.turns?.at(-1);
-    const sceneId = currentEvent?.scene_id ?? currentEvent?.location_id;
-    const lastSceneId = lastTurn?.event?.scene_id ?? lastTurn?.event?.location_id;
-    if (typeof sceneId !== "string" || !sceneId.trim()
-        || sceneId !== lastSceneId
-        || lastTurn?.revision_to !== snapshot.revision
-        || lastTurn?.next_state_hash !== snapshot.state_hash) {
-      const error = new Error("CC8F_COMMITTED_GAZE_HELPER_SOURCE_INVALID");
-      error.code = "CC8F_COMMITTED_GAZE_HELPER_SOURCE_INVALID";
-      throw error;
-    }
-    observerCommittedGaze = await readCommittedWorldSimulationObserverGaze({
-      session_id, observer: character, scene_id: sceneId,
-      expected_revision: expected_revision ?? snapshot.revision,
-      expected_state_hash: expected_state_hash ?? snapshot.state_hash,
-    }, options);
-  }
-  let observerCommittedBodyOrientation;
-  {
-    const snapshot = await getWorldSimulationState(session_id, options);
-    const history = await getWorldSimulationHistory(session_id, options);
-    const currentEvent = snapshot.state?.event_queue?.[0];
-    const lastTurn = history.turns?.at(-1);
-    const sceneId = currentEvent?.scene_id ?? currentEvent?.location_id;
-    const lastSceneId = lastTurn?.event?.scene_id ?? lastTurn?.event?.location_id;
-    if (typeof sceneId === "string" && sceneId.trim()
-        && sceneId === lastSceneId
-        && lastTurn?.revision_to === snapshot.revision
-        && lastTurn?.next_state_hash === snapshot.state_hash) {
-      observerCommittedBodyOrientation =
-        await readCommittedWorldSimulationObserverBodyOrientation({
-          session_id, observer: character, scene_id: sceneId,
-          expected_revision: expected_revision ?? snapshot.revision,
-          expected_state_hash: expected_state_hash ?? snapshot.state_hash,
-        }, options);
-    }
-  }
+  const snapshot = await getWorldSimulationState(session_id, options);
+  const history = await getWorldSimulationHistory(session_id, options);
+  const currentEvent = snapshot.state?.event_queue?.[0];
+  const lastTurn = history.turns?.at(-1);
+  const sceneId = currentEvent?.scene_id ?? currentEvent?.location_id;
+  const lastSceneId = lastTurn?.event?.scene_id ?? lastTurn?.event?.location_id;
+  const sameCommittedScene = typeof sceneId === "string" && sceneId.trim()
+    && sceneId === lastSceneId
+    && lastTurn?.revision_to === snapshot.revision
+    && lastTurn?.next_state_hash === snapshot.state_hash;
+  const observerCommittedOrientations = sameCommittedScene
+    ? await readCommittedWorldSimulationObserverOrientations({
+        session_id, observer: character, scene_id: sceneId,
+        expected_revision: expected_revision ?? snapshot.revision,
+        expected_state_hash: expected_state_hash ?? snapshot.state_hash,
+      }, options)
+    : undefined;
   return buildWorldSimulationCharacterBrainInput(decision_packet, {
     ...options,
-    observer_committed_gaze: observerCommittedGaze,
-    observer_committed_body_orientation: observerCommittedBodyOrientation,
+    observer_committed_orientations: observerCommittedOrientations,
     body_interoceptive_signals: committed,
     body_tactile_contact: tactile,
     body_homeostatic_cues: homeostatic,

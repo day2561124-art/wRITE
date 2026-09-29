@@ -4,8 +4,7 @@ import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-si
 import { readCommittedWorldSimulationBodyHomeostaticCues } from "./world-simulation-body-homeostatic-cue-service.mjs";
 import { readCommittedWorldSimulationBodyTactileContact } from "./world-simulation-body-tactile-contact-service.mjs";
 import { projectWorldSimulationBodySpeechEffectorFeedback } from "./world-simulation-body-speech-effector-feedback-service.mjs";
-import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
-import { readCommittedWorldSimulationObserverBodyOrientation } from "./world-simulation-communication-body-orientation-observer-service.mjs";
+import { readCommittedWorldSimulationObserverOrientations } from "./world-simulation-communication-orientation-observer-service.mjs";
 import { readCommittedWorldSimulationBodyProprioceptiveFeedback } from "./world-simulation-body-proprioceptive-feedback-service.mjs";
 import { readCommittedWorldSimulationBodyVestibularFeedback } from "./world-simulation-body-vestibular-feedback-service.mjs";
 
@@ -307,24 +306,14 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
     const sceneId = prepared.event?.scene_id ?? prepared.event?.location_id;
     const priorSceneId = priorTurn?.event?.scene_id
       ?? priorTurn?.event?.location_id;
-    // CC-8C admits a prior committed, same-scene physical cue only at the
-    // next decision. Revision/hash and observer are rechecked by the reader.
-    // Its engine-side audit is never copied to Character Brain.
-    const observerCommittedGaze = sceneId && priorSceneId === sceneId
+    // CC-8N adopts the existing CC-8L same-snapshot convergence service.
+    // Gaze and body-orientation cues remain independently gated physical
+    // observations; the unified receipt only guarantees one committed World
+    // revision and does not fuse cues or infer communicative intent.
+    const observerCommittedOrientations = sceneId && priorSceneId === sceneId
       && priorTurn?.revision_to === prepared.state_revision
       && priorTurn?.next_state_hash === prepared.world_state_hash
-      ? await readCommittedWorldSimulationObserverGaze({
-          session_id: sessionId,
-          observer: packet.character,
-          scene_id: sceneId,
-          expected_revision: prepared.state_revision,
-          expected_state_hash: prepared.world_state_hash,
-        }, formalLoopOptions(loopOptions))
-      : undefined;
-    const observerCommittedBodyOrientation = sceneId && priorSceneId === sceneId
-      && priorTurn?.revision_to === prepared.state_revision
-      && priorTurn?.next_state_hash === prepared.world_state_hash
-      ? await readCommittedWorldSimulationObserverBodyOrientation({
+      ? await readCommittedWorldSimulationObserverOrientations({
           session_id: sessionId,
           observer: packet.character,
           scene_id: sceneId,
@@ -333,8 +322,7 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
         }, formalLoopOptions(loopOptions))
       : undefined;
     const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
-      observer_committed_gaze: observerCommittedGaze,
-      observer_committed_body_orientation: observerCommittedBodyOrientation,
+      observer_committed_orientations: observerCommittedOrientations,
       body_interoceptive_signals: bodyInteroceptiveSignals,
       body_tactile_contact: bodyTactileContact,
       body_homeostatic_cues: bodyHomeostaticCues,
