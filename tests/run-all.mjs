@@ -1010,6 +1010,7 @@ const steps = [
   ["CC-8H native speech gaze co-observation", ["tests/communication/cc8-speech-gaze-coobservation.test.mjs"]],
   ["CC-8I bounded vocal effort", ["tests/communication/cc8-vocal-effort.test.mjs"]],
   ["CC-8J committed body orientation display", ["tests/communication/cc8-body-orientation-display.test.mjs"]],
+  ["CC-8K committed body orientation observer cue", ["tests/communication/cc8-committed-body-orientation-observer.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
