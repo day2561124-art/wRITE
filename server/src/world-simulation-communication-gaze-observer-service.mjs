@@ -91,7 +91,7 @@ export function projectWorldSimulationObserverCommittedGaze({
       && item.source_action_id === actionId);
     if (selections.length !== 1 || transitions.length !== 1
         || event.actor !== actor || display.source_action_id !== actionId
-        || event.channel !== "nonverbal"
+        || !["speech", "nonverbal"].includes(event.channel)
         || display.target_relation !== "addressee"
         || display.private_intended_meaning_exposed !== false
         || display.objective_target_coordinates_exposed !== false

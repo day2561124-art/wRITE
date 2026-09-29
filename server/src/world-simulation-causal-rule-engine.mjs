@@ -6,6 +6,7 @@ import {
   applyWorldSimulationPendingAcousticCancellation,
 } from "./world-simulation-native-committed-source-service.mjs";
 import { realizeCharacterCommunicationMandarin } from "./character-communication-mandarin-realization-service.mjs";
+import { matchesCharacterCommunicationActionCandidateIdentity } from "./character-communication-foundation-service.mjs";
 import {
   buildWorldSimulationCommunicationAcousticBridgeContract,
   projectWorldSimulationCommunicationAcousticBridge,
@@ -452,8 +453,9 @@ function resolveEmbodiedCommunicationDisplay({
   if (request.schema_version !== "cc8a-embodied-display-request-v1"
       || request.modality !== "gaze"
       || request.target_relation !== "addressee"
-      || communication.channel !== "nonverbal"
-      || candidate.target !== addressee) {
+      || !["speech", "nonverbal"].includes(communication.channel)
+      || candidate.target !== addressee
+      || !matchesCharacterCommunicationActionCandidateIdentity(candidate, actor)) {
     return { ok: false, reason: "invalid embodied communication display request" };
   }
   const actorPosition = positionFor(snapshotScene, actor);

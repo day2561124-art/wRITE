@@ -181,7 +181,67 @@ try {
   assert.equal(nativeText.includes(action.action_id), false);
   assert.equal(nativeText.includes("不希望 B 離開"), false);
   assert.equal(nativeText.includes('"source_action_id"'), false);
-  console.log("CC-8C/D/E committed gaze formal, native and early cognition ingress tests passed.");
+  // One selected speech action may also realize a speaker-authored gaze
+  // request. The observer receives a physical cue, not the spoken meaning.
+  const speechAction = buildCharacterCommunicationActionCandidate({
+    character: "A", cognition: { communication_goal: {
+      character: "A", addressee: "B", purpose: "請 B 稍候",
+      mode: "direct", public_content: "請先等一下",
+      communication_context: { intentional_display: {
+        intended_meaning: "希望 B 注意我", modality: "gaze", target: "B",
+      } },
+    } },
+  });
+  assert.equal(speechAction.communication.channel, "speech");
+  assert.equal(speechAction.communication.embodied_display_request.modality, "gaze");
+  const speechSession = await beginWorldSimulationSession({
+    simulation_label: "CC-8G speech and gaze", seed: "cc8g",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: initial,
+  }, options);
+  const speechId = speechSession.world_simulation_session_id;
+  const speechFirst = await getWorldSimulationState(speechId, options);
+  const speechSelection = [{
+    character: "A", selection: "candidate_action_intent", candidate: speechAction,
+  }];
+  const speechResolved = await adjudicateWorldSimulationCausality({
+    world_simulation_session_id: speechId, turn_id: "gaze",
+    world_state: initial, world_state_hash: speechFirst.state_hash,
+    world_state_revision: 0, event: initial.event_queue[0],
+    selected_action_intents: speechSelection,
+  });
+  const speechOutcome = speechResolved.action_outcomes.find((item) =>
+    item.actor === "A");
+  assert.equal(speechOutcome.result, "communication_emitted");
+  assert.equal(speechOutcome.communication_event.channel, "speech");
+  assert.equal(speechOutcome.communication_event.embodied_display.realized, true);
+  assert.equal(speechResolved.state_transitions.some((item) =>
+    item.entity === "A" && item.field === "facing_degrees"
+      && item.source_action_id === speechAction.action_id), true);
+  await commitWorldSimulationTurn(speechId, {
+    expected_revision: 0, expected_state_hash: speechFirst.state_hash,
+    turn_id: "gaze", event: initial.event_queue[0],
+    next_world_state: speechResolved.next_world_state,
+    selected_action_intents: speechSelection,
+    action_outcomes: speechResolved.action_outcomes,
+    state_transitions: speechResolved.state_transitions,
+  }, options);
+  const speechCue = await readCommittedWorldSimulationObserverGaze({
+    session_id: speechId, observer: "B", scene_id: "room", expected_revision: 1,
+  }, options);
+  assert.equal(speechCue.character_view.length, 1);
+  const speechCueText = JSON.stringify(speechCue.character_view);
+  assert.equal(speechCueText.includes("請先等一下"), false);
+  assert.equal(speechCueText.includes("希望 B 注意我"), false);
+  assert.equal(speechCueText.includes(speechAction.action_id), false);
+  const speechEarly = await prepareWorldSimulationTurn({
+    world_simulation_session_id: speechId,
+  }, options);
+  const speechPacket = speechEarly.decision_packets.find((packet) =>
+    packet.character === "B");
+  assert.deepEqual(speechPacket.cognition.perception.observed_gaze_cues,
+    speechCue.character_view);
+  console.log("CC-8C/D/E/G committed gaze and speech coexpression tests passed.");
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

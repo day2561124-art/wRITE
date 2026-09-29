@@ -160,12 +160,12 @@ async function adjudicate(state, action) {
 }
 
 {
-  const speech = candidate({ mode: "direct" });
+  const speech = candidate({ mode: "direct", display: false });
   assert.equal(Object.hasOwn(speech.communication, "embodied_display_request"), false);
 }
 
 {
-  const speech = candidate({ mode: "direct" });
+  const speech = candidate({ mode: "direct", display: false });
   speech.communication.embodied_display_request = {
     schema_version: "cc8a-embodied-display-request-v1",
     modality: "gaze",

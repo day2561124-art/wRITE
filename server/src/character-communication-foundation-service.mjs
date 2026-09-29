@@ -631,6 +631,25 @@ export function planCharacterCommunication(characterInput = {}) {
   });
 }
 
+// A selected physical display must still belong to the exact bounded
+// candidate originally produced from one speaker's communication plan.
+export function matchesCharacterCommunicationActionCandidateIdentity(candidate, character) {
+  const communication = candidate?.communication;
+  if (!isRecord(communication) || typeof candidate?.action_id !== "string") return false;
+  const identity = {
+    version: characterCommunicationFoundationVersion,
+    character,
+    addressee: communication.addressee,
+    mode: communication.expression_mode,
+    channel: communication.channel,
+    public_message: communication.message,
+    communication_ir: communication.ir,
+    embodied_display_request: communication.embodied_display_request ?? null,
+    surface_realization: communication.surface_realization ?? null,
+  };
+  return candidate.action_id === `communication_${hashAgentRunValue(identity).slice(0, 24)}`;
+}
+
 export function buildCharacterCommunicationActionCandidate(characterInput = {}) {
   const plan = planCharacterCommunication(characterInput);
   if (!plan || plan.external_action === "none") return null;
@@ -660,7 +679,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
   // angle/position. World/Body resolves the current physical orientation.
   const intentionalDisplay = isRecord(plan.ir_context?.intentional_display)
     ? plan.ir_context.intentional_display : null;
-  const embodiedDisplayRequest = channel === "nonverbal" && intentionalDisplay
+  const embodiedDisplayRequest = intentionalDisplay
     && string(intentionalDisplay.modality, 120) === "gaze"
     && string(intentionalDisplay.target, 240) === plan.addressee
     ? {
