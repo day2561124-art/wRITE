@@ -6,11 +6,16 @@ import {
 import {
   worldSimulationCommunicationAcousticBridgeVersion,
 } from "./world-simulation-communication-acoustic-bridge-service.mjs";
+import {
+  worldSimulationCommunicationOrientationObserverVersion,
+} from "./world-simulation-communication-orientation-observer-service.mjs";
 
 export const characterCommunicationListenerUnderstandingVersion =
   "cc6c-listener-speech-understanding-v1";
 export const characterCommunicationListenerUnderstandingResolverViewVersion =
   "cc6c-listener-speech-resolver-view-v1";
+export const characterCommunicationListenerMultimodalCoexpressionVersion =
+  "cc8o-listener-multimodal-coexpression-v1";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -86,6 +91,112 @@ function safeAuditoryObservation(audibilityResult, soundId) {
   };
 }
 
+function multimodalFail(message) {
+  const error = new Error(message);
+  error.code = "CC8O_LISTENER_MULTIMODAL_COEXPRESSION_INVALID";
+  throw error;
+}
+
+function safeCoexpressedVisualCue(cue, modality) {
+  if (!record(cue)
+      || typeof cue.cue_ref !== "string"
+      || !cue.cue_ref.trim()
+      || cue.sense !== "visual"
+      || cue.actor_identity_recognized !== false
+      || cue.exact_orientation_exposed !== false
+      || cue.communicative_intent_inferred !== false
+      || cue.interpretation !== null
+      || cue.world_truth_claimed !== false) {
+    multimodalFail("CC-8O requires one bounded observer-admitted physical visual cue.");
+  }
+  if (modality === "gaze") {
+    if (cue.schema_version !== "cc8b-committed-gaze-observer-cue-v1"
+        || cue.kind !== "visible_head_orientation_change"
+        || cue.gaze_target_inferred !== false) {
+      multimodalFail("CC-8O gaze cue shape is invalid.");
+    }
+  } else if (modality === "body") {
+    if (cue.schema_version !== "cc8k-committed-body-orientation-observer-cue-v1"
+        || cue.kind !== "visible_body_orientation_change"
+        || cue.display_target_inferred !== false) {
+      multimodalFail("CC-8O body cue shape is invalid.");
+    }
+  } else {
+    multimodalFail("CC-8O visual cue modality is invalid.");
+  }
+  return {
+    schema_version: cue.schema_version,
+    modality,
+    kind: cue.kind,
+    sense: "visual",
+    cue_ref: cue.cue_ref,
+    actor_identity_recognized: false,
+    communicative_intent_inferred: false,
+    interpretation: null,
+    world_truth_claimed: false,
+  };
+}
+
+function coexpressedVisualCues({
+  projection, observer, worldState, sourceTurnId, sourceActionId, sourceSpeaker,
+}) {
+  if (projection == null) return [];
+  if (!record(projection)
+      || projection.schema_version
+        !== worldSimulationCommunicationOrientationObserverVersion
+      || projection.observer !== observer
+      || !record(projection.audit)
+      || projection.audit.source_state_hash !== hashAgentRunValue(worldState)
+      || !Array.isArray(projection.character_view)
+      || projection.character_view.length > 128
+      || !Array.isArray(projection.audit.admitted_source_lineage)
+      || projection.audit.admitted_source_lineage.length
+        !== projection.character_view.length) {
+    multimodalFail("CC-8O committed orientation projection is invalid.");
+  }
+
+  const cuesByRef = new Map();
+  for (const cue of projection.character_view) {
+    if (typeof cue?.cue_ref !== "string"
+        || !cue.cue_ref
+        || cuesByRef.has(cue.cue_ref)) {
+      multimodalFail("CC-8O committed orientation cue refs are invalid.");
+    }
+    cuesByRef.set(cue.cue_ref, cue);
+  }
+
+  const seenLineage = new Set();
+  const matches = [];
+  for (const lineage of projection.audit.admitted_source_lineage) {
+    if (!record(lineage)
+        || typeof lineage.cue_ref !== "string"
+        || seenLineage.has(lineage.cue_ref)
+        || !["gaze", "body"].includes(lineage.modality)
+        || typeof lineage.source_actor !== "string"
+        || !lineage.source_actor
+        || typeof lineage.source_action_id !== "string"
+        || !lineage.source_action_id
+        || !cuesByRef.has(lineage.cue_ref)) {
+      multimodalFail("CC-8O committed orientation engine lineage is invalid.");
+    }
+    seenLineage.add(lineage.cue_ref);
+    const safeCue = safeCoexpressedVisualCue(
+      cuesByRef.get(lineage.cue_ref),
+      lineage.modality,
+    );
+    if (projection.audit.source_turn_id !== sourceTurnId
+        || lineage.source_action_id !== sourceActionId
+        || lineage.source_actor !== sourceSpeaker) {
+      continue;
+    }
+    matches.push(safeCue);
+  }
+  if (seenLineage.size !== cuesByRef.size) {
+    multimodalFail("CC-8O committed orientation lineage coverage is incomplete.");
+  }
+  return matches;
+}
+
 /**
  * Builds a listener-only resolver surface from already committed speech that
  * is physically audible in the current turn.
@@ -102,6 +213,7 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
   const sceneId = boundedText(input.scene_id ?? scene.scene_id, "scene_id", 240);
   const history = record(input.world_history) ? input.world_history : {};
   const audibilityResult = record(input.audibility_result) ? input.audibility_result : {};
+  const orientationProjection = input.committed_orientation_projection ?? null;
 
   const candidates = [];
   const engineCandidates = [];
@@ -155,6 +267,14 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
       skips.push({ sound_id: soundId, reason: "safe_auditory_observation_missing" });
       continue;
     }
+    const visualCoexpression = coexpressedVisualCues({
+      projection: orientationProjection,
+      observer,
+      worldState,
+      sourceTurnId: source.turn_id,
+      sourceActionId: actionId,
+      sourceSpeaker: speaker,
+    });
 
     const candidateId = `listener_speech_${hashAgentRunValue({
       version: characterCommunicationListenerUnderstandingVersion,
@@ -172,6 +292,11 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
       emitted_surface_signal: surface,
       signal_language: surfaceRealization.language ?? null,
       acoustic_observation: acousticObservation,
+      coexpressed_visual_cues: cloneJson(visualCoexpression),
+      visual_coexpression_relation: visualCoexpression.length > 0
+        ? "same_committed_action"
+        : null,
+      visual_coexpression_intent_inferred: false,
       source_identity_available: false,
       speaker_semantic_content_available: false,
       speaker_private_purpose_available: false,
@@ -185,6 +310,8 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
       source_action_id: actionId,
       source_sound_id: soundId,
       source_speaker: speaker,
+      coexpressed_visual_cue_refs:
+        visualCoexpression.map((cue) => cue.cue_ref),
       reception,
     });
   }
@@ -202,6 +329,14 @@ export function buildCharacterCommunicationListenerUnderstandingResolverView(inp
         speaker_private_purpose_exposed: false,
         source_engine_identity_exposed: false,
         source_action_identity_exposed: false,
+        multimodal_coexpression_version:
+          characterCommunicationListenerMultimodalCoexpressionVersion,
+        coexpressed_visual_cues_require_same_committed_action: true,
+        coexpressed_visual_cues_are_physical_observer_evidence_only: true,
+        visual_source_actor_identity_exposed: false,
+        visual_source_action_identity_exposed: false,
+        visual_communicative_intent_inferred: false,
+        speech_visual_semantic_equivalence_claimed: false,
         world_truth_exposed: false,
         no_candidate_means_no_listener_interpretation: true,
       },
@@ -279,6 +414,7 @@ export function projectCharacterCommunicationListenerUnderstanding(input = {}) {
           240,
         );
 
+    const visualCueCount = list(engine.coexpressed_visual_cue_refs).length;
     characterViews.push({
       ...cloneJson(interpreted.character_view),
       schema_version: characterCommunicationListenerUnderstandingVersion,
@@ -286,6 +422,16 @@ export function projectCharacterCommunicationListenerUnderstanding(input = {}) {
       interpreted_interaction_function: interpretedInteractionFunction,
       interaction_function_interpretation_subjective:
         interpretedInteractionFunction !== null,
+      ...(visualCueCount > 0
+        ? {
+            multimodal_coexpression_context_available: true,
+            multimodal_coexpression_version:
+              characterCommunicationListenerMultimodalCoexpressionVersion,
+            multimodal_coexpression_same_committed_action_verified: true,
+            multimodal_coexpression_semantic_equivalence_verified: false,
+            multimodal_coexpression_intent_inferred: false,
+          }
+        : {}),
       speaker_identity_recognized: false,
       perceived_speaker: null,
       cc2_understood_testimony_eligible: false,
@@ -297,6 +443,11 @@ export function projectCharacterCommunicationListenerUnderstanding(input = {}) {
       source_sound_id: engine.source_sound_id,
       source_speaker: engine.source_speaker,
       reception_verified: true,
+      coexpressed_visual_cue_count: visualCueCount,
+      multimodal_coexpression_same_committed_action_verified:
+        visualCueCount > 0,
+      multimodal_coexpression_semantic_equivalence_verified: false,
+      multimodal_coexpression_intent_inferred: false,
       interpretation_subjective_only: true,
       interaction_function_interpretation_subjective:
         interpretedInteractionFunction !== null,
@@ -335,6 +486,14 @@ export function buildCharacterCommunicationListenerUnderstandingContract() {
     resolver_receives_speaker_private_purpose: false,
     resolver_receives_source_engine_identity: false,
     resolver_receives_source_action_identity: false,
+    multimodal_coexpression_version:
+      characterCommunicationListenerMultimodalCoexpressionVersion,
+    coexpressed_visual_cues_require_same_committed_action: true,
+    coexpressed_visual_cues_are_physical_observer_evidence_only: true,
+    visual_source_actor_identity_exposed: false,
+    visual_source_action_identity_exposed: false,
+    visual_communicative_intent_inferred: false,
+    speech_visual_semantic_equivalence_claimed: false,
     no_resolver_means_no_interpretation: true,
     mishearing_and_partial_interpretation_allowed: true,
     subjective_interaction_function_interpretation_supported: true,

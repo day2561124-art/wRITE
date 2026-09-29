@@ -32,6 +32,7 @@ export function buildWorldSimulationCommunicationOrientationObserverContract() {
     body_source: worldSimulationCommunicationBodyOrientationObserverVersion,
     physical_visual_cues_only: true,
     source_actor_or_action_ids_in_character_view: false,
+    engine_audit_may_retain_admitted_source_lineage: true,
     exact_orientation_or_target_in_character_view: false,
     cue_fusion_or_intent_inference: false,
     native_brain_ingress_performed: false,
@@ -58,17 +59,51 @@ export function projectWorldSimulationObserverCommittedOrientations({
       || gaze.audit?.exact_post_state_verified !== true
       || body.audit?.exact_post_state_verified !== true)
     fail("Orientation source observer or committed revision mismatch.");
-  const views = [...list(gaze.character_view), ...list(body.character_view)];
+  const gazeViews = list(gaze.character_view);
+  const bodyViews = list(body.character_view);
+  const views = [...gazeViews, ...bodyViews];
   if (views.length > 128 || new Set(views.map((cue) => cue.cue_ref)).size !== views.length)
     fail("Orientation cue count or lineage is invalid.");
+
+  const admittedLineage = [];
+  for (const [modality, projection, projectedViews] of [
+    ["gaze", gaze, gazeViews],
+    ["body", body, bodyViews],
+  ]) {
+    const admittedCandidates = list(projection.audit?.candidates)
+      .filter((candidate) => candidate?.admitted === true);
+    if (admittedCandidates.length !== projectedViews.length)
+      fail("Orientation admitted cue lineage does not match projected cues.");
+    for (let index = 0; index < projectedViews.length; index += 1) {
+      const cue = projectedViews[index];
+      const candidate = admittedCandidates[index];
+      if (typeof cue?.cue_ref !== "string"
+          || !cue.cue_ref
+          || typeof candidate?.source_actor !== "string"
+          || !candidate.source_actor
+          || typeof candidate?.source_action_id !== "string"
+          || !candidate.source_action_id) {
+        fail("Orientation admitted cue lineage is incomplete.");
+      }
+      admittedLineage.push({
+        cue_ref: cue.cue_ref,
+        modality,
+        source_actor: candidate.source_actor,
+        source_action_id: candidate.source_action_id,
+      });
+    }
+  }
+
   return copy({
     schema_version: worldSimulationCommunicationOrientationObserverVersion,
     observer: gaze.observer,
     admission_status: views.length ? "visible_physical_cues_only" : "no_admitted_visual_cue",
     character_view: views,
     audit: {
+      source_turn_id: turn.turn_id ?? null,
       source_revision_to: turn.revision_to,
       source_state_hash: turn.next_state_hash,
+      admitted_source_lineage: admittedLineage,
       gaze_candidate_count: list(gaze.audit?.candidates).length,
       body_candidate_count: list(body.audit?.candidates).length,
       admitted_gaze_count: gaze.character_view.length,

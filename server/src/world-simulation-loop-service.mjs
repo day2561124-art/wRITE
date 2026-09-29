@@ -13,7 +13,10 @@ import {
 import {
   buildWorldSimulationCharacterBrainInput,
 } from "./world-simulation-character-brain-input-service.mjs";
-import { readCommittedWorldSimulationObserverOrientations } from "./world-simulation-communication-orientation-observer-service.mjs";
+import {
+  projectWorldSimulationObserverCommittedOrientations,
+  readCommittedWorldSimulationObserverOrientations,
+} from "./world-simulation-communication-orientation-observer-service.mjs";
 import {
   runWorldSimulationObserverTickBrainIngress,
   buildWorldSimulationObserverTickBrainIngressContract,
@@ -5154,24 +5157,44 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       },
     );
 
+    // CC-8O keeps multimodal admission stricter than temporal proximity:
+    // an observer-visible gaze/body cue may accompany a speech candidate only
+    // when engine-private lineage proves it came from the exact SAME committed
+    // communication action. The resolver sees the bounded physical cue but
+    // never the source actor/action IDs or the speaker's private display intent.
+    const listenerSceneId = sceneState.scene_id
+      ?? event.scene_id
+      ?? event.location_id
+      ?? null;
+    const listenerPriorTurn = array(worldHistory?.turns).at(-1);
+    const listenerPriorSceneId = listenerPriorTurn?.event?.scene_id
+      ?? listenerPriorTurn?.event?.location_id
+      ?? null;
+    const listenerCommittedOrientations = listenerPriorTurn
+      && typeof listenerSceneId === "string"
+      && listenerSceneId.trim()
+      && listenerPriorSceneId === listenerSceneId
+      && listenerPriorTurn.next_state_hash === hashAgentRunValue(worldState)
+      ? projectWorldSimulationObserverCommittedOrientations({
+          committed_turn: listenerPriorTurn,
+          post_world_state: worldState,
+          observer: character,
+          scene_id: listenerSceneId,
+        })
+      : null;
+
     // CC-6C begins only after World has established current physical
-    // audibility. It joins an audible CC-6B signal back to exactly one prior
-    // committed public speech event, then exposes only the emitted surface
-    // signal to an observer-specific recognition/interpretation resolver.
-    // Speaker semantic intent, private purpose, source engine identity and
-    // source action identity never enter the resolver view.
+    // audibility. CC-8O optionally augments each speech candidate with only
+    // those observer-admitted visual cues proven to share its exact action.
     const listenerUnderstandingAssembly =
       buildCharacterCommunicationListenerUnderstandingResolverView({
         observer: character,
         world_state: worldState,
         scene_state: sceneState,
-        scene_id:
-          sceneState.scene_id
-          ?? event.scene_id
-          ?? event.location_id
-          ?? null,
+        scene_id: listenerSceneId,
         audibility_result: audibilityQuery.result,
         world_history: worldHistory,
+        committed_orientation_projection: listenerCommittedOrientations,
       });
     const listenerUnderstandingResolver =
       typeof options.characterCommunicationListenerInterpretationResolver === "function"
@@ -5179,6 +5202,9 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         : null;
     const listenerSpeechCandidates =
       array(listenerUnderstandingAssembly.resolver_view?.speech_candidates);
+    const listenerMultimodalContextAvailable = listenerSpeechCandidates.some(
+      (candidate) => array(candidate?.coexpressed_visual_cues).length > 0,
+    );
     const rawListenerUnderstandingDecisions =
       listenerUnderstandingResolver && listenerSpeechCandidates.length > 0
         ? await listenerUnderstandingResolver(
@@ -5213,6 +5239,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
         communication_listener_interpretation_resolver_used:
           Boolean(listenerUnderstandingResolver),
         communication_listener_interpretation_subjective_only: true,
+        communication_listener_multimodal_coexpression_context_available:
+          listenerMultimodalContextAvailable,
+        communication_listener_multimodal_same_committed_action_only: true,
+        communication_listener_multimodal_intent_inferred: false,
+        communication_listener_multimodal_semantic_equivalence_verified: false,
         communication_listener_source_semantics_forwarded: false,
         communication_listener_speaker_identity_inferred: false,
         communication_listener_world_truth_claimed: false,

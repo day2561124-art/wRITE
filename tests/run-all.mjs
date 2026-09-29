@@ -1014,6 +1014,7 @@ const steps = [
   ["CC-8L committed orientation observer convergence", ["tests/communication/cc8-committed-orientation-observer-convergence.test.mjs"]],
   ["CC-8M committed body orientation Brain ingress", ["tests/communication/cc8-body-orientation-brain-ingress.test.mjs"]],
   ["CC-8N converged committed orientation Brain ingress", ["tests/communication/cc8-orientation-converged-brain-ingress.test.mjs"]],
+  ["CC-8O listener multimodal coexpression admission", ["tests/communication/cc8-listener-multimodal-coexpression.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
