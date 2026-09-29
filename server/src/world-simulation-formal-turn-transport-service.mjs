@@ -4,6 +4,7 @@ import { readCommittedWorldSimulationBodyInteroceptiveSignals } from "./world-si
 import { readCommittedWorldSimulationBodyHomeostaticCues } from "./world-simulation-body-homeostatic-cue-service.mjs";
 import { readCommittedWorldSimulationBodyTactileContact } from "./world-simulation-body-tactile-contact-service.mjs";
 import { projectWorldSimulationBodySpeechEffectorFeedback } from "./world-simulation-body-speech-effector-feedback-service.mjs";
+import { readCommittedWorldSimulationObserverGaze } from "./world-simulation-communication-gaze-observer-service.mjs";
 import { readCommittedWorldSimulationBodyProprioceptiveFeedback } from "./world-simulation-body-proprioceptive-feedback-service.mjs";
 import { readCommittedWorldSimulationBodyVestibularFeedback } from "./world-simulation-body-vestibular-feedback-service.mjs";
 
@@ -301,7 +302,26 @@ async function buildFormalActionDecisionBundle(prepared, sessionId, loopOptions)
         expected_revision: prepared.state_revision,
         expected_state_hash: prepared.world_state_hash,
       }, formalLoopOptions(loopOptions));
+    const priorTurn = worldHistory?.turns?.at(-1);
+    const sceneId = prepared.event?.scene_id ?? prepared.event?.location_id;
+    const priorSceneId = priorTurn?.event?.scene_id
+      ?? priorTurn?.event?.location_id;
+    // CC-8C admits a prior committed, same-scene physical cue only at the
+    // next decision. Revision/hash and observer are rechecked by the reader.
+    // Its engine-side audit is never copied to Character Brain.
+    const observerCommittedGaze = sceneId && priorSceneId === sceneId
+      && priorTurn?.revision_to === prepared.state_revision
+      && priorTurn?.next_state_hash === prepared.world_state_hash
+      ? await readCommittedWorldSimulationObserverGaze({
+          session_id: sessionId,
+          observer: packet.character,
+          scene_id: sceneId,
+          expected_revision: prepared.state_revision,
+          expected_state_hash: prepared.world_state_hash,
+        }, formalLoopOptions(loopOptions))
+      : undefined;
     const characterInput = buildWorldSimulationCharacterBrainInput(packet, {
+      observer_committed_gaze: observerCommittedGaze,
       body_interoceptive_signals: bodyInteroceptiveSignals,
       body_tactile_contact: bodyTactileContact,
       body_homeostatic_cues: bodyHomeostaticCues,
@@ -716,6 +736,8 @@ export function buildWorldSimulationFormalTurnTransportContract() {
       raw_world_event_exposed: false,
       engine_session_or_turn_identity_inside_character_input: false,
       legacy_retrieved_memories_alias_in_formal_surface: false,
+      committed_gaze_cue_ingress_from_prior_same_scene_turn: true,
+      committed_gaze_source_actor_action_and_intent_exposed: false,
       model_context_isolation_claimed: false,
     },
     authority: {

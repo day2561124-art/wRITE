@@ -579,6 +579,67 @@ export function buildWorldSimulationCharacterBrainInput(
       ),
   };
 
+  // CC-8C: only the observer's admitted physical cue crosses the Brain
+  // boundary. The projector audit contains source actor/action lineage and
+  // must never be copied into character-facing input.
+  if (options.observer_committed_gaze !== undefined) {
+    const projection = options.observer_committed_gaze;
+    const cues = projection?.character_view;
+    if (!isObject(projection)
+        || projection.schema_version !== "cc8b-committed-gaze-observer-cue-v1"
+        || projection.observer !== input.character
+        || !["visible_physical_cue_only", "no_admitted_visual_cue"]
+          .includes(projection.admission_status)
+        || !Array.isArray(cues) || cues.length > 128
+        || (cues.length > 0) !==
+          (projection.admission_status === "visible_physical_cue_only")) {
+      const error = new Error("CC8C_GAZE_BRAIN_INGRESS_INVALID");
+      error.code = "CC8C_GAZE_BRAIN_INGRESS_INVALID";
+      throw error;
+    }
+    input.observed_gaze_cues = cues.map((cue) => {
+      if (!isObject(cue)
+          || Object.keys(cue).some((key) => ![
+            "schema_version", "kind", "sense", "observer", "cue_ref",
+            "actor_identity_recognized", "exact_orientation_exposed",
+            "gaze_target_inferred", "communicative_intent_inferred",
+            "interpretation", "world_truth_claimed",
+          ].includes(key))
+          || cue.schema_version !== projection.schema_version
+          || cue.observer !== input.character
+          || cue.kind !== "visible_head_orientation_change"
+          || cue.sense !== "visual"
+          || typeof cue.cue_ref !== "string"
+          || !/^gaze_cue_[a-f0-9]{24}$/.test(cue.cue_ref)
+          || cue.actor_identity_recognized !== false
+          || cue.exact_orientation_exposed !== false
+          || cue.gaze_target_inferred !== false
+          || cue.communicative_intent_inferred !== false
+          || cue.interpretation !== null
+          || cue.world_truth_claimed !== false) {
+        const error = new Error("CC8C_GAZE_BRAIN_INGRESS_INVALID");
+        error.code = "CC8C_GAZE_BRAIN_INGRESS_INVALID";
+        throw error;
+      }
+      return {
+        cue_ref: cue.cue_ref,
+        kind: cue.kind,
+        sense: cue.sense,
+        actor_identity_recognized: false,
+        exact_orientation_exposed: false,
+        gaze_target_inferred: false,
+        communicative_intent_inferred: false,
+        interpretation: null,
+        world_truth_claimed: false,
+      };
+    });
+    input.boundaries.committed_gaze_observer_cue_ingress_v1_installed = true;
+    input.boundaries.committed_gaze_actor_identity_exposed = false;
+    input.boundaries.committed_gaze_action_or_scene_id_exposed = false;
+    input.boundaries.committed_gaze_intent_or_target_inferred = false;
+    input.boundaries.committed_gaze_world_truth_authority = false;
+  }
+
   const bodySensoryEvidence = options.body_sensory_evidence;
   if (bodySensoryEvidence !== undefined && bodySensoryEvidence !== null) {
     input.body_sensory_evidence =
