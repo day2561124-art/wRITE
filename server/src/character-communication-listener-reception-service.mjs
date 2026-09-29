@@ -112,6 +112,8 @@ export function projectCharacterCommunicationListenerReception(input = {}) {
     observer,
     sense: "auditory",
     perceptual_label: sensory?.perceptual_label ?? "unidentified_sound",
+    ...(["soft_voice", "projected_voice"].includes(sensory?.vocal_effort_cue)
+      ? { vocal_effort_cue: sensory.vocal_effort_cue } : {}),
     speech_content_intelligible: false,
     speaker_identity_recognized: false,
     listener_understanding_attested: false,

@@ -505,6 +505,38 @@ function resolveEmbodiedCommunicationDisplay({
   };
 }
 
+function resolveCommunicationVocalEffort(actor, candidate, communication, snapshot) {
+  const request = communication.vocal_effort_request;
+  if (request == null) return { ok: true, realization: null };
+  if (!object(request).schema_version
+      || request.schema_version !== "cc8i-vocal-effort-request-v1"
+      || !["soft", "projected"].includes(request.level)
+      || communication.channel !== "speech"
+      || !matchesCharacterCommunicationActionCandidateIdentity(candidate, actor))
+    return { ok: false, reason: "invalid vocal effort request" };
+  const character = object(object(snapshot.characters)[actor]);
+  const physical = object(character.physical_state);
+  const profile = object(character.speech_acoustics);
+  const base = profile.sound_level_db_at_1m;
+  const selected = request.level === "soft"
+    ? profile.soft_sound_level_db_at_1m
+    : profile.projected_sound_level_db_at_1m;
+  if (physical.unconscious === true || physical.incapacitated === true
+      || profile.enabled === false
+      || typeof base !== "number" || !Number.isFinite(base)
+      || base < 0 || base > 120
+      || typeof selected !== "number" || !Number.isFinite(selected)
+      || selected < 0 || selected > 120
+      || (request.level === "soft" ? selected >= base : selected <= base))
+    return { ok: false, reason: "vocal effort requires conscious actor and explicit valid acoustic capacity" };
+  return { ok: true, realization: {
+    schema_version: "cc8i-vocal-effort-realization-v1",
+    level: request.level,
+    sound_level_db_at_1m: selected,
+    source_action_id: candidate.action_id,
+  } };
+}
+
 function resolveCommunicationIntent(
   actor, candidate, rules, outcomes,
   snapshot, next, snapshotScene, sceneId, transitions,
@@ -542,6 +574,13 @@ function resolveCommunicationIntent(
       "blocked",
       surfaceValidation.reason ?? "surface realization is only valid for speech",
     );
+    return durationMs;
+  }
+  const vocalEffort = resolveCommunicationVocalEffort(
+    actor, candidate, communication, snapshot,
+  );
+  if (!vocalEffort.ok) {
+    pushOutcome(outcomes, actor, candidate, "blocked", vocalEffort.reason);
     return durationMs;
   }
   const embodiedDisplay = resolveEmbodiedCommunicationDisplay({
@@ -595,6 +634,8 @@ function resolveCommunicationIntent(
     surface_realization_complete: surfaceValidation.realization !== null,
     ...(embodiedDisplay.realization
       ? { embodied_display: embodiedDisplay.realization } : {}),
+    ...(vocalEffort.realization
+      ? { vocal_effort_realization: vocalEffort.realization } : {}),
     private_purpose_exposed: false,
     withheld_private_content_exposed: false,
     world_truth_claimed: false,

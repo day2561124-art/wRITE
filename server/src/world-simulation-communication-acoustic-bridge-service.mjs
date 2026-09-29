@@ -76,6 +76,26 @@ function makeSignal({ worldState, sceneId, turnId, outcome }) {
   }
   const profile = acousticProfile(worldState, actor);
   if (!profile) return { status: "explicit_speech_acoustics_unavailable", signal: null };
+  const event = object(outcome.communication_event);
+  const effort = object(event.vocal_effort_realization);
+  let level = profile.sound_level_db_at_1m;
+  let effortCue = null;
+  if (event.vocal_effort_realization != null) {
+    const configured = object(object(object(worldState.characters)[actor]).speech_acoustics);
+    const expected = effort.level === "soft"
+      ? configured.soft_sound_level_db_at_1m
+      : configured.projected_sound_level_db_at_1m;
+    if (effort.schema_version !== "cc8i-vocal-effort-realization-v1"
+        || !["soft", "projected"].includes(effort.level)
+        || effort.source_action_id !== actionId
+        || typeof expected !== "number" || !Number.isFinite(expected)
+        || expected !== effort.sound_level_db_at_1m
+        || expected < 0 || expected > 120
+        || (effort.level === "soft" ? expected >= level : expected <= level))
+      return { status: "invalid_committed_vocal_effort", signal: null };
+    level = expected;
+    effortCue = effort.level === "soft" ? "soft_voice" : "projected_voice";
+  }
 
   const soundId = `communication_sound_${hashAgentRunValue({
     version: worldSimulationCommunicationAcousticBridgeVersion,
@@ -94,7 +114,8 @@ function makeSignal({ worldState, sceneId, turnId, outcome }) {
       scene_id: sceneId,
       source_entity_id: actor,
       communication_action_id: actionId,
-      sound_level_db_at_1m: profile.sound_level_db_at_1m,
+      sound_level_db_at_1m: level,
+      ...(effortCue ? { vocal_effort_cue: effortCue } : {}),
       ...(profile.max_range_m !== null ? { max_range_m: profile.max_range_m } : {}),
       generic_auditory_label: "unidentified_speech_sound",
       lifecycle: "next_perception_only",

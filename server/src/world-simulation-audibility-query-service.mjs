@@ -405,6 +405,10 @@ function solveAudibility(context) {
           sense: "auditory",
           kind: "audible_sound",
           perceptual_label: safeAuditoryLabel(scene, observer, signal),
+          ...(signal.raw.schema_version === "cc6b-communication-acoustic-bridge-v1"
+            && signal.raw.kind === "communication_speech_signal"
+            && ["soft_voice", "projected_voice"].includes(signal.raw.vocal_effort_cue)
+            ? { vocal_effort_cue: signal.raw.vocal_effort_cue } : {}),
           ...(relativeDirection ? { relative_direction_sector: relativeDirection } : {}),
           localization_is_coarse: Boolean(relativeDirection),
         });

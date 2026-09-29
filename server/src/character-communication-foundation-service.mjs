@@ -256,6 +256,10 @@ export function planCharacterCommunication(characterInput = {}) {
   if (goal.surface_realization != null
     && (!["direct", "indirect"].includes(mode) || !isRecord(goal.surface_realization)))
     fail("Mandarin surface realization must be a structured speech-goal request.");
+  if (goal.vocal_effort != null
+    && (!["direct", "indirect"].includes(mode)
+      || !["soft", "projected"].includes(goal.vocal_effort)))
+    fail("Vocal effort requires an explicit bounded speech-goal choice.");
   // CC-3: an opportunity is a decision in this speaker's current cognition,
   // never a World or partner-state inference. A choice not to participate
   // must not be converted into a speech/nonverbal candidate.
@@ -645,6 +649,7 @@ export function matchesCharacterCommunicationActionCandidateIdentity(candidate, 
     public_message: communication.message,
     communication_ir: communication.ir,
     embodied_display_request: communication.embodied_display_request ?? null,
+    vocal_effort_request: communication.vocal_effort_request ?? null,
     surface_realization: communication.surface_realization ?? null,
   };
   return candidate.action_id === `communication_${hashAgentRunValue(identity).slice(0, 24)}`;
@@ -688,6 +693,10 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
         target_relation: "addressee",
       }
     : null;
+  const vocalEffortRequest = channel === "speech" && communicationGoal.vocal_effort != null
+    ? { schema_version: "cc8i-vocal-effort-request-v1",
+        level: communicationGoal.vocal_effort }
+    : null;
   const surfaceRealization = channel === "speech" && communicationGoal.surface_realization != null
     ? realizeCharacterCommunicationMandarin({
         ...plan,
@@ -703,6 +712,7 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
     public_message: publicMessage,
     communication_ir: communicationIr,
     embodied_display_request: embodiedDisplayRequest,
+    vocal_effort_request: vocalEffortRequest,
     surface_realization: surfaceRealization,
   };
   return copy({
@@ -721,6 +731,8 @@ export function buildCharacterCommunicationActionCandidate(characterInput = {}) 
       ir: communicationIr,
       ...(embodiedDisplayRequest
         ? { embodied_display_request: embodiedDisplayRequest } : {}),
+      ...(vocalEffortRequest
+        ? { vocal_effort_request: vocalEffortRequest } : {}),
       ...(surfaceRealization ? { surface_realization: surfaceRealization } : {}),
       surface_realization_complete: surfaceRealization !== null,
       private_purpose_exposed: false,

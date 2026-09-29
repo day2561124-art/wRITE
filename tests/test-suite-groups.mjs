@@ -61,6 +61,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-8A embodied gaze effector foundation", ["tests/communication/cc8-embodied-gaze-effector.test.mjs"]]),
   Object.freeze(["CC-8B committed gaze observer cue", ["tests/communication/cc8-committed-gaze-observer.test.mjs"]]),
   Object.freeze(["CC-8H native speech gaze co-observation", ["tests/communication/cc8-speech-gaze-coobservation.test.mjs"]]),
+  Object.freeze(["CC-8I bounded vocal effort", ["tests/communication/cc8-vocal-effort.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
