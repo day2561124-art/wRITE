@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
-import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
+import { buildCommittedWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
 import { projectRoot } from "../../server/src/project-paths.mjs";
 import { runWorldSimulationTurn, prepareWorldSimulationTurn, resolveWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
 import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
@@ -52,7 +52,11 @@ try {
   const before = await getWorldSimulationState(id, options), beforeHistory = await getWorldSimulationHistory(id, options);
   const prepared = await prepareWorldSimulationTurn({ world_simulation_session_id: id, event_id: "event86b-2" }, options);
   for (const packet of prepared.decision_packets) {
-    const formalView = buildWorldSimulationCharacterBrainInput(packet);
+    const formalView = await buildCommittedWorldSimulationCharacterBrainInput({
+      session_id: id, decision_packet: packet,
+      expected_revision: prepared.state_revision,
+      expected_state_hash: prepared.world_state_hash,
+    }, options);
     assert.equal(Object.hasOwn(formalView.cognition.coping_context, "response_contract"), false);
     assert.equal(formalView.cognition.coping_context.appraisals.length, 1);
   }

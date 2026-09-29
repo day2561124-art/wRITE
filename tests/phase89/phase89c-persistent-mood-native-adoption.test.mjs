@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { projectRoot } from "../../server/src/project-paths.mjs";
-import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
+import { buildCommittedWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
 import {
   buildWorldSimulationFormalImpasseDeliberationRound,
   buildWorldSimulationFormalImpasseStoredSubmission,
@@ -238,7 +238,11 @@ try {
     );
   }
 
-  const directBrainInput = buildWorldSimulationCharacterBrainInput(directAlice);
+  const directBrainInput = await buildCommittedWorldSimulationCharacterBrainInput({
+    session_id: directSessionId, decision_packet: directAlice,
+    expected_revision: directPrepared.state_revision,
+    expected_state_hash: directPrepared.world_state_hash,
+  }, fixtureOptions);
   assert.deepEqual(
     directBrainInput.cognition.persistent_mood_context,
     directAlice.cognition.persistent_mood_context,
