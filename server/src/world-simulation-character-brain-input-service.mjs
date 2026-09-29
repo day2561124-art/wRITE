@@ -579,6 +579,16 @@ export function buildWorldSimulationCharacterBrainInput(
       ),
   };
 
+  // An early-cognition cue may only reach the final Brain through the exact
+  // committed observer projection supplied by trusted transport.
+  const hasEmbeddedGaze = [input.cognition?.perception, input.perception]
+    .some((view) => isObject(view)
+      && Object.hasOwn(view, "observed_gaze_cues"));
+  if (hasEmbeddedGaze && options.observer_committed_gaze === undefined) {
+    const error = new Error("CC8C_GAZE_BRAIN_INGRESS_INVALID");
+    error.code = "CC8C_GAZE_BRAIN_INGRESS_INVALID";
+    throw error;
+  }
   // CC-8C: only the observer's admitted physical cue crosses the Brain
   // boundary. The projector audit contains source actor/action lineage and
   // must never be copied into character-facing input.
@@ -633,6 +643,21 @@ export function buildWorldSimulationCharacterBrainInput(
         world_truth_claimed: false,
       };
     });
+    let duplicateRemoved = false;
+    for (const view of [input.cognition?.perception, input.perception]) {
+      if (!isObject(view) || !Object.hasOwn(view, "observed_gaze_cues")) continue;
+      if (JSON.stringify(view.observed_gaze_cues) !== JSON.stringify(cues)) {
+        const error = new Error("CC8C_GAZE_BRAIN_INGRESS_INVALID");
+        error.code = "CC8C_GAZE_BRAIN_INGRESS_INVALID";
+        throw error;
+      }
+      // One semantic cue exposure at final action choice. Early cognition and
+      // proposal already consumed this evidence before the packet was built.
+      delete view.observed_gaze_cues;
+      duplicateRemoved = true;
+    }
+    input.boundaries.committed_gaze_early_cognition_duplicate_removed =
+      duplicateRemoved;
     input.boundaries.committed_gaze_observer_cue_ingress_v1_installed = true;
     input.boundaries.committed_gaze_actor_identity_exposed = false;
     input.boundaries.committed_gaze_action_or_scene_id_exposed = false;

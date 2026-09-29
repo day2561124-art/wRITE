@@ -971,6 +971,9 @@ function buildWorldCharacterCognition(input = {}) {
       observed: perception.observed ?? [],
       audible: perception.audible ?? [],
       other_senses: perception.other_senses ?? [],
+      ...(Object.hasOwn(perception, "observed_gaze_cues")
+        ? { observed_gaze_cues: perception.observed_gaze_cues }
+        : {}),
     }),
     recovered_memories:
       memories,
@@ -1372,6 +1375,14 @@ async function executeWorldSimulationCapability(
     // Phase62B remains the raw-input policy boundary. Unauthorized
     // narrative/control fields fail closed before trusted preparation.
     assertWorldSimulationInputBoundary(capabilityName, input);
+    if (capabilityName === "world_character_cognition"
+        && assuranceMode !== worldSimulationCharacterFacingAssuranceModes
+          .NATIVE_ENGINE_VERIFIED
+        && Object.hasOwn(object(input.perception), "observed_gaze_cues")) {
+      const error = new Error("Committed gaze cues require native World admission.");
+      error.code = "CC8E_GAZE_EARLY_COGNITION_SOURCE_INVALID";
+      throw error;
+    }
 
     const trustedBase = builder(input);
     if (!isObject(trustedBase)) {

@@ -6711,13 +6711,36 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
       audit: cloneJson(revisedStructuredSelfModelCharacterProjection.audit),
     });
 
+    // CC-8E: admit the immediately prior committed same-scene visual cue
+    // into cognition before candidate proposal. Keep the source audit private
+    // and leave the general perception/memory-retrieval channels untouched.
+    const priorCognitionTurn = worldHistory?.turns?.at(-1);
+    const cognitionSceneId = event.scene_id ?? event.location_id;
+    const priorCognitionSceneId = priorCognitionTurn?.event?.scene_id
+      ?? priorCognitionTurn?.event?.location_id;
+    const cognitionGaze = cognitionSceneId
+      && priorCognitionSceneId === cognitionSceneId
+      && priorCognitionTurn?.revision_to === snapshot.revision
+      && priorCognitionTurn?.next_state_hash === snapshot.state_hash
+      ? await readCommittedWorldSimulationObserverGaze({
+          session_id: sessionId,
+          observer: character,
+          scene_id: cognitionSceneId,
+          expected_revision: snapshot.revision,
+          expected_state_hash: snapshot.state_hash,
+        }, options)
+      : undefined;
+    const cognitionPerception = cognitionGaze
+      ? { ...characterPerception,
+          observed_gaze_cues: cloneJson(cognitionGaze.character_view) }
+      : characterPerception;
     const cognition = await capability(
       sessionId,
       "world_character_cognition",
       {
         character,
         character_state: characterState,
-        perception: characterPerception,
+        perception: cognitionPerception,
 
         recovered_memories:
           recoveredMemories,

@@ -10,7 +10,8 @@ import { readCommittedWorldSimulationObserverGaze } from "../../server/src/world
 import { buildWorldSimulationCharacterBrainInput } from "../../server/src/world-simulation-character-brain-input-service.mjs";
 import { prepareFormalWorldSimulationTurn } from "../../server/src/world-simulation-formal-turn-transport-service.mjs";
 import { createEphemeralWorldSimulationPreparedTurnBroker } from "../../server/src/world-simulation-prepared-turn-ephemeral-broker.mjs";
-import { createWorldSimulationCharacterRuntimeManager, runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
+import { createWorldSimulationCharacterRuntimeManager, prepareWorldSimulationTurn, runWorldSimulationTurn } from "../../server/src/world-simulation-loop-service.mjs";
+import { run_world_character_cognition } from "../../server/src/world-simulation-neural-service.mjs";
 
 const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `cc8c-${process.pid}-${Date.now()}`);
@@ -92,12 +93,42 @@ try {
     character: "B",
   }, { observer_committed_gaze: forged }), { code: "CC8C_GAZE_BRAIN_INGRESS_INVALID" });
 
+  await assert.rejects(run_world_character_cognition({
+    character: "B", character_state: {},
+    perception: { observed_gaze_cues: committed.character_view },
+  }, { ...options, run_id: id }),
+  { code: "CC8E_GAZE_EARLY_COGNITION_SOURCE_INVALID" });
+
+  const early = await prepareWorldSimulationTurn({
+    world_simulation_session_id: id,
+  }, options);
+  const earlyPacket = early.decision_packets.find((packet) => packet.character === "B");
+  assert(earlyPacket);
+  assert.deepEqual(earlyPacket.cognition.perception.observed_gaze_cues,
+    committed.character_view);
+  assert.equal(Object.hasOwn(earlyPacket.perception, "observed_gaze_cues"), false);
+  const earlyText = JSON.stringify(earlyPacket.cognition.perception.observed_gaze_cues);
+  assert.equal(earlyText.includes(action.action_id), false);
+  assert.equal(earlyText.includes("不希望 B 離開"), false);
+  assert.throws(() => buildWorldSimulationCharacterBrainInput(earlyPacket),
+    { code: "CC8C_GAZE_BRAIN_INGRESS_INVALID" });
+  const tamperedEarly = structuredClone(earlyPacket);
+  tamperedEarly.cognition.perception.observed_gaze_cues[0].cue_ref =
+    "gaze_cue_" + "0".repeat(24);
+  assert.throws(() => buildWorldSimulationCharacterBrainInput(tamperedEarly,
+    { observer_committed_gaze: committed }),
+  { code: "CC8C_GAZE_BRAIN_INGRESS_INVALID" });
+
   const prepared = await prepareFormalWorldSimulationTurn({
     world_simulation_session_id: id,
   }, { ...options, preparedTurnBroker: createEphemeralWorldSimulationPreparedTurnBroker() });
   assert.equal(prepared.current_decision?.character_input?.character, "B");
   assert.deepEqual(prepared.current_decision.character_input.observed_gaze_cues,
     built.observed_gaze_cues);
+  assert.equal(Object.hasOwn(prepared.current_decision.character_input.cognition.perception,
+    "observed_gaze_cues"), false);
+  assert.equal(prepared.current_decision.character_input.boundaries
+    .committed_gaze_early_cognition_duplicate_removed, true);
   const formalText = JSON.stringify(prepared.current_decision.character_input);
   assert.equal(formalText.includes(action.action_id), false);
   assert.equal(formalText.includes("不希望 B 離開"), false);
@@ -127,11 +158,13 @@ try {
   assert.equal(nativeInputs.length, 1);
   assert.equal(nativeInputs[0].character, "B");
   assert.deepEqual(nativeInputs[0].observed_gaze_cues, built.observed_gaze_cues);
+  assert.equal(Object.hasOwn(nativeInputs[0].cognition.perception,
+    "observed_gaze_cues"), false);
   const nativeText = JSON.stringify(nativeInputs[0]);
   assert.equal(nativeText.includes(action.action_id), false);
   assert.equal(nativeText.includes("不希望 B 離開"), false);
   assert.equal(nativeText.includes('"source_action_id"'), false);
-  console.log("CC-8C/D committed gaze formal and native Brain ingress tests passed.");
+  console.log("CC-8C/D/E committed gaze formal, native and early cognition ingress tests passed.");
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
