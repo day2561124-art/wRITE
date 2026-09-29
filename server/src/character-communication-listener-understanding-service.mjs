@@ -77,6 +77,8 @@ function safeAuditoryObservation(audibilityResult, soundId) {
     sense: item.sense ?? "auditory",
     kind: item.kind ?? "audible_sound",
     perceptual_label: item.perceptual_label ?? "unidentified_sound",
+    ...(["soft_voice", "projected_voice"].includes(item.vocal_effort_cue)
+      ? { vocal_effort_cue: item.vocal_effort_cue } : {}),
     ...(typeof item.relative_direction_sector === "string"
       ? { relative_direction_sector: item.relative_direction_sector }
       : {}),

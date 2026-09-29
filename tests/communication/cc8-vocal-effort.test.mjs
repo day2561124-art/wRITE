@@ -5,6 +5,7 @@ import { adjudicateWorldSimulationCausality } from "../../server/src/world-simul
 import { projectWorldSimulationCommunicationAcousticBridge } from "../../server/src/world-simulation-communication-acoustic-bridge-service.mjs";
 import { queryWorldSimulationObserverAudibility } from "../../server/src/world-simulation-audibility-query-service.mjs";
 import { projectCharacterCommunicationListenerReception } from "../../server/src/character-communication-listener-reception-service.mjs";
+import { buildCharacterCommunicationListenerUnderstandingResolverView } from "../../server/src/character-communication-listener-understanding-service.mjs";
 
 const semantic = "男孩離開房子";
 function candidate(effort = "projected") {
@@ -83,6 +84,17 @@ async function adjudicate(state, action) {
   assert.equal(reception.admission_status, "heard_sound_only");
   assert.equal(reception.character_view.vocal_effort_cue, "projected_voice");
   assert.equal(reception.character_view.speech_content_intelligible, false);
+  const resolver = buildCharacterCommunicationListenerUnderstandingResolverView({
+    observer: "B", world_state: post, scene_state: post.scenes.room,
+    scene_id: "room",
+    world_history: { turns: [{ turn_id: "speak", action_outcomes: [outcome] }] },
+    audibility_result: hearing,
+  });
+  assert.equal(resolver.resolver_view.speech_candidates.length, 1);
+  assert.equal(resolver.resolver_view.speech_candidates[0]
+    .acoustic_observation.vocal_effort_cue, "projected_voice");
+  assert.equal(JSON.stringify(resolver.resolver_view).includes(action.action_id), false);
+  assert.equal(JSON.stringify(resolver.resolver_view).includes(sound.sound_id), false);
   const observed = JSON.stringify(hearing.perception_auditory_observations);
   assert.equal(observed.includes(semantic), false);
   assert.equal(observed.includes(action.action_id), false);
