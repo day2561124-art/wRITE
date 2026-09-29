@@ -64,6 +64,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-8I bounded vocal effort", ["tests/communication/cc8-vocal-effort.test.mjs"]]),
   Object.freeze(["CC-8J committed body orientation display", ["tests/communication/cc8-body-orientation-display.test.mjs"]]),
   Object.freeze(["CC-8K committed body orientation observer cue", ["tests/communication/cc8-committed-body-orientation-observer.test.mjs"]]),
+  Object.freeze(["CC-8L committed orientation observer convergence", ["tests/communication/cc8-committed-orientation-observer-convergence.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

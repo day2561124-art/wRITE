@@ -1011,6 +1011,7 @@ const steps = [
   ["CC-8I bounded vocal effort", ["tests/communication/cc8-vocal-effort.test.mjs"]],
   ["CC-8J committed body orientation display", ["tests/communication/cc8-body-orientation-display.test.mjs"]],
   ["CC-8K committed body orientation observer cue", ["tests/communication/cc8-committed-body-orientation-observer.test.mjs"]],
+  ["CC-8L committed orientation observer convergence", ["tests/communication/cc8-committed-orientation-observer-convergence.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
