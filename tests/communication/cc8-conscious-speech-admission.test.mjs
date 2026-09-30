@@ -169,4 +169,64 @@ for (const reverse of [false, true]) {
   }
   assert.equal((result.next_world_state.sound_events ?? []).length, 0);
 }
-console.log("CC-8U/8W conscious existing actor speech admission tests passed.");
+// CC-8X: noncanonical channels cannot bypass physical admission.
+for (const channel of [" speech ", "\tspeech\n", ["speech"], [" speech "]]) {
+  for (const physical of [{}, { unconscious: true }, { incapacitated: true },
+    { immobilized: true }, null, "absent"]) {
+    const state = world();
+    if (physical === "absent") delete state.characters.A;
+    else if (physical === null) state.characters.A = null;
+    else state.characters.A.physical_state = physical;
+    state.sound_events = [ambient];
+    const action = candidate(null);
+    action.communication.channel = channel;
+    const original = hashAgentRunValue({ state, action });
+    const { result, outcome } = await adjudicate(state, action);
+    assert.equal(outcome.result, "blocked", "CC-8X noncanonical channel");
+    assert.match(outcome.causal_evidence, /canonical communication channel/);
+    assert.equal(Object.hasOwn(outcome, "communication_event"), false);
+    assert.equal(Object.hasOwn(outcome, "communication_speech_stream"), false);
+    assert.equal(result.communication_observer_increment_admissions.length, 0);
+    assert.deepEqual(result.next_world_state.characters, state.characters);
+    assert.deepEqual(result.next_world_state.sound_events, [ambient]);
+    assert.equal(hashAgentRunValue({ state, action }), original);
+  }
+  for (const effort of [null, "soft", "projected"]) {
+    const state = world();
+    const action = candidate(effort);
+    action.communication.channel = channel;
+    action.communication.surface_realization_complete = false;
+    action.communication.surface_realization = null;
+    const { result, outcome } = await adjudicate(state, action);
+    assert.equal(outcome.result, "blocked");
+    assert.match(outcome.causal_evidence, /canonical communication channel/);
+    assert.equal(Object.hasOwn(outcome, "communication_event"), false);
+    assert.equal(Object.hasOwn(outcome, "communication_speech_stream"), false);
+    assert.equal(result.communication_observer_increment_admissions.length, 0);
+  }
+  for (const reverse of [false, true]) {
+    const state = world();
+    const invalid = candidate(null);
+    invalid.communication.channel = channel;
+    const valid = candidate("soft");
+    const actions = reverse ? [valid, invalid] : [invalid, valid];
+    const result = await adjudicateWorldSimulationCausality({
+      world_simulation_session_id: "cc8x", turn_id: "speak",
+      world_state: state, world_state_hash: hashAgentRunValue(state),
+      world_state_revision: 0, event: state.event_queue[0],
+      selected_action_intents: actions.map(action => ({
+        character: "A", selection: "candidate_action_intent", candidate: action,
+      })),
+    });
+    const blocked = result.action_outcomes.find(item => item.action_id === invalid.action_id);
+    const emitted = result.action_outcomes.find(item => item.action_id === valid.action_id);
+    assert.equal(blocked.result, "blocked");
+    assert.match(blocked.causal_evidence, /canonical communication channel/);
+    assert.equal(emitted.result, "communication_emitted");
+    assert.equal(result.next_world_state.sound_events.filter(item =>
+      item.communication_action_id === valid.action_id).length, 1);
+    assert.equal(result.next_world_state.sound_events.filter(item =>
+      item.communication_action_id === invalid.action_id).length, 0);
+  }
+}
+console.log("CC-8U/8W/8X canonical conscious existing actor speech admission tests passed.");

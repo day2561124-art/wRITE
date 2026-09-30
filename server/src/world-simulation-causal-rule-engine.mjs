@@ -515,6 +515,9 @@ function resolveEmbodiedCommunicationDisplay({
 }
 
 function resolveCommunicationVocalEffort(actor, candidate, communication, snapshot) {
+  // Commit and effector admission must interpret the same channel enum.
+  if (!["speech", "nonverbal"].includes(communication.channel))
+    return { ok: false, reason: "canonical communication channel required" };
   const characters = object(snapshot.characters);
   if (communication.channel === "speech"
       && (!Object.hasOwn(characters, actor) || !isObject(characters[actor])))
