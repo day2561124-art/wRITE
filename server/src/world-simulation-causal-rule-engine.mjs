@@ -444,7 +444,7 @@ export function validateCommunicationSurfaceRealization(actor, candidate, commun
 
 function resolveEmbodiedCommunicationDisplay({
   actor, addressee, candidate, communication, snapshot, next,
-  snapshotScene, sceneId, transitions,
+  snapshotScene, sceneId, transitions, validate_only = false,
 }) {
   const request = object(communication.embodied_display_request);
   if (!Object.keys(request).length) {
@@ -481,6 +481,7 @@ function resolveEmbodiedCommunicationDisplay({
   const degrees = ((rawDegrees % 360) + 360) % 360;
   const body = request.modality === "body";
   const field = body ? "body_facing_degrees" : "facing_degrees";
+  if (validate_only) return { ok: true, realization: null };
   const before = actorState[field] ?? null;
   next.characters[actor][field] = degrees;
   pushTransition(
@@ -952,6 +953,82 @@ function resolveAttack(snapshot, snapshotScene, actor, candidate, rules, outcome
 }
 
 
+// CC-8Q reserves actual effectors for the selected action interval before
+// any preview mutation. All overlapping claimants fail; input order never
+// chooses a winning movement or public communication signal.
+function embodiedEffectorConflicts(intents, rules, nativeResponse, {
+  snapshot, snapshotScene, sceneId,
+}) {
+  const claims = [];
+  for (const [index, selected] of intents.entries()) {
+    const actor = String(selected?.character ?? "").trim();
+    const candidate = object(selected?.candidate);
+    if (!actor || selected?.selection === "reject_all") continue;
+    const kind = actionKind(candidate);
+    const communication = object(candidate.communication);
+    const resources = [];
+    let durationMs = 0;
+    if (kind === "head_orientation" || kind === "body_orientation") {
+      const degrees = object(candidate.motor_command)[kind === "head_orientation"
+        ? "facing_degrees" : "body_facing_degrees"];
+      const physical = object(object(object(snapshot.characters)[actor]).physical_state);
+      if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !positionFor(snapshotScene, actor)
+          || physical.unconscious === true || physical.incapacitated === true
+          || typeof degrees !== "number" || !Number.isFinite(degrees)
+          || degrees < 0 || degrees >= 360) continue;
+      resources.push(kind);
+      durationMs = parseDurationMs(candidate, kind === "head_orientation" ? 250 : 300);
+    } else if (kind === "communication"
+        && matchesCharacterCommunicationActionCandidateIdentity(candidate, actor)) {
+      const channel = communication.channel;
+      const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
+      const message = object(communication.message);
+      if (!addressee || addressee === actor || !["speech", "nonverbal"].includes(channel)
+          || !String(channel === "speech" ? message.semantic_content ?? ""
+            : message.signal_intent ?? "").trim()) continue;
+      const surface = validateCommunicationSurfaceRealization(actor, candidate, communication, message);
+      if (!surface.ok || (channel !== "speech" && surface.realization !== null)
+          || !resolveCommunicationVocalEffort(actor, candidate, communication, snapshot).ok
+          || !resolveEmbodiedCommunicationDisplay({
+            actor, addressee, candidate, communication, snapshot,
+            snapshotScene, sceneId, validate_only: true,
+          }).ok) continue;
+      // A semantic-only unfinished surface does not claim an emitted voice.
+      if (channel === "speech" && surface.realization !== null) resources.push("vocal_production");
+      const display = object(communication.embodied_display_request);
+      if (display.modality === "gaze") resources.push("head_orientation");
+      if (display.modality === "body") resources.push("body_orientation");
+      durationMs = resolveCommunicationDurationMs(candidate, rules, channel);
+    }
+    if (!resources.length) continue;
+    const start = nativeResponse.actor === actor
+      && nativeResponse.action_id === candidate.action_id ? nativeResponse.start_time_ms : 0;
+    claims.push({ index, actor, resources, start, end: start + durationMs });
+  }
+  const conflicts = new Map();
+  const overlaps = (a, b) => a.start === a.end
+    ? (b.start === b.end ? a.start === b.start : a.start >= b.start && a.start < b.end)
+    : b.start === b.end ? b.start >= a.start && b.start < a.end
+      : Math.max(a.start, b.start) < Math.min(a.end, b.end);
+  for (let i = 0; i < claims.length; i += 1) {
+    for (let j = i + 1; j < claims.length; j += 1) {
+      const a = claims[i], b = claims[j];
+      if (a.actor !== b.actor || !overlaps(a, b)) continue;
+      const shared = a.resources.filter(resource => b.resources.includes(resource));
+      if (!shared.length) continue;
+      for (const claim of [a, b]) {
+        const conflict = conflicts.get(claim.index) ?? {
+          resources: new Set(), elapsedMs: claim.end,
+        };
+        shared.forEach(resource => conflict.resources.add(resource));
+        conflicts.set(claim.index, conflict);
+      }
+    }
+  }
+  return conflicts;
+}
+
 function resolveSpatialRulePreview(input = {}) {
   const snapshot = cloneJson(object(input.world_state));
   const next = cloneJson(snapshot);
@@ -967,13 +1044,23 @@ function resolveSpatialRulePreview(input = {}) {
   const claims = pickupClaims(selectedActionIntents);
   const plans = movementPlans(snapshot, snapshotScene, selectedActionIntents);
   const movementConflicts = movementDestinationConflicts(snapshot, snapshotScene, plans);
+  const effectorConflicts = embodiedEffectorConflicts(selectedActionIntents, rules, nativeResponse, {
+    snapshot, snapshotScene, sceneId,
+  });
   let elapsedMs = 0;
 
-  for (const selected of selectedActionIntents) {
+  for (const [selectionIndex, selected] of selectedActionIntents.entries()) {
     const actor = String(selected?.character ?? "").trim();
     const candidate = object(selected?.candidate);
     if (!actor || selected?.selection === "reject_all" || !Object.keys(candidate).length) {
       pushOutcome(outcomes, actor || null, candidate, "no_action_selected", "character brain rejected all candidate intents");
+      continue;
+    }
+    const conflict = effectorConflicts.get(selectionIndex);
+    if (conflict) {
+      elapsedMs = Math.max(elapsedMs, conflict.elapsedMs);
+      pushOutcome(outcomes, actor, candidate, "embodied_effector_conflict",
+        `overlapping selected action claims on ${[...conflict.resources].sort().join(", ")}`);
       continue;
     }
     const kind = actionKind(candidate);
@@ -1206,6 +1293,13 @@ export function buildWorldSimulationCausalRuleContract() {
       simultaneous_pickup_contention_blocks_all_claimants: true,
     },
     communication: {
+      embodied_effector_contention: {
+        resources: ["head_orientation", "body_orientation", "vocal_production"],
+        only_precondition_valid_selected_claims_contend: true,
+        overlapping_selected_claimants_blocked_before_preview_mutation: true,
+        adjacent_action_intervals_conflict: false,
+        resource_capacity_or_physiology_inferred: false,
+      },
       bounded_character_authored_plan_required: true,
       selected_action_required_before_emission: true,
       world_layer_records_emission_not_intended_effect_success: true,
