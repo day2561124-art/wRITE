@@ -127,4 +127,46 @@ for (const physical of [{ unconscious: true }, { incapacitated: true }]) {
   assert.equal(outcome.result, "communication_emitted");
   assert.equal((result.next_world_state.sound_events ?? []).length, 0);
 }
-console.log("CC-8U conscious speech admission tests passed.");
+// CC-8W: speech must originate from an existing World character record.
+for (const missing of [true, false]) {
+  for (const record of missing ? [undefined] : [null, false, 0, "actor", []]) {
+    for (const effort of [null, "soft", "projected"]) {
+      const state = world();
+      if (missing) delete state.characters.A;
+      else state.characters.A = record;
+      state.sound_events = [ambient];
+      const action = candidate(effort);
+      const original = hashAgentRunValue({ state, action });
+      const { result, outcome } = await adjudicate(state, action);
+      assert.equal(outcome.result, "blocked", "CC-8W absent or invalid actor");
+      assert.match(outcome.causal_evidence, /existing actor/);
+      assert.equal(Object.hasOwn(outcome, "communication_event"), false);
+      assert.equal(Object.hasOwn(outcome, "communication_speech_stream"), false);
+      assert.equal(result.communication_observer_increment_admissions.length, 0);
+      assert.deepEqual(result.next_world_state.characters, state.characters);
+      assert.deepEqual(result.next_world_state.sound_events, [ambient]);
+      assert.equal(hashAgentRunValue({ state, action }), original);
+    }
+  }
+}
+for (const reverse of [false, true]) {
+  const state = world();
+  delete state.characters.A;
+  const actions = [candidate(null), candidate("soft")];
+  if (reverse) actions.reverse();
+  const result = await adjudicateWorldSimulationCausality({
+    world_simulation_session_id: "cc8w", turn_id: "speak",
+    world_state: state, world_state_hash: hashAgentRunValue(state),
+    world_state_revision: 0, event: state.event_queue[0],
+    selected_action_intents: actions.map(action => ({
+      character: "A", selection: "candidate_action_intent", candidate: action,
+    })),
+  });
+  assert.equal(result.action_outcomes.length, 2);
+  for (const outcome of result.action_outcomes) {
+    assert.equal(outcome.result, "blocked");
+    assert.match(outcome.causal_evidence, /existing actor/);
+  }
+  assert.equal((result.next_world_state.sound_events ?? []).length, 0);
+}
+console.log("CC-8U/8W conscious existing actor speech admission tests passed.");

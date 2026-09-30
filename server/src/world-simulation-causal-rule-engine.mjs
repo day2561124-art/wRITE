@@ -515,7 +515,11 @@ function resolveEmbodiedCommunicationDisplay({
 }
 
 function resolveCommunicationVocalEffort(actor, candidate, communication, snapshot) {
-  const character = object(object(snapshot.characters)[actor]);
+  const characters = object(snapshot.characters);
+  if (communication.channel === "speech"
+      && (!Object.hasOwn(characters, actor) || !isObject(characters[actor])))
+    return { ok: false, reason: "speech requires existing actor" };
+  const character = object(characters[actor]);
   const physical = object(character.physical_state);
   // Ordinary speech uses the same actor admission as explicit vocal effort,
   // before either voice reservation or public signal production.
