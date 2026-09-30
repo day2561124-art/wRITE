@@ -68,6 +68,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-8M committed body orientation Brain ingress", ["tests/communication/cc8-body-orientation-brain-ingress.test.mjs"]]),
   Object.freeze(["CC-8N converged committed orientation Brain ingress", ["tests/communication/cc8-orientation-converged-brain-ingress.test.mjs"]]),
   Object.freeze(["CC-8O listener multimodal coexpression admission", ["tests/communication/cc8-listener-multimodal-coexpression.test.mjs"]]),
+  Object.freeze(["CC-8P multimodal subjective social lifecycle", ["tests/communication/cc8-multimodal-social-lifecycle.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 
