@@ -69,6 +69,7 @@ function assertUnique(label, values) {
 
 const activeRunAllPaths = [
   ...runAllSource.matchAll(/"tests\/body-0-authority\.test\.mjs"/g),
+  ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-sleep-arousal-reader\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-history\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-brain-body-contract\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-recovery-authority\.test\.mjs"/g),
@@ -226,7 +227,7 @@ assert.deepEqual(
 for (const testPath of worldPaths) {
   assert.match(
     testPath,
-    /^tests\/(?:body-0-authority\.test\.mjs$|body-0-history\.test\.mjs$|body-0-brain-body-contract\.test\.mjs$|body-0-recovery-authority\.test\.mjs$|body-1-sensorimotor-reentry\.test\.mjs$|body-1-head-orientation\.test\.mjs$|body-1-tactile-contact\.test\.mjs$|body-1-proprioceptive-feedback\.test\.mjs$|body-1-auditory-reentry\.test\.mjs$|body-1-olfactory-reentry\.test\.mjs$|body-1-gustatory-contact\.test\.mjs$|body-1-interoceptive-signal\.test\.mjs$|body-1-interoceptive-brain-ingress\.test\.mjs$|body-1-speech-effector-feedback\.test\.mjs$|body-1-eye-orientation\.test\.mjs$|body-1-proprioceptive-brain-ingress\.test\.mjs$|body-1-vestibular-head-rotation\.test\.mjs$|body-1-vestibular-brain-ingress\.test\.mjs$|body-1-respiratory-state\.test\.mjs$|body-1-body-orientation\.test\.mjs$|body-1-homeostatic-cue\.test\.mjs$|body-1-homeostatic-brain-ingress\.test\.mjs$|body-1-tactile-brain-ingress\.test\.mjs$|body-1-native-olfactory-turn\.test\.mjs$|body-1-sensorimotor-loop-gate\.test\.mjs$|(?:cb-c2|cb-c5|phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\/)/,
+    /^tests\/(?:body-0-authority\.test\.mjs$|body-0-history\.test\.mjs$|body-0-brain-body-contract\.test\.mjs$|body-0-recovery-authority\.test\.mjs$|body-1-sensorimotor-reentry\.test\.mjs$|body-1-head-orientation\.test\.mjs$|body-1-tactile-contact\.test\.mjs$|body-1-proprioceptive-feedback\.test\.mjs$|body-1-auditory-reentry\.test\.mjs$|body-1-olfactory-reentry\.test\.mjs$|body-1-gustatory-contact\.test\.mjs$|body-1-interoceptive-signal\.test\.mjs$|body-1-interoceptive-brain-ingress\.test\.mjs$|body-1-speech-effector-feedback\.test\.mjs$|body-1-eye-orientation\.test\.mjs$|body-1-proprioceptive-brain-ingress\.test\.mjs$|body-1-vestibular-head-rotation\.test\.mjs$|body-1-vestibular-brain-ingress\.test\.mjs$|body-1-respiratory-state\.test\.mjs$|body-1-body-orientation\.test\.mjs$|body-1-homeostatic-cue\.test\.mjs$|body-1-homeostatic-brain-ingress\.test\.mjs$|body-1-tactile-brain-ingress\.test\.mjs$|body-1-native-olfactory-turn\.test\.mjs$|body-1-sensorimotor-loop-gate\.test\.mjs$|(?:cb-c2|cb-c5|cb-c6|phase(?:62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96)|certification)\/)/,
     `Active runner leaked non-world-simulation test: ${testPath}`,
   );
 }

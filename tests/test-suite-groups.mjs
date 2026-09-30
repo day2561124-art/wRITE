@@ -405,6 +405,10 @@ export const body0AuthoritySteps = Object.freeze([
     "BODY-0A Objective Body Authority Boundary",
     Object.freeze(["tests/body-0-authority.test.mjs"]),
   ]),
+  Object.freeze([
+    "CB-C6-B Committed Sleep Arousal Reader",
+    Object.freeze(["tests/cb-c6/cb-c6-sleep-arousal-reader.test.mjs"]),
+  ]),
 ]);
 
 export const body0HistorySteps = Object.freeze([

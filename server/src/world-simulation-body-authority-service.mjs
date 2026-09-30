@@ -1,4 +1,5 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
+import { projectWorldSimulationSleepArousalState } from "./world-simulation-body-sleep-arousal-service.mjs";
 import {
   projectWorldSimulationBasicRecoveryAuthority,
 } from "./world-simulation-body-recovery-authority-service.mjs";
@@ -69,6 +70,9 @@ export function projectWorldSimulationBodyAuthority({
     }),
     movement_restricted: movementRestricted,
     movement_multiplier: finite(physical.movement_multiplier),
+    sleep_arousal: projectWorldSimulationSleepArousalState({
+      physical_state: physical, character: actor,
+    }),
   };
   return {
     version: worldSimulationBodyAuthorityVersion,

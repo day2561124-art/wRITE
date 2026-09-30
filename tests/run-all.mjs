@@ -732,6 +732,7 @@ const steps = [
   ["CB-C5-C Subjective Affordance Proposal Admission", ["tests/cb-c5/cb-c5-subjective-affordance-proposal.test.mjs"]],
   ["CB-C5-D Native Grounded Selection and Causal Adjudication", ["tests/cb-c5/cb-c5-native-grounded-selection-adjudication.test.mjs"]],
   ["CB-C5-E Paired Longitudinal Native Affordance", ["tests/cb-c5/cb-c5-native-longitudinal-affordance.test.mjs"]],
+  ["CB-C6-B Committed Sleep Arousal Reader", ["tests/cb-c6/cb-c6-sleep-arousal-reader.test.mjs"]],
   ["BODY-0A Objective Body Authority Boundary", ["tests/body-0-authority.test.mjs"]],
   ["BODY-0B Committed Body History", ["tests/body-0-history.test.mjs"]],
   ["BODY-0C Brain-Body Command and Sensory Evidence Contract", ["tests/body-0-brain-body-contract.test.mjs"]],
