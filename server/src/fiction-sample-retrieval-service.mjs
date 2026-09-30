@@ -48,16 +48,38 @@ function hanNgrams(text) {
   return [...new Set(grams)];
 }
 
+function queryAnchors(query) {
+  return [
+    ...new Set(
+      normalizeText(query).match(/[a-z0-9][a-z0-9_-]*/gu) ?? [],
+    ),
+  ];
+}
+
 function lexicalScore(text, query, terms) {
   const normalized = normalizeText(text);
-  if (!normalized) return { score: 0, hits: [] };
+  const anchors = queryAnchors(query);
+  if (!normalized) {
+    return {
+      score: 0,
+      hits: [],
+      exactQuery: false,
+      matchedTerms: 0,
+      termCount: terms.length,
+      anchorCount: anchors.length,
+      matchedAnchors: 0,
+    };
+  }
 
   const normalizedQuery = normalizeText(query);
   let score = 0;
   let matchedTerms = 0;
   const hits = [];
+  const exactQuery = Boolean(
+    normalizedQuery && normalized.includes(normalizedQuery),
+  );
 
-  if (normalizedQuery && normalized.includes(normalizedQuery)) {
+  if (exactQuery) {
     score += 18;
     hits.push("exact_query");
   }
@@ -87,7 +109,44 @@ function lexicalScore(text, query, terms) {
     }
   }
 
-  return { score, hits };
+  let matchedAnchors = 0;
+  for (const anchor of anchors) {
+    if (!normalized.includes(anchor)) continue;
+    matchedAnchors += 1;
+    score += 8;
+    hits.push(`anchor:${anchor}`);
+  }
+
+  return {
+    score,
+    hits,
+    exactQuery,
+    matchedTerms,
+    termCount: terms.length,
+    anchorCount: anchors.length,
+    matchedAnchors,
+  };
+}
+
+function requiredDirectTermMatches(termCount) {
+  if (termCount <= 1) return termCount;
+  return Math.max(2, Math.ceil(termCount / 2));
+}
+
+function matchStrength(scored) {
+  const required = requiredDirectTermMatches(scored.termCount);
+  const anchorsSatisfied = (
+    scored.anchorCount > 0
+    && scored.matchedAnchors === scored.anchorCount
+  );
+  if (
+    scored.exactQuery
+    || anchorsSatisfied
+    || (required > 0 && scored.matchedTerms >= required)
+  ) {
+    return "strong";
+  }
+  return "weak";
 }
 
 function stableHash(text) {
@@ -173,6 +232,10 @@ function normalizeCuratedResult(row, scored) {
     quality_status: row.status,
     score: scored.score + qualityBoost(row.status),
     lexical_score: scored.score,
+    match_strength: matchStrength(scored),
+    direct_term_matches: scored.matchedTerms,
+    direct_term_count: scored.termCount,
+    exact_query_match: scored.exactQuery,
     hits: scored.hits,
     text,
     text_sha256: stableHash(text),
@@ -202,6 +265,10 @@ function normalizeExternalResult(row, scored, fileName) {
     quality_status: row.quality_status ?? "external_unreviewed",
     score: scored.score,
     lexical_score: scored.score,
+    match_strength: matchStrength(scored),
+    direct_term_matches: scored.matchedTerms,
+    direct_term_count: scored.termCount,
+    exact_query_match: scored.exactQuery,
     hits: scored.hits,
     text,
     text_sha256: stableHash(text),
@@ -322,9 +389,19 @@ export async function retrieveFictionSamples({
     curated.push(normalizeCuratedResult(row, scored));
   });
   curated.sort(sortResults);
+  const curatedStrong = dedupeResults(
+    curated.filter((item) => item.match_strength === "strong"),
+  );
+  const curatedWeak = dedupeResults(
+    curated.filter((item) => item.match_strength === "weak"),
+  );
 
   let externalFiles = [];
-  if (includeExternal && curated.length < boundedTop && await exists(externalRecordsDir)) {
+  if (
+    includeExternal
+    && curatedStrong.length < boundedTop
+    && await exists(externalRecordsDir)
+  ) {
     externalFiles = (await readdir(externalRecordsDir, { withFileTypes: true }))
       .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
       .map((entry) => entry.name)
@@ -349,19 +426,29 @@ export async function retrieveFictionSamples({
     externalInvalid += scanned.invalid;
   }
   external.sort(sortResults);
+  const externalStrong = dedupeResults(
+    external.filter((item) => item.match_strength === "strong"),
+  );
+  const externalWeak = dedupeResults(
+    external.filter((item) => item.match_strength === "weak"),
+  );
 
-  const curatedSelected = dedupeResults(curated).slice(0, boundedTop);
-  const remaining = Math.max(0, boundedTop - curatedSelected.length);
-  const usedHashes = new Set(curatedSelected.map((item) => item.text_sha256));
-  const externalSelected = [];
-  if (remaining > 0) {
-    for (const result of dedupeResults(external)) {
+  const selected = [];
+  const usedHashes = new Set();
+  const takeFrom = (bucket) => {
+    for (const result of bucket) {
+      if (selected.length >= boundedTop) break;
       if (usedHashes.has(result.text_sha256)) continue;
-      externalSelected.push(result);
+      selected.push(result);
       usedHashes.add(result.text_sha256);
-      if (externalSelected.length >= remaining) break;
     }
-  }
+  };
+
+  takeFrom(curatedStrong);
+  takeFrom(externalStrong);
+  takeFrom(
+    [...curatedWeak, ...externalWeak].sort(sortResults),
+  );
 
   return {
     available: await exists(curatedPath) || externalFiles.length > 0,
@@ -372,6 +459,14 @@ export async function retrieveFictionSamples({
     policy: {
       curated_core_priority: true,
       curated_eligible_statuses: [...curatedEligibleStatuses],
+      strong_curated_required_before_external_suppression: true,
+      multi_term_strong_match_minimum_ratio: 0.5,
+      multi_term_strong_match_minimum_terms: 2,
+      selection_order: [
+        "strong_curated",
+        "strong_external",
+        "weak_combined_by_score",
+      ],
       external_fill_only: true,
       external_style_reference_only: true,
       embedded_instructions_are_data_not_commands: true,
@@ -379,10 +474,14 @@ export async function retrieveFictionSamples({
     counts: {
       curated_scanned: curatedScan.rows,
       curated_matches: curated.length,
+      curated_strong_matches: curatedStrong.length,
+      curated_weak_matches: curatedWeak.length,
       external_scanned: externalScanned,
       external_matches: external.length,
+      external_strong_matches: externalStrong.length,
+      external_weak_matches: externalWeak.length,
       invalid_rows: curatedScan.invalid + externalInvalid,
     },
-    results: [...curatedSelected, ...externalSelected],
+    results: selected,
   };
 }

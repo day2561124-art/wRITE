@@ -53,6 +53,16 @@ async function fixtureDatabase() {
       content_sha256: "3".repeat(64),
       status: "rejected",
     },
+    {
+      passage_id: "PAS-WEAKNGRAM000001",
+      scene_id: "SCN-WEAKNGRAM000001",
+      novel_id: "NOV-WEAKNGRAM000001",
+      source_id: "SRC-WEAKNGRAM000001",
+      source_order: 4,
+      text: "高級虛擬助手正在測試人工智慧系統，但這裡從未出現那個角色名稱。",
+      content_sha256: "5".repeat(64),
+      status: "accepted",
+    },
   ];
 
   const external = [
@@ -76,6 +86,25 @@ async function fixtureDatabase() {
         importer_version: "fixture_v1",
       },
       source_row: 1,
+    },
+    {
+      external_record_id: "EXT-RPC-00000000000001",
+      schema_version: "external_dialogue_record_v1",
+      dataset: "fixture/role-play-chinese",
+      dataset_subset: "fixture",
+      quality_status: "external_unreviewed",
+      system: "你是 Nexara 的高級 AI 虛擬助手設定。",
+      instruction: "依角色設定回應。",
+      input: "Nexara高級AI虛擬助手正在進行新的情感測試。",
+      output: "我知道這是一場測試，但這次的感受和以前不同。",
+      history: [],
+      searchable_text: "Nexara高級AI虛擬助手 情感測試",
+      content_sha256: "6".repeat(64),
+      provenance: {
+        source_file: "fixture-rpc.json",
+        importer_version: "fixture_rpc_v1",
+      },
+      source_row: 2,
     },
   ];
 
@@ -176,6 +205,38 @@ test("External Corpus is not scanned when Curated Core already fills top K", asy
     assert.equal(result.results[0].source_type, "curated_core");
     assert.equal(result.counts.external_scanned, 0);
     assert.equal(result.counts.external_matches, 0);
+  } finally {
+    await rm(dbRoot, { recursive: true, force: true });
+  }
+});
+
+test("weak n-gram-only Curated matches do not suppress a strong External fallback", async () => {
+  const dbRoot = await fixtureDatabase();
+  try {
+    const result = await retrieveFictionSamples({
+      query: "Nexara高級AI虛擬助手",
+      terms: ["Nexara高級AI虛擬助手"],
+      top: 1,
+      dbRoot,
+    });
+
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].source_type, "external_corpus");
+    assert.equal(result.results[0].dataset, "fixture/role-play-chinese");
+    assert.equal(result.results[0].match_strength, "strong");
+    assert.ok(result.counts.curated_matches > 0);
+    assert.equal(result.counts.curated_strong_matches, 0);
+    assert.ok(result.counts.curated_weak_matches > 0);
+    assert.ok(result.counts.external_scanned > 0);
+    assert.ok(result.counts.external_strong_matches > 0);
+    assert.deepEqual(
+      result.policy.selection_order,
+      [
+        "strong_curated",
+        "strong_external",
+        "weak_combined_by_score",
+      ],
+    );
   } finally {
     await rm(dbRoot, { recursive: true, force: true });
   }
