@@ -444,7 +444,7 @@ export function validateCommunicationSurfaceRealization(actor, candidate, commun
 
 function resolveEmbodiedCommunicationDisplay({
   actor, addressee, candidate, communication, snapshot, next,
-  snapshotScene, sceneId, transitions, validate_only = false,
+  snapshotScene, sceneId, transitions, validate_only = false, orientation_time_ms = null,
 }) {
   const request = object(communication.embodied_display_request);
   if (!Object.keys(request).length) {
@@ -482,7 +482,8 @@ function resolveEmbodiedCommunicationDisplay({
   const body = request.modality === "body";
   const field = body ? "body_facing_degrees" : "facing_degrees";
   if (validate_only) return { ok: true, realization: null };
-  const before = actorState[field] ?? null;
+  const before = orientation_time_ms === null ? actorState[field] ?? null
+    : next.characters[actor][field] ?? null;
   next.characters[actor][field] = degrees;
   pushTransition(
     transitions,
@@ -492,7 +493,9 @@ function resolveEmbodiedCommunicationDisplay({
     degrees,
     body ? "validated CC-8J body display toward committed communication addressee"
       : "validated CC-8A gaze display toward committed communication addressee",
-    { scene_id: sceneId, source_action_id: candidate.action_id ?? null },
+    { scene_id: sceneId, source_action_id: candidate.action_id ?? null,
+      ...(orientation_time_ms === null ? {} : { time_ms: orientation_time_ms,
+        actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" }) },
   );
   return {
     ok: true,
@@ -543,7 +546,7 @@ function resolveCommunicationVocalEffort(actor, candidate, communication, snapsh
 
 function resolveCommunicationIntent(
   actor, candidate, rules, outcomes,
-  snapshot, next, snapshotScene, sceneId, transitions,
+  snapshot, next, snapshotScene, sceneId, transitions, orientationTimeMs = null,
 ) {
   const communication = object(candidate.communication);
   const addressee = String(communication.addressee ?? candidate.target ?? "").trim();
@@ -597,6 +600,7 @@ function resolveCommunicationIntent(
     snapshotScene,
     sceneId,
     transitions,
+    orientation_time_ms: orientationTimeMs,
   });
   if (!embodiedDisplay.ok) {
     pushOutcome(
@@ -1026,7 +1030,18 @@ function embodiedEffectorConflicts(intents, rules, nativeResponse, {
       }
     }
   }
-  return conflicts;
+  // Only validated, noncontending claims can supply physical precedence.
+  const orientationTimes = new Map();
+  const admitted = claims.filter(claim => !conflicts.has(claim.index));
+  for (let i = 0; i < admitted.length; i += 1) {
+    for (let j = i + 1; j < admitted.length; j += 1) {
+      const a = admitted[i], b = admitted[j];
+      if (a.actor !== b.actor || !a.resources.some(resource =>
+          resource !== "vocal_production" && b.resources.includes(resource))) continue;
+      for (const claim of [a, b]) orientationTimes.set(claim.index, claim.end);
+    }
+  }
+  return { conflicts, orientationTimes };
 }
 
 function resolveSpatialRulePreview(input = {}) {
@@ -1044,12 +1059,20 @@ function resolveSpatialRulePreview(input = {}) {
   const claims = pickupClaims(selectedActionIntents);
   const plans = movementPlans(snapshot, snapshotScene, selectedActionIntents);
   const movementConflicts = movementDestinationConflicts(snapshot, snapshotScene, plans);
-  const effectorConflicts = embodiedEffectorConflicts(selectedActionIntents, rules, nativeResponse, {
+  const { conflicts: effectorConflicts, orientationTimes } = embodiedEffectorConflicts(selectedActionIntents, rules, nativeResponse, {
     snapshot, snapshotScene, sceneId,
   });
   let elapsedMs = 0;
 
-  for (const [selectionIndex, selected] of selectedActionIntents.entries()) {
+  const selections = [...selectedActionIntents.entries()];
+  // Replace only sequenced slots; unrelated actions keep their relative order.
+  const sequenced = selections.filter(([index]) => orientationTimes.has(index))
+    .sort(([a], [b]) => orientationTimes.get(a) - orientationTimes.get(b));
+  let sequenceIndex = 0;
+  const orderedSelections = selections.map(entry => orientationTimes.has(entry[0])
+    ? sequenced[sequenceIndex++] : entry);
+  for (const [selectionIndex, selected] of orderedSelections) {
+    const orientationTimeMs = orientationTimes.get(selectionIndex) ?? null;
     const actor = String(selected?.character ?? "").trim();
     const candidate = object(selected?.candidate);
     if (!actor || selected?.selection === "reject_all" || !Object.keys(candidate).length) {
@@ -1075,6 +1098,7 @@ function resolveSpatialRulePreview(input = {}) {
         snapshotScene,
         sceneId,
         transitions,
+        orientationTimeMs,
       );
       const nativeStartMs = nativeResponse.actor === actor
         && nativeResponse.action_id === candidate.action_id
@@ -1106,10 +1130,13 @@ function resolveSpatialRulePreview(input = {}) {
           "body orientation requires a conscious positioned actor and a finite body angle in [0, 360)");
         continue;
       }
-      const before = object(snapshot.characters[actor]).body_facing_degrees ?? null;
+      const before = object((orientationTimeMs === null ? snapshot : next).characters[actor])
+        .body_facing_degrees ?? null;
       next.characters[actor].body_facing_degrees = degrees;
       pushTransition(transitions, actor, "body_facing_degrees", before, degrees,
-        "validated body orientation", { scene_id: sceneId });
+        "validated body orientation", { scene_id: sceneId,
+          ...(orientationTimeMs === null ? {} : { time_ms: orientationTimeMs,
+            actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" }) });
       pushOutcome(outcomes, actor, candidate, "body_orientation_completed",
         "World committed body orientation without changing head orientation");
       continue;
@@ -1130,10 +1157,13 @@ function resolveSpatialRulePreview(input = {}) {
           "orientation requires a conscious positioned actor and a finite facing angle in [0, 360)");
         continue;
       }
-      const before = object(snapshot.characters[actor]).facing_degrees ?? null;
+      const before = object((orientationTimeMs === null ? snapshot : next).characters[actor])
+        .facing_degrees ?? null;
       next.characters[actor].facing_degrees = degrees;
       pushTransition(transitions, actor, "facing_degrees", before, degrees,
-        "validated head orientation", { scene_id: sceneId });
+        "validated head orientation", { scene_id: sceneId,
+          ...(orientationTimeMs === null ? {} : { time_ms: orientationTimeMs,
+            actor, action_id: candidate.action_id ?? null, source_layer: "spatial_rules" }) });
       pushOutcome(outcomes, actor, candidate, "head_orientation_completed",
         "World committed the actor facing direction; later sensory sampling remains separate");
       continue;
