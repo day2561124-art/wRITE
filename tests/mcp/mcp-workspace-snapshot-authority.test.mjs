@@ -304,4 +304,84 @@ function ipcPair(childPid) {
   }
 }
 
+// Integration worktrees share a registered source ID but own a different
+// root and HEAD. Parent source-cache hits and misses must remain untouched.
+{
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { randomUUID } = await import("node:crypto");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { default: os } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const group = randomUUID();
+  const previous = {
+    isolated: process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL,
+    group: process.env.WRITER_WORKBENCH_TEST_JOURNAL_GROUP,
+  };
+  process.env.WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL = "1";
+  process.env.WRITER_WORKBENCH_TEST_JOURNAL_GROUP = group;
+  let computeWorkspaceSnapshot;
+  try {
+    ({ computeWorkspaceSnapshot } = await import("../../server/src/mcp-development-journal-tools.mjs"));
+  } finally {
+    for (const [key, value] of [
+      ["WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL", previous.isolated],
+      ["WRITER_WORKBENCH_TEST_JOURNAL_GROUP", previous.group],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+  const root = await mkdtemp(path.join(os.tmpdir(), "integration-snapshot-"));
+  const execFileAsync = promisify(execFile);
+  const git = async (args) => execFileAsync(process.platform === "win32" ? "git.exe" : "git", [
+    "-c", "core.hooksPath=" + path.join(root, "hooks"),
+    "-c", "commit.gpgsign=false",
+    "-c", "user.name=Snapshot Fixture",
+    "-c", "user.email=snapshot-fixture@local.invalid", ...args,
+  ], { cwd: root, windowsHide: true });
+  try {
+    await mkdir(path.join(root, "hooks"));
+    await git(["init", "--quiet"]);
+    await writeFile(path.join(root, "fixture.txt"), "committed integration tree\n", "utf8");
+    await git(["add", "--", "fixture.txt"]);
+    await git(["commit", "--quiet", "-m", "integration fixture"]);
+    const head = (await git(["rev-parse", "HEAD"])).stdout.trim();
+    const context = { root, workspace_id: workspaceId,
+      workspace_type: "integration_worktree", current_head: head };
+    for (const hit of [true, false]) {
+      const calls = [];
+      const client = {
+        async tryReuse() { calls.push("reuse"); return { hit, snapshot: exactSnapshot("source cache") }; },
+        async beginSynchronization() { calls.push("sync"); return { started: false }; },
+        async publishExact() { calls.push("publish"); return { stored: true }; },
+      };
+      const snapshot = await computeWorkspaceSnapshot(context, {
+        workspaceSnapshotAuthorityClient: client, allowParentSnapshotAuthority: true,
+      });
+      assert.equal(snapshot.head, head, "receipt must identify the actual integration HEAD");
+      assert.equal(snapshot.changed_artifact_count, 0);
+      assert.equal(snapshot.diagnostics.authority_reused, false);
+      assert.deepEqual(calls, [], "integration capture must neither reuse nor overwrite the source authority");
+    }
+    const manifest = [];
+    const sourceSnapshot = { head, manifest, changed_artifact_count: 0,
+      workspace_snapshot_id: sha256(canonicalJson({ head, manifest })) };
+    let reuseCount = 0;
+    const source = await computeWorkspaceSnapshot({ ...context, workspace_type: "isolated_worktree" }, {
+      workspaceSnapshotAuthorityClient: {
+        async tryReuse() { reuseCount += 1; return { hit: true, snapshot: sourceSnapshot }; },
+        async publishExact() { throw new Error("source hit must not publish"); },
+      },
+    });
+    assert.equal(source.head, head);
+    assert.equal(source.diagnostics.authority_reused, true);
+    assert.equal(reuseCount, 1, "registered source optimization remains available");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(path.join(os.tmpdir(), "writer-workbench-operation-journal-test-" + group),
+      { recursive: true, force: true });
+  }
+}
+
 console.log("Workspace snapshot authority tests passed.");

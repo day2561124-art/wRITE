@@ -135,8 +135,10 @@ async function createHarness(name) {
     const snapshot = await computeWorkspaceSnapshot({
       root: integrationPath,
       workspace_id: candidate.workspace_id,
+      workspace_type: "integration_worktree",
       current_head: candidate.integration_commit,
     });
+    assert.equal(snapshot.head, candidate.integration_commit);
     const results = [];
     for (const suite of ["mcp", "mcp_tunnel"]) {
       const operation = await beginDevJournalOperation({
@@ -169,6 +171,8 @@ async function createHarness(name) {
         exit_code: 0,
         duration_ms: 1,
         operation_id: operation.operation_id,
+        head: snapshot.head,
+        workspace_snapshot_id: snapshot.workspace_snapshot_id,
       });
     }
     return results;
