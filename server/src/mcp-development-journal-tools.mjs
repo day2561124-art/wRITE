@@ -2286,6 +2286,11 @@ export async function computeWorkspaceSnapshot(context, options = {}) {
   if (options.allowParentSnapshotAuthority !== undefined && typeof options.allowParentSnapshotAuthority !== "boolean") {
     throw new Error("allowParentSnapshotAuthority must be a boolean when provided.");
   }
+  // Integration roots share the source workspace ID, not its snapshot authority.
+  // Capture the actual candidate locally and never publish into the source cache.
+  if (context.workspace_type === "integration_worktree") {
+    options = { ...options, allowParentSnapshotAuthority: false };
+  }
   const allowMemoryFingerprintCache = options.allowMemoryFingerprintCache !== false;
 
   const snapshotStartedAt = performance.now();

@@ -65,7 +65,12 @@ export function buildIntegrationVerificationManifest({
   const observed = results.map((result) => result.suite);
   const missingRequiredSuites = expected.filter((suite) => !observed.includes(suite));
   const duplicateResults = observed.length !== new Set(observed).size;
+  // Injected legacy runners may lack Journal identity; production evidence must bind HEAD.
+  const suiteHeadMismatches = results
+    .filter((result) => result.operation_id !== null && result.head !== commit)
+    .map((result) => ({ suite: result.suite, expected_head: commit, actual_head: result.head }));
   const passed = missingRequiredSuites.length === 0
+    && suiteHeadMismatches.length === 0
     && !duplicateResults && results.length > 0
     && results.every((result) => result.execution_ok && result.passed && !result.timed_out)
     && diffCheck?.passed === true && postTestWorktreeClean === true;
@@ -103,8 +108,10 @@ export function buildIntegrationVerificationManifest({
     diagnostic_retries: retainedDiagnostics,
     diagnostic_attempt_count: retainedDiagnostics.filter((item) => item.status === "executed").length,
     missing_required_suites: missingRequiredSuites,
+    suite_head_mismatches: suiteHeadMismatches,
     passed,
-    failed: !passed && results.some((result) => !result.passed || !result.execution_ok),
+    failed: !passed && (suiteHeadMismatches.length > 0
+      || results.some((result) => !result.passed || !result.execution_ok)),
     timed_out: results.some((result) => result.timed_out),
     duration_ms: totalDuration,
     required_gate: "exact_candidate_integration",

@@ -30,6 +30,8 @@ const passed = {
   timed_out: false,
   exit_code: 0,
   duration_ms: 15,
+  head: candidate.integration_commit,
+  workspace_snapshot_id: "d".repeat(64),
 };
 function manifest(overrides = {}) {
   return buildIntegrationVerificationManifest({
@@ -39,6 +41,17 @@ function manifest(overrides = {}) {
     ...overrides,
   });
 }
+
+test("integration receipts reject production suite evidence for source, target, or missing HEAD", () => {
+  for (const head of [candidate.source_head, candidate.target_head, undefined]) {
+    const result = manifest({ suiteResults: [{ ...passed, head }] });
+    assert.equal(result.gate_result, "failed", "a successful process cannot certify a different tree");
+    assert.deepEqual(result.suite_head_mismatches, [{
+      suite: passed.suite, expected_head: candidate.integration_commit, actual_head: head ?? null,
+    }]);
+  }
+  assert.deepEqual(manifest().suite_head_mismatches, []);
+});
 
 test("VA-6 records exact source/target/candidate identities and truthful skipped legacy suites", () => {
   const result = manifest();
