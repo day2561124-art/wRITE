@@ -515,6 +515,13 @@ function resolveEmbodiedCommunicationDisplay({
 }
 
 function resolveCommunicationVocalEffort(actor, candidate, communication, snapshot) {
+  const character = object(object(snapshot.characters)[actor]);
+  const physical = object(character.physical_state);
+  // Ordinary speech uses the same actor admission as explicit vocal effort,
+  // before either voice reservation or public signal production.
+  if (communication.channel === "speech"
+      && (physical.unconscious === true || physical.incapacitated === true))
+    return { ok: false, reason: "speech requires conscious actor" };
   const request = communication.vocal_effort_request;
   if (request == null) return { ok: true, realization: null };
   if (!object(request).schema_version
@@ -523,15 +530,12 @@ function resolveCommunicationVocalEffort(actor, candidate, communication, snapsh
       || communication.channel !== "speech"
       || !matchesCharacterCommunicationActionCandidateIdentity(candidate, actor))
     return { ok: false, reason: "invalid vocal effort request" };
-  const character = object(object(snapshot.characters)[actor]);
-  const physical = object(character.physical_state);
   const profile = object(character.speech_acoustics);
   const base = profile.sound_level_db_at_1m;
   const selected = request.level === "soft"
     ? profile.soft_sound_level_db_at_1m
     : profile.projected_sound_level_db_at_1m;
-  if (physical.unconscious === true || physical.incapacitated === true
-      || profile.enabled === false
+  if (profile.enabled === false
       || typeof base !== "number" || !Number.isFinite(base)
       || base < 0 || base > 120
       || typeof selected !== "number" || !Number.isFinite(selected)

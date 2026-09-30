@@ -73,6 +73,7 @@ export const communicationSteps = Object.freeze([
   Object.freeze(["CC-8R adjacent orientation chronology", ["tests/communication/cc8-orientation-chronology.test.mjs"]]),
   Object.freeze(["CC-8S chronological orientation committed Brain ingress", ["tests/communication/cc8-orientation-chronology-brain-ingress.test.mjs"]]),
   Object.freeze(["CC-8T unchanged orientation committed Brain ingress", ["tests/communication/cc8-unchanged-orientation-brain-ingress.test.mjs"]]),
+  Object.freeze(["CC-8U conscious speech admission", ["tests/communication/cc8-conscious-speech-admission.test.mjs"]]),
   Object.freeze(["Communication shared IR contract", ["tests/communication/communication-ir.test.mjs"]]),
 ]);
 

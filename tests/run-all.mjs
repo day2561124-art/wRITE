@@ -1020,6 +1020,7 @@ const steps = [
   ["CC-8R adjacent orientation chronology", ["tests/communication/cc8-orientation-chronology.test.mjs"]],
   ["CC-8S chronological orientation committed Brain ingress", ["tests/communication/cc8-orientation-chronology-brain-ingress.test.mjs"]],
   ["CC-8T unchanged orientation committed Brain ingress", ["tests/communication/cc8-unchanged-orientation-brain-ingress.test.mjs"]],
+  ["CC-8U conscious speech admission", ["tests/communication/cc8-conscious-speech-admission.test.mjs"]],
   ["Affected test selector", ["tests/affected-test-selector.test.mjs"]],
   ["Dependency-aligned test-suite inventory", ["tests/test-suite-groups.test.mjs"]],
 ];
