@@ -504,7 +504,9 @@ function resolveEmbodiedCommunicationDisplay({
       modality: request.modality,
       target_relation: "addressee",
       effector: body ? "body_orientation" : "head_orientation",
-      realized: true,
+      // A display change is realized only when its action emits a transition.
+      // Already aligned speech stays valid without inventing a visual cue.
+      realized: before !== degrees,
       source_action_id: candidate.action_id ?? null,
       private_intended_meaning_exposed: false,
       objective_target_coordinates_exposed: false,
