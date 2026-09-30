@@ -20,8 +20,8 @@ function cloneJson(value) {
 }
 
 function finiteNonNegative(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value : null;
 }
 
 function positive(value) {
