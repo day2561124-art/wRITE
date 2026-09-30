@@ -463,7 +463,9 @@ function resolveEmbodiedCommunicationDisplay({
   const actorState = object(object(snapshot.characters)[actor]);
   const physical = object(actorState.physical_state);
   if (!Object.hasOwn(object(snapshot.characters), actor)
+      || !isObject(object(snapshot.characters)[actor])
       || !Object.hasOwn(object(snapshot.characters), addressee)
+      || !isObject(object(snapshot.characters)[addressee])
       || !actorPosition || !targetPosition
       || physical.unconscious === true
       || physical.incapacitated === true) {
@@ -990,6 +992,7 @@ function embodiedEffectorConflicts(intents, rules, nativeResponse, {
         ? "facing_degrees" : "body_facing_degrees"];
       const physical = object(object(object(snapshot.characters)[actor]).physical_state);
       if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !isObject(object(snapshot.characters)[actor])
           || !positionFor(snapshotScene, actor)
           || physical.unconscious === true || physical.incapacitated === true
           || typeof degrees !== "number" || !Number.isFinite(degrees)
@@ -1134,6 +1137,7 @@ function resolveSpatialRulePreview(input = {}) {
       const durationMs = parseDurationMs(candidate, 300);
       elapsedMs = Math.max(elapsedMs, durationMs);
       if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !isObject(object(snapshot.characters)[actor])
           || !positionFor(snapshotScene, actor)
           || physical.unconscious === true
           || physical.incapacitated === true
@@ -1161,6 +1165,7 @@ function resolveSpatialRulePreview(input = {}) {
       const durationMs = parseDurationMs(candidate, 250);
       elapsedMs = Math.max(elapsedMs, durationMs);
       if (!Object.hasOwn(object(snapshot.characters), actor)
+          || !isObject(object(snapshot.characters)[actor])
           || !positionFor(snapshotScene, actor)
           || physical.unconscious === true
           || physical.incapacitated === true

@@ -154,4 +154,76 @@ for (const angle of [-1, 360, "180", null]) {
   assert.ok(result.action_outcomes.every(o => o.result === "embodied_effector_conflict"));
   assert.equal(result.next_world_state.characters.A.facing_degrees, 90);
 }
-console.log("CC-8Q simultaneous embodied effector contention tests passed.");
+// CC-8Y: scene coordinates cannot substitute for a valid World character.
+for (const type of ["orient_head", "orient_body"]) {
+  for (const record of [undefined, null, false, 0, "actor", []]) {
+    for (const order of ["single", "forward", "reverse"]) {
+      const state = world();
+      if (record === undefined) delete state.characters.A;
+      else state.characters.A = record;
+      const actions = [motor(type, 180)];
+      if (order !== "single") actions.push(motor(type, 270));
+      if (order === "reverse") actions.reverse();
+      const unaffected = motor(type, 0);
+      const intents = [...actions.map(action => selected("A", action)),
+        selected("C", unaffected)];
+      const original = hashAgentRunValue({ state, intents });
+      const result = await adjudicateWorldSimulationCausality({
+        world_simulation_session_id: "cc8y", turn_id: "contention",
+        world_state: state, world_state_hash: hashAgentRunValue(state),
+        world_state_revision: 0, event: state.event_queue[0],
+        selected_action_intents: intents,
+      });
+      for (const action of actions) {
+        assert.equal(result.action_outcomes.find(o => o.actor === "A"
+          && o.action_id === action.action_id).result,
+          type === "orient_head" ? "head_orientation_blocked" : "body_orientation_blocked");
+      }
+      assert.equal(result.action_outcomes.find(o => o.actor === "C").result,
+        type === "orient_head" ? "head_orientation_completed" : "body_orientation_completed");
+      assert.deepEqual(result.next_world_state.characters.A, state.characters.A);
+      assert.equal(Object.hasOwn(result.next_world_state.characters, "A"),
+        Object.hasOwn(state.characters, "A"));
+      assert.equal(result.state_transitions.some(t => t.entity === "A"), false);
+      assert.equal((result.next_world_state.sound_events ?? []).length, 0);
+      assert.equal(hashAgentRunValue({ state, intents }), original);
+    }
+  }
+}
+for (const modality of ["gaze", "body"]) {
+  for (const record of [undefined, null, false, 0, "target", []]) {
+    for (const reverse of [false, true]) {
+      const state = world();
+      if (record === undefined) delete state.characters.B;
+      else state.characters.B = record;
+      const invalid = speech("A", modality, "B");
+      const valid = speech("A", modality, "C");
+      const actions = reverse ? [valid, invalid] : [invalid, valid];
+      const intents = actions.map(action => selected("A", action));
+      const original = hashAgentRunValue({ state, intents });
+      const result = await adjudicateWorldSimulationCausality({
+        world_simulation_session_id: "cc8y", turn_id: "contention",
+        world_state: state, world_state_hash: hashAgentRunValue(state),
+        world_state_revision: 0, event: state.event_queue[0],
+        selected_action_intents: intents,
+      });
+      const blocked = result.action_outcomes.find(o => o.action_id === invalid.action_id);
+      assert.equal(blocked.result, "blocked");
+      assert.equal(Object.hasOwn(blocked, "communication_event"), false);
+      assert.equal(Object.hasOwn(blocked, "communication_speech_stream"), false);
+      assert.equal(result.action_outcomes.find(o => o.action_id === valid.action_id).result,
+        "communication_emitted");
+      assert.equal(result.next_world_state.characters.A.facing_degrees, 90);
+      assert.equal(result.next_world_state.characters.A.body_facing_degrees, 90);
+      assert.deepEqual(result.next_world_state.characters.B, state.characters.B);
+      assert.equal(Object.hasOwn(result.next_world_state.characters, "B"),
+        Object.hasOwn(state.characters, "B"));
+      assert.equal(result.next_world_state.sound_events.filter(sound =>
+        sound.communication_action_id === invalid.action_id).length, 0);
+      assert.equal(result.next_world_state.sound_events.filter(sound =>
+        sound.communication_action_id === valid.action_id).length, 1);
+      assert.equal(hashAgentRunValue({ state, intents }), original);
+    }
+  }
+}
+console.log("CC-8Q/8Y embodied effector contention and character record tests passed.");
