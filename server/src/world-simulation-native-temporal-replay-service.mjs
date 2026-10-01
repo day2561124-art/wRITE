@@ -1,4 +1,5 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
+import { buildWorldSimulationConsciousObserverAdmission } from "./world-simulation-conscious-observer-admission-service.mjs";
 import { adjudicateWorldSimulationCausality } from "./world-simulation-causal-rule-engine.mjs";
 import { buildWorldSimulationObserverMicrotickLedger } from "./world-simulation-observer-microtick-ledger-service.mjs";
 import { buildWorldSimulationObserverTickSnapshotReadiness } from "./world-simulation-observer-tick-snapshot-readiness-service.mjs";
@@ -83,6 +84,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
   event, scene_analysis, selected_action_intents, observer,
   character_input, character_input_resolver, selection_resolver,
   preparation_decision_resolver, causal_epoch_revalidation_resolver,
+  committed_history = null, conscious_ingress_guard,
 } = {}) {
   if (!record(world_state) || hashAgentRunValue(world_state) !== world_state_hash
       || !Array.isArray(selected_action_intents)
@@ -94,6 +96,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
       || typeof selection_resolver !== "function"
       || (preparation_decision_resolver !== undefined
         && typeof preparation_decision_resolver !== "function")
+      || (conscious_ingress_guard !== undefined && typeof conscious_ingress_guard !== "function")
       || (causal_epoch_revalidation_resolver !== undefined
         && typeof causal_epoch_revalidation_resolver !== "function"))
     refuse("World replay requires exact original snapshot and one same-character Brain resolver.");
@@ -108,6 +111,20 @@ export async function replayWorldSimulationNativeTemporalResponse({
     event, scene_analysis, selected_action_intents,
   });
   const initial = await adjudicateWorldSimulationCausality(input);
+  const consciousAdmission = buildWorldSimulationConsciousObserverAdmission({
+    world_state, world_state_revision, world_state_hash, event, committed_history,
+    next_world_state: initial.next_world_state,
+    state_transitions: initial.state_transitions,
+  });
+  const admitIngress = async (releaseTimeMs) => {
+    if (!consciousAdmission.at(observer, releaseTimeMs).admitted) {
+      const error = new Error("Native response cognition is not admitted at this Body release.");
+      error.code = "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED";
+      throw error;
+    }
+    if (conscious_ingress_guard)
+      await conscious_ingress_guard({ character: observer, release_time_ms: releaseTimeMs });
+  };
   const ledger = buildWorldSimulationObserverMicrotickLedger({
     causal_timeline: initial.causal_timeline,
     admissions: initial.communication_observer_increment_admissions,
@@ -149,7 +166,8 @@ export async function replayWorldSimulationNativeTemporalResponse({
   let preparation = null;
   const preparationAudits = [];
   for (let i = 0; i < ledger.ticks.length; i += 1) {
-    if (!ledger.ticks[i].observer_cues.some((cue) => cue.observer === observer))
+    if (!ledger.ticks[i].observer_cues.some((cue) => cue.observer === observer)
+        || !consciousAdmission.at(observer, ledger.ticks[i].release_time_ms).admitted)
       continue;
     const nextContext = {
       session_id, turn_id, world_state_revision,
@@ -164,6 +182,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
     if (!nextEpoch)
       refuse("Admitted observer cue has no canonical prepared epoch.");
     if (preparation_decision_resolver) {
+      await admitIngress(nextEpoch.release_time_ms);
       const answer = await preparation_decision_resolver(clone({
         schema_version: "cc7ae-native-preparation-decision-view-v1",
         character: observer,
@@ -180,6 +199,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
           no_fixed_response_latency: true,
         },
       }));
+      await admitIngress(nextEpoch.release_time_ms);
       if (!record(answer)
           || Object.keys(answer).sort().join("|") !== "decision|epoch_id"
           || answer.epoch_id !== nextEpoch.epoch_id
@@ -263,6 +283,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
       refuse("CC-7AF native response invalidated by a superseded source causal epoch.");
   };
   await fence("before_fresh_character_input");
+  await admitIngress(epoch.release_time_ms);
   const freshInput = typeof character_input_resolver === "function"
     ? await character_input_resolver(clone({
       character: observer,
@@ -273,6 +294,7 @@ export async function replayWorldSimulationNativeTemporalResponse({
         private_observer_response_only: true,
       },
     })) : character_input;
+  await admitIngress(epoch.release_time_ms);
   if (!record(freshInput) || freshInput.character !== observer
       || !record(freshInput.cognition))
     refuse("Native observer response requires fresh same-character cognition.");
@@ -284,7 +306,15 @@ export async function replayWorldSimulationNativeTemporalResponse({
   };
   const proposed = await runWorldSimulationObserverResponseProposal({
     epoch_context: context, presented_epoch: epoch,
-    character_input: freshInput, character_input_binding: binding, selection_resolver,
+    character_input: freshInput, character_input_binding: binding,
+    selection_resolver: async (view) => {
+      if (view.observer !== observer || view.release_time_ms !== epoch.release_time_ms)
+        refuse("Native conscious selection must bind its exact observer release.");
+      await admitIngress(view.release_time_ms);
+      const decision = await selection_resolver(view);
+      await admitIngress(view.release_time_ms);
+      return decision;
+    },
     consumed_epoch_ids: preparation?.engine_private_consumed_epoch_ids ?? [],
   });
   const scheduled = await scheduleWorldSimulationNativeTemporalResponse({

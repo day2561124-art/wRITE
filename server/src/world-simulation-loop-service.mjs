@@ -10672,7 +10672,16 @@ export async function resolveWorldSimulationTurn(
     ? (options.characterNativeTemporalResponseObserver
       ?? selected.find((choice) => choice.selection === "reject_all")?.character)
     : null;
+  const guardNativeConsciousIngress = async () => {
+    const current = await getWorldSimulationState(sessionId, options);
+    if (current.revision !== snapshot.revision || current.state_hash !== snapshot.state_hash) {
+      const error = new Error("Native temporal conscious ingress requires its prepared World revision/hash.");
+      error.code = "C6D_NATIVE_CONSCIOUS_STATE_CHANGED";
+      throw error;
+    }
+  };
   const nativeTemporalReplay = nativeObserver
+    && projectWorldSimulationConsciousCognitionAdmission(snapshot.state, nativeObserver).admitted
     ? await replayWorldSimulationNativeTemporalResponse({
       session_id: sessionId,
       turn_id: preparedTurn.turn_id,
@@ -10686,6 +10695,8 @@ export async function resolveWorldSimulationTurn(
       ),
       selected_action_intents: cloneJson(selected),
       observer: nativeObserver,
+      committed_history: await getWorldSimulationHistory(sessionId, options),
+      conscious_ingress_guard: guardNativeConsciousIngress,
       character_input_resolver:
         options.characterNativeTemporalResponseInputResolver,
       selection_resolver:
@@ -11095,9 +11106,25 @@ export async function resolveWorldSimulationTurn(
     }).audit;
   // CC-7Q is explicitly opted-in speaker-scoped intention evidence from
   // already-selected speech outcomes. Only the text-free audit is persisted.
+  const speakerIntentTimeMs = Date.parse(causalResolution.next_world_state.simulation_time)
+    - Date.parse(snapshot.state.simulation_time);
+  const admittedSpeakerOutcomes = array(causalResolution.action_outcomes).filter((outcome) =>
+    consciousObserverAdmission.at(outcome.actor, speakerIntentTimeMs).admitted);
+  const rawSpeakerResolver = options.characterCommunicationSpeakerNextTurnResolver;
   const speakerNextTurnIntent = await runWorldSimulationSpeakerNextTurnIntent({
-    action_outcomes: array(causalResolution.action_outcomes),
-    resolver: options.characterCommunicationSpeakerNextTurnResolver ?? null,
+    action_outcomes: admittedSpeakerOutcomes,
+    resolver: typeof rawSpeakerResolver === "function"
+      ? async (packet) => {
+        await guardNativeConsciousIngress();
+        if (!consciousObserverAdmission.at(packet.actor, speakerIntentTimeMs).admitted) {
+          const error = new Error("Post-causal speaker intention is not admitted by Body.");
+          error.code = "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED";
+          throw error;
+        }
+        const decision = await rawSpeakerResolver(packet);
+        await guardNativeConsciousIngress();
+        return decision;
+      } : rawSpeakerResolver ?? null,
   });
   // CC-7R joins World-private release lineage, not the observer resolver
   // views. Only opaque text-free evidence reaches the committed history.

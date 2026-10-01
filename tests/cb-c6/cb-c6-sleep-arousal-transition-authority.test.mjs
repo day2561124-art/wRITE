@@ -1566,3 +1566,150 @@ async function d2bNativeObserver(mode) {
 for (const mode of ["asleep", "awake", "wake", "sleep", "wake-equal", "sleep-equal", "stale"])
   await d2bNativeObserver(mode);
 console.log("CB-C6-D2b post-causal conscious observer admission regression passed.");
+
+function d2cSpeechGoal(character, addressee) {
+  const semantic = "男孩已離開房子";
+  return {
+    character, addressee, purpose: "告知", mode: "direct",
+    public_content: semantic, claim_kind: "sincere_assertion",
+    surface_realization: { schema_version: "cc5-mandarin-clause-request-v1", semantic_anchor: semantic,
+      clause: { subject: "男孩", predicate: "離開", aspect_particle: "了", object: "房子" } },
+  };
+}
+async function d2cNativeIngress(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-d2c-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const speaker = mode.startsWith("speaker");
+    const initiallyAsleep = mode === "native-initial-asleep";
+    const { state: initial } = d1Fixture(initiallyAsleep ? "asleep" : "awake");
+    initial.characters.aria.physical_state.incapacitated = false;
+    Object.assign(initial.event_queue[0], { type: "conversation", participants: ["aria", "keeper"] });
+    const sleepBoundary = mode === "native-sleep-mid" ? 200 : 125;
+    initial.event_queue[0].sleep_arousal_transition.time_ms = mode === "native-sleep-before" ? 0 : sleepBoundary;
+    if (mode === "speaker-awake" || mode === "speaker-stale" || mode === "native-awake"
+        || mode.startsWith("native-stale"))
+      delete initial.event_queue[0].sleep_arousal_transition;
+    initial.scenes.room.audibility_profiles = { aria: { minimum_audible_db: 30 }, keeper: { minimum_audible_db: 30 } };
+    Object.assign(initial.characters.keeper, {
+      known: ["男孩已離開房子"], speech_acoustics: { sound_level_db_at_1m: 60 },
+      communication_goal: d2cSpeechGoal("keeper", "aria"),
+    });
+    if (mode === "speaker-sleep") {
+      initial.characters.keeper.physical_state = {
+        sleep_arousal: { ...d1Clone(initial.characters.aria.physical_state.sleep_arousal),
+          character: "keeper", source: { kind: "world_initialization", source_id: "initial-keeper" } },
+        homeostatic_cues: { fatigue: true },
+      };
+      initial.world_rules.sleep_arousal.rules.push({
+        rule_id: "d2c-keeper-sleep", character: "keeper", from_condition: "awake", condition: "asleep",
+        required_homeostatic_cues: { fatigue: true },
+      });
+      initial.event_queue[0].sleep_arousal_transition = { character: "keeper", condition: "asleep", time_ms: 125 };
+    }
+    if (mode === "speaker-stale") Object.assign(initial.characters.aria, {
+      known: ["男孩已離開房子"], speech_acoustics: { sound_level_db_at_1m: 60 },
+      communication_goal: d2cSpeechGoal("aria", "keeper"),
+    });
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-D2c conscious speaker and Native temporal ingress", seed: mode,
+      rules: { ...initial.world_rules, event_driven: true, persistent_causality: true,
+        communication_action_seconds: 0.25, communication_speech_stream_increment_max_chars: 3 },
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (name) => ({
+        entity_id: `d2c_character_${name}`, canonical_name: name, identity_source: "d2c_fixture", formal: true,
+      }),
+    });
+    const brain = async (packet) => {
+      if (packet.character !== "keeper" && mode !== "speaker-stale") return "reject_all";
+      const candidate = packet.candidate_action_intents.find((item) => item.communication?.surface_realization_complete === true);
+      assert.ok(candidate);
+      return { action_id: candidate.action_id };
+    };
+    const advance = () => runWorldSimulationTurn({ world_simulation_session_id: sid }, {
+      ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain,
+    });
+    const calls = { speaker: [], preparation: [], input: [], selection: [] };
+    function capture(kind, packet) {
+      calls[kind].push(d1Clone(packet));
+      for (const secret of ["sleep_arousal", "body_sleep_adjudication", before.state_hash])
+        assert.equal(JSON.stringify(packet).includes(secret), false, "Body proof and World CAS remain private");
+    }
+    const options = { ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain };
+    if (speaker) options.characterCommunicationSpeakerNextTurnResolver = async (packet) => {
+      capture("speaker", packet);
+      if (mode === "speaker-stale" && calls.speaker.length === 1) await advance();
+      return { mode: "nominate_addressee", target: packet.current_public_addressee };
+    };
+    else Object.assign(options, {
+      characterNativeTemporalResponseObserver: "aria",
+      characterNativeTemporalResponsePreparationResolver: async (packet) => {
+        capture("preparation", packet);
+        if (mode === "native-stale-preparation") await advance();
+        return { epoch_id: packet.epoch_id, decision: mode === "native-sleep-mid" ? "wait" : "select_response" };
+      },
+      characterNativeTemporalResponseInputResolver: async (packet) => {
+        capture("input", packet);
+        if (mode === "native-stale-input") await advance();
+        return { character: "aria", cognition: { communication_goal: d2cSpeechGoal("aria", "keeper") } };
+      },
+      characterNativeTemporalResponseSelectionResolver: async (packet) => {
+        capture("selection", packet);
+        return { epoch_id: packet.epoch_id, reject_all: true };
+      },
+    });
+    if (mode.includes("stale")) {
+      await assert.rejects(runWorldSimulationTurn({ world_simulation_session_id: sid }, options),
+        { code: "C6D_NATIVE_CONSCIOUS_STATE_CHANGED" }).catch((error) => {
+          error.message += ` mode=${mode} callbacks=${JSON.stringify(Object.fromEntries(
+            Object.entries(calls).map(([kind, packets]) => [kind, packets.length])))}`;
+          error.stack += `\n${error.message}`;
+          throw error;
+        });
+      assert.equal(calls.speaker.length, speaker ? 1 : 0);
+      assert.equal(calls.preparation.length, speaker ? 0 : 1);
+      assert.equal(calls.input.length, mode === "native-stale-input" ? 1 : 0);
+      assert.equal(calls.selection.length, 0);
+      assert.equal((await getWorldSimulationState(sid, nativeOptions)).revision, before.revision + 1);
+      assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 1);
+      return;
+    }
+    assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, options)).committed, true);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    const turn = history.turns[0];
+    const receipts = turn.communication_observer_increment_admissions
+      .filter((item) => item.observer === "aria" && item.admission_status === "heard_acoustic_cues_only");
+    assert.ok(receipts.length > 1, "actual acoustic receipts remain independent of conscious admission");
+    if (speaker) {
+      assert.equal(calls.speaker.length, mode === "speaker-sleep" ? 0 : 1);
+      assert.ok(turn.action_outcomes.some((item) => item.actor === "keeper" && item.result === "communication_emitted"),
+        "post-causal admission must preserve the already resolved speech");
+    } else {
+      const admitted = mode === "native-sleep-mid" ? receipts.filter((item) => item.release_time_ms < sleepBoundary) : receipts;
+      if (mode === "native-sleep-mid") assert.ok(admitted.length > 0 && admitted.length < receipts.length,
+        "fixture must include genuine conscious releases before sleep and physical releases after sleep");
+      const expectedPreparation = mode === "native-initial-asleep" || mode === "native-sleep-before" ? []
+        : mode === "native-sleep-mid" ? admitted.map((item) => item.release_time_ms) : [receipts[0].release_time_ms];
+      assert.deepEqual(calls.preparation.map((item) => item.release_time_ms), expectedPreparation);
+      assert.equal(calls.input.length, mode === "native-awake" ? 1 : 0);
+      assert.equal(calls.selection.length, mode === "native-awake" ? 1 : 0);
+      assert.equal(Object.hasOwn(turn, "native_temporal_choice_evidence"), false,
+        "sleep admission cannot fabricate an initial rejection or selected response");
+    }
+    const after = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal(Date.parse(after.state.simulation_time) - Date.parse(before.state.simulation_time), 250);
+    assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition,
+      mode.startsWith("native-sleep") ? "asleep" : "awake");
+    if (mode === "speaker-sleep") assert.equal(after.state.characters.keeper.physical_state.sleep_arousal.condition, "asleep");
+    assert.deepEqual(after.state.motivational_goal_events, before.state.motivational_goal_events);
+    assert.deepEqual(after.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+for (const mode of ["speaker-awake", "speaker-sleep", "speaker-stale", "native-initial-asleep",
+  "native-awake", "native-sleep-before", "native-sleep-mid", "native-stale-preparation", "native-stale-input"])
+  await d2cNativeIngress(mode);
+console.log("CB-C6-D2c conscious speaker and Native temporal ingress regression passed.");
