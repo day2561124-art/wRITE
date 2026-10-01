@@ -1388,7 +1388,8 @@ export function buildWorldSimulationCausalRuleContract() {
       actual_whole_millisecond_world_horizon_required: true,
       conscious_opportunity_admission_deferred_to_c6d: true,
       same_turn_physical_preemption_via_global_timeline: true,
-      communication_stream_truncation_deferred_beyond_c6d3a: true,
+      same_turn_speech_future_release_interruption_via_causal_timeline: true,
+      already_released_speech_increment_retraction_allowed: false,
     },
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
@@ -1784,10 +1785,21 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     }
   }
 
+  // D3b consumes only the canonical Body-sleep observation already
+  // admitted by D3a's immutable cross-layer arbitration. This is not a new
+  // sleep inference and cannot retract any increment whose release happened
+  // at or before the transition timestamp.
+  const bodySleepPreemptionEvents = array(
+    timelineArbitration?.cross_layer_event_arbitration?.final_result?.batches,
+  ).flatMap((batch) => array(batch?.members))
+    .filter((member) => member?.role === "sleep_arousal_state"
+      && member?.source_layer === "body_sleep_arousal"
+      && member?.observation?.kind === "sleep_arousal_asleep")
+    .map((member) => cloneJson(member.observation));
+
   // CC-6B turns only already-resolved, realized speech outcomes into a
-  // short-lived physical sound source. The sound carries no wording or
-  // proposition. It remains available through the next turn's perception
-  // phase, then this projection expires it during that turn's causal resolve.
+  // short-lived physical sound source. D3b refuses to register a source when
+  // Body sleep occurred before the first scheduled speech increment.
   const communicationAcousticBridge =
     projectWorldSimulationCommunicationAcousticBridge({
       world_state: snapshot,
@@ -1795,6 +1807,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       turn_id: input.turn_id ?? null,
       action_outcomes: outcomes,
       suppressed_action_ids: suppressedActionIds,
+      body_sleep_preemption_events: bodySleepPreemptionEvents,
     });
   const acousticRegistrationByAction = new Map(
     communicationAcousticBridge.registrations.map((item) => [item.action_id, item]),
@@ -1900,6 +1913,30 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     combat_resolution: combatResolution,
     physics_resolution: physicsResolution,
   });
+  const speechInterruptionsByAction = new Map(
+    array(causalTimeline.entries)
+      .filter((entry) => entry?.kind === "communication_speech_interrupted"
+        && entry?.result === "speech_stream_interrupted_by_body_sleep")
+      .map((entry) => [entry.action_id, entry]),
+  );
+  for (const outcome of outcomes) {
+    if (outcome?.result !== "communication_emitted") continue;
+    const interruption = speechInterruptionsByAction.get(outcome.action_id);
+    if (!interruption) continue;
+    outcome.communication_speech_interruption = {
+      status: "interrupted_by_body_sleep",
+      transition_id: interruption.transition_id ?? null,
+      interrupted_at_ms: interruption.time_ms,
+      released_increment_count: interruption.released_increment_count,
+      cancelled_future_increment_count:
+        interruption.cancelled_future_increment_count,
+      original_increment_count: interruption.original_increment_count,
+      last_released_increment_ref:
+        interruption.last_released_increment_ref ?? null,
+      already_released_increment_retracted: false,
+      full_selected_surface_rewritten: false,
+    };
+  }
 
   // CC-7C: observer-scoped, release-time acoustic evidence is derived only
   // from a registered CC-6B physical source and a released CC-7B increment.
@@ -1926,9 +1963,18 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       const signal = registeredSpeechSignals.get(outcome?.action_id);
       const stream = object(outcome?.communication_speech_stream);
       if (!signal || !array(stream.increments).length) continue;
+      const releasedIncrementRefs = new Set(
+        array(causalTimeline.entries)
+          .filter((entry) => entry?.kind === "communication_speech_increment"
+            && entry?.action_id === outcome.action_id
+            && entry?.actor === outcome.actor
+            && entry?.stream_id === stream.stream_id)
+          .map((entry) => entry.increment_ref),
+      );
       for (const observer of observers) {
         if (observer === outcome.actor) continue;
         for (const increment of stream.increments) {
+          if (!releasedIncrementRefs.has(increment.increment_ref)) continue;
           const admission = projectWorldSimulationObserverSpeechIncrements({
             world_state: snapshot,
             scene_state: snapshotScene,

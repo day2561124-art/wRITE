@@ -54,24 +54,52 @@ export function buildWorldSimulationSpeechOverlapEvidence({
     if (actors.has(outcome.actor))
       fail("CC-7Z cannot assign two concurrent speech actions to one actor.");
     actors.add(outcome.actor);
+    const interruptions = timeline.filter((entry) =>
+      entry?.kind === "communication_speech_interrupted" &&
+      entry?.actor === outcome.actor &&
+      entry?.action_id === outcome.action_id &&
+      entry?.stream_id === stream.stream_id &&
+      entry?.result === "speech_stream_interrupted_by_body_sleep");
+    if (interruptions.length > 1)
+      fail("CC-7Z speech stream has ambiguous Body interruption evidence.");
+    const interruption = interruptions[0] ?? null;
+    let releasedCount = 0;
+    let cancelledCount = 0;
     for (const increment of stream.increments) {
+      const releaseTime = increment.release_time_ms ?? increment.end_offset_ms;
       const matches = timeline.filter((entry) =>
         entry?.kind === "communication_speech_increment" &&
         entry?.actor === outcome.actor &&
         entry?.action_id === outcome.action_id &&
         entry?.stream_id === stream.stream_id &&
         entry?.increment_ref === increment.increment_ref &&
-        entry?.time_ms === (increment.release_time_ms ?? increment.end_offset_ms) &&
+        entry?.time_ms === releaseTime &&
         entry?.surface_fragment === increment.surface_fragment &&
         entry?.signal_phase === increment.signal_phase);
-      if (matches.length !== 1)
-        fail("CC-7Z speech release has no unique causal timeline entry.");
+      const cancelled = interruption
+        && releaseTime > interruption.time_ms + 1e-9;
+      if (cancelled) {
+        if (matches.length !== 0)
+          fail("CC-7Z Body-cancelled future release remains on the causal timeline.");
+        cancelledCount += 1;
+      } else {
+        if (matches.length !== 1)
+          fail("CC-7Z speech release has no unique causal timeline entry.");
+        releasedCount += 1;
+      }
     }
+    if (interruption && (
+        interruption.released_increment_count !== releasedCount ||
+        interruption.cancelled_future_increment_count !== cancelledCount ||
+        interruption.original_increment_count !== stream.increments.length ||
+        releasedCount + cancelledCount !== stream.increments.length))
+      fail("CC-7Z Body interruption counts disagree with the speech stream.");
     speeches.push({
       actor: outcome.actor,
       action_id: outcome.action_id,
       start_ms: stream.start_time_ms ?? 0,
-      end_ms: (stream.start_time_ms ?? 0) + stream.duration_ms,
+      end_ms: interruption?.time_ms
+        ?? (stream.start_time_ms ?? 0) + stream.duration_ms,
     });
   }
   if (speeches.length > 64)
@@ -106,6 +134,8 @@ export function buildWorldSimulationSpeechOverlapEvidence({
       exact_world_speech_stream_and_timeline_required: true,
       temporal_overlap_only: true,
       technical_stream_segmentation_is_not_turn_boundary: true,
+      body_sleep_interruption_shortens_physical_overlap_interval: true,
+      already_released_increment_retraction_allowed: false,
       interruption_judged: false,
       floor_priority_inferred: false,
       listener_audibility_inferred: false,

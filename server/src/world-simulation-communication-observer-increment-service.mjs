@@ -33,6 +33,8 @@ export function buildWorldSimulationObserverSpeechIncrementContract() {
     character_view_contains_surface_text: false,
     character_view_contains_semantics: false,
     future_increment_exposure_allowed: false,
+    body_sleep_cancelled_future_increment_may_be_absent_from_timeline: true,
+    already_released_increment_retraction_allowed: false,
     observer_movement_and_dynamic_acoustics_supported: false,
     native_incremental_character_brain_invocation_here: false,
     subjective_turn_projection_automatically_decided: false,
@@ -95,12 +97,23 @@ export function projectWorldSimulationObserverSpeechIncrements({
   const timeline = array(causal_timeline?.entries);
   if (increments.length < 1 || increments.length > 1200)
     reject("CC-7C requires a bounded nonempty stream.");
+  const interruptions = timeline.filter((entry) =>
+    entry.kind === "communication_speech_interrupted"
+    && entry.stream_id === streamId
+    && entry.action_id === actionId
+    && entry.actor === speaker
+    && entry.result === "speech_stream_interrupted_by_body_sleep");
+  if (interruptions.length > 1)
+    reject("Speech stream may have at most one authoritative Body interruption.");
+  const interruption = interruptions[0] ?? null;
   const releaseEntries = [];
+  let cancelledByBodySleep = 0;
   for (const [index, increment] of increments.entries()) {
     if (increment.stream_id !== streamId || increment.sequence !== index + 1
       || !Number.isFinite(increment.end_offset_ms)
       || (index > 0 && increment.end_offset_ms <= increments[index - 1].end_offset_ms))
       reject("Stream increment lineage or release order is invalid.");
+    const releaseTime = increment.release_time_ms ?? increment.end_offset_ms;
     const matching = timeline.filter((entry) =>
       entry.kind === "communication_speech_increment"
       && entry.stream_id === streamId
@@ -108,14 +121,27 @@ export function projectWorldSimulationObserverSpeechIncrements({
       && entry.actor === speaker
       && entry.increment_ref === increment.increment_ref
       && entry.increment_sequence === increment.sequence
-      && entry.time_ms === (increment.release_time_ms ?? increment.end_offset_ms)
+      && entry.time_ms === releaseTime
       && entry.surface_fragment === increment.surface_fragment
       && entry.signal_phase === increment.signal_phase);
+    const cancelled = interruption
+      && releaseTime > interruption.time_ms + 1e-9;
+    if (cancelled) {
+      if (matching.length !== 0)
+        reject("Body-cancelled future speech increment may not remain released.");
+      cancelledByBodySleep += 1;
+      continue;
+    }
     if (matching.length !== 1)
-      reject("Each release must match exactly one authoritative causal timeline entry.");
-    if ((increment.release_time_ms ?? increment.end_offset_ms) <= released_through_ms)
+      reject("Each non-cancelled release must match exactly one authoritative causal timeline entry.");
+    if (releaseTime <= released_through_ms)
       releaseEntries.push(increment);
   }
+  if (interruption && (
+      interruption.cancelled_future_increment_count !== cancelledByBodySleep
+      || interruption.released_increment_count + cancelledByBodySleep !== increments.length
+      || interruption.original_increment_count !== increments.length))
+    reject("Body interruption counts disagree with the committed speech stream.");
 
   // Pass only this explicitly registered source to the programmatic query:
   // prior-turn sounds may not be mistaken for the current speech stream.
@@ -173,6 +199,8 @@ export function projectWorldSimulationObserverSpeechIncrements({
       registered_sound_link_verified: true,
       static_acoustics_scope_verified: true,
       future_increments_withheld_count: increments.length - releaseEntries.length,
+      body_sleep_cancelled_future_increment_count: cancelledByBodySleep,
+      already_released_increment_retracted: false,
       source_content_forwarded_to_observer: false,
       listener_intelligibility_inferred: false,
       speaker_identity_inferred: false,

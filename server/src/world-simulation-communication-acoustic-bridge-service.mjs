@@ -142,6 +142,11 @@ export function projectWorldSimulationCommunicationAcousticBridge(input = {}) {
   const sceneId = String(input.scene_id ?? "").trim();
   const turnId = input.turn_id ?? null;
   const suppressed = new Set(array(input.suppressed_action_ids).map(String));
+  const bodySleepEvents = array(input.body_sleep_preemption_events)
+    .filter((item) => item?.kind === "sleep_arousal_asleep"
+      && typeof item?.target === "string"
+      && Number.isFinite(item?.time_ms)
+      && item.time_ms >= 0);
   const soundEventsFieldExists = Object.hasOwn(worldState, "sound_events");
   const beforeList = cloneJson(array(worldState.sound_events));
   const before = soundEventsFieldExists ? cloneJson(worldState.sound_events) : null;
@@ -159,6 +164,23 @@ export function projectWorldSimulationCommunicationAcousticBridge(input = {}) {
     if (outcome?.result !== "communication_emitted") continue;
     if (suppressed.has(actionId)) {
       skipped.push({ action_id: actionId || null, actor: outcome?.actor ?? null, status: "suppressed_action" });
+      continue;
+    }
+    const stream = object(outcome?.communication_speech_stream);
+    const sleep = bodySleepEvents
+      .filter((item) => item.target === outcome?.actor)
+      .sort((left, right) => left.time_ms - right.time_ms)[0] ?? null;
+    if (sleep && array(stream.increments).length > 0
+        && !array(stream.increments).some((increment) => {
+          const release = finiteNonNegative(
+            increment?.release_time_ms ?? increment?.end_offset_ms);
+          return release !== null && release <= sleep.time_ms + 1e-9;
+        })) {
+      skipped.push({
+        action_id: actionId || null,
+        actor: outcome?.actor ?? null,
+        status: "no_speech_increment_released_before_body_sleep",
+      });
       continue;
     }
     const projected = makeSignal({
@@ -214,6 +236,8 @@ export function projectWorldSimulationCommunicationAcousticBridge(input = {}) {
       belief_update_inferred: false,
       grounding_inferred: false,
       one_next_perception_opportunity_only: true,
+      body_sleep_without_any_released_increment_registers_signal: false,
+      partial_pre_sleep_release_may_register_signal: true,
     },
   };
 }
@@ -227,6 +251,8 @@ export function buildWorldSimulationCommunicationAcousticBridgeContract() {
     hidden_default_vocal_level_allowed: false,
     same_scene_source_position_required: true,
     suppressed_actions_register_signal: false,
+    body_sleep_without_any_released_increment_registers_signal: false,
+    partial_pre_sleep_release_may_register_signal: true,
     signal_lifecycle: "one_next_perception_only",
     source_content_forwarded_to_audibility: false,
     speaker_identity_recognition_inferred: false,

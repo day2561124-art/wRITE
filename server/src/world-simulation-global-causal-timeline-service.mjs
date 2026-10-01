@@ -294,6 +294,9 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
       strict_earlier_body_sleep_preempts_later_execution: true,
       exact_timestamp_ties_are_simultaneous_for_preemption: true,
       body_sleep_preview_requires_canonical_body_adjudication: true,
+      speech_release_after_body_sleep_cancelled: true,
+      same_timestamp_speech_release_and_sleep_are_simultaneous: true,
+      already_released_speech_increment_retraction_allowed: false,
       fixed_point_recomputed_after_preemption: true,
     },
     unified_point_events: [
@@ -644,15 +647,32 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
 
 export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
   const entries = [];
+  const bodySleepTransitions = array(input.body_sleep_state_transitions)
+    .filter((transition) => transition?.field === "physical_state.sleep_arousal"
+      && transition?.to?.condition === "asleep"
+      && transition?.body_sleep_adjudication
+      && Number.isFinite(transition.time_ms)
+      && transition.time_ms >= 0);
   for (const outcome of array(input.spatial_action_outcomes)) {
     const durationMs = finiteNumber(outcome?.duration_ms);
     if (durationMs === null) continue;
     const speechStream = object(outcome?.communication_speech_stream);
-    for (const increment of array(speechStream.increments)) {
+    const speechIncrements = array(speechStream.increments);
+    const sleepTransition = bodySleepTransitions
+      .filter((transition) => transition.entity === outcome?.actor)
+      .sort((left, right) => left.time_ms - right.time_ms)[0] ?? null;
+    const releasedSpeechIncrements = [];
+    const cancelledSpeechIncrements = [];
+    for (const increment of speechIncrements) {
       const timeMs = finiteNumber(increment?.release_time_ms ?? increment?.end_offset_ms);
       const startMs = finiteNumber(outcome?.start_time_ms, 0) ?? 0;
       if (timeMs === null || timeMs < startMs
           || timeMs > startMs + durationMs + 1e-9) continue;
+      if (sleepTransition && timeMs > sleepTransition.time_ms + 1e-9) {
+        cancelledSpeechIncrements.push(increment);
+        continue;
+      }
+      releasedSpeechIncrements.push(increment);
       entries.push({
         kind: "communication_speech_increment",
         actor: outcome.actor ?? null,
@@ -674,18 +694,39 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
         source_layer: "communication_temporal_stream",
       });
     }
+    if (sleepTransition && cancelledSpeechIncrements.length > 0
+        && speechStream.stream_id) {
+      entries.push({
+        kind: "communication_speech_interrupted",
+        actor: outcome.actor ?? null,
+        action_id: outcome.action_id ?? null,
+        stream_id: speechStream.stream_id,
+        time_ms: sleepTransition.time_ms,
+        transition_id: sleepTransition.to?.last_transition?.transition_id ?? null,
+        released_increment_count: releasedSpeechIncrements.length,
+        cancelled_future_increment_count: cancelledSpeechIncrements.length,
+        original_increment_count: speechIncrements.length,
+        last_released_increment_ref:
+          releasedSpeechIncrements.at(-1)?.increment_ref ?? null,
+        result: "speech_stream_interrupted_by_body_sleep",
+        source_layer: "body_sleep_arousal",
+      });
+    }
     let kind = "action_complete";
     if (outcome.result === "movement_completed") kind = "movement_complete";
     else if (String(outcome.result ?? "").startsWith("door_")) kind = "door_interaction_complete";
     else if (["pickup_completed", "drop_completed", "transfer_completed"].includes(outcome.result)) kind = "object_interaction_complete";
-    entries.push({
-      kind,
-      actor: outcome.actor ?? null,
-      action_id: outcome.action_id ?? null,
-      time_ms: durationMs + (finiteNumber(outcome?.start_time_ms, 0) ?? 0),
-      result: outcome.result ?? null,
-      source_layer: "spatial_rules",
-    });
+    if (!(sleepTransition && cancelledSpeechIncrements.length > 0
+        && speechStream.stream_id)) {
+      entries.push({
+        kind,
+        actor: outcome.actor ?? null,
+        action_id: outcome.action_id ?? null,
+        time_ms: durationMs + (finiteNumber(outcome?.start_time_ms, 0) ?? 0),
+        result: outcome.result ?? null,
+        source_layer: "spatial_rules",
+      });
+    }
   }
   entries.push(...array(input.combat_resolution?.timeline_entries).map((entry) => ({ ...entry, source_layer: "combat" })));
   for (const resolution of array(input.combat_resolution?.combat_resolutions)) {

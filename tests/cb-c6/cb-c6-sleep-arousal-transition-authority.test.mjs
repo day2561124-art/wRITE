@@ -1589,8 +1589,10 @@ async function d2cNativeIngress(mode) {
     const { state: initial } = d1Fixture(initiallyAsleep ? "asleep" : "awake");
     initial.characters.aria.physical_state.incapacitated = false;
     Object.assign(initial.event_queue[0], { type: "conversation", participants: ["aria", "keeper"] });
-    const sleepBoundary = mode === "native-sleep-mid" ? 200 : 125;
-    initial.event_queue[0].sleep_arousal_transition.time_ms = mode === "native-sleep-before" ? 0 : sleepBoundary;
+    const sleepBoundary = mode === "native-sleep-mid" || mode === "speaker-sleep" ? 200
+      : mode === "speaker-sleep-before" ? 0 : 125;
+    initial.event_queue[0].sleep_arousal_transition.time_ms =
+      mode === "native-sleep-before" ? 0 : sleepBoundary;
     if (mode === "speaker-awake" || mode === "speaker-stale" || mode === "native-awake"
         || mode.startsWith("native-stale"))
       delete initial.event_queue[0].sleep_arousal_transition;
@@ -1599,7 +1601,7 @@ async function d2cNativeIngress(mode) {
       known: ["男孩已離開房子"], speech_acoustics: { sound_level_db_at_1m: 60 },
       communication_goal: d2cSpeechGoal("keeper", "aria"),
     });
-    if (mode === "speaker-sleep") {
+    if (mode.startsWith("speaker-sleep")) {
       initial.characters.keeper.physical_state = {
         sleep_arousal: { ...d1Clone(initial.characters.aria.physical_state.sleep_arousal),
           character: "keeper", source: { kind: "world_initialization", source_id: "initial-keeper" } },
@@ -1609,7 +1611,9 @@ async function d2cNativeIngress(mode) {
         rule_id: "d2c-keeper-sleep", character: "keeper", from_condition: "awake", condition: "asleep",
         required_homeostatic_cues: { fatigue: true },
       });
-      initial.event_queue[0].sleep_arousal_transition = { character: "keeper", condition: "asleep", time_ms: 125 };
+      initial.event_queue[0].sleep_arousal_transition = {
+        character: "keeper", condition: "asleep", time_ms: sleepBoundary,
+      };
     }
     if (mode === "speaker-stale") Object.assign(initial.characters.aria, {
       known: ["男孩已離開房子"], speech_acoustics: { sound_level_db_at_1m: 60 },
@@ -1687,11 +1691,51 @@ async function d2cNativeIngress(mode) {
     const turn = history.turns[0];
     const receipts = turn.communication_observer_increment_admissions
       .filter((item) => item.observer === "aria" && item.admission_status === "heard_acoustic_cues_only");
-    assert.ok(receipts.length > 1, "actual acoustic receipts remain independent of conscious admission");
+    if (!mode.startsWith("speaker-sleep"))
+      assert.ok(receipts.length > 1, "listener sleep must not retract physical speech already emitted by an awake speaker");
     if (speaker) {
-      assert.equal(calls.speaker.length, mode === "speaker-sleep" ? 0 : 1);
-      assert.ok(turn.action_outcomes.some((item) => item.actor === "keeper" && item.result === "communication_emitted"),
-        "post-causal admission must preserve the already resolved speech");
+      assert.equal(calls.speaker.length, mode.startsWith("speaker-sleep") ? 0 : 1);
+      const speechOutcome = turn.action_outcomes.find((item) =>
+        item.actor === "keeper" && item.result === "communication_emitted");
+      assert.ok(speechOutcome, "post-causal admission must preserve the already resolved speech action");
+      if (mode.startsWith("speaker-sleep")) {
+        const stream = speechOutcome.communication_speech_stream;
+        const released = turn.causal_timeline.entries.filter((item) =>
+          item.kind === "communication_speech_increment"
+          && item.action_id === speechOutcome.action_id);
+        const interrupted = turn.causal_timeline.entries.filter((item) =>
+          item.kind === "communication_speech_interrupted"
+          && item.action_id === speechOutcome.action_id);
+        assert.equal(interrupted.length, 1);
+        assert.equal(interrupted[0].time_ms, sleepBoundary);
+        assert.equal(interrupted[0].released_increment_count, released.length);
+        assert.equal(interrupted[0].cancelled_future_increment_count,
+          stream.increment_count - released.length);
+        assert.equal(interrupted[0].original_increment_count, stream.increment_count);
+        assert.equal(speechOutcome.communication_speech_interruption.released_increment_count,
+          released.length);
+        assert.equal(speechOutcome.communication_speech_interruption.cancelled_future_increment_count,
+          stream.increment_count - released.length);
+        assert.equal(speechOutcome.communication_speech_interruption.already_released_increment_retracted, false);
+        assert.equal(speechOutcome.communication_speech_interruption.full_selected_surface_rewritten, false);
+        assert.deepEqual(receipts.map((item) => item.release_time_ms),
+          released.map((item) => item.time_ms),
+          "observer receipts must exist only for actually released pre-sleep increments");
+        if (mode === "speaker-sleep-before") {
+          assert.equal(released.length, 0);
+          assert.equal(receipts.length, 0);
+          assert.equal(speechOutcome.communication_acoustic_signal.registered, false);
+          assert.equal(speechOutcome.communication_acoustic_signal.reason,
+            "no_speech_increment_released_before_body_sleep");
+        } else {
+          assert.ok(released.length > 0 && released.length < stream.increment_count);
+          assert.equal(speechOutcome.communication_acoustic_signal.registered, true);
+          assert.ok(released.every((item) => item.time_ms <= sleepBoundary + 1e-9));
+          assert.ok(stream.increments
+            .filter((item) => (item.release_time_ms ?? item.end_offset_ms) > sleepBoundary + 1e-9)
+            .every((item) => !released.some((entry) => entry.increment_ref === item.increment_ref)));
+        }
+      }
     } else {
       const admitted = mode === "native-sleep-mid" ? receipts.filter((item) => item.release_time_ms < sleepBoundary) : receipts;
       if (mode === "native-sleep-mid") assert.ok(admitted.length > 0 && admitted.length < receipts.length,
@@ -1708,13 +1752,15 @@ async function d2cNativeIngress(mode) {
     assert.equal(Date.parse(after.state.simulation_time) - Date.parse(before.state.simulation_time), 250);
     assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition,
       mode.startsWith("native-sleep") ? "asleep" : "awake");
-    if (mode === "speaker-sleep") assert.equal(after.state.characters.keeper.physical_state.sleep_arousal.condition, "asleep");
+    if (mode.startsWith("speaker-sleep"))
+      assert.equal(after.state.characters.keeper.physical_state.sleep_arousal.condition, "asleep");
     assert.deepEqual(after.state.motivational_goal_events, before.state.motivational_goal_events);
     assert.deepEqual(after.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
-for (const mode of ["speaker-awake", "speaker-sleep", "speaker-stale", "native-initial-asleep",
-  "native-awake", "native-sleep-before", "native-sleep-mid", "native-stale-preparation", "native-stale-input"])
+for (const mode of ["speaker-awake", "speaker-sleep", "speaker-sleep-before", "speaker-stale",
+  "native-initial-asleep", "native-awake", "native-sleep-before", "native-sleep-mid",
+  "native-stale-preparation", "native-stale-input"])
   await d2cNativeIngress(mode);
 console.log("CB-C6-D2c conscious speaker and Native temporal ingress regression passed.");
 
