@@ -5,6 +5,9 @@ import {
   projectWorldSimulationEffectiveGoalImplementationIntentionExecution,
 } from "./world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
 import {
+  assertWorldSimulationSleepArousalMutationAuthority,
+} from "./world-simulation-body-sleep-arousal-service.mjs";
+import {
   projectWorldSimulationEffectiveRevisedStructuredSelfModel,
 } from "./world-simulation-structured-self-model-revision-service.mjs";
 import {
@@ -8584,6 +8587,12 @@ export function projectWorldSimulationChronologicalMutationQueue(input = {}) {
         error.actual_from = cloneJson(before);
         throw error;
       }
+      assertWorldSimulationSleepArousalMutationAuthority({
+        world_state: executed,
+        authority_world_state: input.world_state,
+        world_path: worldPath,
+        mutation,
+      });
       assertPhase63CRetrievalPersistenceMutation(
         executed,
         worldPath,
@@ -8776,6 +8785,12 @@ export function executeWorldSimulationChronologicalMutationQueue(input = {}) {
         error.actual_from = cloneJson(before);
         throw error;
       }
+      assertWorldSimulationSleepArousalMutationAuthority({
+        world_state: executed,
+        authority_world_state: input.world_state,
+        world_path: worldPath,
+        mutation,
+      });
       assertPhase63CRetrievalPersistenceMutation(
         executed,
         worldPath,

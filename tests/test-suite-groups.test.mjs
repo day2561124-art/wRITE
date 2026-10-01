@@ -70,6 +70,7 @@ function assertUnique(label, values) {
 const activeRunAllPaths = [
   ...runAllSource.matchAll(/"tests\/body-0-authority\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-sleep-arousal-reader\.test\.mjs"/g),
+  ...runAllSource.matchAll(/"tests\/cb-c6\/cb-c6-sleep-arousal-transition-authority\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-history\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-brain-body-contract\.test\.mjs"/g),
   ...runAllSource.matchAll(/"tests\/body-0-recovery-authority\.test\.mjs"/g),

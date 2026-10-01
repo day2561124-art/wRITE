@@ -409,6 +409,10 @@ export const body0AuthoritySteps = Object.freeze([
     "CB-C6-B Committed Sleep Arousal Reader",
     Object.freeze(["tests/cb-c6/cb-c6-sleep-arousal-reader.test.mjs"]),
   ]),
+  Object.freeze([
+    "CB-C6-C Sleep Arousal Transition Authority",
+    Object.freeze(["tests/cb-c6/cb-c6-sleep-arousal-transition-authority.test.mjs"]),
+  ]),
 ]);
 
 export const body0HistorySteps = Object.freeze([
