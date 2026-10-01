@@ -356,6 +356,131 @@ export function assertWorldSimulationSleepArousalCommitAuthority({
   return true;
 }
 
+
+export const worldSimulationSleepArousalBodyRuleVersion = "cb-c6c-configured-body-sleep-rule-v1";
+const sleepBodyCueChannels = ["hunger", "fullness", "fatigue"];
+
+function validSleepBodyRule(rule) {
+  const cues = record(rule?.required_homeostatic_cues);
+  const channels = Object.keys(cues);
+  return object(rule)
+    && Object.keys(rule).sort().join("|")
+      === "character|condition|from_condition|required_homeostatic_cues|rule_id"
+    && id(rule.rule_id) && id(rule.character)
+    && ["unknown", "awake", "asleep"].includes(rule.from_condition)
+    && ["awake", "asleep"].includes(rule.condition)
+    && rule.from_condition !== rule.condition
+    && channels.length > 0 && channels.length <= sleepBodyCueChannels.length
+    && channels.every((channel) => sleepBodyCueChannels.includes(channel)
+      && typeof cues[channel] === "boolean");
+}
+
+// Engine-private configured guard, using only committed World-owned BODY-1Q
+// receptor/cue booleans. This is not a fatigue generator, a subjective feeling,
+// an acoustic wake rule, or an ordinary Native producer connection.
+export function adjudicateWorldSimulationSleepArousalFromBody({
+  world_state, world_state_revision, world_state_hash, event, elapsed_ms,
+} = {}) {
+  const state = record(world_state);
+  if (!Number.isSafeInteger(world_state_revision) || world_state_revision < 0
+      || typeof world_state_hash !== "string"
+      || world_state_hash !== hashAgentRunValue(state)
+      || !time(elapsed_ms)) {
+    authorityInvalid("Body adjudication requires exact World revision/hash and resolved horizon");
+  }
+  const queued = record(Array.isArray(state.event_queue) ? state.event_queue[0] : null);
+  const eventId = queued.event_id ?? queued.id;
+  if (!id(eventId) || (event?.event_id ?? event?.id) !== eventId
+      || !sameValue(event?.sleep_arousal_transition, queued.sleep_arousal_transition)) {
+    authorityInvalid("Body adjudication requires the actual World queue head");
+  }
+  const outcome = (status, reason, extra = {}) => ({
+    version: worldSimulationSleepArousalBodyRuleVersion,
+    status, reason, state_transition: null, adjudication: null, ...extra,
+  });
+  if (!Object.hasOwn(queued, "sleep_arousal_transition")) {
+    return outcome("not_requested", "no_sleep_arousal_request");
+  }
+  const request = record(queued.sleep_arousal_transition);
+  if (Object.keys(request).sort().join("|") !== "character|condition|time_ms"
+      || !id(request.character) || !Object.hasOwn(record(state.characters), request.character)
+      || !["awake", "asleep"].includes(request.condition) || !time(request.time_ms)) {
+    authorityInvalid("Body sleep/arousal request is invalid");
+  }
+  if (request.time_ms > elapsed_ms) return outcome("unresolved", "beyond_resolved_horizon");
+  const config = record(record(state.world_rules ?? state.rules).sleep_arousal);
+  if (!Object.keys(config).length) return outcome("unavailable", "body_rule_configuration_missing");
+  if (config.version !== worldSimulationSleepArousalBodyRuleVersion
+      || Object.keys(config).sort().join("|") !== "rules|version"
+      || !Array.isArray(config.rules) || !config.rules.length || config.rules.length > 64
+      || !config.rules.every(validSleepBodyRule)
+      || new Set(config.rules.map((rule) => rule.rule_id)).size !== config.rules.length) {
+    return outcome("unavailable", "body_rule_configuration_invalid");
+  }
+  const physical = record(record(state.characters)[request.character]?.physical_state);
+  const current = projectWorldSimulationSleepArousalState({
+    physical_state: physical, character: request.character,
+  });
+  const candidates = config.rules.filter((rule) => rule.character === request.character
+    && rule.condition === request.condition && rule.from_condition === current.condition);
+  if (!candidates.length) return outcome("unresolved", "body_rule_not_configured_for_transition");
+  const sourceCues = record(physical.homeostatic_cues);
+  // Unknown evidence never satisfies either true or false predicates.
+  const complete = candidates.filter((rule) =>
+    Object.keys(rule.required_homeostatic_cues).every((channel) =>
+      Object.hasOwn(sourceCues, channel) && typeof sourceCues[channel] === "boolean"));
+  const accepted = complete.filter((rule) =>
+    Object.entries(rule.required_homeostatic_cues).every(([channel, required]) =>
+      sourceCues[channel] === required));
+  if (!accepted.length) return outcome("unresolved",
+    complete.length ? "body_rule_guard_not_satisfied" : "body_cue_evidence_unavailable");
+  if (accepted.length !== 1) return outcome("unresolved", "conflicting_body_rules");
+  const rule = accepted[0];
+  const produced = projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: state, event: queued,
+  });
+  if (!produced.state_transition) return outcome("unresolved", produced.status);
+  const transition = JSON.parse(JSON.stringify(produced.state_transition));
+  const adjudication = {
+    version: worldSimulationSleepArousalBodyRuleVersion,
+    rule_id: rule.rule_id,
+    rule_configuration_hash: hashAgentRunValue(config),
+    character: request.character,
+    event_id: eventId,
+    source_world_revision: world_state_revision,
+    source_world_state_hash: world_state_hash,
+    prior_condition: current.condition,
+    prior_record_hash: hashAgentRunValue(physical.sleep_arousal ?? null),
+    relative_time_ms: request.time_ms,
+    absolute_time_ms: transition.to.since_time_ms,
+    resolved_horizon_ms: elapsed_ms,
+    evidence: Object.keys(rule.required_homeostatic_cues).sort().map((channel) => ({
+      channel, value: sourceCues[channel],
+      source: "committed_world_body_homeostatic_cue",
+      character: request.character,
+      source_world_revision: world_state_revision,
+      source_world_state_hash: world_state_hash,
+    })),
+    transition_hash: hashAgentRunValue(transition),
+  };
+  adjudication.adjudication_hash = hashAgentRunValue(adjudication);
+  return outcome("transition_adjudicated", "configured_body_guard_accepted", {
+    state_transition: transition, adjudication,
+  });
+}
+
+export function assertWorldSimulationSleepArousalBodyAdjudication({
+  result, ...context
+} = {}) {
+  if (!object(result)) authorityInvalid("Body adjudication result is missing");
+  const expected = adjudicateWorldSimulationSleepArousalFromBody(context);
+  if (expected.status !== "transition_adjudicated"
+      || hashAgentRunValue(result) !== hashAgentRunValue(expected)) {
+    authorityInvalid("Body sleep/arousal adjudication does not replay against exact World context");
+  }
+  return true;
+}
+
 export function projectWorldSimulationSleepArousalTransitionFromEvent({
   world_state,
   event,

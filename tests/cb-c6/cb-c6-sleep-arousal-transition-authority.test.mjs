@@ -552,4 +552,153 @@ try {
   await rm(fixtureRoot, { recursive: true, force: true });
 }
 
+
+import { hashAgentRunValue } from "../../server/src/agent-run-service.mjs";
+import {
+  adjudicateWorldSimulationSleepArousalFromBody as adjudicateBodySleep,
+  assertWorldSimulationSleepArousalBodyAdjudication as assertBodySleep,
+  worldSimulationSleepArousalBodyRuleVersion as bodyRuleVersion,
+} from "../../server/src/world-simulation-body-sleep-arousal-service.mjs";
+
+function bodyContext(state, revision = 4, horizon = 500) {
+  return {
+    world_state: state, world_state_revision: revision,
+    world_state_hash: hashAgentRunValue(state),
+    event: structuredClone(state.event_queue[0]), elapsed_ms: horizon,
+  };
+}
+function configuredBodyWorld(current = "awake") {
+  const state = world(current);
+  state.characters.aria.physical_state.homeostatic_cues = { fatigue: true };
+  state.world_rules = { sleep_arousal: {
+    version: bodyRuleVersion,
+    rules: [{
+      rule_id: "fixture-explicit-sleep-guard", character: "aria",
+      from_condition: "awake", condition: "asleep",
+      required_homeostatic_cues: { fatigue: true },
+    }, {
+      rule_id: "fixture-explicit-wake-guard", character: "aria",
+      from_condition: "asleep", condition: "awake",
+      required_homeostatic_cues: { fatigue: false },
+    }],
+  } };
+  return state;
+}
+{
+  const state = world();
+  state.event_queue[0].wish = "I want to sleep";
+  state.event_queue[0].audible_sound = true;
+  assert.equal(adjudicateBodySleep(bodyContext(state)).reason, "body_rule_configuration_missing");
+}
+for (const mutate of [
+  (state) => { delete state.characters.aria.physical_state.homeostatic_cues; },
+  (state) => { state.characters.aria.physical_state.homeostatic_cues.fatigue = "true"; },
+  (state) => { state.characters.aria.physical_state.homeostatic_cues.fatigue = 1; },
+]) {
+  const state = configuredBodyWorld();
+  mutate(state);
+  state.characters.aria.energy_state = 0;
+  state.event_queue[0].audible_sound = true;
+  const before = structuredClone(state);
+  const result = adjudicateBodySleep(bodyContext(state));
+  assert.equal(result.reason, "body_cue_evidence_unavailable");
+  assert.equal(result.state_transition, null);
+  assert.equal(result.adjudication, null);
+  assert.deepEqual(state, before);
+}
+{
+  const state = configuredBodyWorld();
+  state.characters.aria.physical_state.homeostatic_cues.fatigue = false;
+  assert.equal(adjudicateBodySleep(bodyContext(state)).reason, "body_rule_guard_not_satisfied");
+  state.world_rules.sleep_arousal.rules[0].character = "bystander";
+  assert.equal(adjudicateBodySleep(bodyContext(state)).reason, "body_rule_not_configured_for_transition");
+}
+for (const alter of [
+  (config) => { config.version = "unsupported"; },
+  (config) => { config.rules[0].required_homeostatic_cues = {}; },
+  (config) => { config.rules[0].required_homeostatic_cues = { energy: true }; },
+  (config) => { config.rules[0].required_homeostatic_cues.fatigue = "true"; },
+  (config) => { config.rules[0].private_override = true; },
+  (config) => { config.rules[0].from_condition = "asleep"; },
+  (config) => { config.rules[1].rule_id = config.rules[0].rule_id; },
+  (config) => { config.rules = Array.from({ length: 65 }, (_, i) =>
+    ({ ...config.rules[0], rule_id: `rule-${i}` })); },
+]) {
+  const state = configuredBodyWorld();
+  alter(state.world_rules.sleep_arousal);
+  const result = adjudicateBodySleep(bodyContext(state));
+  assert.equal(result.reason, "body_rule_configuration_invalid");
+  assert.equal(result.state_transition, null);
+}
+{
+  const state = configuredBodyWorld();
+  state.world_rules.sleep_arousal.rules.push({
+    ...structuredClone(state.world_rules.sleep_arousal.rules[0]), rule_id: "conflict",
+  });
+  assert.equal(adjudicateBodySleep(bodyContext(state)).reason, "conflicting_body_rules");
+  assert.equal(adjudicateBodySleep(bodyContext(state, 4, 499)).reason, "beyond_resolved_horizon");
+}
+{
+  const state = configuredBodyWorld();
+  state.characters.aria.physical_state.incapacitated = true;
+  state.characters.aria.physical_state.injuries = [{ severity: 2 }];
+  const before = structuredClone(state);
+  const context = bodyContext(state);
+  const result = adjudicateBodySleep(context);
+  assert.equal(result.status, "transition_adjudicated");
+  assert.equal(result.adjudication.source_world_revision, 4);
+  assert.equal(result.adjudication.source_world_state_hash, context.world_state_hash);
+  assert.equal(result.adjudication.prior_condition, "awake");
+  assert.equal(result.adjudication.evidence[0].value, true);
+  assert.deepEqual(adjudicateBodySleep(context), result, "deterministic replay");
+  assert.equal(assertBodySleep({ result, ...context }), true);
+  for (const alter of [
+    (r) => { r.adjudication.rule_id = "forged"; },
+    (r) => { r.adjudication.evidence[0].character = "bystander"; },
+    (r) => { r.adjudication.source_world_revision = 3; },
+    (r) => { r.state_transition.to.condition = "awake"; },
+  ]) {
+    const forged = structuredClone(result);
+    alter(forged);
+    assert.throws(() => assertBodySleep({ result: forged, ...context }),
+      { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" });
+  }
+  assert.throws(() => assertBodySleep({ result, ...context, world_state_revision: 5 }),
+    { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" });
+  assert.throws(() => adjudicateBodySleep({ ...context, world_state_hash: "stale" }),
+    { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" });
+  assert.throws(() => adjudicateBodySleep({ ...context, event: { ...context.event, event_id: "other" } }),
+    { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" });
+  const asleep = exercise(state, result.state_transition);
+  asleep.simulation_time = new Date(Date.parse(state.simulation_time) + 1000).toISOString();
+  asleep.event_queue[0] = {
+    event_id: "body-rule-wake", scene_id: "room",
+    sleep_arousal_transition: { character: "aria", condition: "awake", time_ms: 100 },
+  };
+  const missingWakeEvidence = structuredClone(asleep);
+  delete missingWakeEvidence.characters.aria.physical_state.homeostatic_cues.fatigue;
+  missingWakeEvidence.event_queue[0].audible_sound = true;
+  assert.equal(adjudicateBodySleep(bodyContext(missingWakeEvidence, 5, 100)).status, "unresolved");
+  asleep.characters.aria.physical_state.homeostatic_cues.fatigue = false;
+  const wake = adjudicateBodySleep(bodyContext(asleep, 5, 100));
+  assert.equal(wake.status, "transition_adjudicated");
+  assert.equal(wake.adjudication.evidence[0].value, false);
+  const awake = exercise(asleep, wake.state_transition);
+  assert.equal(awake.characters.aria.physical_state.incapacitated, true);
+  assert.deepEqual(awake.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+  assert.deepEqual(state, before, "Body solver must not mutate World");
+  result.state_transition.from.condition = "asleep";
+  assert.deepEqual(state, before, "returned proposal must be detached from World");
+}
+{
+  const state = configuredBodyWorld();
+  delete state.event_queue[0].sleep_arousal_transition;
+  assert.equal(adjudicateBodySleep(bodyContext(state)).status, "not_requested");
+  const unknown = configuredBodyWorld();
+  delete unknown.characters.aria.physical_state.sleep_arousal;
+  assert.equal(adjudicateBodySleep(bodyContext(unknown)).status, "unresolved");
+  unknown.world_rules.sleep_arousal.rules[0].from_condition = "unknown";
+  assert.equal(adjudicateBodySleep(bodyContext(unknown)).status, "transition_adjudicated");
+}
+
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");
