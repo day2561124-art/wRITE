@@ -208,6 +208,7 @@ export function buildWorldSimulationCrossLayerEventArbitrationContract() {
       "combat_scheduled_point_events",
       "continuous_physics_scheduled_point_events",
       "resolved_incapacitation_observations",
+      "canonically_adjudicated_body_sleep_observations",
     ],
     candidate_contract: {
       observations_only: true,

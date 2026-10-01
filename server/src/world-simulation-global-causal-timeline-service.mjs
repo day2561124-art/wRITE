@@ -37,6 +37,9 @@ import {
   evaluateWorldSimulationFixedPointIteration,
   worldSimulationFixedPointConvergenceVersion,
 } from "./world-simulation-fixed-point-convergence-service.mjs";
+import {
+  adjudicateWorldSimulationSleepArousalFromBody,
+} from "./world-simulation-body-sleep-arousal-service.mjs";
 
 export const worldSimulationGlobalCausalTimelineVersion = "phase62g-global-causal-timeline-v1";
 
@@ -180,6 +183,29 @@ function fatalAbilityFieldEvents(physicsResolution) {
   });
 }
 
+function bodySleepPreemptionEvent(input, elapsedMs) {
+  if (!Object.hasOwn(object(input.event), "sleep_arousal_transition")) return null;
+  const resolved = adjudicateWorldSimulationSleepArousalFromBody({
+    world_state: input.world_state,
+    world_state_revision: input.world_state_revision ?? 0,
+    world_state_hash: input.world_state_hash ?? hashAgentRunValue(object(input.world_state)),
+    event: input.event,
+    elapsed_ms: Math.floor(nonNegativeNumber(elapsedMs, 0)),
+  });
+  const transition = resolved.status === "transition_adjudicated" ? resolved.state_transition : null;
+  if (transition?.field !== "physical_state.sleep_arousal"
+      || transition?.to?.condition !== "asleep") return null;
+  return {
+    kind: "sleep_arousal_asleep",
+    target: transition.entity,
+    actor: transition.entity,
+    time_ms: nonNegativeNumber(transition.time_ms, 0),
+    cause: "body_sleep_arousal_transition",
+    transition_id: transition.to?.last_transition?.transition_id ?? null,
+    source_layer: "body_sleep_arousal",
+  };
+}
+
 function executionEntries(input, suppressedActionIds, actionTimeOverrides = {}) {
   return stableSort([
     ...buildWorldSimulationCombatTimelineEntries({
@@ -230,26 +256,28 @@ function crossLayerObservations(arbitration, role) {
   ));
 }
 
-function preemptionsFor(executions, fatalEvents, suppressed) {
+function preemptionsFor(executions, actorStateEvents, suppressed) {
   const additions = [];
   for (const execution of executions) {
     const actionId = String(execution.action_id ?? "");
     const actor = String(execution.actor ?? "");
     if (!actionId || !actor || suppressed.has(actionId)) continue;
-    const fatal = fatalEvents
+    const stateEvent = actorStateEvents
       .filter((entry) => entry.target === actor && entry.time_ms < execution.time_ms - 1e-6)
       .sort((left, right) => left.time_ms - right.time_ms)[0];
-    if (!fatal) continue;
+    if (!stateEvent) continue;
     additions.push({
       action_id: actionId,
       actor,
       action_kind: execution.kind,
       scheduled_time_ms: execution.time_ms,
-      preempted_at_ms: fatal.time_ms,
-      cause: fatal.cause,
-      caused_by_actor: fatal.actor ?? null,
-      caused_by_action_id: fatal.action_id ?? null,
-      projectile_id: fatal.projectile_id ?? null,
+      preempted_at_ms: stateEvent.time_ms,
+      preemption_kind: stateEvent.kind,
+      cause: stateEvent.cause,
+      caused_by_actor: stateEvent.actor ?? null,
+      caused_by_action_id: stateEvent.action_id ?? null,
+      projectile_id: stateEvent.projectile_id ?? null,
+      transition_id: stateEvent.transition_id ?? null,
     });
   }
   return additions;
@@ -263,7 +291,9 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
       clock: "turn_relative_milliseconds",
       stable_sort: true,
       strict_earlier_incapacitation_preempts_later_execution: true,
+      strict_earlier_body_sleep_preempts_later_execution: true,
       exact_timestamp_ties_are_simultaneous_for_preemption: true,
+      body_sleep_preview_requires_canonical_body_adjudication: true,
       fixed_point_recomputed_after_preemption: true,
     },
     unified_point_events: [
@@ -280,7 +310,7 @@ export function buildWorldSimulationGlobalCausalTimelineContract() {
     causal_epoch_freshness: buildWorldSimulationCausalEpochContract(),
     fixed_point_convergence: buildWorldSimulationFixedPointConvergenceContract(),
     character_brain_may_decide_timestamps_as_outcomes: false,
-    known_boundary: "Phase62G supplies the global point-event clock. Phase62H refines deferred execution/topology, and Phase62I integrates in-progress actor movement with injury/incapacitation plus piecewise ability-field exposure.",
+    known_boundary: "Phase62G supplies the global point-event clock. Phase62H refines deferred execution/topology, Phase62I integrates in-progress actor movement with injury/incapacitation, and CB-C6-D3a admits canonically adjudicated Body sleep transitions as same-turn actor-state preemption evidence without truncating communication streams.",
   };
 }
 
@@ -348,6 +378,7 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       if (completion !== null) elapsedMs = Math.max(elapsedMs, nonNegativeNumber(completion, 0));
       else if (interrupted !== null) elapsedMs = Math.max(elapsedMs, nonNegativeNumber(interrupted, 0));
     }
+    const sleepPreemption = bodySleepPreemptionEvent(input, elapsedMs);
 
     lastCombat = adjudicateWorldSimulationCombat({
       world_state: snapshot,
@@ -384,9 +415,11 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       ...continuousEntries.map((entry) => crossLayerCandidate({ ...entry, source_layer: "continuous_physics" }, "execution")),
     ];
     const fatalCandidates = fatals.map((entry) => crossLayerCandidate(entry, "incapacitation"));
+    const sleepCandidates = sleepPreemption
+      ? [crossLayerCandidate(sleepPreemption, "sleep_arousal_state")] : [];
     const epochBoundCandidates = bindWorldSimulationCandidatesToCausalEpoch({
       epoch: causalEpoch.epoch,
-      candidates: [...executionCandidates, ...fatalCandidates],
+      candidates: [...executionCandidates, ...fatalCandidates, ...sleepCandidates],
     });
     const freshness = assertWorldSimulationCausalEpochCandidatesFresh({
       epoch: causalEpoch.epoch,
@@ -398,8 +431,11 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
     });
     crossLayerArbitrationAudits.push(lastCrossLayerArbitration.audit);
     const executions = crossLayerObservations(lastCrossLayerArbitration, "execution");
-    const orderedFatals = crossLayerObservations(lastCrossLayerArbitration, "incapacitation");
-    const additions = preemptionsFor(executions, orderedFatals, suppressed);
+    const orderedActorStateEvents = [
+      ...crossLayerObservations(lastCrossLayerArbitration, "incapacitation"),
+      ...crossLayerObservations(lastCrossLayerArbitration, "sleep_arousal_state"),
+    ];
+    const additions = preemptionsFor(executions, orderedActorStateEvents, suppressed);
 
     injuryRateEvents = collectWorldSimulationInjuryRateEvents({
       combat_resolution: lastCombat,
@@ -423,6 +459,7 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       resolved_action_outcomes: input.resolved_action_outcomes,
       injury_events: injuryRateEvents,
       incapacitation_events: fatals,
+      sleep_arousal_events: sleepPreemption ? [sleepPreemption] : [],
       elapsed_ms: elapsedMs,
     });
     const nextActorTrajectories = actorState.actor_trajectories;
@@ -519,10 +556,12 @@ export function arbitrateWorldSimulationGlobalTimeline(input = {}) {
       action_id: item.action_id,
       time_ms: item.preempted_at_ms,
       scheduled_time_ms: item.scheduled_time_ms,
+      preemption_kind: item.preemption_kind,
       cause: item.cause,
       caused_by_actor: item.caused_by_actor,
       caused_by_action_id: item.caused_by_action_id,
       projectile_id: item.projectile_id,
+      transition_id: item.transition_id,
       source_layer: "global_timeline",
     })),
   ]);
@@ -687,11 +726,15 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     action_id: item.action_id,
     time_ms: item.preempted_at_ms,
     scheduled_time_ms: item.scheduled_time_ms,
-    result: "preempted_by_earlier_incapacitation",
+    preemption_kind: item.preemption_kind ?? "incapacitation",
+    result: item.preemption_kind === "sleep_arousal_asleep"
+      ? "preempted_by_earlier_body_sleep"
+      : "preempted_by_earlier_incapacitation",
     cause: item.cause,
     caused_by_actor: item.caused_by_actor,
     caused_by_action_id: item.caused_by_action_id,
     projectile_id: item.projectile_id,
+    transition_id: item.transition_id ?? null,
     source_layer: "global_timeline",
   })));
 

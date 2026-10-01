@@ -105,7 +105,25 @@ function actorEvents(input, actor) {
       cause: fatal.cause ?? "incapacitation",
     });
   }
-  const priority = new Map([["injury_rate_change", 10], ["incapacitation", 20]]);
+  for (const sleep of array(input.sleep_arousal_events)) {
+    if (String(sleep?.target ?? sleep?.actor ?? "") !== actor
+        || sleep?.kind !== "sleep_arousal_asleep") continue;
+    const timeMs = finiteNumber(sleep?.time_ms);
+    if (timeMs === null || timeMs < 0) continue;
+    events.push({
+      kind: "sleep_arousal_asleep",
+      time_ms: timeMs,
+      source_layer: sleep.source_layer ?? "body_sleep_arousal",
+      source_action_id: null,
+      transition_id: sleep.transition_id ?? null,
+      cause: sleep.cause ?? "body_sleep_arousal_transition",
+    });
+  }
+  const priority = new Map([
+    ["injury_rate_change", 10],
+    ["incapacitation", 20],
+    ["sleep_arousal_asleep", 30],
+  ]);
   return events.sort((left, right) => (
     left.time_ms - right.time_ms
     || (priority.get(left.kind) ?? 99) - (priority.get(right.kind) ?? 99)
@@ -209,10 +227,11 @@ function buildTrajectoryForMovement(input, actor, candidate, outcome, start, des
     if (travelled >= totalDistance - 1e-9 || interrupted) break;
     const eventTimeMs = Math.max(currentTimeMs, event.time_ms);
     if (advanceUntil(eventTimeMs, "movement_before_actor_state_change")) break;
-    if (event.kind === "incapacitation") {
+    if (event.kind === "incapacitation" || event.kind === "sleep_arousal_asleep") {
       interrupted = true;
       interruptedAtMs = event.time_ms;
-      stopReason = event.cause ?? "incapacitated_mid_movement";
+      stopReason = event.cause ?? (event.kind === "sleep_arousal_asleep"
+        ? "sleep_arousal_interrupted_movement" : "incapacitated_mid_movement");
       rateChanges.push({
         actor,
         action_id: candidate.action_id ?? null,
@@ -223,6 +242,7 @@ function buildTrajectoryForMovement(input, actor, candidate, outcome, start, des
         source_layer: event.source_layer ?? null,
         source_action_id: event.source_action_id ?? null,
         projectile_id: event.projectile_id ?? null,
+        ...(event.transition_id ? { transition_id: event.transition_id } : {}),
       });
       break;
     }
@@ -455,6 +475,8 @@ export function buildWorldSimulationActorStateContract() {
       piecewise_position_integration: true,
       nonfatal_injury_changes_remaining_speed_immediately: true,
       incapacitation_stops_in_progress_movement_at_causal_position: true,
+      body_sleep_transition_stops_in_progress_movement_at_causal_position: true,
+      wake_transition_does_not_resume_preempted_movement_in_same_turn: true,
       refined_completion_time_can_extend_turn_window: true,
       combat_and_projectile_collision_may_sample_piecewise_trajectory: true,
     },

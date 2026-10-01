@@ -1387,6 +1387,8 @@ export function buildWorldSimulationCausalRuleContract() {
       receipt_replayed_at_locked_world_commit: true,
       actual_whole_millisecond_world_horizon_required: true,
       conscious_opportunity_admission_deferred_to_c6d: true,
+      same_turn_physical_preemption_via_global_timeline: true,
+      communication_stream_truncation_deferred_beyond_c6d3a: true,
     },
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
@@ -1565,17 +1567,22 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
   const spatialActionOutcomes = cloneJson(outcomes);
   for (const preemption of array(timelineArbitration.preemptions)) {
+    const slept = preemption.preemption_kind === "sleep_arousal_asleep";
     outcomes.push({
       actor: preemption.actor ?? null,
       action_id: preemption.action_id ?? null,
       action: null,
-      result: "action_preempted_by_earlier_incapacitation",
+      result: slept
+        ? "action_preempted_by_earlier_body_sleep"
+        : "action_preempted_by_earlier_incapacitation",
       causal_evidence: `${preemption.cause} at ${Number(preemption.preempted_at_ms).toFixed(3)}ms occurred before scheduled ${preemption.action_kind} execution at ${Number(preemption.scheduled_time_ms).toFixed(3)}ms`,
       preempted_at_ms: preemption.preempted_at_ms,
       scheduled_time_ms: preemption.scheduled_time_ms,
+      preemption_kind: preemption.preemption_kind ?? "incapacitation",
       caused_by_actor: preemption.caused_by_actor ?? null,
       caused_by_action_id: preemption.caused_by_action_id ?? null,
       projectile_id: preemption.projectile_id ?? null,
+      transition_id: preemption.transition_id ?? null,
       adjudication: "programmatic_global_causal_timeline",
     });
   }

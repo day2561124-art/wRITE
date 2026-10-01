@@ -757,6 +757,10 @@ import {
   runWorldSimulationTurn,
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { adjudicateWorldSimulationCausality } from "../../server/src/world-simulation-causal-rule-engine.mjs";
+import {
+  arbitrateWorldSimulationGlobalTimeline,
+  buildWorldSimulationGlobalCausalTimelineContract,
+} from "../../server/src/world-simulation-global-causal-timeline-service.mjs";
 
 async function nativeBodyScenario(label, alter, expectedReason, cycle = false, invalidReceipt = null) {
   const root = path.join(projectRoot, "tests", ".tmp", `c6-native-${label}-${process.pid}-${Date.now()}`);
@@ -1713,3 +1717,172 @@ for (const mode of ["speaker-awake", "speaker-sleep", "speaker-stale", "native-i
   "native-awake", "native-sleep-before", "native-sleep-mid", "native-stale-preparation", "native-stale-input"])
   await d2cNativeIngress(mode);
 console.log("CB-C6-D2c conscious speaker and Native temporal ingress regression passed.");
+
+// CB-C6-D3a: canonically adjudicated Body sleep is a same-turn physical
+// actor-state interruption. It reuses the Phase62G/62I fixed-point and
+// trajectory machinery; it does not truncate CC-7B speech streams here.
+function d3aTimelineWorld({
+  condition = "awake",
+  transitionCondition = "asleep",
+  transitionTimeMs = 100,
+} = {}) {
+  const state = configuredBodyWorld(condition);
+  Object.assign(state.world_rules, {
+    collision_radius_m: 0.2,
+    combat_target_radius_m: 0.2,
+    default_movement_speed_mps: 8,
+    physics_action_seconds: 1,
+    attack_attempt_seconds: 1,
+  });
+  state.characters.aria.physical_state.homeostatic_cues.fatigue =
+    transitionCondition === "asleep";
+  Object.assign(state.characters.aria.physical_state, {
+    health_current: 100,
+    health_max: 100,
+    movement_multiplier: 1,
+  });
+  state.characters.target = {
+    physical_state: { health_current: 100, health_max: 100 },
+  };
+  state.scenes.room = {
+    scene_id: "room",
+    dimensions: { width_m: 12, depth_m: 4 },
+    entity_positions: {
+      aria: { x: 1, y: 1 },
+      target: { x: 9, y: 1 },
+    },
+    obstacles: [],
+    observable_by: {
+      aria: { visual: ["target"], audible: [] },
+      target: { visual: ["aria"], audible: [] },
+    },
+  };
+  state.event_queue[0] = {
+    event_id: "d3a-" + condition + "-" + transitionCondition + "-" + transitionTimeMs,
+    scene_id: "room",
+    participants: ["aria", "target"],
+    sleep_arousal_transition: {
+      character: "aria",
+      condition: transitionCondition,
+      time_ms: transitionTimeMs,
+    },
+  };
+  state.objects = {
+    "d3a-launcher": {
+      holder: "aria",
+      enabled: true,
+      state: "ready",
+      ammo: { current: 1 },
+      projectile: {
+        speed_mps: 20,
+        radius_m: 0.05,
+        base_damage: 10,
+        damage_type: "d3a_test",
+        penetration_energy: 20,
+        max_lifetime_ms: 1000,
+      },
+    },
+  };
+  state.projectiles = {};
+  state.ability_fields = {};
+  return state;
+}
+
+function d3aArbitrate(state, selectedActionIntents, resolvedActionOutcomes = []) {
+  return arbitrateWorldSimulationGlobalTimeline({
+    world_state: state,
+    world_state_revision: 7,
+    world_state_hash: hashAgentRunValue(state),
+    next_world_state: structuredClone(state),
+    scene_id: "room",
+    event: structuredClone(state.event_queue[0]),
+    turn_id: "c6-d3a-regression",
+    selected_action_intents: selectedActionIntents,
+    resolved_action_outcomes: resolvedActionOutcomes,
+    elapsed_ms: 0,
+  });
+}
+
+{
+  const contract = buildWorldSimulationGlobalCausalTimelineContract();
+  assert.equal(contract.ordering.strict_earlier_body_sleep_preempts_later_execution, true);
+  assert.equal(contract.ordering.exact_timestamp_ties_are_simultaneous_for_preemption, true);
+  assert.equal(contract.ordering.body_sleep_preview_requires_canonical_body_adjudication, true);
+
+  const state = d3aTimelineWorld({ transitionTimeMs: 100 });
+  const selected = [{
+    character: "aria",
+    candidate: {
+      action_id: "d3a-delayed-launch",
+      intent: "延遲發射",
+      duration_ms: 500,
+      projectile: {
+        weapon_id: "d3a-launcher",
+        target_character: "target",
+        fire_delay_ms: 300,
+      },
+    },
+  }];
+  const arbitration = d3aArbitrate(state, selected);
+  assert.ok(arbitration.suppressed_action_ids.includes("d3a-delayed-launch"));
+  const preemption = arbitration.preemptions.find((item) =>
+    item.action_id === "d3a-delayed-launch");
+  assert.ok(preemption);
+  assert.equal(preemption.preemption_kind, "sleep_arousal_asleep");
+  assert.equal(preemption.preempted_at_ms, 100);
+  assert.equal(preemption.scheduled_time_ms, 300);
+  assert.equal(preemption.cause, "body_sleep_arousal_transition");
+  assert.ok(preemption.transition_id);
+  assert.ok(arbitration.cross_layer_event_arbitration.audits.some((audit) =>
+    audit.source_layers.includes("body_sleep_arousal")));
+
+  const sameTime = d3aTimelineWorld({ transitionTimeMs: 300 });
+  const tied = d3aArbitrate(sameTime, selected);
+  assert.equal(tied.suppressed_action_ids.includes("d3a-delayed-launch"), false,
+    "same timestamp sleep and execution remain simultaneous rather than retroactive");
+
+  const wake = d3aTimelineWorld({
+    condition: "asleep",
+    transitionCondition: "awake",
+    transitionTimeMs: 100,
+  });
+  const waking = d3aArbitrate(wake, selected);
+  assert.equal(waking.suppressed_action_ids.includes("d3a-delayed-launch"), false,
+    "wake transition is not a physical preemption source");
+}
+
+{
+  const state = d3aTimelineWorld({ transitionTimeMs: 250 });
+  const selected = [{
+    character: "aria",
+    candidate: {
+      action_id: "d3a-long-move",
+      intent: "持續移動",
+      duration_ms: 1000,
+      movement: { to: { x: 9, y: 1 } },
+    },
+  }];
+  const arbitration = d3aArbitrate(state, selected, [{
+    actor: "aria",
+    action_id: "d3a-long-move",
+    result: "movement_completed",
+    duration_ms: 1000,
+    distance_m: 8,
+  }]);
+  const trajectory = arbitration.actor_trajectories.aria;
+  assert.ok(trajectory);
+  assert.equal(trajectory.interrupted, true);
+  assert.equal(trajectory.interrupted_at_ms, 250);
+  assert.equal(trajectory.stop_reason, "body_sleep_arousal_transition");
+  assert.ok(trajectory.distance_travelled_m > 0 && trajectory.distance_travelled_m < 8);
+  assert.ok(Math.abs(trajectory.final_position.x - 3) < 1e-9);
+  assert.equal(arbitration.suppressed_action_ids.includes("d3a-long-move"), false,
+    "in-progress movement is truncated at causal position rather than erased");
+  const interruption = arbitration.movement_adjustments.find((item) =>
+    item.kind === "movement_interrupted" && item.actor === "aria");
+  assert.equal(interruption.time_ms, 250);
+  assert.equal(interruption.cause, "body_sleep_arousal_transition");
+  assert.ok(interruption.transition_id);
+}
+
+console.log("CB-C6-D3a Body sleep physical action preemption regression passed.");
