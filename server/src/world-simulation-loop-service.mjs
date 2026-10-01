@@ -4889,12 +4889,62 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
         engine_opportunity_refs_exposed: false,
       },
     };
+    // Recheck at actual Brain ingress, after asynchronous runtime preparation.
+    // A deferred/stale opportunity is never reported completed or consumed.
+    let admissionFailure = null;
+    let brainCompleted = false;
+    let brainInvoked = false;
+    const admissionError = (message, code) => {
+      const error = new Error(message);
+      error.code = code;
+      error.consumed_opportunity_ids = dispatches.map((item) => item.opportunity_id);
+      if (brainCompleted) error.consumed_opportunity_ids.push(opportunity.opportunity_id);
+      error.failed_opportunity_id = opportunity.opportunity_id;
+      return error;
+    };
     await characterRuntimeManager.runCharacterTurn({
       world_simulation_session_id: scheduled.world_simulation_session_id,
       character: opportunity.character,
       brain_input: brainInput,
-      characterBrain: options.characterBrain,
+      characterBrain: async (packet) => {
+        try {
+          const current = await getWorldSimulationState(
+            scheduled.world_simulation_session_id, options,
+          );
+          if (current.revision !== scheduled.state_revision
+              || current.state_hash !== scheduled.world_state_hash) {
+            const error = admissionError(
+              "Conscious cognition admission World revision/hash changed.",
+              "C6D_CONSCIOUS_COGNITION_STATE_CHANGED",
+            );
+            throw error;
+          }
+          if (brainInvoked) {
+            const error = admissionError(
+              "Conscious cognition opportunity was invoked more than once.",
+              "C6D_CONSCIOUS_COGNITION_DUPLICATE_INVOCATION",
+            );
+            throw error;
+          }
+          brainInvoked = true;
+          const result = await options.characterBrain(packet);
+          brainCompleted = true;
+          return result;
+        } catch (error) {
+          admissionFailure = error;
+          throw error;
+        }
+      },
     }, options);
+    // Custom runtimes cannot swallow failed admission and claim consumption.
+    if (admissionFailure) throw admissionFailure;
+    if (!brainCompleted) {
+      const error = admissionError(
+        "Conscious cognition runtime did not complete the Character Brain callback.",
+        "C6D_CONSCIOUS_COGNITION_CALLBACK_NOT_COMPLETED",
+      );
+      throw error;
+    }
 
     dispatches.push({
       character: opportunity.character,

@@ -1,4 +1,8 @@
 import { hashAgentRunValue } from "./agent-run-service.mjs";
+import { projectWorldSimulationSleepArousalState } from "./world-simulation-body-sleep-arousal-service.mjs";
+
+export const worldSimulationConsciousCognitionAdmissionVersion =
+  "cb-c6d-conscious-cognition-admission-v1";
 import {
   projectWorldSimulationEffectiveMotivationalGoalAdjustment,
 } from "./world-simulation-goal-disengagement-reengagement-service.mjs";
@@ -198,6 +202,29 @@ function dueTemporalEvidence(runtimeContext, character, nowMs) {
   return evidence;
 }
 
+// Admission changes dispatch availability, never C2 evidence or identity.
+function consciousAdmissionFor(worldState, character) {
+  const matches = Object.entries(object(worldState.characters))
+    .filter(([name]) => sameCharacter(name, character));
+  if (matches.length > 1) {
+    const error = new Error("Conscious cognition admission requires one canonical Body character.");
+    error.code = "C6D_CONSCIOUS_COGNITION_CHARACTER_AMBIGUOUS";
+    throw error;
+  }
+  const [canonicalName, state] = matches[0] ?? [character, {}];
+  const sleep = projectWorldSimulationSleepArousalState({
+    character: canonicalName, physical_state: object(state?.physical_state),
+  });
+  return {
+    version: worldSimulationConsciousCognitionAdmissionVersion,
+    condition: sleep.condition,
+    admitted: sleep.condition !== "asleep",
+    reason: sleep.condition === "asleep" ? "committed_sleep_defers_conscious_cognition"
+      : sleep.condition === "awake" ? "committed_awake"
+        : "legacy_unknown_preserves_existing_admission",
+  };
+}
+
 function buildOpportunity({
   character,
   evidence,
@@ -253,6 +280,16 @@ export function buildWorldSimulationAutonomousCognitionSchedulerContract() {
     applicable_plan_cue_trigger_supported: true,
     repeated_unconsumed_evidence_has_stable_opportunity_identity: true,
     consumed_opportunity_suppression_supported: true,
+    conscious_sleep_admission: {
+      version: worldSimulationConsciousCognitionAdmissionVersion,
+      scope: "conscious_c2_opportunities",
+      committed_asleep_defers_dispatch: true,
+      legacy_unknown_policy: "preserve_existing_admission_without_awake_claim",
+      deferral_consumes_opportunity: false,
+      opportunity_identity_excludes_sleep_condition: true,
+      neural_shutdown_claim: false,
+      action_and_sensory_admission_deferred: true,
+    },
     scheduler_creates_thought_content: false,
     scheduler_revises_beliefs: false,
     scheduler_selects_actions: false,
@@ -281,6 +318,8 @@ export function projectWorldSimulationAutonomousCognitionOpportunities(input = {
   const now = currentSimulationTime(worldState, input);
   const nowMs = parseTimeMs(now);
   const opportunities = [];
+  const deferredOpportunities = [];
+  const consciousAdmissionAudits = [];
 
   for (const character of characterNames(
     worldState,
@@ -339,11 +378,24 @@ export function projectWorldSimulationAutonomousCognitionOpportunities(input = {
       goalRefs: goals.map((goal) => goal.goal_ref).sort(),
       planRefs: plans.map((plan) => plan.plan_ref).sort(),
     });
+    // Validate Body even when an opportunity was previously consumed.
+    const admission = consciousAdmissionFor(worldState, character);
     if (consumedIds.has(opportunity.opportunity_id)) continue;
+    consciousAdmissionAudits.push({
+      character, opportunity_id: opportunity.opportunity_id, ...admission,
+    });
+    if (!admission.admitted) {
+      deferredOpportunities.push(opportunity);
+      continue;
+    }
     opportunities.push(opportunity);
   }
 
   opportunities.sort((left, right) => characterKey(left.character)
+    .localeCompare(characterKey(right.character), "zh-Hant-TW")
+    || left.opportunity_id.localeCompare(right.opportunity_id, "en"));
+
+  deferredOpportunities.sort((left, right) => characterKey(left.character)
     .localeCompare(characterKey(right.character), "zh-Hant-TW")
     || left.opportunity_id.localeCompare(right.opportunity_id, "en"));
 
@@ -352,6 +404,9 @@ export function projectWorldSimulationAutonomousCognitionOpportunities(input = {
     simulation_time: cloneJson(now),
     opportunities,
     opportunity_count: opportunities.length,
+    deferred_opportunities: deferredOpportunities,
+    deferred_opportunity_count: deferredOpportunities.length,
+    conscious_admission_audits: consciousAdmissionAudits,
     trigger_model: "evidence_driven",
     event_queue_entry_required: false,
     fixed_frequency_trigger_used: false,

@@ -943,3 +943,331 @@ for (const [label, forge] of [
 }
 
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");
+
+import {
+  projectWorldSimulationAutonomousCognitionOpportunities,
+  worldSimulationConsciousCognitionAdmissionVersion,
+} from "../../server/src/world-simulation-autonomous-cognition-scheduler-service.mjs";
+import {
+  scheduleWorldSimulationAutonomousCognitionOpportunities,
+  dispatchWorldSimulationAutonomousCognitionOpportunities,
+} from "../../server/src/world-simulation-loop-service.mjs";
+import {
+  motivationalGoalEventSchemaVersion,
+  motivationalGoalHistoryReferenceSchemaVersion,
+  worldSimulationMotivationGoalIntegrationVersion,
+} from "../../server/src/world-simulation-motivation-goal-integration-service.mjs";
+import {
+  buildWorldSimulationGoalImplementationIntentionEvents,
+  buildWorldSimulationGoalImplementationIntentionResolverView,
+} from "../../server/src/world-simulation-goal-to-plan-implementation-intention-service.mjs";
+import { projectWorldSimulationEffectiveGoalImplementationIntentionExecution }
+  from "../../server/src/world-simulation-goal-implementation-intention-execution-feedback-service.mjs";
+
+function d1Clone(value) { return JSON.parse(JSON.stringify(value)); }
+function d1GoalHash(event) { const body = d1Clone(event); delete body.goal_event_hash; return hashAgentRunValue(body); }
+function d1GoalRef(event) {
+  return {
+    schema_version: motivationalGoalHistoryReferenceSchemaVersion,
+    derived_index: true,
+    goal_event_id: event.goal_event_id,
+    goal_event_hash: event.goal_event_hash,
+    goal_id: event.goal_id,
+    character: event.character,
+    source_turn_id: event.source_turn_id,
+    operation: event.operation,
+    previous_goal_event_id: event.previous_goal_event_id,
+    previous_goal_event_hash: event.previous_goal_event_hash,
+    status: event.status,
+  };
+}
+function d1MakeGoalEvent({ character, goalId, turnId, operation, previous = null }) {
+  const event = {
+    schema_version: motivationalGoalEventSchemaVersion,
+    version: worldSimulationMotivationGoalIntegrationVersion,
+    immutable: true,
+    character,
+    source_turn_id: turnId,
+    operation,
+    goal_id: goalId,
+    goal_kind: "maintain_state",
+    domain: "relationships",
+    target_descriptor: { label: "keep_companions_safe", context: "academy_conflict" },
+    motivation_basis_refs: [{
+      source_kind: "phase68b_structured_self_model_aspect_event",
+      source_event_id: "self_aspect_source_69d",
+      source_event_hash: "self_aspect_hash_69d",
+    }],
+    motivation_relations: ["self_concordant_with"],
+    resolver_view_hash: `goal_resolver_${turnId}`,
+    previous_goal_event_id: previous?.goal_event_id ?? null,
+    previous_goal_event_hash: previous?.goal_event_hash ?? null,
+    subjective_not_world_truth: true,
+    world_truth_verified: false,
+    proposed_is_not_committed: true,
+    committed_goal_is_selected_action: false,
+    action_plan_generated: false,
+    utility_score: null,
+    priority_score: null,
+    success_probability: null,
+    character_brain_direct_write: false,
+    status: "motivational_goal_event_recorded",
+    goal_event_id: `goal_event_${turnId}`,
+  };
+  event.goal_event_hash = d1GoalHash(event);
+  return event;
+}
+function d1ExecuteBuilt(world, turnId, layer, built) {
+  const queue = buildWorldSimulationChronologicalMutationQueue({
+    turn_id: `${turnId}:${layer}`,
+    world_state_hash: hashAgentRunValue(world),
+    state_transitions: built.result.state_transitions,
+    elapsed_ms: 0,
+  });
+  return executeWorldSimulationChronologicalMutationQueue({
+    world_state: world,
+    preview_world_state: built.result.preview_world_state,
+    queue,
+  }).next_world_state;
+}
+
+function d1Fixture(condition) {
+  let state = configuredBodyWorld(condition);
+  Object.assign(state.characters.aria, { known: [], current_goal: "保留既有關切" });
+  Object.assign(state.characters.aria.physical_state, {
+    incapacitated: true, injuries: [{ severity: 2 }],
+    homeostatic_cues: { fatigue: condition === "awake" },
+  });
+  state.characters.keeper = { known: [], current_goal: "短暫停留", physical_state: {} };
+  state.memories = { aria: [], keeper: [] };
+  state.available_actions = {
+    aria: [], keeper: [{ action_id: "bounded-rest", intent: "留在原地", duration_ms: 500 }],
+  };
+  Object.assign(state.scenes.room, {
+    scene_id: "room", simulation_time: state.simulation_time,
+    dimensions: { width_m: 8, depth_m: 8 },
+    observable_by: { aria: { visual: [], audible: [] }, keeper: { visual: [], audible: [] } },
+  });
+  state.scenes.room.entity_positions.keeper = { x: 2, y: 1 };
+  Object.assign(state.event_queue[0], {
+    event_id: "d1-configured-body-transition", participants: ["keeper"],
+    type: "bounded_body_request", summary: "短暫停留",
+    sleep_arousal_transition: {
+      character: "aria", condition: condition === "asleep" ? "awake" : "asleep", time_ms: 500,
+    },
+  });
+  const goalId = "c6-d-preserved-goal";
+  const proposed = d1MakeGoalEvent({ character: "aria", goalId, turnId: "d1-goal-propose", operation: "propose" });
+  const committed = d1MakeGoalEvent({ character: "aria", goalId, turnId: "d1-goal-commit", operation: "commit", previous: proposed });
+  state.motivational_goal_events = { [proposed.goal_event_id]: proposed, [committed.goal_event_id]: committed };
+  state.motivational_goal_history = [d1GoalRef(proposed), d1GoalRef(committed)];
+  const turnId = "d1-form-plan";
+  const resolver = buildWorldSimulationGoalImplementationIntentionResolverView({ world_state: state, turn_id: turnId });
+  const formed = buildWorldSimulationGoalImplementationIntentionEvents({
+    world_state: state, turn_id: turnId,
+    implementation_intention_decisions: [{
+      character: "aria", goal_id: goalId,
+      cue_descriptor: { cue_kind: "obstacle", label: "companion_is_threatened", context: "academy_conflict" },
+      response_descriptor: { response_kind: "seek_support", label: "coordinate_with_nearby_ally", context: "planning_only" },
+      resolver_view_hash: resolver.resolver_view_hash,
+    }],
+  });
+  state = d1ExecuteBuilt(state, turnId, "goal_implementation_intention", formed);
+  const planId = formed.result.implementation_intention_events_created[0].implementation_intention_id;
+  const context = {
+    aria: {
+      idle: true,
+      pending_internal_cues: [{ kind: "unresolved_question", source_ref: "d1-pending-concern" }],
+      temporal_cues: [{ source_ref: "d1-due-cue", due_at: state.simulation_time }],
+      applicable_implementation_intention_ids: [planId],
+    },
+  };
+  return { state, context, planId };
+}
+
+// Pure projection covers canonical alias lookup, legacy compatibility and no mutation.
+{
+  const { state, context } = d1Fixture("asleep");
+  state.characters.keeper.physical_state.sleep_arousal = {
+    ...d1Clone(state.characters.aria.physical_state.sleep_arousal),
+    character: "keeper", condition: "awake",
+    source: { kind: "world_initialization", source_id: "initial-keeper" },
+  };
+  state.characters.legacy = { current_goal: "等待線索", physical_state: {} };
+  const input = {
+    world_state: state,
+    runtime_context_by_character: { ARIA: context.aria, keeper: { idle: true }, legacy: { idle: true } },
+  };
+  const before = d1Clone(input);
+  const projection = projectWorldSimulationAutonomousCognitionOpportunities(input);
+  assert.deepEqual(input, before);
+  assert.equal(projection.opportunity_count, 2);
+  assert.equal(projection.deferred_opportunity_count, 1);
+  const pending = projection.deferred_opportunities[0];
+  assert.equal(pending.character, "ARIA");
+  assert.equal(pending.goal_refs.length, 1);
+  assert.equal(pending.plan_refs.length, 1);
+  assert.ok(pending.trigger_kinds.includes("unresolved_question"));
+  assert.ok(pending.trigger_kinds.includes("explicit_temporal_cue_due"));
+  assert.ok(pending.trigger_kinds.includes("implementation_intention_cue_applicable"));
+  assert.deepEqual(projectWorldSimulationAutonomousCognitionOpportunities(input), projection);
+  assert.equal(projection.conscious_admission_audits.find((item) => item.character === "legacy").condition, "unknown");
+  assert.equal(projection.conscious_admission_audits.find((item) => item.character === "legacy").admitted, true);
+  const consumed = projectWorldSimulationAutonomousCognitionOpportunities({
+    ...input, consumed_opportunity_ids: [pending.opportunity_id],
+  });
+  assert.equal(consumed.deferred_opportunity_count, 0);
+  assert.equal(consumed.opportunity_count, 2);
+  const { projection_hash, ...body } = projection;
+  assert.equal(projection_hash, hashAgentRunValue(body));
+  for (const invalid of [null, { ...d1Clone(state.characters.aria.physical_state.sleep_arousal), character: "keeper" }]) {
+    const invalidInput = d1Clone(input);
+    invalidInput.world_state.characters.aria.physical_state.sleep_arousal = invalid;
+    invalidInput.consumed_opportunity_ids = [pending.opportunity_id];
+    const original = d1Clone(invalidInput);
+    assert.throws(() => projectWorldSimulationAutonomousCognitionOpportunities(invalidInput),
+      { code: "C6B_SLEEP_AROUSAL_RECORD_INVALID" });
+    assert.deepEqual(invalidInput, original);
+  }
+}
+
+async function d1NativeCognition(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-d1-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const lifecycle = mode === "lifecycle";
+    const partial = mode === "partial-stale";
+    const { state: initial, context } = d1Fixture(lifecycle ? "asleep" : "awake");
+    if (lifecycle) context.keeper = { idle: true };
+    if (partial) {
+      initial.characters.a = { known_entities: [], current_goal: "保留第一個已完成關切", physical_state: {} };
+      initial.memories.a = [];
+      context.a = { idle: true };
+    }
+    const contextBefore = d1Clone(context);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-D conscious cognition admission", seed: mode, initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const paths = worldSimulationStatePaths(sid, nativeOptions);
+    const durableBytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const originalBytes = await durableBytes();
+    const originalPlans = projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+      world_state: before.state,
+    }).plans_by_character.aria;
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (name) => ({
+        entity_id: `d1_character_${name}`, canonical_name: name, identity_source: "d1_fixture", formal: true,
+      }),
+    });
+    const input = { world_simulation_session_id: sid, runtime_context_by_character: context };
+    const scheduled = await scheduleWorldSimulationAutonomousCognitionOpportunities(input, nativeOptions);
+    const pending = lifecycle ? scheduled.scheduler_projection.deferred_opportunities[0]
+      : scheduled.scheduler_projection.opportunities.find((item) => item.character === "aria");
+    assert.ok(pending);
+    const packets = [];
+    const brain = async (packet) => {
+      packets.push(d1Clone(packet));
+      const raw = JSON.stringify(packet);
+      for (const privateValue of [
+        "sleep_arousal", worldSimulationConsciousCognitionAdmissionVersion, bodyRuleVersion,
+        "initial-aria", "d1-configured-body-transition", before.state_hash, pending.opportunity_id,
+      ]) assert.equal(raw.includes(privateValue), false, "conscious admission remains engine-private");
+      return { disposition: "processed_autonomous_cognition_opportunity" };
+    };
+    const worldTurn = async () => {
+      assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, {
+        ...nativeOptions, characterRuntimeManager: runtime,
+        characterBrain: async () => ({ action_id: "bounded-rest" }),
+      })).committed, true);
+    };
+    if (!lifecycle) {
+      const customRuntime = {
+        inspectRuntime: async () => ({ current_mind: { character_facing_view: {} } }),
+        runCharacterTurn: async ({ character, brain_input, characterBrain }) => {
+          if (partial && character === "a") return characterBrain(brain_input);
+          if (mode === "incomplete") return {};
+          if (mode === "duplicate") {
+            await characterBrain(brain_input);
+            try { await characterBrain(brain_input); } catch { return {}; }
+          } else {
+            await worldTurn();
+            try { return await characterBrain(brain_input); }
+            catch (error) { if (mode === "stale-swallowed") return {}; throw error; }
+          }
+        },
+      };
+      const code = mode === "incomplete" ? "C6D_CONSCIOUS_COGNITION_CALLBACK_NOT_COMPLETED"
+        : mode === "duplicate" ? "C6D_CONSCIOUS_COGNITION_DUPLICATE_INVOCATION"
+          : "C6D_CONSCIOUS_COGNITION_STATE_CHANGED";
+      let failedDispatch = null;
+      await assert.rejects(dispatchWorldSimulationAutonomousCognitionOpportunities(input, {
+        ...nativeOptions, characterRuntimeManager: customRuntime, characterBrain: brain,
+      }), (error) => {
+        failedDispatch = error;
+        assert.equal(error.code, code);
+        assert.equal(error.failed_opportunity_id, pending.opportunity_id);
+        const consumed = partial
+          ? [scheduled.scheduler_projection.opportunities.find((item) => item.character === "a").opportunity_id]
+          : mode === "duplicate" ? [pending.opportunity_id] : [];
+        assert.deepEqual(error.consumed_opportunity_ids, consumed);
+        return true;
+      });
+      assert.deepEqual(packets.map((packet) => packet.character), partial ? ["a"] : mode === "duplicate" ? ["aria"] : []);
+      if (mode === "incomplete" || mode === "duplicate") {
+        assert.deepEqual(await durableBytes(), originalBytes);
+      } else {
+        const after = await getWorldSimulationState(sid, nativeOptions);
+        assert.equal(after.revision, before.revision + 1);
+        assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition, "asleep");
+        assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 1);
+        const retryInput = { ...input, consumed_opportunity_ids: failedDispatch.consumed_opportunity_ids };
+        const deferred = await scheduleWorldSimulationAutonomousCognitionOpportunities(retryInput, nativeOptions);
+        assert.deepEqual(deferred.scheduler_projection.deferred_opportunities, [pending]);
+        const sleepBytes = await durableBytes();
+        assert.equal((await dispatchWorldSimulationAutonomousCognitionOpportunities(retryInput, nativeOptions)).dispatch_count, 0);
+        assert.deepEqual(await durableBytes(), sleepBytes);
+      }
+    } else {
+      assert.equal(scheduled.scheduler_projection.opportunity_count, 1);
+      assert.equal(scheduled.scheduler_projection.deferred_opportunity_count, 1);
+      const first = await dispatchWorldSimulationAutonomousCognitionOpportunities(input, {
+        ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain,
+      });
+      assert.deepEqual(packets.map((packet) => packet.character), ["keeper"]);
+      assert.equal(first.consumed_opportunity_ids.includes(pending.opportunity_id), false);
+      assert.deepEqual(await durableBytes(), originalBytes);
+      await worldTurn();
+      const awakened = await getWorldSimulationState(sid, nativeOptions);
+      assert.equal(awakened.state.characters.aria.physical_state.sleep_arousal.condition, "awake");
+      assert.equal(awakened.state.characters.aria.physical_state.incapacitated, true);
+      assert.deepEqual(awakened.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+      assert.deepEqual(awakened.state.memories.aria, before.state.memories.aria);
+      assert.deepEqual(projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+        world_state: awakened.state,
+      }).plans_by_character.aria, originalPlans);
+      const wakingInput = { ...input, consumed_opportunity_ids: first.consumed_opportunity_ids };
+      const reentry = await scheduleWorldSimulationAutonomousCognitionOpportunities(wakingInput, nativeOptions);
+      assert.deepEqual(reentry.scheduler_projection.opportunities, [pending], "actual guarded wake preserves C2 opportunity identity and evidence");
+      assert.equal(reentry.scheduler_projection.deferred_opportunity_count, 0);
+      const wakingBytes = await durableBytes();
+      const second = await dispatchWorldSimulationAutonomousCognitionOpportunities(wakingInput, {
+        ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain,
+      });
+      assert.deepEqual(packets.map((packet) => packet.character), ["keeper", "aria"]);
+      assert.deepEqual(second.consumed_opportunity_ids, [pending.opportunity_id]);
+      assert.equal((await dispatchWorldSimulationAutonomousCognitionOpportunities({
+        ...input, consumed_opportunity_ids: [...first.consumed_opportunity_ids, ...second.consumed_opportunity_ids],
+      }, nativeOptions)).dispatch_count, 0);
+      assert.deepEqual(await durableBytes(), wakingBytes);
+    }
+    assert.deepEqual(context, contextBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of ["lifecycle", "stale", "stale-swallowed", "partial-stale", "incomplete", "duplicate"]) {
+  await d1NativeCognition(mode);
+}
+console.log("CB-C6-D1 conscious cognition deferral and pinned dispatch regression passed.");
