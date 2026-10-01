@@ -523,6 +523,8 @@ import {
   projectWorldSimulationConsciousCognitionAdmission,
   worldSimulationAutonomousCognitionSchedulerVersion,
 } from "./world-simulation-autonomous-cognition-scheduler-service.mjs";
+import { buildWorldSimulationConsciousObserverAdmission }
+  from "./world-simulation-conscious-observer-admission-service.mjs";
 import {
   buildWorldSimulationGoalImplementationIntentionActivationContract,
   buildWorldSimulationGoalImplementationIntentionActivationResolverView,
@@ -11007,16 +11009,48 @@ export async function resolveWorldSimulationTurn(
   const observerTickPerception = observerTickPerceptionProjection.audit;
   // Explicitly opt-in observer-only Brain adapter, called only after the
   // causal consistency gate. Responses cannot replace selected actions.
+  const consciousObserverAdmission = buildWorldSimulationConsciousObserverAdmission({
+    world_state: snapshot.state,
+    world_state_revision: snapshot.revision,
+    world_state_hash: snapshot.state_hash,
+    next_world_state: causalResolution.next_world_state,
+    event: preparedTurn.event,
+    state_transitions: array(causalResolution.state_transitions),
+    committed_history: await getWorldSimulationHistory(sessionId, options),
+  });
+  const consciousObserverReceipts = consciousObserverAdmission.filterAdmissions(
+    array(causalResolution.communication_observer_increment_admissions),
+  );
+  const consciousObserverPerception = consciousObserverAdmission.filterPerception(
+    observerTickPerceptionProjection,
+  );
+  const guardConsciousObserverResolver = (resolver) => {
+    if (typeof resolver !== "function") return resolver ?? null;
+    return async (packet) => {
+      const current = await getWorldSimulationState(sessionId, options);
+      if (current.revision !== snapshot.revision || current.state_hash !== snapshot.state_hash) {
+        const error = new Error("Post-causal conscious observer ingress requires its prepared World revision/hash.");
+        error.code = "C6D_NATIVE_CONSCIOUS_STATE_CHANGED";
+        throw error;
+      }
+      if (!consciousObserverAdmission.at(packet.observer, packet.release_time_ms).admitted) {
+        const error = new Error("Post-causal conscious observer ingress is not admitted at this release.");
+        error.code = "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED";
+        throw error;
+      }
+      return resolver(packet);
+    };
+  };
   const observerTickBrainIngress =
     await runWorldSimulationObserverTickBrainIngress({
-      perception: observerTickPerceptionProjection,
-      resolver: options.characterObserverTickPerceptionResolver ?? null,
+      perception: consciousObserverPerception,
+      resolver: guardConsciousObserverResolver(options.characterObserverTickPerceptionResolver),
     });
   const observerLexicalIncrementProjection =
     await runWorldSimulationObserverLexicalIncrementAdmission({
-      admissions: array(causalResolution.communication_observer_increment_admissions),
+      admissions: consciousObserverReceipts,
       action_outcomes: array(causalResolution.action_outcomes),
-      resolver: options.characterCommunicationLexicalIncrementResolver ?? null,
+      resolver: guardConsciousObserverResolver(options.characterCommunicationLexicalIncrementResolver),
     });
   // Persist audit only. Listener-authored lexical fragments remain transient
   // engine-private evidence and feed only the matching observer's CC-7K
@@ -11026,19 +11060,19 @@ export async function resolveWorldSimulationTurn(
     await runWorldSimulationObserverMeaningIncrementAdmission({
       lexical_recognitions:
         observerLexicalIncrementProjection.engine_private_lexical_increments,
-      resolver: options.characterCommunicationIncrementalMeaningResolver ?? null,
+      resolver: guardConsciousObserverResolver(options.characterCommunicationIncrementalMeaningResolver),
     });
   // Persist audit only. Incremental interpreted content remains transient
   // observer-authored evidence; it is not belief, grounding, or World truth.
   const observerMeaningIncrement = observerMeaningIncrementProjection.audit;
   const communicationTurnIncrementHandoff =
     await runWorldSimulationTurnIncrementHandoff({
-      admissions: array(causalResolution.communication_observer_increment_admissions),
+      admissions: consciousObserverReceipts,
       lexical_recognitions:
         observerLexicalIncrementProjection.engine_private_lexical_increments,
       meaning_interpretations:
         observerMeaningIncrementProjection.engine_private_meaning_increments,
-      resolver: options.characterCommunicationTurnIncrementResolver ?? null,
+      resolver: guardConsciousObserverResolver(options.characterCommunicationTurnIncrementResolver),
     });
   // CC-7M is a passive post-causal opportunity ledger. Only the text-free
   // audit reaches World history; private observer entries remain transient.

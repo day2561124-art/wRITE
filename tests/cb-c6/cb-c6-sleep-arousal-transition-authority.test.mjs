@@ -1398,3 +1398,171 @@ async function d2NativeAdmission(mode) {
 }
 for (const mode of ["lifecycle", "all-asleep", "stale", "stale-swallowed"]) await d2NativeAdmission(mode);
 console.log("CB-C6-D2a Native participant and ordinary action admission regression passed.");
+
+import { buildWorldSimulationConsciousObserverAdmission }
+  from "../../server/src/world-simulation-conscious-observer-admission-service.mjs";
+import { runWorldSimulationObserverTickBrainIngress }
+  from "../../server/src/world-simulation-observer-tick-brain-ingress-service.mjs";
+import { worldSimulationObserverTickPerceptionVersion }
+  from "../../server/src/world-simulation-observer-tick-perception-service.mjs";
+
+// Body-only timing proof never relaxes CC-7F/G's complete World-prefix gate.
+for (const condition of ["awake", "asleep"]) {
+  const { state } = d1Fixture(condition);
+  state.event_queue[0].sleep_arousal_transition.time_ms = 125;
+  const context = bodyContext(state, 4, 250);
+  const mutation = bindBodyMutation({ ...context, result: adjudicateBodySleep(context) });
+  const next = d1Clone(state);
+  next.simulation_time = new Date(Date.parse(state.simulation_time) + 250).toISOString();
+  next.characters.aria.physical_state.sleep_arousal = d1Clone(mutation.to);
+  const input = { ...context, next_world_state: next, state_transitions: [mutation], committed_history: { turns: [] } };
+  const original = d1Clone(input);
+  const admission = buildWorldSimulationConsciousObserverAdmission(input);
+  assert.equal(admission.at("ARIA", 124).admitted, condition === "awake");
+  assert.equal(admission.at("ARIA", 125).admitted, condition === "asleep");
+  assert.equal(admission.at("aria", 250).admitted, condition === "asleep");
+  assert.equal(admission.at("aria", 250.75).admitted, condition === "asleep",
+    "fractional acoustic releases retain precision within the truncated World clock bucket");
+  assert.equal(admission.at("keeper", 125).condition, "unknown");
+  assert.throws(() => admission.at("aria", 251), { code: "C6D_CONSCIOUS_OBSERVER_ADMISSION_INVALID" });
+  const sources = [124, 125, 250].map((release_time_ms) => ({
+    schema_version: worldSimulationObserverTickPerceptionVersion,
+    observer: "aria", release_time_ms, visual: [], heard_nonlexical: [],
+    world_truth_authority: false, future_release_exposed: false, world_snapshot_exposed: false,
+  }));
+  const perception = {
+    audit: { schema_version: worldSimulationObserverTickPerceptionVersion,
+      status: "observer_views_engine_private", character_view_count: 3, tick_count: 3,
+      ticks: sources.map((view) => ({ release_time_ms: view.release_time_ms, observer_view_count: 1 })),
+    },
+    engine_private_character_views: sources,
+  };
+  const sourceCopy = d1Clone(perception);
+  const seen = [];
+  const filtered = admission.filterPerception(perception);
+  const ingress = await runWorldSimulationObserverTickBrainIngress({
+    perception: filtered, resolver: async (packet) => {
+      seen.push(packet.release_time_ms);
+      assert.equal(JSON.stringify(packet).includes("sleep_arousal"), false);
+      return { noticing_status: "no_noticing", attended_senses: [] };
+    },
+  });
+  assert.deepEqual(seen, condition === "awake" ? [124] : [125, 250]);
+  assert.equal(ingress.invocation_count, seen.length);
+  assert.equal(filtered.audit.character_view_count, seen.length);
+  assert.deepEqual(perception, sourceCopy);
+  assert.deepEqual(input, original);
+  const forged = d1Clone(input);
+  forged.state_transitions[0].time_ms = 124;
+  assert.throws(() => buildWorldSimulationConsciousObserverAdmission(forged));
+  const missingProof = d1Clone(input);
+  delete missingProof.state_transitions[0].body_sleep_adjudication;
+  assert.throws(() => buildWorldSimulationConsciousObserverAdmission(missingProof));
+}
+
+async function d2bNativeObserver(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-d2b-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const wakes = mode.startsWith("wake") || mode === "stale";
+    const startsAsleep = wakes || mode === "asleep";
+    const { state: initial } = d1Fixture(startsAsleep ? "asleep" : "awake");
+    const boundary = mode.endsWith("equal") ? 250 : 125;
+    Object.assign(initial.event_queue[0], { type: "conversation", participants: ["aria", "keeper"] });
+    if (mode === "awake" || mode === "asleep") delete initial.event_queue[0].sleep_arousal_transition;
+    else initial.event_queue[0].sleep_arousal_transition.time_ms = boundary;
+    initial.scenes.room.audibility_profiles = { aria: { minimum_audible_db: 30 } };
+    const semantic = "男孩已離開房子";
+    Object.assign(initial.characters.keeper, {
+      known: [semantic], speech_acoustics: { sound_level_db_at_1m: 60 },
+      communication_goal: {
+        character: "keeper", purpose: "告知", addressee: "aria", mode: "direct",
+        public_content: semantic, claim_kind: "sincere_assertion",
+        surface_realization: { schema_version: "cc5-mandarin-clause-request-v1", semantic_anchor: semantic,
+          clause: { subject: "男孩", predicate: "離開", aspect_particle: "了", object: "房子" } },
+      },
+    });
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-D2b release-time conscious observer admission", seed: mode,
+      rules: { ...initial.world_rules, event_driven: true, persistent_causality: true,
+        communication_action_seconds: 0.25, communication_speech_stream_increment_max_chars: 3 },
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (name) => ({
+        entity_id: `d2b_character_${name}`, canonical_name: name, identity_source: "d2b_fixture", formal: true,
+      }),
+    });
+    const brain = async (packet) => {
+      if (packet.character !== "keeper") return "reject_all";
+      const candidate = packet.candidate_action_intents.find((item) => item.communication?.surface_realization_complete === true);
+      assert.ok(candidate, "fixture must select real, bounded Mandarin speech");
+      return { action_id: candidate.action_id };
+    };
+    const lexical = [], meanings = [], turns = [], perceptions = [];
+    const options = {
+      ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain,
+      characterObserverTickPerceptionResolver: async (packet) => {
+        perceptions.push(d1Clone(packet));
+        return { noticing_status: "no_noticing", attended_senses: [] };
+      },
+      characterCommunicationLexicalIncrementResolver: async (packet) => {
+        lexical.push(d1Clone(packet));
+        for (const secret of ["sleep_arousal", "body_sleep_adjudication", before.state_hash])
+          assert.equal(JSON.stringify(packet).includes(secret), false);
+        if (mode === "stale" && lexical.length === 1)
+          await runWorldSimulationTurn({ world_simulation_session_id: sid }, {
+            ...nativeOptions, characterRuntimeManager: runtime, characterBrain: brain,
+          });
+        return { recognition_status: "recognized", heard_surface_fragment: packet.emitted_surface_fragment };
+      },
+      characterCommunicationIncrementalMeaningResolver: async (packet) => {
+        meanings.push(d1Clone(packet));
+        assert.equal(packet.heard_surface_prefix,
+          meanings.map((item) => item.current_heard_surface_fragment).join(""),
+          "sleeping fragments must never enter the later meaning prefix");
+        return { interpretation_status: "partial", interpreted_content: packet.heard_surface_prefix,
+          interpreted_interaction_function: "ongoing_statement_candidate", understanding_attested: false };
+      },
+      characterCommunicationTurnIncrementResolver: async (packet) => {
+        turns.push(d1Clone(packet));
+        return { listener_decision: { turn_end_projection: "uncertain",
+          projection_basis_refs: [], response_preparation: "none" } };
+      },
+    };
+    if (mode === "stale") {
+      await assert.rejects(runWorldSimulationTurn({ world_simulation_session_id: sid }, options),
+        { code: "C6D_NATIVE_CONSCIOUS_STATE_CHANGED" });
+      assert.equal(lexical.length, 1);
+      assert.equal(meanings.length, 0);
+      assert.equal(turns.length, 0);
+      assert.equal((await getWorldSimulationState(sid, nativeOptions)).revision, before.revision + 1);
+      assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 1);
+      return;
+    }
+    assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, options)).committed, true);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    const receipts = history.turns[0].communication_observer_increment_admissions
+      .filter((item) => item.observer === "aria" && item.admission_status === "heard_acoustic_cues_only");
+    assert.ok(receipts.length > 1, "physical sleeping acoustic receipts must remain intact");
+    const permitted = (time) => mode === "asleep" ? false : mode === "awake" ? true
+      : wakes ? time >= boundary : time < boundary;
+    const expected = receipts.filter((item) => permitted(item.release_time_ms)).map((item) => item.release_time_ms);
+    assert.deepEqual(lexical.map((item) => item.release_time_ms), expected);
+    assert.deepEqual(meanings.map((item) => item.release_time_ms), expected);
+    assert.deepEqual(turns.map((item) => item.release_time_ms), expected);
+    assert.ok(perceptions.every((item) => permitted(item.release_time_ms)));
+    const after = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal(Date.parse(after.state.simulation_time) - Date.parse(before.state.simulation_time), 250);
+    assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition,
+      mode === "asleep" || mode.startsWith("sleep") ? "asleep" : "awake");
+    assert.equal(after.state.characters.aria.physical_state.incapacitated, true);
+    assert.deepEqual(after.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+    assert.deepEqual(after.state.motivational_goal_events, before.state.motivational_goal_events);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+for (const mode of ["asleep", "awake", "wake", "sleep", "wake-equal", "sleep-equal", "stale"])
+  await d2bNativeObserver(mode);
+console.log("CB-C6-D2b post-causal conscious observer admission regression passed.");
