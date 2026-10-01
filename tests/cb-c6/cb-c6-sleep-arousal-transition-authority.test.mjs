@@ -1932,3 +1932,214 @@ function d3aArbitrate(state, selectedActionIntents, resolvedActionOutcomes = [])
 }
 
 console.log("CB-C6-D3a Body sleep physical action preemption regression passed.");
+
+import { runWorldSimulationOffscreenEventBatch }
+  from "../../server/src/world-simulation-offscreen-event-batch-service.mjs";
+
+for (const budget of [-1, 33, 1.5, null, "1", undefined]) {
+  await assert.rejects(runWorldSimulationOffscreenEventBatch({
+    world_simulation_session_id: "invalid-budget-never-read", max_turns: budget,
+  }), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+}
+await assert.rejects(runWorldSimulationOffscreenEventBatch({
+  world_simulation_session_id: "unsupported-horizon-never-read", max_turns: 1,
+  target_horizon: "2026-10-01T00:00:00Z",
+}), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+await assert.rejects(runWorldSimulationOffscreenEventBatch({
+  world_simulation_session_id: "custom-adjudicator-never-read", max_turns: 1,
+}, { causalAdjudicator: () => ({}) }), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+
+for (const mode of ["budget-resume", "partial-failure"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e1-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const { state: initial } = d1Fixture("awake");
+    const first = initial.event_queue[0];
+    initial.event_queue = [first, ...[2, 3].map(index => {
+      const event = d1Clone(first);
+      event.event_id = `e1-event-${index}`;
+      delete event.sleep_arousal_transition;
+      return event;
+    })];
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E1 canonical offscreen batch", seed: mode,
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async name => ({
+        entity_id: `e1_character_${name}`, canonical_name: name,
+        identity_source: "e1_fixture", formal: true,
+      }),
+    });
+    let brainCalls = 0;
+    let failSecond = mode === "partial-failure";
+    const options = {
+      ...nativeOptions, characterRuntimeManager: runtime,
+      characterBrain: async () => {
+        brainCalls += 1;
+        if (failSecond && brainCalls === 2) throw new Error("e1 deliberate second-turn failure");
+        return { action_id: "bounded-rest" };
+      },
+    };
+    const input = { world_simulation_session_id: sid, max_turns: 0 };
+    const zero = await runWorldSimulationOffscreenEventBatch(input, options);
+    assert.equal(zero.status, "budget_exhausted");
+    assert.equal(zero.committed_turn_count, 0);
+    assert.equal(zero.reached_simulation_time, before.state.simulation_time);
+    assert.equal(zero.pending_event_count, 3);
+    assert.equal(brainCalls, 0);
+    assert.deepEqual(await getWorldSimulationState(sid, nativeOptions), before);
+
+    let firstBatch;
+    if (failSecond) {
+      await assert.rejects(runWorldSimulationOffscreenEventBatch({
+        ...input, max_turns: 3,
+      }, options), error => {
+        firstBatch = error.offscreen_batch_progress;
+        assert.equal(firstBatch.status, "failed");
+        assert.equal(firstBatch.committed_turn_count, 1);
+        assert.equal(firstBatch.attempted_turn_count, 2);
+        assert.equal(firstBatch.pending_event_id, "e1-event-2");
+        assert.equal(firstBatch.automatic_replay_allowed, false);
+        return true;
+      });
+      failSecond = false;
+    } else {
+      firstBatch = await runWorldSimulationOffscreenEventBatch({
+        ...input, max_turns: 2,
+      }, options);
+      assert.equal(firstBatch.status, "budget_exhausted");
+      assert.equal(firstBatch.committed_turn_count, 2);
+      assert.equal(firstBatch.pending_event_id, "e1-event-3");
+    }
+    const middle = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal(firstBatch.last_observed_revision, middle.revision);
+    assert.equal(firstBatch.last_observed_state_hash, middle.state_hash);
+    assert.equal(firstBatch.state_reconciliation_required, false);
+    assert.equal(firstBatch.reached_simulation_time, middle.state.simulation_time);
+    assert.equal(Date.parse(middle.state.simulation_time) - Date.parse(before.state.simulation_time),
+      firstBatch.committed_turn_count * 500);
+    assert.equal(middle.state.characters.aria.physical_state.sleep_arousal.condition, "asleep");
+    assert.deepEqual(middle.state.characters.aria.physical_state.injuries,
+      before.state.characters.aria.physical_state.injuries);
+    assert.deepEqual(middle.state.motivational_goal_events, before.state.motivational_goal_events);
+
+    const resumed = await runWorldSimulationOffscreenEventBatch({
+      ...input, max_turns: 3 - firstBatch.committed_turn_count,
+    }, options);
+    assert.equal(resumed.status, "no_pending_event");
+    assert.equal(resumed.committed_turn_count, 3 - firstBatch.committed_turn_count);
+    assert.equal(resumed.pending_event_count, 0);
+    const final = await getWorldSimulationState(sid, nativeOptions);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    assert.equal(history.turns.length, 3);
+    assert.deepEqual(history.turns.map(turn => turn.event.event_id),
+      initial.event_queue.map(event => event.event_id));
+    assert.equal(Date.parse(final.state.simulation_time) - Date.parse(before.state.simulation_time), 1500);
+    assert.equal(resumed.reached_simulation_time, final.state.simulation_time);
+    assert.equal(resumed.target_horizon_claimed, false);
+    assert.equal(resumed.canonical_turn_fidelity_preserved, true);
+    assert.equal(resumed.wall_clock_catch_up_used, false);
+    const callsBeforeEmpty = brainCalls;
+    const empty = await runWorldSimulationOffscreenEventBatch({ ...input, max_turns: 1 }, options);
+    assert.equal(empty.committed_turn_count, 0);
+    assert.equal(empty.status, "no_pending_event");
+    assert.equal(brainCalls, callsBeforeEmpty);
+    assert.deepEqual(await getWorldSimulationState(sid, nativeOptions), final);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E1 bounded canonical offscreen event batch regression passed.");
+
+for (const mode of ["concurrent-commit", "unreadable-state"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e1-report-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  let restoreState = null;
+  try {
+    const { state: initial } = d1Fixture("awake");
+    const second = d1Clone(initial.event_queue[0]);
+    second.event_id = "e1-report-second";
+    delete second.sleep_arousal_transition;
+    initial.event_queue.push(second);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E1 concurrent failure reporting", seed: mode,
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const makeRuntime = () => createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async name => ({
+        entity_id: `e1_report_character_${name}`, canonical_name: name,
+        identity_source: "e1_report_fixture", formal: true,
+      }),
+    });
+    const { rename } = await import("node:fs/promises");
+    let progress;
+    await assert.rejects(runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 2,
+    }, {
+      ...nativeOptions, characterRuntimeManager: makeRuntime(),
+      characterBrain: async () => {
+        if (mode === "concurrent-commit") {
+          const independentlyCommitted = await runWorldSimulationTurn({
+            world_simulation_session_id: sid,
+          }, {
+            ...nativeOptions, characterRuntimeManager: makeRuntime(),
+            characterBrain: async () => ({ action_id: "bounded-rest" }),
+          });
+          assert.equal(independentlyCommitted.committed, true);
+          return { action_id: "bounded-rest" };
+        }
+        const statePath = worldSimulationStatePaths(sid, nativeOptions).state;
+        const savedPath = statePath + ".e1-test-unavailable";
+        await rename(statePath, savedPath);
+        restoreState = () => rename(savedPath, statePath);
+        throw new Error("e1 fixture temporarily cannot read its committed state");
+      },
+    }), error => {
+      progress = error.offscreen_batch_progress;
+      assert.equal(progress.status, "failed");
+      assert.equal(progress.committed_turn_count, 0);
+      assert.equal(progress.attempted_turn_count, 1);
+      assert.equal(progress.state_reconciliation_required, true);
+      assert.equal(progress.reached_simulation_time, null);
+      assert.equal(progress.pending_event_id, null);
+      assert.equal(progress.pending_event_count, null);
+      assert.equal(progress.automatic_replay_allowed, false);
+      return true;
+    });
+    if (restoreState) { await restoreState(); restoreState = null; }
+    const current = await getWorldSimulationState(sid, nativeOptions);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    if (mode === "concurrent-commit") {
+      assert.equal(current.revision, before.revision + 1);
+      assert.equal(history.turns.length, 1);
+      assert.equal(progress.last_observed_revision, current.revision);
+      assert.equal(progress.last_observed_state_hash, current.state_hash);
+      assert.equal(current.state.event_queue[0].event_id, "e1-report-second");
+      const resumed = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 1,
+      }, {
+        ...nativeOptions, characterRuntimeManager: makeRuntime(),
+        characterBrain: async () => ({ action_id: "bounded-rest" }),
+      });
+      assert.equal(resumed.committed_turn_count, 1);
+      assert.equal(resumed.pending_event_count, 0);
+      assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 2);
+    } else {
+      assert.deepEqual(current, before);
+      assert.equal(history.turns.length, 0);
+      assert.equal(progress.last_observed_revision, before.revision);
+      assert.equal(progress.last_observed_state_hash, before.state_hash);
+    }
+  } finally {
+    if (restoreState) await restoreState();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E1 concurrent and unreadable state reporting regression passed.");
