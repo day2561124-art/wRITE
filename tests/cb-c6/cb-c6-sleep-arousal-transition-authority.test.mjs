@@ -1935,6 +1935,8 @@ console.log("CB-C6-D3a Body sleep physical action preemption regression passed."
 
 import { runWorldSimulationOffscreenEventBatch }
   from "../../server/src/world-simulation-offscreen-event-batch-service.mjs";
+import { projectWorldSimulationOffscreenBreakpoint }
+  from "../../server/src/world-simulation-offscreen-breakpoint-service.mjs";
 
 for (const budget of [-1, 33, 1.5, null, "1", undefined]) {
   await assert.rejects(runWorldSimulationOffscreenEventBatch({
@@ -2310,3 +2312,255 @@ console.log("CB-C6-E2 canonical offscreen horizon regression passed.");
   }
 }
 console.log("CB-C6-E2 equivalent timestamp horizon regression passed.");
+
+function e3PersistentProcessWorld() {
+  const { state } = d1Fixture("awake");
+  state.event_queue = [];
+  state.ability_fields = {
+    field_e3: {
+      field_id: "field_e3",
+      owner: "keeper",
+      ability_id: "e3_field",
+      scene_id: "room",
+      center: { x: 6, y: 6 },
+      radius_m: 0.5,
+      remaining_ms: 250,
+      active: true,
+      affects_owner: false,
+      effect: { damage_per_second: 0 },
+      tick_ms: 100,
+    },
+  };
+  state.projectiles = {
+    projectile_e3: {
+      projectile_id: "projectile_e3",
+      owner: "keeper",
+      source_action_id: null,
+      weapon_id: "e3-fixture",
+      scene_id: "room",
+      position: { x: 7, y: 4 },
+      velocity_mps: { x: 2, y: 0 },
+      radius_m: 0.05,
+      base_damage: 0,
+      damage_type: "fixture",
+      initial_penetration_energy: 1,
+      remaining_penetration_energy: 1,
+      max_lifetime_ms: 5000,
+      age_ms: 0,
+      active: true,
+      target_character: null,
+      penetrated_obstacles: [],
+    },
+  };
+  state.world_rules = {
+    ...(state.world_rules ?? {}),
+    ability_field_tick_ms: 100,
+    combat_target_radius_m: 0.2,
+  };
+  return state;
+}
+
+{
+  const state = e3PersistentProcessWorld();
+  const before = d1Clone(state);
+  const first = projectWorldSimulationOffscreenBreakpoint({ world_state: state });
+  assert.equal(first.status, "breakpoint_available");
+  assert.equal(first.breakpoint.kind, "ability_field_tick");
+  assert.equal(first.breakpoint.subject_id, "field_e3");
+  assert.equal(first.breakpoint.delta_ms, 100);
+  assert.equal(first.breakpoint.source_authority,
+    "programmatic_immutable_ability_field_lifecycle");
+  assert.equal(first.boundaries.world_time_advanced, false);
+  assert.equal(first.boundaries.world_state_mutated, false);
+  assert.equal(first.boundaries.character_brain_invoked, false);
+  assert.equal(first.boundaries.automatic_recovery_inferred, false);
+  assert.deepEqual(projectWorldSimulationOffscreenBreakpoint({ world_state: state }), first,
+    "same committed World state must discover the same deterministic breakpoint");
+  assert.deepEqual(state, before, "breakpoint discovery must not mutate committed input");
+
+  const projectileOnly = d1Clone(state);
+  projectileOnly.ability_fields = {};
+  const projectile = projectWorldSimulationOffscreenBreakpoint({
+    world_state: projectileOnly,
+  });
+  assert.equal(projectile.breakpoint.kind, "projectile_bounds");
+  assert.equal(projectile.breakpoint.subject_id, "projectile_e3");
+  assert.equal(projectile.breakpoint.delta_ms, 500);
+  assert.equal(projectile.breakpoint.source_authority,
+    "programmatic_immutable_event_discovery");
+
+  const at = ms => new Date(Date.parse(state.simulation_time) + ms).toISOString();
+  const beforeKnownBreakpoint = projectWorldSimulationOffscreenBreakpoint({
+    world_state: state,
+    target_horizon: at(50),
+  });
+  assert.equal(beforeKnownBreakpoint.status, "no_authoritative_breakpoint");
+  assert.equal(beforeKnownBreakpoint.breakpoint, null);
+  assert.equal(beforeKnownBreakpoint.boundaries.unknown_slow_process_synthesized, false);
+
+  const noProcesses = d1Clone(state);
+  noProcesses.ability_fields = {};
+  noProcesses.projectiles = {};
+  const none = projectWorldSimulationOffscreenBreakpoint({ world_state: noProcesses });
+  assert.equal(none.status, "no_authoritative_breakpoint");
+  assert.equal(none.breakpoint, null);
+}
+console.log("CB-C6-E3 read-only persistent-process breakpoint projection regression passed.");
+
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e3-empty-queue-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root };
+  try {
+    const initial = e3PersistentProcessWorld();
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E3 empty queue breakpoint discovery",
+      seed: "e3-breakpoint", initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytesBefore = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    for (const max_turns of [0, 1]) {
+      const result = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid,
+        max_turns,
+      }, {
+        ...options,
+        characterBrain: async () => {
+          assert.fail("E3 breakpoint discovery must not invoke Character Brain.");
+        },
+      });
+      assert.equal(result.status, "slow_process_breakpoint_pending");
+      assert.equal(result.blocked_reason, "offscreen_slow_process_breakpoint_pending");
+      assert.equal(result.attempted_turn_count, 0);
+      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.pending_event_count, 0);
+      assert.equal(result.pending_breakpoint.kind, "ability_field_tick");
+      assert.equal(result.pending_breakpoint.delta_ms, 100);
+      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.target_horizon_claimed, false);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await Promise.all([
+        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+      ]), bytesBefore, "discovery-only E3 must preserve exact durable bytes");
+    }
+
+    const beforeInjury = d1Clone(before.state.characters.aria.physical_state.injuries);
+    assert.deepEqual(
+      (await getWorldSimulationState(sid, options)).state.characters.aria.physical_state.injuries,
+      beforeInjury,
+      "elapsed offscreen discovery must not synthesize recovery",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E3 empty-queue breakpoint admission regression passed.");
+
+{
+  const state = e3PersistentProcessWorld();
+  state.ability_fields = {};
+  const p = state.projectiles.projectile_e3;
+  p.velocity_mps = { x: 0, y: 0 };
+  p.max_lifetime_ms = 500;
+  const at = ms => new Date(Date.parse(state.simulation_time) + ms).toISOString();
+  const before = d1Clone(state);
+  assert.equal(projectWorldSimulationOffscreenBreakpoint({
+    world_state: state, target_horizon: at(499),
+  }).breakpoint, null);
+  const exact = projectWorldSimulationOffscreenBreakpoint({
+    world_state: state, target_horizon: at(500),
+  });
+  assert.equal(exact.breakpoint.kind, "projectile_lifetime");
+  assert.equal(exact.breakpoint.delta_ms, 500);
+  assert.equal(exact.earliest_breakpoint_confirmed, true);
+  assert.deepEqual(state, before);
+  p.age_ms = 500;
+  const due = projectWorldSimulationOffscreenBreakpoint({
+    world_state: state, target_horizon: at(0),
+  });
+  assert.equal(due.breakpoint.kind, "projectile_lifetime");
+  assert.equal(due.breakpoint.delta_ms, 0);
+
+  const unknown = e3PersistentProcessWorld();
+  delete unknown.projectiles.projectile_e3.velocity_mps;
+  const unresolved = projectWorldSimulationOffscreenBreakpoint({ world_state: unknown });
+  assert.equal(unresolved.status, "process_authority_unresolved");
+  assert.equal(unresolved.unresolved_process_count, 1);
+  assert.equal(unresolved.unresolved_processes[0].reason, "projectile_motion_unavailable");
+  assert.equal(unresolved.breakpoint.kind, "ability_field_tick");
+  assert.equal(unresolved.earliest_breakpoint_confirmed, false,
+    "a known candidate cannot prove it precedes an unresolved active process");
+  unknown.ability_fields.field_e3.remaining_ms = null;
+  assert.equal(projectWorldSimulationOffscreenBreakpoint({
+    world_state: unknown,
+  }).unresolved_process_count, 2);
+
+  const tied = e3PersistentProcessWorld();
+  tied.projectiles = {};
+  const field = tied.ability_fields.field_e3;
+  const alpha = { ...field, field_id: "alpha" };
+  const zeta = { ...field, field_id: "zeta" };
+  tied.ability_fields = { zeta, alpha };
+  const first = projectWorldSimulationOffscreenBreakpoint({ world_state: tied });
+  tied.ability_fields = { alpha, zeta };
+  assert.deepEqual(projectWorldSimulationOffscreenBreakpoint({ world_state: tied }), first);
+  assert.equal(first.breakpoint.subject_id, "alpha");
+}
+
+for (const mode of ["exact-lifetime", "due-now", "unresolved"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e3-boundary-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root };
+  try {
+    const initial = e3PersistentProcessWorld();
+    let horizonMs = 500;
+    if (mode === "unresolved") {
+      delete initial.projectiles.projectile_e3.velocity_mps;
+      horizonMs = 100;
+    } else {
+      initial.ability_fields = {};
+      initial.projectiles.projectile_e3.velocity_mps = { x: 0, y: 0 };
+      initial.projectiles.projectile_e3.max_lifetime_ms = 500;
+      if (mode === "due-now") {
+        initial.projectiles.projectile_e3.age_ms = 500;
+        horizonMs = 0;
+      }
+    }
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E3 pending boundary preservation", seed: mode,
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await durable();
+    for (const max_turns of [0, 1]) {
+      const result = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns,
+        target_horizon: new Date(Date.parse(before.state.simulation_time) + horizonMs).toISOString(),
+      }, {
+        ...options, characterBrain: async () => assert.fail("Discovery may not invoke Brain."),
+      });
+      assert.equal(result.status, mode === "unresolved"
+        ? "slow_process_authority_unresolved" : "slow_process_breakpoint_pending");
+      assert.equal(result.unresolved_process_count, mode === "unresolved" ? 1 : 0);
+      assert.equal(result.pending_breakpoint_confirmed, mode !== "unresolved");
+      assert.equal(result.pending_breakpoint.delta_ms, mode === "unresolved" ? 100 : horizonMs);
+      assert.equal(result.attempted_turn_count, 0);
+      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.target_horizon_claimed, mode === "due-now",
+        "time may already equal the horizon while a zero-time process remains explicitly pending");
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await durable(), original);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E3 horizon equality and unresolved process regression passed.");

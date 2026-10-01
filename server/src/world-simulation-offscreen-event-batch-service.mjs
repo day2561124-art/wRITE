@@ -1,8 +1,11 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
+import {
+  projectWorldSimulationOffscreenBreakpoint,
+} from "./world-simulation-offscreen-breakpoint-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
-  "cb-c6e2-offscreen-event-batch-v2";
+  "cb-c6e3-offscreen-event-batch-v3";
 
 function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
   const error = new Error(message);
@@ -48,6 +51,8 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
   const completed = [];
   let attempts = 0;
   let stateReadVerified = true;
+  let pendingBreakpoint = null;
+  let pendingUnresolvedProcesses = [];
   const report = (status, blockedReason = null) => {
     const confirmed = stateReadVerified
       && snapshot.revision === initial.revision + completed.length
@@ -72,6 +77,12 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       pending_event_id: confirmed ? (snapshot.state.event_queue?.[0]?.event_id
         ?? snapshot.state.event_queue?.[0]?.id ?? null) : null,
       pending_event_count: confirmed ? (snapshot.state.event_queue?.length ?? 0) : null,
+      pending_breakpoint: confirmed && pendingBreakpoint
+        ? { ...pendingBreakpoint } : null,
+      pending_breakpoint_confirmed: confirmed && pendingBreakpoint !== null
+        && pendingUnresolvedProcesses.length === 0,
+      unresolved_process_count: confirmed ? pendingUnresolvedProcesses.length : null,
+      unresolved_processes: confirmed ? pendingUnresolvedProcesses.map(item => ({ ...item })) : null,
       requested_target_horizon: target,
       target_horizon_claimed: confirmed && target !== null
         && Date.parse(snapshot.state.simulation_time) === Date.parse(target),
@@ -81,12 +92,29 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
     };
   };
 
+  const reportIdle = (emptyStatus = "no_pending_event") => {
+    const discovery = projectWorldSimulationOffscreenBreakpoint({
+      world_state: snapshot.state, target_horizon: target,
+    });
+    pendingBreakpoint = discovery.breakpoint;
+    pendingUnresolvedProcesses = discovery.unresolved_processes;
+    if (pendingUnresolvedProcesses.length)
+      return report("slow_process_authority_unresolved",
+        "offscreen_slow_process_authority_unresolved");
+    return pendingBreakpoint
+      ? report("slow_process_breakpoint_pending", "offscreen_slow_process_breakpoint_pending")
+      : report(emptyStatus);
+  };
+
   try {
     while (attempts < budget) {
       if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target))
-        return report("target_horizon_reached");
+        return snapshot.state.event_queue?.length
+          ? report("target_horizon_reached") : reportIdle("target_horizon_reached");
       const event = snapshot.state.event_queue?.[0];
-      if (!event) return report("no_pending_event");
+      if (!event) return reportIdle();
+      pendingBreakpoint = null;
+      pendingUnresolvedProcesses = [];
       const eventId = event.event_id ?? event.id;
       if (typeof eventId !== "string" || !eventId.trim())
         reject("Offscreen execution requires the canonical queue head identity.");
@@ -122,8 +150,10 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       snapshot = next;
     }
     if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target))
-      return report("target_horizon_reached");
-    return report(snapshot.state.event_queue?.length ? "budget_exhausted" : "no_pending_event");
+      return snapshot.state.event_queue?.length
+          ? report("target_horizon_reached") : reportIdle("target_horizon_reached");
+    if (snapshot.state.event_queue?.length) return report("budget_exhausted");
+    return reportIdle();
   } catch (error) {
     // A canonical turn may fail because another writer already changed World.
     // The old queue head must not be reported as safe to retry. A failed read
