@@ -94,6 +94,7 @@ function stableSort(entries) {
     ["object_interaction_complete", 90],
     ["communication_speech_increment", 95],
     ["action_complete", 100],
+    ["sleep_arousal_transition", 110],
   ]);
   return [...entries].sort((left, right) => (
     nonNegativeNumber(left.time_ms, 0) - nonNegativeNumber(right.time_ms, 0)
@@ -693,6 +694,22 @@ export function buildResolvedWorldSimulationGlobalTimeline(input = {}) {
     projectile_id: item.projectile_id,
     source_layer: "global_timeline",
   })));
+
+  // Canonical engine proposals supply this annotation; queue/commit retain
+  // the actual Body proof. Tie-break order does not imply preemption.
+  for (const transition of array(input.body_sleep_state_transitions)) {
+    if (transition?.field !== "physical_state.sleep_arousal"
+        || !Number.isFinite(transition.time_ms) || transition.time_ms < 0
+        || !transition?.body_sleep_adjudication) continue;
+    entries.push({
+      kind: "sleep_arousal_transition",
+      actor: transition.entity,
+      time_ms: transition.time_ms,
+      transition_id: transition.to?.last_transition?.transition_id ?? null,
+      result: "configured_body_sleep_arousal_transition_resolved",
+      source_layer: "body_sleep_arousal",
+    });
+  }
 
   const ordered = stableSort(entries).map((entry, index) => ({
     sequence: index + 1,

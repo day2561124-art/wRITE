@@ -86,6 +86,12 @@ import {
   worldSimulationFixedPointConvergenceVersion,
 } from "./world-simulation-fixed-point-convergence-service.mjs";
 
+import {
+  adjudicateWorldSimulationSleepArousalFromBody,
+  bindWorldSimulationSleepArousalBodyMutation,
+  worldSimulationSleepArousalBodyRuleVersion,
+} from "./world-simulation-body-sleep-arousal-service.mjs";
+
 export const worldSimulationCausalRuleEngineVersion = "phase62d-spatial-causal-rules-v1";
 
 function isObject(value) {
@@ -1373,6 +1379,15 @@ export function buildWorldSimulationCausalRuleContract() {
       range_validity_does_not_imply_hit: true,
       combat_causal_layer: buildWorldSimulationCombatCausalContract(),
     },
+    sleep_arousal: {
+      version: worldSimulationSleepArousalBodyRuleVersion,
+      conditional_pure_producer: "body_sleep_arousal",
+      configured_committed_body_cues_required: true,
+      missing_configuration_remains_unavailable: true,
+      receipt_replayed_at_locked_world_commit: true,
+      actual_whole_millisecond_world_horizon_required: true,
+      conscious_opportunity_admission_deferred_to_c6d: true,
+    },
     continuous_physics: buildWorldSimulationContinuousPhysicsContract(),
     global_causal_timeline: buildWorldSimulationGlobalCausalTimelineContract(),
     continuous_actor_state: buildWorldSimulationActorStateContract(),
@@ -1812,8 +1827,68 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     );
   }
 
+  // C6-C: event requests are guarded by configured committed Body evidence.
+  // The producer never extends elapsed time, infers fatigue, or clears injury.
+  const bodySleepTransitions = [];
+  if (Object.hasOwn(event, "sleep_arousal_transition")) {
+    // ISO World clocks commit whole milliseconds. A fractional tail cannot
+    // authorize an effect beyond the actual durable clock.
+    const bodyContext = {
+      world_state: snapshot,
+      world_state_revision: input.world_state_revision ?? 0,
+      world_state_hash: input.world_state_hash ?? hashAgentRunValue(snapshot),
+      event,
+      elapsed_ms: Math.floor(elapsedMs),
+    };
+    const bodyProduced = runWorldSimulationPureProposalProducer({
+      producer: "body_sleep_arousal",
+      turn_id: input.turn_id ?? null,
+      world_state_hash: input.world_state_hash ?? null,
+      root_world_state: snapshot,
+      authoritative_world_state: next,
+      existing_state_transitions: transitions,
+      causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+      elapsed_ms: bodyContext.elapsed_ms,
+      scene_id: sceneId,
+      solve: ({ isolated_preview_world_state: isolatedPreview }) => {
+        const result = adjudicateWorldSimulationSleepArousalFromBody(bodyContext);
+        const proposals = result.status === "transition_adjudicated"
+          ? [bindWorldSimulationSleepArousalBodyMutation({ result, ...bodyContext })] : [];
+        for (const proposal of proposals) {
+          isolatedPreview.characters[proposal.entity].physical_state.sleep_arousal
+            = cloneJson(proposal.to);
+        }
+        return {
+          next_world_state: isolatedPreview,
+          state_transitions: proposals,
+          body_sleep_resolution: {
+            version: result.version, status: result.status, reason: result.reason,
+          },
+        };
+      },
+    });
+    bodySleepTransitions.push(...array(bodyProduced.proposal_package.mutation_proposals));
+    transitions.push(...bodySleepTransitions);
+    // Engine/history metadata only; no action outcome or Brain knowledge claim.
+    bodyProduced.audit.body_sleep_resolution = cloneJson(bodyProduced.result.body_sleep_resolution);
+    mutationProposalBoundaryAudits.push(bodyProduced.audit);
+    pureProposalProducerAudits.push(bodyProduced.audit);
+    const bodyProjection = projectWorldSimulationPureProposalTransitions({
+      root_world_state: snapshot,
+      turn_id: input.turn_id ?? null,
+      world_state_hash: input.world_state_hash ?? null,
+      state_transitions: transitions,
+      causal_timeline: { entries: [], actor_trajectories: actorTrajectories },
+      elapsed_ms: bodyContext.elapsed_ms,
+      scene_id: sceneId,
+    });
+    next = bodyProjection.projected_world_state;
+    nextScene = object(object(next.scenes)[sceneId] ?? next.scene_state);
+  }
+
   const causalTimeline = buildResolvedWorldSimulationGlobalTimeline({
     arbitration: timelineArbitration,
+    body_sleep_state_transitions: bodySleepTransitions,
     spatial_action_outcomes: spatialActionOutcomes,
     combat_resolution: combatResolution,
     physics_resolution: physicsResolution,

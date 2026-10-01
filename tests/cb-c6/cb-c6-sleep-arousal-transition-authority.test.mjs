@@ -751,4 +751,147 @@ for (const alter of [
   rejectTransition(unconfigured, bindBodyMutation({ result, ...context }));
 }
 
+
+import {
+  createWorldSimulationCharacterRuntimeManager,
+  runWorldSimulationTurn,
+} from "../../server/src/world-simulation-loop-service.mjs";
+import { adjudicateWorldSimulationCausality } from "../../server/src/world-simulation-causal-rule-engine.mjs";
+
+async function nativeBodyScenario(label, alter, expectedReason, cycle = false) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-native-${label}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const initial = configuredBodyWorld();
+    initial.characters.aria.physical_state.incapacitated = true;
+    initial.characters.aria.physical_state.injuries = [{ severity: 2 }];
+    initial.characters.aria.known = [];
+    initial.characters.aria.current_goal = "保留既有關切";
+    initial.characters.keeper = { known: [], current_goal: "短暫停留", physical_state: {} };
+    initial.memories = { aria: [], keeper: [] };
+    initial.available_actions = {
+      aria: [], keeper: [{ action_id: "bounded-rest", intent: "留在原地", duration_ms: 500 }],
+    };
+    initial.scenes.room.scene_id = "room";
+    initial.scenes.room.simulation_time = initial.simulation_time;
+    initial.scenes.room.dimensions = { width_m: 8, depth_m: 8 };
+    initial.scenes.room.entity_positions.keeper = { x: 2, y: 1 };
+    initial.scenes.room.observable_by = { aria: { visual: [], audible: [] }, keeper: { visual: [], audible: [] } };
+    Object.assign(initial.event_queue[0], {
+      participants: ["aria", "keeper"], type: "bounded_body_request", summary: "短暫停留",
+    });
+    if (cycle) {
+      // An explicit fixture rule, not a simulated cue change or wake threshold.
+      initial.world_rules.sleep_arousal.rules[1].required_homeostatic_cues.fatigue = true;
+      initial.event_queue[0].next_events = [{
+        event_id: "native-body-wake", scene_id: "room", participants: ["aria", "keeper"],
+        type: "bounded_body_request", summary: "接續短暫停留",
+        sleep_arousal_transition: { character: "aria", condition: "awake", time_ms: 500 },
+      }];
+    }
+    alter(initial);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6 Native configured Body lifecycle", seed: label,
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const runtimeManager = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (name) => ({
+        entity_id: `character_${name}`, canonical_name: name,
+        identity_source: "c6_native_fixture", formal: true,
+      }),
+    });
+    let brainCalls = 0;
+    const turnOptions = {
+      ...nativeOptions, characterRuntimeManager: runtimeManager,
+      characterBrain: async (packet) => {
+        brainCalls += 1;
+        const raw = JSON.stringify(packet);
+        for (const privateValue of [
+          "body_sleep_adjudication", bodyRuleVersion,
+          "fixture-explicit-sleep-guard", "fixture-explicit-wake-guard",
+        ]) assert.equal(raw.includes(privateValue), false, "Body authority must remain engine-private");
+        return packet.character === "keeper" ? { action_id: "bounded-rest" } : "reject_all";
+      },
+    };
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, turnOptions)).committed, true);
+    const after = await getWorldSimulationState(sid, nativeOptions);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    const turn = history.turns[0];
+    const audit = turn.pure_proposal_producers.audits.find((item) => item.producer === "body_sleep_arousal");
+    assert.ok(audit);
+    assert.equal(audit.body_sleep_resolution.reason, expectedReason);
+    assert.equal(audit.producer_return_contains_world_state, false);
+    assert.equal(audit.hidden_preview_writes_rejected_before_return, true);
+    assert.equal(turn.pure_proposal_producers.audit_count, 6);
+    const sleep = turn.state_transitions.find((item) => item.field === "physical_state.sleep_arousal");
+    const accepted = expectedReason === "configured_body_guard_accepted";
+    assert.equal(Boolean(sleep), accepted);
+    assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition, accepted ? "asleep" : "awake");
+    assert.equal(Date.parse(after.state.simulation_time) - Date.parse(before.state.simulation_time), 500);
+    assert.equal(after.state.characters.aria.physical_state.incapacitated, true);
+    assert.deepEqual(after.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+    assert.equal(turn.causal_timeline.entries.filter((item) => item.kind === "sleep_arousal_transition").length, accepted ? 1 : 0);
+    const { timeline_hash, ...timeline } = turn.causal_timeline;
+    assert.equal(timeline_hash, hashAgentRunValue(timeline));
+    if (accepted) {
+      assert.equal(sleep.body_sleep_adjudication.source_world_revision, before.revision);
+      assert.equal(sleep.body_sleep_adjudication.source_world_state_hash, before.state_hash);
+      const queued = turn.chronological_mutation_queue.batches.flatMap((batch) => batch.mutations)
+        .find((item) => item.field === "physical_state.sleep_arousal");
+      assert.deepEqual(queued.body_sleep_adjudication, sleep.body_sleep_adjudication);
+      const replayInput = {
+        turn_id: turn.turn_id, world_state: before.state,
+        world_state_revision: before.revision, world_state_hash: before.state_hash,
+        event: turn.event, selected_action_intents: turn.selected_action_intents,
+      };
+      const replay = await adjudicateWorldSimulationCausality(replayInput);
+      assert.deepEqual(replay.state_transitions.find((item) => item.field === sleep.field), sleep);
+      assert.deepEqual((await adjudicateWorldSimulationCausality(replayInput)).causal_timeline, replay.causal_timeline);
+    } else {
+      assert.deepEqual(after.state.characters.aria.physical_state, before.state.characters.aria.physical_state);
+    }
+    if (cycle) {
+      assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, turnOptions)).committed, true);
+      const final = await getWorldSimulationState(sid, nativeOptions);
+      const all = await getWorldSimulationHistory(sid, nativeOptions);
+      assert.equal(all.turns.length, 2);
+      const wake = all.turns[1].state_transitions.find((item) => item.field === "physical_state.sleep_arousal");
+      assert.deepEqual(wake.from, sleep.to);
+      assert.equal(wake.to.condition, "awake");
+      assert.equal(wake.to.since_time_ms, Date.parse(before.state.simulation_time) + 1000);
+      assert.equal(wake.body_sleep_adjudication.source_world_revision, 1);
+      assert.equal(final.state.characters.aria.physical_state.incapacitated, true);
+      assert.deepEqual(final.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+    }
+    assert.ok(brainCalls > 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+await nativeBodyScenario("cycle", () => {}, "configured_body_guard_accepted", true);
+await nativeBodyScenario("unconfigured", (state) => {
+  delete state.world_rules.sleep_arousal;
+  state.event_queue[0].wish = "I want to sleep"; state.event_queue[0].audible_sound = true;
+}, "body_rule_configuration_missing");
+await nativeBodyScenario("false-guard", (state) => {
+  state.characters.aria.physical_state.homeostatic_cues.fatigue = false;
+}, "body_rule_guard_not_satisfied");
+await nativeBodyScenario("missing-cue", (state) => {
+  delete state.characters.aria.physical_state.homeostatic_cues.fatigue;
+}, "body_cue_evidence_unavailable");
+await nativeBodyScenario("conflict", (state) => {
+  state.world_rules.sleep_arousal.rules.push({
+    ...structuredClone(state.world_rules.sleep_arousal.rules[0]), rule_id: "native-conflict",
+  });
+}, "conflicting_body_rules");
+await nativeBodyScenario("beyond-horizon", (state) => {
+  state.event_queue[0].sleep_arousal_transition.time_ms = 501;
+}, "beyond_resolved_horizon");
+await nativeBodyScenario("fractional-tail", (state) => {
+  state.available_actions.keeper[0].duration_ms = 500.75;
+  state.event_queue[0].sleep_arousal_transition.time_ms = 500.25;
+}, "beyond_resolved_horizon");
+
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");
