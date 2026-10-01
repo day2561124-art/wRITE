@@ -415,4 +415,141 @@ for (const simulationTime of [undefined, null, false, "", "invalid", -1]) {
   }), (error) => error?.code === "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID");
 }
 
+
+import { readFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { projectRoot } from "../../server/src/project-paths.mjs";
+import { beginWorldSimulationSession } from "../../server/src/world-simulation-session-service.mjs";
+import {
+  commitWorldSimulationTurn, getWorldSimulationState, getWorldSimulationHistory,
+  worldSimulationStatePaths,
+} from "../../server/src/world-simulation-state-service.mjs";
+
+for (const clock of [
+  "2026-09-30T00:00:00.000", "2026-09-30", "09/30/2026",
+  "2026-02-30T00:00:00.000Z", "2026-02-29T00:00:00.000+08:00",
+  "2026-09-31T00:00:00.000Z", "2026-09-30T24:00:00.000Z",
+  "2026-09-30T00:00:00.000+24:00", "2026-09-30T00:00:00.000+08:60",
+]) {
+  const state = world();
+  state.simulation_time = clock;
+  assert.throws(() => projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: state, event: state.event_queue[0],
+  }), { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" });
+}
+{
+  const state = world();
+  state.simulation_time = "2026-09-30T08:00:00.000+08:00";
+  assert.equal(projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: state, event: state.event_queue[0],
+  }).state_transition.to.since_time_ms, Date.parse(world().simulation_time) + 500);
+}
+
+for (const [clock, expected] of [
+  ["2024-02-29T08:00:00.1+08:00", "2024-02-29T00:00:00.100Z"],
+  ["2024-02-28T19:00:00.12-05:00", "2024-02-29T00:00:00.120Z"],
+  ["2024-02-29T00:00:00Z", "2024-02-29T00:00:00.000Z"],
+]) {
+  const state = world();
+  state.simulation_time = clock;
+  assert.equal(projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: state, event: state.event_queue[0],
+  }).state_transition.to.since_time_ms, Date.parse(expected) + 500);
+}
+
+const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
+  `c6c-commit-${process.pid}-${Date.now()}`);
+const options = { fixtureRoot };
+try {
+  const initial = world();
+  initial.characters.aria.physical_state.incapacitated = true;
+  initial.characters.aria.physical_state.injuries = [{ severity: 2 }];
+  const session = await beginWorldSimulationSession({
+    simulation_label: "C6-C authoritative sleep commit fixture",
+    seed: "c6-c-commit",
+    rules: { event_driven: true, persistent_causality: true },
+    initial_world_state: initial,
+  }, options);
+  const sessionId = session.world_simulation_session_id;
+  const paths = worldSimulationStatePaths(sessionId, options);
+  const bytes = async () => Promise.all([
+    readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+  ]);
+  const inputFor = (envelope, transition, turnId) => {
+    const next = structuredClone(envelope.state);
+    next.characters.aria.physical_state.sleep_arousal = structuredClone(transition.to);
+    next.simulation_time = new Date(transition.to.since_time_ms).toISOString();
+    return {
+      expected_revision: envelope.revision, expected_state_hash: envelope.state_hash,
+      turn_id: turnId, event: structuredClone(envelope.state.event_queue[0]),
+      next_world_state: next, state_transitions: [structuredClone(transition)],
+    };
+  };
+  const reject = async (input, code = "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID") => {
+    const before = await bytes();
+    await assert.rejects(commitWorldSimulationTurn(sessionId, input, options), { code });
+    assert.deepEqual(await bytes(), before, "rejection must preserve state and history bytes");
+  };
+  const first = await getWorldSimulationState(sessionId, options);
+  const sleep = projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: first.state, event: first.state.event_queue[0],
+  }).state_transition;
+  const valid = inputFor(first, sleep, "sleep");
+  for (const alter of [
+    (input) => { input.state_transitions = []; },
+    (input) => { input.event.event_id = "forged-event"; },
+    (input) => { input.state_transitions[0].from.condition = "asleep"; },
+    (input) => { input.next_world_state.simulation_time = first.state.simulation_time; },
+    (input) => { input.next_world_state.characters.aria.physical_state.sleep_arousal = null; },
+    (input) => { delete input.next_world_state.characters.aria; },
+  ]) {
+    const invalid = structuredClone(valid);
+    alter(invalid);
+    await reject(invalid);
+  }
+  valid.next_world_state.event_queue = [{
+    event_id: "event-wake-2", scene_id: "room",
+    sleep_arousal_transition: { character: "aria", condition: "awake", time_ms: 100 },
+  }];
+  const accepted = structuredClone(valid);
+  const pendingCommit = commitWorldSimulationTurn(sessionId, valid, options);
+  // This runs while session/transaction I/O is pending, without a timing race.
+  valid.event.event_id = "caller-mutated-event";
+  valid.state_transitions[0].to.condition = "awake";
+  valid.next_world_state.characters.aria.physical_state.sleep_arousal = null;
+  await pendingCommit;
+  const acceptedHistory = await getWorldSimulationHistory(sessionId, options);
+  assert.deepEqual(acceptedHistory.turns[0].event, accepted.event);
+  assert.deepEqual(acceptedHistory.turns[0].state_transitions, accepted.state_transitions);
+  assert.deepEqual((await getWorldSimulationState(sessionId, options)).state,
+    accepted.next_world_state);
+  await reject(valid, "WORLD_SIMULATION_STALE_REVISION");
+  const second = await getWorldSimulationState(sessionId, options);
+  const wake = projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: second.state, event: second.state.event_queue[0],
+  }).state_transition;
+  const wakeInput = inputFor(second, wake, "wake");
+  wakeInput.next_world_state.event_queue = structuredClone(initial.event_queue);
+  await commitWorldSimulationTurn(sessionId, wakeInput, options);
+  const third = await getWorldSimulationState(sessionId, options);
+  assert.equal(third.state.characters.aria.physical_state.incapacitated, true);
+  assert.deepEqual(third.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+  const reused = projectWorldSimulationSleepArousalTransitionFromEvent({
+    world_state: third.state, event: third.state.event_queue[0],
+  }).state_transition;
+  await reject(inputFor(third, reused, "reused-source-event"));
+  const history = await getWorldSimulationHistory(sessionId, options);
+  assert.equal(history.turns.length, 2);
+  let replay = structuredClone(initial.characters.aria.physical_state.sleep_arousal);
+  for (const turn of history.turns) {
+    const transition = turn.state_transitions[0];
+    assert.deepEqual(transition.from, replay);
+    assert.equal(transition.to.source.source_id, turn.event.event_id);
+    replay = structuredClone(transition.to);
+  }
+  assert.deepEqual(replay, third.state.characters.aria.physical_state.sleep_arousal);
+} finally {
+  await rm(fixtureRoot, { recursive: true, force: true });
+}
+
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");

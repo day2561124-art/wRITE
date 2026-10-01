@@ -21,6 +21,10 @@ import {
   assertWorldSimulationNativePreparationEvidence,
 } from "./world-simulation-native-response-preparation-service.mjs";
 
+import {
+  assertWorldSimulationSleepArousalCommitAuthority,
+} from "./world-simulation-body-sleep-arousal-service.mjs";
+
 export const worldSimulationStateVersion = "phase62c-world-state-v1";
 
 function isObject(value) {
@@ -193,8 +197,10 @@ export async function commitWorldSimulationTurn(
   input = {},
   options = {},
 ) {
+  // Own the entire commit payload before the first asynchronous boundary.
+  // The state and history factories must serialize the same accepted evidence.
+  input = cloneJson(requireObject(input, "world simulation turn commit"));
   await assertWorldSimulationRun(sessionId, options);
-  requireObject(input, "world simulation turn commit");
   if (!Number.isSafeInteger(input.expected_revision)) {
     throw new Error("expected_revision is required for a world-state commit.");
   }
@@ -263,6 +269,13 @@ export async function commitWorldSimulationTurn(
             throw stale;
           }
           const now = new Date().toISOString();
+          assertWorldSimulationSleepArousalCommitAuthority({
+            world_state: current.state,
+            next_world_state: nextWorldState,
+            event: input.event,
+            state_transitions: input.state_transitions,
+            committed_history: await readJson(paths.history, "world simulation history"),
+          });
           committedEnvelope = stateEnvelope(
             sessionId,
             nextWorldState,

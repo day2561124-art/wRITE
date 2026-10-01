@@ -94,8 +94,29 @@ function sleepRecordFromCharacter(value) {
 
 // Queue timestamps are turn-relative; durable records use absolute World time.
 function transitionTime(worldState, offsetMs) {
-  const simulationTime = worldState?.simulation_time;
-  const startMs = typeof simulationTime === "string" ? Date.parse(simulationTime) : NaN;
+  // Parse bounded ISO fields explicitly: no host-local timezone and no calendar
+  // rollover (for example February 30 or 24:00) becomes transition authority.
+  const value = worldState?.simulation_time;
+  const parts = typeof value === "string"
+    ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
+    : null;
+  if (!parts) authorityInvalid("transition requires explicit ISO World time");
+  const [year, month, day, hour, minute, second] = parts.slice(1, 7).map(Number);
+  const milliseconds = Number((parts[7] ?? "").padEnd(3, "0"));
+  const zoneHour = Number(parts[10] ?? 0);
+  const zoneMinute = Number(parts[11] ?? 0);
+  if (zoneHour > 23 || zoneMinute > 59) authorityInvalid("World timezone is invalid");
+  const wall = new Date(0);
+  wall.setUTCFullYear(year, month - 1, day);
+  wall.setUTCHours(hour, minute, second, milliseconds);
+  if (wall.getUTCFullYear() !== year || wall.getUTCMonth() !== month - 1
+      || wall.getUTCDate() !== day || wall.getUTCHours() !== hour
+      || wall.getUTCMinutes() !== minute || wall.getUTCSeconds() !== second) {
+    authorityInvalid("World calendar fields are invalid");
+  }
+  const zoneMs = (zoneHour * 60 + zoneMinute) * 60000
+    * (parts[9] === "-" ? -1 : 1);
+  const startMs = wall.getTime() - zoneMs;
   const absoluteMs = startMs + offsetMs;
   if (!time(offsetMs) || !time(startMs) || !time(absoluteMs)
       || absoluteMs > Number.MAX_SAFE_INTEGER) {
@@ -272,6 +293,65 @@ export function assertWorldSimulationSleepArousalMutationAuthority({
       || Object.keys(record(mutation?.to?.last_transition)).sort().join("|")
         !== "event_id|time_ms|transition_id") {
     authorityInvalid("transition lineage is not canonical");
+  }
+  return true;
+}
+
+
+// Commit boundary: projections and custom adjudicators cannot bypass the queue
+// gate by supplying a different next_world_state. History supplies the replay
+// identity check; no new sleep truth store is introduced.
+export function assertWorldSimulationSleepArousalCommitAuthority({
+  world_state, next_world_state, event, state_transitions, committed_history,
+} = {}) {
+  const before = record(world_state);
+  const after = record(next_world_state);
+  const characters = new Set([
+    ...Object.keys(record(before.characters)), ...Object.keys(record(after.characters)),
+  ]);
+  const transitions = Array.isArray(state_transitions) ? state_transitions : [];
+  const sleepTransitions = transitions.filter((entry) =>
+    entry?.field === "physical_state.sleep_arousal");
+  const changed = [];
+  for (const character of characters) {
+    if (!sameValue(sleepRecordFromCharacter(record(before.characters)[character]),
+      sleepRecordFromCharacter(record(after.characters)[character]))) changed.push(character);
+  }
+  if (!changed.length && !sleepTransitions.length) return true;
+  if (changed.length !== 1 || sleepTransitions.length !== 1) {
+    authorityInvalid("commit requires one exact sleep/arousal transition");
+  }
+  const character = changed[0];
+  const transition = sleepTransitions[0];
+  const queued = record(Array.isArray(before.event_queue) ? before.event_queue[0] : null);
+  const eventId = queued.event_id ?? queued.id;
+  if (!id(eventId) || (event?.event_id ?? event?.id) !== eventId
+      || !sameValue(event?.sleep_arousal_transition, queued.sleep_arousal_transition)
+      || transition.entity !== character
+      || !sameValue(transition.from,
+        sleepRecordFromCharacter(record(before.characters)[character]) ?? null)
+      || !sameValue(transition.to,
+        sleepRecordFromCharacter(record(after.characters)[character]))) {
+    authorityInvalid("commit delta does not match original World event and transition");
+  }
+  assertWorldSimulationSleepArousalMutationAuthority({
+    world_state: before, authority_world_state: before,
+    world_path: ["characters", character, "physical_state", "sleep_arousal"],
+    mutation: transition,
+  });
+  const horizon = transitionTime(after, 0);
+  if (horizon < transitionTime(before, 0) || transition.to.since_time_ms > horizon) {
+    authorityInvalid("sleep/arousal effect exceeds the committed World horizon");
+  }
+  const turns = Array.isArray(committed_history?.turns) ? committed_history.turns : [];
+  for (const turn of turns) {
+    const prior = Array.isArray(turn.state_transitions) ? turn.state_transitions : [];
+    if (prior.some((entry) => entry?.field === "physical_state.sleep_arousal"
+        && (entry.to?.last_transition?.event_id === eventId
+          || entry.to?.last_transition?.transition_id
+            === transition.to.last_transition.transition_id))) {
+      authorityInvalid("sleep/arousal transition identity already exists in World history");
+    }
   }
   return true;
 }
