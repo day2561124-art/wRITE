@@ -294,6 +294,16 @@ export function assertWorldSimulationSleepArousalMutationAuthority({
         !== "event_id|time_ms|transition_id") {
     authorityInvalid("transition lineage is not canonical");
   }
+  if (Object.hasOwn(record(mutation), "body_sleep_adjudication")) {
+    // Queue replay binds evidence to the original World, not earlier writes.
+    // The embedded revision is provisional here; commit pins the actual CAS.
+    const receipt = record(mutation.body_sleep_adjudication);
+    assertWorldSimulationSleepArousalBodyMutation({
+      world_state: authority, world_state_revision: receipt.source_world_revision,
+      world_state_hash: hashAgentRunValue(authority), event,
+      elapsed_ms: receipt.resolved_horizon_ms, mutation,
+    });
+  }
   return true;
 }
 
@@ -302,7 +312,8 @@ export function assertWorldSimulationSleepArousalMutationAuthority({
 // gate by supplying a different next_world_state. History supplies the replay
 // identity check; no new sleep truth store is introduced.
 export function assertWorldSimulationSleepArousalCommitAuthority({
-  world_state, next_world_state, event, state_transitions, committed_history,
+  world_state, world_state_revision, world_state_hash,
+  next_world_state, event, state_transitions, committed_history,
 } = {}) {
   const before = record(world_state);
   const after = record(next_world_state);
@@ -343,6 +354,13 @@ export function assertWorldSimulationSleepArousalCommitAuthority({
   if (horizon < transitionTime(before, 0) || transition.to.since_time_ms > horizon) {
     authorityInvalid("sleep/arousal effect exceeds the committed World horizon");
   }
+  // Recompute configured Body authority under the same locked World CAS.
+  // Queue previews may still exercise the C1 structural primitive without a
+  // receipt, but no durable sleep effect can use that compatibility path.
+  assertWorldSimulationSleepArousalBodyMutation({
+    world_state: before, world_state_revision, world_state_hash, event,
+    elapsed_ms: horizon - transitionTime(before, 0), mutation: transition,
+  });
   const turns = Array.isArray(committed_history?.turns) ? committed_history.turns : [];
   for (const turn of turns) {
     const prior = Array.isArray(turn.state_transitions) ? turn.state_transitions : [];
@@ -477,6 +495,34 @@ export function assertWorldSimulationSleepArousalBodyAdjudication({
   if (expected.status !== "transition_adjudicated"
       || hashAgentRunValue(result) !== hashAgentRunValue(expected)) {
     authorityInvalid("Body sleep/arousal adjudication does not replay against exact World context");
+  }
+  return true;
+}
+
+// Receipt is transition metadata, never a second objective Body state.
+export function bindWorldSimulationSleepArousalBodyMutation({ result, ...context } = {}) {
+  assertWorldSimulationSleepArousalBodyAdjudication({ result, ...context });
+  return JSON.parse(JSON.stringify({
+    ...result.state_transition, body_sleep_adjudication: result.adjudication,
+  }));
+}
+
+export function assertWorldSimulationSleepArousalBodyMutation({
+  mutation, ...context
+} = {}) {
+  if (!object(mutation?.body_sleep_adjudication)) {
+    authorityInvalid("durable sleep/arousal effect requires Body adjudication");
+  }
+  const expected = adjudicateWorldSimulationSleepArousalFromBody(context);
+  if (expected.status !== "transition_adjudicated") {
+    authorityInvalid("configured Body guard did not accept the sleep/arousal effect");
+  }
+  const declared = Object.fromEntries(Object.keys(expected.state_transition)
+    .map((key) => [key, mutation?.[key]]));
+  if (hashAgentRunValue(declared) !== hashAgentRunValue(expected.state_transition)
+      || hashAgentRunValue(mutation.body_sleep_adjudication)
+        !== hashAgentRunValue(expected.adjudication)) {
+    authorityInvalid("Body mutation receipt does not replay against exact World context");
   }
   return true;
 }

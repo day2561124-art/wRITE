@@ -271,6 +271,8 @@ export async function commitWorldSimulationTurn(
           const now = new Date().toISOString();
           assertWorldSimulationSleepArousalCommitAuthority({
             world_state: current.state,
+            world_state_revision: current.revision,
+            world_state_hash: current.state_hash,
             next_world_state: nextWorldState,
             event: input.event,
             state_transitions: input.state_transitions,

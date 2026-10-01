@@ -7,6 +7,7 @@ import {
 import {
   projectWorldSimulationSleepArousalTransitionFromEvent,
   buildWorldSimulationSleepArousalTransitionRecord,
+  bindWorldSimulationSleepArousalBodyMutation as bindBodyMutation,
 } from "../../server/src/world-simulation-body-sleep-arousal-service.mjs";
 
 const version = "cb-c6b-sleep-arousal-record-v1";
@@ -461,7 +462,9 @@ const fixtureRoot = path.join(projectRoot, "tests", ".tmp",
   `c6c-commit-${process.pid}-${Date.now()}`);
 const options = { fixtureRoot };
 try {
-  const initial = world();
+  const initial = configuredBodyWorld();
+  // Explicit fixture guard: this test does not model physiological cue updates.
+  initial.world_rules.sleep_arousal.rules[1].required_homeostatic_cues.fatigue = true;
   initial.characters.aria.physical_state.incapacitated = true;
   initial.characters.aria.physical_state.injuries = [{ severity: 2 }];
   const session = await beginWorldSimulationSession({
@@ -482,7 +485,10 @@ try {
     return {
       expected_revision: envelope.revision, expected_state_hash: envelope.state_hash,
       turn_id: turnId, event: structuredClone(envelope.state.event_queue[0]),
-      next_world_state: next, state_transitions: [structuredClone(transition)],
+      next_world_state: next, state_transitions: [bindBodyMutation({
+        ...bodyContext(envelope.state, envelope.revision, transition.time_ms),
+        result: adjudicateBodySleep(bodyContext(envelope.state, envelope.revision, transition.time_ms)),
+      })],
     };
   };
   const reject = async (input, code = "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID") => {
@@ -497,6 +503,15 @@ try {
   const valid = inputFor(first, sleep, "sleep");
   for (const alter of [
     (input) => { input.state_transitions = []; },
+    (input) => { delete input.state_transitions[0].body_sleep_adjudication; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication = null; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.source_world_revision += 1; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.source_world_state_hash = "forged"; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.rule_configuration_hash = "forged"; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.evidence[0].character = "bystander"; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.evidence[0].value = false; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.resolved_horizon_ms += 1; },
+    (input) => { input.state_transitions[0].body_sleep_adjudication.extra = true; },
     (input) => { input.event.event_id = "forged-event"; },
     (input) => { input.state_transitions[0].from.condition = "asleep"; },
     (input) => { input.next_world_state.simulation_time = first.state.simulation_time; },
@@ -699,6 +714,41 @@ for (const alter of [
   assert.equal(adjudicateBodySleep(bodyContext(unknown)).status, "unresolved");
   unknown.world_rules.sleep_arousal.rules[0].from_condition = "unknown";
   assert.equal(adjudicateBodySleep(bodyContext(unknown)).status, "transition_adjudicated");
+}
+
+
+// Queue transport retains a detached receipt and hashes it into the queue.
+// Legacy C1 structural previews remain available; actual commit requires proof.
+{
+  const state = configuredBodyWorld();
+  const context = bodyContext(state);
+  const result = adjudicateBodySleep(context);
+  const mutation = bindBodyMutation({ result, ...context });
+  const queue = queueFor([mutation]);
+  assert.deepEqual(queue.batches[0].mutations[0].body_sleep_adjudication, result.adjudication);
+  mutation.body_sleep_adjudication.evidence[0].value = false;
+  assert.equal(queue.batches[0].mutations[0].body_sleep_adjudication.evidence[0].value, true);
+  exercise(state, bindBodyMutation({ result, ...context }));
+  for (const alter of [
+    (m) => { m.body_sleep_adjudication = null; },
+    (m) => { m.body_sleep_adjudication.evidence[0].character = "bystander"; },
+    (m) => { m.body_sleep_adjudication.evidence[0].value = false; },
+    (m) => { m.body_sleep_adjudication.source_world_state_hash = "forged"; },
+    (m) => { m.body_sleep_adjudication.prior_record_hash = "forged"; },
+    (m) => { m.body_sleep_adjudication.rule_id = "forged"; },
+    (m) => { m.body_sleep_adjudication.extra = true; },
+  ]) {
+    const invalid = bindBodyMutation({ result, ...context });
+    alter(invalid);
+    assert.notEqual(queueFor([invalid]).queue_hash, queue.queue_hash);
+    rejectTransition(state, invalid);
+  }
+  const changedCue = structuredClone(state);
+  changedCue.characters.aria.physical_state.homeostatic_cues.fatigue = false;
+  rejectTransition(changedCue, bindBodyMutation({ result, ...context }));
+  const unconfigured = structuredClone(state);
+  delete unconfigured.world_rules.sleep_arousal;
+  rejectTransition(unconfigured, bindBodyMutation({ result, ...context }));
 }
 
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");

@@ -136,6 +136,10 @@ function normalizeMutation(transition, index, input) {
     action_id: transition?.action_id ?? null,
     scene_id: transition?.scene_id ?? null,
     adjudication: transition?.adjudication ?? null,
+    ...(transition?.field === "physical_state.sleep_arousal"
+      && Object.hasOwn(object(transition), "body_sleep_adjudication")
+      ? { body_sleep_adjudication: cloneJson(transition.body_sleep_adjudication) }
+      : {}),
   };
   normalized.mutation_id = `mutation_${hashAgentRunValue({
     version: worldSimulationChronologicalMutationQueueVersion,
