@@ -2143,3 +2143,170 @@ for (const mode of ["concurrent-commit", "unreadable-state"]) {
   }
 }
 console.log("CB-C6-E1 concurrent and unreadable state reporting regression passed.");
+
+for (const target_horizon of [null, "", "not-a-time", "2026-10-01T00:00:00Z", 500]) {
+  await assert.rejects(runWorldSimulationOffscreenEventBatch({
+    world_simulation_session_id: "e2-invalid-never-read", max_turns: 1, target_horizon,
+  }), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+}
+await assert.rejects(runWorldSimulationTurn({
+  world_simulation_session_id: "e2-native-invalid-never-read",
+}, {
+  worldSimulationTimeCeiling: "not-a-time", characterBrain: async () => "reject_all",
+}), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+await assert.rejects(runWorldSimulationOffscreenEventBatch({
+  world_simulation_session_id: "e2-override-never-read", max_turns: 1,
+}, { worldSimulationTimeCeiling: "2026-10-01T00:00:00.000Z" }),
+{ code: "C6E_OFFSCREEN_BATCH_INVALID" });
+
+for (const [mode, horizonMs, firstCount] of [
+  ["inside-first", 250, 0], ["inside-second", 750, 1], ["exact", 500, 1],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e2-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const { state: initial } = d1Fixture("awake");
+    const first = initial.event_queue[0];
+    initial.event_queue = [first, ...[2, 3].map(index => {
+      const event = d1Clone(first);
+      event.event_id = `e2-event-${index}`;
+      delete event.sleep_arousal_transition;
+      return event;
+    })];
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E2 exact horizon guard", seed: mode,
+      initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    let brainCalls = 0;
+    const options = {
+      ...nativeOptions,
+      characterRuntimeManager: createWorldSimulationCharacterRuntimeManager({
+        identityResolver: async name => ({
+          entity_id: `e2_character_${name}`, canonical_name: name,
+          identity_source: "e2_fixture", formal: true,
+        }),
+      }),
+      characterBrain: async packet => {
+        brainCalls += 1;
+        assert.equal(JSON.stringify(packet).includes("worldSimulationTimeCeiling"), false);
+        assert.equal(JSON.stringify(packet).includes("requested_target_horizon"), false);
+        return { action_id: "bounded-rest" };
+      },
+    };
+    const input = { world_simulation_session_id: sid, max_turns: 3 };
+    await assert.rejects(runWorldSimulationOffscreenEventBatch({
+      ...input, target_horizon: at(-1),
+    }, options), { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+    const zero = await runWorldSimulationOffscreenEventBatch({
+      ...input, target_horizon: at(0),
+    }, options);
+    assert.equal(zero.status, "target_horizon_reached");
+    assert.equal(zero.target_horizon_claimed, true);
+    assert.equal(zero.committed_turn_count, 0);
+    assert.equal(brainCalls, 0);
+    assert.deepEqual(await getWorldSimulationState(sid, nativeOptions), before);
+
+    const batch = await runWorldSimulationOffscreenEventBatch({
+      ...input, target_horizon: at(horizonMs),
+    }, options);
+    assert.equal(batch.committed_turn_count, firstCount);
+    assert.equal(batch.reached_simulation_time, at(firstCount * 500));
+    assert.equal(batch.requested_target_horizon, at(horizonMs));
+    assert.equal(batch.target_horizon_claimed, mode === "exact");
+    assert.equal(batch.status, mode === "exact" ? "target_horizon_reached" : "blocked");
+    assert.equal(batch.blocked_reason, mode === "exact"
+      ? null : "offscreen_horizon_would_be_exceeded");
+    assert.equal(batch.attempted_turn_count, mode === "exact" ? 1 : firstCount + 1);
+    assert.equal(batch.pending_event_count, 3 - firstCount);
+    assert.equal(batch.state_reconciliation_required, false);
+    const middle = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal(middle.revision, before.revision + firstCount);
+    assert.deepEqual(middle.state.event_queue, initial.event_queue.slice(firstCount));
+    assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, firstCount);
+    assert.deepEqual(middle.state.motivational_goal_events, before.state.motivational_goal_events);
+    assert.deepEqual(middle.state.characters.aria.physical_state.injuries,
+      before.state.characters.aria.physical_state.injuries);
+    if (firstCount === 0) assert.deepEqual(middle, before);
+
+    const budget = await runWorldSimulationOffscreenEventBatch({
+      ...input, max_turns: 1, target_horizon: at(1500),
+    }, options);
+    assert.equal(budget.status, "budget_exhausted");
+    assert.equal(budget.committed_turn_count, 1);
+    assert.equal(budget.target_horizon_claimed, false);
+    assert.equal(budget.reached_simulation_time, at((firstCount + 1) * 500));
+    const resumed = await runWorldSimulationOffscreenEventBatch({
+      ...input, target_horizon: at(1500),
+    }, options);
+    assert.equal(resumed.status, "target_horizon_reached");
+    assert.equal(resumed.target_horizon_claimed, true);
+    const final = await getWorldSimulationState(sid, nativeOptions);
+    const history = await getWorldSimulationHistory(sid, nativeOptions);
+    assert.equal(final.state.simulation_time, at(1500));
+    assert.equal(final.state.characters.aria.physical_state.sleep_arousal.condition, "asleep");
+    assert.equal(history.turns.length, 3);
+    assert.deepEqual(history.turns.map(turn => turn.event.event_id),
+      initial.event_queue.map(event => event.event_id));
+    const callsBeforeEmpty = brainCalls;
+    const empty = await runWorldSimulationOffscreenEventBatch({
+      ...input, target_horizon: at(2000),
+    }, options);
+    assert.equal(empty.status, "no_pending_event");
+    assert.equal(empty.target_horizon_claimed, false);
+    assert.equal(empty.reached_simulation_time, at(1500));
+    assert.equal(brainCalls, callsBeforeEmpty);
+    assert.deepEqual(await getWorldSimulationState(sid, nativeOptions), final);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E2 canonical offscreen horizon regression passed.");
+
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e2-equivalent-time-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root };
+  try {
+    const { state: initial } = d1Fixture("awake");
+    const target = new Date(Date.parse(initial.simulation_time)).toISOString();
+    initial.simulation_time = target.replace("Z", "+00:00");
+    initial.scenes.room.simulation_time = initial.simulation_time;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E2 equivalent committed timestamp",
+      seed: "equivalent-time", initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytesBefore = await Promise.all([
+      readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+    ]);
+    for (const max_turns of [0, 1]) {
+      const reached = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns, target_horizon: target,
+      }, {
+        ...options,
+        characterBrain: async () => {
+          assert.fail("An equivalent already-reached World horizon must not invoke Brain.");
+        },
+      });
+      assert.equal(reached.status, "target_horizon_reached");
+      assert.equal(reached.target_horizon_claimed, true);
+      assert.equal(reached.attempted_turn_count, 0);
+      assert.equal(reached.committed_turn_count, 0);
+      assert.equal(reached.reached_simulation_time, before.state.simulation_time);
+      assert.equal(reached.pending_event_count, before.state.event_queue.length);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await Promise.all([
+        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+      ]), bytesBefore, "time comparison must not normalize or rewrite committed bytes");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+console.log("CB-C6-E2 equivalent timestamp horizon regression passed.");

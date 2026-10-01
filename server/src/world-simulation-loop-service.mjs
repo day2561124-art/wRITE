@@ -10930,6 +10930,27 @@ export async function resolveWorldSimulationTurn(
         } }
       : {}),
   }));
+  // C6-E2: keep a turn crossing the requested World horizon wholly pending.
+  // Check the actual canonical resolution before post-causal observer ingress,
+  // subjective effects or commit; never truncate a selected action or its timeline.
+  const timeCeiling = readWorldSimulationTimeCeiling(options);
+  if (timeCeiling !== null) {
+    const priorTime = Date.parse(snapshot.state.simulation_time);
+    const resolvedTime = Date.parse(causalResolution.next_world_state?.simulation_time);
+    if (!Number.isFinite(priorTime) || !Number.isFinite(resolvedTime)
+        || resolvedTime < priorTime || priorTime > timeCeiling) {
+      const error = new Error("Offscreen horizon requires valid nonbackward World time.");
+      error.code = "C6E_OFFSCREEN_BATCH_INVALID";
+      throw error;
+    }
+    if (resolvedTime > timeCeiling) return {
+      ok: false, committed: false,
+      world_simulation_session_id: sessionId, turn_id: preparedTurn.turn_id,
+      previous_state_hash: snapshot.state_hash, next_state_hash: null,
+      blocked_reason: "offscreen_horizon_would_be_exceeded",
+      causal_resolution_discarded: true,
+    };
+  }
   // Re-adjudicate from the SAME unmodified pre-turn snapshot after pre-cue
   // Phase74D/76F receipts. An intervening implementation change or stale
   // speculative replay must fail closed before consistency or atomic commit.
@@ -13673,6 +13694,13 @@ export async function resolveWorldSimulationTurn(
       runtime_identities: committedCharacterRuntimeIdentities,
     });
 
+  if (timeCeiling !== null
+      && motivationalGoalMutationExecution.next_world_state.simulation_time
+        !== causalResolution.next_world_state.simulation_time) {
+    const error = new Error("Post-causal projections changed the guarded World clock.");
+    error.code = "C6E_OFFSCREEN_BATCH_STATE_CHANGED";
+    throw error;
+  }
   const committed = await commitWorldSimulationTurn(
     sessionId,
     {
@@ -15846,7 +15874,20 @@ export async function resolveWorldSimulationTurn(
   };
 }
 
+function readWorldSimulationTimeCeiling(options) {
+  const value = options.worldSimulationTimeCeiling;
+  if (value === undefined) return null;
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))
+      || new Date(Date.parse(value)).toISOString() !== value) {
+    const error = new Error("Native World time ceiling requires an exact canonical ISO timestamp.");
+    error.code = "C6E_OFFSCREEN_BATCH_INVALID";
+    throw error;
+  }
+  return Date.parse(value);
+}
+
 export async function runWorldSimulationTurn(input = {}, options = {}) {
+  readWorldSimulationTimeCeiling(options);
   if (typeof options.characterBrain !== "function") {
     const error = new Error("Phase62C requires a characterBrain function for named-character action choice.");
     error.code = "WORLD_SIMULATION_CHARACTER_BRAIN_REQUIRED";

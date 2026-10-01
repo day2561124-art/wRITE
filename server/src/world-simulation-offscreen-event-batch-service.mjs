@@ -2,7 +2,7 @@ import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
-  "cb-c6e1-offscreen-event-batch-v1";
+  "cb-c6e2-offscreen-event-batch-v2";
 
 function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
   const error = new Error(message);
@@ -11,16 +11,16 @@ function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
 }
 
 /**
- * E1 preserves canonical per-event fidelity. It bounds the number of Native
- * turns, not elapsed World time. Empty queues do not authorize time jumps,
- * slow physiology, synthetic cognition or a claim of a reached target horizon.
+ * Preserve canonical per-event fidelity within a turn budget and optional
+ * exact World-time ceiling. A whole turn crossing the ceiling remains pending.
+ * Empty queues do not authorize time jumps, slow physiology or synthetic cognition.
  * This report is engine-private execution evidence, never a character packet.
  */
 export async function runWorldSimulationOffscreenEventBatch(input = {}, options = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)
       || Object.keys(input).some(key =>
-        !["world_simulation_session_id", "max_turns"].includes(key)))
-    reject("E1 accepts only a session identity and an explicit turn budget.");
+        !["world_simulation_session_id", "max_turns", "target_horizon"].includes(key)))
+    reject("Offscreen batches accept a session, explicit turn budget and optional target horizon.");
   const sessionId = input.world_simulation_session_id;
   const budget = input.max_turns;
   if (typeof sessionId !== "string" || !sessionId.trim()
@@ -29,10 +29,22 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
   if (options.causalAdjudicator !== undefined)
     reject("Offscreen event batches require the canonical World causal adjudicator.");
 
+  if (options.worldSimulationTimeCeiling !== undefined)
+    reject("The batch owns its Native time ceiling; supply target_horizon in input.");
+  const target = input.target_horizon ?? null;
+  if (Object.hasOwn(input, "target_horizon")
+      && (typeof target !== "string" || !Number.isFinite(Date.parse(target))
+        || new Date(Date.parse(target)).toISOString() !== target))
+    reject("Target horizon must be an exact canonical ISO World timestamp.");
+  const turnOptions = target === null ? options
+    : { ...options, worldSimulationTimeCeiling: target };
+
   let snapshot = await getWorldSimulationState(sessionId, options);
   const initial = snapshot;
   if (!Number.isFinite(Date.parse(snapshot.state?.simulation_time)))
     reject("Offscreen event batches require committed World simulation time.");
+  if (target !== null && Date.parse(target) < Date.parse(snapshot.state.simulation_time))
+    reject("Target horizon may not precede committed World time.");
   const completed = [];
   let attempts = 0;
   let stateReadVerified = true;
@@ -60,15 +72,19 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       pending_event_id: confirmed ? (snapshot.state.event_queue?.[0]?.event_id
         ?? snapshot.state.event_queue?.[0]?.id ?? null) : null,
       pending_event_count: confirmed ? (snapshot.state.event_queue?.length ?? 0) : null,
-      target_horizon_claimed: false,
+      requested_target_horizon: target,
+      target_horizon_claimed: confirmed && target !== null
+        && Date.parse(snapshot.state.simulation_time) === Date.parse(target),
       canonical_turn_fidelity_preserved: true,
       wall_clock_catch_up_used: false,
       automatic_replay_allowed: false,
-      };
+    };
   };
 
   try {
     while (attempts < budget) {
+      if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target))
+        return report("target_horizon_reached");
       const event = snapshot.state.event_queue?.[0];
       if (!event) return report("no_pending_event");
       const eventId = event.event_id ?? event.id;
@@ -77,7 +93,7 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       attempts += 1;
       const result = await runWorldSimulationTurn({
         world_simulation_session_id: sessionId, event_id: eventId,
-      }, options);
+      }, turnOptions);
       if (result.committed !== true) {
         stateReadVerified = false;
         snapshot = await getWorldSimulationState(sessionId, options);
@@ -105,6 +121,8 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
           "C6E_OFFSCREEN_BATCH_STATE_CHANGED");
       snapshot = next;
     }
+    if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target))
+      return report("target_horizon_reached");
     return report(snapshot.state.event_queue?.length ? "budget_exhausted" : "no_pending_event");
   } catch (error) {
     // A canonical turn may fail because another writer already changed World.
