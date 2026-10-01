@@ -758,7 +758,7 @@ import {
 } from "../../server/src/world-simulation-loop-service.mjs";
 import { adjudicateWorldSimulationCausality } from "../../server/src/world-simulation-causal-rule-engine.mjs";
 
-async function nativeBodyScenario(label, alter, expectedReason, cycle = false) {
+async function nativeBodyScenario(label, alter, expectedReason, cycle = false, invalidReceipt = null) {
   const root = path.join(projectRoot, "tests", ".tmp", `c6-native-${label}-${process.pid}-${Date.now()}`);
   const nativeOptions = { fixtureRoot: root };
   try {
@@ -814,7 +814,33 @@ async function nativeBodyScenario(label, alter, expectedReason, cycle = false) {
         return packet.character === "keeper" ? { action_id: "bounded-rest" } : "reject_all";
       },
     };
+    let forgedAttempts = 0;
+    if (invalidReceipt) {
+      turnOptions.causalAdjudicator = async (input) => {
+        const resolution = await adjudicateWorldSimulationCausality(input);
+        const mutation = resolution.state_transitions.find((item) => item.field === "physical_state.sleep_arousal");
+        assert.ok(mutation?.body_sleep_adjudication, "fixture must first obtain real Body authority");
+        invalidReceipt(mutation);
+        forgedAttempts += 1;
+        return resolution;
+      };
+    }
     const before = await getWorldSimulationState(sid, nativeOptions);
+    if (invalidReceipt) {
+      const paths = worldSimulationStatePaths(sid, nativeOptions);
+      const durableBytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+      const originalBytes = await durableBytes();
+      await assert.rejects(
+        runWorldSimulationTurn({ world_simulation_session_id: sid }, turnOptions),
+        { code: "C6C_SLEEP_AROUSAL_MUTATION_AUTHORITY_INVALID" },
+      );
+      assert.equal(forgedAttempts, 1, "custom adjudicator must actually reach the proof rejection");
+      assert.ok(brainCalls > 0);
+      assert.deepEqual(await durableBytes(), originalBytes, "Native proof rejection preserves exact state/history bytes");
+      assert.deepEqual(await getWorldSimulationState(sid, nativeOptions), before);
+      assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 0);
+      return;
+    }
     assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, turnOptions)).committed, true);
     const after = await getWorldSimulationState(sid, nativeOptions);
     const history = await getWorldSimulationHistory(sid, nativeOptions);
@@ -828,7 +854,10 @@ async function nativeBodyScenario(label, alter, expectedReason, cycle = false) {
     const sleep = turn.state_transitions.find((item) => item.field === "physical_state.sleep_arousal");
     const accepted = expectedReason === "configured_body_guard_accepted";
     assert.equal(Boolean(sleep), accepted);
-    assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition, accepted ? "asleep" : "awake");
+    assert.equal(after.state.characters.aria.physical_state.sleep_arousal?.condition,
+      accepted ? "asleep" : before.state.characters.aria.physical_state.sleep_arousal?.condition);
+    assert.equal(Object.hasOwn(after.state.characters.keeper.physical_state, "sleep_arousal"), false,
+      "ordinary turns must not initialize an unrelated legacy actor as awake or asleep");
     assert.equal(Date.parse(after.state.simulation_time) - Date.parse(before.state.simulation_time), 500);
     assert.equal(after.state.characters.aria.physical_state.incapacitated, true);
     assert.deepEqual(after.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
@@ -836,6 +865,10 @@ async function nativeBodyScenario(label, alter, expectedReason, cycle = false) {
     const { timeline_hash, ...timeline } = turn.causal_timeline;
     assert.equal(timeline_hash, hashAgentRunValue(timeline));
     if (accepted) {
+      assert.equal(sleep.body_sleep_adjudication.prior_condition,
+        before.state.characters.aria.physical_state.sleep_arousal?.condition ?? "unknown");
+      assert.equal(sleep.body_sleep_adjudication.prior_record_hash,
+        hashAgentRunValue(before.state.characters.aria.physical_state.sleep_arousal ?? null));
       assert.equal(sleep.body_sleep_adjudication.source_world_revision, before.revision);
       assert.equal(sleep.body_sleep_adjudication.source_world_state_hash, before.state_hash);
       const queued = turn.chronological_mutation_queue.batches.flatMap((batch) => batch.mutations)
@@ -893,5 +926,20 @@ await nativeBodyScenario("fractional-tail", (state) => {
   state.available_actions.keeper[0].duration_ms = 500.75;
   state.event_queue[0].sleep_arousal_transition.time_ms = 500.25;
 }, "beyond_resolved_horizon");
+
+await nativeBodyScenario("legacy-unknown-unconfigured-prior", (state) => {
+  delete state.characters.aria.physical_state.sleep_arousal;
+}, "body_rule_not_configured_for_transition");
+await nativeBodyScenario("legacy-unknown-explicit-prior", (state) => {
+  delete state.characters.aria.physical_state.sleep_arousal;
+  state.world_rules.sleep_arousal.rules[0].from_condition = "unknown";
+}, "configured_body_guard_accepted");
+for (const [label, forge] of [
+  ["missing-proof", (mutation) => { delete mutation.body_sleep_adjudication; }],
+  ["stale-proof", (mutation) => { mutation.body_sleep_adjudication.source_world_revision += 1; }],
+  ["cross-character-proof", (mutation) => { mutation.body_sleep_adjudication.evidence[0].character = "keeper"; }],
+]) {
+  await nativeBodyScenario(label, () => {}, "configured_body_guard_accepted", false, forge);
+}
 
 console.log("CB-C6-C sleep/arousal transition authority regression passed.");
