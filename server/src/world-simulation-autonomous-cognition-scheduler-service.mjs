@@ -203,7 +203,7 @@ function dueTemporalEvidence(runtimeContext, character, nowMs) {
 }
 
 // Admission changes dispatch availability, never C2 evidence or identity.
-function consciousAdmissionFor(worldState, character) {
+export function projectWorldSimulationConsciousCognitionAdmission(worldState, character) {
   const matches = Object.entries(object(worldState.characters))
     .filter(([name]) => sameCharacter(name, character));
   if (matches.length > 1) {
@@ -379,7 +379,7 @@ export function projectWorldSimulationAutonomousCognitionOpportunities(input = {
       planRefs: plans.map((plan) => plan.plan_ref).sort(),
     });
     // Validate Body even when an opportunity was previously consumed.
-    const admission = consciousAdmissionFor(worldState, character);
+    const admission = projectWorldSimulationConsciousCognitionAdmission(worldState, character);
     if (consumedIds.has(opportunity.opportunity_id)) continue;
     consciousAdmissionAudits.push({
       character, opportunity_id: opportunity.opportunity_id, ...admission,

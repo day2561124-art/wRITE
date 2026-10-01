@@ -709,7 +709,7 @@ assert.ok(
   "Phase66A must consume Phase65D decisions after pure resolution",
 );
 const runCharacterTurnIndex = loopSource.lastIndexOf(
-  "selections[packet.character] = await characterRuntimeManager.runCharacterTurn",
+  "selections[packet.character] = await runAdmittedWorldSimulationCharacterTurn",
 );
 const resolveTurnCallIndex = loopSource.lastIndexOf(
   "return resolveWorldSimulationTurn(",

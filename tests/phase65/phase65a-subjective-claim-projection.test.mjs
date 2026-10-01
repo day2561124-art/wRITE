@@ -959,7 +959,7 @@ assert.ok(commitIndex > claimRelationExecutionIndex);
 
 const runCharacterTurnIndex =
   loopSource.lastIndexOf(
-    "selections[packet.character] = await characterRuntimeManager.runCharacterTurn",
+    "selections[packet.character] = await runAdmittedWorldSimulationCharacterTurn",
   );
 const resolveTurnCallIndex =
   loopSource.lastIndexOf(

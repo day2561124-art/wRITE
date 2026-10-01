@@ -520,6 +520,7 @@ import {
 import {
   buildWorldSimulationAutonomousCognitionSchedulerContract,
   projectWorldSimulationAutonomousCognitionOpportunities,
+  projectWorldSimulationConsciousCognitionAdmission,
   worldSimulationAutonomousCognitionSchedulerVersion,
 } from "./world-simulation-autonomous-cognition-scheduler-service.mjs";
 import {
@@ -4974,6 +4975,35 @@ export async function dispatchWorldSimulationAutonomousCognitionOpportunities(
   });
 }
 
+async function runAdmittedWorldSimulationCharacterTurn(manager, input, options, expected) {
+  let failure = null;
+  const result = await manager.runCharacterTurn({
+    ...input,
+    characterBrain: async (packet) => {
+      try {
+        const current = await getWorldSimulationState(input.world_simulation_session_id, options);
+        if (current.revision !== expected.revision || current.state_hash !== expected.state_hash) {
+          const error = new Error("Native conscious Brain ingress requires its prepared World revision/hash.");
+          error.code = "C6D_NATIVE_CONSCIOUS_STATE_CHANGED";
+          throw error;
+        }
+        if (!sameCharacterName(packet?.character, input.character)
+            || !projectWorldSimulationConsciousCognitionAdmission(current.state, input.character).admitted) {
+          const error = new Error("Native conscious Brain ingress is not admitted for this character.");
+          error.code = "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED";
+          throw error;
+        }
+        return await input.characterBrain(packet);
+      } catch (error) {
+        failure = error;
+        throw error;
+      }
+    },
+  }, options);
+  if (failure) throw failure;
+  return result;
+}
+
 export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const sessionId = nonEmptyString(
     input.world_simulation_session_id,
@@ -5069,7 +5099,11 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
   const structuredSelfModelCharacterProjections = [];
   const revisedStructuredSelfModelCharacterProjections = [];
   const visibleConstraintObservationProjections = [];
+  const consciousParticipantAdmissions = [];
   for (const character of participants) {
+    const admission = projectWorldSimulationConsciousCognitionAdmission(worldState, character);
+    consciousParticipantAdmissions.push({ character, ...admission });
+    if (!admission.admitted) continue;
     const characterState = object(characterMapValue(worldState.characters, character));
     const memories = array(characterMapValue(worldState.memories, character));
     const retrievalPracticeActivationProjection =
@@ -7382,7 +7416,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
           resolver_view: implementationIntentionActivationResolverView,
         });
       const nativeActivationBrainResult =
-        await characterRuntimeManager.runCharacterTurn({
+        await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
           world_simulation_session_id: sessionId,
           character,
           brain_input: {
@@ -7403,7 +7437,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
             },
           },
           characterBrain: options.characterBrain,
-        }, options);
+        }, options, snapshot);
       rawActivatedPlanRefs =
         resolveWorldSimulationNativeImplementationIntentionActivationIntent({
           resolver_view: implementationIntentionActivationResolverView,
@@ -7513,7 +7547,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
               "characterRuntimeManager must provide runCharacterTurn() for CB-C5 native proposal.",
             );
           }
-          const brainResult = await characterRuntimeManager.runCharacterTurn({
+          const brainResult = await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
             world_simulation_session_id: sessionId,
             character,
             brain_input: {
@@ -7533,7 +7567,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
               },
             },
             characterBrain: options.characterBrain,
-          }, options);
+          }, options, snapshot);
           proposal = resolveWorldSimulationNativeSubjectiveAffordanceProposal(
             affordanceCatalog, brainResult,
           );
@@ -8049,6 +8083,7 @@ export async function prepareWorldSimulationTurn(input = {}, options = {}) {
     event,
     scene_analysis: cloneJson(sceneAnalysis),
     decision_packets: decisionPackets,
+    conscious_participant_admissions: cloneJson(consciousParticipantAdmissions),
     subjective_affordance_private_bindings:
       cloneJson(subjectiveAffordancePrivateBindings),
     attention_encoding_evidence: cloneJson(attentionEncodingEvidence),
@@ -10160,6 +10195,14 @@ export async function resolveWorldSimulationTurn(
     const stale = new Error("Prepared world turn is stale and cannot be adjudicated.");
     stale.code = "WORLD_SIMULATION_PREPARED_TURN_STALE";
     throw stale;
+  }
+
+  for (const packet of array(preparedTurn.decision_packets)) {
+    if (!projectWorldSimulationConsciousCognitionAdmission(snapshot.state, packet?.character).admitted) {
+      const error = new Error("Sleeping character cannot supply a conscious Native decision packet.");
+      error.code = "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED";
+      throw error;
+    }
   }
 
   // Phase81D-R1 full re-entry projections are engine-side evidence created only
@@ -16077,14 +16120,14 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
     brainInput.boundaries.counterfactual_linked_experience_reuse_world_truth_authority = false;
 
     precommitSourceBrainInputs.set(packet.character, cloneJson(brainInput));
-    selections[packet.character] = await characterRuntimeManager.runCharacterTurn(
+    selections[packet.character] = await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager,
       {
         world_simulation_session_id: prepared.world_simulation_session_id,
         character: packet.character,
         brain_input: brainInput,
         characterBrain: options.characterBrain,
       },
-      options,
+      options, nativeGoalSnapshot,
     );
   }
   // CC-7AF opt-in PRECOMMIT source reconsideration. The old A selection is
@@ -16132,12 +16175,12 @@ export async function runWorldSimulationTurn(input = {}, options = {}) {
       error.code = "CC7AF_PRECOMMIT_SOURCE_RECONSIDERATION_INVALID";
       throw error;
     }
-    const freshChoice = await characterRuntimeManager.runCharacterTurn({
+    const freshChoice = await runAdmittedWorldSimulationCharacterTurn(characterRuntimeManager, {
       world_simulation_session_id: prepared.world_simulation_session_id,
       character: reconsiderationCharacter,
       brain_input: cloneJson(precommitSourceBrainInputs.get(reconsiderationCharacter)),
       characterBrain: options.characterBrain,
-    }, options);
+    }, options, nativeGoalSnapshot);
     const finalSource = candidateSelection(
       { candidate_action_intents: packet.candidate_action_intents },
       freshChoice,

@@ -1271,3 +1271,130 @@ for (const mode of ["lifecycle", "stale", "stale-swallowed", "partial-stale", "i
   await d1NativeCognition(mode);
 }
 console.log("CB-C6-D1 conscious cognition deferral and pinned dispatch regression passed.");
+
+import { prepareWorldSimulationTurn as d2Prepare, resolveWorldSimulationTurn as d2Resolve }
+  from "../../server/src/world-simulation-loop-service.mjs";
+
+async function d2NativeAdmission(mode) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-d2a-${mode}-${process.pid}-${Date.now()}`);
+  const nativeOptions = { fixtureRoot: root };
+  try {
+    const stale = mode.startsWith("stale");
+    const allAsleep = mode === "all-asleep";
+    const { state: initial } = d1Fixture(stale ? "awake" : "asleep");
+    initial.event_queue[0].participants = allAsleep ? ["aria"] : ["aria", "keeper"];
+    if (allAsleep) initial.event_queue[0].sleep_arousal_transition.time_ms = 0;
+    if (mode === "lifecycle") initial.event_queue[0].next_events = [{
+      event_id: "d2-awake-ordinary", scene_id: "room", participants: ["aria", "keeper"],
+      type: "bounded_ordinary_event", summary: "醒後繼續原本事件",
+    }];
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-D2a Native conscious participant admission", seed: mode, initial_world_state: initial,
+    }, nativeOptions);
+    const sid = session.world_simulation_session_id;
+    const paths = worldSimulationStatePaths(sid, nativeOptions);
+    const durableBytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const before = await getWorldSimulationState(sid, nativeOptions);
+    const beforeBytes = await durableBytes();
+    const runtime = createWorldSimulationCharacterRuntimeManager({
+      identityResolver: async (name) => ({
+        entity_id: `d2_character_${name}`, canonical_name: name, identity_source: "d2_fixture", formal: true,
+      }),
+    });
+    const beforeMind = (await runtime.inspectRuntime({
+      world_simulation_session_id: sid, character: "aria",
+    }, nativeOptions)).current_mind;
+    const preparations = [];
+    const trackedRuntime = { ...runtime, prepareSpeculativeCurrentMind: async (input, options) => {
+      preparations.push(input.character);
+      return runtime.prepareSpeculativeCurrentMind(input, options);
+    } };
+    const packets = [];
+    const brain = async (packet) => {
+      packets.push(d1Clone(packet));
+      const raw = JSON.stringify(packet);
+      for (const privateValue of ["sleep_arousal", "conscious_participant_admissions",
+        worldSimulationConsciousCognitionAdmissionVersion, bodyRuleVersion, before.state_hash]) {
+        assert.equal(raw.includes(privateValue), false, "Native conscious admission stays engine-private");
+      }
+      return packet.character === "keeper" ? { action_id: "bounded-rest" } : "reject_all";
+    };
+    const options = { ...nativeOptions, characterRuntimeManager: trackedRuntime, characterBrain: brain };
+    if (stale) {
+      options.characterRuntimeManager = { ...trackedRuntime,
+        runCharacterTurn: async ({ brain_input, characterBrain }) => {
+          await runWorldSimulationTurn({ world_simulation_session_id: sid }, {
+            ...nativeOptions, characterRuntimeManager: runtime,
+            characterBrain: async (packet) => packet.character === "keeper"
+              ? { action_id: "bounded-rest" } : "reject_all",
+          });
+          try { return await characterBrain(brain_input); }
+          catch (error) { if (mode === "stale-swallowed") return "reject_all"; throw error; }
+        },
+      };
+      await assert.rejects(runWorldSimulationTurn({ world_simulation_session_id: sid }, options),
+        { code: "C6D_NATIVE_CONSCIOUS_STATE_CHANGED" });
+      assert.equal(packets.length, 0);
+      const after = await getWorldSimulationState(sid, nativeOptions);
+      assert.equal(after.revision, before.revision + 1);
+      assert.equal(after.state.characters.aria.physical_state.sleep_arousal.condition, "asleep");
+      assert.equal((await getWorldSimulationHistory(sid, nativeOptions)).turns.length, 1);
+      return;
+    }
+
+    const prepared = await d2Prepare({ world_simulation_session_id: sid }, options);
+    assert.deepEqual(prepared.decision_packets.map((packet) => packet.character), allAsleep ? [] : ["keeper"]);
+    assert.deepEqual(preparations, allAsleep ? [] : ["keeper"]);
+    const admission = prepared.conscious_participant_admissions.find((item) => item.character === "aria");
+    assert.equal(admission.condition, "asleep");
+    assert.equal(admission.admitted, false);
+    if (!allAsleep) {
+      const legacy = prepared.conscious_participant_admissions.find((item) => item.character === "keeper");
+      assert.equal(legacy.condition, "unknown");
+      assert.equal(legacy.admitted, true);
+    }
+    for (const field of ["memory_retrieval_processes", "current_mind_transition_projections",
+      "subjective_cognition_projections", "listener_social_interpretation_projections"]) {
+      assert.equal(JSON.stringify(prepared[field]).includes('"character":"aria"'), false, field);
+    }
+    assert.equal(packets.length, 0);
+    assert.deepEqual(await durableBytes(), beforeBytes);
+    const forged = d1Clone(prepared);
+    forged.decision_packets.push({ character: "ARIA", candidate_action_intents: [] });
+    forged.conscious_participant_admissions = [{ character: "ARIA", condition: "awake", admitted: true }];
+    let adjudications = 0;
+    await assert.rejects(d2Resolve(forged, { ARIA: "reject_all" }, {
+      ...nativeOptions, causalAdjudicator: async () => { adjudications += 1; throw new Error("must not adjudicate"); },
+    }), { code: "C6D_NATIVE_CONSCIOUS_ADMISSION_DENIED" });
+    assert.equal(adjudications, 0);
+    assert.deepEqual(await durableBytes(), beforeBytes);
+
+    const result = await runWorldSimulationTurn({ world_simulation_session_id: sid }, options);
+    assert.equal(result.committed, true);
+    assert.deepEqual(packets.map((packet) => packet.character), allAsleep ? [] : ["keeper"]);
+    const awakened = await getWorldSimulationState(sid, nativeOptions);
+    assert.equal(awakened.state.characters.aria.physical_state.sleep_arousal.condition, "awake");
+    assert.equal(Date.parse(awakened.state.simulation_time) - Date.parse(before.state.simulation_time),
+      allAsleep ? 0 : 500, "World horizon derives from real physical resolution, never a fabricated sleeping action");
+    assert.deepEqual(awakened.state.memories.aria, before.state.memories.aria);
+    assert.deepEqual(awakened.state.motivational_goal_events, before.state.motivational_goal_events);
+    assert.deepEqual(projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+      world_state: awakened.state,
+    }).plans_by_character.aria, projectWorldSimulationEffectiveGoalImplementationIntentionExecution({
+      world_state: before.state,
+    }).plans_by_character.aria);
+    assert.equal(awakened.state.characters.aria.physical_state.incapacitated, true);
+    assert.deepEqual(awakened.state.characters.aria.physical_state.injuries, [{ severity: 2 }]);
+    assert.deepEqual((await runtime.inspectRuntime({
+      world_simulation_session_id: sid, character: "aria",
+    }, nativeOptions)).current_mind, beforeMind);
+    if (mode === "lifecycle") {
+      assert.equal((await runWorldSimulationTurn({ world_simulation_session_id: sid }, options)).committed, true);
+      assert.deepEqual(packets.map((packet) => packet.character), ["keeper", "aria", "keeper"]);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+for (const mode of ["lifecycle", "all-asleep", "stale", "stale-swallowed"]) await d2NativeAdmission(mode);
+console.log("CB-C6-D2a Native participant and ordinary action admission regression passed.");

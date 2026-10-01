@@ -336,7 +336,7 @@ const stateSource = await readFile("server/src/world-simulation-state-service.mj
 const runStart = loopSource.indexOf("export async function runWorldSimulationTurn(");
 const runSource = loopSource.slice(runStart);
 const phase81IIndex = runSource.indexOf("const counterfactualLinkedExperienceReentry =");
-const brainSelectionIndex = runSource.indexOf("runCharacterTurn(");
+const brainSelectionIndex = runSource.indexOf("runAdmittedWorldSimulationCharacterTurn(");
 assert.ok(runStart >= 0);
 assert.ok(phase81IIndex >= 0);
 assert.ok(brainSelectionIndex > phase81IIndex);
