@@ -1,7 +1,10 @@
 # CB-C6-E4 — Offscreen physical-step implementation note
 
-Status: E4 first runtime candidate implemented; validation pending, not sealed.
-The first slice exposes a direct Native World-owned field step. It reuses the causal engine through a private derived context and commits through the existing atomic writer. It does not yet attach progression to the offscreen batch.
+Status: E4 first direct runtime slice sealed at `4417345242fa4eb4d52fd5745bd24b4f6b2d701a`; full C6-E/F remain open.
+E4 formal MCP (604868ms) and mcp_tunnel (122875ms) passed without retry; main integrated, pushed and canonical remote exact; source workspace removed 2026-10-02.
+The direct Native World-owned field step reuses the causal engine through a private derived context and commits through the existing atomic writer.
+
+E5 candidate: attach that same step to empty-queue offscreen batches only when discovery confirms a positive whole-millisecond breakpoint within the horizon. Each Native physical admission attempt shares the existing bounded budget. Queued turns retain their original path. Record actual physical commits before post-commit reads, label execution kind, and expose the physical pending reason. Budget exhaustion reports the reached clock and remaining breakpoint; it never jumps to the requested horizon. Unsupported zero-time, projectile, multi-scene, geometry and pending acoustic cases remain uncommitted. E5 regression and exact-snapshot validation are pending; E5 is not sealed.
 Supported: one scene containing all active fields, authoritative positive whole-millisecond breakpoint and valid field geometry.
 Explicitly pending: active projectile progression, multiple active scenes, zero-time or fractional physical effects, and CC-6B signals awaiting their next perception opportunity. Physical-only progression cannot expire an unheard speech signal. No clock jump is allowed around these cases.
 New regression covers deterministic immutable replay, field expiration and damage, Native exact commits, stale CAS and byte-preserving blocked/idle behavior. Results must be recorded after actual execution.

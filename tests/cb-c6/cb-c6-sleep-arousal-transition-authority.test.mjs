@@ -2435,7 +2435,9 @@ console.log("CB-C6-E3 read-only persistent-process breakpoint projection regress
       });
       assert.equal(result.status, "slow_process_breakpoint_pending");
       assert.equal(result.blocked_reason, "offscreen_slow_process_breakpoint_pending");
-      assert.equal(result.attempted_turn_count, 0);
+      assert.equal(result.attempted_turn_count, max_turns === 0 ? 0 : 1);
+      assert.equal(result.physical_step_blocked_reason, max_turns === 0
+        ? null : "physical_step_projectile_progression_pending");
       assert.equal(result.committed_turn_count, 0);
       assert.equal(result.pending_event_count, 0);
       assert.equal(result.pending_breakpoint.kind, "ability_field_tick");
@@ -2551,7 +2553,7 @@ for (const mode of ["exact-lifetime", "due-now", "unresolved"]) {
       assert.equal(result.unresolved_process_count, mode === "unresolved" ? 1 : 0);
       assert.equal(result.pending_breakpoint_confirmed, mode !== "unresolved");
       assert.equal(result.pending_breakpoint.delta_ms, mode === "unresolved" ? 100 : horizonMs);
-      assert.equal(result.attempted_turn_count, 0);
+      assert.equal(result.attempted_turn_count, mode === "exact-lifetime" && max_turns > 0 ? 1 : 0);
       assert.equal(result.committed_turn_count, 0);
       assert.equal(result.reached_simulation_time, before.state.simulation_time);
       assert.equal(result.target_horizon_claimed, mode === "due-now",
@@ -2735,3 +2737,124 @@ console.log("CB-C6-E4 World-owned physical field progression regression passed."
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E4 physical step preserves pending acoustic ingress regression passed.");
+
+for (const [budget, horizonMs, elapsed, commits] of [
+  [0, 250, 0, 0], [1, 250, 100, 1], [2, 250, 200, 2],
+  [3, 250, 250, 3], [32, 200, 200, 2], [32, 99, 0, 0],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e5-budget-${budget}-${horizonMs}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("Empty-queue physical batch must not invoke Brain.") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E5 bounded physical batch", seed: "e5-field",
+      initial_world_state: e4FieldWorld(),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const bytesBefore = await durable();
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: budget, target_horizon: at(horizonMs),
+    }, options);
+    assert.equal(result.attempted_turn_count, commits);
+    assert.equal(result.committed_turn_count, commits);
+    assert.equal(result.committed_physical_step_count, commits);
+    assert.equal(result.reached_simulation_time, at(elapsed));
+    assert.equal(result.target_horizon_claimed, elapsed === horizonMs);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.automatic_replay_allowed, false);
+    assert.equal(result.pending_event_count, 0);
+    if (budget < 3 && horizonMs === 250) {
+      assert.equal(result.status, "slow_process_breakpoint_pending");
+      assert.equal(result.pending_breakpoint.delta_ms, elapsed === 200 ? 50 : 100);
+    }
+    if (elapsed === horizonMs) assert.equal(result.status, "target_horizon_reached");
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + commits);
+    assert.equal(after.state.ability_fields.field_e3.remaining_ms, 250 - elapsed);
+    assert.equal(after.state.ability_fields.field_e3.active, elapsed < 250);
+    assert.deepEqual(after.state.event_queue, []);
+    assert.deepEqual(after.state.characters.aria.physical_state, before.state.characters.aria.physical_state);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, commits);
+    for (let i = 0; i < commits; i += 1) {
+      const completed = result.committed_turns[i];
+      assert.equal(completed.execution_kind, "physical_process_step");
+      assert.equal(completed.turn_id, history.turns[i].turn_id);
+      assert.equal(completed.next_state_hash, history.turns[i].next_state_hash,
+        "physical batch hash must match the actual atomic writer history");
+      assert.equal(completed.event_id, history.turns[i].event.event_id);
+      assert.equal(history.turns[i].event.type, "offscreen_physical_process_step");
+      assert.ok(history.turns[i].chronological_mutation_execution.execution_hash);
+      if (i) assert.equal(completed.previous_state_hash, result.committed_turns[i - 1].next_state_hash);
+    }
+    if (!commits) assert.deepEqual(await durable(), bytesBefore);
+    if (elapsed === 250) {
+      const bytesAfter = await durable();
+      const idle = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32, target_horizon: at(500),
+      }, options);
+      assert.equal(idle.reached_simulation_time, at(250));
+      assert.equal(idle.committed_turn_count, 0);
+      assert.equal(idle.target_horizon_claimed, false);
+      assert.deepEqual(await durable(), bytesAfter, "inactive fields cannot authorize a horizon jump");
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E5 bounded physical batch horizon and lineage regression passed.");
+
+for (const [mode, reason, attempts] of [
+  ["acoustic", "physical_step_acoustic_ingress_pending", 1],
+  ["projectile", "physical_step_projectile_progression_pending", 1],
+  ["geometry", "physical_step_field_geometry_unresolved", 1],
+  ["scenes", "physical_step_scene_scope_unresolved", 1],
+  ["fractional", null, 0], ["unresolved", null, 0],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e5-pending-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("Unsupported physical processes must stay pending without Brain.") };
+  try {
+    const initial = e4FieldWorld();
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1", sound_id: "e5-pending",
+      scene_id: "room", source_entity_id: "keeper", active: true, lifecycle: "next_perception_only",
+    }];
+    if (mode === "projectile") initial.projectiles = e3PersistentProcessWorld().projectiles;
+    if (mode === "geometry") delete initial.ability_fields.field_e3.center;
+    if (mode === "scenes") {
+      initial.scenes.other = d1Clone(initial.scenes.room);
+      initial.ability_fields.other = { ...d1Clone(initial.ability_fields.field_e3),
+        field_id: "other", scene_id: "other" };
+    }
+    if (mode === "fractional") initial.ability_fields.field_e3.remaining_ms = 0.5;
+    if (mode === "unresolved") initial.ability_fields.field_e3.remaining_ms = null;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E5 pending physical authority", seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await durable();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(result.attempted_turn_count, attempts);
+    assert.equal(result.committed_turn_count, 0);
+    assert.equal(result.committed_physical_step_count, 0);
+    assert.equal(result.physical_step_blocked_reason, reason);
+    assert.equal(result.reached_simulation_time, before.state.simulation_time);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.ok(result.pending_breakpoint || result.unresolved_process_count);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await durable(), original, "pending authority must preserve exact durable bytes");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E5 physical batch unsupported authority and acoustic preservation regression passed.");
