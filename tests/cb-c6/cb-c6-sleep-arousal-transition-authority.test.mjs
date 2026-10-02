@@ -4130,11 +4130,11 @@ for (const x of [2, 2.5]) {
     const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
     const original = await bytes();
     const batch = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 32, target_horizon: before.state.simulation_time,
+      world_simulation_session_id: sid, max_turns: 0, target_horizon: before.state.simulation_time,
     }, options);
     assert.equal(batch.attempted_turn_count, 0);
     assert.equal(batch.committed_turn_count, 0);
-    assert.deepEqual(await bytes(), original, "E13 does not admit batch contact");
+    assert.deepEqual(await bytes(), original, "E13 budget-zero discovery stays read-only; E14 owns positive-budget batch contact");
     await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
       world_simulation_session_id: sid, expected_revision: before.revision,
       expected_state_hash: before.state_hash, zero_time_projectile_contact_drain: true,
@@ -4231,3 +4231,200 @@ for (const [mode, reason] of [
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E13 direct zero-time character contact, damage, lineage, CAS and unsupported authority passed.");
+
+// E14 attaches the sealed direct owner to the bounded batch; no Brain or time jump.
+async function e14BatchFixture(label, initial, exercise) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    "c6-e14-" + label + "-" + process.pid + "-" + Date.now());
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E14 physical batches cannot invoke Brain") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E14 bounded current contact", seed: label, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const batch = (budget, horizon = before.state.simulation_time) =>
+      runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: budget,
+        ...(horizon === null ? {} : { target_horizon: horizon }),
+      }, options);
+    await exercise({ sid, options, before, bytes, original, batch });
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+function e14AssertLineage(before, after, turns) {
+  assert.equal(after.revision, before.revision + turns.length);
+  assert.equal(after.state.simulation_time, before.state.simulation_time);
+  let previous = before.state_hash;
+  for (const turn of turns) {
+    assert.equal(turn.previous_state_hash, previous);
+    assert.deepEqual(turn.selected_action_intents, []);
+    assert.deepEqual(turn.knowledge_transitions, []);
+    assert.ok(turn.chronological_mutation_execution.execution_hash);
+    previous = turn.next_state_hash;
+  }
+  assert.equal(previous, after.state_hash);
+  assert.deepEqual(after.state.characters.keeper, before.state.characters.keeper);
+  assert.deepEqual(after.state.memories, before.state.memories);
+  assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+  assert.deepEqual(after.state.event_queue, before.state.event_queue);
+}
+for (const [x, budget, ceiling] of [
+  [2, 0, "exact"], [2, 1, "exact"], [2, 2, "exact"], [2, 32, "exact"],
+  [2, 1, "later"], [2, 1, "absent"],
+  [2.5, 0, "exact"], [2.5, 1, "exact"], [2.5, 32, "later"], [2.5, 1, "absent"],
+]) {
+  await e14BatchFixture(x + "-" + budget + "-" + ceiling, e13ContactWorld(x),
+    async ({ sid, options, before, bytes, original, batch }) => {
+      const horizon = ceiling === "absent" ? null : ceiling === "later"
+        ? new Date(Date.parse(before.state.simulation_time) + 100).toISOString()
+        : before.state.simulation_time;
+      const result = await batch(budget, horizon);
+      const count = budget === 0 ? 0 : 1;
+      assert.equal(result.attempted_turn_count, count);
+      assert.equal(result.committed_turn_count, count);
+      assert.equal(result.committed_physical_step_count, count);
+      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      if (budget === 0) {
+        assert.equal(result.pending_breakpoint.kind, "projectile_character");
+        assert.equal(result.pending_breakpoint.delta_ms, 0);
+        assert.deepEqual(await bytes(), original);
+        return;
+      }
+      const after = await getWorldSimulationState(sid, options);
+      const turns = (await getWorldSimulationHistory(sid, options)).turns;
+      assert.equal(turns.length, 1);
+      e14AssertLineage(before, after, turns);
+      assert.equal(result.committed_turns[0].turn_id, turns[0].turn_id);
+      assert.equal(result.committed_turns[0].previous_state_hash, before.state_hash);
+      assert.equal(result.committed_turns[0].next_state_hash, after.state_hash);
+      const projectile = after.state.projectiles.projectile_e3;
+      assert.equal(projectile.active, false);
+      assert.equal(projectile.termination_reason, "character_contact");
+      assert.equal(projectile.remaining_penetration_energy, 0);
+      for (const key of ["position", "age_ms"])
+        assert.deepEqual(projectile[key], before.state.projectiles.projectile_e3[key]);
+      const hits = turns[0].action_outcomes.filter(item => item.result === "projectile_hit_character");
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].damage_applied > 0);
+      assert.equal(after.state.characters.aria.physical_state.health_current,
+        before.state.characters.aria.physical_state.health_current - hits[0].damage_applied);
+      const contacts = turns[0].causal_timeline.entries.filter(item =>
+        item.kind === "projectile_resolution" && item.result === "projectile_hit_character");
+      assert.equal(contacts.length, 1);
+      assert.equal(contacts[0].time_ms, 0);
+      const finalBytes = await bytes();
+      await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+        world_simulation_session_id: sid, expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+      }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+      assert.deepEqual(await bytes(), finalBytes);
+      const idle = await batch(32);
+      assert.equal(idle.attempted_turn_count, 0);
+      assert.equal(idle.committed_turn_count, 0);
+      assert.deepEqual(await bytes(), finalBytes);
+    });
+}
+await e14BatchFixture("too-early", e13ContactWorld(),
+  async ({ before, bytes, original, batch }) => {
+    await assert.rejects(batch(32,
+      new Date(Date.parse(before.state.simulation_time) - 1).toISOString()),
+      { code: "C6E_OFFSCREEN_BATCH_INVALID" });
+    assert.deepEqual(await bytes(), original);
+  });
+// The existing discovery orders bounds before character at the same timestamp.
+// One termination commit must leave contact pending; resumption spends the next budget.
+for (const budget of [0, 1, 2, 32]) {
+  const initial = e13ContactWorld();
+  const p = initial.projectiles.projectile_e3;
+  initial.projectiles.bounds = { ...d1Clone(p), projectile_id: "bounds", position: { x: initial.scenes.room.dimensions.width_m, y: 4 } };
+  initial.projectiles.expired = { ...d1Clone(p), projectile_id: "expired",
+    position: { x: 7, y: 4 }, age_ms: p.max_lifetime_ms };
+  await e14BatchFixture("mixed-" + budget, initial,
+    async ({ sid, options, before, bytes, original, batch }) => {
+      const result = await batch(budget);
+      assert.equal(result.attempted_turn_count, Math.min(budget, 2));
+      assert.equal(result.committed_turn_count, Math.min(budget, 2));
+      let after = await getWorldSimulationState(sid, options);
+      if (budget === 0) assert.deepEqual(await bytes(), original);
+      if (budget === 1) {
+        assert.equal(after.state.projectiles.projectile_e3.active, true);
+        assert.equal(after.state.characters.aria.physical_state.health_current, 100);
+        assert.equal(after.state.projectiles.bounds.termination_reason, "left_scene_bounds");
+        assert.equal(after.state.projectiles.expired.termination_reason, "lifetime_expired");
+        assert.equal(result.pending_breakpoint.kind, "projectile_character");
+      }
+      const resume = await batch(32);
+      assert.equal(resume.committed_turn_count, budget === 0 ? 2 : budget === 1 ? 1 : 0);
+      after = await getWorldSimulationState(sid, options);
+      const turns = (await getWorldSimulationHistory(sid, options)).turns;
+      assert.equal(turns.length, 2);
+      e14AssertLineage(before, after, turns);
+      assert.equal(after.state.projectiles.projectile_e3.termination_reason, "character_contact");
+      const hits = turns.flatMap(turn => turn.action_outcomes)
+        .filter(item => item.result === "projectile_hit_character");
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].damage_applied > 0);
+      const finalBytes = await bytes();
+      assert.equal((await batch(32)).committed_turn_count, 0);
+      assert.deepEqual(await bytes(), finalBytes);
+    });
+}
+for (const reverse of [false, true]) {
+  const initial = e13ContactWorld();
+  const p = initial.projectiles.projectile_e3;
+  const alpha = { ...d1Clone(p), projectile_id: "alpha" };
+  const zeta = { ...d1Clone(p), projectile_id: "zeta" };
+  const live = { ...d1Clone(p), projectile_id: "live", position: { x: 7, y: 4 } };
+  initial.projectiles = reverse ? { zeta, live, alpha } : { alpha, live, zeta };
+  await e14BatchFixture("multiple-" + reverse, initial,
+    async ({ sid, options, before, bytes, batch }) => {
+      const result = await batch(32);
+      assert.equal(result.attempted_turn_count, 1);
+      assert.equal(result.committed_turn_count, 1);
+      const after = await getWorldSimulationState(sid, options);
+      const turns = (await getWorldSimulationHistory(sid, options)).turns;
+      e14AssertLineage(before, after, turns);
+      assert.deepEqual(after.state.projectiles.live, before.state.projectiles.live);
+      const hits = turns.flatMap(turn => turn.action_outcomes)
+        .filter(item => item.result === "projectile_hit_character");
+      assert.deepEqual(hits.map(item => item.projectile_id), ["alpha", "zeta"]);
+      const finalBytes = await bytes();
+      assert.equal((await batch(32)).attempted_turn_count, 0);
+      assert.deepEqual(await bytes(), finalBytes);
+    });
+}
+for (const [mode, reason] of [
+  ["fields", "physical_step_same_time_or_fractional_pending"],
+  ["obstacles", "physical_step_projectile_obstacle_progression_pending"],
+  ["acoustic", "physical_step_acoustic_ingress_pending"],
+  ["scenes", "physical_step_scene_scope_unresolved"], ["queue", null], ["unresolved", null],
+]) {
+  const initial = e13ContactWorld();
+  if (mode === "fields") initial.ability_fields = e4FieldWorld().ability_fields;
+  if (mode === "obstacles") initial.scenes.room.obstacles = [{ obstacle_id: "e14-unmodeled" }];
+  if (mode === "queue") initial.event_queue = [{ event_id: "e14-pending" }];
+  if (mode === "acoustic") initial.sound_events = [{
+    schema_version: "cc6b-communication-acoustic-bridge-v1", sound_id: "e14-pending",
+    scene_id: "room", active: true,
+  }];
+  if (mode === "scenes") {
+    initial.scenes.other = d1Clone(initial.scenes.room);
+    initial.projectiles.other = { ...d1Clone(initial.projectiles.projectile_e3),
+      projectile_id: "other", scene_id: "other" };
+  }
+  if (mode === "unresolved") delete initial.projectiles.projectile_e3.velocity_mps;
+  await e14BatchFixture("pending-" + mode, initial,
+    async ({ sid, options, before, bytes, original, batch }) => {
+      const result = await batch(32);
+      assert.equal(result.attempted_turn_count, reason === null ? 0 : 1);
+      assert.equal(result.committed_turn_count, 0);
+      if (reason !== null) assert.equal(result.physical_step_blocked_reason, reason);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await bytes(), original);
+    });
+}
+console.log("CB-C6-E14 bounded batch contact budgets, mixed effects, lineage and unsupported authority passed.");

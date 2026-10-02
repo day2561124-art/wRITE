@@ -6,7 +6,7 @@ import {
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
-  "cb-c6e11-offscreen-event-batch-v6";
+  "cb-c6e14-offscreen-event-batch-v7";
 
 function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
   const error = new Error(message);
@@ -110,20 +110,20 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       : report(emptyStatus);
   };
 
-  const isCurrentProjectileTermination = discovery => discovery.earliest_breakpoint_confirmed
+  const isCurrentProjectileEffect = discovery => discovery.earliest_breakpoint_confirmed
     && discovery.breakpoint?.delta_ms === 0
-    && ["projectile_lifetime", "projectile_bounds"].includes(discovery.breakpoint.kind);
+    && ["projectile_lifetime", "projectile_bounds", "projectile_character"].includes(discovery.breakpoint.kind);
 
   try {
     while (attempts < budget) {
       if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target)) {
-        // Reaching the horizon does not finish an already-due projectile termination. Only
+        // Reaching the horizon does not finish an already-due supported projectile effect. Only
         // the sealed Native zero-time owner may use the remaining turn budget.
         if (snapshot.state.event_queue?.length) return report("target_horizon_reached");
         const discovery = projectWorldSimulationOffscreenBreakpoint({
           world_state: snapshot.state, target_horizon: target,
         });
-        if (!isCurrentProjectileTermination(discovery)) return reportIdle("target_horizon_reached");
+        if (!isCurrentProjectileEffect(discovery)) return reportIdle("target_horizon_reached");
       }
       const event = snapshot.state.event_queue?.[0];
       pendingPhysicalStepReason = null;
@@ -146,7 +146,7 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
         if (!discovery.earliest_breakpoint_confirmed
             || !Number.isSafeInteger(discovery.breakpoint?.delta_ms)
             || discovery.breakpoint.delta_ms < 0
-            || (discovery.breakpoint.delta_ms === 0 && !isCurrentProjectileTermination(discovery)))
+            || (discovery.breakpoint.delta_ms === 0 && !isCurrentProjectileEffect(discovery)))
           return reportIdle();
         attempts += 1;
         result = await runWorldSimulationOffscreenPhysicalStep({
