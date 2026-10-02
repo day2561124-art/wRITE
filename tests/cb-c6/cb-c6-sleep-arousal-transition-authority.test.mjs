@@ -2564,6 +2564,35 @@ for (const mode of ["exact-lifetime", "due-now", "unresolved"]) {
       }, {
         ...options, characterBrain: async () => assert.fail("Discovery may not invoke Brain."),
       });
+      if (mode === "due-now" && max_turns > 0) {
+        assert.equal(result.status, "target_horizon_reached");
+        assert.equal(result.attempted_turn_count, 1);
+        assert.equal(result.committed_turn_count, 1);
+        assert.equal(result.committed_physical_step_count, 1);
+        assert.equal(result.pending_breakpoint, null);
+        assert.equal(result.unresolved_process_count, 0);
+        assert.equal(result.state_reconciliation_required, false);
+        assert.equal(result.reached_simulation_time, before.state.simulation_time);
+        assert.equal(result.target_horizon_claimed, true);
+        const after = await getWorldSimulationState(sid, options);
+        assert.equal(after.revision, before.revision + 1);
+        assert.equal(after.state.projectiles.projectile_e3.active, false);
+        assert.equal(after.state.projectiles.projectile_e3.termination_reason, "lifetime_expired");
+        assert.equal(after.state.projectiles.projectile_e3.age_ms, 500);
+        assert.deepEqual(after.state.projectiles.projectile_e3.position,
+          before.state.projectiles.projectile_e3.position);
+        assert.deepEqual(after.state.characters, before.state.characters);
+        assert.deepEqual(after.state.memories, before.state.memories);
+        assert.deepEqual(after.state.event_queue, before.state.event_queue);
+        const history = await getWorldSimulationHistory(sid, options);
+        assert.equal(history.turns.length, 1);
+        assert.equal(result.committed_turns[0].next_state_hash, history.turns[0].next_state_hash);
+        assert.equal(history.turns[0].previous_state_hash, before.state_hash);
+        assert.equal(after.state_hash, history.turns[0].next_state_hash);
+        assert.ok(history.turns[0].state_transitions.some(item =>
+          item.field === "projectile_state" && item.lifecycle_effect === "termination" && item.time_ms === 0));
+        continue;
+      }
       assert.equal(result.status, mode === "unresolved"
         ? "slow_process_authority_unresolved" : "slow_process_breakpoint_pending");
       assert.equal(result.unresolved_process_count, mode === "unresolved" ? 1 : 0);
@@ -2973,7 +3002,7 @@ for (const [mode, elapsed] of [["bounds", 500], ["lifetime", 300], ["contact", 1
     const sid = session.world_simulation_session_id;
     const before = await getWorldSimulationState(sid, options);
     const result = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 32,
+      world_simulation_session_id: sid, max_turns: 1,
     }, options);
     assert.equal(result.committed_physical_step_count, 1);
     assert.equal(result.attempted_turn_count, 1);
@@ -2992,7 +3021,7 @@ for (const [mode, elapsed] of [["bounds", 500], ["lifetime", 300], ["contact", 1
     const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
     const committedBytes = await bytes();
     const retry = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 32,
+      world_simulation_session_id: sid, max_turns: 0,
     }, options);
     assert.equal(retry.committed_turn_count, 0);
     assert.equal(retry.pending_breakpoint.delta_ms, 0);
@@ -3281,7 +3310,9 @@ for (const [mode, reason, attempts] of [
   ["obstacles", "physical_step_projectile_obstacle_progression_pending", 1],
   ["geometry", "physical_step_field_geometry_unresolved", 1],
   ["scenes", "physical_step_scene_scope_unresolved", 1],
-  ["unresolved", null, 0], ["due-now", null, 0], ["fractional", null, 0],
+  ["unresolved", null, 0],
+  ["due-now", "physical_step_same_time_or_fractional_pending", 1],
+  ["fractional", null, 0],
 ]) {
   const root = path.join(projectRoot, "tests", ".tmp",
     `c6-e7-pending-${mode}-${process.pid}-${Date.now()}`);
@@ -3408,8 +3439,8 @@ for (const mode of ["already-due", "flight-then-due"]) {
     const paths = worldSimulationStatePaths(sid, options);
     const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
     const priorBytes = await bytes();
-    // E8 leaves the batch's exact-horizon and zero-time policy unchanged.
-    for (const max_turns of [0, 32]) {
+    // A zero budget must preserve E8's direct Native fixture; E9 covers positive budgets.
+    for (const max_turns of [0]) {
       const pending = await runWorldSimulationOffscreenEventBatch({
         world_simulation_session_id: sid, max_turns, target_horizon: reached,
       }, options);
@@ -3499,3 +3530,152 @@ for (const [mode, reason] of [
   assert.deepEqual(initial, original, "unsupported zero-time authority stays immutable");
 }
 console.log("CB-C6-E8 direct Native zero-time lifetime, replay, lineage and batch-policy preservation regression passed.");
+
+const e9Cases = [
+  ["due", 0, 0], ["due", 1, 0], ["due", 32, 0],
+  ["due", 1, 500], ["due", 32, null],
+  ["flight", 0, 300], ["flight", 1, 300], ["flight", 2, 300], ["flight", 32, 300],
+  ["flight", 2, 500], ["flight", 32, null], ["flight", 32, 299],
+];
+for (const [mode, budget, horizonMs] of e9Cases) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e9-${mode}-${budget}-${horizonMs}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E9 batch lifetime must not invoke Brain") };
+  try {
+    const initial = mode === "due" ? e8ExpiredWorld() : e6ProjectileWorld("lifetime");
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E9 bounded batch lifetime", seed: `${mode}-${budget}-${horizonMs}`,
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const target = horizonMs === null ? {} : { target_horizon: at(horizonMs) };
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const originalBytes = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: budget, ...target,
+    }, options);
+    const crossCeiling = mode === "flight" && horizonMs === 299;
+    const required = mode === "due" ? 1 : 2;
+    const commits = crossCeiling ? 0 : Math.min(budget, required);
+    const elapsed = mode === "flight" && commits > 0 ? 300 : 0;
+    assert.equal(result.attempted_turn_count, commits);
+    assert.equal(result.committed_turn_count, commits);
+    assert.equal(result.committed_physical_step_count, commits);
+    assert.equal(result.reached_simulation_time, at(elapsed));
+    assert.equal(result.target_horizon_claimed, horizonMs !== null && horizonMs === elapsed);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.automatic_replay_allowed, false);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + commits);
+    assert.equal(after.state.simulation_time, at(elapsed), "no epsilon beyond actual flight");
+    assert.equal(after.state.projectiles.projectile_e3.active, commits < required);
+    assert.equal(after.state.projectiles.projectile_e3.age_ms,
+      mode === "due" || elapsed ? 300 : 0);
+    if (mode === "due") assert.deepEqual(after.state.projectiles.projectile_e3.position,
+      before.state.projectiles.projectile_e3.position);
+    assert.deepEqual(after.state.characters, before.state.characters);
+    assert.deepEqual(after.state.event_queue, before.state.event_queue);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    if (!commits) assert.deepEqual(await bytes(), originalBytes);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, commits);
+    for (let i = 0; i < commits; i++) {
+      const turn = history.turns[i], entry = result.committed_turns[i];
+      assert.equal(entry.execution_kind, "physical_process_step");
+      assert.equal(entry.turn_id, turn.turn_id);
+      assert.equal(entry.previous_state_hash, turn.previous_state_hash);
+      assert.equal(entry.next_state_hash, turn.next_state_hash);
+      assert.equal(turn.previous_state_hash, i ? history.turns[i - 1].next_state_hash : before.state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+    }
+    if (commits < required && !crossCeiling) assert.ok(result.pending_breakpoint_confirmed);
+    else if (!crossCeiling) {
+      assert.equal(result.pending_breakpoint, null);
+      assert.equal(after.state.projectiles.projectile_e3.termination_reason, "lifetime_expired");
+      const terminations = history.turns.flatMap(turn => turn.state_transitions)
+        .filter(item => item.field === "projectile_state" && item.lifecycle_effect === "termination");
+      assert.equal(terminations.length, 1);
+      assert.equal(terminations[0].time_ms, 0);
+    }
+    if (crossCeiling) {
+      assert.equal(result.physical_step_blocked_reason, null);
+      assert.equal(result.pending_breakpoint, null);
+      assert.equal(result.status, "no_pending_event");
+      continue;
+    }
+    const rest = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, ...target,
+    }, options);
+    assert.equal(rest.committed_turn_count, required - commits);
+    assert.equal(rest.attempted_turn_count, required - commits);
+    assert.equal(rest.reached_simulation_time, at(mode === "due" ? 0 : 300));
+    const final = await getWorldSimulationState(sid, options);
+    assert.equal(final.revision, before.revision + required);
+    assert.equal(final.state.projectiles.projectile_e3.active, false);
+    const finalHistory = await getWorldSimulationHistory(sid, options);
+    assert.equal(finalHistory.turns.length, required);
+    assert.equal(finalHistory.turns.at(-1).next_state_hash, final.state_hash);
+    if (required === 2) assert.equal(finalHistory.turns[1].previous_state_hash,
+      finalHistory.turns[0].next_state_hash);
+    const finalBytes = await bytes();
+    const idle = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, ...target,
+    }, options);
+    assert.equal(idle.attempted_turn_count, 0);
+    assert.equal(idle.committed_turn_count, 0);
+    assert.equal(idle.reached_simulation_time, final.state.simulation_time);
+    assert.deepEqual(await bytes(), finalBytes, "terminated batch cannot duplicate history or invent time");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+for (const [mode, reason, attempts] of [
+  ["fields", "physical_step_same_time_or_fractional_pending", 1],
+  ["obstacles", "physical_step_projectile_obstacle_progression_pending", 1],
+  ["acoustic", "physical_step_acoustic_ingress_pending", 1],
+  ["queue", null, 0],
+  ["bounds", null, 0],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e9-pending-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E9 unsupported same-time work stays pending") };
+  try {
+    const initial = e8ExpiredWorld();
+    if (mode === "fields") initial.ability_fields = e4FieldWorld().ability_fields;
+    if (mode === "obstacles") initial.scenes.room.obstacles = [{ obstacle_id: "e9-unmodeled" }];
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "e9-pending", scene_id: "room", active: true,
+    }];
+    if (mode === "queue") initial.event_queue = [{ event_id: "e9-pending" }];
+    if (mode === "bounds") {
+      const reached = await e4Resolve(e6ProjectileWorld("bounds"));
+      Object.assign(initial, reached.next_world_state);
+    }
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E9 unsupported same-time", seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: before.state.simulation_time,
+    }, options);
+    assert.equal(result.attempted_turn_count, attempts);
+    assert.equal(result.committed_turn_count, 0);
+    assert.equal(result.physical_step_blocked_reason, reason);
+    assert.equal(result.target_horizon_claimed, true);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original, "E9 cannot broaden unsupported or queued authority");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E9 bounded same-time batch lifetime, budget/horizon, history and idle regression passed.");

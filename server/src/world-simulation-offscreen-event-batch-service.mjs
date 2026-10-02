@@ -6,7 +6,7 @@ import {
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
-  "cb-c6e5-offscreen-event-batch-v4";
+  "cb-c6e9-offscreen-event-batch-v5";
 
 function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
   const error = new Error(message);
@@ -110,11 +110,21 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       : report(emptyStatus);
   };
 
+  const isCurrentLifetime = discovery => discovery.earliest_breakpoint_confirmed
+    && discovery.breakpoint?.delta_ms === 0
+    && discovery.breakpoint.kind === "projectile_lifetime";
+
   try {
     while (attempts < budget) {
-      if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target))
-        return snapshot.state.event_queue?.length
-          ? report("target_horizon_reached") : reportIdle("target_horizon_reached");
+      if (target !== null && Date.parse(snapshot.state.simulation_time) === Date.parse(target)) {
+        // Reaching the horizon does not finish an already-due lifetime. Only
+        // the sealed Native zero-time owner may use the remaining turn budget.
+        if (snapshot.state.event_queue?.length) return report("target_horizon_reached");
+        const discovery = projectWorldSimulationOffscreenBreakpoint({
+          world_state: snapshot.state, target_horizon: target,
+        });
+        if (!isCurrentLifetime(discovery)) return reportIdle("target_horizon_reached");
+      }
       const event = snapshot.state.event_queue?.[0];
       pendingPhysicalStepReason = null;
       pendingBreakpoint = null;
@@ -135,7 +145,9 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
         });
         if (!discovery.earliest_breakpoint_confirmed
             || !Number.isSafeInteger(discovery.breakpoint?.delta_ms)
-            || discovery.breakpoint.delta_ms <= 0) return reportIdle();
+            || discovery.breakpoint.delta_ms < 0
+            || (discovery.breakpoint.delta_ms === 0 && !isCurrentLifetime(discovery)))
+          return reportIdle();
         attempts += 1;
         result = await runWorldSimulationOffscreenPhysicalStep({
           world_simulation_session_id: sessionId,
