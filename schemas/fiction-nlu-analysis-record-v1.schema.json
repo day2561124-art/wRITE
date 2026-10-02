@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_analysis_record_v1.json",
+  "title": "Fiction NLU Analysis Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "analysis_id",
+    "schema_version",
+    "analysis_kind",
+    "analysis_version",
+    "status",
+    "subject",
+    "method",
+    "confidence",
+    "evidence",
+    "provenance",
+    "retrieval_admission",
+    "payload"
+  ],
+  "properties": {
+    "analysis_id": {
+      "type": "string",
+      "pattern": "^ANL-[A-F0-9]{16}$"
+    },
+    "schema_version": {
+      "const": "fiction_nlu_analysis_record_v1"
+    },
+    "analysis_kind": {
+      "enum": [
+        "semantic_classification",
+        "character_resolution",
+        "relationship",
+        "relationship_timeline",
+        "event",
+        "event_relation",
+        "plot_structure",
+        "narrative_function",
+        "style_features",
+        "style_embedding",
+        "style_profile"
+      ]
+    },
+    "analysis_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["provisional", "validated", "superseded"]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "id", "content_hash_kind", "content_sha256"],
+      "properties": {
+        "level": {
+          "enum": ["passage", "scene", "novel"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "content_hash_kind": {
+          "enum": [
+            "passage_content_sha256",
+            "scene_hash",
+            "novel_text_sha256"
+          ]
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"level": {"const": "passage"}},
+            "required": ["level"]
+          },
+          "then": {
+            "properties": {
+              "id": {"pattern": "^PAS-[A-F0-9]{16}$"},
+              "content_hash_kind": {"const": "passage_content_sha256"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"level": {"const": "scene"}},
+            "required": ["level"]
+          },
+          "then": {
+            "properties": {
+              "id": {"pattern": "^SCN-[A-F0-9]{16}$"},
+              "content_hash_kind": {"const": "scene_hash"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"level": {"const": "novel"}},
+            "required": ["level"]
+          },
+          "then": {
+            "properties": {
+              "id": {"pattern": "^NOV-[A-F0-9]{16}$"},
+              "content_hash_kind": {"const": "novel_text_sha256"}
+            }
+          }
+        }
+      ]
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "version"],
+      "properties": {
+        "type": {
+          "enum": ["deterministic", "heuristic", "model", "hybrid", "manual"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_id": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["passage_id", "content_sha256"],
+        "properties": {
+          "passage_id": {
+            "type": "string",
+            "pattern": "^PAS-[A-F0-9]{16}$"
+          },
+          "scene_id": {
+            "type": ["string", "null"],
+            "pattern": "^SCN-[A-F0-9]{16}$"
+          },
+          "novel_id": {
+            "type": ["string", "null"],
+            "pattern": "^NOV-[A-F0-9]{16}$"
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "span_start": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "span_end": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "quote_sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_at", "producer", "input_sha256"],
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "code_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "model_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "retrieval_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "contract_version"],
+      "properties": {
+        "state": {
+          "enum": ["not_admitted", "eligible", "admitted"]
+        },
+        "contract_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}
