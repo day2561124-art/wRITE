@@ -115,6 +115,48 @@ empty; development pilots are not persisted into it. Canonical Passage enumerati
 uses `records/passages_v1.jsonl` directly rather than manifest counts so metadata
 lag cannot omit newly added passages.
 
+## NLU-2 — Character mention / entity resolution
+
+Repository artifacts:
+
+- `config/fiction-nlu-character-resolution-v1.json`
+- `schemas/fiction-nlu-character-resolution-v1.schema.json`
+- `scripts/fiction-sample-nlu-character-resolve-v1.py`
+- `tests/nlu/fiction-sample-nlu-character-resolution-v1.test.mjs`
+
+NLU-2 is novel-local and conservative. Character entities may be created only
+from explicit proper-name anchors. Pronouns and nominal mentions may link only to
+an already anchored entity and never create entities themselves. First- and
+second-person pronouns remain unresolved because speaker attribution is owned by
+a later phase.
+
+Long fiction is processed in bounded overlapping windows. The model first returns
+unique proper-name anchors; the producer deterministically expands every observed
+occurrence and then sends only bounded third-person pronoun candidates for linking.
+This avoids asking a model to emit hundreds of mention rows in one response and
+reduces book-scale over-merging risk.
+
+Each mention stores both Passage-relative and Novel-absolute spans, exact content
+hashes, and a uniquely locating context hash. Character IDs are deterministic and
+scoped by `novel_id + normalized canonical anchor`.
+
+Provider-suggested alias merges are never silent. A merge emits a deterministic
+`MRG-*` event with:
+
+- the surviving canonical entity;
+- the absorbed deterministic entity identity;
+- proper-anchor evidence for both the canonical and alias surfaces;
+- an explicit reason and confidence.
+
+The validator rejects merges lacking either side of the proper-anchor evidence,
+self-merges, active absorbed entities, missing mention lineage, non-deterministic
+IDs, or span/hash mismatches.
+
+Development output remains `provisional`, never claims complete-novel truth, does
+not infer relationship truth, and always keeps retrieval admission closed. Formal
+external storage begins empty; real-model pilots are validation evidence only and
+are not persisted into the production analysis store.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
