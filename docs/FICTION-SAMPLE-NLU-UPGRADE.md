@@ -242,6 +242,46 @@ Development output remains `provisional`,
 `complete_relationship_history_claim=false`, and
 `retrieval_admission=not_admitted`.
 
+## NLU-5 — Narrative event extraction / event coreference
+
+Repository artifacts:
+
+- `config/fiction-nlu-event-analysis-v1.json`
+- `schemas/fiction-nlu-event-analysis-v1.schema.json`
+- `scripts/fiction-sample-nlu-event-extract-v1.py`
+- `tests/nlu/fiction-sample-nlu-event-analysis-v1.test.mjs`
+
+NLU-5 introduces event mentions as first-class evidence records. Each event mention
+must cite an exact trigger span and exact context in a canonical Passage. Character
+arguments may bind to validated NLU-2 `CHR-*` / `MEN-*` identities; arguments
+that cannot be grounded remain literal spans rather than invented character
+entities.
+
+Event coreference is deliberately conservative. Singleton event clusters are the
+default, and equal trigger text, equal event type, or equal participants do not
+automatically imply the same event occurrence. A multi-mention cluster requires
+explicit bounded coreference evidence above the configured threshold, matching
+event type, compatible grounded participants, and a connected graph of
+`ECL-*` links.
+
+The event taxonomy covers bounded narrative actions and state transitions such as
+movement, communication, perception, cognition, affect expression, social
+interaction, possession transfer, conflict actions, state change, and routine
+activity. NLU-5 does not infer temporal order, causality, enabling/preventing
+relations, or plot importance; those remain downstream responsibilities.
+
+The provider supports heuristic regression mode and Ollama extraction. A UTF-8
+qwen3.5:9b pilot produced three validated event mentions from one short fiction
+Passage: movement (`走進`), communication (`說`), and perception
+(`看向`). All remained singleton clusters because no explicit same-event
+coreference evidence was present. Independent NLU-5 validation passed.
+
+Development output remains `provisional`,
+`complete_event_inventory_claim=false`,
+`temporal_relations_resolved=false`,
+`causal_relations_resolved=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
