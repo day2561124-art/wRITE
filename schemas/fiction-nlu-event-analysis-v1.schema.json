@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_event_analysis_v1.json",
+  "title": "Fiction NLU Event Analysis Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "provider",
+    "scope",
+    "entity_registry_sha256",
+    "windows",
+    "event_mentions",
+    "event_clusters",
+    "coreference_links",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_event_analysis_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_event_analysis_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "event_mentions_and_conservative_coreference_not_temporal_or_causal_truth"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_event_request_v1"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "character_resolution_analysis_id",
+        "complete_event_inventory_claim",
+        "temporal_relations_resolved",
+        "causal_relations_resolved"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "character_resolution_analysis_id": {
+          "type": "string",
+          "pattern": "^ANL-[A-F0-9]{16}$"
+        },
+        "complete_event_inventory_claim": {
+          "const": false
+        },
+        "temporal_relations_resolved": {
+          "const": false
+        },
+        "causal_relations_resolved": {
+          "const": false
+        }
+      }
+    },
+    "entity_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "window_id",
+          "passage_ids",
+          "char_count",
+          "overlap_from_previous"
+        ],
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "pattern": "^EVW-[A-F0-9]{16}$"
+          },
+          "passage_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^PAS-[A-F0-9]{16}$"
+            }
+          },
+          "char_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "overlap_from_previous": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "event_mentions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_mention_id",
+          "event_type",
+          "passage_id",
+          "scene_id",
+          "confidence",
+          "trigger",
+          "context_span",
+          "context_sha256",
+          "arguments",
+          "source"
+        ],
+        "properties": {
+          "event_mention_id": {
+            "type": "string",
+            "pattern": "^EVM-[A-F0-9]{16}$"
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^event\\.[a-z_]+$"
+          },
+          "passage_id": {
+            "type": "string",
+            "pattern": "^PAS-[A-F0-9]{16}$"
+          },
+          "scene_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^SCN-[A-F0-9]{16}$"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "trigger": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "surface",
+              "start",
+              "end",
+              "quote_sha256"
+            ],
+            "properties": {
+              "surface": {
+                "type": "string",
+                "minLength": 1
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          "context_span": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "context_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "surface",
+                "passage_span",
+                "entity_id",
+                "mention_id"
+              ],
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "actor",
+                    "patient",
+                    "target",
+                    "recipient",
+                    "item",
+                    "location",
+                    "instrument",
+                    "experiencer",
+                    "content"
+                  ]
+                },
+                "surface": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "passage_span": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "end": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "entity_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^CHR-[A-F0-9]{16}$"
+                },
+                "mention_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^MEN-[A-F0-9]{16}$"
+                }
+              }
+            }
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model"
+            ]
+          }
+        }
+      }
+    },
+    "event_clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "event_type",
+          "canonical_mention_id",
+          "mention_ids",
+          "participant_entity_ids",
+          "first_novel_offset",
+          "last_novel_offset",
+          "confidence"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^event\\.[a-z_]+$"
+          },
+          "canonical_mention_id": {
+            "type": "string",
+            "pattern": "^EVM-[A-F0-9]{16}$"
+          },
+          "mention_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^EVM-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "participant_entity_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^CHR-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "first_novel_offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_novel_offset": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "coreference_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "coref_link_id",
+          "mention_a",
+          "mention_b",
+          "event_id",
+          "confidence",
+          "reason"
+        ],
+        "properties": {
+          "coref_link_id": {
+            "type": "string",
+            "pattern": "^ECL-[A-F0-9]{16}$"
+          },
+          "mention_a": {
+            "type": "string",
+            "pattern": "^EVM-[A-F0-9]{16}$"
+          },
+          "mention_b": {
+            "type": "string",
+            "pattern": "^EVM-[A-F0-9]{16}$"
+          },
+          "event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "enum": [
+              "provider_bounded_coreference"
+            ]
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "schema_version": "fiction_nlu_event_analysis_config_v1",
+  "config_version": "fiction_nlu_event_analysis_v1",
+  "assertion_scope": "event_mentions_and_conservative_coreference_not_temporal_or_causal_truth",
+  "principles": [
+    "Extract explicit event mentions before resolving event coreference.",
+    "Every event mention must have an exact trigger span in a canonical Passage.",
+    "Character arguments should bind to validated NLU-2 entity/mention IDs when available; ungrounded literal arguments remain explicit spans rather than invented entities.",
+    "Event coreference is opt-in and conservative: singleton clusters are the default.",
+    "Never merge events solely because trigger text, event type, or participant sets match.",
+    "A coreference merge requires an explicit bounded scorer decision, matching event type, compatible grounded participants, and high confidence.",
+    "Do not infer temporal, causal, enabling, preventing, or plot-importance relations in NLU-5.",
+    "Retrieval admission remains closed until a later certified integration."
+  ],
+  "event_types": {
+    "event.movement": {
+      "description": "movement, arrival, departure, entering, leaving, falling, approaching",
+      "lexical_hints": [
+        "走",
+        "跑",
+        "進",
+        "離開",
+        "回去",
+        "靠近",
+        "倒下",
+        "起身"
+      ]
+    },
+    "event.communication": {
+      "description": "speech, messaging, asking, answering, telling, calling",
+      "lexical_hints": [
+        "說",
+        "問",
+        "回答",
+        "告訴",
+        "喊",
+        "叫",
+        "傳訊",
+        "回覆"
+      ]
+    },
+    "event.perception": {
+      "description": "seeing, hearing, noticing, observing",
+      "lexical_hints": [
+        "看",
+        "望",
+        "聽",
+        "注意",
+        "發現",
+        "瞥"
+      ]
+    },
+    "event.cognition": {
+      "description": "thinking, remembering, deciding, realizing, planning",
+      "lexical_hints": [
+        "想",
+        "記得",
+        "決定",
+        "意識",
+        "打算",
+        "考慮"
+      ]
+    },
+    "event.affect_expression": {
+      "description": "explicit emotional reaction or expression",
+      "lexical_hints": [
+        "笑",
+        "哭",
+        "害羞",
+        "生氣",
+        "嘆氣",
+        "臉紅"
+      ]
+    },
+    "event.social_interaction": {
+      "description": "social contact or interaction not primarily speech",
+      "lexical_hints": [
+        "擁抱",
+        "牽手",
+        "握手",
+        "親吻",
+        "碰",
+        "陪"
+      ]
+    },
+    "event.possession_transfer": {
+      "description": "giving, receiving, lending, taking, returning an item",
+      "lexical_hints": [
+        "給",
+        "拿",
+        "收下",
+        "借",
+        "還",
+        "遞"
+      ]
+    },
+    "event.conflict_action": {
+      "description": "attack, defense, chase, physical opposition",
+      "lexical_hints": [
+        "攻擊",
+        "打",
+        "踢",
+        "擋",
+        "追",
+        "閃避",
+        "反擊"
+      ]
+    },
+    "event.state_change": {
+      "description": "explicit transition into a materially different state",
+      "lexical_hints": [
+        "變成",
+        "開始",
+        "停止",
+        "打開",
+        "關上",
+        "碎裂",
+        "消失"
+      ]
+    },
+    "event.routine_activity": {
+      "description": "bounded everyday activity such as eating, studying, cooking, sleeping",
+      "lexical_hints": [
+        "吃",
+        "喝",
+        "讀書",
+        "寫作業",
+        "做飯",
+        "睡",
+        "洗澡",
+        "上課"
+      ]
+    }
+  },
+  "argument_roles": [
+    "actor",
+    "patient",
+    "target",
+    "recipient",
+    "item",
+    "location",
+    "instrument",
+    "experiencer",
+    "content"
+  ],
+  "window_policy": {
+    "max_chars": 4800,
+    "max_passages": 3,
+    "overlap_passages": 1,
+    "order": "novel_source_order_then_char_start"
+  },
+  "extraction_policy": {
+    "max_events_per_passage": 24,
+    "min_confidence": 0.68,
+    "require_exact_trigger": true,
+    "require_unique_trigger_context": true
+  },
+  "coreference_policy": {
+    "candidate_passage_gap": 1,
+    "max_candidates_per_mention": 6,
+    "threshold": 0.92,
+    "require_same_event_type": true,
+    "require_compatible_grounded_participants": true,
+    "singleton_default": true,
+    "automatic_exact_trigger_merge": false
+  },
+  "provider_policy": {
+    "request_version": "fiction_nlu_event_request_v1",
+    "think": false,
+    "bounded_completion_retries": 1
+  },
+  "output_policy": {
+    "analysis_kind": "event",
+    "analysis_version": "event_analysis_v1",
+    "status": "provisional",
+    "complete_event_inventory_claim": false,
+    "temporal_relations_resolved": false,
+    "causal_relations_resolved": false,
+    "retrieval_admission": "not_admitted"
+  }
+}
