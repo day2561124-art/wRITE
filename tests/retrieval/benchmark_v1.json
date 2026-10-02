@@ -1,0 +1,35 @@
+{
+  "schema_version": "fiction_sample_retrieval_benchmark_v1",
+  "benchmark_id": "fiction_sample_retrieval_seed_r0_r1_v1",
+  "description": "Seed benchmark frozen from the pre-Retrieval-v2 hybrid regression. Qrels are intentionally partial; precision/nDCG stay informational until judged coverage expands.",
+  "k_values": [5, 10],
+  "cases": [
+    {
+      "id": "friend_recovery_outing",
+      "category": "relationship_support",
+      "query": "朋友帶她去遊樂園玩，陪她吃飯，讓她暫時從政治創傷裡喘口氣",
+      "qrels_complete": false,
+      "qrels": {
+        "PAS-734DBDE241F27BB1": 4
+      }
+    },
+    {
+      "id": "memory_scarf_identity",
+      "category": "memory_identity_object",
+      "query": "角色靠一件舊圍巾和手工縫製留下的痕跡，確認那些回憶仍然屬於自己",
+      "qrels_complete": false,
+      "qrels": {
+        "PAS-1294ACA245031859": 4
+      }
+    },
+    {
+      "id": "ancient_academy_resurrection",
+      "category": "worldbuilding_goal",
+      "query": "探索古代學術國度的殘骸，尋找能夠復活重要之人的方法",
+      "qrels_complete": false,
+      "qrels": {
+        "PAS-996ABEA05B6B8190": 4
+      }
+    }
+  ]
+}
