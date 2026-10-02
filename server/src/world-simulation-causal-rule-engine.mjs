@@ -1439,11 +1439,13 @@ export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {})
   if (!discovery.earliest_breakpoint_confirmed)
     return blocked(discovery.unresolved_process_count
       ? "physical_step_authority_unresolved" : "physical_step_no_breakpoint");
-  // Projectile endpoint/zero-time draining requires a separate scheduler gate.
-  if (Object.values(object(state.projectiles)).some(item => item?.active === true))
-    return blocked("physical_step_projectile_progression_pending");
+  // Positive flight uses the existing scheduler. Exact endpoint draining stays
+  // pending; never borrow discovery's query epsilon as physical elapsed time.
+  const projectiles = Object.values(object(state.projectiles)).filter(item => item?.active === true);
   const fields = Object.values(object(state.ability_fields)).filter(item => item?.active === true);
-  const scenes = new Set(fields.map(item => String(item.scene_id ?? "")));
+  if (projectiles.length && fields.length)
+    return blocked("physical_step_projectile_progression_pending");
+  const scenes = new Set([...fields, ...projectiles].map(item => String(item.scene_id ?? "")));
   if (scenes.size !== 1 || !object(state.scenes)[[...scenes][0]])
     return blocked("physical_step_scene_scope_unresolved");
   if (fields.some(item => ![item.center?.x, item.center?.y, item.radius_m]
@@ -1454,6 +1456,10 @@ export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {})
   if (!Number.isSafeInteger(delta) || delta <= 0)
     return blocked("physical_step_same_time_or_fractional_pending");
   const sceneId = [...scenes][0];
+  // Existing penetration continuation advances 0.01ms after contact; it is
+  // outside this exact whole-ms admission slice. Retain obstacle authority.
+  if (projectiles.length && Object.keys(object(state.scenes)[sceneId]?.obstacles ?? {}).length)
+    return blocked("physical_step_projectile_obstacle_progression_pending");
   const turnId = `world_physical_${hashAgentRunValue({
     session: input.world_simulation_session_id, revision: input.world_state_revision,
     hash: input.world_state_hash, breakpoint: discovery.breakpoint,
