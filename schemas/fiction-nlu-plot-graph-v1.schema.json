@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_plot_graph_v1.json",
+  "title": "Fiction NLU Plot Graph Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","config_version","config_sha256","assertion_scope","scope","event_registry_sha256","event_relation_registry_sha256","nodes","edges","components","temporal_layers","graph_stats","consistency"],
+  "properties": {
+    "schema_version": {"const":"fiction_nlu_plot_graph_v1"},
+    "config_version": {"const":"fiction_nlu_plot_graph_v1"},
+    "config_sha256": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "assertion_scope": {"const":"deterministic_event_relation_graph_not_narrative_function"},
+    "scope": {
+      "type":"object","additionalProperties":false,
+      "required":["novel_id","event_analysis_id","event_relation_analysis_id","complete_plot_graph_claim","narrative_function_resolved","salience_resolved"],
+      "properties":{
+        "novel_id":{"type":"string","pattern":"^NOV-[A-F0-9]{16}$"},
+        "event_analysis_id":{"type":"string","pattern":"^ANL-[A-F0-9]{16}$"},
+        "event_relation_analysis_id":{"type":"string","pattern":"^ANL-[A-F0-9]{16}$"},
+        "complete_plot_graph_claim":{"const":false},
+        "narrative_function_resolved":{"const":false},
+        "salience_resolved":{"const":false}
+      }
+    },
+    "event_registry_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "event_relation_registry_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "nodes":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["node_id","event_id","event_type","canonical_mention_id","participant_entity_ids","first_novel_offset","last_novel_offset","confidence"],"properties":{
+      "node_id":{"type":"string","pattern":"^PLN-[A-F0-9]{16}$"},
+      "event_id":{"type":"string","pattern":"^EVT-[A-F0-9]{16}$"},
+      "event_type":{"type":"string","pattern":"^event\\.[a-z_]+$"},
+      "canonical_mention_id":{"type":"string","pattern":"^EVM-[A-F0-9]{16}$"},
+      "participant_entity_ids":{"type":"array","items":{"type":"string","pattern":"^CHR-[A-F0-9]{16}$"},"uniqueItems":true},
+      "first_novel_offset":{"type":"integer","minimum":0},
+      "last_novel_offset":{"type":"integer","minimum":1},
+      "confidence":{"type":"number","minimum":0,"maximum":1}
+    }}},
+    "edges":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["edge_id","source_relation_id","relation_type","source_node_id","target_node_id","score","evidence_passage_ids"],"properties":{
+      "edge_id":{"type":"string","pattern":"^PLE-[A-F0-9]{16}$"},
+      "source_relation_id":{"type":"string","pattern":"^ERL-[A-F0-9]{16}$"},
+      "relation_type":{"enum":["temporal.before","temporal.overlaps","temporal.simultaneous","causal.causes","causal.enables","causal.prevents"]},
+      "source_node_id":{"type":"string","pattern":"^PLN-[A-F0-9]{16}$"},
+      "target_node_id":{"type":"string","pattern":"^PLN-[A-F0-9]{16}$"},
+      "score":{"type":"number","minimum":0,"maximum":1},
+      "evidence_passage_ids":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^PAS-[A-F0-9]{16}$"},"uniqueItems":true}
+    }}},
+    "components":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["component_id","node_ids","edge_ids","participant_entity_ids","first_novel_offset","last_novel_offset"],"properties":{
+      "component_id":{"type":"string","pattern":"^PLC-[A-F0-9]{16}$"},
+      "node_ids":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^PLN-[A-F0-9]{16}$"},"uniqueItems":true},
+      "edge_ids":{"type":"array","items":{"type":"string","pattern":"^PLE-[A-F0-9]{16}$"},"uniqueItems":true},
+      "participant_entity_ids":{"type":"array","items":{"type":"string","pattern":"^CHR-[A-F0-9]{16}$"},"uniqueItems":true},
+      "first_novel_offset":{"type":"integer","minimum":0},
+      "last_novel_offset":{"type":"integer","minimum":1}
+    }}},
+    "temporal_layers":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["layer_index","node_ids"],"properties":{
+      "layer_index":{"type":"integer","minimum":0},
+      "node_ids":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^PLN-[A-F0-9]{16}$"},"uniqueItems":true}
+    }}},
+    "graph_stats":{"type":"object","additionalProperties":false,"required":["node_count","edge_count","component_count","singleton_component_count","temporal_layer_count"],"properties":{
+      "node_count":{"type":"integer","minimum":0},
+      "edge_count":{"type":"integer","minimum":0},
+      "component_count":{"type":"integer","minimum":0},
+      "singleton_component_count":{"type":"integer","minimum":0},
+      "temporal_layer_count":{"type":"integer","minimum":0}
+    }},
+    "consistency":{"type":"object","additionalProperties":false,"required":["valid","errors","warnings"],"properties":{
+      "valid":{"type":"boolean"},
+      "errors":{"type":"array","items":{"type":"string"}},
+      "warnings":{"type":"array","items":{"type":"string"}}
+    }}
+  }
+}

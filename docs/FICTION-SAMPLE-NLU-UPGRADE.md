@@ -324,6 +324,48 @@ Development output remains `provisional`,
 `narrative_order_used_as_story_time=false`, and
 `retrieval_admission=not_admitted`.
 
+## NLU-7 — Deterministic plot graph
+
+Repository artifacts:
+
+- `config/fiction-nlu-plot-graph-v1.json`
+- `schemas/fiction-nlu-plot-graph-v1.schema.json`
+- `scripts/fiction-sample-nlu-plot-graph-v1.py`
+- `tests/nlu/fiction-sample-nlu-plot-graph-v1.test.mjs`
+
+NLU-7 consumes validated NLU-5 event clusters and NLU-6 event relations. It is a
+deterministic graph assembler, not another language-model inference layer.
+
+Each validated `EVT-*` event cluster becomes exactly one `PLN-*` plot node.
+Each admitted NLU-6 temporal or causal relation becomes exactly one `PLE-*`
+plot edge retaining the source `ERL-*` relation ID, score, and evidence Passage
+IDs. No narrative-adjacency edge is invented when NLU-6 contains no semantic
+relation.
+
+Weakly connected semantic subgraphs are materialized as deterministic `PLC-*`
+components. Isolated events remain singleton components rather than being joined
+merely because they appear next to each other in the text.
+
+Temporal layers are derived only from admitted `temporal.before` edges using an
+acyclic predecessor-layer calculation. Narrative Passage order is never used as
+a story-time fallback or tie-breaker. Causal-only or temporally incomparable
+events may therefore occupy the same temporal layer.
+
+The full graph payload is bound to exact NLU-5 event-registry and NLU-6
+event-relation-registry hashes. Validation rebuilds nodes, edges, components,
+temporal layers, and graph statistics from the dependencies and rejects any
+non-deterministic alteration.
+
+NLU-7 deliberately does not assign salience, setup, payoff, climax, turning
+point, main-plot, subplot, or other narrative-function labels. Those higher-order
+interpretations remain NLU-8 responsibilities.
+
+Development output remains `provisional`,
+`complete_plot_graph_claim=false`,
+`narrative_function_resolved=false`,
+`salience_resolved=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
