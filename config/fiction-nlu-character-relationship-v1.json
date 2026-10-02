@@ -1,0 +1,374 @@
+{
+  "schema_version": "fiction_nlu_character_relationship_config_v1",
+  "config_version": "fiction_nlu_character_relationship_v1",
+  "assertion_scope": "evidence_window_relationship_assertion_not_global_truth",
+  "principles": [
+    "Relationship extraction consumes validated NLU-2 entities and mentions; it never creates or renames character entities.",
+    "Every active relationship assertion is local to an evidence window and must cite passage-local evidence tied to both entities.",
+    "Multiple relation types may coexist for one entity pair.",
+    "Missing or low-confidence evidence is not a negative relationship fact.",
+    "Persistent social roles and dynamic affect/behavior are represented separately so NLU-4 can build timelines later.",
+    "Symmetric relations use a canonical ordered entity pair; directed relations preserve source and target.",
+    "Contradictory local assertions are retained with provenance instead of being silently collapsed.",
+    "Retrieval admission remains closed until a later certified integration."
+  ],
+  "pair_candidate_policy": {
+    "same_passage": true,
+    "adjacent_passage_gap": 1,
+    "max_pair_windows_per_novel": 512,
+    "max_entities_per_window": 12,
+    "require_both_entities_have_mentions": true,
+    "prefer_same_scene": true,
+    "min_candidates_per_group": 2,
+    "max_candidates_per_group": 5,
+    "lexical_hint_boost": 3,
+    "default_candidate_score": 1
+  },
+  "evidence_policy": {
+    "max_quotes_per_assertion": 3,
+    "require_source_and_target_mention_coverage": true,
+    "quote_must_be_exact_passage_substring": true,
+    "active_requires_evidence": true
+  },
+  "provider_policy": {
+    "request_version": "fiction_nlu_character_relationship_request_v1",
+    "score_every_candidate": true,
+    "bounded_completion_retries": 1,
+    "think": false
+  },
+  "relation_groups": {
+    "social_role": {
+      "semantics": "relatively_persistent_social_or_institutional_relation",
+      "relations": {
+        "social.friend_of": {
+          "directionality": "symmetric",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "朋友",
+            "好友",
+            "摯友"
+          ]
+        },
+        "social.acquaintance_of": {
+          "directionality": "symmetric",
+          "threshold": 0.7,
+          "lexical_hints": [
+            "認識",
+            "熟人",
+            "見過"
+          ]
+        },
+        "social.classmate_of": {
+          "directionality": "symmetric",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "同學",
+            "同班"
+          ]
+        },
+        "social.colleague_of": {
+          "directionality": "symmetric",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "同事",
+            "共事"
+          ]
+        },
+        "social.sibling_of": {
+          "directionality": "symmetric",
+          "threshold": 0.82,
+          "lexical_hints": [
+            "哥哥",
+            "姐姐",
+            "弟弟",
+            "妹妹",
+            "兄妹",
+            "姊妹",
+            "姐弟",
+            "兄弟"
+          ]
+        },
+        "social.parent_of": {
+          "directionality": "directed",
+          "threshold": 0.84,
+          "lexical_hints": [
+            "父親",
+            "母親",
+            "爸爸",
+            "媽媽",
+            "父母",
+            "女兒",
+            "兒子"
+          ]
+        },
+        "social.teacher_of": {
+          "directionality": "directed",
+          "threshold": 0.8,
+          "lexical_hints": [
+            "老師",
+            "學生",
+            "導師"
+          ]
+        },
+        "social.superior_of": {
+          "directionality": "directed",
+          "threshold": 0.8,
+          "lexical_hints": [
+            "上司",
+            "部下",
+            "主管",
+            "下屬"
+          ]
+        },
+        "social.romantic_partner_of": {
+          "directionality": "symmetric",
+          "threshold": 0.86,
+          "lexical_hints": [
+            "戀人",
+            "男朋友",
+            "女朋友",
+            "交往",
+            "情侶",
+            "伴侶"
+          ]
+        },
+        "social.spouse_of": {
+          "directionality": "symmetric",
+          "threshold": 0.9,
+          "lexical_hints": [
+            "丈夫",
+            "妻子",
+            "老公",
+            "老婆",
+            "結婚",
+            "夫妻"
+          ]
+        }
+      }
+    },
+    "affective_stance": {
+      "semantics": "directional_or_symmetric_local_affective_signal",
+      "relations": {
+        "affect.affection_for": {
+          "directionality": "directed",
+          "threshold": 0.68,
+          "lexical_hints": [
+            "喜歡",
+            "珍惜",
+            "溫柔",
+            "在意",
+            "心疼",
+            "寵溺"
+          ]
+        },
+        "affect.romantic_interest_in": {
+          "directionality": "directed",
+          "threshold": 0.74,
+          "lexical_hints": [
+            "喜歡你",
+            "愛你",
+            "告白",
+            "心動",
+            "戀愛",
+            "暗戀"
+          ]
+        },
+        "affect.trusts": {
+          "directionality": "directed",
+          "threshold": 0.7,
+          "lexical_hints": [
+            "相信",
+            "信任",
+            "放心交給"
+          ]
+        },
+        "affect.distrusts": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "不信任",
+            "懷疑",
+            "不相信",
+            "戒備"
+          ]
+        },
+        "affect.admires": {
+          "directionality": "directed",
+          "threshold": 0.7,
+          "lexical_hints": [
+            "佩服",
+            "崇拜",
+            "仰慕",
+            "敬佩"
+          ]
+        },
+        "affect.fears": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "害怕",
+            "畏懼",
+            "恐懼"
+          ]
+        },
+        "affect.resentment_toward": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "怨恨",
+            "憎恨",
+            "討厭",
+            "恨"
+          ]
+        },
+        "affect.jealous_of": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "嫉妒",
+            "吃醋",
+            "眼紅"
+          ]
+        },
+        "affect.depends_on": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "依賴",
+            "離不開",
+            "需要你"
+          ]
+        }
+      }
+    },
+    "behavioral_stance": {
+      "semantics": "observable_or_inferred_local_interaction_pattern",
+      "relations": {
+        "behavior.cares_for": {
+          "directionality": "directed",
+          "threshold": 0.66,
+          "lexical_hints": [
+            "照顧",
+            "關心",
+            "餵",
+            "替她",
+            "替他",
+            "休息"
+          ]
+        },
+        "behavior.protects": {
+          "directionality": "directed",
+          "threshold": 0.68,
+          "lexical_hints": [
+            "保護",
+            "護住",
+            "擋在",
+            "守著"
+          ]
+        },
+        "behavior.supports": {
+          "directionality": "directed",
+          "threshold": 0.66,
+          "lexical_hints": [
+            "支持",
+            "鼓勵",
+            "安慰",
+            "陪你",
+            "幫你"
+          ]
+        },
+        "behavior.helps": {
+          "directionality": "directed",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "幫忙",
+            "幫她",
+            "幫他",
+            "協助",
+            "替你"
+          ]
+        },
+        "behavior.teases": {
+          "directionality": "directed",
+          "threshold": 0.66,
+          "lexical_hints": [
+            "逗",
+            "調侃",
+            "取笑",
+            "捉弄",
+            "開玩笑"
+          ]
+        },
+        "behavior.avoids": {
+          "directionality": "directed",
+          "threshold": 0.68,
+          "lexical_hints": [
+            "躲著",
+            "避開",
+            "不理",
+            "逃避",
+            "迴避"
+          ]
+        },
+        "behavior.competes_with": {
+          "directionality": "symmetric",
+          "threshold": 0.68,
+          "lexical_hints": [
+            "競爭",
+            "較量",
+            "比賽",
+            "勝負"
+          ]
+        },
+        "behavior.cooperates_with": {
+          "directionality": "symmetric",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "合作",
+            "配合",
+            "一起完成",
+            "聯手"
+          ]
+        },
+        "behavior.opposes": {
+          "directionality": "symmetric",
+          "threshold": 0.7,
+          "lexical_hints": [
+            "敵對",
+            "對抗",
+            "阻止",
+            "反對",
+            "交戰"
+          ]
+        },
+        "behavior.controls": {
+          "directionality": "directed",
+          "threshold": 0.74,
+          "lexical_hints": [
+            "命令",
+            "控制",
+            "支配",
+            "強迫"
+          ]
+        },
+        "behavior.obeys": {
+          "directionality": "directed",
+          "threshold": 0.72,
+          "lexical_hints": [
+            "服從",
+            "聽從",
+            "照做",
+            "遵命"
+          ]
+        }
+      }
+    }
+  },
+  "output_policy": {
+    "analysis_kind": "relationship",
+    "analysis_version": "character_relationship_v1",
+    "status": "provisional",
+    "scope_semantics": "evidence_window_not_relation_lifetime",
+    "retrieval_admission": "not_admitted"
+  }
+}
