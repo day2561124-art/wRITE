@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_character_relationship_v1.json",
+  "title": "Fiction NLU Character Relationship Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "provider",
+    "scope",
+    "entity_registry_sha256",
+    "pair_windows",
+    "assertions",
+    "inactive_candidates",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_character_relationship_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_character_relationship_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "evidence_window_relationship_assertion_not_global_truth"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_character_relationship_request_v1"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "character_resolution_analysis_id",
+        "complete_relationship_claim",
+        "scope_semantics"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "character_resolution_analysis_id": {
+          "type": "string",
+          "pattern": "^ANL-[A-F0-9]{16}$"
+        },
+        "complete_relationship_claim": {
+          "const": false
+        },
+        "scope_semantics": {
+          "const": "evidence_window_not_relation_lifetime"
+        }
+      }
+    },
+    "entity_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pair_windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pair_window_id",
+          "entity_a",
+          "entity_b",
+          "passage_ids",
+          "scene_ids",
+          "first_novel_offset",
+          "last_novel_offset",
+          "candidate_relations"
+        ],
+        "properties": {
+          "pair_window_id": {
+            "type": "string",
+            "pattern": "^RPW-[A-F0-9]{16}$"
+          },
+          "entity_a": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "entity_b": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "passage_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^PAS-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "scene_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^SCN-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "first_novel_offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_novel_offset": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "candidate_relations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z_]+\\.[a-z_]+$"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assertion_id",
+          "pair_window_id",
+          "relation_id",
+          "group",
+          "directionality",
+          "source_entity_id",
+          "target_entity_id",
+          "score",
+          "threshold",
+          "active",
+          "source",
+          "evidence",
+          "local_scope"
+        ],
+        "properties": {
+          "assertion_id": {
+            "type": "string",
+            "pattern": "^REL-[A-F0-9]{16}$"
+          },
+          "pair_window_id": {
+            "type": "string",
+            "pattern": "^RPW-[A-F0-9]{16}$"
+          },
+          "relation_id": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.[a-z_]+$"
+          },
+          "group": {
+            "enum": [
+              "social_role",
+              "affective_stance",
+              "behavioral_stance"
+            ]
+          },
+          "directionality": {
+            "enum": [
+              "symmetric",
+              "directed"
+            ]
+          },
+          "source_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "target_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "model",
+              "heuristic",
+              "explicit_pattern",
+              "hybrid"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "passage_id",
+                "scene_id",
+                "span_start",
+                "span_end",
+                "quote_sha256",
+                "supporting_mention_ids"
+              ],
+              "properties": {
+                "passage_id": {
+                  "type": "string",
+                  "pattern": "^PAS-[A-F0-9]{16}$"
+                },
+                "scene_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^SCN-[A-F0-9]{16}$"
+                },
+                "span_start": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "span_end": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "quote_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "supporting_mention_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^MEN-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "local_scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "passage_ids",
+              "scene_ids",
+              "first_novel_offset",
+              "last_novel_offset",
+              "scope_semantics"
+            ],
+            "properties": {
+              "passage_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^PAS-[A-F0-9]{16}$"
+                },
+                "uniqueItems": true
+              },
+              "scene_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^SCN-[A-F0-9]{16}$"
+                },
+                "uniqueItems": true
+              },
+              "first_novel_offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "last_novel_offset": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "scope_semantics": {
+                "const": "evidence_window_not_relation_lifetime"
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "active": {
+                  "const": true
+                }
+              },
+              "required": [
+                "active"
+              ]
+            },
+            "then": {
+              "properties": {
+                "evidence": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "inactive_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pair_window_id",
+          "relation_id",
+          "source_entity_id",
+          "target_entity_id",
+          "score",
+          "threshold"
+        ],
+        "properties": {
+          "pair_window_id": {
+            "type": "string",
+            "pattern": "^RPW-[A-F0-9]{16}$"
+          },
+          "relation_id": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.[a-z_]+$"
+          },
+          "source_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "target_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

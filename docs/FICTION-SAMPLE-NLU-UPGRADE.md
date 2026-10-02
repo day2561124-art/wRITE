@@ -157,6 +157,48 @@ not infer relationship truth, and always keeps retrieval admission closed. Forma
 external storage begins empty; real-model pilots are validation evidence only and
 are not persisted into the production analysis store.
 
+## NLU-3 — Document-level character relationship extraction
+
+Repository artifacts:
+
+- `config/fiction-nlu-character-relationship-v1.json`
+- `schemas/fiction-nlu-character-relationship-v1.schema.json`
+- `scripts/fiction-sample-nlu-relationship-extract-v1.py`
+- `tests/nlu/fiction-sample-nlu-character-relationship-v1.test.mjs`
+
+NLU-3 consumes validated NLU-2 character-resolution records. It never creates,
+renames, or merges characters itself. Relationship candidate windows are built
+from already-linked character mentions and are bounded by local Passage adjacency
+instead of evaluating every novel-level entity pair.
+
+The taxonomy separates relatively persistent social-role signals from dynamic
+affective and behavioral stances. One entity pair may therefore carry multiple
+simultaneous local assertions. Symmetric relations use one canonical ordered pair;
+directed relations score A->B and B->A independently.
+
+Every active relationship assertion must:
+
+- exceed the configured relation-specific threshold;
+- contain exact canonical Passage evidence;
+- preserve NLU-2 supporting mention IDs;
+- cover both relationship entities inside the cited evidence;
+- bind to a deterministic `REL-*` identity and a deterministic pair window;
+- declare an evidence-window scope rather than a relationship lifetime.
+
+The payload is bound to the exact NLU-2 entity registry hash. If character
+entities, mentions, or merge evidence change, old relationship output is rejected
+rather than silently reused.
+
+A completed analysis may legitimately contain zero positive assertions. In that
+case the NLU-0 analysis record retains canonical Passage-level provenance while
+the relationship payload remains empty; the producer never invents a positive
+relationship merely to satisfy the outer evidence contract.
+
+Development output remains `provisional`, `complete_relationship_claim=false`,
+and `retrieval_admission=not_admitted`. Relationship state transitions and
+conflict resolution across time are owned by NLU-4 rather than collapsed in this
+phase.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
