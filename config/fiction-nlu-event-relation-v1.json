@@ -1,0 +1,106 @@
+{
+  "schema_version": "fiction_nlu_event_relation_config_v1",
+  "config_version": "fiction_nlu_event_relation_v1",
+  "assertion_scope": "evidence_backed_event_relations_not_complete_temporal_or_causal_graph",
+  "temporal": {
+    "labels": [
+      "before",
+      "after",
+      "overlaps",
+      "simultaneous",
+      "unknown"
+    ],
+    "stored_labels": [
+      "temporal.before",
+      "temporal.overlaps",
+      "temporal.simultaneous"
+    ],
+    "normalization": "after(a,b)_normalizes_to_before(b,a)",
+    "threshold": 0.78,
+    "symmetric_labels": [
+      "temporal.overlaps",
+      "temporal.simultaneous"
+    ],
+    "strict_order_label": "temporal.before",
+    "enforce_acyclic_strict_order": true,
+    "materialize_transitive_closure": false,
+    "narrative_order_is_not_story_time": true
+  },
+  "causal": {
+    "labels": [
+      "causal.causes",
+      "causal.enables",
+      "causal.prevents"
+    ],
+    "threshold": 0.88,
+    "binary_decision_per_label": true,
+    "require_temporal_compatibility": true,
+    "causal_direction_requires_cause_not_after_effect": true,
+    "hallucination_guard": "explicit_or_strongly_entailed_evidence_required"
+  },
+  "pair_candidate_policy": {
+    "max_passage_gap": 2,
+    "same_scene_priority": true,
+    "max_pairs_per_novel": 512,
+    "require_distinct_event_clusters": true
+  },
+  "evidence_policy": {
+    "max_quotes_per_relation": 3,
+    "quote_must_be_exact_passage_substring": true,
+    "require_both_event_mentions_covered": true
+  },
+  "provider_policy": {
+    "request_version": "fiction_nlu_event_relation_request_v1",
+    "think": false,
+    "score_every_temporal_pair": true,
+    "score_every_causal_label": true,
+    "bounded_completion_retries": 1
+  },
+  "heuristic_cues": {
+    "temporal_before": [
+      "先",
+      "之後",
+      "然後",
+      "接著",
+      "隨後",
+      "再"
+    ],
+    "simultaneous": [
+      "同時",
+      "一邊",
+      "一面"
+    ],
+    "overlap": [
+      "期間",
+      "正在",
+      "當時"
+    ],
+    "causes": [
+      "因此",
+      "所以",
+      "導致",
+      "使得",
+      "造成"
+    ],
+    "enables": [
+      "讓",
+      "得以",
+      "因此能",
+      "才能"
+    ],
+    "prevents": [
+      "阻止",
+      "避免",
+      "防止",
+      "使得無法"
+    ]
+  },
+  "output_policy": {
+    "analysis_kind": "event_relation",
+    "analysis_version": "event_relation_v1",
+    "status": "provisional",
+    "complete_temporal_graph_claim": false,
+    "complete_causal_graph_claim": false,
+    "retrieval_admission": "not_admitted"
+  }
+}
