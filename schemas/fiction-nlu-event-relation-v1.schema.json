@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_event_relation_v1.json",
+  "title": "Fiction NLU Event Relation Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "provider",
+    "scope",
+    "event_registry_sha256",
+    "pair_candidates",
+    "temporal_relations",
+    "causal_relations",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_event_relation_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_event_relation_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "evidence_backed_event_relations_not_complete_temporal_or_causal_graph"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_event_relation_request_v1"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "event_analysis_id",
+        "complete_temporal_graph_claim",
+        "complete_causal_graph_claim",
+        "narrative_order_used_as_story_time"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "event_analysis_id": {
+          "type": "string",
+          "pattern": "^ANL-[A-F0-9]{16}$"
+        },
+        "complete_temporal_graph_claim": {
+          "const": false
+        },
+        "complete_causal_graph_claim": {
+          "const": false
+        },
+        "narrative_order_used_as_story_time": {
+          "const": false
+        }
+      }
+    },
+    "event_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pair_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pair_id",
+          "event_a",
+          "event_b",
+          "passage_ids",
+          "passage_gap"
+        ],
+        "properties": {
+          "pair_id": {
+            "type": "string",
+            "pattern": "^ERP-[A-F0-9]{16}$"
+          },
+          "event_a": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "event_b": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "passage_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^PAS-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "passage_gap": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "temporal_relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relation_id",
+          "pair_id",
+          "relation_type",
+          "source_event_id",
+          "target_event_id",
+          "score",
+          "threshold",
+          "source",
+          "evidence",
+          "normalized_from"
+        ],
+        "properties": {
+          "relation_id": {
+            "type": "string",
+            "pattern": "^ERL-[A-F0-9]{16}$"
+          },
+          "pair_id": {
+            "type": "string",
+            "pattern": "^ERP-[A-F0-9]{16}$"
+          },
+          "relation_type": {
+            "enum": [
+              "temporal.before",
+              "temporal.overlaps",
+              "temporal.simultaneous"
+            ]
+          },
+          "source_event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "target_event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model"
+            ]
+          },
+          "normalized_from": {
+            "enum": [
+              "before",
+              "after",
+              "overlaps",
+              "simultaneous"
+            ]
+          },
+          "evidence": {
+            "$ref": "#/$defs/evidenceArray"
+          }
+        }
+      }
+    },
+    "causal_relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relation_id",
+          "pair_id",
+          "relation_type",
+          "source_event_id",
+          "target_event_id",
+          "score",
+          "threshold",
+          "source",
+          "evidence"
+        ],
+        "properties": {
+          "relation_id": {
+            "type": "string",
+            "pattern": "^ERL-[A-F0-9]{16}$"
+          },
+          "pair_id": {
+            "type": "string",
+            "pattern": "^ERP-[A-F0-9]{16}$"
+          },
+          "relation_type": {
+            "enum": [
+              "causal.causes",
+              "causal.enables",
+              "causal.prevents"
+            ]
+          },
+          "source_event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "target_event_id": {
+            "type": "string",
+            "pattern": "^EVT-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model"
+            ]
+          },
+          "evidence": {
+            "$ref": "#/$defs/evidenceArray"
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings",
+        "strict_before_cycle_count"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "strict_before_cycle_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "passage_id",
+          "span_start",
+          "span_end",
+          "quote_sha256",
+          "event_mention_ids"
+        ],
+        "properties": {
+          "passage_id": {
+            "type": "string",
+            "pattern": "^PAS-[A-F0-9]{16}$"
+          },
+          "span_start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "span_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "quote_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "event_mention_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^EVM-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

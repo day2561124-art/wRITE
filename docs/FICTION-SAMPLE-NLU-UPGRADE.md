@@ -282,6 +282,48 @@ Development output remains `provisional`,
 `causal_relations_resolved=false`, and
 `retrieval_admission=not_admitted`.
 
+## NLU-6 — Temporal / causal event relations
+
+Repository artifacts:
+
+- `config/fiction-nlu-event-relation-v1.json`
+- `schemas/fiction-nlu-event-relation-v1.schema.json`
+- `scripts/fiction-sample-nlu-event-relation-v1.py`
+- `tests/nlu/fiction-sample-nlu-event-relation-v1.test.mjs`
+
+NLU-6 consumes validated NLU-5 event clusters and never re-extracts events. It
+builds bounded nearby event-pair candidates, then evaluates temporal and causal
+relations separately.
+
+Temporal storage normalizes directional labels to `temporal.before`;
+`after(A,B)` is stored as `before(B,A)`. Symmetric temporal signals remain
+`temporal.overlaps` or `temporal.simultaneous`. Critically, Passage or
+narrative mention order is never substituted for story-world time. When evidence
+does not support a temporal relation, the pair remains unresolved rather than
+receiving a default before/after edge.
+
+Causal relations are limited to `causal.causes`, `causal.enables`, and
+`causal.prevents`, with a higher admission threshold than temporal relations.
+Every stored relation requires exact canonical Passage evidence covering both
+events. Causal direction is rejected when it conflicts with an admitted strict
+temporal-before edge.
+
+The strict `temporal.before` graph is checked globally for cycles. NLU-6 does not
+materialize a transitive closure and does not claim a complete temporal or causal
+graph; local pair decisions that would make the global graph inconsistent are
+invalid.
+
+Provider labels are defined relative to the supplied event pair, not narrative
+position. A UTF-8 qwen3.5:9b pilot produced one validated temporal relation with
+score 0.95 and no causal assertion. The empty causal result is accepted as the
+intended conservative behavior rather than lowering the causal threshold.
+
+Development output remains `provisional`,
+`complete_temporal_graph_claim=false`,
+`complete_causal_graph_claim=false`,
+`narrative_order_used_as_story_time=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
