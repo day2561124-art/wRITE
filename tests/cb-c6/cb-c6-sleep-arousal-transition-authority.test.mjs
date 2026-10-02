@@ -3640,7 +3640,6 @@ for (const [mode, reason, attempts] of [
   ["obstacles", "physical_step_projectile_obstacle_progression_pending", 1],
   ["acoustic", "physical_step_acoustic_ingress_pending", 1],
   ["queue", null, 0],
-  ["bounds", null, 0],
 ]) {
   const root = path.join(projectRoot, "tests", ".tmp",
     `c6-e9-pending-${mode}-${process.pid}-${Date.now()}`);
@@ -3655,10 +3654,6 @@ for (const [mode, reason, attempts] of [
       sound_id: "e9-pending", scene_id: "room", active: true,
     }];
     if (mode === "queue") initial.event_queue = [{ event_id: "e9-pending" }];
-    if (mode === "bounds") {
-      const reached = await e4Resolve(e6ProjectileWorld("bounds"));
-      Object.assign(initial, reached.next_world_state);
-    }
     const session = await beginWorldSimulationSession({
       simulation_label: "C6-E9 unsupported same-time", seed: mode, initial_world_state: initial,
     }, options);
@@ -3777,12 +3772,12 @@ for (const mode of ["already-due", "flight-then-due"]) {
     const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
     const prior = await bytes();
     const batch = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 32, target_horizon: before.state.simulation_time,
+      world_simulation_session_id: sid, max_turns: 0, target_horizon: before.state.simulation_time,
     }, options);
     assert.equal(batch.committed_turn_count, 0);
     assert.equal(batch.attempted_turn_count, 0);
     assert.equal(batch.pending_breakpoint.kind, "projectile_bounds");
-    assert.deepEqual(await bytes(), prior, "E10 keeps the sealed E9 batch lifetime-only");
+    assert.deepEqual(await bytes(), prior, "zero-budget bounds discovery cannot commit");
     await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
       world_simulation_session_id: sid, expected_revision: before.revision,
       expected_state_hash: before.state_hash, zero_time_projectile_termination_drain: true,
@@ -3876,6 +3871,173 @@ for (const [mode, reason] of [
     assert.equal(result.blocked_reason, reason);
     assert.deepEqual(await getWorldSimulationState(sid, options), before);
     assert.deepEqual(await bytes(), original, "unsupported boundary authority preserves durable bytes");
+    const batch = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: before.state.simulation_time,
+    }, options);
+    assert.equal(batch.committed_turn_count, 0);
+    assert.equal(batch.state_reconciliation_required, false);
+    assert.equal(batch.target_horizon_claimed, true);
+    if (batch.attempted_turn_count) assert.equal(batch.physical_step_blocked_reason, reason);
+    if (mode === "queue" || mode === "unresolved") assert.equal(batch.attempted_turn_count, 0);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original, "E11 unsupported batch preserves durable bytes");
+
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E10 direct Native zero-time bounds, immutable query, replay, lineage and batch preservation passed.");
+
+const e11Cases = [
+  ["due", 0, 0], ["due", 1, 0], ["due", 32, 0],
+  ["due", 1, 500], ["due", 32, null],
+  ["flight", 0, null], ["flight", 1, null], ["flight", 2, null], ["flight", 32, null],
+  ["flight", 32, 499],
+];
+for (const [mode, budget, horizonMs] of e11Cases) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e11-${mode}-${budget}-${horizonMs}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E11 batch bounds must not invoke Brain") };
+  try {
+    const initial = mode === "due" ? await e10BoundsWorld() : e6ProjectileWorld("bounds");
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E11 bounded batch bounds", seed: `${mode}-${budget}-${horizonMs}`,
+      initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const target = horizonMs === null ? {} : { target_horizon: at(horizonMs) };
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const originalBytes = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: budget, ...target,
+    }, options);
+    const crossCeiling = mode === "flight" && horizonMs === 499;
+    const required = mode === "due" ? 1 : 2;
+    const commits = crossCeiling ? 0 : Math.min(budget, required);
+    const elapsed = mode === "flight" && commits > 0 ? 500 : 0;
+    assert.equal(result.attempted_turn_count, commits);
+    assert.equal(result.committed_turn_count, commits);
+    assert.equal(result.committed_physical_step_count, commits);
+    assert.equal(result.reached_simulation_time, at(elapsed));
+    assert.equal(result.target_horizon_claimed, horizonMs !== null && horizonMs === elapsed);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.equal(result.automatic_replay_allowed, false);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + commits);
+    assert.equal(after.state.simulation_time, at(elapsed), "no epsilon beyond actual flight");
+    assert.equal(after.state.projectiles.projectile_e3.active, commits < required);
+    assert.equal(after.state.projectiles.projectile_e3.age_ms,
+      mode === "due" || elapsed ? 500 : 0);
+    if (mode === "due") assert.deepEqual(after.state.projectiles.projectile_e3.position,
+      before.state.projectiles.projectile_e3.position);
+    assert.deepEqual(after.state.characters, before.state.characters);
+    assert.deepEqual(after.state.event_queue, before.state.event_queue);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    if (!commits) assert.deepEqual(await bytes(), originalBytes);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, commits);
+    for (let i = 0; i < commits; i++) {
+      const turn = history.turns[i], entry = result.committed_turns[i];
+      assert.equal(entry.execution_kind, "physical_process_step");
+      assert.equal(entry.turn_id, turn.turn_id);
+      assert.equal(entry.previous_state_hash, turn.previous_state_hash);
+      assert.equal(entry.next_state_hash, turn.next_state_hash);
+      assert.equal(turn.previous_state_hash, i ? history.turns[i - 1].next_state_hash : before.state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+    }
+    if (commits < required && !crossCeiling) assert.ok(result.pending_breakpoint_confirmed);
+    else if (!crossCeiling) {
+      assert.equal(result.pending_breakpoint, null);
+      assert.equal(after.state.projectiles.projectile_e3.termination_reason, "left_scene_bounds");
+      const terminations = history.turns.flatMap(turn => turn.state_transitions)
+        .filter(item => item.field === "projectile_state" && item.lifecycle_effect === "termination");
+      assert.equal(terminations.length, 1);
+      assert.equal(terminations[0].time_ms, 0);
+    }
+    if (crossCeiling) {
+      assert.equal(result.physical_step_blocked_reason, null);
+      assert.equal(result.pending_breakpoint, null);
+      assert.equal(result.status, "no_pending_event");
+      continue;
+    }
+    const rest = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, ...target,
+    }, options);
+    assert.equal(rest.committed_turn_count, required - commits,
+      JSON.stringify({ mode, budget, horizonMs, rest }));
+    assert.equal(rest.attempted_turn_count, required - commits);
+    assert.equal(rest.reached_simulation_time, at(mode === "due" ? 0 : 500));
+    const final = await getWorldSimulationState(sid, options);
+    assert.equal(final.revision, before.revision + required);
+    assert.equal(final.state.projectiles.projectile_e3.active, false);
+    const finalHistory = await getWorldSimulationHistory(sid, options);
+    assert.equal(finalHistory.turns.length, required);
+    assert.equal(finalHistory.turns.at(-1).next_state_hash, final.state_hash);
+    if (required === 2) assert.equal(finalHistory.turns[1].previous_state_hash,
+      finalHistory.turns[0].next_state_hash);
+    const finalBytes = await bytes();
+    const idle = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, ...target,
+    }, options);
+    assert.equal(idle.attempted_turn_count, 0);
+    assert.equal(idle.committed_turn_count, 0);
+    assert.equal(idle.reached_simulation_time, final.state.simulation_time);
+    assert.deepEqual(await bytes(), finalBytes, "terminated batch cannot duplicate history or invent time");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e11-fractional-discovery-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E11 cannot round fractional discovery into World time") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E11 fractional bounded flight stays pending", seed: "e11-fractional",
+      initial_world_state: e6ProjectileWorld("bounds"),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const target = new Date(Date.parse(before.state.simulation_time) + 500).toISOString();
+    const discovery = projectWorldSimulationOffscreenBreakpoint({
+      world_state: before.state, target_horizon: target,
+    });
+    assert.equal(discovery.breakpoint.kind, "projectile_bounds");
+    assert.equal(Number.isSafeInteger(discovery.breakpoint.delta_ms), false,
+      "the existing bounded query exposes fractional arithmetic; no rounding authority");
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const pending = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: target,
+    }, options);
+    assert.equal(pending.attempted_turn_count, 0);
+    assert.equal(pending.committed_turn_count, 0);
+    assert.equal(pending.status, "slow_process_breakpoint_pending");
+    assert.equal(pending.target_horizon_claimed, false);
+    assert.deepEqual(pending.pending_breakpoint, discovery.breakpoint);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original, "fractional pending cannot alter durable bytes");
+    // The existing untargeted owner confirms an exact 500ms step. Its flight
+    // and zero-time termination remain two budgeted commits, never a rounded retry.
+    const resumed = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 2,
+    }, options);
+    assert.equal(resumed.attempted_turn_count, 2);
+    assert.equal(resumed.committed_turn_count, 2);
+    assert.equal(resumed.reached_simulation_time, target);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + 2);
+    assert.equal(after.state.projectiles.projectile_e3.termination_reason, "left_scene_bounds");
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, 2);
+    assert.equal(history.turns[0].previous_state_hash, before.state_hash);
+    assert.equal(history.turns[1].previous_state_hash, history.turns[0].next_state_hash);
+    assert.equal(history.turns[1].next_state_hash, after.state_hash);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E11 bounded batch bounds, budget/horizon, history, idle and unsupported authority regression passed.");
