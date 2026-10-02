@@ -830,8 +830,8 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
 }
 
 function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, nextWorldState, snapshotScene, nextScene, transitions, outcomes, resolutions) {
-  // This bounded mode only drains due lifetimes and outward scene bounds. It does not
-  // turn a zero-duration query into flight, contact or penetration.
+  // Current-time lifetime/bounds and explicitly admitted character contacts reuse
+  // the existing effect owners. No zero-duration flight or penetration is created.
   const zeroTimeTermination = input.drain_projectile_terminations_at_current_time === true && elapsedMs === 0;
   const states = [];
   for (const [projectileId, rawProjectile] of Object.entries(object(nextWorldState.projectiles))) {
@@ -861,7 +861,9 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
         event,
       };
     }).filter(candidate => !zeroTimeTermination
-      || (["lifetime", "bounds"].includes(candidate.event.kind) && candidate.time_ms === 0));
+      || ((["lifetime", "bounds"].includes(candidate.event.kind)
+        || (input.drain_projectile_contacts_at_current_time === true && candidate.event.kind === "character"))
+        && candidate.time_ms === 0));
     if (!candidates.length) break;
     const arbitration = arbitrateWorldSimulationEventCandidates({
       candidates,

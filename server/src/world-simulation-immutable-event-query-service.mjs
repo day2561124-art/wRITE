@@ -194,6 +194,14 @@ function solveCircleContact(relativePosition, relativeVelocity, radius, maxSecon
 function movingCharacterContact(projectile, profile, startMs, endMs, targetRadius) {
   const projectileRadius = positiveNumber(projectile.radius_m, 0.05);
   const radius = projectileRadius + targetRadius;
+  // A zero-duration contact observes exact current geometry, without flight.
+  if (endMs === startMs) {
+    const target = profilePositionAt(profile, startMs);
+    if (!target) return null;
+    const dx = projectile.position.x - target.x;
+    const dy = projectile.position.y - target.y;
+    return dx ** 2 + dy ** 2 <= radius ** 2 ? startMs : null;
+  }
   const boundaries = [startMs, endMs];
   for (const breakpoint of profileBreakpoints(profile)) {
     if (breakpoint > startMs && breakpoint < endMs) boundaries.push(breakpoint);
