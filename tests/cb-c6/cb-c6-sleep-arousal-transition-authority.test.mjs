@@ -4056,3 +4056,178 @@ for (const [position, velocity] of [
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E11/E12 bounded batch bounds, window-independent discovery, fractional preservation and lineage passed.");
+
+function e13ContactWorld(x = 2) {
+  const state = e6ProjectileWorld("contact");
+  state.projectiles.projectile_e3.position = { x, y: 4 };
+  return state;
+}
+for (const [x, hit] of [[2, true], [2.5, true], [1.99, false]]) {
+  const input = {
+    projectile: e13ContactWorld(x).projectiles.projectile_e3,
+    scene: { dimensions: { width_m: 8, depth_m: 8 }, obstacles: [] },
+    character_motion_profiles: [{ character: "aria", target_radius_m: 0.75,
+      profile: { start: { x: 3, y: 4 }, end: { x: 3, y: 4 }, duration_ms: 0 } }],
+    current_time_ms: 125, active_end_ms: 125,
+  };
+  const original = d1Clone(input);
+  const query = queryWorldSimulationProjectileNextEvent(input);
+  assert.equal(query.result.event.kind, hit ? "character" : "advance_end");
+  assert.equal(query.result.event.timeMs, 125);
+  assert.deepEqual(queryWorldSimulationProjectileNextEvent(input), query);
+  assert.deepEqual(input, original);
+}
+{
+  const initial = e13ContactWorld(), original = d1Clone(initial);
+  const result = await e4Resolve(initial, initial.simulation_time);
+  assert.equal(result.next_world_state.simulation_time, initial.simulation_time);
+  assert.equal(result.next_world_state.projectiles.projectile_e3.termination_reason, "character_contact");
+  const hits = result.action_outcomes.filter(item => item.result === "projectile_hit_character");
+  assert.equal(hits.length, 1);
+  assert.ok(hits[0].damage_applied > 0);
+  const contactTimeline = result.causal_timeline.entries.filter(item =>
+    item.kind === "projectile_resolution" && item.result === "projectile_hit_character"
+      && item.projectile_id === "projectile_e3");
+  assert.equal(contactTimeline.length, 1);
+  assert.equal(contactTimeline[0].time_ms, 0);
+  assert.deepEqual(result.next_world_state.memories, initial.memories);
+  assert.deepEqual(result.next_world_state.motivational_goal_history, initial.motivational_goal_history);
+  assert.deepEqual(result.next_world_state.event_queue, initial.event_queue);
+  assert.deepEqual(await e4Resolve(initial, initial.simulation_time), result);
+  assert.deepEqual(initial, original);
+  const p = initial.projectiles.projectile_e3;
+  const alpha = { ...d1Clone(p), projectile_id: "alpha" };
+  const zeta = { ...d1Clone(p), projectile_id: "zeta" };
+  const live = { ...d1Clone(p), projectile_id: "live", position: { x: 7, y: 4 } };
+  initial.projectiles = { zeta, live, alpha };
+  const multiple = await e4Resolve(initial, initial.simulation_time);
+  assert.deepEqual(multiple.next_world_state.projectiles.live, live);
+  assert.equal(multiple.action_outcomes.filter(item => item.result === "projectile_hit_character").length, 2);
+  initial.projectiles = { alpha, live, zeta };
+  assert.deepEqual(await e4Resolve(initial, initial.simulation_time), multiple);
+  const forged = await adjudicateWorldSimulationCausality({
+    world_simulation_session_id: "e13-forged", world_state: original,
+    world_state_revision: 0, world_state_hash: hashAgentRunValue(original), turn_id: "e13-forged",
+    event: { event_id: "e13-forged", scene_id: "room", type: "offscreen_physical_process_step" },
+    selected_action_intents: [], drain_projectile_contacts_at_current_time: true,
+    drain_projectile_terminations_at_current_time: true, zero_time_projectile_contact_drain: true,
+  });
+  assert.equal(forged.next_world_state.projectiles.projectile_e3.active, true);
+  assert.equal(forged.next_world_state.characters.aria.physical_state.health_current, 100);
+}
+for (const x of [2, 2.5]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e13-contact-${x}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E13 direct contact cannot invoke Brain") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E13 current contact", seed: String(x), initial_world_state: e13ContactWorld(x),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const batch = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: before.state.simulation_time,
+    }, options);
+    assert.equal(batch.attempted_turn_count, 0);
+    assert.equal(batch.committed_turn_count, 0);
+    assert.deepEqual(await bytes(), original, "E13 does not admit batch contact");
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, zero_time_projectile_contact_drain: true,
+    }, options), { code: "C6E_PHYSICAL_STEP_INVALID" });
+    assert.deepEqual(await bytes(), original);
+    const result = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, target_horizon: before.state.simulation_time,
+    }, options);
+    assert.equal(result.committed, true);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + 1);
+    assert.equal(after.state.simulation_time, before.state.simulation_time);
+    assert.equal(after.state.projectiles.projectile_e3.active, false);
+    assert.equal(after.state.projectiles.projectile_e3.termination_reason, "character_contact");
+    for (const key of ["position", "age_ms"])
+      assert.deepEqual(after.state.projectiles.projectile_e3[key], before.state.projectiles.projectile_e3[key]);
+    assert.equal(after.state.projectiles.projectile_e3.remaining_penetration_energy, 0,
+      "existing contact termination consumes penetration energy");
+    assert.deepEqual(after.state.characters.keeper, before.state.characters.keeper);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    assert.deepEqual(after.state.event_queue, before.state.event_queue);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, 1);
+    const turn = history.turns[0];
+    assert.equal(turn.turn_id, result.turn_id);
+    assert.equal(turn.previous_state_hash, before.state_hash);
+    assert.equal(turn.next_state_hash, after.state_hash);
+    assert.deepEqual(turn.selected_action_intents, []);
+    assert.deepEqual(turn.knowledge_transitions, []);
+    assert.ok(turn.chronological_mutation_execution.execution_hash);
+    const hits = turn.action_outcomes.filter(item => item.result === "projectile_hit_character");
+    assert.equal(hits.length, 1);
+    assert.ok(hits[0].damage_applied > 0);
+    assert.equal(after.state.characters.aria.physical_state.health_current,
+      before.state.characters.aria.physical_state.health_current - hits[0].damage_applied);
+    const contactTimeline = turn.causal_timeline.entries.filter(item =>
+      item.kind === "projectile_resolution" && item.result === "projectile_hit_character"
+        && item.projectile_id === "projectile_e3");
+    assert.equal(contactTimeline.length, 1);
+    assert.equal(contactTimeline[0].time_ms, 0);
+    const finalBytes = await bytes();
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+    }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+    assert.deepEqual(await bytes(), finalBytes);
+    const idle = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: after.revision, expected_state_hash: after.state_hash,
+    }, options);
+    assert.equal(idle.committed, false);
+    assert.equal(idle.blocked_reason, "physical_step_no_breakpoint");
+    assert.deepEqual(await bytes(), finalBytes);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+for (const [mode, reason] of [
+  ["fields", "physical_step_same_time_or_fractional_pending"],
+  ["obstacles", "physical_step_projectile_obstacle_progression_pending"],
+  ["queue", "physical_step_queue_not_empty"], ["acoustic", "physical_step_acoustic_ingress_pending"],
+  ["scenes", "physical_step_scene_scope_unresolved"], ["unresolved", "physical_step_authority_unresolved"],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp", `c6-e13-pending-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root, characterBrain: async () => assert.fail("E13 unsupported contact stays pending") };
+  try {
+    const initial = e13ContactWorld();
+    if (mode === "fields") initial.ability_fields = e4FieldWorld().ability_fields;
+    if (mode === "obstacles") initial.scenes.room.obstacles = [{ obstacle_id: "e13-unmodeled" }];
+    if (mode === "queue") initial.event_queue = [{ event_id: "e13-pending" }];
+    if (mode === "acoustic") initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1", sound_id: "e13-pending", scene_id: "room", active: true,
+    }];
+    if (mode === "scenes") {
+      initial.scenes.other = d1Clone(initial.scenes.room);
+      initial.projectiles.other = { ...d1Clone(initial.projectiles.projectile_e3), projectile_id: "other", scene_id: "other" };
+    }
+    if (mode === "unresolved") delete initial.projectiles.projectile_e3.velocity_mps;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E13 unsupported contact authority", seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const pending = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, target_horizon: before.state.simulation_time,
+    }, options);
+    assert.equal(pending.committed, false);
+    assert.equal(pending.blocked_reason, reason);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E13 direct zero-time character contact, damage, lineage, CAS and unsupported authority passed.");
