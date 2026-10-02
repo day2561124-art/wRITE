@@ -1,0 +1,79 @@
+{
+  "schema_version": "fiction_nlu_character_resolution_config_v1",
+  "config_version": "fiction_nlu_character_resolution_v1",
+  "assertion_scope": "novel_local_character_identity_provisional",
+  "principles": [
+    "Create character entities only from explicit proper-name anchors.",
+    "Pronoun and nominal mentions may link only to an already anchored entity; they never create entities.",
+    "Canonical names must be observed explicit proper-name surfaces, never invented names.",
+    "Cross-window automatic merge is limited to exact normalized canonical-anchor equality.",
+    "Ambiguous, weak, or unsupported mentions remain unresolved rather than being forced into a cluster.",
+    "Every mention and merge decision must preserve passage-local evidence and canonical content hashes.",
+    "Character resolution does not infer relationship truth, speaker identity, or plot truth.",
+    "Retrieval admission remains closed until a later certified integration."
+  ],
+  "window_policy": {
+    "max_chars": 5200,
+    "max_passages": 4,
+    "overlap_passages": 1,
+    "order": "novel_source_order_then_char_start",
+    "known_entity_prompt_limit": 24
+  },
+  "thresholds": {
+    "proper_anchor": 0.82,
+    "alias_link": 0.92,
+    "pronoun_link": 0.88,
+    "nominal_link": 0.9
+  },
+  "mention_types": [
+    "proper",
+    "pronoun",
+    "nominal"
+  ],
+  "third_person_pronouns": [
+    "他",
+    "她",
+    "牠",
+    "它",
+    "他們",
+    "她們",
+    "牠們",
+    "它們"
+  ],
+  "first_second_person_pronouns": [
+    "我",
+    "我們",
+    "你",
+    "你們",
+    "妳",
+    "妳們"
+  ],
+  "normalization": {
+    "unicode_nfkc": true,
+    "trim_whitespace": true,
+    "collapse_internal_whitespace": true,
+    "strip_outer_punctuation": true,
+    "lowercase_latin": true
+  },
+  "merge_policy": {
+    "exact_normalized_canonical_name": true,
+    "provider_alias_merge_requires_observed_anchor": true,
+    "provider_alias_merge_threshold": 0.92,
+    "automatic_fuzzy_name_merge": false,
+    "automatic_pronoun_entity_creation": false,
+    "automatic_nominal_entity_creation": false
+  },
+  "provider_policy": {
+    "request_version": "fiction_nlu_character_resolution_request_v1",
+    "bounded_completion_retries": 1,
+    "require_exact_context_quote": true,
+    "context_quote_must_be_unique_in_passage": true,
+    "think": false
+  },
+  "output_policy": {
+    "analysis_kind": "character_resolution",
+    "analysis_version": "character_resolution_v1",
+    "status": "provisional",
+    "retrieval_admission": "not_admitted"
+  }
+}

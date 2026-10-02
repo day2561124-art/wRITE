@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_character_resolution_v1.json",
+  "title": "Fiction NLU Character Resolution Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "provider",
+    "scope",
+    "windows",
+    "entities",
+    "mentions",
+    "unresolved_mention_ids",
+    "merge_events",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_character_resolution_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_character_resolution_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "novel_local_character_identity_provisional"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_character_resolution_request_v1"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "passage_count",
+        "status_filter",
+        "complete_novel_claim"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "passage_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status_filter": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "complete_novel_claim": {
+          "const": false
+        }
+      }
+    },
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "window_id",
+          "passage_ids",
+          "char_count",
+          "overlap_from_previous"
+        ],
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "pattern": "^WIN-[A-F0-9]{16}$"
+          },
+          "passage_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^PAS-[A-F0-9]{16}$"
+            }
+          },
+          "char_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "overlap_from_previous": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entity_id",
+          "canonical_name",
+          "normalized_name",
+          "aliases",
+          "anchor_mention_ids",
+          "mention_ids",
+          "confidence",
+          "state"
+        ],
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "canonical_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "normalized_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "anchor_mention_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^MEN-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "mention_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^MEN-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "state": {
+            "enum": [
+              "anchored",
+              "provisional_alias_merge"
+            ]
+          }
+        }
+      }
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mention_id",
+          "passage_id",
+          "scene_id",
+          "surface",
+          "mention_type",
+          "confidence",
+          "link_state",
+          "entity_id",
+          "passage_span",
+          "novel_span",
+          "quote_sha256",
+          "context_span",
+          "context_sha256",
+          "source"
+        ],
+        "properties": {
+          "mention_id": {
+            "type": "string",
+            "pattern": "^MEN-[A-F0-9]{16}$"
+          },
+          "passage_id": {
+            "type": "string",
+            "pattern": "^PAS-[A-F0-9]{16}$"
+          },
+          "scene_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^SCN-[A-F0-9]{16}$"
+          },
+          "surface": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mention_type": {
+            "enum": [
+              "proper",
+              "pronoun",
+              "nominal"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "link_state": {
+            "enum": [
+              "proper_anchor",
+              "linked",
+              "unresolved",
+              "rejected"
+            ]
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "passage_span": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "novel_span": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "quote_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "context_span": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "context_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source": {
+            "enum": [
+              "provider_proper_anchor",
+              "provider_coref",
+              "seed_anchor",
+              "heuristic_pronoun",
+              "unresolved_provider"
+            ]
+          }
+        }
+      }
+    },
+    "unresolved_mention_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^MEN-[A-F0-9]{16}$"
+      },
+      "uniqueItems": true
+    },
+    "merge_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merge_id",
+          "canonical_entity_id",
+          "absorbed_entity_id",
+          "reason",
+          "confidence",
+          "evidence_mention_ids"
+        ],
+        "properties": {
+          "merge_id": {
+            "type": "string",
+            "pattern": "^MRG-[A-F0-9]{16}$"
+          },
+          "canonical_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "absorbed_entity_id": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "reason": {
+            "enum": [
+              "exact_normalized_canonical_name",
+              "provider_observed_alias"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence_mention_ids": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string",
+              "pattern": "^MEN-[A-F0-9]{16}$"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
