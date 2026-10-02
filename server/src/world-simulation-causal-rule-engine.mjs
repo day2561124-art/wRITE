@@ -1,3 +1,4 @@
+import { projectWorldSimulationOffscreenBreakpoint } from "./world-simulation-offscreen-breakpoint-service.mjs";
 import {
   hashAgentRunValue,
 } from "./agent-run-service.mjs";
@@ -1412,7 +1413,77 @@ export function buildWorldSimulationCausalRuleContract() {
   };
 }
 
+// Only this World-derived entry can seed elapsed time without an action.
+const offscreenPhysicalStepContexts = new WeakMap();
+
+export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {}) {
+  const state = cloneJson(object(input.world_state));
+  if (!Number.isSafeInteger(input.world_state_revision) || input.world_state_revision < 0
+      || input.world_state_hash !== hashAgentRunValue(state)) {
+    const error = new Error("Physical step requires the exact committed World identity.");
+    error.code = "C6E_PHYSICAL_STEP_INVALID";
+    throw error;
+  }
+  const discovery = projectWorldSimulationOffscreenBreakpoint({
+    world_state: state, target_horizon: input.target_horizon ?? null,
+  });
+  const blocked = reason => ({
+    committed: false, blocked_reason: reason, discovery,
+  });
+  if (array(state.event_queue).length) return blocked("physical_step_queue_not_empty");
+  // CC-6B expiry assumes a normal listener perception opportunity occurred.
+  // A physical-only step cannot consume that pending opportunity.
+  if (array(state.sound_events).some(signal =>
+      signal?.schema_version === worldSimulationCommunicationAcousticBridgeVersion))
+    return blocked("physical_step_acoustic_ingress_pending");
+  if (!discovery.earliest_breakpoint_confirmed)
+    return blocked(discovery.unresolved_process_count
+      ? "physical_step_authority_unresolved" : "physical_step_no_breakpoint");
+  // Projectile endpoint/zero-time draining requires a separate scheduler gate.
+  if (Object.values(object(state.projectiles)).some(item => item?.active === true))
+    return blocked("physical_step_projectile_progression_pending");
+  const fields = Object.values(object(state.ability_fields)).filter(item => item?.active === true);
+  const scenes = new Set(fields.map(item => String(item.scene_id ?? "")));
+  if (scenes.size !== 1 || !object(state.scenes)[[...scenes][0]])
+    return blocked("physical_step_scene_scope_unresolved");
+  if (fields.some(item => ![item.center?.x, item.center?.y, item.radius_m]
+      .every(value => typeof value === "number" && Number.isFinite(value))
+      || item.radius_m <= 0))
+    return blocked("physical_step_field_geometry_unresolved");
+  const delta = discovery.breakpoint.delta_ms;
+  if (!Number.isSafeInteger(delta) || delta <= 0)
+    return blocked("physical_step_same_time_or_fractional_pending");
+  const sceneId = [...scenes][0];
+  const turnId = `world_physical_${hashAgentRunValue({
+    session: input.world_simulation_session_id, revision: input.world_state_revision,
+    hash: input.world_state_hash, breakpoint: discovery.breakpoint,
+  }).slice(0, 24)}`;
+  const event = {
+    event_id: turnId, scene_id: sceneId, type: "offscreen_physical_process_step",
+    source_authority: discovery.breakpoint.source_authority,
+    simulation_time: state.simulation_time,
+  };
+  const causalInput = {
+    world_simulation_session_id: input.world_simulation_session_id,
+    world_state: state, world_state_revision: input.world_state_revision,
+    world_state_hash: input.world_state_hash, turn_id: turnId, event,
+    selected_action_intents: [],
+  };
+  offscreenPhysicalStepContexts.set(causalInput, { elapsed_ms: delta });
+  try {
+    const resolution = await adjudicateWorldSimulationCausality(causalInput);
+    if (resolution.next_world_state.simulation_time !== discovery.breakpoint.simulation_time
+        || hashAgentRunValue(resolution.next_world_state.event_queue ?? [])
+          !== hashAgentRunValue(state.event_queue ?? []))
+      throw new Error("Physical step did not preserve its exact clock/queue boundary.");
+    return { ...resolution, turn_id: turnId, event, discovery };
+  } finally {
+    offscreenPhysicalStepContexts.delete(causalInput);
+  }
+}
+
 export async function adjudicateWorldSimulationCausality(input = {}) {
+  const physicalStep = offscreenPhysicalStepContexts.get(input) ?? null;
   const snapshot = cloneJson(object(input.world_state));
   let next = cloneJson(snapshot);
   const event = object(input.event);
@@ -1441,7 +1512,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
   const immutableCausalEvaluatorAudits = [];
   const immutableCausalQueryAudits = [];
   const immutableEventArbitrationAudits = [];
-  let elapsedMs = 0;
+  let elapsedMs = physicalStep?.elapsed_ms ?? 0;
 
   const spatialProduced = runWorldSimulationPureProposalProducer({
     producer: "spatial_rules",
@@ -2017,7 +2088,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       "simulation_time",
       previousTime,
       nextTime,
-      `maximum resolved action duration elapsed: ${elapsedMs}ms`,
+      physicalStep ? `World-owned physical breakpoint elapsed: ${elapsedMs}ms`
+        : `maximum resolved action duration elapsed: ${elapsedMs}ms`,
       { time_ms: elapsedMs, source_layer: "causal_resolution" },
     );
     if (nextScene) {
@@ -2085,6 +2157,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     error.code="CC7AF_PENDING_CANCELLATION_UNVERIFIED";
     throw error;
   }
+  if (!physicalStep) {
   next.event_queue = [
     ...(cancellation?.remaining_queue ?? queue.slice(1)),...followUps];
   pushTransition(
@@ -2096,6 +2169,8 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
     `resolved queue-head event ${currentEventId || "<unnamed>"} and scheduled follow-ups`,
     { time_ms: elapsedMs, source_layer: "causal_resolution" },
   );
+  }
+
   for (const followUp of followUps) {
     scheduledEvents.push(followUp.event_id ?? followUp.id ?? followUp);
   }

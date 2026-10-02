@@ -2564,3 +2564,174 @@ for (const mode of ["exact-lifetime", "due-now", "unresolved"]) {
   }
 }
 console.log("CB-C6-E3 horizon equality and unresolved process regression passed.");
+
+import { adjudicateWorldSimulationOffscreenPhysicalStep } from "../../server/src/world-simulation-causal-rule-engine.mjs";
+import { runWorldSimulationOffscreenPhysicalStep } from "../../server/src/world-simulation-offscreen-physical-step-service.mjs";
+
+function e4FieldWorld() {
+  const state = e3PersistentProcessWorld();
+  state.projectiles = {};
+  return state;
+}
+async function e4Resolve(state, target_horizon = null) {
+  return adjudicateWorldSimulationOffscreenPhysicalStep({
+    world_simulation_session_id: "e4-pure", world_state: state,
+    world_state_revision: 0, world_state_hash: hashAgentRunValue(state), target_horizon,
+  });
+}
+{
+  const state = e4FieldWorld();
+  const before = d1Clone(state);
+  const first = await e4Resolve(state);
+  assert.equal(first.next_world_state.ability_fields.field_e3.remaining_ms, 150);
+  assert.equal(first.next_world_state.simulation_time,
+    new Date(Date.parse(state.simulation_time) + 100).toISOString());
+  assert.deepEqual(first.next_world_state.event_queue, []);
+  assert.deepEqual(first.next_world_state.memories, state.memories);
+  assert.deepEqual(first.next_world_state.motivational_goal_history, state.motivational_goal_history);
+  assert.ok(first.chronological_mutation_queue.queue_hash);
+  assert.ok(first.chronological_mutation_execution.execution_hash);
+  assert.deepEqual(await e4Resolve(state), first, "physical step must replay exactly");
+  assert.deepEqual(state, before, "causal entry must not mutate committed input");
+  const second = await e4Resolve(first.next_world_state);
+  const third = await e4Resolve(second.next_world_state);
+  assert.equal(third.next_world_state.ability_fields.field_e3.active, false);
+  assert.equal(third.next_world_state.ability_fields.field_e3.remaining_ms, 0);
+  assert.equal(third.next_world_state.simulation_time,
+    new Date(Date.parse(state.simulation_time) + 250).toISOString());
+  const horizon = new Date(Date.parse(state.simulation_time) + 99).toISOString();
+  assert.equal((await e4Resolve(state, horizon)).blocked_reason, "physical_step_no_breakpoint");
+  const damage = e4FieldWorld();
+  damage.ability_fields.field_e3.center = d1Clone(damage.scenes.room.entity_positions.aria);
+  damage.ability_fields.field_e3.radius_m = 1;
+  damage.ability_fields.field_e3.effect.damage_per_second = 10;
+  const hit = await e4Resolve(damage);
+  assert.ok(hit.action_outcomes.some(item => item.result === "ability_field_tick"
+    && item.damage_applied > 0), "existing field impact owner must retain actual damage");
+  for (const [mode, reason] of [
+    ["queue", "physical_step_queue_not_empty"],
+    ["projectile", "physical_step_projectile_progression_pending"],
+    ["geometry", "physical_step_field_geometry_unresolved"],
+    ["scenes", "physical_step_scene_scope_unresolved"],
+    ["unresolved", "physical_step_authority_unresolved"],
+    ["fractional", "physical_step_same_time_or_fractional_pending"],
+  ]) {
+    const pending = e4FieldWorld();
+    if (mode === "queue") pending.event_queue = [{ event_id: "pending" }];
+    if (mode === "projectile") pending.projectiles = e3PersistentProcessWorld().projectiles;
+    if (mode === "geometry") delete pending.ability_fields.field_e3.center;
+    if (mode === "scenes") {
+      pending.scenes.other = d1Clone(pending.scenes.room);
+      pending.ability_fields.other = { ...d1Clone(pending.ability_fields.field_e3),
+        field_id: "other", scene_id: "other" };
+    }
+    if (mode === "unresolved") pending.ability_fields.field_e3.remaining_ms = null;
+    if (mode === "fractional") pending.ability_fields.field_e3.remaining_ms = 0.5;
+    const original = d1Clone(pending);
+    assert.equal((await e4Resolve(pending)).blocked_reason, reason);
+    assert.deepEqual(pending, original);
+  }
+  await assert.rejects(adjudicateWorldSimulationOffscreenPhysicalStep({
+    world_state: state, world_state_revision: 0, world_state_hash: "forged",
+  }), { code: "C6E_PHYSICAL_STEP_INVALID" });
+}
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e4-physical-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root, characterBrain: async () => assert.fail("Physical step may not invoke Brain.") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E4 native physical field progression", seed: "e4-field",
+      initial_world_state: e4FieldWorld(),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const original = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const at = ms => new Date(Date.parse(original.state.simulation_time) + ms).toISOString();
+    let current = original;
+    for (const [elapsed, remaining] of [[100, 150], [200, 50], [250, 0]]) {
+      const result = await runWorldSimulationOffscreenPhysicalStep({
+        world_simulation_session_id: sid, expected_revision: current.revision,
+        expected_state_hash: current.state_hash, target_horizon: at(250),
+      }, options);
+      assert.equal(result.committed, true);
+      assert.equal(result.reached_simulation_time, at(elapsed));
+      assert.equal(result.automatic_replay_allowed, false);
+      const next = await getWorldSimulationState(sid, options);
+      assert.equal(next.revision, current.revision + 1);
+      assert.equal(next.state.ability_fields.field_e3.remaining_ms, remaining);
+      assert.deepEqual(next.state.event_queue, []);
+      assert.deepEqual(next.state.memories, original.state.memories);
+      assert.deepEqual(next.state.motivational_goal_history, original.state.motivational_goal_history);
+      assert.deepEqual(next.state.characters.aria.physical_state.injuries,
+        original.state.characters.aria.physical_state.injuries);
+      assert.deepEqual(next.state.characters.aria.physical_state.sleep_arousal,
+        original.state.characters.aria.physical_state.sleep_arousal);
+      current = next;
+    }
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, 3);
+    for (const turn of history.turns) {
+      assert.equal(turn.event.type, "offscreen_physical_process_step");
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_queue.queue_hash);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+    }
+    const durable = await bytes();
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: original.revision,
+      expected_state_hash: original.state_hash,
+    }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+    assert.deepEqual(await bytes(), durable);
+    const idle = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: current.revision,
+      expected_state_hash: current.state_hash, target_horizon: at(500),
+    }, options);
+    assert.equal(idle.committed, false);
+    assert.equal(idle.blocked_reason, "physical_step_no_breakpoint");
+    assert.deepEqual(await bytes(), durable, "idle must not jump to requested horizon");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E4 World-owned physical field progression regression passed.");
+
+{
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e4-acoustic-pending-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("Pending acoustic ingress may not invoke Brain from a physical step.") };
+  try {
+    const initial = e4FieldWorld();
+    initial.sound_events = [{
+      schema_version: "cc6b-communication-acoustic-bridge-v1",
+      sound_id: "e4-pending-speech", scene_id: "room",
+      kind: "communication_speech_signal", lifecycle: "next_perception_only",
+      source_entity_id: "keeper", active: true,
+    }];
+    const clone = d1Clone(initial);
+    const projected = await e4Resolve(initial);
+    assert.equal(projected.blocked_reason, "physical_step_acoustic_ingress_pending");
+    assert.deepEqual(initial, clone);
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E4 pending acoustic admission preservation",
+      seed: "e4-acoustic-pending", initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const durable = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await durable();
+    const result = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash,
+    }, options);
+    assert.equal(result.committed, false);
+    assert.equal(result.blocked_reason, "physical_step_acoustic_ingress_pending");
+    assert.equal(result.reached_simulation_time, before.state.simulation_time);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await durable(), original,
+      "physical step must preserve unheard CC-6B signal and exact durable bytes");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E4 physical step preserves pending acoustic ingress regression passed.");
