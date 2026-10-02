@@ -1,0 +1,63 @@
+{
+  "schema_version": "fiction_nlu_character_relationship_timeline_config_v1",
+  "config_version": "fiction_nlu_character_relationship_timeline_v1",
+  "assertion_scope": "narrative_order_evidence_timeline_not_latent_relationship_truth",
+  "principles": [
+    "Consume validated NLU-3 local relationship assertions and pair windows; never re-extract relationships.",
+    "Order evidence by canonical narrative Passage order and novel offsets, not inferred story-world chronology.",
+    "A relation missing from a later evidence window means not_observed, never ended.",
+    "Concurrent and contradictory relationship signals remain visible; no last-write-wins collapse.",
+    "First support and reinforcement may be derived deterministically; weakening, ending, reconciliation, or causal change require later explicit evidence/modeling.",
+    "Directed relations preserve source and target; symmetric relations preserve NLU-3 canonical ordering.",
+    "Every timeline object is bound to the exact NLU-3 relationship assertion registry hash.",
+    "Retrieval admission remains closed until a later certified integration."
+  ],
+  "ordering_policy": {
+    "basis": "narrative_passage_order",
+    "primary_key": "first_novel_offset",
+    "secondary_key": "last_novel_offset",
+    "tie_breaker": "pair_window_id",
+    "nonlinear_story_time_resolved": false
+  },
+  "snapshot_policy": {
+    "include_zero_assertion_pair_windows": true,
+    "absence_semantics": "not_observed_not_ended",
+    "preserve_concurrent_signals": true
+  },
+  "change_policy": {
+    "event_types": [
+      "timeline_started",
+      "evidence_changed",
+      "evidence_reinforced",
+      "evidence_became_unobserved",
+      "no_positive_evidence_continues"
+    ],
+    "derive_only_from_adjacent_snapshots": true,
+    "no_termination_inference": true
+  },
+  "conflict_policy": {
+    "preserve_conflicts": true,
+    "conflicting_relation_pairs": [
+      [
+        "affect.trusts",
+        "affect.distrusts"
+      ],
+      [
+        "affect.affection_for",
+        "affect.resentment_toward"
+      ]
+    ],
+    "conflict_is_warning_not_error": true
+  },
+  "reciprocity_policy": {
+    "detect_directed_reciprocity": true,
+    "reciprocity_is_coexistence_not_symmetry": true
+  },
+  "output_policy": {
+    "analysis_kind": "relationship_timeline",
+    "analysis_version": "character_relationship_timeline_v1",
+    "status": "provisional",
+    "complete_relationship_history_claim": false,
+    "retrieval_admission": "not_admitted"
+  }
+}

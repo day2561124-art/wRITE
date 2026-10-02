@@ -1,0 +1,415 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_character_relationship_timeline_v1.json",
+  "title": "Fiction NLU Character Relationship Timeline Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "scope",
+    "relationship_registry_sha256",
+    "ordering",
+    "timelines",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_character_relationship_timeline_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_character_relationship_timeline_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "narrative_order_evidence_timeline_not_latent_relationship_truth"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "relationship_analysis_id",
+        "complete_relationship_history_claim"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "relationship_analysis_id": {
+          "type": "string",
+          "pattern": "^ANL-[A-F0-9]{16}$"
+        },
+        "complete_relationship_history_claim": {
+          "const": false
+        }
+      }
+    },
+    "relationship_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "ordering": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "nonlinear_story_time_resolved"
+      ],
+      "properties": {
+        "basis": {
+          "const": "narrative_passage_order"
+        },
+        "nonlinear_story_time_resolved": {
+          "const": false
+        }
+      }
+    },
+    "timelines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "timeline_id",
+          "entity_a",
+          "entity_b",
+          "snapshots",
+          "tracks",
+          "change_events",
+          "conflict_events",
+          "reciprocity_events"
+        ],
+        "properties": {
+          "timeline_id": {
+            "type": "string",
+            "pattern": "^RTL-[A-F0-9]{16}$"
+          },
+          "entity_a": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "entity_b": {
+            "type": "string",
+            "pattern": "^CHR-[A-F0-9]{16}$"
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "snapshot_id",
+                "pair_window_id",
+                "first_novel_offset",
+                "last_novel_offset",
+                "passage_ids",
+                "scene_ids",
+                "assertion_ids",
+                "track_ids",
+                "absence_semantics"
+              ],
+              "properties": {
+                "snapshot_id": {
+                  "type": "string",
+                  "pattern": "^RSP-[A-F0-9]{16}$"
+                },
+                "pair_window_id": {
+                  "type": "string",
+                  "pattern": "^RPW-[A-F0-9]{16}$"
+                },
+                "first_novel_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "last_novel_offset": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "passage_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^PAS-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "scene_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^SCN-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "assertion_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^REL-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "track_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^RTR-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "absence_semantics": {
+                  "const": "not_observed_not_ended"
+                }
+              }
+            }
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "track_id",
+                "relation_id",
+                "directionality",
+                "source_entity_id",
+                "target_entity_id",
+                "assertion_ids",
+                "snapshot_ids",
+                "first_novel_offset",
+                "last_novel_offset",
+                "observation_count"
+              ],
+              "properties": {
+                "track_id": {
+                  "type": "string",
+                  "pattern": "^RTR-[A-F0-9]{16}$"
+                },
+                "relation_id": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+\\.[a-z_]+$"
+                },
+                "directionality": {
+                  "enum": [
+                    "symmetric",
+                    "directed"
+                  ]
+                },
+                "source_entity_id": {
+                  "type": "string",
+                  "pattern": "^CHR-[A-F0-9]{16}$"
+                },
+                "target_entity_id": {
+                  "type": "string",
+                  "pattern": "^CHR-[A-F0-9]{16}$"
+                },
+                "assertion_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^REL-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "snapshot_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^RSP-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "first_novel_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "last_novel_offset": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "observation_count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "change_events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "change_id",
+                "event_type",
+                "from_snapshot_id",
+                "to_snapshot_id",
+                "added_track_ids",
+                "continuing_track_ids",
+                "not_observed_track_ids"
+              ],
+              "properties": {
+                "change_id": {
+                  "type": "string",
+                  "pattern": "^RCH-[A-F0-9]{16}$"
+                },
+                "event_type": {
+                  "enum": [
+                    "timeline_started",
+                    "evidence_changed",
+                    "evidence_reinforced",
+                    "evidence_became_unobserved",
+                    "no_positive_evidence_continues"
+                  ]
+                },
+                "from_snapshot_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^RSP-[A-F0-9]{16}$"
+                },
+                "to_snapshot_id": {
+                  "type": "string",
+                  "pattern": "^RSP-[A-F0-9]{16}$"
+                },
+                "added_track_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^RTR-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "continuing_track_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^RTR-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                },
+                "not_observed_track_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^RTR-[A-F0-9]{16}$"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "conflict_events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "conflict_id",
+                "snapshot_id",
+                "track_id_a",
+                "track_id_b",
+                "relation_id_a",
+                "relation_id_b"
+              ],
+              "properties": {
+                "conflict_id": {
+                  "type": "string",
+                  "pattern": "^RCF-[A-F0-9]{16}$"
+                },
+                "snapshot_id": {
+                  "type": "string",
+                  "pattern": "^RSP-[A-F0-9]{16}$"
+                },
+                "track_id_a": {
+                  "type": "string",
+                  "pattern": "^RTR-[A-F0-9]{16}$"
+                },
+                "track_id_b": {
+                  "type": "string",
+                  "pattern": "^RTR-[A-F0-9]{16}$"
+                },
+                "relation_id_a": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+\\.[a-z_]+$"
+                },
+                "relation_id_b": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+\\.[a-z_]+$"
+                }
+              }
+            }
+          },
+          "reciprocity_events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reciprocity_id",
+                "relation_id",
+                "forward_track_id",
+                "reverse_track_id"
+              ],
+              "properties": {
+                "reciprocity_id": {
+                  "type": "string",
+                  "pattern": "^RRP-[A-F0-9]{16}$"
+                },
+                "relation_id": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+\\.[a-z_]+$"
+                },
+                "forward_track_id": {
+                  "type": "string",
+                  "pattern": "^RTR-[A-F0-9]{16}$"
+                },
+                "reverse_track_id": {
+                  "type": "string",
+                  "pattern": "^RTR-[A-F0-9]{16}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
