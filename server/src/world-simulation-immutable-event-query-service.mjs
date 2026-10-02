@@ -308,6 +308,13 @@ function sceneBoundsExitTime(scene, projectile, startMs, endMs) {
   const dimensions = object(scene.dimensions);
   const width = positiveNumber(dimensions.width_m ?? dimensions.width, Number.POSITIVE_INFINITY);
   const depth = positiveNumber(dimensions.depth_m ?? dimensions.depth, Number.POSITIVE_INFINITY);
+  // Exact zero-window outward boundary contact is already due. Preserve
+  // inward/stationary endpoints and the existing positive-window query.
+  if (endMs === startMs && (
+      (projectile.position.x === 0 && projectile.velocity_mps.x < 0)
+      || (projectile.position.x === width && projectile.velocity_mps.x > 0)
+      || (projectile.position.y === 0 && projectile.velocity_mps.y < 0)
+      || (projectile.position.y === depth && projectile.velocity_mps.y > 0))) return startMs;
   const seconds = (endMs - startMs) / 1000;
   const end = {
     x: projectile.position.x + projectile.velocity_mps.x * seconds,
