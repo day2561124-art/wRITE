@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_semantic_classification_v2.json",
+  "title": "Fiction NLU Semantic Classification Payload v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "taxonomy_version",
+    "taxonomy_sha256",
+    "assertion_scope",
+    "candidate_policy_version",
+    "provider",
+    "legacy_context",
+    "labels",
+    "active_labels",
+    "inactive_candidates",
+    "hierarchy_check"
+  ],
+  "properties": {
+    "taxonomy_version": {
+      "const": "fiction_nlu_semantic_taxonomy_v2"
+    },
+    "taxonomy_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "passage_semantic_interpretation_not_canonical_truth"
+    },
+    "candidate_policy_version": {
+      "const": "bounded_high_recall_v1"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_classification_request_v2"
+        }
+      }
+    },
+    "legacy_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discourse_bucket",
+        "active_facets"
+      ],
+      "properties": {
+        "discourse_bucket": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_facets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label_id",
+          "dimension",
+          "score",
+          "threshold",
+          "active",
+          "source",
+          "evidence"
+        ],
+        "properties": {
+          "label_id": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.[a-z_]+$"
+          },
+          "dimension": {
+            "enum": [
+              "discourse",
+              "activity",
+              "interaction",
+              "emotion_signal",
+              "tension"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "deterministic",
+              "legacy_hint",
+              "model",
+              "hybrid"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "span_start",
+                "span_end",
+                "quote_sha256"
+              ],
+              "properties": {
+                "span_start": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "span_end": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "quote_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "active": {
+                  "const": true
+                }
+              },
+              "required": [
+                "active"
+              ]
+            },
+            "then": {
+              "properties": {
+                "evidence": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "active_labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z_]+\\.[a-z_]+$"
+      },
+      "uniqueItems": true
+    },
+    "inactive_candidates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z_]+\\.[a-z_]+$"
+      },
+      "uniqueItems": true
+    },
+    "hierarchy_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

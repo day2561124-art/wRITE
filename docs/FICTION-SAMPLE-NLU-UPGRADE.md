@@ -84,6 +84,37 @@ not be enabled during independent NLU production/backfill.
 NLU-9 through NLU-11 may run in parallel with the character/event branch because
 they do not depend on entity or event graph completion.
 
+## NLU-1 — Hierarchical multi-label semantic classification
+
+Repository artifacts:
+
+- `config/fiction-nlu-semantic-taxonomy-v2.json`
+- `schemas/fiction-nlu-semantic-classification-v2.schema.json`
+- `scripts/fiction-sample-nlu-classify-v2.py`
+- `tests/nlu/fiction-sample-nlu-classification-v2.test.mjs`
+
+NLU-1 keeps deterministic observable discourse separate from inferred semantic
+labels. The current taxonomy contains five dimensions: discourse, activity,
+interaction, emotion signal, and tension. Candidate generation is bounded per
+inferred dimension and uses legacy retrieval facets plus lexical hints only to
+prioritize candidates; those hints do not become canonical truth.
+
+The classifier provider is pluggable. The built-in heuristic provider exists for
+contract/regression testing. The Ollama provider scores candidates by dimension,
+turns model thinking off, requires every supplied candidate to be scored, and
+performs one bounded completion retry for omitted candidates. Active inferred
+labels require exact passage-local evidence spans; an above-threshold score with no
+valid evidence is not activated.
+
+Output remains `provisional`, includes per-label scores/evidence and hierarchy
+checks, and always carries `retrieval_admission.state = not_admitted`.
+
+External database installation is additive under `database_v1/analysis` plus
+versioned schema/taxonomy files. The formal semantic-classification store begins
+empty; development pilots are not persisted into it. Canonical Passage enumeration
+uses `records/passages_v1.jsonl` directly rather than manifest counts so metadata
+lag cannot omit newly added passages.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until

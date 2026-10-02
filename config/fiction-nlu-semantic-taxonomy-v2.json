@@ -1,0 +1,533 @@
+{
+  "taxonomy_version": "fiction_nlu_semantic_taxonomy_v2",
+  "schema_version": "fiction_nlu_semantic_taxonomy_manifest_v1",
+  "purpose": "Hierarchical multi-label passage semantics for writing-sample understanding. Labels are evidence-backed interpretations, not canonical character or plot truth.",
+  "assertion_scope": "passage_semantic_interpretation_not_canonical_truth",
+  "principles": [
+    "Keep observable discourse features distinct from model-inferred semantic labels.",
+    "Every active inferred label requires passage-local evidence.",
+    "Preserve per-label scores; never collapse a passage to one dominant class.",
+    "A low score means insufficient evidence, not a canonical negative fact.",
+    "Character identity, relationship truth, event identity, plot structure, and style remain owned by later NLU phases.",
+    "Retrieval admission remains closed until a separate integration gate explicitly maps certified NLU fields."
+  ],
+  "candidate_policy": {
+    "mode": "bounded_high_recall_v1",
+    "min_candidates_per_inferred_dimension": 3,
+    "max_candidates_per_inferred_dimension": 6,
+    "always_include_dimension_defaults": true,
+    "legacy_hint_boost": 3,
+    "lexical_hint_boost": 1,
+    "discourse_is_deterministic": true
+  },
+  "scoring_policy": {
+    "score_range": [
+      0,
+      1
+    ],
+    "active_threshold_default": 0.62,
+    "strong_threshold": 0.82,
+    "evidence_required_for_active": true,
+    "max_evidence_quotes_per_label": 3,
+    "provider_must_score_every_candidate": true
+  },
+  "hierarchy": {
+    "root": "passage_semantics",
+    "dimensions": [
+      "discourse",
+      "activity",
+      "interaction",
+      "emotion_signal",
+      "tension"
+    ],
+    "cross_dimension_rules": [
+      {
+        "id": "romantic_intimacy_implies_interpersonal",
+        "if_active": "interaction.romantic_intimacy",
+        "requires_any": [
+          "interaction.interpersonal_dialogue",
+          "interaction.caregiving",
+          "interaction.comforting",
+          "interaction.teasing"
+        ],
+        "severity": "warning"
+      },
+      {
+        "id": "combat_high_tension_soft_expectation",
+        "if_active": "activity.combat_action",
+        "requires_any": [
+          "tension.rising_tension",
+          "tension.high_tension"
+        ],
+        "severity": "warning"
+      }
+    ]
+  },
+  "dimensions": {
+    "discourse": {
+      "selection": "exactly_one",
+      "inference": "deterministic_from_legacy_or_text",
+      "labels": {
+        "discourse.dialogue_heavy": {
+          "description": "Dialogue occupies most of the passage.",
+          "threshold": 0.5,
+          "legacy_values": [
+            "dialogue_heavy"
+          ],
+          "lexical_hints": []
+        },
+        "discourse.mixed_dialogue_narration": {
+          "description": "Dialogue and narration both materially contribute.",
+          "threshold": 0.5,
+          "legacy_values": [
+            "mixed_dialogue_narration"
+          ],
+          "lexical_hints": []
+        },
+        "discourse.narration_heavy": {
+          "description": "Narration occupies most of the passage.",
+          "threshold": 0.5,
+          "legacy_values": [
+            "narration_heavy"
+          ],
+          "lexical_hints": []
+        }
+      }
+    },
+    "activity": {
+      "selection": "multi",
+      "inference": "hybrid",
+      "defaults": [
+        "activity.everyday_interaction",
+        "activity.planning_decision",
+        "activity.setting_description"
+      ],
+      "labels": {
+        "activity.everyday_interaction": {
+          "description": "Ordinary day-to-day action or conversation without a dominant specialized task.",
+          "threshold": 0.62,
+          "legacy_facets": [],
+          "lexical_hints": [
+            "吃飯",
+            "回家",
+            "上課",
+            "放學",
+            "早安",
+            "晚安",
+            "房間",
+            "教室",
+            "一起走"
+          ]
+        },
+        "activity.combat_action": {
+          "description": "Direct combat, attack, defense, chase, or physically dangerous confrontation.",
+          "threshold": 0.62,
+          "legacy_facets": [
+            "combat_action"
+          ],
+          "lexical_hints": [
+            "攻擊",
+            "戰鬥",
+            "揮拳",
+            "刀",
+            "劍",
+            "槍",
+            "閃避",
+            "防禦",
+            "追擊",
+            "爆炸"
+          ]
+        },
+        "activity.investigation": {
+          "description": "Seeking, checking, comparing, or reasoning over clues, evidence, causes, or hidden facts.",
+          "threshold": 0.62,
+          "legacy_facets": [
+            "investigation"
+          ],
+          "lexical_hints": [
+            "調查",
+            "線索",
+            "證據",
+            "查出",
+            "推理",
+            "確認",
+            "追查",
+            "原因",
+            "真相"
+          ]
+        },
+        "activity.travel_transition": {
+          "description": "Movement between locations or a journey is a central activity.",
+          "threshold": 0.62,
+          "legacy_facets": [
+            "travel_transition"
+          ],
+          "lexical_hints": [
+            "出發",
+            "抵達",
+            "離開",
+            "回到",
+            "車站",
+            "搭車",
+            "旅館",
+            "路上",
+            "前往"
+          ]
+        },
+        "activity.worldbuilding_exposition": {
+          "description": "The passage primarily explains rules, institutions, history, abilities, or setting knowledge.",
+          "threshold": 0.62,
+          "legacy_facets": [
+            "worldbuilding_exposition"
+          ],
+          "lexical_hints": [
+            "也就是說",
+            "原理",
+            "規則",
+            "制度",
+            "歷史",
+            "能力",
+            "組織",
+            "世界"
+          ]
+        },
+        "activity.setting_description": {
+          "description": "The passage materially describes location, environment, weather, architecture, or sensory surroundings.",
+          "threshold": 0.62,
+          "legacy_facets": [
+            "setting_description"
+          ],
+          "lexical_hints": [
+            "街道",
+            "教室",
+            "房間",
+            "天空",
+            "空氣",
+            "陽光",
+            "森林",
+            "建築",
+            "景色",
+            "氣味"
+          ]
+        },
+        "activity.training_practice": {
+          "description": "Practice, rehearsal, study, drills, or deliberate skill improvement is central.",
+          "threshold": 0.62,
+          "legacy_facets": [],
+          "lexical_hints": [
+            "練習",
+            "訓練",
+            "複習",
+            "演練",
+            "排練",
+            "修行",
+            "鍛鍊"
+          ]
+        },
+        "activity.planning_decision": {
+          "description": "Characters compare options, make plans, negotiate next steps, or decide what to do.",
+          "threshold": 0.62,
+          "legacy_facets": [],
+          "lexical_hints": [
+            "打算",
+            "計畫",
+            "決定",
+            "怎麼辦",
+            "接下來",
+            "要不要",
+            "安排",
+            "選擇"
+          ]
+        }
+      }
+    },
+    "interaction": {
+      "selection": "multi",
+      "inference": "model",
+      "defaults": [
+        "interaction.interpersonal_dialogue",
+        "interaction.cooperation",
+        "interaction.conflict"
+      ],
+      "labels": {
+        "interaction.interpersonal_dialogue": {
+          "description": "The passage centers on direct interpersonal exchange.",
+          "threshold": 0.62,
+          "lexical_hints": [
+            "說",
+            "問",
+            "回答",
+            "笑著說",
+            "看著她",
+            "看著他"
+          ]
+        },
+        "interaction.teasing": {
+          "description": "Playful provocation, joking pressure, or affectionate needling between characters.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "逗",
+            "調侃",
+            "取笑",
+            "故意",
+            "捉弄",
+            "開玩笑"
+          ]
+        },
+        "interaction.conflict": {
+          "description": "Open disagreement, confrontation, rejection, argument, or hostile friction.",
+          "threshold": 0.62,
+          "lexical_hints": [
+            "爭吵",
+            "反駁",
+            "拒絕",
+            "生氣",
+            "敵意",
+            "衝突",
+            "不准",
+            "閉嘴"
+          ]
+        },
+        "interaction.comforting": {
+          "description": "One character reassures, consoles, calms, or emotionally supports another.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "沒事",
+            "別怕",
+            "安慰",
+            "放心",
+            "陪你",
+            "不要哭",
+            "抱住"
+          ]
+        },
+        "interaction.cooperation": {
+          "description": "Characters coordinate, help one another, or work toward a shared immediate goal.",
+          "threshold": 0.62,
+          "lexical_hints": [
+            "一起",
+            "幫忙",
+            "合作",
+            "配合",
+            "交給我",
+            "我們來"
+          ]
+        },
+        "interaction.caregiving": {
+          "description": "Practical care for another person's comfort, health, food, rest, clothing, or safety.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "照顧",
+            "餵",
+            "替她",
+            "替他",
+            "蓋好",
+            "擦掉",
+            "扶著",
+            "休息"
+          ]
+        },
+        "interaction.romantic_intimacy": {
+          "description": "The passage contains clearly romantic or physically intimate interaction beyond generic friendliness.",
+          "threshold": 0.7,
+          "lexical_hints": [
+            "告白",
+            "牽手",
+            "擁抱",
+            "親吻",
+            "戀人",
+            "喜歡你",
+            "愛你",
+            "心跳"
+          ]
+        },
+        "interaction.group_social": {
+          "description": "Three or more characters participate in a shared social exchange or group dynamic.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "大家",
+            "眾人",
+            "同學們",
+            "三人",
+            "四人",
+            "一起笑"
+          ]
+        }
+      }
+    },
+    "emotion_signal": {
+      "selection": "multi",
+      "inference": "model",
+      "defaults": [
+        "emotion_signal.affection",
+        "emotion_signal.anxiety",
+        "emotion_signal.embarrassment"
+      ],
+      "labels": {
+        "emotion_signal.embarrassment": {
+          "description": "The text signals embarrassment, shyness, fluster, or social self-consciousness.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "害羞",
+            "臉紅",
+            "不好意思",
+            "低下頭",
+            "結巴",
+            "慌張",
+            "耳朵紅"
+          ]
+        },
+        "emotion_signal.affection": {
+          "description": "The text signals fondness, warmth, tenderness, attachment, or romantic affection.",
+          "threshold": 0.66,
+          "lexical_hints": [
+            "喜歡",
+            "溫柔",
+            "寵溺",
+            "珍惜",
+            "可愛",
+            "依偎",
+            "心疼",
+            "愛"
+          ]
+        },
+        "emotion_signal.anxiety": {
+          "description": "The text signals worry, nervous anticipation, unease, or apprehension.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "擔心",
+            "緊張",
+            "不安",
+            "忐忑",
+            "焦慮",
+            "害怕會",
+            "放心不下"
+          ]
+        },
+        "emotion_signal.sadness": {
+          "description": "The text signals sadness, grief, hurt, disappointment, or tearful low mood.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "難過",
+            "悲傷",
+            "眼淚",
+            "哭",
+            "失落",
+            "心痛",
+            "沮喪"
+          ]
+        },
+        "emotion_signal.anger": {
+          "description": "The text signals anger, irritation, resentment, or rage.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "生氣",
+            "憤怒",
+            "惱火",
+            "怒",
+            "不爽",
+            "咬牙",
+            "火大"
+          ]
+        },
+        "emotion_signal.fear": {
+          "description": "The text signals fear, fright, dread, or immediate threat response.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "害怕",
+            "恐懼",
+            "發抖",
+            "驚恐",
+            "畏懼",
+            "逃"
+          ]
+        },
+        "emotion_signal.joy": {
+          "description": "The text signals happiness, delight, excitement, or relieved pleasure.",
+          "threshold": 0.64,
+          "lexical_hints": [
+            "開心",
+            "高興",
+            "興奮",
+            "笑了",
+            "雀躍",
+            "欣喜",
+            "太好了"
+          ]
+        },
+        "emotion_signal.loneliness": {
+          "description": "The text signals isolation, longing for company, abandonment, or emotional distance.",
+          "threshold": 0.66,
+          "lexical_hints": [
+            "孤單",
+            "寂寞",
+            "一個人",
+            "沒有人",
+            "被留下",
+            "空蕩"
+          ]
+        },
+        "emotion_signal.surprise": {
+          "description": "The text signals surprise, shock, startle, or unexpected realization.",
+          "threshold": 0.62,
+          "lexical_hints": [
+            "驚訝",
+            "愣住",
+            "沒想到",
+            "嚇了一跳",
+            "意外",
+            "震驚"
+          ]
+        }
+      }
+    },
+    "tension": {
+      "selection": "exactly_one",
+      "inference": "model",
+      "defaults": [
+        "tension.low_tension",
+        "tension.rising_tension",
+        "tension.high_tension"
+      ],
+      "labels": {
+        "tension.low_tension": {
+          "description": "Low immediate stakes or calm conversational/reflective pacing.",
+          "threshold": 0.55,
+          "lexical_hints": [
+            "平靜",
+            "悠閒",
+            "慢慢",
+            "日常",
+            "輕鬆"
+          ]
+        },
+        "tension.rising_tension": {
+          "description": "Pressure or uncertainty is building but has not reached sustained crisis intensity.",
+          "threshold": 0.58,
+          "lexical_hints": [
+            "突然",
+            "越來越",
+            "不對勁",
+            "逼近",
+            "來不及",
+            "緊張"
+          ]
+        },
+        "tension.high_tension": {
+          "description": "Immediate danger, severe confrontation, crisis, or sustained high-pressure action dominates.",
+          "threshold": 0.6,
+          "lexical_hints": [
+            "危險",
+            "死亡",
+            "爆炸",
+            "尖叫",
+            "攻擊",
+            "逃命",
+            "重傷",
+            "失控"
+          ]
+        }
+      }
+    }
+  }
+}
