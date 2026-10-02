@@ -3890,7 +3890,8 @@ const e11Cases = [
   ["due", 0, 0], ["due", 1, 0], ["due", 32, 0],
   ["due", 1, 500], ["due", 32, null],
   ["flight", 0, null], ["flight", 1, null], ["flight", 2, null], ["flight", 32, null],
-  ["flight", 32, 499],
+  ["flight", 0, 500], ["flight", 1, 500], ["flight", 2, 500], ["flight", 32, 500],
+  ["flight", 2, 750], ["flight", 32, 499],
 ];
 for (const [mode, budget, horizonMs] of e11Cases) {
   const root = path.join(projectRoot, "tests", ".tmp",
@@ -3990,15 +3991,41 @@ for (const [mode, budget, horizonMs] of e11Cases) {
     assert.deepEqual(await bytes(), finalBytes, "terminated batch cannot duplicate history or invent time");
   } finally { await rm(root, { recursive: true, force: true }); }
 }
+// E12 direct plane times must not depend on the discovery window.
+// Exact positive endpoints remain flight; E10 owns the following zero-time effect.
+for (const [position, velocity] of [
+  [{ x: 7, y: 4 }, { x: 2, y: 0 }],
+  [{ x: 1, y: 4 }, { x: -2, y: 0 }],
+  [{ x: 4, y: 7 }, { x: 0, y: 2 }],
+  [{ x: 4, y: 1 }, { x: 0, y: -2 }],
+  [{ x: 7, y: 7 }, { x: 2, y: 2 }],
+]) {
+  for (const windowMs of [499, 500, 500.000001, 750, 5000]) {
+    const input = {
+      projectile: { ...e6ProjectileWorld("bounds").projectiles.projectile_e3,
+        position, velocity_mps: velocity, max_lifetime_ms: 10000 },
+      scene: { dimensions: { width_m: 8, depth_m: 8 }, obstacles: [] },
+      character_motion_profiles: [], current_time_ms: 73, active_end_ms: 73 + windowMs,
+    };
+    const original = d1Clone(input);
+    const result = queryWorldSimulationProjectileNextEvent(input);
+    assert.equal(result.result.event.kind, windowMs <= 500 ? "advance_end" : "bounds");
+    assert.equal(result.result.event.timeMs, 73 + Math.min(windowMs, 500));
+    assert.deepEqual(queryWorldSimulationProjectileNextEvent(input), result);
+    assert.deepEqual(input, original);
+  }
+}
 {
   const root = path.join(projectRoot, "tests", ".tmp",
-    `c6-e11-fractional-discovery-${process.pid}-${Date.now()}`);
+    `c6-e12-fractional-discovery-${process.pid}-${Date.now()}`);
   const options = { fixtureRoot: root,
-    characterBrain: async () => assert.fail("E11 cannot round fractional discovery into World time") };
+    characterBrain: async () => assert.fail("E12 cannot round actual fractional World time") };
   try {
+    const initial = e6ProjectileWorld("bounds");
+    initial.projectiles.projectile_e3.velocity_mps = { x: 3, y: 0 };
     const session = await beginWorldSimulationSession({
-      simulation_label: "C6-E11 fractional bounded flight stays pending", seed: "e11-fractional",
-      initial_world_state: e6ProjectileWorld("bounds"),
+      simulation_label: "C6-E12 actual fractional bounded flight stays pending", seed: "e12-fractional",
+      initial_world_state: initial,
     }, options);
     const sid = session.world_simulation_session_id;
     const before = await getWorldSimulationState(sid, options);
@@ -4007,37 +4034,25 @@ for (const [mode, budget, horizonMs] of e11Cases) {
       world_state: before.state, target_horizon: target,
     });
     assert.equal(discovery.breakpoint.kind, "projectile_bounds");
-    assert.equal(Number.isSafeInteger(discovery.breakpoint.delta_ms), false,
-      "the existing bounded query exposes fractional arithmetic; no rounding authority");
+    assert.equal(discovery.breakpoint.delta_ms, (1 / 3) * 1000);
+    assert.equal(Number.isSafeInteger(discovery.breakpoint.delta_ms), false);
+    const unbounded = projectWorldSimulationOffscreenBreakpoint({ world_state: before.state });
+    assert.equal(unbounded.breakpoint.delta_ms, discovery.breakpoint.delta_ms);
     const paths = worldSimulationStatePaths(sid, options);
     const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
     const original = await bytes();
-    const pending = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 32, target_horizon: target,
-    }, options);
-    assert.equal(pending.attempted_turn_count, 0);
-    assert.equal(pending.committed_turn_count, 0);
-    assert.equal(pending.status, "slow_process_breakpoint_pending");
-    assert.equal(pending.target_horizon_claimed, false);
-    assert.deepEqual(pending.pending_breakpoint, discovery.breakpoint);
-    assert.deepEqual(await getWorldSimulationState(sid, options), before);
-    assert.deepEqual(await bytes(), original, "fractional pending cannot alter durable bytes");
-    // The existing untargeted owner confirms an exact 500ms step. Its flight
-    // and zero-time termination remain two budgeted commits, never a rounded retry.
-    const resumed = await runWorldSimulationOffscreenEventBatch({
-      world_simulation_session_id: sid, max_turns: 2,
-    }, options);
-    assert.equal(resumed.attempted_turn_count, 2);
-    assert.equal(resumed.committed_turn_count, 2);
-    assert.equal(resumed.reached_simulation_time, target);
-    const after = await getWorldSimulationState(sid, options);
-    assert.equal(after.revision, before.revision + 2);
-    assert.equal(after.state.projectiles.projectile_e3.termination_reason, "left_scene_bounds");
-    const history = await getWorldSimulationHistory(sid, options);
-    assert.equal(history.turns.length, 2);
-    assert.equal(history.turns[0].previous_state_hash, before.state_hash);
-    assert.equal(history.turns[1].previous_state_hash, history.turns[0].next_state_hash);
-    assert.equal(history.turns[1].next_state_hash, after.state_hash);
+    for (const targetInput of [{ target_horizon: target }, {}]) {
+      const pending = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: 32, ...targetInput,
+      }, options);
+      assert.equal(pending.attempted_turn_count, 0);
+      assert.equal(pending.committed_turn_count, 0);
+      assert.equal(pending.status, "slow_process_breakpoint_pending");
+      assert.equal(pending.target_horizon_claimed, false);
+      assert.equal(pending.pending_breakpoint.delta_ms, discovery.breakpoint.delta_ms);
+      assert.deepEqual(await getWorldSimulationState(sid, options), before);
+      assert.deepEqual(await bytes(), original, "actual fractional time preserves durable bytes");
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 }
-console.log("CB-C6-E11 bounded batch bounds, budget/horizon, history, idle and unsupported authority regression passed.");
+console.log("CB-C6-E11/E12 bounded batch bounds, window-independent discovery, fractional preservation and lineage passed.");

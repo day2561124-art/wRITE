@@ -321,15 +321,18 @@ function sceneBoundsExitTime(scene, projectile, startMs, endMs) {
     y: projectile.position.y + projectile.velocity_mps.y * seconds,
   };
   if (end.x >= 0 && end.y >= 0 && end.x <= width && end.y <= depth) return null;
-  const dx = end.x - projectile.position.x;
-  const dy = end.y - projectile.position.y;
+  // Derive plane times directly from position and velocity. Scaling a segment
+  // fraction by the query window makes an exact crossing window-dependent.
+  // Keep the inclusive positive-window endpoint guard above and exact zero gate.
+  const velocity = projectile.velocity_mps;
   const candidates = [];
-  if (dx > 0 && Number.isFinite(width)) candidates.push((width - projectile.position.x) / dx);
-  if (dx < 0) candidates.push((0 - projectile.position.x) / dx);
-  if (dy > 0 && Number.isFinite(depth)) candidates.push((depth - projectile.position.y) / dy);
-  if (dy < 0) candidates.push((0 - projectile.position.y) / dy);
-  const fraction = candidates.filter((value) => value >= 0 && value <= 1).sort((left, right) => left - right)[0];
-  return fraction === undefined ? null : startMs + fraction * (endMs - startMs);
+  if (velocity.x > 0 && Number.isFinite(width)) candidates.push((width - projectile.position.x) / velocity.x);
+  if (velocity.x < 0) candidates.push((0 - projectile.position.x) / velocity.x);
+  if (velocity.y > 0 && Number.isFinite(depth)) candidates.push((depth - projectile.position.y) / velocity.y);
+  if (velocity.y < 0) candidates.push((0 - projectile.position.y) / velocity.y);
+  const exitSeconds = candidates.filter((value) => value >= 0 && value <= seconds)
+    .sort((left, right) => left - right)[0];
+  return exitSeconds === undefined ? null : startMs + exitSeconds * 1000;
 }
 
 export function queryWorldSimulationProjectileNextEvent(input = {}) {
