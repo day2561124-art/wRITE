@@ -1,0 +1,56 @@
+{
+  "schema_version": "fiction_nlu_plot_graph_config_v1",
+  "config_version": "fiction_nlu_plot_graph_v1",
+  "assertion_scope": "deterministic_event_relation_graph_not_narrative_function",
+  "principles": [
+    "Consume validated NLU-5 event analysis and NLU-6 event relations; never re-extract or rescore them.",
+    "Create exactly one plot node per validated EVT event cluster.",
+    "Create plot edges only from admitted NLU-6 temporal/causal relations; never invent narrative-adjacency edges.",
+    "Connected components are deterministic weakly connected components over admitted semantic edges; isolated events remain singleton components.",
+    "Temporal layers are derived only from temporal.before edges and do not use narrative Passage order as story time.",
+    "Do not assign salience, setup, payoff, climax, turning-point, or other narrative-function labels in NLU-7.",
+    "Every node and edge remains bound to exact NLU-5/NLU-6 lineage.",
+    "Retrieval admission remains closed until a later certified integration."
+  ],
+  "node_policy": {
+    "source": "nlu5_event_clusters",
+    "preserve_participant_entities": true,
+    "preserve_event_type": true,
+    "preserve_offsets": true
+  },
+  "edge_policy": {
+    "source": "nlu6_admitted_relations",
+    "allowed_types": [
+      "temporal.before",
+      "temporal.overlaps",
+      "temporal.simultaneous",
+      "causal.causes",
+      "causal.enables",
+      "causal.prevents"
+    ],
+    "preserve_relation_score": true,
+    "preserve_evidence_passages": true,
+    "invent_missing_edges": false
+  },
+  "component_policy": {
+    "connectivity": "weak_undirected_over_semantic_edges",
+    "include_singletons": true,
+    "assign_narrative_function": false
+  },
+  "temporal_layer_policy": {
+    "source_relation": "temporal.before",
+    "algorithm": "kahn_longest_predecessor_layer_v1",
+    "require_acyclic": true,
+    "incomparable_events_may_share_layer": true,
+    "narrative_order_tiebreak_only": false
+  },
+  "output_policy": {
+    "analysis_kind": "plot_structure",
+    "analysis_version": "plot_graph_v1",
+    "status": "provisional",
+    "complete_plot_graph_claim": false,
+    "narrative_function_resolved": false,
+    "salience_resolved": false,
+    "retrieval_admission": "not_admitted"
+  }
+}
