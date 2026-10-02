@@ -1,0 +1,152 @@
+{
+  "schema_version": "fiction_nlu_narrative_function_config_v1",
+  "config_version": "fiction_nlu_narrative_function_v1",
+  "assertion_scope": "bounded_narrative_function_and_salience_not_canonical_plot_truth",
+  "target_policy": {
+    "target_types": [
+      "node",
+      "component"
+    ],
+    "node_source": "nlu7_plot_nodes",
+    "component_source": "nlu7_components",
+    "preserve_plot_graph_lineage": true
+  },
+  "function_taxonomy": {
+    "function.exposition": {
+      "description": "Introduces or clarifies story-relevant setting, situation, character state, or premise.",
+      "threshold": 0.72
+    },
+    "function.setup": {
+      "description": "Establishes a commitment, condition, object, goal, problem, or expectation that later narrative material may depend on.",
+      "threshold": 0.8
+    },
+    "function.progression": {
+      "description": "Advances an already established situation, action line, or goal without necessarily changing its direction.",
+      "threshold": 0.68
+    },
+    "function.complication": {
+      "description": "Introduces a new obstacle, problem, uncertainty, or burden that makes an established line harder.",
+      "threshold": 0.78
+    },
+    "function.escalation": {
+      "description": "Raises stakes, intensity, cost, urgency, or scope of an existing conflict or problem.",
+      "threshold": 0.8
+    },
+    "function.reversal": {
+      "description": "Materially changes the apparent direction, expectation, advantage, or interpretation of an established line.",
+      "threshold": 0.86
+    },
+    "function.turning_point": {
+      "description": "Produces a durable change in the direction or state of a narrative line, supported by downstream consequences.",
+      "threshold": 0.9
+    },
+    "function.climax": {
+      "description": "Represents a locally culminating high-consequence confrontation or decision for a narrative component; never inferred from position alone.",
+      "threshold": 0.94
+    },
+    "function.resolution": {
+      "description": "Resolves or settles an established conflict, goal, uncertainty, or dependency.",
+      "threshold": 0.86
+    },
+    "function.aftermath": {
+      "description": "Shows consequences, adjustment, recovery, or reflection after a resolved/high-impact development.",
+      "threshold": 0.8
+    },
+    "function.transition": {
+      "description": "Bridges narrative situations, locations, phases, or activity lines without itself carrying major consequence.",
+      "threshold": 0.74
+    },
+    "function.foreshadowing": {
+      "description": "Provides information or a commitment whose narrative relevance is primarily realized by a later supported event.",
+      "threshold": 0.9
+    },
+    "function.payoff": {
+      "description": "Later event that concretely realizes, resolves, or activates an earlier supported setup/foreshadowing dependency.",
+      "threshold": 0.92
+    },
+    "function.callback": {
+      "description": "Later material that meaningfully reuses or refers back to an earlier event/state without necessarily resolving it.",
+      "threshold": 0.86
+    }
+  },
+  "candidate_policy": {
+    "version": "bounded_graph_conditioned_v1",
+    "min_labels_per_target": 5,
+    "max_labels_per_target": 9,
+    "always_include": [
+      "function.progression",
+      "function.transition",
+      "function.complication"
+    ],
+    "require_all_candidate_scores": true,
+    "no_position_only_candidates": true
+  },
+  "salience_policy": {
+    "score_range": [
+      0,
+      1
+    ],
+    "independent_from_function_labels": true,
+    "evidence_required": true,
+    "graph_features_are_support_not_truth": true,
+    "position_is_not_salience": true,
+    "high_salience_reference_threshold": 0.8,
+    "complete_salience_ranking_claim": false
+  },
+  "dependency_policy": {
+    "allowed_types": [
+      "narrative.setup_payoff",
+      "narrative.foreshadowing_payoff",
+      "narrative.callback"
+    ],
+    "max_node_distance_within_component": 32,
+    "max_pairs_per_component": 128,
+    "threshold": 0.9,
+    "require_distinct_nodes": true,
+    "require_exact_passage_evidence_for_both_ends": true,
+    "no_order_only_linking": true
+  },
+  "high_risk_label_gates": {
+    "function.turning_point": {
+      "require_downstream_graph_support": true,
+      "position_prior_allowed": false
+    },
+    "function.climax": {
+      "require_high_consequence_evidence": true,
+      "position_prior_allowed": false,
+      "max_active_per_component": 1
+    },
+    "function.foreshadowing": {
+      "require_dependency_link": [
+        "narrative.foreshadowing_payoff"
+      ],
+      "position_prior_allowed": false
+    },
+    "function.payoff": {
+      "require_dependency_link": [
+        "narrative.setup_payoff",
+        "narrative.foreshadowing_payoff"
+      ],
+      "position_prior_allowed": false
+    }
+  },
+  "provider_policy": {
+    "request_version": "fiction_nlu_narrative_function_request_v1",
+    "think": false,
+    "temperature": 0,
+    "score_every_candidate": true,
+    "bounded_completion_retries": 1,
+    "return_evidence_quotes": true,
+    "max_context_nodes_per_target": 10,
+    "dependency_batch_size": 10
+  },
+  "output_policy": {
+    "analysis_kind": "narrative_function",
+    "analysis_version": "narrative_function_v1",
+    "status": "provisional",
+    "complete_narrative_function_claim": false,
+    "complete_salience_ranking_claim": false,
+    "screenplay_structure_assumed": false,
+    "retrieval_admission": "not_admitted"
+  }
+}
