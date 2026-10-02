@@ -1,11 +1,12 @@
 import { getWorldSimulationState } from "./world-simulation-state-service.mjs";
 import { runWorldSimulationTurn } from "./world-simulation-loop-service.mjs";
+import { runWorldSimulationOffscreenPhysicalStep } from "./world-simulation-offscreen-physical-step-service.mjs";
 import {
   projectWorldSimulationOffscreenBreakpoint,
 } from "./world-simulation-offscreen-breakpoint-service.mjs";
 
 export const worldSimulationOffscreenEventBatchVersion =
-  "cb-c6e3-offscreen-event-batch-v3";
+  "cb-c6e5-offscreen-event-batch-v4";
 
 function reject(message, code = "C6E_OFFSCREEN_BATCH_INVALID") {
   const error = new Error(message);
@@ -51,6 +52,7 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
   const completed = [];
   let attempts = 0;
   let stateReadVerified = true;
+  let pendingPhysicalStepReason = null;
   let pendingBreakpoint = null;
   let pendingUnresolvedProcesses = [];
   const report = (status, blockedReason = null) => {
@@ -66,6 +68,8 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
       max_turns: budget,
       attempted_turn_count: attempts,
       committed_turn_count: completed.length,
+      committed_physical_step_count: completed.filter(item => item.execution_kind === "physical_process_step").length,
+      physical_step_blocked_reason: confirmed ? pendingPhysicalStepReason : null,
       committed_turns: completed.map(item => ({ ...item })),
       initial_revision: initial.revision,
       initial_state_hash: initial.state_hash,
@@ -112,26 +116,52 @@ export async function runWorldSimulationOffscreenEventBatch(input = {}, options 
         return snapshot.state.event_queue?.length
           ? report("target_horizon_reached") : reportIdle("target_horizon_reached");
       const event = snapshot.state.event_queue?.[0];
-      if (!event) return reportIdle();
+      pendingPhysicalStepReason = null;
       pendingBreakpoint = null;
       pendingUnresolvedProcesses = [];
-      const eventId = event.event_id ?? event.id;
-      if (typeof eventId !== "string" || !eventId.trim())
-        reject("Offscreen execution requires the canonical queue head identity.");
-      attempts += 1;
-      const result = await runWorldSimulationTurn({
-        world_simulation_session_id: sessionId, event_id: eventId,
-      }, turnOptions);
+      let eventId = event?.event_id ?? event?.id ?? null;
+      let result;
+      const executionKind = event ? "queued_event" : "physical_process_step";
+      if (event) {
+        if (typeof eventId !== "string" || !eventId.trim())
+          reject("Offscreen execution requires the canonical queue head identity.");
+        attempts += 1;
+        result = await runWorldSimulationTurn({
+          world_simulation_session_id: sessionId, event_id: eventId,
+        }, turnOptions);
+      } else {
+        const discovery = projectWorldSimulationOffscreenBreakpoint({
+          world_state: snapshot.state, target_horizon: target,
+        });
+        if (!discovery.earliest_breakpoint_confirmed
+            || !Number.isSafeInteger(discovery.breakpoint?.delta_ms)
+            || discovery.breakpoint.delta_ms <= 0) return reportIdle();
+        attempts += 1;
+        result = await runWorldSimulationOffscreenPhysicalStep({
+          world_simulation_session_id: sessionId,
+          expected_revision: snapshot.revision, expected_state_hash: snapshot.state_hash,
+          ...(target === null ? {} : { target_horizon: target }),
+        }, options);
+        eventId = result.turn_id ?? null;
+        // Physical Native returns the atomic writer envelope, not queued-turn shape.
+        // Read its actual committed identity before any post-commit state read.
+        if (result.committed === true)
+          result = { ...result, next_state_hash: result.state?.state_hash };
+      }
       if (result.committed !== true) {
         stateReadVerified = false;
         snapshot = await getWorldSimulationState(sessionId, options);
         stateReadVerified = true;
+        if (!event) {
+          pendingPhysicalStepReason = result.blocked_reason ?? "physical_step_not_committed";
+          return reportIdle();
+        }
         return report("blocked", result.blocked_reason ?? "canonical_turn_not_committed");
       }
       // Record the actual commit before a post-commit read can fail. Recovery
       // must inspect this turn, not repeat an already committed mutation.
       completed.push({
-        event_id: eventId, turn_id: result.turn_id,
+        event_id: eventId, turn_id: result.turn_id, execution_kind: executionKind,
         previous_state_hash: result.previous_state_hash,
         next_state_hash: result.next_state_hash,
       });
