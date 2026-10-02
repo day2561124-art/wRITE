@@ -2946,8 +2946,17 @@ for (const [mode, elapsed] of [["bounds", 500], ["lifetime", 300], ["contact", 1
     assert.equal(projectWorldSimulationOffscreenBreakpoint({
       world_state: first.next_world_state,
     }).breakpoint.delta_ms, 0, "reached endpoint retains due same-time work");
-    assert.equal((await e4Resolve(first.next_world_state)).blocked_reason,
-      "physical_step_same_time_or_fractional_pending");
+    const sameTime = await e4Resolve(first.next_world_state);
+    if (mode === "lifetime") {
+      assert.equal(sameTime.next_world_state.projectiles.projectile_e3.active, false);
+      assert.equal(sameTime.next_world_state.projectiles.projectile_e3.termination_reason, "lifetime_expired");
+      assert.equal(sameTime.next_world_state.simulation_time, first.next_world_state.simulation_time);
+      assert.equal(sameTime.next_world_state.projectiles.projectile_e3.age_ms, elapsed);
+      assert.deepEqual(sameTime.next_world_state.projectiles.projectile_e3.position,
+        first.next_world_state.projectiles.projectile_e3.position);
+    } else {
+      assert.equal(sameTime.blocked_reason, "physical_step_same_time_or_fractional_pending");
+    }
   }
 }
 {
@@ -3310,3 +3319,183 @@ for (const [mode, reason, attempts] of [
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E7 foreground equivalence and unsupported mixed authority regression passed.");
+
+function e8ExpiredWorld() {
+  const state = e6ProjectileWorld("lifetime");
+  state.projectiles.projectile_e3.age_ms = 300;
+  return state;
+}
+{
+  const state = e8ExpiredWorld();
+  const original = d1Clone(state);
+  const due = state.projectiles.projectile_e3;
+  const first = await e4Resolve(state, state.simulation_time);
+  const terminated = first.next_world_state.projectiles.projectile_e3;
+  assert.equal(terminated.active, false);
+  assert.equal(terminated.termination_reason, "lifetime_expired");
+  assert.equal(first.next_world_state.simulation_time, state.simulation_time);
+  assert.equal(terminated.age_ms, due.age_ms);
+  assert.deepEqual(terminated.position, due.position);
+  assert.equal(terminated.remaining_penetration_energy, due.remaining_penetration_energy);
+  assert.deepEqual(first.next_world_state.characters, state.characters);
+  assert.deepEqual(first.next_world_state.event_queue, state.event_queue);
+  assert.deepEqual(first.next_world_state.memories, state.memories);
+  assert.deepEqual(first.next_world_state.motivational_goal_history, state.motivational_goal_history);
+  const effects = first.state_transitions.filter(item => item.field === "projectile_state");
+  assert.equal(effects.length, 1);
+  assert.equal(effects[0].time_ms, 0);
+  assert.equal(effects[0].lifecycle_effect, "termination");
+  assert.deepEqual(effects[0].from, due);
+  assert.deepEqual(effects[0].to, terminated);
+  assert.equal(first.action_outcomes.filter(item => item.result === "projectile_lifetime_expired").length, 1);
+  assert.ok(first.chronological_mutation_queue.queue_hash);
+  assert.ok(first.chronological_mutation_execution.execution_hash);
+  assert.deepEqual(await e4Resolve(state, state.simulation_time), first);
+  assert.deepEqual(state, original, "E8 zero-time termination owns immutable input");
+  assert.equal((await e4Resolve(first.next_world_state)).blocked_reason, "physical_step_no_breakpoint");
+  const forged = await adjudicateWorldSimulationCausality({
+    world_simulation_session_id: "e8-forged", world_state: state,
+    world_state_revision: 0, world_state_hash: hashAgentRunValue(state), turn_id: "e8-forged",
+    event: { event_id: "e8-forged", scene_id: "room", type: "offscreen_physical_process_step" },
+    selected_action_intents: [], drain_expired_projectiles_at_current_time: true,
+    zero_time_lifetime_drain: true,
+  });
+  assert.equal(forged.next_world_state.projectiles.projectile_e3.active, true,
+    "public causal input cannot forge the private World step context");
+  assert.equal(forged.next_world_state.simulation_time, state.simulation_time);
+}
+{
+  const state = e8ExpiredWorld();
+  const due = state.projectiles.projectile_e3;
+  const alpha = { ...d1Clone(due), projectile_id: "alpha" };
+  const zeta = { ...d1Clone(due), projectile_id: "zeta" };
+  const live = { ...d1Clone(due), projectile_id: "live", age_ms: 0, velocity_mps: { x: 0, y: 0 } };
+  state.projectiles = { zeta, live, alpha };
+  const first = await e4Resolve(state, state.simulation_time);
+  assert.equal(first.next_world_state.projectiles.alpha.active, false);
+  assert.equal(first.next_world_state.projectiles.zeta.active, false);
+  assert.deepEqual(first.next_world_state.projectiles.live, live,
+    "zero-time drain cannot advance or terminate a future process");
+  assert.equal(first.action_outcomes.filter(item => item.result === "projectile_lifetime_expired").length, 2);
+  state.projectiles = { alpha, live, zeta };
+  assert.deepEqual(await e4Resolve(state, state.simulation_time), first,
+    "same-time lifetime batch cannot depend on map insertion order");
+}
+for (const mode of ["already-due", "flight-then-due"]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e8-lifetime-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E8 zero-time lifetime must not invoke Brain") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E8 direct Native zero-time lifetime", seed: mode,
+      initial_world_state: mode === "already-due" ? e8ExpiredWorld() : e6ProjectileWorld("lifetime"),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    let before = await getWorldSimulationState(sid, options);
+    const original = before;
+    if (mode === "flight-then-due") {
+      const flight = await runWorldSimulationOffscreenPhysicalStep({
+        world_simulation_session_id: sid, expected_revision: before.revision,
+        expected_state_hash: before.state_hash,
+      }, options);
+      assert.equal(flight.committed, true);
+      before = await getWorldSimulationState(sid, options);
+      assert.equal(before.state.projectiles.projectile_e3.age_ms, 300);
+      assert.equal(before.state.projectiles.projectile_e3.active, true);
+    }
+    const reached = before.state.simulation_time;
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const priorBytes = await bytes();
+    // E8 leaves the batch's exact-horizon and zero-time policy unchanged.
+    for (const max_turns of [0, 32]) {
+      const pending = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns, target_horizon: reached,
+      }, options);
+      assert.equal(pending.committed_turn_count, 0);
+      assert.equal(pending.attempted_turn_count, 0);
+      assert.equal(pending.pending_breakpoint.delta_ms, 0);
+      assert.equal(pending.target_horizon_claimed, true);
+      assert.deepEqual(await bytes(), priorBytes);
+    }
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, zero_time_lifetime_drain: true,
+    }, options), { code: "C6E_PHYSICAL_STEP_INVALID" });
+    assert.deepEqual(await bytes(), priorBytes, "Native cannot accept caller-owned drain flags");
+    const result = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, target_horizon: reached,
+    }, options);
+    assert.equal(result.committed, true);
+    assert.equal(result.reached_simulation_time, reached);
+    assert.equal(result.previous_state_hash, before.state_hash);
+    assert.equal(result.automatic_replay_allowed, false);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + 1);
+    assert.notEqual(after.state_hash, before.state_hash);
+    assert.equal(after.state.simulation_time, reached);
+    assert.equal(after.state.projectiles.projectile_e3.active, false);
+    assert.equal(after.state.projectiles.projectile_e3.termination_reason, "lifetime_expired");
+    assert.equal(after.state.projectiles.projectile_e3.age_ms, 300);
+    assert.deepEqual(after.state.projectiles.projectile_e3.position, before.state.projectiles.projectile_e3.position);
+    assert.deepEqual(after.state.characters, before.state.characters);
+    assert.deepEqual(after.state.event_queue, before.state.event_queue);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, mode === "already-due" ? 1 : 2);
+    const turn = history.turns.at(-1);
+    assert.equal(turn.turn_id, result.turn_id);
+    assert.equal(turn.previous_state_hash, before.state_hash);
+    assert.equal(turn.next_state_hash, after.state_hash);
+    assert.equal(history.turns[0].previous_state_hash, original.state_hash);
+    if (history.turns.length === 2) assert.equal(history.turns[0].next_state_hash, turn.previous_state_hash);
+    assert.deepEqual(turn.selected_action_intents, []);
+    assert.deepEqual(turn.knowledge_transitions, []);
+    assert.ok(turn.chronological_mutation_execution.execution_hash);
+    assert.ok(turn.state_transitions.some(item => item.field === "projectile_state"
+      && item.lifecycle_effect === "termination" && item.time_ms === 0));
+    const committedBytes = await bytes();
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, target_horizon: reached,
+    }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+    assert.deepEqual(await bytes(), committedBytes, "old CAS cannot duplicate termination");
+    const idle = await runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: after.revision,
+      expected_state_hash: after.state_hash, target_horizon: reached,
+    }, options);
+    assert.equal(idle.committed, false);
+    assert.equal(idle.blocked_reason, "physical_step_no_breakpoint");
+    assert.deepEqual(await bytes(), committedBytes, "terminated process cannot create a second history turn");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+for (const [mode, reason] of [
+  ["fields", "physical_step_same_time_or_fractional_pending"],
+  ["obstacles", "physical_step_projectile_obstacle_progression_pending"],
+  ["queue", "physical_step_queue_not_empty"],
+  ["acoustic", "physical_step_acoustic_ingress_pending"],
+  ["scenes", "physical_step_scene_scope_unresolved"],
+  ["unresolved", "physical_step_authority_unresolved"],
+]) {
+  const initial = e8ExpiredWorld();
+  if (mode === "fields") initial.ability_fields = e4FieldWorld().ability_fields;
+  if (mode === "obstacles") initial.scenes.room.obstacles = [{ obstacle_id: "e8-unmodeled" }];
+  if (mode === "queue") initial.event_queue = [{ event_id: "e8-pending" }];
+  if (mode === "acoustic") initial.sound_events = [{
+    schema_version: "cc6b-communication-acoustic-bridge-v1",
+    sound_id: "e8-pending-speech", scene_id: "room", active: true,
+  }];
+  if (mode === "scenes") {
+    initial.scenes.other = d1Clone(initial.scenes.room);
+    initial.projectiles.other = { ...d1Clone(initial.projectiles.projectile_e3),
+      projectile_id: "other", scene_id: "other" };
+  }
+  if (mode === "unresolved") delete initial.projectiles.projectile_e3.velocity_mps;
+  const original = d1Clone(initial);
+  assert.equal((await e4Resolve(initial)).blocked_reason, reason);
+  assert.deepEqual(initial, original, "unsupported zero-time authority stays immutable");
+}
+console.log("CB-C6-E8 direct Native zero-time lifetime, replay, lineage and batch-policy preservation regression passed.");

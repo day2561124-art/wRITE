@@ -66,10 +66,20 @@ Do not claim these oracles have passed until runtime exists and the actual tests
 
 ## E7 candidate — shared field/projectile bound
 
-E7 is under development, not sealed. Admit positive whole-millisecond mixed fields/projectiles only when every active process is in one scene, all field geometry is valid, and that scene has no obstacles. Discovery's earliest confirmed breakpoint bounds both families. Reuse the existing combined continuous-physics owner, cross-layer timeline, chronological proposal queue/executor and atomic writer; do not introduce another ordering truth.
+E7 bounded slice sealed: source `1580ae041e14220bcd67bdacf189e856deb4ad22`, integration `722ef2254279f7e2fd2233f4e6922686ce4fcf48`. Admit positive whole-millisecond mixed fields/projectiles only when every active process is in one scene, all field geometry is valid, and that scene has no obstacles. Discovery's earliest confirmed breakpoint bounds both families. Reuse the existing combined continuous-physics owner, cross-layer timeline, chronological proposal queue/executor and atomic writer; do not introduce another ordering truth.
 
 Fresh official SimPy scheduling review on 2026-10-02 confirms deterministic processing of same-time events. Engineering inference: a shared timestamp requires stable complete effect processing, not elapsed-time epsilon. Repository ordering remains authoritative; no SimPy dependency or FIFO policy is imported.
 
 Required E7 oracles: field-first and projectile-first progression, same-time field expiration and projectile contact, each actual damage effect exactly once, deterministic replay and reordered maps, Native budget/horizon and stale CAS durable-byte preservation, exact revision/history/hash chain, unchanged queue/memory/goals and no Brain call. The earlier E3 mixed fixture now distinguishes budget-zero discovery from one legitimate shared 100ms step; E4/E5 obstacle cases retain their unsupported-authority byte gates.
 
-Zero-time draining, fractional boundaries, multiple scenes, obstacles/penetration and pending acoustic ingress remain unsupported. E7 focused and formal results must be recorded after actual execution; full C6-E/F remain open.
+Zero-time draining, fractional boundaries, multiple scenes, obstacles/penetration and pending acoustic ingress remain unsupported. E7 World 363560ms and exact-candidate MCP 642938ms/mcp_tunnel 127900ms PASS_STABLE; diff clean, canonical remote exact and source ancestry verified, source and integration worktrees removed, Journal/transaction/checkpoint healthy. Full C6-E/F remain open.
+
+## E8 candidate — direct same-time projectile lifetime termination
+
+E8 is under development, not sealed. The direct Native physical-step may commit an already-expired projectile lifetime at the current exact World timestamp. Admission requires earliest confirmed projectile lifetime at delta 0, one scene, no active fields, obstacles, queued event or pending acoustic ingress. Multiple expired projectiles use existing immutable arbitration; live projectiles do not advance or terminate.
+
+A World-owned WeakMap context carries this bounded mode to the existing continuous-physics proposal producer. The scheduler queries the exact zero-duration window and admits only lifetime events at 0, then uses the existing immutable termination evaluator, timeline, chronological mutation queue/executor and atomic writer. Do not borrow discovery epsilon as elapsed time. Caller flags on general causal input do not create this context; Native accepts no drain flag.
+
+Fresh SimPy Environments/Scheduling review on 2026-10-02 distinguishes reaching time from processing same-time work. Engineering inference: termination can change committed revision/hash/history without changing World time, position, age or penetration energy. Existing repository ordering and lifecycle semantics remain authoritative.
+
+E8 keeps the offscreen batch's zero-time and exact-horizon stopping policy unchanged. Batch hookup, bounds/contact zero-time effects, mixed field/projectile zero-time work and obstacle penetration remain subsequent slices after E8 is sealed. Tests cover direct already-due and flight-then-due Native lineage, exact unchanged clock/kinematics/subjective state, deterministic replay/map order, live-process preservation, stale CAS, post-termination idle bytes, forged flags and unsupported authority. E8 focused/formal results remain pending until actual execution.

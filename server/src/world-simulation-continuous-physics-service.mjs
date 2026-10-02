@@ -709,6 +709,17 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
   }
   if (event.kind === "lifetime") {
     terminateProjectileLifecycle(input, state, nextWorldState, transitions, "lifetime_expired");
+    if (input.drain_expired_projectiles_at_current_time === true && state.currentTimeMs === 0) {
+      resolutions.push({
+        projectile_id: projectile.projectile_id, owner: projectile.owner,
+        source_action_id: projectile.source_action_id,
+        result: "projectile_lifetime_expired", time_ms: 0,
+      });
+      pushOutcome(outcomes, projectile.owner, { action_id: projectile.source_action_id, intent: null },
+        "projectile_lifetime_expired", "committed projectile lifetime ended at current World time", {
+          projectile_id: projectile.projectile_id, time_ms: 0,
+        });
+    }
     state.doneForTurn = true;
     return;
   }
@@ -819,21 +830,27 @@ function applyProjectileTimelineStep(input, state, event, nextWorldState, nextSc
 }
 
 function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, nextWorldState, snapshotScene, nextScene, transitions, outcomes, resolutions) {
+  // This bounded mode only drains already-expired lifetimes. It does not
+  // turn a zero-duration query into flight, contact or penetration.
+  const zeroTimeLifetime = input.drain_expired_projectiles_at_current_time === true && elapsedMs === 0;
   const states = [];
   for (const [projectileId, rawProjectile] of Object.entries(object(nextWorldState.projectiles))) {
     const projectile = object(rawProjectile);
     if (projectile.active !== true || String(projectile.scene_id ?? "") !== input.scene_id) continue;
     const startMs = projectileStart.has(projectileId) ? projectileStart.get(projectileId) : 0;
-    if (startMs >= elapsedMs) continue;
+    if (startMs >= elapsedMs && !(zeroTimeLifetime && startMs === 0)) continue;
     states.push({ projectileId, projectile, currentTimeMs: startMs, doneForTurn: false });
   }
+  // Query audits and proposal hashes must share the arbitration's stable subject order.
+  if (zeroTimeLifetime) states.sort((a, b) => a.projectileId < b.projectileId ? -1 : a.projectileId > b.projectileId ? 1 : 0);
 
   let iterations = 0;
   const maxIterations = Math.max(128, states.length * 96);
   while (iterations < maxIterations) {
     iterations += 1;
     const activeStates = states
-      .filter((state) => state.projectile.active === true && state.doneForTurn !== true && state.currentTimeMs < elapsedMs - 1e-6);
+      .filter((state) => state.projectile.active === true && state.doneForTurn !== true
+        && (state.currentTimeMs < elapsedMs - 1e-6 || (zeroTimeLifetime && state.currentTimeMs === 0)));
     const candidates = activeStates.map((state) => {
       const event = nextProjectileTimelineStep(input, state.projectile, state.currentTimeMs, elapsedMs, snapshotScene, nextScene);
       return {
@@ -843,7 +860,8 @@ function resolveProjectilesInGlobalTimeOrder(input, projectileStart, elapsedMs, 
         time_ms: event.timeMs,
         event,
       };
-    });
+    }).filter(candidate => !zeroTimeLifetime
+      || (candidate.event.kind === "lifetime" && candidate.time_ms === 0));
     if (!candidates.length) break;
     const arbitration = arbitrateWorldSimulationEventCandidates({
       candidates,

@@ -1453,7 +1453,9 @@ export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {})
       || item.radius_m <= 0))
     return blocked("physical_step_field_geometry_unresolved");
   const delta = discovery.breakpoint.delta_ms;
-  if (!Number.isSafeInteger(delta) || delta <= 0)
+  const zeroTimeLifetime = delta === 0
+    && discovery.breakpoint.kind === "projectile_lifetime" && fields.length === 0;
+  if (!Number.isSafeInteger(delta) || delta < 0 || (delta === 0 && !zeroTimeLifetime))
     return blocked("physical_step_same_time_or_fractional_pending");
   const sceneId = [...scenes][0];
   // Existing penetration continuation advances 0.01ms after contact; it is
@@ -1475,7 +1477,9 @@ export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {})
     world_state_hash: input.world_state_hash, turn_id: turnId, event,
     selected_action_intents: [],
   };
-  offscreenPhysicalStepContexts.set(causalInput, { elapsed_ms: delta });
+  offscreenPhysicalStepContexts.set(causalInput, {
+    elapsed_ms: delta, zero_time_lifetime_drain: zeroTimeLifetime,
+  });
   try {
     const resolution = await adjudicateWorldSimulationCausality(causalInput);
     if (resolution.next_world_state.simulation_time !== discovery.breakpoint.simulation_time
@@ -1729,6 +1733,7 @@ export async function adjudicateWorldSimulationCausality(input = {}) {
       selected_action_intents: selectedActionIntents,
       resolved_action_outcomes: outcomes,
       elapsed_ms: elapsedMs,
+      drain_expired_projectiles_at_current_time: physicalStep?.zero_time_lifetime_drain === true,
       suppressed_action_ids: suppressedActionIds,
       action_time_overrides: actionTimeOverrides,
       actor_trajectories: actorTrajectories,
