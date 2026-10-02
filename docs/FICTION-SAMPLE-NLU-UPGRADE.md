@@ -199,6 +199,49 @@ and `retrieval_admission=not_admitted`. Relationship state transitions and
 conflict resolution across time are owned by NLU-4 rather than collapsed in this
 phase.
 
+## NLU-4 — Character relationship timeline / evolution
+
+Repository artifacts:
+
+- `config/fiction-nlu-character-relationship-timeline-v1.json`
+- `schemas/fiction-nlu-character-relationship-timeline-v1.schema.json`
+- `scripts/fiction-sample-nlu-relationship-timeline-v1.py`
+- `tests/nlu/fiction-sample-nlu-character-relationship-timeline-v1.test.mjs`
+
+NLU-4 is a deterministic compiler over validated NLU-3 relationship output. It
+does not call a language model and does not re-extract relationships. Its job is
+to organize local NLU-3 pair windows and assertions into a globally consistent,
+evidence-preserving narrative-order timeline.
+
+Each character pair receives:
+
+- ordered evidence snapshots for every analyzed NLU-3 pair window, including
+  windows with zero positive assertions;
+- one deterministic track per relation + direction + source/target identity;
+- adjacent-snapshot change events that distinguish first support, reinforcement,
+  changed evidence, and evidence becoming unobserved;
+- explicit conflict events for configured locally contradictory relation signals;
+- reciprocity events when the same directed relation is independently observed in
+  both directions.
+
+Absence is deliberately represented as `not_observed_not_ended`. NLU-4 never
+infers that a relationship ended, weakened, reconciled, or changed causally merely
+because a later window lacks evidence. Concurrent or contradictory assertions are
+preserved rather than resolved by last-write-wins.
+
+Ordering is canonical narrative Passage order using NLU-3 novel offsets. The
+payload explicitly declares `nonlinear_story_time_resolved=false`; story-world
+chronology is not inferred in this phase.
+
+The timeline payload is bound to the exact NLU-3 relationship registry hash.
+Validation deterministically rebuilds the entire timeline from the dependency and
+rejects any altered snapshot, track, change event, conflict event, reciprocity
+event, or stale NLU-3 lineage.
+
+Development output remains `provisional`,
+`complete_relationship_history_claim=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
