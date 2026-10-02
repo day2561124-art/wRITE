@@ -2436,18 +2436,34 @@ console.log("CB-C6-E3 read-only persistent-process breakpoint projection regress
       assert.equal(result.status, "slow_process_breakpoint_pending");
       assert.equal(result.blocked_reason, "offscreen_slow_process_breakpoint_pending");
       assert.equal(result.attempted_turn_count, max_turns === 0 ? 0 : 1);
-      assert.equal(result.physical_step_blocked_reason, max_turns === 0
-        ? null : "physical_step_projectile_progression_pending");
-      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.physical_step_blocked_reason, null);
+      assert.equal(result.committed_turn_count, max_turns);
       assert.equal(result.pending_event_count, 0);
       assert.equal(result.pending_breakpoint.kind, "ability_field_tick");
       assert.equal(result.pending_breakpoint.delta_ms, 100);
-      assert.equal(result.reached_simulation_time, before.state.simulation_time);
+      assert.equal(result.reached_simulation_time, max_turns === 0
+        ? before.state.simulation_time
+        : new Date(Date.parse(before.state.simulation_time) + 100).toISOString());
       assert.equal(result.target_horizon_claimed, false);
-      assert.deepEqual(await getWorldSimulationState(sid, options), before);
-      assert.deepEqual(await Promise.all([
-        readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
-      ]), bytesBefore, "discovery-only E3 must preserve exact durable bytes");
+      const after = await getWorldSimulationState(sid, options);
+      if (max_turns === 0) {
+        assert.deepEqual(after, before);
+        assert.deepEqual(await Promise.all([
+          readFile(paths.state, "utf8"), readFile(paths.history, "utf8"),
+        ]), bytesBefore, "budget-zero E3 discovery preserves exact durable bytes");
+      } else {
+        assert.equal(after.revision, before.revision + 1);
+        assert.equal(after.state.ability_fields.field_e3.remaining_ms, 150);
+        assert.equal(after.state.projectiles.projectile_e3.age_ms, 100);
+        assert.deepEqual(after.state.characters, before.state.characters);
+        assert.deepEqual(after.state.memories, before.state.memories);
+        assert.deepEqual(after.state.event_queue, before.state.event_queue);
+        const history = await getWorldSimulationHistory(sid, options);
+        assert.equal(history.turns.length, 1);
+        assert.equal(history.turns[0].previous_state_hash, before.state_hash);
+        assert.equal(history.turns[0].next_state_hash, after.state_hash);
+        assert.equal(result.committed_turns[0].next_state_hash, after.state_hash);
+      }
     }
 
     const beforeInjury = d1Clone(before.state.characters.aria.physical_state.injuries);
@@ -2631,7 +2647,7 @@ async function e4Resolve(state, target_horizon = null) {
     && item.damage_applied > 0), "existing field impact owner must retain actual damage");
   for (const [mode, reason] of [
     ["queue", "physical_step_queue_not_empty"],
-    ["projectile", "physical_step_projectile_progression_pending"],
+    ["projectile_obstacles", "physical_step_projectile_obstacle_progression_pending"],
     ["geometry", "physical_step_field_geometry_unresolved"],
     ["scenes", "physical_step_scene_scope_unresolved"],
     ["unresolved", "physical_step_authority_unresolved"],
@@ -2639,7 +2655,10 @@ async function e4Resolve(state, target_horizon = null) {
   ]) {
     const pending = e4FieldWorld();
     if (mode === "queue") pending.event_queue = [{ event_id: "pending" }];
-    if (mode === "projectile") pending.projectiles = e3PersistentProcessWorld().projectiles;
+    if (mode === "projectile_obstacles") {
+      pending.projectiles = e3PersistentProcessWorld().projectiles;
+      pending.scenes.room.obstacles = [{ obstacle_id: "e4-unmodeled" }];
+    }
     if (mode === "geometry") delete pending.ability_fields.field_e3.center;
     if (mode === "scenes") {
       pending.scenes.other = d1Clone(pending.scenes.room);
@@ -2830,7 +2849,7 @@ console.log("CB-C6-E5 bounded physical batch horizon and lineage regression pass
 
 for (const [mode, reason, attempts] of [
   ["acoustic", "physical_step_acoustic_ingress_pending", 1],
-  ["projectile", "physical_step_projectile_progression_pending", 1],
+  ["projectile_obstacles", "physical_step_projectile_obstacle_progression_pending", 1],
   ["geometry", "physical_step_field_geometry_unresolved", 1],
   ["scenes", "physical_step_scene_scope_unresolved", 1],
   ["fractional", null, 0], ["unresolved", null, 0],
@@ -2845,7 +2864,10 @@ for (const [mode, reason, attempts] of [
       schema_version: "cc6b-communication-acoustic-bridge-v1", sound_id: "e5-pending",
       scene_id: "room", source_entity_id: "keeper", active: true, lifecycle: "next_perception_only",
     }];
-    if (mode === "projectile") initial.projectiles = e3PersistentProcessWorld().projectiles;
+    if (mode === "projectile_obstacles") {
+      initial.projectiles = e3PersistentProcessWorld().projectiles;
+      initial.scenes.room.obstacles = [{ obstacle_id: "e5-unmodeled" }];
+    }
     if (mode === "geometry") delete initial.ability_fields.field_e3.center;
     if (mode === "scenes") {
       initial.scenes.other = d1Clone(initial.scenes.room);
@@ -3080,3 +3102,211 @@ for (const [mode, reason, attempts] of [
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 console.log("CB-C6-E6 Native contact, budget/horizon and unsupported projectile authority regression passed.");
+
+function e7MixedWorld(mode) {
+  const state = e6ProjectileWorld("contact");
+  state.projectiles.projectile_e3.velocity_mps = { x: 10, y: 0 };
+  const field = d1Clone(e4FieldWorld().ability_fields.field_e3);
+  field.center = d1Clone(state.scenes.room.entity_positions.aria);
+  field.radius_m = 1;
+  field.remaining_ms = mode === "field-first" ? 50 : mode === "projectile-first" ? 150 : 100;
+  field.effect.damage_per_second = 20;
+  state.ability_fields = { field_e3: field };
+  return state;
+}
+for (const [mode, firstMs, fieldRemaining, projectileActive] of [
+  ["field-first", 50, 0, true], ["projectile-first", 100, 50, false], ["tie", 100, 0, false],
+]) {
+  const state = e7MixedWorld(mode);
+  const before = d1Clone(state);
+  const discovery = projectWorldSimulationOffscreenBreakpoint({ world_state: state });
+  assert.equal(discovery.breakpoint.delta_ms, firstMs);
+  const first = await e4Resolve(state);
+  assert.equal(first.next_world_state.simulation_time,
+    new Date(Date.parse(state.simulation_time) + firstMs).toISOString());
+  assert.equal(first.next_world_state.ability_fields.field_e3.remaining_ms, fieldRemaining);
+  assert.equal(first.next_world_state.ability_fields.field_e3.active, fieldRemaining > 0);
+  assert.equal(first.next_world_state.projectiles.projectile_e3.age_ms, firstMs);
+  assert.equal(first.next_world_state.projectiles.projectile_e3.active, projectileActive);
+  const fieldHits = first.action_outcomes.filter(item =>
+    item.result === "ability_field_tick" && item.target === "aria");
+  const projectileHits = first.action_outcomes.filter(item =>
+    item.result === "projectile_hit_character" && item.target === "aria");
+  assert.equal(fieldHits.length, 1);
+  assert.equal(projectileHits.length, projectileActive ? 0 : 1);
+  assert.ok(fieldHits[0].damage_applied > 0);
+  const actualDamage = [...fieldHits, ...projectileHits]
+    .reduce((total, hit) => total + hit.damage_applied, 0);
+  assert.ok(Math.abs(first.next_world_state.characters.aria.physical_state.health_current
+    - (100 - actualDamage)) < 1e-9, "both evaluator effects must persist exactly once");
+  assert.deepEqual(state, before, "E7 input remains immutable");
+  assert.deepEqual(await e4Resolve(state), first, "E7 same snapshot replays exactly");
+  assert.deepEqual(first.next_world_state.event_queue, state.event_queue);
+  assert.deepEqual(first.next_world_state.memories, state.memories);
+  assert.deepEqual(first.next_world_state.motivational_goal_history, state.motivational_goal_history);
+  assert.deepEqual(first.next_world_state.characters.aria.physical_state.sleep_arousal,
+    state.characters.aria.physical_state.sleep_arousal);
+  assert.ok(first.chronological_mutation_queue.queue_hash);
+  assert.ok(first.chronological_mutation_execution.execution_hash);
+  assert.deepEqual(first.knowledge_transitions, []);
+}
+{
+  const state = e7MixedWorld("tie");
+  const inactiveField = { ...d1Clone(state.ability_fields.field_e3),
+    field_id: "inactive-field", active: false };
+  const inactiveProjectile = { ...d1Clone(state.projectiles.projectile_e3),
+    projectile_id: "inactive-projectile", active: false };
+  state.ability_fields = { z: inactiveField, field_e3: state.ability_fields.field_e3 };
+  state.projectiles = { z: inactiveProjectile, projectile_e3: state.projectiles.projectile_e3 };
+  const first = await e4Resolve(state);
+  state.ability_fields = Object.fromEntries(Object.entries(state.ability_fields).reverse());
+  state.projectiles = Object.fromEntries(Object.entries(state.projectiles).reverse());
+  assert.deepEqual(await e4Resolve(state), first, "map insertion cannot reorder mixed effects");
+}
+for (const [mode, horizonMs, totalCommits] of [
+  ["field-first", 100, 2], ["projectile-first", 150, 2], ["tie", 100, 1],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e7-mixed-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("E7 mixed physics must not invoke Brain") };
+  try {
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E7 Native mixed physical boundaries", seed: mode,
+      initial_world_state: e7MixedWorld(mode),
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const at = ms => new Date(Date.parse(before.state.simulation_time) + ms).toISOString();
+    const firstMs = mode === "field-first" ? 50 : 100;
+    for (const [budget, horizon] of [[0, horizonMs], [32, firstMs - 1]]) {
+      const result = await runWorldSimulationOffscreenEventBatch({
+        world_simulation_session_id: sid, max_turns: budget, target_horizon: at(horizon),
+      }, options);
+      assert.equal(result.committed_turn_count, 0);
+      assert.equal(result.attempted_turn_count, 0);
+      assert.equal(result.target_horizon_claimed, false);
+      assert.deepEqual(await bytes(), original, "E7 budget/horizon preserve durable bytes");
+    }
+    const first = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 1, target_horizon: at(horizonMs),
+    }, options);
+    assert.equal(first.committed_physical_step_count, 1);
+    assert.equal(first.reached_simulation_time, at(firstMs));
+    assert.equal(first.target_horizon_claimed, firstMs === horizonMs);
+    assert.equal(first.state_reconciliation_required, false);
+    const rest = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: at(horizonMs),
+    }, options);
+    assert.equal(rest.committed_physical_step_count, totalCommits - 1);
+    assert.equal(rest.reached_simulation_time, at(horizonMs));
+    assert.equal(rest.target_horizon_claimed, true);
+    const after = await getWorldSimulationState(sid, options);
+    assert.equal(after.revision, before.revision + totalCommits);
+    assert.equal(after.state.projectiles.projectile_e3.active, false);
+    assert.equal(after.state.projectiles.projectile_e3.termination_reason, "character_contact");
+    assert.equal(after.state.projectiles.projectile_e3.age_ms, 100);
+    assert.equal(after.state.ability_fields.field_e3.active, false);
+    assert.equal(after.state.ability_fields.field_e3.remaining_ms, 0);
+    assert.deepEqual(after.state.memories, before.state.memories);
+    assert.deepEqual(after.state.motivational_goal_history, before.state.motivational_goal_history);
+    const history = await getWorldSimulationHistory(sid, options);
+    assert.equal(history.turns.length, totalCommits);
+    const completed = [...first.committed_turns, ...rest.committed_turns];
+    for (let i = 0; i < history.turns.length; i += 1) {
+      const turn = history.turns[i];
+      assert.equal(turn.previous_state_hash, i ? history.turns[i - 1].next_state_hash : before.state_hash);
+      assert.equal(turn.next_state_hash, completed[i].next_state_hash);
+      assert.deepEqual(turn.selected_action_intents, []);
+      assert.deepEqual(turn.knowledge_transitions, []);
+      assert.ok(turn.chronological_mutation_execution.execution_hash);
+    }
+    assert.equal(history.turns.at(-1).next_state_hash, after.state_hash);
+    const hits = history.turns.flatMap(turn => turn.action_outcomes).filter(item =>
+      item.target === "aria" && ["projectile_hit_character", "ability_field_tick"].includes(item.result));
+    assert.equal(hits.filter(item => item.result === "projectile_hit_character").length, 1);
+    const actualDamage = hits.reduce((sum, hit) => sum + hit.damage_applied, 0);
+    assert.ok(Math.abs(after.state.characters.aria.physical_state.health_current
+      - (100 - actualDamage)) < 1e-9, "Native history and durable combined damage agree");
+    const committedBytes = await bytes();
+    await assert.rejects(runWorldSimulationOffscreenPhysicalStep({
+      world_simulation_session_id: sid, expected_revision: before.revision,
+      expected_state_hash: before.state_hash, target_horizon: at(horizonMs),
+    }, options), { code: "C6E_PHYSICAL_STEP_STALE" });
+    assert.deepEqual(await bytes(), committedBytes, "stale mixed step cannot duplicate damage");
+    const idle = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32, target_horizon: at(horizonMs + 100),
+    }, options);
+    assert.equal(idle.committed_turn_count, 0);
+    assert.equal(idle.reached_simulation_time, at(horizonMs));
+    assert.equal(idle.target_horizon_claimed, false);
+    assert.deepEqual(await bytes(), committedBytes, "inactive mixed processes cannot authorize time");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E7 mixed field/projectile order, ties, Native damage, budget and lineage regression passed.");
+
+// Compare the offscreen shared bound with an ordinary causal turn of the same duration.
+for (const mode of ["field-first", "projectile-first", "tie"]) {
+  const state = e7MixedWorld(mode);
+  const physical = await e4Resolve(state);
+  const elapsed = Date.parse(physical.next_world_state.simulation_time) - Date.parse(state.simulation_time);
+  const foreground = await adjudicateWorldSimulationCausality({
+    world_simulation_session_id: "e7-foreground", world_state: state,
+    world_state_revision: 0, world_state_hash: hashAgentRunValue(state),
+    turn_id: "e7-foreground", event: { event_id: "e7-foreground", scene_id: "room", type: "bounded_wait" },
+    selected_action_intents: [{ character: "keeper", candidate: {
+      action_id: "e7-wait", intent: "remain still", duration_ms: elapsed,
+    } }],
+  });
+  assert.equal(foreground.next_world_state.simulation_time, physical.next_world_state.simulation_time);
+  assert.deepEqual(foreground.next_world_state.projectiles, physical.next_world_state.projectiles);
+  assert.deepEqual(foreground.next_world_state.ability_fields, physical.next_world_state.ability_fields);
+  assert.equal(foreground.next_world_state.characters.aria.physical_state.health_current,
+    physical.next_world_state.characters.aria.physical_state.health_current,
+    "foreground and offscreen damage agree at the shared bound");
+}
+for (const [mode, reason, attempts] of [
+  ["obstacles", "physical_step_projectile_obstacle_progression_pending", 1],
+  ["geometry", "physical_step_field_geometry_unresolved", 1],
+  ["scenes", "physical_step_scene_scope_unresolved", 1],
+  ["unresolved", null, 0], ["due-now", null, 0], ["fractional", null, 0],
+]) {
+  const root = path.join(projectRoot, "tests", ".tmp",
+    `c6-e7-pending-${mode}-${process.pid}-${Date.now()}`);
+  const options = { fixtureRoot: root,
+    characterBrain: async () => assert.fail("unsupported mixed authority cannot invoke Brain") };
+  try {
+    const initial = e7MixedWorld("tie");
+    if (mode === "obstacles") initial.scenes.room.obstacles = [{ obstacle_id: "e7-unmodeled" }];
+    if (mode === "geometry") delete initial.ability_fields.field_e3.center;
+    if (mode === "scenes") {
+      initial.scenes.other = d1Clone(initial.scenes.room);
+      initial.ability_fields.field_e3.scene_id = "other";
+    }
+    if (mode === "unresolved") delete initial.projectiles.projectile_e3.velocity_mps;
+    if (mode === "due-now") initial.projectiles.projectile_e3.age_ms = initial.projectiles.projectile_e3.max_lifetime_ms;
+    if (mode === "fractional") initial.ability_fields.field_e3.remaining_ms = 0.5;
+    const session = await beginWorldSimulationSession({
+      simulation_label: "C6-E7 unsupported mixed authority", seed: mode, initial_world_state: initial,
+    }, options);
+    const sid = session.world_simulation_session_id;
+    const before = await getWorldSimulationState(sid, options);
+    const paths = worldSimulationStatePaths(sid, options);
+    const bytes = () => Promise.all([readFile(paths.state, "utf8"), readFile(paths.history, "utf8")]);
+    const original = await bytes();
+    const result = await runWorldSimulationOffscreenEventBatch({
+      world_simulation_session_id: sid, max_turns: 32,
+    }, options);
+    assert.equal(result.attempted_turn_count, attempts);
+    assert.equal(result.committed_turn_count, 0);
+    assert.equal(result.physical_step_blocked_reason, reason);
+    assert.equal(result.reached_simulation_time, before.state.simulation_time);
+    assert.equal(result.state_reconciliation_required, false);
+    assert.deepEqual(await getWorldSimulationState(sid, options), before);
+    assert.deepEqual(await bytes(), original, "unsupported mixed authority preserves durable state/history");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}
+console.log("CB-C6-E7 foreground equivalence and unsupported mixed authority regression passed.");

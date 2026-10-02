@@ -1443,8 +1443,8 @@ export async function adjudicateWorldSimulationOffscreenPhysicalStep(input = {})
   // pending; never borrow discovery's query epsilon as physical elapsed time.
   const projectiles = Object.values(object(state.projectiles)).filter(item => item?.active === true);
   const fields = Object.values(object(state.ability_fields)).filter(item => item?.active === true);
-  if (projectiles.length && fields.length)
-    return blocked("physical_step_projectile_progression_pending");
+  // A shared positive bound advances every active process in this one scene
+  // through the existing combined physics/timeline owners, including ties.
   const scenes = new Set([...fields, ...projectiles].map(item => String(item.scene_id ?? "")));
   if (scenes.size !== 1 || !object(state.scenes)[[...scenes][0]])
     return blocked("physical_step_scene_scope_unresolved");
