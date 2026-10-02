@@ -49,7 +49,11 @@ function staticMotionProfiles(worldState, scene, windowMs, targetRadiusM) {
       if (!position) return null;
       return {
         character,
-        target_radius_m: targetRadiusM,
+        target_radius_m: positiveNumber(
+          object(object(worldState.characters)[character]?.combat_profile).collision_radius_m
+            ?? object(worldState.characters)[character]?.collision_radius_m,
+          targetRadiusM,
+        ),
         profile: {
           start: position,
           end: position,
@@ -114,7 +118,7 @@ function projectileCandidate(worldState, projectileId, rawProjectile, currentTim
     ? lifetimeRemainingMs : Math.max(0, horizonDeltaMs)) + 0.001;
 
   const rules = object(worldState.world_rules ?? worldState.rules);
-  const targetRadiusM = positiveNumber(rules.combat_target_radius_m, 0.3);
+  const targetRadiusM = positiveNumber(rules.combat_target_radius_m ?? rules.collision_radius_m, 0.3);
   const queried = queryWorldSimulationProjectileNextEvent({
     projectile,
     scene,
