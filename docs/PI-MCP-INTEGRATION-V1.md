@@ -4,6 +4,46 @@
 
 ## 目前階段
 
+Phase E — Canary。Workstream：`dev_workstream_20261003-133510_1d6d8a9c4e9f`。
+隔離 workspace：`dev_workspace_b4cf50c9846643a09d79f584`。
+基底 commit：`6b7d1c37b60878688dde0a5452cbb56ce929e732`。
+正式封板以 exact candidate、validation manifest、canonical remote 與 Journal 收尾證據為準。
+
+- 新增 trusted-host `createPiCanaryExecutionController`，沿用 Phase C engine、adapter、store、checkpoint、reconciliation 與既有 Development Journal。沒有 model / patch generator / engineering decision layer。
+- Cohort 使用 immutable host policy：schema 1、cohort_id、最多 10 個名額，以及最多 10 個 GPT 已授權的 exact Intent ID / hash。預設 disabled，GPT / trusted host 決定是否啟用。
+- 第一次 schema 2 admission 的 command 保存 完整 approved policy、cohort / policy hash；`readPiCanaryEnrollment` 唯讀重建 policy / Intent / state / admission receipt，不依賴 chat。語義 history 驗證拒絕 cohort policy 或名額違反。Journal 在原 append lock / revision CAS 內檢查新 operation、同 cohort policy 與名額，再原子發布；並行請求不能超額。
+- 既有 schema 1 / 2 / 3 operation 一律不能加入 Canary。相同 enrolled Intent 重送只取原紀錄；cohort 或 policy 變更拒絕。原紀錄 hash、版本與生命週期保持原樣，沒有 migration。
+- 一般 reliable admission / command 不得繞過 Canary authority 恢復 enrolled operation。重新啟動須提供相同 host policy / GPT Intent；owner、step、receipt、retry、ambiguous mutation 沿用 Phase C 規則。
+- Canary 限 active isolated workspace；workspace / workstream identity 由既有 MCP authority 回傳再查核。shared main、workspace create、integrate / push 拒絕；commit 仍需 GPT Intent 的明確權限與 exact input。
+- 每次 action dispatch 前重查 host 開關；lookup 1 秒 deadline，失敗或不確定視為 disabled。Admission disabled 無 state publication；claim 後停用保存 BLOCKED / permission evidence，交回 GPT。允許查核已保存狀態與 observational reconciliation。
+- 失敗不轉送 legacy，不自行改 scope、patch、test expectation 或 mutation key。Validation / ambiguous outcome 仍 decision_required；terminal duplicate 可以在停用時讀回。
+- `createPiCanaryStdioTransport` 綁 trusted existing MCP session，使用 concrete tools/call、workspace lookup、operation lookup。每個 binding 有獨立 RPC identity；timeout / transport / semantic failure 分類保持既有 boundary。
+- 新 operation 回傳 Phase E structured result、cohort / policy、completed / remaining、verification、checkpoint、receipts。始終 `engineering_review_required:true`，execution completion 不替 GPT 判定工程封板。
+- production default route 保持原流程；此階段為 explicit cohort 入口。Phase F default cutover 必須重新核對全部前置條件與正式 acceptance evidence。
+
+### Phase E 驗證與 cutover 前置條件
+
+- regression 先於 controller 建立。Canary 45/45 PASS；A–D 149/149 PASS，A–E 合計 194 項 focused regression。
+- 既有 Pi runtime / codemode / read-only entry 16/16 實際 PASS，0 SKIP；original MCP 24 scripts 保留，Pi additive inventory 10 scripts。
+- 真正 child process exit 覆蓋 claim、physical mutation completion、receipt publication、admission pair-before-head；新 process 恢復同 enrollment / operation，實體 keyed write 只開始一次。
+- 並行 admission、舊 operation 拒絕、default-disabled、policy conflict、scope / permission、開關 deadline、stdio identity / error、missing PASS / validation escalation 都有 regression。
+- 正式 MCP / tunnel PASS 由本 workstream 的 exact candidate 提供；以上 regression 不宣稱 live tunnel fault injection 或 default cutover。
+- 開始本階段時 main / canonical remote 對齊，Journal healthy / active 0 / dangling 0。Shared-main 37 項既有修改逐一 hash 保留。
+- 前置查核仍發現 Retrieval R3 / CB-C6-E15 的舊 workstream metadata active，以及三個末端 source commit 尚非 canonical main ancestor / patch-equivalent。舊 source branch / clean workspace 全部保留；使用者確認內容完工不取代 formal seal / safe closure 證據。這是 Phase F 待核對條件，不能直接將舊 operation migration 或忽略。
+- 正式整合、live cohort execution、workspace cleanup 與最終 journal / remote 證據保存於既有 operation / candidate 紀錄。
+
+參考 [AWS caller-provided idempotency identity 與同 identity 不同 intent 拒絕](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/)；本工程不引入額外 execution platform。
+
+## 已封板 Phase D，保留設計紀錄
+
+Phase D commit：`6b7d1c37b60878688dde0a5452cbb56ce929e732`。
+Candidate：`dev_integration_20261003-123019_6ea68bc1f8d5`。
+Manifest：`6cbe2389cb8471e496ae6f26ae4c1f95cb87fa2a2bc3ac18ec39dcb945dd5b42`，
+MCP / tunnel PASS_STABLE，diagnostic retry 0。
+正式整合後，production legacy read 的 live shadow operation
+`pi_operation_c11fb0d261f344f6a975b2bfc1059606` 為 MATCHED，fresh process 重建相同 projection；
+Pi mutation dispatch 0。以下保留當時施工紀錄。
+
 Phase D — Shadow Mode。Workstream：`dev_workstream_20261003-114241_91643599324a`。
 隔離 workspace：`dev_workspace_3170619a970d43a7bba9a98f`。
 基底 commit：`16abdbd8e509d251860619f6cca6fa4975bb6d7b`。

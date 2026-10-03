@@ -16,6 +16,26 @@ function exact(v,keys) {
   if(!v||typeof v!=="object"||Array.isArray(v)||Object.keys(v).length!==keys.length
     ||keys.some(k=>!Object.hasOwn(v,k)))reliableFailure("CORRUPT_STATE");
 }
+export function validateCanaryPolicy(source) {
+  const p=reliableJson(source);
+  if(!p||Array.isArray(p)||Object.keys(p).sort().join(",")!=="authorized_intents,cohort_id,max_operations,schema_version"
+    ||p.schema_version!==1||!/^canary-[A-Za-z0-9_-]{1,96}$/u.test(p.cohort_id)
+    ||!Number.isSafeInteger(p.max_operations)||p.max_operations<1||p.max_operations>10
+    ||!Array.isArray(p.authorized_intents)||!p.authorized_intents.length||p.authorized_intents.length>10
+    ||new Set(p.authorized_intents.map(x=>x?.intent_id)).size!==p.authorized_intents.length
+    ||p.authorized_intents.some(x=>!x||Array.isArray(x)||Object.keys(x).sort().join(",")!=="intent_hash,intent_id"
+      ||typeof x.intent_id!=="string"||!x.intent_id.length||x.intent_id.length>128||!/^[a-f0-9]{64}$/u.test(x.intent_hash)))
+    reliableFailure("INVALID_CANARY_POLICY");
+  return p;
+}
+export function validateCanaryBinding(value,intent) {
+  exact(value,["cohort_id","policy_hash","policy"]);
+  const policy=validateCanaryPolicy(value.policy);
+  if(value.cohort_id!==policy.cohort_id||value.policy_hash!==hashExecutionInput(policy)
+    ||(intent&&!policy.authorized_intents.some(x=>x.intent_id===intent.intent_id&&x.intent_hash===hashExecutionInput(intent))))
+    reliableFailure("CORRUPT_STATE");
+  return {...value,policy};
+}
 export const reliableTerminal=s=>["COMPLETED","FAILED","CANCELLED"].includes(s);
 export function initialReliableState(intent,options) {
   return validateOperationState({...createOperationState(intent,options),verification_state:Object.fromEntries(
@@ -218,7 +238,8 @@ export function validateReliableProjection(value,prior) {
     validateRetryPolicy(value.runtime.retry_policy);
     if(value.runtime.owner!==null)validateOwner(value.runtime.owner);
     if(!prior) {
-      exact(value.command,["type"]);
+      exact(value.command,Object.hasOwn(value.command,"canary_binding")?["type","canary_binding"]:["type"]);
+      if(Object.hasOwn(value.command,"canary_binding"))validateCanaryBinding(value.command.canary_binding,intent);
       if(value.command.type!=="operation_created"||value.action_type!=="operation_created"||value.revision!==1
         ||value.previous_projection_hash!==null||value.runtime.owner!==null||value.runtime.active_call!==null
         ||value.runtime.retry_at!==null||stableJson(state)!==stableJson(initialReliableState(intent,{

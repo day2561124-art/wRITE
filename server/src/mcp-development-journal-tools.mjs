@@ -985,7 +985,7 @@ export function createDevOperationJournalService({
   // STARTED + COMPLETED share the existing append lock and one head publication.
   // Partial publication fails the existing cardinality/hash checks after restart.
   // No long-lived development operation is retained for a logical Pi lifecycle.
-  async function appendExecutionProjection(value, { expected_revision, validateHistory } = {}) {
+  async function appendExecutionProjection(value, { expected_revision, validateHistory, admissionGuard } = {}) {
     const record = normalizeExecutionProjection(value);
     if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
       || typeof validateHistory !== "function") throw new Error("Invalid Pi persistence binding.");
@@ -1002,6 +1002,11 @@ export function createDevOperationJournalService({
         const latest = validateHistory(history);
         const existing = [...latest.values()].find(event => event.execution_projection.intent.intent_id === record.intent.intent_id);
         function conflict(code) { const error = new Error(code); error.code = code; throw error; }
+        // Trusted host admission authority runs inside the same CAS/append lock as publication.
+        if (expected_revision === 0 && admissionGuard !== undefined) {
+          if (typeof admissionGuard !== "function") conflict("INVALID_ADMISSION_AUTHORITY");
+          await admissionGuard({ history, latest, existing, record });
+        }
         if (expected_revision === 0 && existing) {
           if (existing.execution_projection.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
           return existing;

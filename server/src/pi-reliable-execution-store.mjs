@@ -35,7 +35,7 @@ function output(event,events) {
 export function createPiReliableExecutionStore({journal={
   readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
   recoverExecutionPublication:recoverDevExecutionPublication},
-  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive}={}) {
+  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,admissionGuard}={}) {
   if(typeof journal.readExecutionProjections!=="function"||typeof journal.appendExecutionProjection!=="function"
     ||typeof clock!=="function"||typeof isOwnerAlive!=="function")reliableFailure("INVALID_STATE_STORE_BINDING");
   async function history() {
@@ -51,18 +51,22 @@ export function createPiReliableExecutionStore({journal={
     return {events,latest:validatePiExecutionHistory(events)};
   }
   async function publish(record,revision) {
-    const event=await journal.appendExecutionProjection(record,{expected_revision:revision,validateHistory:validatePiExecutionHistory});
+    const event=await journal.appendExecutionProjection(record,{expected_revision:revision,validateHistory:validatePiExecutionHistory,
+      ...(revision===0?{admissionGuard}:{})});
     return output(event,(await history()).events);
   }
   async function admit(source,{retry_policy={max_attempts:3,base_delay_ms:250,max_delay_ms:5000},...options}={}) {
     const intent=createExecutionIntent(source),policy=validateRetryPolicy(retry_policy);
-    const {latest}=await history();
+    const {latest,events}=await history();
+    const created=events.find(e=>e.execution_projection.intent.intent_id===intent.intent_id&&e.execution_projection.revision===1);
+    if(created?.execution_projection.command?.canary_binding&&typeof admissionGuard!=="function")
+      reliableFailure("CANARY_AUTHORITY_REQUIRED");
     const existing=[...latest.values()].find(e=>e.execution_projection.intent.intent_id===intent.intent_id);
     if(existing?.execution_projection.schema_version===1)reliableFailure("LEGACY_OPERATION_NOT_MIGRATED");
     const state=initialReliableState(intent,{...options,timestamp:clock()});
     return publish(makeReliableProjection({schema_version:2,revision:1,previous_projection_hash:null,
       action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null},
-      command:{type:"operation_created"}}),0);
+      command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{})}}),0);
   }
   async function current(args) {
     const h=await history(),event=h.latest.get(args.operation_id);
@@ -74,7 +78,10 @@ export function createPiReliableExecutionStore({journal={
     return {event,...h};
   }
   async function command(args) {
-    const {event}=await current(args),prior=event.execution_projection;
+    const {event,events}=await current(args),prior=event.execution_projection;
+    const created=events.find(e=>e.execution_projection.state.operation_id===prior.state.operation_id&&e.execution_projection.revision===1);
+    if(created?.execution_projection.command?.canary_binding&&typeof admissionGuard!=="function")
+      reliableFailure("CANARY_AUTHORITY_REQUIRED");
     if(!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("STATE_REVISION_REQUIRED");
     if(args.command.type==="owner_acquired"&&prior.runtime.owner) {
       const alive=await isOwnerAlive(prior.runtime.owner);

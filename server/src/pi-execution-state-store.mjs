@@ -81,6 +81,14 @@ export function validatePiExecutionHistory(events) {
   const byOperation = new Map();
   const byIntent = new Map();
   const keys = new Map();
+  const cohorts = new Map();
+  function bindCanary(record) {
+    const binding=record.command?.canary_binding;
+    if(!binding)return;
+    const previous=cohorts.get(binding.cohort_id);
+    if(previous&&(previous.policy_hash!==binding.policy_hash||previous.count>=binding.policy.max_operations))fail("CORRUPT_STATE");
+    cohorts.set(binding.cohort_id,{policy_hash:binding.policy_hash,count:(previous?.count??0)+1});
+  }
   function bindKeys(record) {
     for (const action of record.intent.requested_actions.filter(x => x.idempotency_key)) {
       const binding = hashExecutionInput({ intent_id: record.intent.intent_id, context: record.intent.context, action });
@@ -104,7 +112,7 @@ export function validatePiExecutionHistory(events) {
         || event.result?.result_hash !== hashExecutionInput(state)) fail("CORRUPT_STATE");
       if (!prior) {
         if (byIntent.has(record.intent.intent_id)) fail("CORRUPT_STATE");
-        byIntent.set(record.intent.intent_id, state.operation_id); bindKeys(record);
+        byIntent.set(record.intent.intent_id, state.operation_id); bindKeys(record); bindCanary(record);
       }
       byOperation.set(state.operation_id, event);
       continue;
