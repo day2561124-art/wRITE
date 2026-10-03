@@ -309,7 +309,7 @@ function normalizeExecutionProjection(value) {
     error.code = "EXECUTION_PROJECTION_SIZE_LIMIT"; throw error;
   }
   const record = JSON.parse(encoded);
-  if (![1, 2].includes(record.schema_version) || !Number.isSafeInteger(record.revision) || record.revision < 1
+  if (![1, 2, 3].includes(record.schema_version) || !Number.isSafeInteger(record.revision) || record.revision < 1
     || !sha256Pattern.test(record.projection_hash) || !record.intent || !record.state
     || !/^pi_operation_[a-f0-9]{32}$/u.test(record.state.operation_id)) throw new Error("CORRUPT_STATE");
   return record;
@@ -886,7 +886,7 @@ export function createDevOperationJournalService({
     }
     return events.filter(event => event.execution_projection !== undefined);
   }
-  // Recover only a provably unpublished schema-2 Pi persistence transaction.
+  // Recover only a provably unpublished schema-2 execution or schema-3 observation transaction.
   // No event is rewritten/deleted; unknown tails and physical mutations remain fail-safe.
   async function recoverExecutionPublication({ validateHistory } = {}) {
     if (typeof validateHistory !== "function" || explicitDegraded) throw new Error("CORRUPT_STATE");
@@ -919,7 +919,7 @@ export function createDevOperationJournalService({
       const started = tail[0];
       if (started.stage !== "operation_started" || started.operation_type !== "pi_execution_projection"
         || started.tool_name !== "pi.execution.persist" || started.targets.length
-        || started.reconciliation_key !== null || started.result?.execution_schema_version !== 2
+        || started.reconciliation_key !== null || ![2, 3].includes(started.result?.execution_schema_version)
         || started.diagnostic?.hostname !== os.hostname()
         || !Number.isSafeInteger(started.diagnostic.owner_pid) || started.diagnostic.owner_pid < 1
         || isProcessRunning(started.diagnostic.owner_pid)) throw new Error("CORRUPT_STATE");
@@ -927,10 +927,11 @@ export function createDevOperationJournalService({
       if (started.result.state_revision !== (prior?.revision ?? 0) + 1
         || started.result.state_before !== (prior?.state.status ?? null)) throw new Error("CORRUPT_STATE");
       if (prior) {
-        if (prior.schema_version !== 2 || started.result.input_hash !== prior.state.intent_hash
+        if (prior.schema_version !== started.result.execution_schema_version || started.result.input_hash !== prior.state.intent_hash
           || started.result.intent_id !== prior.intent.intent_id || started.workspace_id !== prior.state.workspace_id
           || started.workstream_id !== prior.state.workstream_id) throw new Error("CORRUPT_STATE");
-      } else if (started.result.action_type !== "operation_created" || started.result.state_after !== "CREATED"
+      } else if (started.result.action_type !== (started.result.execution_schema_version === 3 ? "shadow_planned" : "operation_created")
+        || started.result.state_after !== (started.result.execution_schema_version === 3 ? "PREPARING" : "CREATED")
         || [...latest.values()].some(e => e.execution_projection.intent.intent_id === started.result.intent_id)) {
         throw new Error("CORRUPT_STATE");
       }
@@ -941,7 +942,7 @@ export function createDevOperationJournalService({
           || terminalEvent.workstream_id !== started.workstream_id || terminalEvent.targets.length
           || terminalEvent.reconciliation_key !== null) throw new Error("CORRUPT_STATE");
         if (terminalEvent.stage === "operation_completed") {
-          if (terminalEvent.execution_projection?.schema_version !== 2
+          if (terminalEvent.execution_projection?.schema_version !== started.result.execution_schema_version
             || canonicalJson(terminalEvent.result) !== canonicalJson(started.result)) throw new Error("CORRUPT_STATE");
           validateHistory([...history, terminalEvent]);
         } else if (terminalEvent.stage === "operation_recovered") {
@@ -1015,7 +1016,7 @@ export function createDevOperationJournalService({
         const metadata = {
           logical_operation_id: record.state.operation_id, intent_id: record.intent.intent_id,
           action_type: record.action_type, state_revision: record.revision, projection_hash: record.projection_hash,
-          ...(record.schema_version === 2 ? { execution_schema_version: 2 } : {}),
+          ...([2, 3].includes(record.schema_version) ? { execution_schema_version: record.schema_version } : {}),
           state_before: previous?.state.status ?? null, state_after: record.state.status,
           step_id: record.state.current_step, input_hash: record.state.intent_hash,
           result_hash: sha256Text(canonicalJson(record.state)),

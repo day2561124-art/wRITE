@@ -4,6 +4,42 @@
 
 ## 目前階段
 
+Phase D — Shadow Mode。Workstream：`dev_workstream_20261003-114241_91643599324a`。
+隔離 workspace：`dev_workspace_3170619a970d43a7bba9a98f`。
+基底 commit：`16abdbd8e509d251860619f6cca6fa4975bb6d7b`。
+正式封板以 exact integration candidate、validation manifest、canonical remote 與 Journal 收尾查核為準。
+
+- trusted-host opt-in `createPiShadowExecutionObserver` 與 `createPiShadowLegacyBridge`。Legacy caller 決定每次呼叫，原 MCP dispatcher 執行；Pi 保存預期調度與實際觀察。production default route 保持原流程。
+- 預期步驟來自 GPT 的 immutable Intent 與既有 capability adapter，包含 tool、permission、scope、dependencies、phase、input hash 與 mutation key。沿用 Phase C 的 mutation phase 順序限制。
+- 每次實際呼叫保存 observation_id、實際 tool、arguments hash、request fingerprint、key、開始／完成時間、result hash、explicit PASS 與可取得的 legacy dev_operation_id。
+- 比較 tool / input / workspace / key / order / dependency / overlapping / duplicate / missing step；response 的 workspace、workstream 與 reconciliation key 也檢查 identity binding。任何差異交回 GPT。
+- Pi 無 mutation dispatcher、無 retry / reconnect / alternative implementation／test expectation 修改。Legacy response 與 thrown error 的原物件照原流程返回；observer 的 deadline / persistence / diagnostic failure 不能導致 legacy 重送。
+- Caller 在 observation 與 dispatch 之間或 response 期間改動 request，標記 `SHADOW_INPUT_CHANGED`，保存 coverage gap；observer 故障也留下 gap。缺失觀察不能因其餘步驟吻合而得到 MATCHED。
+- schema 3 projection 共用 Development Journal 的 append lock、revision CAS、immutable hash-chain 與 bounded payload；schema 1 / 2 保留原格式和 hash，不 migration。
+- 同 Intent / 同內容 admission 與同 observation identity 重送回已保存結果；identity 內容衝突拒絕。這只去重觀察紀錄，legacy 的重複實際呼叫仍會被完整觀察及標記。
+- Shadow closure 後紀錄不重開。`MATCHED` 代表已封閉、無差異的調度比對；`engineering_review_required:true`。Common OperationState 明列 observation-only，沒有 Pi 執行完成或工程封板的語義。
+- Journal publication recovery 延用 Phase C 已驗證的 same-host dead owner / exact namespace / zero targets / valid prefix / full semantic history proof，新增 schema 3 observation transaction。Unknown / live owner / foreign / corrupt history 仍 fail safe。
+- Restart 從 durable observation 重建比較；in-flight legacy outcome 保持 unknown，交回 GPT，shadow 不查猜 physical success、不重送 mutation。
+
+### Phase D 驗證與邊界
+
+- regression 先於實作建立，初次因缺 observer module 失敗。最終 shadow 48/48 PASS，0 FAIL / 0 SKIP；A–C 101/101 PASS，合計 A–D focused 149 項。
+- 既有 pinned Pi runtime / codemode / read-only entry 16/16 實際 PASS，0 SKIP；MCP suite inventory PASS，原 24 scripts 保留、Pi additive inventory 9 scripts。
+- 實際 Workbench read、真正 MCP stdio read／write、現有 Journal reconciliation provider 及 temporary physical file 都已比對。Shadow 的 domain mutation dispatch count 為 0，legacy dispatcher 每次只呼叫一次。
+- 真正 child process exit 覆蓋 observation publication 的四個位置，以及 legacy physical mutation 完成前後的 Pi receipt 邊界；fresh process 恢復觀察，不 replay legacy mutation。
+- hash-valid fabricated MATCHED、permission / context conflict、missing PASS、coverage loss、late / duplicate observation、request mutation、wrong response identity 都有 regression。
+- 正式 MCP / tunnel PASS 必須由本 workstream 的 exact candidate gate 提供。Production sampling、canary 與 default cutover 依 Phase E–F 和原前置條件另行驗收。
+- shared-main 的 37 項既有 overlay 保留並逐一 byte-hash 比對；code、checkpoint、commit / integrate / push 由既有 Development Journal 追溯。
+
+參考 [AWS shadow testing](https://docs.aws.amazon.com/sagemaker/latest/dg/shadow-tests.html) 中保留原 production response、另存比較證據的方式。本工程使用被動調度觀察，重用現有 Pi / MCP / Journal 基礎設施。
+
+## 已封板 Phase C，保留設計紀錄
+
+Phase C 已由 commit `16abdbd8e509d251860619f6cca6fa4975bb6d7b` 整合並推送。
+Candidate：`dev_integration_20261003-111035_b5cfa2c6a2de`。
+Manifest：`166dfce8c2cc170f51a1a6326564f97ea4ed9185192391ba4d73b8eb0537fdf4`，
+MCP / tunnel PASS_STABLE，diagnostic retry 0。以下保留當時施工紀錄。
+
 Phase C — Reliability。Workstream：`dev_workstream_20261003-100124_6f779341a426`。
 隔離 workspace：`dev_workspace_86a7ddd3980944b0902ac022`。
 基底 commit：`213913e20723ad020a118a3229ea50fa512fad1d`。
