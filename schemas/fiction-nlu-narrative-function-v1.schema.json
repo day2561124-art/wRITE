@@ -1,0 +1,411 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_narrative_function_v1.json",
+  "title": "Fiction NLU Narrative Function Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "provider",
+    "scope",
+    "plot_graph_registry_sha256",
+    "targets",
+    "function_scores",
+    "salience_scores",
+    "dependency_links",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fiction_nlu_narrative_function_v1"
+    },
+    "config_version": {
+      "const": "fiction_nlu_narrative_function_v1"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assertion_scope": {
+      "const": "bounded_narrative_function_and_salience_not_canonical_plot_truth"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "request_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_version": {
+          "const": "fiction_nlu_narrative_function_request_v1"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "novel_id",
+        "plot_graph_analysis_id",
+        "complete_narrative_function_claim",
+        "complete_salience_ranking_claim",
+        "screenplay_structure_assumed"
+      ],
+      "properties": {
+        "novel_id": {
+          "type": "string",
+          "pattern": "^NOV-[A-F0-9]{16}$"
+        },
+        "plot_graph_analysis_id": {
+          "type": "string",
+          "pattern": "^ANL-[A-F0-9]{16}$"
+        },
+        "complete_narrative_function_claim": {
+          "const": false
+        },
+        "complete_salience_ranking_claim": {
+          "const": false
+        },
+        "screenplay_structure_assumed": {
+          "const": false
+        }
+      }
+    },
+    "plot_graph_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_type",
+          "target_id",
+          "component_id",
+          "candidate_labels"
+        ],
+        "properties": {
+          "target_type": {
+            "enum": [
+              "node",
+              "component"
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "pattern": "^(PLN|PLC)-[A-F0-9]{16}$"
+          },
+          "component_id": {
+            "type": "string",
+            "pattern": "^PLC-[A-F0-9]{16}$"
+          },
+          "candidate_labels": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 9,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^function\\.[a-z_]+$"
+            }
+          }
+        }
+      }
+    },
+    "function_scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_type",
+          "target_id",
+          "label",
+          "score",
+          "threshold",
+          "active",
+          "source",
+          "gate_status",
+          "gate_evidence",
+          "evidence"
+        ],
+        "properties": {
+          "target_type": {
+            "enum": [
+              "node",
+              "component"
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "pattern": "^(PLN|PLC)-[A-F0-9]{16}$"
+          },
+          "label": {
+            "type": "string",
+            "pattern": "^function\\.[a-z_]+$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model",
+              "hybrid"
+            ]
+          },
+          "gate_status": {
+            "enum": [
+              "not_applicable",
+              "passed",
+              "failed"
+            ]
+          },
+          "gate_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "high_consequence",
+              "downstream_consequence"
+            ],
+            "properties": {
+              "high_consequence": {
+                "type": "boolean"
+              },
+              "downstream_consequence": {
+                "type": "boolean"
+              }
+            }
+          },
+          "evidence": {
+            "$ref": "#/$defs/evidenceArray"
+          }
+        }
+      }
+    },
+    "salience_scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_type",
+          "target_id",
+          "score",
+          "source",
+          "evidence",
+          "graph_support"
+        ],
+        "properties": {
+          "target_type": {
+            "enum": [
+              "node",
+              "component"
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "pattern": "^(PLN|PLC)-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model",
+              "hybrid"
+            ]
+          },
+          "evidence": {
+            "$ref": "#/$defs/evidenceArray"
+          },
+          "graph_support": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "incoming_semantic_edges",
+              "outgoing_semantic_edges",
+              "downstream_reachable_count",
+              "component_node_count"
+            ],
+            "properties": {
+              "incoming_semantic_edges": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outgoing_semantic_edges": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "downstream_reachable_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "component_node_count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "dependency_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "link_id",
+          "relation_type",
+          "source_node_id",
+          "target_node_id",
+          "score",
+          "threshold",
+          "source",
+          "evidence"
+        ],
+        "properties": {
+          "link_id": {
+            "type": "string",
+            "pattern": "^NFL-[A-F0-9]{16}$"
+          },
+          "relation_type": {
+            "enum": [
+              "narrative.setup_payoff",
+              "narrative.foreshadowing_payoff",
+              "narrative.callback"
+            ]
+          },
+          "source_node_id": {
+            "type": "string",
+            "pattern": "^PLN-[A-F0-9]{16}$"
+          },
+          "target_node_id": {
+            "type": "string",
+            "pattern": "^PLN-[A-F0-9]{16}$"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source": {
+            "enum": [
+              "heuristic",
+              "model"
+            ]
+          },
+          "evidence": {
+            "$ref": "#/$defs/evidenceArray"
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceArray": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "passage_id",
+          "span_start",
+          "span_end",
+          "quote_sha256",
+          "node_ids"
+        ],
+        "properties": {
+          "passage_id": {
+            "type": "string",
+            "pattern": "^PAS-[A-F0-9]{16}$"
+          },
+          "span_start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "span_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "quote_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "node_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^PLN-[A-F0-9]{16}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

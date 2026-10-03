@@ -366,6 +366,55 @@ Development output remains `provisional`,
 `salience_resolved=false`, and
 `retrieval_admission=not_admitted`.
 
+## NLU-8 — Narrative function and salience
+
+Repository artifacts:
+
+- `config/fiction-nlu-narrative-function-v1.json`
+- `schemas/fiction-nlu-narrative-function-v1.schema.json`
+- `scripts/fiction-sample-nlu-narrative-function-v1.py`
+- `tests/nlu/fiction-sample-nlu-narrative-function-v1.test.mjs`
+
+NLU-8 consumes a fully validated NLU-7 plot graph and keeps three distinct
+layers: narrative-function labels, an independent salience score, and explicit
+long-range narrative dependency links.
+
+Function labels are multi-label and bounded per graph target. Each node or
+component receives 5–9 graph-conditioned candidates, and the provider must score
+every candidate rather than returning only salient labels. Candidate generation
+uses semantic graph topology and does not use novel position or temporal layer as
+a narrative-function prior.
+
+High-risk labels have separate admission gates. `turning_point` requires
+downstream graph support plus explicit downstream-consequence evidence;
+`climax` requires explicit high-consequence evidence and at most one active
+climax per component; `foreshadowing` and `payoff` require admitted
+long-range dependency links. A high model score cannot bypass these gates.
+
+Long-range links are limited to `setup_payoff`, `foreshadowing_payoff`, and
+`callback`. They are never created from order alone and require exact canonical
+Passage evidence covering both endpoints.
+
+Salience is an independent 0–1 estimate with its own evidence and deterministic
+graph-support features. It does not automatically activate any narrative-function
+label and does not claim a complete ranking of the novel.
+
+The runtime validates the full NLU-2 → NLU-5 → NLU-6 → NLU-7 lineage before
+NLU-8 scoring. Provider evidence is normalized only when it is an exact substring
+of the canonical NLU-5 event context associated with the referenced plot node.
+
+A UTF-8 qwen3.5:9b pilot successfully scored all 16 bounded function candidates
+for two targets, produced independent salience scores, and passed the independent
+NLU-8 validator. On the single-event fixture it activated only lower-risk
+`exposition` / `setup` labels and produced no high-risk narrative-function or
+dependency assertion.
+
+Development output remains `provisional`,
+`complete_narrative_function_claim=false`,
+`complete_salience_ranking_claim=false`,
+`screenplay_structure_assumed=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until
