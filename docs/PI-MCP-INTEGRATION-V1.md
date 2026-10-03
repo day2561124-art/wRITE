@@ -4,6 +4,58 @@
 
 ## 目前階段
 
+Phase C — Reliability。Workstream：`dev_workstream_20261003-100124_6f779341a426`。
+隔離 workspace：`dev_workspace_86a7ddd3980944b0902ac022`。
+基底 commit：`213913e20723ad020a118a3229ea50fa512fad1d`。
+正式封板以此 workstream 的 exact integration candidate、validation manifest 與 canonical remote 查核為準；focused PASS 不替代正式 gate。
+
+- trusted-host opt-in `createPiReliableExecutionEngine`、`createPiReliableExecutionStore`、`createPiReliableMcpAdapter`。未新增 production tool entry，未改預設 route，沒有 model client / engineering reasoning。
+- schema 2 projection 保存 deterministic command、owner、active call、retry policy / retry_at；OperationState 共用原合約。schema 1 可以共存查核，不能轉成 dispatchable operation，也不 migration。
+- 每個 step 在 dispatch 前保存唯一 call_id、step/input/key binding 與 checkpoint；完成後保存 immutable bounded receipt，state 只保留 hash/reference。restart 跳過已完成步驟。
+- Journal 的 append lock 執行 revision CAS；同 intent_id / 同內容回傳 durable 最新結果，不重跑。不同 Intent 重用相同 mutation key，在 admission publication 前拒絕；不以 namespace 偷換 key。
+- owner 以 worker_id、PID、hostname 綁定；仍有 live owner 的重送只回進度。只有已確認退出的 owner 可接手；未知 liveness 停止 dispatch。晚到 response 不能重用舊 claim 或改 terminal state。
+- Pi 管理 request / lookup deadline、bounded exponential backoff、reconnect scheduling、safe read retry 與有上限的 reconciliation polling。policy 首次 admission 後不能由 duplicate request 改寫。
+- mutation key 放在既有 MCP `params._meta.reconciliation_key`，fingerprint 使用實際 tool name 與綁定後 arguments；重用 MCP 的 durable reconciliation 與 dedupe，而非另建一套 physical mutation journal。
+- mutation timeout / restart 後的 in-flight claim 先查原 key。只有 verified `not_admitted` / same-key authority 才可重送；completed 保存 facts，partial / unknown / exhausted / unsafe 狀態回 GPT。terminal no-effect 要求新 key 時，Pi 不自行產生新 key。
+- MCP completed / deduplicated facts 未必含原始 response，receipt 明列 `original_response_available:false`。測試缺 PASS evidence 時交回 GPT，不將 intended effect 當作 validation PASS。
+- write → test → commit 按 GPT 順序與 permission 執行。phase conflict、validation / test / Git semantic failure 保存 decision_required；不改 patch、suite、expectation 或工程目標。
+- filesystem / test / commit 的 mutation 綁 active isolated workspace；main / candidate / workstream scope 需要額外 trusted server authority。Pi 不自行提升 permission。
+- execution COMPLETED 只代表既定操作完成，結果固定 `engineering_review_required:true`；工程封板與 completion conditions 的語義判斷仍由 GPT 負責。
+
+### Phase C publication recovery
+
+只在 schema 2 Pi persistence tail 符合以下證據時恢復：append lock、完整 immutable file version / hash-chain、既有 head prefix、合法 revision / Intent history、正確 namespace、零 mutation targets，以及同 host 的 started owner 已退出。
+
+| 未發布 tail | 行為 |
+| --- | --- |
+| 只有 started | 追加 operation_recovered / no_effect_observed；邏輯 state 未發布，resume 使用原 safe state |
+| 完整 started + completed pair | 驗證完整 schema 2 projection / deterministic history，再發布原 pair 的 head |
+| recovery event 已寫、head 未發布 | 驗證相同 no-effect proof 後發布；recovery 自身可再次 restart |
+| schema 1 / foreign operation / live owner / truncated / hash-valid invented progress | CORRUPT_STATE，拒絕 head publication 與 tool dispatch |
+| physical effect 尚無 MCP terminal acknowledgement | 不由 Pi publication recovery 猜測成功或重送；保持 safe failure / decision boundary |
+
+不刪除、不改寫既有事件；不泛化為任意 Journal repair 或所有 OS / device 的斷電保障。原 Phase B API 保持原本 fail-safe 行為。
+
+### Phase C 驗證與限制
+
+- 新 regression 在實作前因 missing reliability module 失敗；最終 Phase A–C focused 101/101 PASS，0 FAIL / 0 SKIP。
+- 既有 pinned runtime / codemode / read-only entry 16/16 PASS，0 FAIL / 0 SKIP；原 24 MCP scripts 保留，Pi inventory additive 增至 8 scripts。
+- fault tests 使用真正 Node process exit，涵蓋 claim / send / MCP terminal-before-Pi-receipt / stored receipt / saved backoff / Pi publication / recovery publication；fresh process 查同一份 Journal 與實際 temporary file，並行重送只 mutation 一次。
+- reconciliation provider 使用現有實體 Journal service，跨 process restart；transport timeout / reconnect / late response 用可控 host binding 注入。
+- 以上證據不宣稱已完成 live production canary、production tunnel fault injection 或 default cutover；Phase D–F 仍待施工。正式 MCP / tunnel baseline 必須由本 workstream 的 exact candidate 取得。
+- code、checkpoint、commit / integration / push 的 provenance 保存在既有 Development Journal；shared-main 37 項既有 overlay 必須逐一 byte-hash 保留。
+
+研究採用 caller-provided idempotency identity、durable result 與同 identity 不同 intent 必須拒絕的原則：[AWS Builders' Library](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/)。
+durable operation / retry 的工程参考：[Temporal Nexus operations](https://docs.temporal.io/nexus/operations)。
+本階段重用現有 lock、journal、workspace、capability 與 MCP reconciliation，沒有引入 orchestration platform 或第二個 reasoning layer。
+
+## 已封板 Phase B，保留設計紀錄
+
+Phase B 已由 commit `213913e20723ad020a118a3229ea50fa512fad1d` 整合並推送。
+Candidate：`dev_integration_20261003-092812_b68353d7322f`。
+Manifest：`799ac3eb5a6b1eb2277088e861fec00bc3eddea0328d690669b26bc24deebba7`，
+MCP / tunnel PASS_STABLE，diagnostic retry 0。以下保留當時施工紀錄。
+
 Phase B — Journal & State。Workstream：
 `dev_workstream_20261003-084957_ea2f0234f257`。
 隔離 workspace：`dev_workspace_6706581babde4884ab49af9b`。

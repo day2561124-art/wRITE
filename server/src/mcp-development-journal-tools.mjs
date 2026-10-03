@@ -309,7 +309,7 @@ function normalizeExecutionProjection(value) {
     error.code = "EXECUTION_PROJECTION_SIZE_LIMIT"; throw error;
   }
   const record = JSON.parse(encoded);
-  if (record.schema_version !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
+  if (![1, 2].includes(record.schema_version) || !Number.isSafeInteger(record.revision) || record.revision < 1
     || !sha256Pattern.test(record.projection_hash) || !record.intent || !record.state
     || !/^pi_operation_[a-f0-9]{32}$/u.test(record.state.operation_id)) throw new Error("CORRUPT_STATE");
   return record;
@@ -886,6 +886,97 @@ export function createDevOperationJournalService({
     }
     return events.filter(event => event.execution_projection !== undefined);
   }
+  // Recover only a provably unpublished schema-2 Pi persistence transaction.
+  // No event is rewritten/deleted; unknown tails and physical mutations remain fail-safe.
+  async function recoverExecutionPublication({ validateHistory } = {}) {
+    if (typeof validateHistory !== "function" || explicitDegraded) throw new Error("CORRUPT_STATE");
+    const { eventsPath } = await ensureStorageRoot(storageRoot);
+    const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+    try {
+      const head = await readHead(headPath);
+      const files = await listEventFiles(eventsPath);
+      const count = files.length - head.latest_sequence;
+      if (count === 0) return { recovered: false };
+      if (![1, 2].includes(count) || files.length > DEV_JOURNAL_MAX_RECOVERY_SCAN) throw new Error("CORRUPT_STATE");
+      const tailPath = path.join(eventsPath, files.at(-1));
+      const info = await lstat(tailPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES) throw new Error("CORRUPT_STATE");
+      const last = parseEvent(await eventReader(tailPath, "utf8"));
+      const physicalHead = { schema_version: DEV_JOURNAL_SCHEMA_VERSION, latest_sequence: last.sequence,
+        latest_event_id: last.journal_event_id, latest_event_hash: last.event_hash };
+      let verified = await verifySnapshotExtension({ eventsPath,
+        base: { head: emptyHead(), files: [], events: [], versions: [] },
+        snapshot: { head: physicalHead, files } });
+      const prefix = verified.events.slice(0, head.latest_sequence);
+      const prefixTail = prefix.at(-1);
+      if (head.latest_event_id !== (prefixTail?.journal_event_id ?? null)
+        || head.latest_event_hash !== (prefixTail?.event_hash ?? null)) throw new Error("CORRUPT_STATE");
+      const health = classifyVerifiedSnapshot({ head, events: prefix });
+      if (health.dangling_operations.length || health.ambiguous_terminal) throw new Error("CORRUPT_STATE");
+      const history = executionProjectionEvents(prefix);
+      const latest = validateHistory(history);
+      const tail = verified.events.slice(head.latest_sequence);
+      const started = tail[0];
+      if (started.stage !== "operation_started" || started.operation_type !== "pi_execution_projection"
+        || started.tool_name !== "pi.execution.persist" || started.targets.length
+        || started.reconciliation_key !== null || started.result?.execution_schema_version !== 2
+        || started.diagnostic?.hostname !== os.hostname()
+        || !Number.isSafeInteger(started.diagnostic.owner_pid) || started.diagnostic.owner_pid < 1
+        || isProcessRunning(started.diagnostic.owner_pid)) throw new Error("CORRUPT_STATE");
+      const prior = latest.get(started.result.logical_operation_id)?.execution_projection;
+      if (started.result.state_revision !== (prior?.revision ?? 0) + 1
+        || started.result.state_before !== (prior?.state.status ?? null)) throw new Error("CORRUPT_STATE");
+      if (prior) {
+        if (prior.schema_version !== 2 || started.result.input_hash !== prior.state.intent_hash
+          || started.result.intent_id !== prior.intent.intent_id || started.workspace_id !== prior.state.workspace_id
+          || started.workstream_id !== prior.state.workstream_id) throw new Error("CORRUPT_STATE");
+      } else if (started.result.action_type !== "operation_created" || started.result.state_after !== "CREATED"
+        || [...latest.values()].some(e => e.execution_projection.intent.intent_id === started.result.intent_id)) {
+        throw new Error("CORRUPT_STATE");
+      }
+      let terminalEvent = tail[1];
+      if (terminalEvent) {
+        if (terminalEvent.operation_id !== started.operation_id || terminalEvent.operation_type !== started.operation_type
+          || terminalEvent.tool_name !== started.tool_name || terminalEvent.workspace_id !== started.workspace_id
+          || terminalEvent.workstream_id !== started.workstream_id || terminalEvent.targets.length
+          || terminalEvent.reconciliation_key !== null) throw new Error("CORRUPT_STATE");
+        if (terminalEvent.stage === "operation_completed") {
+          if (terminalEvent.execution_projection?.schema_version !== 2
+            || canonicalJson(terminalEvent.result) !== canonicalJson(started.result)) throw new Error("CORRUPT_STATE");
+          validateHistory([...history, terminalEvent]);
+        } else if (terminalEvent.stage === "operation_recovered") {
+          const expected = { ...started.result, outcome: "no_effect_observed", recovery_reason: "PI_STATE_NOT_PUBLISHED" };
+          if (terminalEvent.execution_projection !== undefined || canonicalJson(terminalEvent.result) !== canonicalJson(expected))
+            throw new Error("CORRUPT_STATE");
+        } else throw new Error("CORRUPT_STATE");
+      }
+      // Recheck every immutable file version under the append lock before publishing.
+      await verifySnapshotExtension({ eventsPath, base: verified, snapshot: { head: physicalHead, files } });
+      if (!terminalEvent) {
+        terminalEvent = normalizeBaseEvent({
+          operation_id: started.operation_id, operation_type: started.operation_type, tool_name: started.tool_name,
+          workstream_id: started.workstream_id, workspace_id: started.workspace_id, links: started.links, targets: [],
+          stage: "operation_recovered", result: { ...started.result, outcome: "no_effect_observed",
+            recovery_reason: "PI_STATE_NOT_PUBLISHED" },
+        }, { sequence: started.sequence + 1, previousEventHash: started.event_hash,
+          eventId: eventIdGenerator(), timestamp: clock().toISOString() });
+        const encoded = canonicalJson(terminalEvent) + "\n";
+        if (Buffer.byteLength(encoded) > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error("CORRUPT_STATE");
+        await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(terminalEvent.sequence, terminalEvent.journal_event_id)), encoded);
+        await executionPublicationHook?.("after_recovery_event");
+      }
+      classifyVerifiedSnapshot({ head: physicalHead, events: [...prefix, started, terminalEvent] });
+      await executionPublicationHook?.("before_recovery_head");
+      await atomicWriteJson(headPath, { schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+        latest_sequence: terminalEvent.sequence, latest_event_id: terminalEvent.journal_event_id,
+        latest_event_hash: terminalEvent.event_hash });
+      verifiedSnapshot = null;
+      await executionPublicationHook?.("after_recovery_head");
+      return { recovered: true, outcome: terminalEvent.stage === "operation_completed" ? "published" : "not_published",
+        operation_id: started.operation_id };
+    } finally { await releaseJournalLock(handle, lockPath); }
+  }
+
   async function readExecutionProjections() {
     return executionProjectionEvents((await verify()).events);
   }
@@ -924,6 +1015,7 @@ export function createDevOperationJournalService({
         const metadata = {
           logical_operation_id: record.state.operation_id, intent_id: record.intent.intent_id,
           action_type: record.action_type, state_revision: record.revision, projection_hash: record.projection_hash,
+          ...(record.schema_version === 2 ? { execution_schema_version: 2 } : {}),
           state_before: previous?.state.status ?? null, state_after: record.state.status,
           step_id: record.state.current_step, input_hash: record.state.intent_hash,
           result_hash: sha256Text(canonicalJson(record.state)),
@@ -1523,11 +1615,13 @@ export function createDevOperationJournalService({
     getMutationToken,
     readExecutionProjections,
     appendExecutionProjection,
+    recoverExecutionPublication,
     storageRoot,
   };
 }
 
 const defaultJournal = createDevOperationJournalService();
+export const recoverDevExecutionPublication = options => defaultJournal.recoverExecutionPublication(options);
 export const readDevExecutionProjections = () => defaultJournal.readExecutionProjections();
 export const appendDevExecutionProjection = (value, options) => defaultJournal.appendExecutionProjection(value, options);
 const snapshotFingerprintCacheByWorkspace = new Map();

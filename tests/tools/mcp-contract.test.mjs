@@ -41,6 +41,8 @@ const piTestScripts = [
   "tests/mcp/pi-execution-contract.test.mjs",
   "tests/mcp/pi-execution-orchestrator.test.mjs",
   "tests/mcp/pi-execution-state-store.test.mjs",
+  "tests/mcp/pi-reliable-execution.test.mjs",
+  "tests/mcp/pi-execution-publication-recovery.test.mjs",
 ];
 
 const defaultTestScriptTimeoutMs = 300_000;

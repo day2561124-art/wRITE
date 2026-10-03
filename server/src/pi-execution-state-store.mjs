@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateReliableProjection } from "./pi-reliable-execution-state.mjs";
 import { createExecutionIntent, createOperationState, validateOperationState,
   transitionOperation, hashExecutionInput } from "./pi-execution-contract.mjs";
 import { canonicalJson, appendDevExecutionProjection, readDevExecutionProjections } from "./mcp-development-journal-tools.mjs";
@@ -78,7 +79,35 @@ function transitionAction(status) {
 export function validatePiExecutionHistory(events) {
   const byOperation = new Map();
   const byIntent = new Map();
+  const keys = new Map();
+  function bindKeys(record) {
+    for (const action of record.intent.requested_actions.filter(x => x.idempotency_key)) {
+      const binding = hashExecutionInput({ intent_id: record.intent.intent_id, context: record.intent.context, action });
+      const previous = keys.get(action.idempotency_key);
+      if (previous && previous !== binding) fail("IDEMPOTENCY_KEY_CONFLICT");
+      keys.set(action.idempotency_key, binding);
+    }
+  }
   for (const event of events) {
+    if (event.execution_projection?.schema_version === 2) {
+      const raw = event.execution_projection;
+      const prior = byOperation.get(raw.state?.operation_id)?.execution_projection;
+      const record = validateReliableProjection(raw, prior);
+      const state = record.state;
+      if (event.stage !== "operation_completed" || event.operation_type !== "pi_execution_projection"
+        || event.workspace_id !== state.workspace_id || event.workstream_id !== state.workstream_id
+        || event.result?.logical_operation_id !== state.operation_id || event.result?.projection_hash !== record.projection_hash
+        || event.result?.state_revision !== record.revision || event.result?.action_type !== record.action_type
+        || event.result?.execution_schema_version !== 2
+        || event.result?.state_after !== state.status || event.result?.input_hash !== state.intent_hash
+        || event.result?.result_hash !== hashExecutionInput(state)) fail("CORRUPT_STATE");
+      if (!prior) {
+        if (byIntent.has(record.intent.intent_id)) fail("CORRUPT_STATE");
+        byIntent.set(record.intent.intent_id, state.operation_id); bindKeys(record);
+      }
+      byOperation.set(state.operation_id, event);
+      continue;
+    }
     const record = validatedProjection(event.execution_projection);
     const state = record.state;
     if (event.stage !== "operation_completed" || event.operation_type !== "pi_execution_projection"
@@ -97,6 +126,7 @@ export function validatePiExecutionHistory(events) {
       // The global intent identity is fixed; a workspace change requires a new intent_id.
       if (byIntent.has(record.intent.intent_id)) fail("CORRUPT_STATE");
       byIntent.set(record.intent.intent_id, state.operation_id);
+      bindKeys(record);
     } else {
       if (Date.parse(state.updated_at) < Date.parse(prior.state.updated_at)) fail("CORRUPT_STATE");
       if (record.revision !== prior.revision + 1 || record.previous_projection_hash !== prior.projection_hash

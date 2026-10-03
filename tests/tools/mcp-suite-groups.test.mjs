@@ -86,6 +86,8 @@ assert.deepEqual(piScripts, [
   "tests/mcp/pi-execution-contract.test.mjs",
   "tests/mcp/pi-execution-orchestrator.test.mjs",
   "tests/mcp/pi-execution-state-store.test.mjs",
+  "tests/mcp/pi-reliable-execution.test.mjs",
+  "tests/mcp/pi-execution-publication-recovery.test.mjs",
 ]);
 assert(original.includes("for (const scriptPath of [...testScripts, ...piTestScripts])"),
   "Full MCP runner must execute Pi tests as well as retain the original baseline");
