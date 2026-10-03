@@ -38,6 +38,8 @@ const piTestScripts = [
   "tests/mcp/mcp-pi-agent-execution.test.mjs",
   "tests/mcp/mcp-pi-codemode-bridge.test.mjs",
   "tests/mcp/mcp-pi-readonly-entry.test.mjs",
+  "tests/mcp/pi-execution-contract.test.mjs",
+  "tests/mcp/pi-execution-orchestrator.test.mjs",
 ];
 
 const defaultTestScriptTimeoutMs = 300_000;
