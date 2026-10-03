@@ -54,6 +54,7 @@ export const DEV_JOURNAL_LINK_TYPES = Object.freeze([
   "related_to",
 ]);
 export const DEV_JOURNAL_MAX_EVENT_BYTES = 128 * 1024;
+export const DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES = 1024 * 1024;
 export const DEV_JOURNAL_MAX_TARGETS = 100;
 export const DEV_JOURNAL_MAX_LINKS = 100;
 export const DEV_JOURNAL_MAX_QUERY_RESULTS = 100;
@@ -299,7 +300,23 @@ function boundedResultMetadata(value) {
   return output;
 }
 
+// Typed Pi snapshots extend this journal rather than creating another event store.
+// Old events retain their exact schema/hash; the optional payload is hash covered.
+function normalizeExecutionProjection(value) {
+  const encoded = canonicalJson(value);
+  if (Buffer.byteLength(encoded, "utf8") > 768 * 1024) {
+    const error = new Error("EXECUTION_PROJECTION_SIZE_LIMIT");
+    error.code = "EXECUTION_PROJECTION_SIZE_LIMIT"; throw error;
+  }
+  const record = JSON.parse(encoded);
+  if (record.schema_version !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
+    || !sha256Pattern.test(record.projection_hash) || !record.intent || !record.state
+    || !/^pi_operation_[a-f0-9]{32}$/u.test(record.state.operation_id)) throw new Error("CORRUPT_STATE");
+  return record;
+}
+
 function normalizeBaseEvent(input, { sequence, previousEventHash, eventId, timestamp }) {
+
   const operationId = input.operation_id;
   if (!operationIdPattern.test(operationId)) throw new Error("operation_id is invalid.");
   if (!stageSet.has(input.stage)) throw new Error("stage is invalid.");
@@ -338,6 +355,10 @@ function normalizeBaseEvent(input, { sequence, previousEventHash, eventId, times
   };
   if (event.parent_operation_id !== null && !operationIdPattern.test(event.parent_operation_id)) throw new Error("parent_operation_id is invalid.");
   if (event.reconciles_event_id !== null && !eventIdPattern.test(event.reconciles_event_id)) throw new Error("reconciles_event_id is invalid.");
+  if (input.execution_projection !== undefined) {
+    if (event.operation_type !== "pi_execution_projection" || event.stage !== "operation_completed") throw new Error("Invalid Pi projection event.");
+    event.execution_projection = normalizeExecutionProjection(input.execution_projection);
+  }
   event.event_hash = computeEventHash(event);
   return event;
 }
@@ -515,6 +536,11 @@ async function releaseJournalLock(handle, lockPath) {
 function parseEvent(raw) {
   const event = JSON.parse(raw);
   if (!isObject(event) || event.schema_version !== DEV_JOURNAL_SCHEMA_VERSION) throw new Error("Journal event schema is invalid.");
+  const typedExecution = event.operation_type === "pi_execution_projection" && event.stage === "operation_completed"
+    && event.execution_projection !== undefined;
+  if (Buffer.byteLength(raw, "utf8") > (typedExecution ? DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES : DEV_JOURNAL_MAX_EVENT_BYTES)) {
+    throw new Error("Journal event size is invalid.");
+  }
   if (!Number.isSafeInteger(event.sequence) || event.sequence < 1) throw new Error("Journal event sequence is invalid.");
   if (!eventIdPattern.test(event.journal_event_id) || !operationIdPattern.test(event.operation_id)) throw new Error("Journal event identity is invalid.");
   if (!stageSet.has(event.stage)) throw new Error("Journal event stage is invalid.");
@@ -527,6 +553,10 @@ function parseEvent(raw) {
   if ((reconciliationKey === null) !== (requestFingerprint === null)) throw new Error("Journal reconciliation identity is incomplete.");
   normalizeTargets(event.targets ?? []);
   normalizeLinks(event.links ?? []);
+  if (event.execution_projection !== undefined) {
+    if (event.operation_type !== "pi_execution_projection" || event.stage !== "operation_completed") throw new Error("Invalid Pi projection event.");
+    normalizeExecutionProjection(event.execution_projection);
+  }
   return event;
 }
 
@@ -581,6 +611,7 @@ export function createDevOperationJournalService({
   eventIdGenerator = generateEventId,
   eventReader = readFile,
   lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
+  executionPublicationHook,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -678,7 +709,7 @@ export function createDevOperationJournalService({
     const loaded = await mapJournalFilesBounded(suffix, async (fileName) => {
       const filePath = path.join(eventsPath, fileName);
       const beforeInfo = await lstat(filePath, { bigint: true });
-      if (beforeInfo.isSymbolicLink() || !beforeInfo.isFile() || beforeInfo.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
+      if (beforeInfo.isSymbolicLink() || !beforeInfo.isFile() || beforeInfo.size > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
       const event = parseEvent(await eventReader(filePath, "utf8"));
       const afterInfo = await lstat(filePath, { bigint: true });
       const version = snapshotArtifactVersionToken(afterInfo);
@@ -846,6 +877,92 @@ export function createDevOperationJournalService({
     } finally {
       await releaseJournalLock(lockHandle, lockPath);
     }
+  }
+
+  function executionProjectionEvents(events) {
+    for (const event of events) {
+      if (event.operation_type === "pi_execution_projection" && event.stage === "operation_completed"
+        && event.execution_projection === undefined) throw new Error("CORRUPT_STATE");
+    }
+    return events.filter(event => event.execution_projection !== undefined);
+  }
+  async function readExecutionProjections() {
+    return executionProjectionEvents((await verify()).events);
+  }
+
+  // STARTED + COMPLETED share the existing append lock and one head publication.
+  // Partial publication fails the existing cardinality/hash checks after restart.
+  // No long-lived development operation is retained for a logical Pi lifecycle.
+  async function appendExecutionProjection(value, { expected_revision, validateHistory } = {}) {
+    const record = normalizeExecutionProjection(value);
+    if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
+      || typeof validateHistory !== "function") throw new Error("Invalid Pi persistence binding.");
+    await assertMutationAllowed();
+    for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
+      const verification = await verify();
+      const { eventsPath } = await ensureStorageRoot(storageRoot);
+      const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+      try {
+        const head = await readHead(headPath);
+        // Safe storage contention only: no tool action has been dispatched.
+        if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
+        const history = executionProjectionEvents(verification.events);
+        const latest = validateHistory(history);
+        const existing = [...latest.values()].find(event => event.execution_projection.intent.intent_id === record.intent.intent_id);
+        function conflict(code) { const error = new Error(code); error.code = code; throw error; }
+        if (expected_revision === 0 && existing) {
+          if (existing.execution_projection.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
+          return existing;
+        }
+        const previous = latest.get(record.state.operation_id)?.execution_projection ?? null;
+        if ((previous?.revision ?? 0) !== expected_revision) conflict("STATE_REVISION_CONFLICT");
+        if (record.revision !== expected_revision + 1
+          || record.previous_projection_hash !== (previous?.projection_hash ?? null)) conflict("STATE_REVISION_CONFLICT");
+        if (previous && previous.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
+        const operationId = operationIdGenerator();
+        const timestamp = clock().toISOString();
+        const metadata = {
+          logical_operation_id: record.state.operation_id, intent_id: record.intent.intent_id,
+          action_type: record.action_type, state_revision: record.revision, projection_hash: record.projection_hash,
+          state_before: previous?.state.status ?? null, state_after: record.state.status,
+          step_id: record.state.current_step, input_hash: record.state.intent_hash,
+          result_hash: sha256Text(canonicalJson(record.state)),
+        };
+        const checkpoint = record.action_type === "checkpoint_saved" ? record.state.checkpoint : null;
+        const links = checkpoint?.workspace_checkpoint_id ? [{
+          relation: "used", checkpoint_id: checkpoint.workspace_checkpoint_id,
+          workspace_id: record.state.workspace_id, workspace_snapshot_id: checkpoint.workspace_snapshot_id,
+        }] : [];
+        const base = {
+          operation_id: operationId, operation_type: "pi_execution_projection", tool_name: "pi.execution.persist",
+          workstream_id: record.state.workstream_id, workspace_id: record.state.workspace_id,
+          result: metadata, links, targets: [],
+        };
+        const started = normalizeBaseEvent({ ...base, stage: "operation_started" }, {
+          sequence: head.latest_sequence + 1, previousEventHash: head.latest_event_hash,
+          eventId: eventIdGenerator(), timestamp,
+        });
+        const completed = normalizeBaseEvent({ ...base, stage: "operation_completed", execution_projection: record }, {
+          sequence: started.sequence + 1, previousEventHash: started.event_hash,
+          eventId: eventIdGenerator(), timestamp,
+        });
+        validateHistory([...history, completed]);
+        const encoded = [started, completed].map(event => canonicalJson(event) + "\n");
+        if (encoded.some(text => Buffer.byteLength(text, "utf8") > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES)) conflict("EXECUTION_PROJECTION_SIZE_LIMIT");
+        await executionPublicationHook?.("before_events");
+        await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(started.sequence, started.journal_event_id)), encoded[0]);
+        await executionPublicationHook?.("after_started");
+        await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(completed.sequence, completed.journal_event_id)), encoded[1]);
+        await executionPublicationHook?.("after_completed");
+        await atomicWriteJson(headPath, { schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+          latest_sequence: completed.sequence, latest_event_id: completed.journal_event_id, latest_event_hash: completed.event_hash });
+        await executionPublicationHook?.("after_head");
+        return completed;
+      } finally {
+        await releaseJournalLock(handle, lockPath);
+      }
+    }
+    throw journalSnapshotUnstableError();
   }
 
   function artifactStatesEqual(left, right) {
@@ -1404,11 +1521,15 @@ export function createDevOperationJournalService({
     listOperations,
     getProvenance,
     getMutationToken,
+    readExecutionProjections,
+    appendExecutionProjection,
     storageRoot,
   };
 }
 
 const defaultJournal = createDevOperationJournalService();
+export const readDevExecutionProjections = () => defaultJournal.readExecutionProjections();
+export const appendDevExecutionProjection = (value, options) => defaultJournal.appendExecutionProjection(value, options);
 const snapshotFingerprintCacheByWorkspace = new Map();
 const snapshotFingerprintStateSet = new Set(["modified", "added", "untracked"]);
 

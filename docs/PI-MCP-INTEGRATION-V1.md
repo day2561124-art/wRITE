@@ -4,6 +4,52 @@
 
 ## 目前階段
 
+Phase B — Journal & State。Workstream：
+`dev_workstream_20261003-084957_ea2f0234f257`。
+隔離 workspace：`dev_workspace_6706581babde4884ab49af9b`。
+基底 commit：`d2dc03d61b038b64babeb2f526478a890b5da4f3`。
+正式封板以此 workstream 的 exact integration candidate、validation manifest 與 canonical remote 查核為準。
+
+- 新增 trusted-host `createPiExecutionStateStore`：admit、advance、checkpoint、inspect。
+- 新增 opt-in `persistExecutionIntent`，保存 CREATED → ADMITTED → PREPARING，再回傳 structured result。
+- 完整 Intent 與 OperationState 寫入現有 Development Journal 的 versioned `execution_projection`，不另建 journal 或以 chat / memory 作唯一狀態。
+- 每一 revision 保存 previous_projection_hash、projection_hash、action_type；讀取重建時驗證 Intent hash、identity、context、step/key/verification binding 與合法 transition。
+- 相同 intent_id / 相同內容回傳已保存的最新結果；相同 identity / 不同內容拒絕。這是 admission 去重，尚不是 Phase C 的 mutation idempotency。
+- Journal 既有 append lock 內執行 revision CAS，started/completed 成對寫入，再以既有 durable head publication 發布。正常落盤不留下長期 active / dangling Development Journal operation。
+- checkpoint 保存 operation / intent / workspace / revision / phase / step；可用 trusted verification resolver 連結既有 workspace checkpoint、exact snapshot 與 Git head。未驗證或跨 workspace reference 拒絕，不複製其 payload。
+- Result 可從 durable projection 重建 completed、remaining、verification、checkpoint、resume_point、decision_required 與 journal receipt。
+- Phase B 不 dispatch tools、不產生程式內容、不改 production default；`execution_enabled` 與 `resume_dispatch_enabled` 固定 false。DECISION_REQUIRED 不自行重新開啟。
+
+### Phase B publication 與復原邊界
+
+舊 Journal schema 1、既有事件 hash、operation lifecycle、flat metadata 與 128 KiB event limit 保留。
+新增欄位只出現在 `pi_execution_projection / operation_completed`，payload 上限 768 KiB、專用 event 上限 1 MiB，承接既有 Intent 512 KiB budget。一般事件仍受原上限限制。完整 payload 與 state/result/input hash 同時受既有 Journal hash-chain 保護。
+
+物理 publication 與邏輯 Pi operation 分開：一筆 state persistence 有自己的 dev_operation_id，metadata 綁 logical Pi operation_id。重建不依賴 process memory 或聊天進度。
+
+| 中斷位置 | Phase B 行為 |
+| --- | --- |
+| event 寫入前 | 舊 head / 舊 state 仍可讀回 |
+| started 寫入後、head 發布前 | cardinality / chain 不一致，CORRUPT_STATE，停止執行 |
+| completed 寫入後、head 發布前 | 同上；不猜測、不 blind replay |
+| head 發布後、response 遺失 | 新程序讀回已發布結果；相同 admission 不重建 operation |
+
+測試使用真正的 child process exit（包括留下 owner 已退出的 append lock），再由 fresh process/service 查核。
+上述 partial publication 目前只 fail safe；自動 reconcile / resume / retry 是 Phase C gate，不能宣稱已完成。
+沿用既有 exclusive file write、file sync 與 atomic rename；只宣稱已測試的 process restart / interruption 行為，不將它泛稱為所有 OS / device 的斷電保障。[Node.js FileHandle.sync](https://nodejs.org/api/fs.html#filehandlesync)
+
+### Phase B 驗證證據
+
+- implementation 前的新 regression 因尚無 state-store module 而失敗。
+- 首輪 17 tests：14 PASS；3 個 integrity failure 已阻止執行，但 admission 原始錯誤未分類。修正為 CORRUPT_STATE，未放寬 expectation。
+- 最終新增 26 tests PASS，0 FAIL / 0 SKIP；加上 Phase A 共 47/47 PASS。
+- fresh Node restart、duplicate/concurrent admission、跨 process revision CAS、workspace binding、verified/foreign checkpoint、decision escalation、terminal guard、pending completion guard、clock rollback、200 KiB payload、oversize rejection、legacy Journal 共存、hash-valid semantic corruption、四個 publication exit points 均涵蓋。
+- pinned optional Pi runtime 安裝後，既有 runtime / codemode / read-only entry 16/16 PASS，0 FAIL / 0 SKIP。
+- full MCP inventory 保留原 24 scripts，Pi 6 scripts additive；inventory assertions PASS。
+- formal MCP / tunnel 結果須由本 workstream 的 exact-candidate validation 記錄取得；以上 focused PASS 不能替代 formal gate。
+
+## 已封板 Phase A，保留設計紀錄
+
 Phase A — Boundary Foundation，隔離 workspace：
 `dev_workspace_5cdbb0f1d7044d71abd73592`。
 Workstream：`dev_workstream_20261003-073214_3867df627fa2`。
@@ -16,7 +62,7 @@ Workstream：`dev_workstream_20261003-073214_3867df627fa2`。
 - `shadow` 是此階段的零工具呼叫 planning mode；正式 Phase D 的 legacy path comparison 尚未實作。
 - `read_only` 僅能由 trusted host 明確綁定工具及 workspace resolver；只 dispatch workspace-scoped observation。
 - retry / reconciliation 分類只是此階段的 policy foundation，沒有執行 retry、reconnect、restore 或 durable resume。
-- OperationState 是嚴格驗證的 immutable projection；**尚未持久化**，不能用它宣稱 restart recovery。
+- Phase A 的 OperationState 是 immutable projection；當時尚未持久化。Phase B 已增加上述 Journal persistence 與 restart regression。
 - 所有施工檔案修改、依賴安裝與後續 checkpoint / commit 使用既有 Workbench MCP，保留 Development Journal provenance。
 
 ## 前置檢查，2026-10-03 Asia/Taipei
@@ -50,7 +96,7 @@ Workstream：`dev_workstream_20261003-073214_3867df627fa2`。
 | INV-04 | GPT 決定做什麼、寫什麼 | action input SHA-256 與 mutation_plan 一致 |
 | INV-05 | Pi 決定可靠執行 mechanics | state / error / reconciliation policy foundation |
 | INV-06 | MCP 只執行並回報事實 | adapter 保留 bounded evidence，GPT 解讀 |
-| INV-07 | Pi 保存 execution state 與紀錄 | Phase B 必須持久化；本階段不宣稱已完成 |
+| INV-07 | Pi 保存 execution state 與紀錄 | Phase B 以同一 Development Journal 保存完整 versioned projection |
 | INV-08 | GPT 判斷工具結果工程意義 | OBSERVED 不等於工程驗收 PASS |
 | INV-09 | MCP 盡量 stateless | 未增加 MCP runtime execution state |
 | INV-10 | 所有 mutation 可追蹤 | Phase A mutation 關閉；施工修改沿用 Workbench Journal |
@@ -150,9 +196,9 @@ Error classification 是執行規則，不是實作方向：
 | E | 少量全新 operation canary | 原 operation 不 migration，exact permission/reconciliation/workspace tests，fallback 可用 |
 | F | full default cutover | 全部 21 項驗證矩陣與 acceptance criteria PASS、GPT 明確 cutover decision |
 
-B 優先擴展現有 Development Journal 的 hash-chain、locking、reconciliation identity、provenance 和 checkpoint 基礎。既有 journal result 僅接受 bounded flat metadata，不能假装它已保存完整 OperationState；應設計版本化 durable projection / immutable payload reference，不能建立另一套無關的 append-only journal。
+B 已擴展現有 Development Journal 的 hash-chain、locking、provenance 與 checkpoint reference。既有 result 仍是 bounded flat metadata；完整 state 放在專用 versioned execution_projection，不另建 append-only journal。
 
-C 的 idempotency 至少綁 caller/intent、workspace、step、capability、精確 input hash；同 key 不同內容拒絕。失敗後的未執行判斷必須由 tool / journal / physical postcondition 證明。使用既有 MCP reconciliation_key 時，遵守其 no-effect 要求 new-key 的既有語義，不私自重開 terminal operation。
+C 的 idempotency 至少綁 caller/intent、workspace、step��capability、精確 input hash；同 key 不同內容拒絕。失敗後的未執行判斷必須由 tool / journal / physical postcondition 證明。使用既有 MCP reconciliation_key 時，遵守其 no-effect 要求 new-key 的既有語義，不私自重開 terminal operation。
 
 Durable state publication、journal admission、tool dispatch、physical effect、receipt persistence、terminal publication 的每個 crash window 都需故障注入。MCP 端 idempotency / receipt 和 Pi 端 dedupe 必須配合；只在 Pi memory 留 key 不能保證 mutation once semantics。
 
@@ -180,7 +226,7 @@ Focused：
 
 Inventory：
 `node tests/tools/mcp-suite-groups.test.mjs`。
-保留原 24-script baseline 及 3 個既有 Pi scripts，新增 2 個 foundation scripts，皆由正式 mcp runner 執行。
+保留原 24-script baseline 及 3 個既有 Pi scripts，新增 2 個 foundation scripts 與 1 個 Phase B state-store script，皆由正式 mcp runner 執行。
 
 本輪 first regression 在 implementation 前因兩個新 module 尚不存在而失敗。實作後 19 focused tests PASS；既有 Pi 16 tests PASS、0 FAIL、0 SKIP。追加真實 adapter read / operation-isolation regression 後，使用 final focused run 與 Workbench Journal operation / snapshot / checkpoint 作最終證據，不能把此筆早期數字當 final gate。
 
