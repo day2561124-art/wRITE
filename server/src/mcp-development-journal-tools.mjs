@@ -978,6 +978,62 @@ export function createDevOperationJournalService({
     } finally { await releaseJournalLock(handle, lockPath); }
   }
 
+  async function readProductionRoutes() {
+    return (await verify()).events.filter(event => event.operation_type === "pi_production_route" && event.stage === "operation_completed");
+  }
+
+  // Route decisions reuse the Development Journal append lock and durable hash chain.
+  // A partial publication fails closed; no caller or transport metadata can select a route.
+  async function appendProductionRoute(record, { expected_revision, validateHistory, validateGate } = {}) {
+    if (!Number.isSafeInteger(expected_revision) || expected_revision < 0
+      || typeof validateHistory !== "function" || typeof validateGate !== "function") throw new Error("Invalid production route authority.");
+    await assertMutationAllowed();
+    for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
+      const verification = await verify();
+      const { eventsPath } = await ensureStorageRoot(storageRoot);
+      const handle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+      try {
+        const head = await readHead(headPath);
+        if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
+        const history = verification.events.filter(event => event.operation_type === "pi_production_route" && event.stage === "operation_completed");
+        const prior = validateHistory(history);
+        const duplicate = history.find(event => JSON.parse(event.result.route_record).decision_id === record.decision_id);
+        if (duplicate) {
+          const stored = JSON.parse(duplicate.result.route_record);
+          if (stored.revision !== record.revision || stored.mode !== record.mode || stored.gate_hash !== record.gate_hash) {
+            const error = new Error("ROUTE_DECISION_CONFLICT"); error.code = "ROUTE_DECISION_CONFLICT"; throw error;
+          }
+          return duplicate;
+        }
+        if (prior.revision !== expected_revision || record.revision !== expected_revision + 1 || record.previous_route_hash !== prior.route_hash) {
+          const error = new Error("ROUTE_REVISION_CONFLICT"); error.code = "ROUTE_REVISION_CONFLICT"; throw error;
+        }
+        if (await validateGate({ verification, history, record }) !== true) {
+          const error = new Error("CUTOVER_GATE_FAILED"); error.code = "CUTOVER_GATE_FAILED"; throw error;
+        }
+        const operationId = operationIdGenerator();
+        const timestamp = clock().toISOString();
+        const base = { operation_id: operationId, operation_type: "pi_production_route", tool_name: "pi.route.persist",
+          targets: [], links: [], result: { route_revision: record.revision, route_hash: record.route_hash, route_record: canonicalJson(record) } };
+        const started = normalizeBaseEvent({ ...base, stage: "operation_started" }, {
+          sequence: head.latest_sequence + 1, previousEventHash: head.latest_event_hash, eventId: eventIdGenerator(), timestamp });
+        const completed = normalizeBaseEvent({ ...base, stage: "operation_completed" }, {
+          sequence: started.sequence + 1, previousEventHash: started.event_hash, eventId: eventIdGenerator(), timestamp });
+        validateHistory([...history, completed]);
+        await executionPublicationHook?.("route_before_events");
+        await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(started.sequence, started.journal_event_id)), canonicalJson(started) + "\n");
+        await executionPublicationHook?.("route_after_started");
+        await writeExclusiveDurableFile(path.join(eventsPath, eventFilename(completed.sequence, completed.journal_event_id)), canonicalJson(completed) + "\n");
+        await executionPublicationHook?.("route_after_completed");
+        await atomicWriteJson(headPath, { schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+          latest_sequence: completed.sequence, latest_event_id: completed.journal_event_id, latest_event_hash: completed.event_hash });
+        await executionPublicationHook?.("route_after_head");
+        return completed;
+      } finally { await releaseJournalLock(handle, lockPath); }
+    }
+    throw journalSnapshotUnstableError();
+  }
+
   async function readExecutionProjections() {
     return executionProjectionEvents((await verify()).events);
   }
@@ -1005,7 +1061,7 @@ export function createDevOperationJournalService({
         // Trusted host admission authority runs inside the same CAS/append lock as publication.
         if (expected_revision === 0 && admissionGuard !== undefined) {
           if (typeof admissionGuard !== "function") conflict("INVALID_ADMISSION_AUTHORITY");
-          await admissionGuard({ history, latest, existing, record });
+          await admissionGuard({ history, latest, existing, record, allEvents: verification.events });
         }
         if (expected_revision === 0 && existing) {
           if (existing.execution_projection.state.intent_hash !== record.state.intent_hash) conflict("INTENT_ID_CONFLICT");
@@ -1396,7 +1452,9 @@ export function createDevOperationJournalService({
       if (existing.operation_id) return { reconciled: true, operation: existing };
       let admission;
       try {
-        admission = await begin({ operation_type: "mcp_mutation", tool_name: context.tool_name });
+        const scope = typeof context.resolve_workspace_scope === "function" ? await context.resolve_workspace_scope() : {};
+        admission = await begin({ operation_type: "mcp_mutation", tool_name: context.tool_name,
+          workspace_id: scope.workspace_id, workstream_id: scope.workstream_id });
       } catch (error) {
         if (error.code !== "RECONCILIATION_EXISTING_OPERATION") throw error;
         return { reconciled: true, operation: await getOperation({ operation_id: error.operation_id }) };
@@ -1619,6 +1677,8 @@ export function createDevOperationJournalService({
     listOperations,
     getProvenance,
     getMutationToken,
+    readProductionRoutes,
+    appendProductionRoute,
     readExecutionProjections,
     appendExecutionProjection,
     recoverExecutionPublication,
@@ -1628,6 +1688,8 @@ export function createDevOperationJournalService({
 
 const defaultJournal = createDevOperationJournalService();
 export const recoverDevExecutionPublication = options => defaultJournal.recoverExecutionPublication(options);
+export const readDevProductionRoutes = () => defaultJournal.readProductionRoutes();
+export const appendDevProductionRoute = (record, options) => defaultJournal.appendProductionRoute(record, options);
 export const readDevExecutionProjections = () => defaultJournal.readExecutionProjections();
 export const appendDevExecutionProjection = (value, options) => defaultJournal.appendExecutionProjection(value, options);
 const snapshotFingerprintCacheByWorkspace = new Map();

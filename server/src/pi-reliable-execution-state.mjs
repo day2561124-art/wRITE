@@ -36,6 +36,11 @@ export function validateCanaryBinding(value,intent) {
     reliableFailure("CORRUPT_STATE");
   return {...value,policy};
 }
+export function validateProductionBinding(value) {
+ exact(value,["route_revision","route_hash"]);
+ if(!Number.isSafeInteger(value.route_revision)||value.route_revision<1||!/^[a-f0-9]{64}$/u.test(value.route_hash))reliableFailure("CORRUPT_STATE");
+ return {...value};
+}
 export const reliableTerminal=s=>["COMPLETED","FAILED","CANCELLED"].includes(s);
 export function initialReliableState(intent,options) {
   return validateOperationState({...createOperationState(intent,options),verification_state:Object.fromEntries(
@@ -238,8 +243,9 @@ export function validateReliableProjection(value,prior) {
     validateRetryPolicy(value.runtime.retry_policy);
     if(value.runtime.owner!==null)validateOwner(value.runtime.owner);
     if(!prior) {
-      exact(value.command,Object.hasOwn(value.command,"canary_binding")?["type","canary_binding"]:["type"]);
+      exact(value.command,Object.hasOwn(value.command,"production_binding")?["type","production_binding"]:Object.hasOwn(value.command,"canary_binding")?["type","canary_binding"]:["type"]);
       if(Object.hasOwn(value.command,"canary_binding"))validateCanaryBinding(value.command.canary_binding,intent);
+      if(Object.hasOwn(value.command,"production_binding"))validateProductionBinding(value.command.production_binding);
       if(value.command.type!=="operation_created"||value.action_type!=="operation_created"||value.revision!==1
         ||value.previous_projection_hash!==null||value.runtime.owner!==null||value.runtime.active_call!==null
         ||value.runtime.retry_at!==null||stableJson(state)!==stableJson(initialReliableState(intent,{

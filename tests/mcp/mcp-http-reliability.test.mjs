@@ -52,6 +52,8 @@ function createFakeSpawn(scenario) {
           result: message.method === 'tools/list'
             ? { tools: [{ name: 'safe_read', annotations: { readOnlyHint: !(scenario === 'read-flips' && generation > 1) } },
               { name: 'unsafe_write', annotations: { readOnlyHint: false } },
+              { name: 'dev_pi_execute_intent', annotations: { readOnlyHint: false } },
+              { name: 'dev_pi_execution_status', annotations: { readOnlyHint: true } },
               { name: 'dev_run_tests', annotations: { readOnlyHint: false } },
               { name: 'dev_workspace_validate_integration', annotations: { readOnlyHint: false } }] }
             : { ok: true, generation },
@@ -96,7 +98,7 @@ function createFakeSpawn(scenario) {
           return true;
         }
         if (message.method === 'tools/call' && scenario === 'long-tool-slow'
-          && message.params?.name === 'dev_run_tests') {
+          && ['dev_run_tests', 'dev_workspace_validate_integration', 'dev_pi_execute_intent', 'dev_pi_execution_status'].includes(message.params?.name)) {
           setTimeout(() => emitResponse(message), 175);
           return true;
         }
@@ -355,16 +357,18 @@ async function verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly() {
     const before = session.getStatus();
     assert.equal(before.call_timeout_ms, 100);
     assert.equal(before.long_tool_call_timeout_ms, 300);
-    assert.deepEqual(before.long_running_tools, ['dev_run_tests', 'dev_workspace_validate_integration']);
-    const reply = await rpcCall(session, {
-      jsonrpc: '2.0',
-      id: 'long-tool',
-      method: 'tools/call',
-      params: { name: 'dev_run_tests', arguments: { suite: 'mcp' } },
-    });
-    assert.equal(reply.result.generation, 1);
-    assert.equal(session.getStatus().generation, 1, 'legitimate long-running tool triggered child recovery');
-    assert.equal(session.pendingCallCount(), 0);
+    assert.deepEqual(before.long_running_tools, ['dev_pi_execute_intent', 'dev_run_tests', 'dev_workspace_validate_integration']);
+    for (const name of ['dev_run_tests', 'dev_workspace_validate_integration', 'dev_pi_execute_intent']) {
+      const reply = await rpcCall(session, {
+        jsonrpc: '2.0', id: 'long-tool-' + name, method: 'tools/call',
+        params: { name, arguments: {} },
+      });
+      assert.equal(reply.result.generation, 1);
+      assert.equal(session.getStatus().generation, 1, 'legitimate long-running tool triggered child recovery');
+      assert.equal(session.pendingCallCount(), 0);
+    }
+    assert.equal(before.long_running_tools.includes('dev_pi_execution_status'), false,
+      'Observational Pi status must retain the bounded ordinary timeout');
   } finally {
     if (session.child) session.child.exitCode = 0;
     session.close();

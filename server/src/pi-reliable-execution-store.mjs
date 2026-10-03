@@ -35,7 +35,7 @@ function output(event,events) {
 export function createPiReliableExecutionStore({journal={
   readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
   recoverExecutionPublication:recoverDevExecutionPublication},
-  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,admissionGuard}={}) {
+  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,productionBinding,admissionGuard}={}) {
   if(typeof journal.readExecutionProjections!=="function"||typeof journal.appendExecutionProjection!=="function"
     ||typeof clock!=="function"||typeof isOwnerAlive!=="function")reliableFailure("INVALID_STATE_STORE_BINDING");
   async function history() {
@@ -59,6 +59,7 @@ export function createPiReliableExecutionStore({journal={
     const intent=createExecutionIntent(source),policy=validateRetryPolicy(retry_policy);
     const {latest,events}=await history();
     const created=events.find(e=>e.execution_projection.intent.intent_id===intent.intent_id&&e.execution_projection.revision===1);
+    if(created?.execution_projection.command?.production_binding&&typeof admissionGuard!=="function")reliableFailure("PRODUCTION_AUTHORITY_REQUIRED");
     if(created?.execution_projection.command?.canary_binding&&typeof admissionGuard!=="function")
       reliableFailure("CANARY_AUTHORITY_REQUIRED");
     const existing=[...latest.values()].find(e=>e.execution_projection.intent.intent_id===intent.intent_id);
@@ -66,7 +67,7 @@ export function createPiReliableExecutionStore({journal={
     const state=initialReliableState(intent,{...options,timestamp:clock()});
     return publish(makeReliableProjection({schema_version:2,revision:1,previous_projection_hash:null,
       action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null},
-      command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{})}}),0);
+      command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{}),...(productionBinding?{production_binding:productionBinding}:{})}}),0);
   }
   async function current(args) {
     const h=await history(),event=h.latest.get(args.operation_id);
@@ -80,6 +81,7 @@ export function createPiReliableExecutionStore({journal={
   async function command(args) {
     const {event,events}=await current(args),prior=event.execution_projection;
     const created=events.find(e=>e.execution_projection.state.operation_id===prior.state.operation_id&&e.execution_projection.revision===1);
+    if(created?.execution_projection.command?.production_binding&&typeof admissionGuard!=="function")reliableFailure("PRODUCTION_AUTHORITY_REQUIRED");
     if(created?.execution_projection.command?.canary_binding&&typeof admissionGuard!=="function")
       reliableFailure("CANARY_AUTHORITY_REQUIRED");
     if(!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("STATE_REVISION_REQUIRED");
@@ -89,6 +91,6 @@ export function createPiReliableExecutionStore({journal={
     }
     return publish(reduceReliableProjection(prior,args.command,clock()),prior.revision);
   }
-  return Object.freeze({admit,command,isOwnerAlive,
+  return Object.freeze({admit,command,isOwnerAlive,readHistory:async()=>freeze((await history()).events),
     inspect:async args=>{const {event,events}=await current(args);return output(event,events);}});
 }

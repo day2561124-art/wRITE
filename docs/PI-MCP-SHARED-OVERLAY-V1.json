@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "source_authority": "user_confirmation",
+  "confirmation": "確認是既有工程／runtime 產物，保留現狀",
+  "confirmation_date": "2026-10-03",
+  "timezone": "Asia/Taipei",
+  "producer_journal_matches": 4,
+  "user_attested_without_exact_producer_match": 33,
+  "preserve_bytes": true,
+  "commit_contents": false,
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "fa59d6002fc0b5a50f4f5c832bd8df9acd6b6f70742e3341749126672ed32f55"
+    },
+    {
+      "path": "config/canon-zones.json",
+      "sha256": "ff42d430cbebbb88dd09686ef00f797d27b8e7eca22ac0a443afd86fd46f65d1"
+    },
+    {
+      "path": "config/engine-components.json",
+      "sha256": "a6292f0cd67316a217744e3bf34c80e3ab045637dafd0c98e47041e357982bae"
+    },
+    {
+      "path": "config/entity-intake.json",
+      "sha256": "09a75fa97b79c77d96612b8e486ba53be6d9be0b6d27929bb8f6b2e2a325d019"
+    },
+    {
+      "path": "config/entity-registry.json",
+      "sha256": "d8961dd3e855cabfcee88126551daf79d77f822490571b9a77d2a42f8bc8be1b"
+    },
+    {
+      "path": "config/settlement-completion-reminders.json",
+      "sha256": "4d4a8aca4c9597732ac8a926f374232999b86953229f820970f69347a4dfb780"
+    },
+    {
+      "path": "config/visual-asset-registry.json",
+      "sha256": "bd95e64eeee51c02b8f48f2988a8e584c7ebc476384f3ec3e59b95617086f401"
+    },
+    {
+      "path": "config/visual-library-approval-queue-import-dry-run.json",
+      "sha256": "44f99b5d9660f17adf6ed6e7ffbd67d99ec12a005b8037047ea3ae966eebeceb"
+    },
+    {
+      "path": "config/visual-library-bridge-readiness.json",
+      "sha256": "cd8775332877d834de9d66e80ed8e034e00ea210dc6b61510cf212a034640dbe"
+    },
+    {
+      "path": "config/visual-library-confirmed-import.json",
+      "sha256": "bdf00c5af8e9290f9ec76433750caf8550cd5e990297acd266dd486ebf5adbe8"
+    },
+    {
+      "path": "config/visual-library-controlled-import-guard.json",
+      "sha256": "9562ae1f77ccb2a25571cc77a5626fa0bd5271d9538b1f9a392379a11df4135c"
+    },
+    {
+      "path": "config/visual-library-controlled-import-trial.json",
+      "sha256": "110318b2a4631db0f08eaedb9f2f802069c87b402741579a15696c10b8d7ee67"
+    },
+    {
+      "path": "config/visual-library-final-acceptance.json",
+      "sha256": "db6cd09d09952f4dd64299fe982dc7b01f3edbf03855e80c4e6cd1ff8f5a85d5"
+    },
+    {
+      "path": "config/visual-library-final-e2e-acceptance.json",
+      "sha256": "82fbbb52a147c8fdda92c7bbf6d0fd15e1ee191cc79dec819f1e892784ae3c72"
+    },
+    {
+      "path": "config/visual-library-import-simulation.json",
+      "sha256": "a4710cc19ce0bf05271aa11d3626d7736adf82d4f9d7ec24a493c0b6e9399e45"
+    },
+    {
+      "path": "config/visual-library-mcp-readonly-tool-registration.json",
+      "sha256": "65183804a55514eba1c6501d927b9c3a71b6c1c3dfb9ae114cdd2ad82291a731"
+    },
+    {
+      "path": "config/visual-library-pending-import-readiness.json",
+      "sha256": "5955c8fade1f1679b16e448d9b3e6c74a69297992643cf0d06a3ccf096b7b6fa"
+    },
+    {
+      "path": "config/visual-library-persistent-baseline-activation.json",
+      "sha256": "7e3ef2ed1e59e944a28513252c66153feb2a773d6f3a09453354c87648ae5bdf"
+    },
+    {
+      "path": "config/visual-library-persistent-baseline-transition.json",
+      "sha256": "ec5e39a0cf6a259f9df01124749217ff47862eeb4037783d8f4f6f48473f87f6"
+    },
+    {
+      "path": "config/visual-library-persistent-import-operator-checklist.json",
+      "sha256": "e5591bd814d3d22007339a53948aa7ab936c2609546056f138b627fc3d47150a"
+    },
+    {
+      "path": "config/visual-library-rebuild-intake.json",
+      "sha256": "ea257d584f19ccc176b20913ebd8f6757113119f3521efefd0922ed49475fce4"
+    },
+    {
+      "path": "config/visual-library-rollback-delete-restore.json",
+      "sha256": "9fe83b249164e3c311ddb55fd635f917a1a0b9d953c55b9d70e34c84b4b336a9"
+    },
+    {
+      "path": "config/visual-library-ui-import-flow.json",
+      "sha256": "cf799bbcda1fd7bec783635654701a1127d858762cfe063b9b2d0ab413499054"
+    },
+    {
+      "path": "config/visual-link-approval-queue-candidate.json",
+      "sha256": "60aeeac6d6e793471e80039088911060b3d556094532d30095a9bdb7d22aae08"
+    },
+    {
+      "path": "config/visual-link-approval-queue-import-dry-run.json",
+      "sha256": "339a96d99f2be6338f7e90ec4605dcd0e69566182e21700f538418ff00ed30f8"
+    },
+    {
+      "path": "config/visual-link-approval-queue-import-guard.json",
+      "sha256": "85b4e0d0297f0113e1ba708b904caeaeae49c6d021eecd230fab1269697cfcc6"
+    },
+    {
+      "path": "config/visual-link-approval-readiness.json",
+      "sha256": "8c0684efcebe330a9060382d658e57d57437c8a5f3d21bdb85fee932ffa1accd"
+    },
+    {
+      "path": "config/visual-link-final-acceptance.json",
+      "sha256": "097d92c062a0e11e0d13f70fa4a477af10c17a089e484d44466237230e1489a8"
+    },
+    {
+      "path": "data/canon_db/active_engine.md",
+      "sha256": "308b7f1dd270d76a3f414c62fd2610b552d221b5a2de0fb1c40a833d510291b5"
+    },
+    {
+      "path": "data/entity_registry/conflict_report.json",
+      "sha256": "23e3d34b0efdecec64123527902b37a78ea9e84cd54e9f93b472e6d1d02ef4a0"
+    },
+    {
+      "path": "data/entity_registry/entity_registry.index.json",
+      "sha256": "724033f003366213fa388e2691b796960dd0827e14ff608b161ca14ab3704ab4"
+    },
+    {
+      "path": "data/entity_registry/entity_registry.json",
+      "sha256": "9c7e6d5580a9d3ae7b7b3731b5ab3faadc17168a571fd04f7db69d2f45804203"
+    },
+    {
+      "path": "data/entity_registry/entity_registry_build_report.json",
+      "sha256": "450d03db2c2ef8e062d88b878f9314ce20285ebc139ffa2bd806bb18cb7688c8"
+    },
+    {
+      "path": "data/entity_registry/provenance.json",
+      "sha256": "144f668d3810eb2d81585aa3e45986cad976ddb0185c7751125f31d687b40fb7"
+    },
+    {
+      "path": "launcher.ps1",
+      "sha256": "e444f6069902483514fd5210ee54cc315945ffe78f388eac487cd2c2ed113ecc"
+    },
+    {
+      "path": "tests/maintenance/mcp-tool-inventory-baseline-reconciliation.test.mjs",
+      "sha256": "0519bb6c051b27676ad06107f18eb81a7adab39d63b2797833e4e24ed39cbba3"
+    },
+    {
+      "path": "scripts/start-mcp-tailscale.ps1",
+      "sha256": "363be8bea1076584791acbbcc072ca6d49e6a2f9e17401a5c42da6fc32b7440b"
+    }
+  ]
+}

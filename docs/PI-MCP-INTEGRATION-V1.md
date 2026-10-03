@@ -1,5 +1,76 @@
 # Pi × MCP 全面整合 v1.0 — 工程合約與階段紀錄
 
+## Phase F — 正式預設入口與封板條件
+
+施工 workstream：`dev_workstream_20261003-182637_8fb1ecfc6ec7`；
+隔離 workspace：`dev_workspace_01337ad105064bf19f2fbcc5`；
+基底為已封板 Phase E commit `8d93148b1577c4648a1992e1344d0ca988006e7e`。
+
+本版提供正式執行入口與 durable route，但程式安裝不會自行啟用 cutover。
+正式封板仍須 exact candidate 的 MCP / tunnel manifest PASS_STABLE、canonical main 對齊、
+全部舊 workstream 安全關閉、Journal healthy / active 0 / dangling 0、
+以及 GPT 明確 route decision 與 live default operation 收尾證據。最終證據以既有 Journal、
+integration candidate / manifest 與 workstream metadata 為準；本段施工紀錄不宣稱已切換。
+
+- GPT 產生 exact `ExecutionIntent` 與完整權限。Developer / full profile 的 `dev_pi_execute_intent({intent_json})` 是新工程執行入口；`dev_pi_execution_status` 讀取 route 或以 exact Intent / operation ID、workspace / workstream 查核 durable state。
+- Pi 沿用已封板 Phase C engine、capability adapter、state、checkpoint、retry / reconciliation 與 Development Journal。沒有 model client、patch generator、需求判斷、scope 擴張或自行 production cutover。
+- Route 初始 `legacy_direct`，只由 GPT / trusted host 在既有 Journal append lock 中發布 `pi_default` / `pi_paused`。保存完整 route record、revision CAS、previous hash、GPT decision ID 與 gate hash；相同 decision ID / 內容重送回原紀錄，內容衝突拒絕。
+- Admission 在同一 durable publication lock 檢查 route。每個全新 operation 的 schema 2 command 綁 admission route revision / hash；restart 重新查核先於 admission 的 route receipt。舊 A–E operation 不 migration，generic engine 不能繞過 production admission authority。
+- 暫停後不接新 operation；dispatch 前再次讀取 route。已有 active owner 時 route 切換拒絕。既有 terminal duplicate 仍可查核，沒有 silent legacy fallback。
+- 啟用後，developer / full profile 的直接工程工具與 HTTP 父程序固定 integration 入口只接受 GPT 明確 emergency / diagnostic fallback metadata：`_meta.pi_fallback:{purpose,reason,decision_id}`。Mutation 還必須有 `_meta.reconciliation_key`，先 audit 再執行。Client 偽造 `pi_internal` 無效；只有 host 私有 AsyncLocalStorage 能標記 Pi 已管理的呼叫。
+- Public profile 的既有產品唯讀工具保持原權限；仍不能呼叫工程 Intent 或寫入工具。Cutover guard 僅管制工程 profile。已以真實 MCP public session 驗證，修正前 regression 先重現拒絕，修正後 PASS。
+- HTTP keyed integration 在 mutation admission 之前先查核 fallback 權限，防止拒絕的請求留下 ambiguous mutation。父程序需要受控 restart 才能載入新 guard；child reload 不足。Health 身份增加 `pi_execution_protocol:writer-workbench/pi-production/v1`。
+- 一般 MCP mutation 的 outer Journal scope 由既有 workspace authority 解析實際 workspace / workstream，不能由 client 填寫；duplicate 在 scope lookup 前回原結果。修正只作用於新紀錄，舊 E 歷史不重寫。
+- `scripts/pi-execution.mjs` 是固定入口 client，stdin 接 exact Intent JSON；`--status` 接 optional selector JSON。Pi host 自行 reconnect、以相同 Intent 重送、poll durable state；語義拒絕不 retry，deadline 不偽造 completion。結果必須符合原 Intent ID / hash；UTF-8 chunk 不損毀中文。未提供 tool profile 時選 developer，既有 public profile不升權。
+- `pi_default` 前後 source of truth 均為 Pi state + Journal 的 execution facts、Filesystem / Git / Test 的 physical facts。GPT 仍審核 engineering meaning 與封板。所有 result 保持 `engineering_review_required:true`。
+
+### Phase F source regression 與 shared-main witness
+
+A–F focused regression **226/226 PASS，0 FAIL / 0 SKIP**（其中 F 32 項）。
+既有 Pi runtime / codemode / read-only entry **16/16 實際 PASS，0 SKIP**；
+original 24-script MCP inventory 保留、Pi additive inventory 增為 11 scripts。
+原 HTTP integration control **16/16 PASS，0 SKIP**，包含真實 HTTP reload、
+固定 high-risk metadata、target / source / dependency freshness、dirty overlap、
+staged / conflict / lock / active-operation failure-safe 行為。
+HTTP reliability 保留原 crash / timeout / reconnect / overflow 測試，並加入實際三個長時間入口超過 ordinary timeout 仍不重啟 child 的斷言；Pi status 不取得 extended timeout。
+原施工 source commit `c8788a9182bd4cfbf5aab329571ef3f6a549f950` 的 candidate `dev_integration_20261003-173614_442443727e2f` 未整合。首次 MCP gate 失敗為 long-running tool inventory 尚缺新 Intent 入口，原 evidence 與 automatic diagnostic retry 均保留。修正工作區由 immutable checkpoint `dev_checkpoint_bd7db500941142deb43c726e17240c56` fork / 精確恢復，原 source branch 保留，無 main overwrite 或 operation migration。
+第二候選 `dev_integration_20261003-180533_737b60ca4b69` 綁 source commit `6cb485883042e07a8a7e98311b2ed90e17667f96`；MCP 已 PASS，tunnel launcher 因舊 catalog 預期 103 而實際新增兩個入口後為 105 失敗，diagnostic retry 保留且不改原 gate。此候選未整合、integration workspace 已移除。
+最後修正保留 launcher / tunnel 全部行為驗證，developer HTTP 改為 105（104 child tools + parent `dev_mcp_reload`），public 40 不變；真實 HTTP 驗證 Intent / status 曝露、Intent high-risk metadata 與 durable route status 的 GPT authority。
+本 source 由 checkpoint `dev_checkpoint_b279c605e3004669b18f4da54e66a0f5` 精確 fork。先前 13 個恢復檔案的同 workspace producer coverage 為 partial，但 checkpoint byte hash、原 commit / 新 commit Git blob 與 recovery receipt 已逐一核對，review operation `dev_operation_c635f2c6ac6b4d5a902bf1393a340e74` 保存完整來源鏈，沒有重寫既有紀錄。
+正式 MCP / tunnel gate 仍須由本階段 exact candidate 執行，focused PASS 不取代正式 manifest。
+
+F regression 覆蓋真實 worker exit after claim / physical mutation / receipt，
+publication pair-before-head 的 fresh process recovery、duplicate / idempotency、
+pause / active-owner fence、legacy 拒絕、route hash / CAS / gate、
+parent fallback 拒絕、UTF-8 transport、client reconnect / pending deadline，
+以及 genuine MCP stdio status、直接呼叫拒絕與有 audit 的 diagnostic read。
+測試使用 temporary physical once-only mutation 與真實 Development Journal；
+這些測試不冒稱 live tunnel fault injection。
+
+Shared-main 37 個既有未提交檔案逐一保存 byte SHA-256。
+其中 4 個可對到 exact producer Journal，33 個由使用者確認來源：
+「確認是既有工程／runtime 產物，保留現狀」。
+[PI-MCP-SHARED-OVERLAY-V1.json](PI-MCP-SHARED-OVERLAY-V1.json) 保存此來源確認與 37 個 hash。
+User attestation 與 producer match 分開記錄；這批內容不 stage / commit / clean，
+integration / push / cutover 後仍須逐一比對完全相同。
+
+## Phase E 已封板的正式證據
+
+Phase E commit `8d93148b1577c4648a1992e1344d0ca988006e7e` 已整合並推送 canonical remote。
+Candidate `dev_integration_20261003-142354_8d2e6c93a9e5` integrated revision 8；
+manifest `f26ba38d9955ce0826f574dc7ebc6515f1820143bf335c61695ef852dae24d25`
+為 MCP / tunnel PASS_STABLE，diagnostic retry 0。
+Live canary operation `pi_operation_afd42abbc9fa4bf59b66d15ee6d44a28`
+schema 2 revision 16 COMPLETED，依 GPT Intent 完成 read、exact write、
+mcp_core explicit PASS 與 fixture commit；duplicate / cold process tool dispatch 0。
+Fixture commit `55b877c33d70867459edbbcb4e4fb1fcee252c99` 僅在 experiment branch 保留，
+沒有 integrate / push 到 shared main。
+E source 與 experiment workstream 均 completed、workspace removed healthy；
+最後 Journal active 0 / dangling 0、active workstream 0，shared-main 37 個 byte hash 保持原樣。
+
+以下為 A–E 當時施工紀錄，保留設計與驗證脈絡，不表示目前 production route。
+
+
 本文件以使用者提供的《Pi × MCP 全面整合工程規格 v1.0》29 節為工程要求。核心約束固定為 **GPT 決定；Pi 調度並記錄；MCP 執行**。本文件不取代原規格，也不將階段成果視為全面整合封板。
 
 ## 目前階段

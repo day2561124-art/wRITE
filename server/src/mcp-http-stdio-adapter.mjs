@@ -13,6 +13,7 @@ const DEFAULT_CHILD_CALL_TIMEOUT_MS = 120_000;
 const DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_LONG_RUNNING_TOOL_NAMES = Object.freeze([
   'dev_run_tests',
+  'dev_pi_execute_intent',
   'dev_workspace_validate_integration',
 ]);
 const DEFAULT_RECOVERY_MAX_ATTEMPTS = 3;

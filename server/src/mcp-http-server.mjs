@@ -651,6 +651,7 @@ async function handleReconciledParentCall(entry, message) {
       || !Number.isSafeInteger(args.expected_revision) || args.expected_revision < 1)) {
       throw new Error('Invalid integration identity or revision.');
     }
+    if (name === INTEGRATE_TOOL_NAME) await integrationControl.guard(message.params);
     const outcome = await executeReconciledMcpMutation({
       reconciliation_key: key, request_fingerprint_sha256: fingerprintMcpMutationRequest(name, args), tool_name: name,
     }, async () => {
@@ -952,7 +953,7 @@ function writeHealthJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
-const instanceIdentity = { ...getMcpIdentity(), pid: process.pid, instanceId: randomUUID(),
+const instanceIdentity = { pi_execution_protocol: 'writer-workbench/pi-production/v1', ...getMcpIdentity(), pid: process.pid, instanceId: randomUUID(),
   startedAt: new Date().toISOString(), profile: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public' };
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {

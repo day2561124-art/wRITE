@@ -161,6 +161,8 @@ import {
   DEV_TEST_SUITES,
   dev_run_tests,
 } from "./mcp-development-test-tools.mjs";
+import { createPiProductionRouteStore } from "./pi-production-execution-route.mjs";
+import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
 import {
@@ -2069,6 +2071,36 @@ const toolDefinitions = [
       },
     }),
     handler: async (args) => jsonContent(await dev_git_remote_status(args)),
+  },
+  {
+    name: "dev_pi_execute_intent",
+    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts only the exact GPT-authored ExecutionIntent JSON contract; Pi schedules, persists, retries and reconciles concrete MCP capabilities without model requests or engineering decisions. Duplicate intent IDs return durable state. No automatic direct-tool fallback.",
+    risk: "high-risk-write",
+    annotations: { readOnlyHint: false },
+    inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
+    handler: async args => {
+      let intent; try { intent = JSON.parse(args.intent_json); } catch { throw new Error("INVALID_EXECUTION_INTENT_JSON"); }
+      return jsonContent(await piProductionController.execute(intent));
+    },
+  },
+  {
+    name: "dev_pi_execution_status",
+    description: "Read persisted production route and optionally one Pi operation by exact registered workspace/workstream identity. This observational entry does not select implementation, migrate legacy operations or dispatch tools.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      intent_id: { type: "string", minLength: 1, maxLength: 128 },
+      operation_id: { type: "string", pattern: "^pi_operation_[a-f0-9]{32}$", maxLength: 64 },
+      workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+    }),
+    handler: async args => {
+      const route = await piProductionController.status();
+      if (Object.keys(args).length === 0) return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
+      if ((!args.operation_id === !args.intent_id) || !args.workstream_id || !args.workspace_id) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
+      return jsonContent({ route, operation: await piProductionController.inspect({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
+        context: { project_id: "writer_workbench", workstream_id: args.workstream_id, workspace_id: args.workspace_id } }) });
+    },
   },
   {
     name: "dev_pi_runtime_status",
@@ -4649,6 +4681,8 @@ const chatgptPublicToolNames = new Set([
 ]);
 
 const chatgptDeveloperToolNames = new Set([
+  "dev_pi_execute_intent",
+  "dev_pi_execution_status",
   ...chatgptPublicToolNames,
   "dev_pi_runtime_status",
   "dev_pi_execute_readonly",
@@ -5669,7 +5703,50 @@ function writeMessage(message, framing = "line") {
   return responseWriteChain;
 }
 
+const piProductionRoute = createPiProductionRouteStore();
+async function auditPiFallback(record) {
+  const { beginDevJournalOperation, completeDevJournalOperation } = await import("./mcp-development-journal-tools.mjs");
+  const started = await beginDevJournalOperation({ operation_type: "pi_diagnostic_fallback", tool_name: "pi.fallback.admit", result: record });
+  await completeDevJournalOperation(started.operation_id, { result: record });
+}
+const piProductionController = createPiProductionExecutionController({ route: piProductionRoute, transport: {
+  callTool: params => callToolDirect(params),
+  queryOperation: args => dev_workspace_get_operation(args),
+  resolveWorkspace: async args => {
+    const result = await dev_workspace_get_workspace(args);
+    return result.workspace ?? result;
+  },
+  verifyScope: async ({context, step}) => {
+    const workstream = await dev_workspace_get_workstream({workstream_id: context.workstream_id});
+    if (workstream.workspace_id !== context.workspace_id) return false;
+    if (step.scope === "workstream") return step.arguments.workstream_id === workstream.workstream_id
+      && step.arguments.expected_workstream_revision === workstream.revision && workstream.state === "active" && workstream.mode === "shared";
+    if (step.scope === "candidate") {
+      const candidate = await dev_workspace_get_integration_candidate({integration_candidate_id: step.arguments.integration_candidate_id});
+      return candidate.workstream_id === workstream.workstream_id && candidate.revision === step.arguments.expected_revision && candidate.state === "ready";
+    }
+    if (step.scope === "main") {
+      const status = await dev_git_status({});
+      return status.execution_ok === true && status.workspace_context?.current_head === step.arguments.expectedHead;
+    }
+    if (step.scope === "operation") {
+      const operation = await dev_workspace_get_operation({operation_id: step.arguments.operation_id});
+      return operation.events?.[0]?.workspace_id === context.workspace_id && operation.events?.[0]?.workstream_id === context.workstream_id;
+    }
+    return false;
+  },
+  requestTimeoutMs: 1800000, queryTimeoutMs: 300000,
+} });
 async function callTool(params) {
+  const name = params?.name;
+  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_create_isolated","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
+    await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback });
+  }
+  if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
+  return callToolDirect(params);
+}
+
+async function callToolDirect(params) {
   if (!isObject(params)) {
     throw new Error("tools/call params must be an object.");
   }
@@ -5703,6 +5780,12 @@ async function callTool(params) {
       reconciliation_key: key,
       request_fingerprint_sha256: fingerprintMcpMutationRequest(tool.name, mutationArgs),
       tool_name: tool.name,
+    resolve_workspace_scope: async () => {
+        if (!mutationArgs.workspace_id) return {};
+        const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
+        const context = await resolveDevWorkspaceExecutionContext({ workspace_id: mutationArgs.workspace_id }, { mutation: true });
+        return { workspace_id: context.workspace_id, workstream_id: context.workstream_id };
+      },
     }, () => auditedToolCall(tool, mutationArgs, actor));
     if (!outcome.reconciled) {
       return { ...outcome.value, _meta: { ...outcome.value?._meta,
@@ -5757,7 +5840,7 @@ async function dispatch(message) {
         },
       },
       serverInfo,
-      instructions: "Use tools/list and tools/call. High-risk write tools require their explicit confirmation tokens.",
+      instructions: "Use tools/list and tools/call. Engineering routing is governed by dev_pi_execution_status. When pi_default is active, submit exact GPT-authored ExecutionIntent JSON through dev_pi_execute_intent; GPT decides, Pi schedules and records, MCP executes. Direct engineering tools are explicit diagnostic/emergency fallback only and require params._meta.pi_fallback with purpose, reason and GPT decision_id; mutations also require a reconciliation_key. Never infer success or automatically fall back after a Pi failure. High-risk writes retain their explicit confirmation guards.",
     });
   }
 

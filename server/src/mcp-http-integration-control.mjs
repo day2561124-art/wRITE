@@ -60,6 +60,15 @@ async function loadIntegrationRuntime() {
   return import(url.href);
 }
 
+async function guardParentProductionRoute(params) {
+  const url = new URL('./pi-production-execution-controller.mjs', import.meta.url);
+  try { const info = await lstat(url); if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe Pi production runtime.'); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  const runtime = await import(url.href);
+  if (typeof runtime.guardPiParentIntegration !== 'function') throw new Error('Pi production guard unavailable.');
+  await runtime.guardPiParentIntegration(params);
+}
+
 function validateArguments(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)
     || Object.keys(args).some((key) => !['integration_candidate_id', 'expected_revision'].includes(key))
@@ -119,6 +128,7 @@ export function createParentIntegrationControl({
   profile,
   loadRuntime = loadIntegrationRuntime,
   audit = auditedIntegration,
+  guardRoute = guardParentProductionRoute,
 }) {
   let integrate = null;
   let loading = null;
@@ -160,6 +170,7 @@ export function createParentIntegrationControl({
     }
     try {
       const args = validateArguments(message.params.arguments);
+      await guardRoute(message.params);
       await prepare();
       if (!integrate) throw new Error('Integration control is unavailable; load the Phase 2D runtime before bootstrap cleanup.');
       const actor = typeof message.params._meta?.actor === 'string' ? message.params._meta.actor.slice(0, 256) : 'mcp-client';
@@ -168,5 +179,5 @@ export function createParentIntegrationControl({
       return { jsonrpc: '2.0', id, result: { isError: true, content: [{ type: 'text', text: error.message }] } };
     }
   }
-  return { prepare, decorate, call };
+  return { prepare, decorate, call, guard: guardRoute };
 }

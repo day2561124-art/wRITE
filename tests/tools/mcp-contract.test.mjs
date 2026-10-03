@@ -45,6 +45,7 @@ const piTestScripts = [
   "tests/mcp/pi-execution-publication-recovery.test.mjs",
   "tests/mcp/pi-shadow-execution.test.mjs",
   "tests/mcp/pi-canary-execution.test.mjs",
+  "tests/mcp/pi-production-execution.test.mjs",
 ];
 
 const defaultTestScriptTimeoutMs = 300_000;
