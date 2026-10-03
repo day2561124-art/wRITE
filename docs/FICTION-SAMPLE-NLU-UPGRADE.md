@@ -415,6 +415,48 @@ Development output remains `provisional`,
 `screenplay_structure_assumed=false`, and
 `retrieval_admission=not_admitted`.
 
+## NLU-9 — Explicit style features
+
+Repository artifacts:
+
+- `config/fiction-nlu-style-features-v1.json`
+- `schemas/fiction-nlu-style-features-v1.schema.json`
+- `scripts/fiction-sample-nlu-style-features-v1.py`
+- `tests/nlu/fiction-sample-nlu-style-features-v1.test.mjs`
+
+NLU-9 is a deterministic, parser-free stylometric layer over canonical Passage
+text. It deliberately precedes learned style embeddings and author/novel style
+profiles.
+
+The first version records transparent surface measurements including Unicode/script
+composition, sentence and paragraph rhythm, punctuation rates, quoted-dialogue
+ratio, Han-character diversity/entropy, literal function-word rates, and
+sentence-final particle rates. Sentence lengths use non-whitespace,
+non-punctuation characters so Chinese fiction does not require a word tokenizer.
+
+Each output is Passage-local and bound directly to the canonical Passage content
+hash. Validation recomputes the complete payload from canonical text and rejects
+any changed measurement. Short samples are retained but receive an explicit
+sample-quality tier and warnings instead of being treated as stable style
+evidence.
+
+NLU-9 does not perform authorship attribution, quality scoring, semantic style
+interpretation, embeddings, or style profiling. Parser/POS/dependency features
+are intentionally excluded from v1 rather than introducing tokenizer/parser bias
+into the deterministic baseline.
+
+A direct smoke run against two real eligible database Passages produced two
+records and both passed the independent validator. Focused regressions also verify
+deterministic reproduction of the same analysis ID and payload, checkpoint resume,
+dialogue/punctuation/marker measurements, and rejection of tampered feature
+values.
+
+Development output remains `provisional`,
+`author_attribution_claim=false`,
+`style_profile_claim=false`,
+`semantic_quality_claim=false`, and
+`retrieval_admission=not_admitted`.
+
 ## Retrieval integration rule
 
 NLU-12 full backfill and any production retrieval dependency remain deferred until

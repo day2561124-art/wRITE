@@ -1,0 +1,158 @@
+{
+  "schema_version": "fiction_nlu_style_features_config_v1",
+  "config_version": "fiction_nlu_style_features_v1",
+  "analysis_version": "explicit_style_features_v1",
+  "assertion_scope": "deterministic_explicit_style_measurements_not_style_profile_or_authorship_truth",
+  "subject_policy": {
+    "level": "passage",
+    "eligible_statuses": [
+      "accepted",
+      "golden"
+    ],
+    "minimum_non_whitespace_chars_for_stable_sample": 200,
+    "short_sample_threshold": 80,
+    "minimum_sentences_for_rhythm_stability": 3
+  },
+  "sentence_policy": {
+    "terminal_marks": [
+      "。",
+      "！",
+      "？",
+      "!",
+      "?"
+    ],
+    "length_basis": "non_whitespace_non_punctuation_chars",
+    "short_sentence_max_chars": 12,
+    "long_sentence_min_chars": 40
+  },
+  "paragraph_policy": {
+    "boundary": "nonempty_line_v1"
+  },
+  "dialogue_policy": {
+    "quote_pairs": [
+      [
+        "「",
+        "」"
+      ],
+      [
+        "『",
+        "』"
+      ],
+      [
+        "“",
+        "”"
+      ],
+      [
+        "\"",
+        "\""
+      ]
+    ],
+    "nested_quotes_are_not_resolved": true
+  },
+  "punctuation_groups": {
+    "comma": [
+      "，",
+      ","
+    ],
+    "period": [
+      "。",
+      "."
+    ],
+    "exclamation": [
+      "！",
+      "!"
+    ],
+    "question": [
+      "？",
+      "?"
+    ],
+    "semicolon": [
+      "；",
+      ";"
+    ],
+    "colon": [
+      "：",
+      ":"
+    ],
+    "enumeration_comma": [
+      "、"
+    ],
+    "ellipsis": [
+      "…"
+    ],
+    "dash": [
+      "—",
+      "–",
+      "－"
+    ],
+    "quote_mark": [
+      "「",
+      "」",
+      "『",
+      "』",
+      "“",
+      "”",
+      "\"",
+      "'"
+    ]
+  },
+  "literal_markers": {
+    "function_words": [
+      "的",
+      "了",
+      "是",
+      "在",
+      "也",
+      "就",
+      "都",
+      "而",
+      "但",
+      "卻",
+      "還",
+      "又",
+      "只",
+      "很",
+      "更",
+      "被",
+      "把",
+      "著",
+      "與",
+      "和",
+      "因為",
+      "所以",
+      "因此",
+      "如果",
+      "但是",
+      "然而"
+    ],
+    "sentence_final_particles": [
+      "啊",
+      "呢",
+      "吧",
+      "嗎",
+      "呀",
+      "喔",
+      "哦",
+      "啦",
+      "嘛"
+    ]
+  },
+  "diversity_policy": {
+    "basis": "han_characters",
+    "segment_window_chars": 50,
+    "entropy_base": 2
+  },
+  "normalization": {
+    "punctuation_rate_denominator": "non_whitespace_chars_per_1000",
+    "marker_rate_denominator": "han_chars_per_1000",
+    "round_digits": 6
+  },
+  "output_policy": {
+    "analysis_kind": "style_features",
+    "status": "provisional",
+    "author_attribution_claim": false,
+    "style_profile_claim": false,
+    "semantic_quality_claim": false,
+    "retrieval_admission": "not_admitted"
+  }
+}
