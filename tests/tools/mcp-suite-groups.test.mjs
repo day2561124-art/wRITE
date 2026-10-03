@@ -75,5 +75,19 @@ const directImports = [...entrypoint.matchAll(/import "\.\.\/mcp\/([^"]+\.test\.
   .map((match) => `tests/mcp/${match[1]}`);
 assert.deepEqual(directImports, mcpHermeticCoreScripts,
   "Hermetic entrypoint and reviewed inventory must agree exactly");
+
+const piMatch = original.match(/const piTestScripts = \[([\s\S]*?)\];/u);
+assert(piMatch, "Pi tests must be additive to the original 24-script baseline");
+const piScripts = [...piMatch[1].matchAll(/"([^"]+\.mjs)"/gu)].map((match) => match[1]);
+assert.deepEqual(piScripts, [
+  "tests/mcp/mcp-pi-agent-execution.test.mjs",
+  "tests/mcp/mcp-pi-codemode-bridge.test.mjs",
+  "tests/mcp/mcp-pi-readonly-entry.test.mjs",
+]);
+assert(original.includes("for (const scriptPath of [...testScripts, ...piTestScripts])"),
+  "Full MCP runner must execute Pi tests as well as retain the original baseline");
+assert.equal(new Set([...legacyScripts, ...piScripts]).size, legacyScripts.length + piScripts.length);
+for (const script of piScripts) assert(existsSync(path.join(root, script)), "Missing additive Pi script");
+
 console.log("VA-4 MCP 24-script partition and legacy full-suite preservation: PASS");
 console.log("VA-9 reviewed hermetic core and explicit legacy external-state contract: PASS");

@@ -34,6 +34,12 @@ const testScripts = [
   "tests/mcp/mcp-development-integration-tools.test.mjs",
 ];
 
+const piTestScripts = [
+  "tests/mcp/mcp-pi-agent-execution.test.mjs",
+  "tests/mcp/mcp-pi-codemode-bridge.test.mjs",
+  "tests/mcp/mcp-pi-readonly-entry.test.mjs",
+];
+
 const defaultTestScriptTimeoutMs = 300_000;
 const testScriptTimeoutOverrides = new Map([
   ["tests/mcp/mcp-development-test-tools.test.mjs", 600_000],
@@ -85,7 +91,7 @@ function runTestScript(scriptPath) {
 try {
   // VA-4 additive safety contract: prove all original MCP scripts remain covered.
   await runTestScript("tests/tools/mcp-suite-groups.test.mjs");
-  for (const scriptPath of testScripts) {
+  for (const scriptPath of [...testScripts, ...piTestScripts]) {
     await runTestScript(scriptPath);
   }
   console.log("MCP contract tests passed.");

@@ -71,6 +71,8 @@ const retiredLegacyWritingToolNames = [
 ];
 
 const blockedToolNames = [
+  "dev_pi_runtime_status",
+  "dev_pi_execute_readonly",
   "dev_read_file_range",
   "dev_get_file_info",
   "dev_create_file",
@@ -336,7 +338,7 @@ const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_pi_runtime_status", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
+  [...publicToolNames, "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
 assert.equal(publicToolMap.has("dev_pi_runtime_status"), false, "Pi runtime status leaked into chatgpt_public");
@@ -368,6 +370,94 @@ assert.equal(developerPiPayload.ok, true);
 assert.equal(developerPiPayload.integration_mode, "isolated_sidecar");
 assert.equal(developerPiPayload.package_name, "@earendil-works/pi-coding-agent");
 assert.equal(typeof developerPiPayload.ready, "boolean");
+
+const piEntryResponses = await runStdioSession("chatgpt_developer", [
+  {
+    "jsonrpc": "2.0",
+    "id": "pi-execute",
+    "method": "tools/call",
+    "params": {
+      "name": "dev_pi_execute_readonly",
+      "arguments": {
+        "code": "const r = await Promise.all([tools.dev_read_file({path:'package.json',maxBytes:8192}), tools.dev_list_directory({path:'scripts/pi-runtime',maxEntries:20})]); return typeof r[0].content === 'string' && Array.isArray(r[1].entries);",
+        "workspace_id": "dev_workspace_shared_repository_v1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": "pi-missing-workspace",
+    "method": "tools/call",
+    "params": {
+      "name": "dev_pi_execute_readonly",
+      "arguments": {
+        "code": "return 1"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": "pi-extra-option",
+    "method": "tools/call",
+    "params": {
+      "name": "dev_pi_execute_readonly",
+      "arguments": {
+        "code": "return 1",
+        "workspace_id": "dev_workspace_shared_repository_v1",
+        "nodeExecutable": "caller-controlled"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": "pi-unknown-workspace",
+    "method": "tools/call",
+    "params": {
+      "name": "dev_pi_execute_readonly",
+      "arguments": {
+        "code": "return 1",
+        "workspace_id": "dev_workspace_ffffffffffffffffffffffff"
+      }
+    }
+  }
+]);
+const piEntryTool = developerList.result.tools.find((tool) => tool.name === "dev_pi_execute_readonly");
+assert(piEntryTool, "Developer profile is missing read-only Pi execution");
+assert.equal(publicToolMap.has(piEntryTool.name), false);
+assert.equal(piEntryTool.annotations?.readOnlyHint, true);
+assert.deepEqual(Object.keys(piEntryTool.inputSchema.properties).sort(), ["code", "workspace_id"]);
+assert.deepEqual(piEntryTool.inputSchema.required, ["code", "workspace_id"]);
+assert.equal(piEntryTool.inputSchema.additionalProperties, false);
+assert.equal(piEntryTool.inputSchema.properties.code.maxLength, 16384);
+const piEntryPermission = piEntryTool._meta?.["armed-academy/permission"];
+assert.equal(piEntryPermission?.permission_level, "read_only");
+assert.equal(piEntryPermission?.risk_level, "read");
+assert.equal(piEntryPermission?.requires_user_confirmation, false);
+assert.deepEqual(piEntryPermission?.allowed_sources, [
+  "mcp_client_bounded_javascript", "registered_development_workspace", "server_owned_pi_readonly_bridge",
+]);
+for (const [id, field] of [["pi-missing-workspace", "workspace_id"], ["pi-extra-option", "nodeExecutable"]]) {
+  const response = piEntryResponses.find((item) => item.id === id);
+  assert(response?.error?.code === -32602 || response?.result?.isError === true,
+    "Invalid Pi fields must be rejected before execution: " + JSON.stringify(response));
+  const message = response.error?.message ?? response.result?.content?.[0]?.text ?? "";
+  assert(message.includes(field), "Pi validation error must identify the rejected field");
+}
+const unknownPi = JSON.parse(piEntryResponses.find((item) => item.id === "pi-unknown-workspace").result.content[0].text);
+assert.equal(unknownPi.reason, "workspace_unavailable");
+const piExecutionResponse = piEntryResponses.find((item) => item.id === "pi-execute");
+assert.equal(piExecutionResponse.result.isError, undefined);
+const piExecution = JSON.parse(piExecutionResponse.result.content[0].text);
+assert.equal(piExecution.workspace_context.workspace_id, "dev_workspace_shared_repository_v1");
+if (developerPiPayload.ready) {
+  assert.equal(piExecution.ok, true);
+  assert.equal(piExecution.value, true);
+  assert.equal(piExecution.host_calls, 2);
+  assert.equal(piExecution.model_requests, 0);
+} else {
+  assert.equal(piExecution.ok, false);
+  assert(["host_node_version_too_old", "sidecar_failed", "sidecar_unavailable", "ipc_failed"].includes(piExecution.reason));
+}
 
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked", "workspace_id"], ["repository_git_worktree_status"]],
@@ -1541,7 +1631,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...new Set([...publicToolNames, "dev_pi_runtime_status", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
+    [...new Set([...publicToolNames, "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {

@@ -1082,12 +1082,22 @@ async function verifyLauncherMcpProfile({
       names.includes("dev_pi_runtime_status") === (expectedProfile === "chatgpt_developer"),
       `${label} launcher Pi readiness exposure drifted.`,
     );
+    assert(names.includes("dev_pi_execute_readonly") === (expectedProfile === "chatgpt_developer"), "Pi execution profile exposure drifted.");
     if (expectedProfile === "chatgpt_developer") {
       const piResult = await client.callTool({ name: "dev_pi_runtime_status", arguments: {} });
       assert(!piResult.isError, "Pi readiness call failed through launcher HTTP.");
       const piStatus = JSON.parse(piResult.content?.[0]?.text ?? "{}");
       assert(piStatus.ok === true && typeof piStatus.ready === "boolean", "Pi readiness result is malformed.");
       assert(piStatus.integration_mode === "isolated_sidecar", "Pi integration mode drifted.");
+      const execution = await client.callTool({ name: "dev_pi_execute_readonly", arguments: { code: "return 42;", workspace_id: "dev_workspace_shared_repository_v1" } });
+      assert(!execution.isError, "Pi execution did not return a bounded MCP result.");
+      const payload = JSON.parse(execution.content?.[0]?.text ?? "{}");
+      assert(payload.workspace_context?.workspace_id === "dev_workspace_shared_repository_v1", "Pi workspace binding drifted.");
+      if (piStatus.ready) {
+        assert(payload.ok === true && payload.value === 42 && payload.model_requests === 0, "Pi execution failed through launcher HTTP.");
+      } else {
+        assert(payload.ok === false && ["host_node_version_too_old", "sidecar_failed", "sidecar_unavailable", "ipc_failed"].includes(payload.reason), "Unavailable Pi must fail closed.");
+      }
     } else {
       let piBlocked = false;
       try {
@@ -1096,6 +1106,13 @@ async function verifyLauncherMcpProfile({
         piBlocked = String(error.message ?? error).includes("Tool not allowed by MCP tool profile chatgpt_public: dev_pi_runtime_status");
       }
       assert(piBlocked, "Public launcher must reject crafted Pi readiness calls.");
+      let executionBlocked = false;
+      try {
+        await client.callTool({ name: "dev_pi_execute_readonly", arguments: { code: "return 1;", workspace_id: "dev_workspace_shared_repository_v1" } });
+      } catch (error) {
+        executionBlocked = String(error.message ?? error).includes("Tool not allowed by MCP tool profile chatgpt_public: dev_pi_execute_readonly");
+      }
+      assert(executionBlocked, "Public launcher must reject crafted Pi execution calls.");
     }
     assert(
       names.length === expectedCount,
@@ -1533,7 +1550,7 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 102,
+      expectedCount: 103,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
@@ -1564,7 +1581,7 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (102 tools: 101 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (103 tools: 102 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));

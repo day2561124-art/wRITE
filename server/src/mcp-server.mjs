@@ -161,7 +161,8 @@ import {
   DEV_TEST_SUITES,
   dev_run_tests,
 } from "./mcp-development-test-tools.mjs";
-import { dev_pi_runtime_status } from "./mcp-pi-agent-tools.mjs";
+import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
+import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
 import {
   POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
   POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
@@ -2076,6 +2077,17 @@ const toolDefinitions = [
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({}),
     handler: async () => jsonContent(await dev_pi_runtime_status()),
+  },
+  {
+    name: "dev_pi_execute_readonly",
+    description: "Execute bounded JavaScript in an isolated Pi Codemode sandbox with only Workbench file and directory reads. Requires an explicit registered workspace. No caller-controlled executable, options, shell, environment, model, or MCP endpoint; no secondary model requests.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({
+      code: { type: "string", minLength: 1, maxLength: PI_READ_ONLY_LIMITS.codeBytes },
+      workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
+    }, ["code", "workspace_id"]),
+    handler: async (args) => jsonContent(await dev_pi_execute_readonly(args)),
   },
   {
     name: "dev_workspace_begin_workstream",
@@ -4639,6 +4651,7 @@ const chatgptPublicToolNames = new Set([
 const chatgptDeveloperToolNames = new Set([
   ...chatgptPublicToolNames,
   "dev_pi_runtime_status",
+  "dev_pi_execute_readonly",
   "dev_read_file_range",
   "dev_get_file_info",
   "dev_git_status",
@@ -4750,6 +4763,11 @@ const permissionSources = {
     "pi_sidecar_package",
     "host_node_runtime",
     "server_owned_pi_runner",
+  ],
+  dev_pi_execute_readonly: [
+    "mcp_client_bounded_javascript",
+    "registered_development_workspace",
+    "server_owned_pi_readonly_bridge",
   ],
   dev_git_remote_status: [
     "repository_git_head",
