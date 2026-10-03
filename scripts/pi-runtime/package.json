@@ -1,0 +1,11 @@
+{
+  "name": "writer-workbench-pi-runtime",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.0"
+  }
+}

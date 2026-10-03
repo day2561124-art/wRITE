@@ -161,6 +161,7 @@ import {
   DEV_TEST_SUITES,
   dev_run_tests,
 } from "./mcp-development-test-tools.mjs";
+import { dev_pi_runtime_status } from "./mcp-pi-agent-tools.mjs";
 import {
   POWERSHELL_MAINTENANCE_COMMAND_MAX_CHARACTERS,
   POWERSHELL_MAINTENANCE_DEFAULT_TIMEOUT_MS,
@@ -2067,6 +2068,14 @@ const toolDefinitions = [
       },
     }),
     handler: async (args) => jsonContent(await dev_git_remote_status(args)),
+  },
+  {
+    name: "dev_pi_runtime_status",
+    description: "Read-only bounded readiness status for the isolated Pi 1.0 agent sidecar. No executable, path, shell, environment, MCP endpoint, model, or tool selection is caller-controlled.",
+    risk: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: baseSchema({}),
+    handler: async () => jsonContent(await dev_pi_runtime_status()),
   },
   {
     name: "dev_workspace_begin_workstream",
@@ -4629,6 +4638,7 @@ const chatgptPublicToolNames = new Set([
 
 const chatgptDeveloperToolNames = new Set([
   ...chatgptPublicToolNames,
+  "dev_pi_runtime_status",
   "dev_read_file_range",
   "dev_get_file_info",
   "dev_git_status",
@@ -4736,6 +4746,11 @@ const permissionSources = {
   dev_git_commit: ["repository_development_paths", "repository_git_index", "mcp_client_commit_message"],
   dev_git_push: ["repository_git_head", "repository_git_remote_origin", "mcp_client_expected_head"],
   dev_git_status: ["repository_git_worktree_status"],
+  dev_pi_runtime_status: [
+    "pi_sidecar_package",
+    "host_node_runtime",
+    "server_owned_pi_runner",
+  ],
   dev_git_remote_status: [
     "repository_git_head",
     "repository_git_tracking_ref",

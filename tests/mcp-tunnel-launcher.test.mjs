@@ -1079,6 +1079,25 @@ async function verifyLauncherMcpProfile({
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name);
     assert(
+      names.includes("dev_pi_runtime_status") === (expectedProfile === "chatgpt_developer"),
+      `${label} launcher Pi readiness exposure drifted.`,
+    );
+    if (expectedProfile === "chatgpt_developer") {
+      const piResult = await client.callTool({ name: "dev_pi_runtime_status", arguments: {} });
+      assert(!piResult.isError, "Pi readiness call failed through launcher HTTP.");
+      const piStatus = JSON.parse(piResult.content?.[0]?.text ?? "{}");
+      assert(piStatus.ok === true && typeof piStatus.ready === "boolean", "Pi readiness result is malformed.");
+      assert(piStatus.integration_mode === "isolated_sidecar", "Pi integration mode drifted.");
+    } else {
+      let piBlocked = false;
+      try {
+        await client.callTool({ name: "dev_pi_runtime_status", arguments: {} });
+      } catch (error) {
+        piBlocked = String(error.message ?? error).includes("Tool not allowed by MCP tool profile chatgpt_public: dev_pi_runtime_status");
+      }
+      assert(piBlocked, "Public launcher must reject crafted Pi readiness calls.");
+    }
+    assert(
       names.length === expectedCount,
       `${label} launcher profile exposed ${names.length} tools; expected ${expectedCount}.`,
     );
@@ -1514,7 +1533,7 @@ async function main() {
       fakeScript,
       argsLog,
       profile: undefined,
-      expectedCount: 101,
+      expectedCount: 102,
       expectRangeRead: true,
       expectPatch: true,
       expectDelete: true,
@@ -1545,7 +1564,7 @@ async function main() {
     });
 
     console.log("MCP tunnel launcher integration tests passed.");
-    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (101 tools: 100 child-owned plus parent-owned dev_mcp_reload)");
+    console.log("- Launcher default MCP HTTP profile: chatgpt_developer (102 tools: 101 child-owned plus parent-owned dev_mcp_reload)");
     console.log("- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)");
   } finally {
     if (!serverClosed) await new Promise((resolve) => server.close(resolve));

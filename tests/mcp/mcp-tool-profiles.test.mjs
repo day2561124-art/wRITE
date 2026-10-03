@@ -320,14 +320,55 @@ publicToolNames.push(...journalToolNames);
 publicToolNames.push(...checkpointToolNames);
 publicToolNames.push(...transactionToolNames);
 publicToolNames.push(...cleanupToolNames);
-const developerResponses = await runStdioSession("chatgpt_developer", [listRequest]);
+const developerResponses = await runStdioSession("chatgpt_developer", [
+  listRequest,
+  {
+    jsonrpc: "2.0",
+    id: "pi-runtime-status",
+    method: "tools/call",
+    params: {
+      name: "dev_pi_runtime_status",
+      arguments: {},
+    },
+  },
+]);
 const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
+  [...publicToolNames, "dev_pi_runtime_status", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
+assert.equal(publicToolMap.has("dev_pi_runtime_status"), false, "Pi runtime status leaked into chatgpt_public");
+const developerPiTool = developerList.result.tools.find((tool) => tool.name === "dev_pi_runtime_status");
+assert(developerPiTool, "chatgpt_developer is missing dev_pi_runtime_status");
+assert.equal(developerPiTool.annotations?.readOnlyHint, true);
+assert.deepEqual(Object.keys(developerPiTool.inputSchema?.properties ?? {}), []);
+assert.equal(developerPiTool.inputSchema?.additionalProperties, false);
+const developerPiPermission = developerPiTool._meta?.["armed-academy/permission"];
+assert.equal(developerPiPermission?.permission_level, "read_only");
+assert.equal(developerPiPermission?.read_or_write, "read");
+assert.equal(developerPiPermission?.risk_level, "read");
+assert.equal(developerPiPermission?.requires_user_confirmation, false);
+assert.equal(developerPiPermission?.log_required, false);
+assert.equal(developerPiPermission?.can_modify_canon, false);
+assert.equal(developerPiPermission?.can_modify_active_engine, false);
+assert.equal(developerPiPermission?.can_modify_story_graph, false);
+assert.equal(developerPiPermission?.can_modify_memory, false);
+assert.deepEqual(developerPiPermission?.allowed_sources, [
+  "pi_sidecar_package",
+  "host_node_runtime",
+  "server_owned_pi_runner",
+]);
+const developerPiResponse = developerResponses.find((response) => response.id === "pi-runtime-status");
+assert(developerPiResponse?.result, "dev_pi_runtime_status did not return an MCP result");
+assert.equal(developerPiResponse.result.isError, undefined);
+const developerPiPayload = JSON.parse(developerPiResponse.result.content?.[0]?.text ?? "{}");
+assert.equal(developerPiPayload.ok, true);
+assert.equal(developerPiPayload.integration_mode, "isolated_sidecar");
+assert.equal(developerPiPayload.package_name, "@earendil-works/pi-coding-agent");
+assert.equal(typeof developerPiPayload.ready, "boolean");
+
 for (const [toolName, expectedProperties, expectedSources] of [
   ["dev_git_status", ["includeUntracked", "workspace_id"], ["repository_git_worktree_status"]],
   ["dev_git_diff", ["mode", "workspace_id"], ["repository_git_worktree_diff", "repository_git_index_diff"]],
@@ -1500,7 +1541,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...new Set([...publicToolNames, "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
+    [...new Set([...publicToolNames, "dev_pi_runtime_status", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {
