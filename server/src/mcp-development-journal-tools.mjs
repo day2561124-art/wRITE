@@ -612,6 +612,7 @@ export function createDevOperationJournalService({
   eventReader = readFile,
   lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
   executionPublicationHook,
+  resolutionContextResolver,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -744,6 +745,72 @@ export function createDevOperationJournalService({
     return { head: snapshot.head, files: snapshot.files, events, versions };
   }
 
+
+  // Host-only repair: a create callback cannot write before its child STARTED.
+  // Keep the failed terminal immutable; a separate verified pair records resolution.
+  function validateNoChildResolution(events, input) {
+    const started=events.find(e=>e.operation_id===input.operation_id&&e.stage==="operation_started");
+    const terminal=events.find(e=>e.operation_id===input.operation_id&&terminalStageSet.has(e.stage));
+    if (!started || !terminal || started.operation_type!=="mcp_mutation" || !["dev_create_file","dev_apply_patch"].includes(started.tool_name)
+      || started.targets.length || terminal.targets.length || terminal.stage!=="operation_failed"
+      || terminal.result?.outcome!=="ambiguous_effect" || terminal.result?.reconciliation_required!==true
+      || terminal.event_hash!==input.expected_terminal_hash
+      || started.request_fingerprint_sha256!==input.request_fingerprint_sha256
+      || events.some(e=>e.parent_operation_id===started.operation_id&&e.stage==="operation_started"
+        && e.operation_type!=="pi_terminal_resolution")
+      || input.decision_owner!=="GPT" || !/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
+      || typeof input.reason!=="string" || !input.reason.trim() || input.reason.length>1024) {
+      throw Object.assign(new Error("UNSAFE_TERMINAL_RESOLUTION"),{code:"UNSAFE_TERMINAL_RESOLUTION"});
+    }
+    return {started,terminal};
+  }
+
+  function validateCompletedChildResolution(events, input) {
+    const started=events.find(e=>e.operation_id===input.operation_id&&e.stage==="operation_started");
+    const terminal=events.find(e=>e.operation_id===input.operation_id&&terminalStageSet.has(e.stage));
+    const children=events.filter(e=>e.parent_operation_id===input.operation_id&&e.stage==="operation_started"&&e.operation_type!=="pi_terminal_resolution");
+    const child=children[0];
+    const done=child&&events.find(e=>e.operation_id===child.operation_id&&terminalStageSet.has(e.stage));
+    if(!started||!terminal||started.operation_type!=="mcp_mutation"||started.tool_name!=="dev_create_file"
+      ||started.targets.length||terminal.targets.length||!["operation_failed","operation_recovered"].includes(terminal.stage)
+      ||terminal.result?.outcome!=="ambiguous_effect"||terminal.result?.reconciliation_required!==true
+      ||terminal.event_hash!==input.expected_terminal_hash||started.request_fingerprint_sha256!==input.request_fingerprint_sha256
+      ||children.length!==1||child.operation_type!=="filesystem_create"||child.tool_name!==started.tool_name
+      ||child.workspace_id!==started.workspace_id||child.workstream_id!==started.workstream_id
+      ||done?.stage!=="operation_completed"||done.event_hash!==input.expected_child_terminal_hash
+      ||done.workspace_id!==started.workspace_id||done.workstream_id!==started.workstream_id
+      ||child.targets.length!==1||done.targets.length!==1||done.result?.created!==true
+      ||done.result.after_sha256!==input.observed_sha256||child.targets[0].before.exists!==false
+      ||child.targets[0].path!==done.targets[0].path||child.targets[0].expected.sha256!==input.observed_sha256
+      ||canonicalJson(child.targets[0].expected)!==canonicalJson(done.targets[0].after)
+      ||events.some(e=>e.parent_operation_id===child.operation_id&&e.stage==="operation_started")
+      ||input.decision_owner!=="GPT"||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
+      ||typeof input.reason!=="string"||!input.reason.trim()||input.reason.length>1024)
+      throw new Error("UNSAFE_COMPLETED_CHILD_RESOLUTION");
+    return {started,terminal,child,done};
+  }
+  const validateResolution=(events,input)=>input?.resolution_kind==="completed_child_create"
+    ?validateCompletedChildResolution(events,input):validateNoChildResolution(events,input);
+
+  function resolvedTerminals(events) {
+    const resolved=new Map();
+    for(const event of events) {
+      if(event.operation_type!=="pi_terminal_resolution"||!terminalStageSet.has(event.stage))continue;
+      if(event.stage!=="operation_completed")continue;
+      const proof=JSON.parse(event.result?.resolution_record??"null");
+      const {started,terminal}=validateResolution(events,proof??{});
+      const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
+      if(!admission || admission.result?.resolution_record!==canonicalJson(proof)
+        || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
+        || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
+        || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
+        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind==="completed_child_create"?"intended_effect_observed":"no_effect_observed")
+        || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
+      resolved.set(started.operation_id,event);
+    }
+    return resolved;
+  }
+
   function classifyVerifiedSnapshot({ head, events }) {
     const byOperation = new Map();
     const keys = new Set();
@@ -775,7 +842,9 @@ export function createDevOperationJournalService({
         else dangling.push(operationId);
       }
     }
+    const resolutions = resolvedTerminals(events);
     const ambiguousTerminal = events.some((event) => (
+      !resolutions.has(event.operation_id) &&
       terminalStageSet.has(event.stage)
       && (event.result?.outcome === "ambiguous_effect" || event.result?.reconciliation_required === true)
     ));
@@ -1328,6 +1397,57 @@ export function createDevOperationJournalService({
     return terminal(operationId, "operation_recovered", input);
   }
 
+
+  async function resolveTerminalMutation(input={}, completedChild=false) {
+    const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...(completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]:[])]);
+    if(completedChild&&input.resolution_kind!=="completed_child_create")throw new Error("INVALID_TERMINAL_RESOLUTION");
+    if(!isObject(input)||Object.keys(input).some(k=>!allowed.has(k)))throw new Error("INVALID_TERMINAL_RESOLUTION");
+    let verification=await verify();
+    const {started,terminal,done:childDone}=validateResolution(verification.events,input);
+    if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
+      throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+    const existing=resolvedTerminals(verification.events).get(started.operation_id);
+    if(existing) {
+      if(existing.result.resolution_record!==canonicalJson(input))throw new Error("RESOLUTION_DECISION_CONFLICT");
+      return {reconciled:true,event:existing};
+    }
+    if(completedChild) {
+      const resolve=resolutionContextResolver??(async workspace_id=>{
+        const {resolveDevWorkspaceExecutionContext}=await import("./mcp-development-workstream-tools.mjs");
+        return resolveDevWorkspaceExecutionContext({workspace_id},{mutation:false});
+      });
+      const context=await resolve(started.workspace_id);
+      if(context.workspace_id!==started.workspace_id||context.workstream_id!==started.workstream_id)
+        throw new Error("RESOLUTION_WORKSPACE_MISMATCH");
+      const actual=await captureDevArtifactState(context.root,childDone.targets[0].path);
+      if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
+    }
+    const key="resolution:"+started.operation_id;
+    const fingerprint=sha256Text(canonicalJson(input));
+    if(Array.from(canonicalJson(input)).length>2048)throw new Error("RESOLUTION_RECORD_LIMIT");
+    let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
+    if(!admission)try {
+      admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
+        operation_type:"pi_terminal_resolution",tool_name:"pi.journal.resolve_no_child_create",
+        workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}});
+    }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
+      verification=await verify();admission=verification.events.find(e=>e.operation_id===error.operation_id&&e.stage==="operation_started");}
+    if(admission.request_fingerprint_sha256!==fingerprint)throw new Error("RESOLUTION_DECISION_CONFLICT");
+    verification=await verify();
+    const done=resolvedTerminals(verification.events).get(started.operation_id);
+    if(done)return {reconciled:true,event:done};
+    validateResolution(verification.events,input);
+    let event;
+    try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
+      result:{outcome:completedChild?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)}});}
+    catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
+    await verify();return {reconciled:false,event};
+  }
+
+  const resolveNoChildMutation=input=>resolveTerminalMutation(input);
+  const resolveCompletedChildMutation=input=>resolveTerminalMutation(input,true);
+
   async function markDegraded(reason = "terminal_journal_append_failed") {
     explicitDegraded = true;
     runtimeHealth = "degraded";
@@ -1424,10 +1544,12 @@ export function createDevOperationJournalService({
     }
     const events = verification.events.filter((event) => event.operation_id === started.operation_id);
     const terminal = events.find((event) => terminalStageSet.has(event.stage));
-    const ambiguous = terminal?.result?.outcome === "ambiguous_effect" || terminal?.result?.reconciliation_required === true;
-    const noEffect = ["failed_no_effect", "no_effect_observed"].includes(terminal?.result?.outcome);
+    const resolution = resolvedTerminals(verification.events).get(started.operation_id);
+    const observedTerminal = resolution ?? terminal;
+    const ambiguous = !resolution && (terminal?.result?.outcome === "ambiguous_effect" || terminal?.result?.reconciliation_required === true);
+    const noEffect = ["failed_no_effect", "no_effect_observed"].includes(observedTerminal?.result?.outcome);
     const intended = terminal?.stage === "operation_completed"
-      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(terminal?.result?.outcome);
+      || ["intended_effect_observed", "failed_intended_effect_observed"].includes(observedTerminal?.result?.outcome);
     const state = ambiguous ? "recovery_required" : noEffect ? "no_effect" : intended ? "completed"
       : terminal ? "recovery_required" : verification.active_operations.includes(started.operation_id) ? "active" : "dangling";
     return {
@@ -1438,7 +1560,8 @@ export function createDevOperationJournalService({
       terminal: Boolean(terminal), outcome: terminal?.stage ?? "dangling",
       reconciliation_state: state, recovered: terminal?.stage === "operation_recovered",
       safe_to_reinitiate: noEffect && !ambiguous, reinitiate_requires_new_key: noEffect && !ambiguous,
-      automatic_replay_allowed: false, original_result: terminal?.result ?? null, events,
+      automatic_replay_allowed: false, original_result: observedTerminal?.result ?? null,
+      resolution_event_id: resolution?.journal_event_id ?? null, events,
     };
   }
 
@@ -1463,7 +1586,10 @@ export function createDevOperationJournalService({
       try {
         value = await callback();
       } catch (error) {
-        await fail(admission.operation_id, { result: { outcome: "ambiguous_effect", reconciliation_required: true } });
+        const verification = await verify();
+        const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
+          event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
+        await fail(admission.operation_id, { result: { outcome: beforeChild ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !beforeChild } });
         throw error;
       }
       let payload;
@@ -1472,7 +1598,8 @@ export function createDevOperationJournalService({
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
           && event.stage === "operation_started");
-        const noEffect = children.length > 0 && children.every((child) => verification.events.some((event) =>
+        const noEffect = (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
+          || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
           && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));
         await fail(admission.operation_id, { result: {
@@ -1671,6 +1798,8 @@ export function createDevOperationJournalService({
     complete,
     fail,
     recover,
+    resolveNoChildMutation,
+    resolveCompletedChildMutation,
     markDegraded,
     getOperation,
     executeReconciled,
