@@ -578,7 +578,7 @@ async function findStartedEventByReconciliationKey(eventsPath, reconciliationKey
     const fileName = files[index];
     const filePath = path.join(eventsPath, fileName);
     const info = await lstat(filePath);
-    if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
+    if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
     const event = parseEvent(await readFile(filePath, "utf8"));
     if (event.stage === "operation_started" && event.reconciliation_key === reconciliationKey) return event;
   }
