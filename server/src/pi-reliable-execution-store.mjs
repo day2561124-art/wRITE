@@ -28,6 +28,7 @@ function output(event,events) {
       completed:record.state.completed_steps,remaining:record.state.pending_steps,verification:record.state.verification_state,
       checkpoint:record.state.checkpoint,resume_point:record.state.resume_point,decision_required:record.state.status==="DECISION_REQUIRED",
       retry_at:record.runtime.retry_at,persistence_enabled:true,execution_enabled:true,resume_dispatch_enabled:true,
+      ...(record.intent.bootstrap?{execution_context:record.runtime.lifecycle_binding}:{}),
       engineering_review_required:true,production_default_changed:false,model_requests:0,
       decision_owner:"GPT",execution_owner:"Pi",tool_owner:"MCP"}})));
 }
@@ -66,7 +67,7 @@ export function createPiReliableExecutionStore({journal={
     if(existing?.execution_projection.schema_version===1)reliableFailure("LEGACY_OPERATION_NOT_MIGRATED");
     const state=initialReliableState(intent,{...options,timestamp:clock()});
     return publish(makeReliableProjection({schema_version:2,revision:1,previous_projection_hash:null,
-      action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null},
+      action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null,...(intent.bootstrap?{lifecycle_binding:null}:{})},
       command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{}),...(productionBinding?{production_binding:productionBinding}:{})}}),0);
   }
   async function current(args) {

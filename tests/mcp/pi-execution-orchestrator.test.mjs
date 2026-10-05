@@ -121,7 +121,7 @@ test("Phase A blocks every effect including tests, commits and workspace creatio
     ["git.integrate", { integration_candidate_id: "dev_integration_20261003-061249_5f3b8a5e4ab9", expected_revision: 8 }, "integrate", "git:integrate"],
     ["git.push", { expectedHead: "1".repeat(40) }, "push", "git:push"],
     ["verification.focused", { suite: "mcp" }, "tests", "verification:focused"],
-    ["workspace.create", { workstream_id: intent().context.workstream_id, expected_workstream_revision: 1 }, "workspace_create", "workspace:new"],
+    ["workspace.create", { workstream_id: intent().context.workstream_id, expected_workstream_revision: 1 }, "workspace_create", intent().context.workstream_id],
     ["git.commit", { message: "Exact approved patch", paths: ["server/new.mjs"], expectedHead: "1".repeat(40) }, "commit", "git:commit"],
   ];
   for (const [capability, input, permission, target] of mutations) {

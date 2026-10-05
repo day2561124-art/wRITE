@@ -46,8 +46,21 @@ export const mcpHermeticCoreScripts = Object.freeze([
   "tests/mcp/mcp-verification-controlled-retry.test.mjs",
 ]);
 export const mcpHermeticCoreEntrypoint = "tests/tools/mcp-hermetic-core.test.mjs";
+export const mcpPiCoreScripts = Object.freeze([
+  "tests/mcp/pi-lifecycle-admission.test.mjs",
+]);
+export const mcpPiPostSealScripts=Object.freeze([
+  "tests/mcp/pi-lifecycle-admission.test.mjs",
+  "tests/mcp/pi-capability-introspection.test.mjs",
+  "tests/mcp/pi-introspection-runtime.test.mjs",
+  "tests/mcp/pi-journal-resolution.test.mjs",
+  "tests/mcp/pi-bootstrap-binding.test.mjs",
+  "tests/mcp/pi-bootstrap-physical.test.mjs",
+  "tests/mcp/pi-bootstrap-cold.test.mjs"
+]);
 export const mcpSuiteScripts = Object.freeze({
-  mcp_core: mcpCoreScripts,
+  mcp_pi_postseal:mcpPiPostSealScripts,
+  mcp_core: Object.freeze([...mcpCoreScripts, ...mcpPiCoreScripts]),
   mcp_infrastructure: mcpInfrastructureScripts,
   mcp_reliability: mcpReliabilityScripts,
 });

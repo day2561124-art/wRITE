@@ -8,6 +8,7 @@ import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "./p
 import {readDevExecutionProjections,appendDevExecutionProjection,recoverDevExecutionPublication} from "./mcp-development-journal-tools.mjs";
 import {reliableFailure,stableJson} from "./pi-reliable-execution-state.mjs";
 const managed=new AsyncLocalStorage();
+export const isPiManagedMcpCall=()=>managed.getStore()===true;
 export const runPiManagedMcpCall=(callback)=>managed.run(true,callback);
 export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback}){
  if(managed.getStore()===true||(await route.inspect()).revision===0)return;

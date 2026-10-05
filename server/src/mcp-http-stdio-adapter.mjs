@@ -10,7 +10,11 @@ import { terminateProcessTree } from './process-control.mjs';
 // and provide helpers to forward JSON-RPC messages via newline framing.
 
 const DEFAULT_CHILD_CALL_TIMEOUT_MS = 120_000;
-const DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS = 30 * 60 * 1000;
+// Long-running tools own their shorter, capability-specific deadlines internally.
+// Keep the outer transport ceiling above bounded verification suites so transport
+// recovery cannot terminate a still-valid durable Pi/test operation.
+const MAX_LONG_TOOL_CALL_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS = MAX_LONG_TOOL_CALL_TIMEOUT_MS;
 const DEFAULT_LONG_RUNNING_TOOL_NAMES = Object.freeze([
   'dev_run_tests',
   'dev_pi_execute_intent',
@@ -124,7 +128,7 @@ export function createStdioSession(options = {}) {
     options.longToolCallTimeoutMs,
     DEFAULT_LONG_TOOL_CALL_TIMEOUT_MS,
     callTimeoutMs,
-    30 * 60 * 1000,
+    MAX_LONG_TOOL_CALL_TIMEOUT_MS,
   );
   const longRunningToolNames = new Set(
     options.longRunningToolNames ?? DEFAULT_LONG_RUNNING_TOOL_NAMES,

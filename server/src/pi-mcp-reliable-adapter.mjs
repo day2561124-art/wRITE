@@ -2,7 +2,9 @@ import { createExecutionIntent, hashExecutionInput, classifyExecutionFailure } f
 import { createMcpCapabilityAdapter } from "./pi-mcp-adapter.mjs";
 import { reliableFailure, reliableJson, receiptOf } from "./pi-reliable-execution-state.mjs";
 const known=new Set(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT","PERMISSION_DENIED","CORRUPT_STATE",
-  "VALIDATION_FAILURE","TEST_FAILURE","GIT_SEMANTIC_CONFLICT","ARCHITECTURE_CONFLICT","IMPLEMENTATION_FAILURE"]);
+  "VALIDATION_FAILURE","TEST_FAILURE","GIT_SEMANTIC_CONFLICT","ARCHITECTURE_CONFLICT","IMPLEMENTATION_FAILURE",
+  "CAPABILITY_STATUS_UNCERTAIN","CAPABILITY_EXPECTATION_REQUIRED","CAPABILITY_VERSION_DRIFT","CAPABILITY_SCHEMA_DRIFT",
+  "CAPABILITY_UNAVAILABLE","CAPABILITY_NOT_DISPATCHABLE","CAPABILITY_DEPRECATED","UNKNOWN_CAPABILITY"]);
 export function reliableErrorCode(error) {return known.has(error?.code)?error.code:"UNCLASSIFIED_FAILURE";}
 function observations(evidence) {
   const facts=[evidence];
@@ -20,33 +22,40 @@ function timedRequest(callback,timeoutMs) {
   return Promise.race([Promise.resolve().then(callback),timeout]).finally(()=>clearTimeout(timer));
 }
 export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorkspace,verifyScope,reconnect,
-  requestTimeoutMs=120000,queryTimeoutMs=30000}={}) {
+  requestTimeoutMs=120000,queryTimeoutMs=30000,validateCapabilityExpectation}={}) {
   if(!Number.isSafeInteger(requestTimeoutMs)||requestTimeoutMs<1||requestTimeoutMs>1800000
     ||!Number.isSafeInteger(queryTimeoutMs)||queryTimeoutMs<1||queryTimeoutMs>300000
     ||(reconnect!==undefined&&typeof reconnect!=="function"))reliableFailure("INVALID_TRANSPORT_BINDING");
   if(typeof callTool!=="function"||typeof queryOperation!=="function"||typeof resolveWorkspace!=="function")
     reliableFailure("HOST_ADAPTER_UNBOUND");
   const planner=createMcpCapabilityAdapter();
-  function describe(source,stepId) {
-    const intent=createExecutionIntent(source),step=planner.describe(intent,stepId);
+  function describe(source,stepId,options={}) {
+    const intent=createExecutionIntent(source),step=planner.describe(intent,stepId,options);
     return {...step,request_fingerprint_sha256:hashExecutionInput({tool_name:step.tool,arguments:step.arguments})};
   }
   async function guard(intent,step) {
+    const context=step.execution_context??intent.context;
+    const action=intent.requested_actions.find(a=>a.step_id===step.step_id);
+    if(typeof validateCapabilityExpectation==="function") {
+      const result=await validateCapabilityExpectation({capability_name:action.capability,
+        ...(action.expected_capability_version!==undefined?{expected_capability_version:action.expected_capability_version,expected_schema_hash:action.expected_schema_hash}:{})});
+      if(result?.ok!==true && !(result?.code==="CAPABILITY_EXPECTATION_REQUIRED" && action.expected_schema_hash===undefined && action.expected_capability_version===undefined)) reliableFailure(result?.code??"CAPABILITY_STATUS_UNCERTAIN");
+    } else if(action.expected_schema_hash!==undefined || action.expected_capability_version!==undefined) reliableFailure("CAPABILITY_STATUS_UNCERTAIN");
     if(intent.permissions[step.permission]!==true)reliableFailure("PERMISSION_DENIED");
     if(step.scope==="workspace") {
-      const workspace=await timedRequest(()=>resolveWorkspace({workspace_id:intent.context.workspace_id},{mutation:step.effect}),queryTimeoutMs);
-      if(!workspace||workspace.workspace_id!==intent.context.workspace_id||workspace.workstream_id!==intent.context.workstream_id)
+      const workspace=await timedRequest(()=>resolveWorkspace({workspace_id:context.workspace_id},{mutation:step.effect}),queryTimeoutMs);
+      if(!workspace||workspace.workspace_id!==context.workspace_id||workspace.workstream_id!==context.workstream_id)
         reliableFailure("PERMISSION_DENIED");
       if(step.effect&&(workspace.workspace_type!=="isolated_worktree"||workspace.state!=="active"))
         reliableFailure("PERMISSION_DENIED");
     } else {
       // Candidate/main/workstream operations require a server-owned scope authority.
-      if(typeof verifyScope!=="function"||await timedRequest(()=>verifyScope({context:intent.context,step}),queryTimeoutMs)!==true)
+      if(typeof verifyScope!=="function"||await timedRequest(()=>verifyScope({context,step}),queryTimeoutMs)!==true)
         reliableFailure("PERMISSION_DENIED");
     }
   }
-  async function execute(source,stepId) {
-    const intent=createExecutionIntent(source),step=describe(intent,stepId);
+  async function execute(source,stepId,options={}) {
+    const intent=createExecutionIntent(source),step=describe(intent,stepId,options);
     await guard(intent,step);
     const evidence=reliableJson(await timedRequest(()=>callTool({name:step.tool,arguments:step.arguments,
       ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})}),requestTimeoutMs));
@@ -62,8 +71,8 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       ||(verification&&!(deduped?deduped.original_result?.passed===true:facts.some(x=>x?.passed===true))),
       error_code:failed?"TOOL_REPORTED_FAILURE":"VALIDATION_EVIDENCE_REQUIRED"};
   }
-  async function reconcile(source,stepId) {
-    const intent=createExecutionIntent(source),step=describe(intent,stepId);
+  async function reconcile(source,stepId,options={}) {
+    const intent=createExecutionIntent(source),step=describe(intent,stepId,options);
     if(!step.effect)reliableFailure("INVALID_RECONCILIATION");
     // Lookup is read-only; no mutation guards or patch generation are performed here.
     const params={reconciliation_key:step.idempotency_key,request_fingerprint_sha256:step.request_fingerprint_sha256};

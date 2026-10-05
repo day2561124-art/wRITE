@@ -340,7 +340,7 @@ const developerList = developerResponses[0];
 const developerNames = developerList.result.tools.map((tool) => tool.name);
 assert.deepEqual(
   [...developerNames].sort(),
-  [...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
+  [...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"].sort(),
   "chatgpt_developer must equal chatgpt_public plus the development filesystem/range/write/test/Git/workstream/worktree tools",
 );
 assert.equal(publicToolMap.has("dev_pi_runtime_status"), false, "Pi runtime status leaked into chatgpt_public");
@@ -1218,6 +1218,7 @@ assert.equal(developerTestSchema.properties.suite.type, "string");
 assert.deepEqual(developerTestSchema.properties.suite.enum, [
   "mcp",
   "mcp_core",
+  "mcp_pi_postseal",
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",
@@ -1633,7 +1634,7 @@ try {
   });
   assert.deepEqual(
     adapterList.result.tools.map((tool) => tool.name).sort(),
-    [...new Set([...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
+    [...new Set([...publicToolNames, "dev_pi_execute_intent", "dev_pi_execution_status", "dev_pi_runtime_status", "dev_pi_execute_readonly", "dev_capability_get_schema", "dev_capability_list", "dev_apply_patch", "dev_run_tests", "powershell_run", "powershell_admin_run", "dev_git_commit", "dev_git_push"])].sort(),
     "HTTP stdio adapter did not honor MCP_TOOL_PROFILE=chatgpt_developer",
   );
 } finally {

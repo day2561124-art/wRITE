@@ -24,6 +24,7 @@ import {
 export const DEV_TEST_SUITES = Object.freeze([
   "mcp",
   "mcp_core",
+  "mcp_pi_postseal",
   "mcp_infrastructure",
   "mcp_reliability",
   "mcp_tunnel",
@@ -42,6 +43,7 @@ const productionSuiteDefinitions = Object.freeze({
     argv: Object.freeze(["tests/tools/mcp-contract.test.mjs"]),
     timeoutMs: 1_500_000,
   }),
+  mcp_pi_postseal: Object.freeze({executable:process.execPath,argv:Object.freeze(["tests/tools/mcp-pi-postseal.test.mjs"]),timeoutMs:300_000}),
   mcp_core: Object.freeze({
     executable: process.execPath,
     argv: Object.freeze(["tests/tools/mcp-core.test.mjs"]),

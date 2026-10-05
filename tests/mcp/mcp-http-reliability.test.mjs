@@ -341,6 +341,25 @@ await verifyCrashFailsInflightOnceAndRecoversWithoutReplay();
 await verifyProtocolOverflowFailsOnceAndRecoversWithoutReplay();
 await verifyHeaderFramingUsesUtf8ByteLength();
 
+function verifyDefaultLongRunningToolTimeoutCoversBoundedVerification() {
+  const fake = createFakeSpawn('long-tool-slow');
+  const session = createStdioSession({ spawnProcess: fake.spawnProcess });
+  try {
+    const status = session.getStatus();
+    assert.equal(status.call_timeout_ms, 120_000);
+    assert.equal(status.long_tool_call_timeout_ms, 8 * 60 * 60 * 1000);
+    assert(
+      status.long_tool_call_timeout_ms > 7_200_000,
+      'outer long-tool transport deadline must exceed the bounded affected/all verification deadline',
+    );
+  } finally {
+    if (session.child) session.child.exitCode = 0;
+    session.close();
+  }
+}
+
+verifyDefaultLongRunningToolTimeoutCoversBoundedVerification();
+
 async function verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly() {
   const fake = createFakeSpawn('long-tool-slow');
   const session = createStdioSession({

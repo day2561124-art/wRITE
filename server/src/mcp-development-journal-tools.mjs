@@ -612,6 +612,7 @@ export function createDevOperationJournalService({
   eventReader = readFile,
   lockAcquireTimeoutMs = DEV_JOURNAL_LOCK_ACQUIRE_TIMEOUT_MS,
   executionPublicationHook,
+  lifecycleEffectInspector,
   resolutionContextResolver,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
@@ -1233,6 +1234,7 @@ export function createDevOperationJournalService({
       let outcome = "no_effect_observed";
       let ambiguous = false;
       let observedTargets = [];
+      let lifecycleFacts={};
       if (started.operation_type === "mcp_mutation") {
         // Absence of child evidence never proves that an arbitrary handler had no effect.
         const current = await verify();
@@ -1244,6 +1246,15 @@ export function createDevOperationJournalService({
           event && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome));
         outcome = noEffect ? "no_effect_observed" : "ambiguous_effect";
         ambiguous = !noEffect;
+        if(ambiguous && children.length===0 && ["dev_workspace_begin_workstream","dev_workspace_create_isolated"].includes(started.tool_name)) {
+          try {
+            const {inspectPiLifecycleOperationEffect}=await import("./mcp-development-workstream-tools.mjs");
+            const observed=await (lifecycleEffectInspector??inspectPiLifecycleOperationEffect)(started);
+            if(observed.outcome==="intended_effect_observed" && observed.reconciliation_required===false) {
+              lifecycleFacts=observed;outcome=observed.outcome;ambiguous=false;
+            }
+          } catch { /* Preserve ambiguous state and escalate. */ }
+        }
       } else if (transactionOperation) {
         try {
           const { inspectDevTransactionOperationEffect } = await import("./mcp-development-transaction-tools.mjs");
@@ -1309,6 +1320,7 @@ export function createDevOperationJournalService({
           outcome,
           reconciliation_required: ambiguous,
           recovered_from_started_event_id: started.journal_event_id,
+          ...lifecycleFacts,
         },
       });
       if (ambiguous) {
@@ -1404,13 +1416,13 @@ export function createDevOperationJournalService({
     if(!isObject(input)||Object.keys(input).some(k=>!allowed.has(k)))throw new Error("INVALID_TERMINAL_RESOLUTION");
     let verification=await verify();
     const {started,terminal,done:childDone}=validateResolution(verification.events,input);
-    if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
-      throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
     const existing=resolvedTerminals(verification.events).get(started.operation_id);
     if(existing) {
       if(existing.result.resolution_record!==canonicalJson(input))throw new Error("RESOLUTION_DECISION_CONFLICT");
       return {reconciled:true,event:existing};
     }
+    if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
+      throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
     if(completedChild) {
       const resolve=resolutionContextResolver??(async workspace_id=>{
         const {resolveDevWorkspaceExecutionContext}=await import("./mcp-development-workstream-tools.mjs");
@@ -1618,7 +1630,13 @@ export function createDevOperationJournalService({
           await fail(admission.operation_id, { result: { outcome: "ambiguous_effect", reconciliation_required: true } });
           throw new Error("RECONCILIATION_RECOVERY_REQUIRED");
         }
-        await complete(admission.operation_id, { result: { outcome: "intended_effect_observed" } });
+        const lifecycle=["dev_workspace_begin_workstream","dev_workspace_create_isolated"].includes(context.tool_name)
+          && workstreamIdPattern.test(payload.workstream_id??"") && workspaceIdPattern.test(payload.workspace_id??"");
+        const binding=lifecycle?{workstream_id:payload.workstream_id,workspace_id:payload.workspace_id,
+          workstream_revision:payload.workstream_revision??payload.revision,base_head:payload.base_head,
+          ...(payload.state?{state:payload.state}:{})}:{};
+        await complete(admission.operation_id, {result:{outcome:"intended_effect_observed",...binding},
+          links:lifecycle?[{relation:"produced",workstream_id:payload.workstream_id,workspace_id:payload.workspace_id}]:[]});
       }
       return { reconciled: false, value, operation: await getOperation({ operation_id: admission.operation_id }) };
     });

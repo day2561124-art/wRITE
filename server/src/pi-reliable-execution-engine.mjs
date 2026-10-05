@@ -12,6 +12,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
     const stopped=()=>reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
     if(stopped())return record;
     const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
+    const binding=()=>({binding:record.runtime.lifecycle_binding??null});
     const args=()=>({operation_id:record.state.operation_id,context:record.intent.context,expected_revision:record.revision});
     const inspect=()=>store.inspect({operation_id:record.state.operation_id,context:record.intent.context});
     async function send(command) {record=await store.command({...args(),command});return record;}
@@ -42,7 +43,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       if(call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)return stop("RECONCILIATION_RETRY_EXHAUSTED");
       await own({type:"reconciliation_started",call_id:call.call_id});
       let observed;
-      try {observed=await adapter.reconcile(record.intent,call.step_id);}
+      try {observed=await adapter.reconcile(record.intent,call.step_id,binding());}
       catch(error) {
         const code=reliableErrorCode(error);
         if(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT"].includes(code)
@@ -89,7 +90,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
         if(!next){await stop("UNEXPECTED_EXECUTION_PHASE");continue;}
         await own({type:"phase_changed",status:next});continue;
       }
-      const stepId=state.pending_steps[0],step=adapter.describe(record.intent,stepId);
+      const stepId=state.pending_steps[0],step=adapter.describe(record.intent,stepId,binding());
       const required=step.capability.startsWith("git.")&&step.effect?"COMMITTING"
         :step.capability.startsWith("verification.")?"VERIFYING":"EXECUTING";
       const currentIndex=phases.indexOf(state.status),requiredIndex=phases.indexOf(required);
@@ -103,7 +104,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       let response;
       try {
         await executionHook?.("before_dispatch",record);
-        response=await adapter.execute(record.intent,stepId);
+        response=await adapter.execute(record.intent,stepId,binding());
         await executionHook?.("after_dispatch",record);
       } catch(error) {
         const code=reliableErrorCode(error);

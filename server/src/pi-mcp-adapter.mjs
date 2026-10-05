@@ -2,6 +2,7 @@ import {
   CAPABILITY_DEFINITIONS, capabilityDefinition, createExecutionIntent,
   classifyExecutionFailure, hashExecutionInput,
 } from "./pi-execution-contract.mjs";
+import {piBootstrapContext} from "./pi-workstream-bootstrap.mjs";
 
 // Caller intents can select a stable capability, never a tool name or endpoint.
 export function createCapabilityRegistry() {
@@ -19,15 +20,27 @@ const recognizedErrorCodes = new Set(["TRANSPORT_ERROR", "TEMPORARY_UNAVAILABLE"
 export function createMcpCapabilityAdapter({ callTool, resolveWorkspace } = {}) {
   // These bindings are host-only dependencies. They never appear in the intent contract.
   const registry = createCapabilityRegistry();
-  const describe = (source, stepId) => {
+  const describe = (source, stepId, {binding=null}={}) => {
     const intent = createExecutionIntent(source);
     const action = intent.requested_actions.find(x => x.step_id === stepId);
     if (!action) failure("UNREQUESTED_STEP");
     const definition = registry.resolve(action.capability);
+    if(binding && intent.bootstrap!==true) failure("UNEXPECTED_BOOTSTRAP_BINDING");
+    const context=piBootstrapContext(binding,intent.context);
     const args = { ...action.input };
-    if (definition.scope === "workspace") args.workspace_id = intent.context.workspace_id;
+    if(intent.bootstrap && action.capability==="workspace.create_isolated") {
+      if(!binding || binding.workspace_id!=="dev_workspace_shared_repository_v1") failure("BOOTSTRAP_BINDING_REQUIRED");
+      args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;
+    }
+    if (definition.scope === "workspace") args.workspace_id = context.workspace_id;
+    if (definition.scope === "operation_list") {
+      args.workspace_id = context.workspace_id;
+      args.workstream_id = context.workstream_id;
+    }
+    if (definition.scope === "provenance") args.workspace_id = context.workspace_id;
     return Object.freeze({
       step_id: stepId, capability: action.capability, tool: definition.tool,
+      ...(intent.bootstrap?{execution_context:context}:{}),
       effect: definition.effect, permission: definition.permission,
       scope: definition.scope, depends_on: action.depends_on,
       idempotency_key: action.idempotency_key ?? null,
