@@ -644,12 +644,50 @@ export function createDevIntegrationService({
       .sort((a, b) => String(b.integrated_at ?? b.updated_at).localeCompare(String(a.integrated_at ?? a.updated_at)))[0] ?? null;
   }
 
+  function semanticResolutionDependencySnapshot(workstream, dependency, registry) {
+    const metadata = isObject(workstream.metadata) ? workstream.metadata : {};
+    const resolutionFor = metadata.resolution_for;
+    if (
+      dependency.state !== "completed"
+      || workstream.parent_workstream_id !== dependency.workstream_id
+      || metadata.strategy !== "semantic_three_way_resolution_only"
+      || metadata.no_redo !== true
+      || typeof resolutionFor !== "string"
+      || !candidateIdPattern.test(resolutionFor)
+    ) {
+      return null;
+    }
+    const conflicted = findCandidate(registry, resolutionFor);
+    if (
+      !conflicted
+      || conflicted.state !== "conflicted"
+      || conflicted.failure_reason?.code !== "CONFLICT"
+      || conflicted.workstream_id !== dependency.workstream_id
+      || conflicted.target_head !== workstream.base_head
+      || metadata.source_commit !== conflicted.source_head
+      || metadata.target_head !== conflicted.target_head
+    ) {
+      return null;
+    }
+    return {
+      workstream_id: dependency.workstream_id,
+      source_branch: conflicted.source_branch,
+      source_head: conflicted.source_head,
+      integration_commit: null,
+    };
+  }
+
   async function dependencySnapshots(workstream, targetHead) {
     const registry = await readRegistry();
     const snapshots = [];
     const blockers = [];
     for (const dependencyId of workstream.depends_on ?? []) {
       const dependency = await workstreamReader({ workstream_id: dependencyId });
+      const resolutionSnapshot = semanticResolutionDependencySnapshot(workstream, dependency, registry);
+      if (resolutionSnapshot) {
+        snapshots.push(resolutionSnapshot);
+        continue;
+      }
       const integrated = await latestIntegratedCandidate(dependencyId, registry);
       if (dependency.state !== "completed" || !integrated) {
         blockers.push({ workstream_id: dependencyId, reason: "dependency must be completed and integrated" });

@@ -76,7 +76,14 @@ async function createHarness(name) {
   const workstreams = new Map();
   const workspaces = new Map();
 
-  async function createSource({ changes, dependsOn = [], base = baseHead, message = "source commit" }) {
+  async function createSource({
+    changes,
+    dependsOn = [],
+    base = baseHead,
+    message = "source commit",
+    parentWorkstreamId = null,
+    metadata = {},
+  }) {
     const identity = nextIdentity();
     const worktreePath = path.join(worktreeRoot, identity.workspace_id);
     await git(repositoryRoot, ["worktree", "add", "-b", identity.branch_name, worktreePath, base]);
@@ -96,7 +103,9 @@ async function createHarness(name) {
       base_head: base,
       workspace_id: identity.workspace_id,
       workspace: { workspace_id: identity.workspace_id },
+      parent_workstream_id: parentWorkstreamId,
       depends_on: [...dependsOn],
+      metadata: structuredClone(metadata),
     });
     workspaces.set(identity.workspace_id, {
       workspace_id: identity.workspace_id,
@@ -520,6 +529,78 @@ test("dependency gate blocks before dependency integration and admits a fresh se
     assert.equal(admitted.state, "preflight_passed");
     assert.equal(admitted.strategy, "merge_commit");
     assert.equal(admitted.depends_on[0].integration_commit, dependencyIntegrated.integration_commit);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("semantic resolution workstream supersedes its exact conflicted parent dependency without faking integration", async () => {
+  const harness = await createHarness("semantic-resolution-dependency");
+  try {
+    const dependency = await harness.createSource({
+      changes: { "conflict.txt": "dependency source\n" },
+    });
+    const targetHead = await harness.advanceMain(
+      "conflict.txt",
+      "main conflict\n",
+      "main conflict for semantic resolution",
+    );
+    const service = harness.createService();
+    const conflicted = await service.preflight({ workstream_id: dependency.workstream_id });
+    assert.equal(conflicted.state, "conflicted");
+    assert.equal(conflicted.failure_reason.code, "CONFLICT");
+
+    const invalidResolution = await harness.createSource({
+      base: targetHead,
+      changes: { "invalid-resolution.txt": "invalid\n" },
+      dependsOn: [dependency.workstream_id],
+      parentWorkstreamId: dependency.workstream_id,
+      metadata: {
+        resolution_for: conflicted.integration_candidate_id,
+        source_commit: dependency.sourceHead,
+        target_head: targetHead,
+        strategy: "semantic_three_way_resolution_only",
+        no_redo: false,
+      },
+    });
+    const invalidCandidate = await service.preflight({
+      workstream_id: invalidResolution.workstream_id,
+    });
+    assert.equal(invalidCandidate.state, "blocked");
+    assert.equal(invalidCandidate.failure_reason.code, "BLOCKED_BY_DEPENDENCY");
+
+    const resolution = await harness.createSource({
+      base: targetHead,
+      changes: { "conflict.txt": "semantic resolution\n" },
+      dependsOn: [dependency.workstream_id],
+      parentWorkstreamId: dependency.workstream_id,
+      metadata: {
+        resolution_for: conflicted.integration_candidate_id,
+        source_commit: dependency.sourceHead,
+        target_head: targetHead,
+        strategy: "semantic_three_way_resolution_only",
+        no_redo: true,
+      },
+    });
+    const candidate = await service.preflight({ workstream_id: resolution.workstream_id });
+    assert.equal(candidate.state, "preflight_passed");
+    assert.equal(candidate.strategy, "fast_forward");
+    assert.equal(candidate.depends_on.length, 1);
+    assert.equal(candidate.depends_on[0].source_branch, dependency.branch_name);
+    assert.equal(candidate.depends_on[0].source_head, dependency.sourceHead);
+    assert.equal(candidate.depends_on[0].integration_commit, null);
+
+    const ready = await service.validateIntegration({
+      integration_candidate_id: candidate.integration_candidate_id,
+      expected_revision: candidate.revision,
+    });
+    assert.equal(ready.state, "ready");
+    const integrated = await service.integrate({
+      integration_candidate_id: ready.integration_candidate_id,
+      expected_revision: ready.revision,
+    });
+    assert.equal(integrated.state, "integrated");
+    assert.equal((await git(harness.repositoryRoot, ["rev-parse", "HEAD"])).stdout.trim(), resolution.sourceHead);
   } finally {
     await harness.cleanup();
   }
