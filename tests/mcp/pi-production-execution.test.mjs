@@ -7,13 +7,22 @@ import {createDevOperationJournalService} from "../../server/src/mcp-development
 import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "../../server/src/pi-production-execution-route.mjs";
 import {createPiProductionExecutionController,guardPiDirectExecution} from "../../server/src/pi-production-execution-controller.mjs";
 import {createPiReliableExecutionStore} from "../../server/src/pi-reliable-execution-store.mjs";
-import {REQUIRED_DECISION_BOUNDARIES,hashExecutionInput} from "../../server/src/pi-execution-contract.mjs";
+import {REQUIRED_DECISION_BOUNDARIES,hashExecutionInput,createExecutionIntent} from "../../server/src/pi-execution-contract.mjs";
 const context={project_id:"writer_workbench",workstream_id:"dev_workstream_20261003-153931_7730524b821e",workspace_id:"dev_workspace_65ed265de3494399b7ad40b2"};
 function intent(id="default-intent-001",write=false){const input=write?{path:"scripts/probe.mjs",content:"// GPT exact content"}:{path:"package.json"};
  const action={step_id:"requested",capability:write?"filesystem.write":"filesystem.read",input,depends_on:[],...(write?{idempotency_key:"production-key-"+id}:{})};
  return {schema_version:1,intent_id:id,goal:"Execute exact GPT request",context,constraints:["Preserve scope"],requested_actions:[action],
  mutation_plan:write?[{step_id:"requested",target:input.path,expected_change:"Exact GPT content",input_sha256:hashExecutionInput(input)}]:[],
  verification:{focused:[],affected:[],full:[]},completion_conditions:["GPT reviews facts"],permissions:{read:true,write:true,tests:false,commit:false,integrate:false,push:false,workspace_create:false},decision_boundaries:[...REQUIRED_DECISION_BOUNDARIES]};}
+test("legacy workspace.create target remains readable while workspace.create_isolated stays strict",()=>{
+ const input={workstream_id:context.workstream_id,expected_workstream_revision:1};
+ const legacy={schema_version:1,intent_id:"legacy-workspace-create-history-001",goal:"Read pre-Phase F workspace create history",context,constraints:["Preserve historical contract"],requested_actions:[{step_id:"create",capability:"workspace.create",input,depends_on:[],idempotency_key:"legacy-workspace-create-history-001"}],
+  mutation_plan:[{step_id:"create",target:"isolated-workspace",expected_change:"Create isolated workspace",input_sha256:hashExecutionInput(input)}],
+  verification:{focused:[],affected:[],full:[]},completion_conditions:["Historical intent remains valid"],permissions:{read:true,write:false,tests:false,commit:false,integrate:false,push:false,workspace_create:true},decision_boundaries:[...REQUIRED_DECISION_BOUNDARIES]};
+ assert.equal(createExecutionIntent(legacy).mutation_plan[0].target,"isolated-workspace");
+ const strict=JSON.parse(JSON.stringify(legacy));strict.intent_id="strict-workspace-create-isolated-001";strict.requested_actions[0].capability="workspace.create_isolated";strict.requested_actions[0].idempotency_key="strict-workspace-create-isolated-001";
+ assert.throws(()=>createExecutionIntent(strict),{code:"MUTATION_TARGET_MISMATCH"});
+});
 async function fixture(t){const root=await mkdtemp(path.join(os.tmpdir(),"pi-production-"));t.after(async()=>{assert.equal(path.dirname(root),os.tmpdir());await rm(root,{recursive:true,force:true});});
  const journal=createDevOperationJournalService({storageRoot:path.join(root,"journal")});return {journal,route:createPiProductionRouteStore({journal})};}
 const decision={mode:"pi_default",decision_id:"gpt-cutover-001",gate_hash:"a".repeat(64)};
