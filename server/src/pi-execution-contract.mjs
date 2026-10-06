@@ -223,7 +223,9 @@ export function createExecutionIntent(input) {
       if (!plan || plan.input_sha256 !== hashExecutionInput(action.input)) fail("MUTATION_CONTENT_MISMATCH");
       if (action.capability.startsWith("filesystem.") && plan.target !== action.input.path) fail("MUTATION_TARGET_MISMATCH");
       if (action.capability === "workspace.create_checkpoint" && plan.target !== (bootstrap?"bootstrap_workspace":intent.context.workspace_id)) fail("MUTATION_TARGET_MISMATCH");
-      if (["workspace.create", "workspace.create_isolated", "workspace.update_workstream", "workspace.end_workstream"].includes(action.capability)
+      // workspace.create is the pre-Phase F alias; historical intents may use descriptive mutation targets.
+      // Its actual workstream_id remains context-bound by validateInput above.
+      if (["workspace.create_isolated", "workspace.update_workstream", "workspace.end_workstream"].includes(action.capability)
         && plan.target !== (bootstrap?"bootstrap_workstream":intent.context.workstream_id)) fail("MUTATION_TARGET_MISMATCH");
       if(action.capability==="workspace.begin_workstream" && plan.target!=="bootstrap_workstream") fail("MUTATION_TARGET_MISMATCH");
       plans.delete(action.step_id);
