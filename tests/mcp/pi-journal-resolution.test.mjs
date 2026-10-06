@@ -125,3 +125,47 @@ test('stored resolution dedupes after PID reuse without a second event',async()=
  try{const result=await f.j.resolveNoChildMutation(f.input);assert.equal(result.reconciled,true);assert.equal((await f.j.status()).latest_sequence,before);}
  finally{mock.restoreAll();}
 });
+
+
+test('powershell nonzero exit with completed child stays reconciled',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'pi-powershell-nonzero-'));
+ const scope={workspace_id:'dev_workspace_123456789012345678901234',workstream_id:'dev_workstream_20261006-000000_123456789012'};
+ const j=createDevOperationJournalService({storageRoot:path.join(root,'journal')});
+ const commandSha=createHash('sha256').update('node --test tests/mcp/pi-production-execution.test.mjs').digest('hex');
+ const result=await j.executeReconciled({tool_name:'powershell_run',reconciliation_key:'powershell-nonzero-exit',request_fingerprint_sha256:'9'.repeat(64),resolve_workspace_scope:async()=>scope},async()=>{
+   const child=await j.begin({operation_type:'powershell_maintenance',tool_name:'powershell_run',workspace_id:scope.workspace_id,workstream_id:scope.workstream_id,
+     result:{command_sha256:commandSha,cwd:root,elevated:false,timeout_ms:120000}});
+   await j.complete(child.operation_id,{result:{command_sha256:commandSha,cwd:root,duration_ms:10,elevated:false,execution_ok:true,exit_code:1,ok:false,reason:null,
+     stderr_sha256:'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',stderr_truncated:false,stdout_truncated:false,timed_out:false,timeout_ms:120000}});
+   return {content:[{type:'text',text:JSON.stringify({execution_ok:true,ok:false,exit_code:1,timed_out:false})}]};
+ });
+ assert.equal(result.operation.reconciliation_state,'completed');
+ assert.equal((await j.status()).health,'healthy');
+});
+
+test('completed powershell child ambiguity resolves append-only with exact receipt',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'pi-powershell-resolution-'));
+ const scope={workspace_id:'dev_workspace_123456789012345678901234',workstream_id:'dev_workstream_20261006-000000_123456789012'};
+ const j=createDevOperationJournalService({storageRoot:path.join(root,'journal')});
+ const commandSha=createHash('sha256').update('node --test tests/mcp/pi-production-execution.test.mjs').digest('hex');
+ const requestHash='8'.repeat(64);
+ const outer=await j.begin({operation_type:'mcp_mutation',tool_name:'powershell_run',workspace_id:scope.workspace_id,workstream_id:scope.workstream_id,
+   reconciliation_key:'powershell-resolution-fixture',request_fingerprint_sha256:requestHash});
+ const child=await j.begin({operation_type:'powershell_maintenance',tool_name:'powershell_run',workspace_id:scope.workspace_id,workstream_id:scope.workstream_id,
+   parent_operation_id:outer.operation_id,result:{command_sha256:commandSha,cwd:root,elevated:false,timeout_ms:120000}});
+ const childDone=await j.complete(child.operation_id,{result:{command_sha256:commandSha,cwd:root,duration_ms:10,elevated:false,execution_ok:true,exit_code:1,ok:false,reason:null,
+   stderr_sha256:'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',stderr_truncated:false,stdout_truncated:false,timed_out:false,timeout_ms:120000}});
+ await j.fail(outer.operation_id,{result:{outcome:'ambiguous_effect',reconciliation_required:true}});
+ const file=path.join(j.storageRoot,'events',(await readdir(path.join(j.storageRoot,'events'))).at(-1));
+ const terminal=JSON.parse(await readFile(file,'utf8'));terminal.diagnostic.owner_pid=2147483647;
+ const {event_hash,...body}=terminal;terminal.event_hash=createHash('sha256').update(canonicalJson(body)).digest('hex');
+ await writeFile(file,canonicalJson(terminal)+'\n');
+ await writeFile(path.join(j.storageRoot,'head.json'),JSON.stringify({schema_version:1,latest_sequence:terminal.sequence,latest_event_id:terminal.journal_event_id,latest_event_hash:terminal.event_hash}));
+ const reopened=createDevOperationJournalService({storageRoot:j.storageRoot});
+ await reopened.resolveCompletedPowershellMutation({operation_id:outer.operation_id,expected_terminal_hash:terminal.event_hash,request_fingerprint_sha256:requestHash,
+   decision_owner:'GPT',decision_id:'gpt-powershell-resolution-fixture',reason:'Exact completed maintenance child proves the command execution reached a durable terminal result; never replay.',
+   resolution_kind:'completed_powershell_observation',expected_child_terminal_hash:childDone.event_hash,expected_command_sha256:commandSha,observed_exit_code:1});
+ const status=await reopened.status();assert.equal(status.health,'healthy');assert.equal(status.reconciliation_required,false);
+ const operation=await reopened.getOperation({operation_id:outer.operation_id});
+ assert.equal(operation.reconciliation_state,'completed');assert.equal(operation.automatic_replay_allowed,false);assert.equal(operation.safe_to_reinitiate,false);
+});

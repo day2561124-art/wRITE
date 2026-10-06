@@ -790,8 +790,37 @@ export function createDevOperationJournalService({
       throw new Error("UNSAFE_COMPLETED_CHILD_RESOLUTION");
     return {started,terminal,child,done};
   }
+  function validateCompletedPowershellResolution(events,input) {
+    const started=events.find(e=>e.operation_id===input.operation_id&&e.stage==="operation_started");
+    const terminal=events.find(e=>e.operation_id===input.operation_id&&terminalStageSet.has(e.stage));
+    const children=events.filter(e=>e.parent_operation_id===input.operation_id&&e.stage==="operation_started"&&e.operation_type!=="pi_terminal_resolution");
+    const child=children[0];
+    const done=child&&events.find(e=>e.operation_id===child.operation_id&&terminalStageSet.has(e.stage));
+    const expectedElevated=started?.tool_name==="powershell_admin_run";
+    if(!started||!terminal||started.operation_type!=="mcp_mutation"
+      ||!["powershell_run","powershell_admin_run"].includes(started.tool_name)
+      ||started.targets.length||terminal.targets.length||terminal.stage!=="operation_failed"
+      ||terminal.result?.outcome!=="ambiguous_effect"||terminal.result?.reconciliation_required!==true
+      ||terminal.event_hash!==input.expected_terminal_hash||started.request_fingerprint_sha256!==input.request_fingerprint_sha256
+      ||children.length!==1||child.operation_type!=="powershell_maintenance"||child.tool_name!==started.tool_name
+      ||child.workspace_id!==started.workspace_id||child.workstream_id!==started.workstream_id
+      ||done?.stage!=="operation_completed"||done.event_hash!==input.expected_child_terminal_hash
+      ||done.workspace_id!==started.workspace_id||done.workstream_id!==started.workstream_id
+      ||!sha256Pattern.test(input.expected_command_sha256??"")||!Number.isSafeInteger(input.observed_exit_code)
+      ||child.result?.command_sha256!==input.expected_command_sha256||done.result?.command_sha256!==input.expected_command_sha256
+      ||child.result?.cwd!==done.result?.cwd||child.result?.elevated!==expectedElevated||done.result?.elevated!==expectedElevated
+      ||child.result?.timeout_ms!==done.result?.timeout_ms||done.result?.execution_ok!==true||done.result?.timed_out!==false
+      ||done.result?.exit_code!==input.observed_exit_code
+      ||events.some(e=>e.parent_operation_id===child.operation_id&&e.stage==="operation_started")
+      ||input.decision_owner!=="GPT"||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id??"")
+      ||typeof input.reason!=="string"||!input.reason.trim()||input.reason.length>1024)
+      throw new Error("UNSAFE_COMPLETED_POWERSHELL_RESOLUTION");
+    return {started,terminal,child,done};
+  }
   const validateResolution=(events,input)=>input?.resolution_kind==="completed_child_create"
-    ?validateCompletedChildResolution(events,input):validateNoChildResolution(events,input);
+    ?validateCompletedChildResolution(events,input)
+    :input?.resolution_kind==="completed_powershell_observation"
+      ?validateCompletedPowershellResolution(events,input):validateNoChildResolution(events,input);
 
   function resolvedTerminals(events) {
     const resolved=new Map();
@@ -805,7 +834,9 @@ export function createDevOperationJournalService({
         || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
-        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(proof.resolution_kind==="completed_child_create"?"intended_effect_observed":"no_effect_observed")
+        || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(
+          ["completed_child_create","completed_powershell_observation"].includes(proof.resolution_kind)
+            ?"intended_effect_observed":"no_effect_observed")
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
     }
@@ -1410,9 +1441,13 @@ export function createDevOperationJournalService({
   }
 
 
-  async function resolveTerminalMutation(input={}, completedChild=false) {
-    const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...(completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]:[])]);
-    if(completedChild&&input.resolution_kind!=="completed_child_create")throw new Error("INVALID_TERMINAL_RESOLUTION");
+  async function resolveTerminalMutation(input={}, resolutionKind=null) {
+    const completedChild=resolutionKind==="completed_child_create";
+    const completedPowershell=resolutionKind==="completed_powershell_observation";
+    const resolutionFields=completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
+      :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]:[];
+    const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...resolutionFields]);
+    if(resolutionKind!==null&&input.resolution_kind!==resolutionKind)throw new Error("INVALID_TERMINAL_RESOLUTION");
     if(!isObject(input)||Object.keys(input).some(k=>!allowed.has(k)))throw new Error("INVALID_TERMINAL_RESOLUTION");
     let verification=await verify();
     const {started,terminal,done:childDone}=validateResolution(verification.events,input);
@@ -1440,7 +1475,8 @@ export function createDevOperationJournalService({
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
-        operation_type:"pi_terminal_resolution",tool_name:"pi.journal.resolve_no_child_create",
+        operation_type:"pi_terminal_resolution",tool_name:completedChild?"pi.journal.resolve_completed_child_create"
+          :completedPowershell?"pi.journal.resolve_completed_powershell":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
         reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}});
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -1452,13 +1488,14 @@ export function createDevOperationJournalService({
     validateResolution(verification.events,input);
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
-      result:{outcome:completedChild?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)}});}
+      result:{outcome:(completedChild||completedPowershell)?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)}});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     await verify();return {reconciled:false,event};
   }
 
   const resolveNoChildMutation=input=>resolveTerminalMutation(input);
-  const resolveCompletedChildMutation=input=>resolveTerminalMutation(input,true);
+  const resolveCompletedChildMutation=input=>resolveTerminalMutation(input,"completed_child_create");
+  const resolveCompletedPowershellMutation=input=>resolveTerminalMutation(input,"completed_powershell_observation");
 
   async function markDegraded(reason = "terminal_journal_append_failed") {
     explicitDegraded = true;
@@ -1606,7 +1643,9 @@ export function createDevOperationJournalService({
       }
       let payload;
       try { payload = JSON.parse(value?.content?.[0]?.text ?? "{}"); } catch { payload = {}; }
-      if (value?.isError === true || payload?.ok === false || payload?.execution_ok === false) {
+      const completedCommandObservation=["powershell_run","powershell_admin_run"].includes(context.tool_name)
+        && payload?.execution_ok===true&&payload?.timed_out===false&&Number.isSafeInteger(payload?.exit_code);
+      if (value?.isError === true || (!completedCommandObservation && (payload?.ok === false || payload?.execution_ok === false))) {
         const verification = await verify();
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
           && event.stage === "operation_started");
@@ -1818,6 +1857,7 @@ export function createDevOperationJournalService({
     recover,
     resolveNoChildMutation,
     resolveCompletedChildMutation,
+    resolveCompletedPowershellMutation,
     markDegraded,
     getOperation,
     executeReconciled,
