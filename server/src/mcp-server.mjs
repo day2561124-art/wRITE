@@ -163,6 +163,7 @@ import {
 } from "./mcp-development-test-tools.mjs";
 import { createPiProductionRouteStore } from "./pi-production-execution-route.mjs";
 import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
+import { createPiLifecycleScopeVerifier } from "./pi-lifecycle-scope.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
 import {
@@ -1789,7 +1790,14 @@ const devWorkspaceExecutionProperties = Object.freeze({
   }),
 });
 
+import {CAPABILITY_DEFINITIONS} from "./pi-execution-contract.mjs";
+import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
+import {isPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
+import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
+import {createPiRuntimeCapabilityMetadata} from "./pi-runtime-capability-metadata.mjs";
 const toolDefinitions = [
+  {name:"dev_capability_get_schema",description:"Read bounded server-owned capability schema/version/hash metadata; no source-file access or dispatch.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_name:{type:"string",maxLength:128},expected_schema_version:{type:"string",maxLength:16}},["capability_name"]),handler:async args=>jsonContent(piCapabilityMetadata.getSchema(args))},
+  {name:"dev_capability_list",description:"Read bounded registered capability metadata. Does not select replacement tools or execute effects.",risk:"read",annotations:{readOnlyHint:true},inputSchema:baseSchema({capability_names:{type:"array",maxItems:64,uniqueItems:true,items:{type:"string",maxLength:128}},offset:{type:"integer",minimum:0,maximum:128},limit:{type:"integer",minimum:1,maximum:64}}),handler:async args=>jsonContent(piCapabilityMetadata.list(args))},
   {
     name: "dev_list_directory",
     description: "List one repository directory without following symbolic links or exposing .git internals and common secret files.",
@@ -2089,6 +2097,7 @@ const toolDefinitions = [
     risk: "read",
     annotations: { readOnlyHint: true },
     inputSchema: baseSchema({
+      bootstrap: { type: "boolean", const: true },
       intent_id: { type: "string", minLength: 1, maxLength: 128 },
       operation_id: { type: "string", pattern: "^pi_operation_[a-f0-9]{32}$", maxLength: 64 },
       workstream_id: { type: "string", pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE, maxLength: 64 },
@@ -2097,9 +2106,11 @@ const toolDefinitions = [
     handler: async args => {
       const route = await piProductionController.status();
       if (Object.keys(args).length === 0) return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
-      if ((!args.operation_id === !args.intent_id) || !args.workstream_id || !args.workspace_id) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
+      if ((!args.operation_id === !args.intent_id) || (args.bootstrap
+        ? args.workstream_id!==undefined || args.workspace_id!==undefined
+        : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
       return jsonContent({ route, operation: await piProductionController.inspect({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
-        context: { project_id: "writer_workbench", workstream_id: args.workstream_id, workspace_id: args.workspace_id } }) });
+        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }) });
     },
   },
   {
@@ -2166,7 +2177,16 @@ const toolDefinitions = [
       },
       mode: { type: "string", enum: DEV_WORKSTREAM_MODES, default: "shared" },
     }, ["label"]),
-    handler: async (args) => jsonContent(await dev_workspace_begin_workstream(args)),
+    handler: async (args) => {
+      const context=getPiBootstrapReconciliation();
+      if(isPiManagedMcpCall()) {
+        if(!context?.reconciliation_key) throw new Error("BOOTSTRAP_IDEMPOTENCY_REQUIRED");
+        const {mode,...bootstrapArgs}=args;
+        if(mode!=="shared")throw new Error("PI_BOOTSTRAP_REQUIRES_SHARED_MODE");
+        return jsonContent(await beginPiWorkstreamBootstrap({...bootstrapArgs,bootstrap_id:context.reconciliation_key,request_fingerprint_sha256:context.request_fingerprint_sha256}));
+      }
+      return jsonContent(await dev_workspace_begin_workstream(args));
+    },
   },
   {
     name: "dev_workspace_get_workstream",
@@ -2201,6 +2221,7 @@ const toolDefinitions = [
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
+      blocker_resolution_operation_id: {type:"string",pattern:"^dev_operation_[a-f0-9]{32}$",maxLength:64},
       workstream_id: {
         type: "string",
         pattern: DEV_WORKSTREAM_ID_PATTERN_SOURCE,
@@ -4691,6 +4712,8 @@ const chatgptDeveloperToolNames = new Set([
   "dev_git_status",
   "dev_git_remote_status",
   "dev_workspace_begin_workstream",
+  "dev_capability_get_schema",
+  "dev_capability_list",
   "dev_workspace_get_workstream",
   "dev_workspace_list_workstreams",
   "dev_workspace_update_workstream",
@@ -5703,12 +5726,20 @@ function writeMessage(message, framing = "line") {
   return responseWriteChain;
 }
 
+const piCapabilityMetadata=createPiRuntimeCapabilityMetadata({tools:toolDefinitions,availability:name=>{
+  const definition=CAPABILITY_DEFINITIONS.find(c=>c.capability===name);return definition&&isToolAllowed(definition.tool)?"available":"unavailable";
+}});
 const piProductionRoute = createPiProductionRouteStore();
 async function auditPiFallback(record) {
   const { beginDevJournalOperation, completeDevJournalOperation } = await import("./mcp-development-journal-tools.mjs");
   const started = await beginDevJournalOperation({ operation_type: "pi_diagnostic_fallback", tool_name: "pi.fallback.admit", result: record });
   await completeDevJournalOperation(started.operation_id, { result: record });
 }
+const piLifecycleScopeVerifier = createPiLifecycleScopeVerifier({
+  getWorkstream: args => dev_workspace_get_workstream(args),
+  getCheckpoint: args => dev_workspace_get_checkpoint(args),
+  getOperation: args => dev_workspace_get_operation(args),
+});
 const piProductionController = createPiProductionExecutionController({ route: piProductionRoute, transport: {
   callTool: params => callToolDirect(params),
   queryOperation: args => dev_workspace_get_operation(args),
@@ -5716,11 +5747,17 @@ const piProductionController = createPiProductionExecutionController({ route: pi
     const result = await dev_workspace_get_workspace(args);
     return result.workspace ?? result;
   },
+  validateCapabilityExpectation: args=>piCapabilityMetadata.validateExpectation(args),
   verifyScope: async ({context, step}) => {
+    if(step.scope==="capability") return step.effect===false;
+    if(step.scope==="bootstrap") return context.workstream_id===null && context.workspace_id==="dev_workspace_shared_repository_v1" && step.tool==="dev_workspace_begin_workstream";
     const workstream = await dev_workspace_get_workstream({workstream_id: context.workstream_id});
     if (workstream.workspace_id !== context.workspace_id) return false;
-    if (step.scope === "workstream") return step.arguments.workstream_id === workstream.workstream_id
-      && step.arguments.expected_workstream_revision === workstream.revision && workstream.state === "active" && workstream.mode === "shared";
+    if (step.scope === "workstream" && step.tool === "dev_workspace_create_isolated") {
+      return step.arguments.workstream_id === workstream.workstream_id
+        && step.arguments.expected_workstream_revision === workstream.revision
+        && workstream.state === "active" && workstream.mode === "shared";
+    }
     if (step.scope === "candidate") {
       const candidate = await dev_workspace_get_integration_candidate({integration_candidate_id: step.arguments.integration_candidate_id});
       const integrationStateAllowed = candidate.state === "ready"
@@ -5735,17 +5772,13 @@ const piProductionController = createPiProductionExecutionController({ route: pi
       const status = await dev_git_status({});
       return status.execution_ok === true && status.workspace_context?.current_head === step.arguments.expectedHead;
     }
-    if (step.scope === "operation") {
-      const operation = await dev_workspace_get_operation({operation_id: step.arguments.operation_id});
-      return operation.events?.[0]?.workspace_id === context.workspace_id && operation.events?.[0]?.workstream_id === context.workstream_id;
-    }
-    return false;
+    return piLifecycleScopeVerifier({context, step});
   },
   requestTimeoutMs: 1800000, queryTimeoutMs: 300000,
 } });
 async function callTool(params) {
   const name = params?.name;
-  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_create_isolated","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
+  if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
     await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
@@ -5787,7 +5820,13 @@ async function callToolDirect(params) {
       request_fingerprint_sha256: fingerprintMcpMutationRequest(tool.name, mutationArgs),
       tool_name: tool.name,
     resolve_workspace_scope: async () => {
-        if (!mutationArgs.workspace_id) return {};
+        if (!mutationArgs.workspace_id) {
+          if(["dev_workspace_create_isolated","dev_workspace_update_workstream","dev_workspace_end_workstream"].includes(tool.name)) {
+            const record=await dev_workspace_get_workstream({workstream_id:mutationArgs.workstream_id});
+            return {workspace_id:record.workspace_id,workstream_id:record.workstream_id};
+          }
+          return {};
+        }
         const { resolveDevWorkspaceExecutionContext } = await import("./mcp-development-workstream-tools.mjs");
         const context = await resolveDevWorkspaceExecutionContext({ workspace_id: mutationArgs.workspace_id }, { mutation: true });
         return { workspace_id: context.workspace_id, workstream_id: context.workstream_id };

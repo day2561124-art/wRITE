@@ -35,7 +35,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   Object.keys(mcpSuiteScripts),
-  ["mcp_core", "mcp_infrastructure", "mcp_reliability"],
+  ["mcp_pi_postseal", "mcp_core", "mcp_infrastructure", "mcp_reliability"],
 );
 for (const entry of mcpScriptEntries) {
   assert.ok(["core", "infrastructure", "reliability"].includes(entry.layer));
@@ -92,7 +92,7 @@ assert.deepEqual(piScripts, [
   "tests/mcp/pi-canary-execution.test.mjs",
   "tests/mcp/pi-production-execution.test.mjs",
 ]);
-assert(original.includes("for (const scriptPath of [...testScripts, ...piTestScripts])"),
+assert(original.includes('for (const scriptPath of [...testScripts, ...piTestScripts, ...(await import("./mcp-suite-groups.mjs")).mcpPiPostSealScripts, "tests/mcp/pi-bootstrap-wire.test.mjs"])'),
   "Full MCP runner must execute Pi tests as well as retain the original baseline");
 assert.equal(new Set([...legacyScripts, ...piScripts]).size, legacyScripts.length + piScripts.length);
 for (const script of piScripts) assert(existsSync(path.join(root, script)), "Missing additive Pi script");

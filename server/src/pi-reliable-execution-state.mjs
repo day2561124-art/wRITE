@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { createExecutionIntent, createOperationState, validateOperationState, transitionOperation,
   hashExecutionInput, capabilityDefinition } from "./pi-execution-contract.mjs";
+import {createMcpCapabilityAdapter} from "./pi-mcp-adapter.mjs";
+import {piBootstrapBinding} from "./pi-workstream-bootstrap.mjs";
 export function reliableFailure(code) { const e=new Error(code);e.code=code;throw e; }
 export function reliableJson(value) {
   // Reuse the contract's accessor, depth and JSON checks before serialization.
@@ -79,9 +81,11 @@ function factualObjects(evidence) {
   }
   return values;
 }
-function reconciliationBinding(action,context,evidence) {
+function reconciliationBinding(action,context,evidence,binding=null) {
   const definition=capabilityDefinition(action.capability);
-  const args={...action.input,...(definition.scope==="workspace"?{workspace_id:context.workspace_id}:{})};
+  const effective=binding??context;
+  const args={...action.input,...(definition.scope==="workspace"?{workspace_id:effective.workspace_id}:{})};
+  if(binding && action.capability==="workspace.create_isolated") {args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;}
   return evidence.reconciliation_key===action.idempotency_key
     &&evidence.request_fingerprint_sha256===hashExecutionInput({tool_name:definition.tool,arguments:args});
 }
@@ -110,10 +114,14 @@ export function reduceReliableProjection(prior,command,now) {
       if(facts.some(x=>x?.isError===true||x?.ok===false||x?.execution_ok===false||x?.passed===false)
         ||(action.capability.startsWith("verification.")&&!facts.some(x=>x?.passed===true)))
         reliableFailure("INVALID_SUCCESS_RECEIPT");
-    } else if(!reconciliationBinding(action,prior.intent.context,r.evidence)
+    } else if(!reconciliationBinding(action,prior.intent.context,r.evidence,prior.runtime.lifecycle_binding??null)
       ||!/^dev_operation_[a-f0-9]{32}$/u.test(r.evidence.operation_id)
       ||(action.capability.startsWith("verification.")&&r.evidence.original_result?.passed!==true))
       reliableFailure("INVALID_RECONCILIATION");
+    if(prior.intent.bootstrap && ["workspace.begin_workstream","workspace.create_isolated"].includes(action.capability)) {
+      const fact=r.kind==="reconciled_facts"?r.evidence.original_result:factualObjects(r.evidence).find(v=>v?.workstream_id&&v?.workspace_id);
+      runtime.lifecycle_binding=piBootstrapBinding(runtime.lifecycle_binding,action.capability,fact);
+    }
     state.tool_results.push({call_id:active.call_id,step_id:action.step_id,
       input_hash:r.input_hash,result_hash:r.result_hash,receipt_hash:hashExecutionInput(r)});
     state.completed_steps.push(action.step_id);state.pending_steps=state.pending_steps.filter(x=>x!==action.step_id);
@@ -168,7 +176,7 @@ export function reduceReliableProjection(prior,command,now) {
       receipt(command.receipt,action);
       if(state.status!=="RECONCILING"||command.receipt.kind!=="reconciled_facts"
         ||command.receipt.evidence.reconciliation_state!=="active"
-        ||!reconciliationBinding(action,prior.intent.context,command.receipt.evidence))reliableFailure("INVALID_RECONCILIATION");
+        ||!reconciliationBinding(action,prior.intent.context,command.receipt.evidence,prior.runtime.lifecycle_binding??null))reliableFailure("INVALID_RECONCILIATION");
       runtime.retry_at=new Date(Date.parse(now)+Math.min(runtime.retry_policy.max_delay_ms,
         runtime.retry_policy.base_delay_ms*2**(active.reconciliation_attempt-1))).toISOString();state.retry_count++;break;
     case "reconciliation_read_retry_scheduled":
@@ -203,7 +211,7 @@ export function reduceReliableProjection(prior,command,now) {
         if(state.status!=="RECONCILING"||!command.not_started_receipt)reliableFailure("UNSAFE_RETRY");
         receipt(command.not_started_receipt,action);
         const e=command.not_started_receipt.evidence;
-        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent.context,e))
+        if(e.reconciliation_state!=="not_admitted"||e.safe_same_key_retry!==true||!reconciliationBinding(action,prior.intent.context,e,prior.runtime.lifecycle_binding??null))
           reliableFailure("UNSAFE_RETRY");
         Object.assign(state,transitionOperation(state,active.phase,now));
       } else if(command.not_started_receipt!==null)reliableFailure("UNSAFE_RETRY");
@@ -239,7 +247,7 @@ export function validateReliableProjection(value,prior) {
     if(value.schema_version!==2||projection_hash!==projectionHash(body)
       ||Buffer.byteLength(stableJson(value))>768*1024)reliableFailure("CORRUPT_STATE");
     const intent=createExecutionIntent(value.intent);const state=validateOperationState(value.state);
-    exact(value.runtime,["retry_policy","owner","active_call","retry_at"]);
+    exact(value.runtime,intent.bootstrap?["retry_policy","owner","active_call","retry_at","lifecycle_binding"]:["retry_policy","owner","active_call","retry_at"]);
     validateRetryPolicy(value.runtime.retry_policy);
     if(value.runtime.owner!==null)validateOwner(value.runtime.owner);
     if(!prior) {
@@ -248,7 +256,7 @@ export function validateReliableProjection(value,prior) {
       if(Object.hasOwn(value.command,"production_binding"))validateProductionBinding(value.command.production_binding);
       if(value.command.type!=="operation_created"||value.action_type!=="operation_created"||value.revision!==1
         ||value.previous_projection_hash!==null||value.runtime.owner!==null||value.runtime.active_call!==null
-        ||value.runtime.retry_at!==null||stableJson(state)!==stableJson(initialReliableState(intent,{
+        ||value.runtime.retry_at!==null||(intent.bootstrap && value.runtime.lifecycle_binding!==null)||stableJson(state)!==stableJson(initialReliableState(intent,{
           operation_id:state.operation_id,parent_operation_id:state.parent_operation_id,timestamp:state.created_at})))reliableFailure("CORRUPT_STATE");
     } else {
       if(prior.schema_version!==2||value.revision!==prior.revision+1||value.previous_projection_hash!==prior.projection_hash

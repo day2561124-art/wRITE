@@ -116,3 +116,12 @@ test('completed child proof cannot use no-child repair ingress or a foreign work
  const other=createDevOperationJournalService({storageRoot:f.j.storageRoot,resolutionContextResolver:async()=>({...f.context,workstream_id:null})});
  await assert.rejects(other.resolveCompletedChildMutation(f.input),/RESOLUTION_WORKSPACE_MISMATCH/);
 });
+
+test('stored resolution dedupes after PID reuse without a second event',async()=>{
+ const f=await fixture();await f.j.resolveNoChildMutation(f.input);
+ const before=(await f.j.status()).latest_sequence;
+ const {mock}=await import('node:test');const prior=process.kill;
+ mock.method(process,'kill',(pid,signal)=>pid===2147483647?undefined:prior.call(process,pid,signal));
+ try{const result=await f.j.resolveNoChildMutation(f.input);assert.equal(result.reconciled,true);assert.equal((await f.j.status()).latest_sequence,before);}
+ finally{mock.restoreAll();}
+});

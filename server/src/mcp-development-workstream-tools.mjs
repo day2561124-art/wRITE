@@ -718,11 +718,21 @@ export function createDevWorkstreamRegistryService({
     const workstreamId = assertWorkstreamId(input.workstream_id);
     const expectedRevision = input.expected_workstream_revision;
     const recoveryMode = options?.recovery === true;
+    const {getMcpOperationReconciliationContext}=await import("./mcp-operation-reconciliation-context.mjs");
+    const {isPiManagedMcpCall}=await import("./pi-production-execution-controller.mjs");
+    const creation=isPiManagedMcpCall()?getMcpOperationReconciliationContext():null;
 
     return mutate(recoveryMode ? "dev_workspace_create_recovery_isolated" : "dev_workspace_create_isolated", async (registry) => {
       const record = findRecord(registry, workstreamId);
       if (!record) throw new Error(`Unknown workstream: ${workstreamId}.`);
       if (terminalStateSet.has(record.state)) throw new Error("Terminal workstreams cannot create isolated workspaces.");
+      if(creation && record.metadata?.pi_workspace_creation_key===creation.reconciliation_key) {
+        if(record.metadata.pi_workspace_creation_fingerprint!==creation.request_fingerprint_sha256) throw new Error("PI_BOOTSTRAP_KEY_CONFLICT");
+        const observed=await inspectRegisteredWorkspace(record.workspace);
+        if(record.workspace?.state!=="active" || !observed.healthy || !observed.locked
+          || record.revision!==record.metadata.pi_workspace_creation_revision) throw new Error("WORKSPACE_RECONCILIATION_REQUIRED");
+        return { ...record.workspace,workstream_revision:record.revision,workspace_reconciled:true };
+      }
       assertExpectedRevision(record, expectedRevision);
       if (record.mode !== "shared" || record.workspace) throw new Error("Workstream already has an isolated workspace lifecycle record.");
       if (recoveryMode && !checkpointIdPattern.test(record.metadata?.recovery_source_checkpoint_id ?? "")) {
@@ -801,6 +811,8 @@ export function createDevWorkstreamRegistryService({
         record.workspace.updated_at = clock().toISOString();
         record.workspace.revision += 1;
         record.revision += 1;
+        if(creation) record.metadata={...record.metadata,pi_workspace_creation_key:creation.reconciliation_key,
+          pi_workspace_creation_fingerprint:creation.request_fingerprint_sha256,pi_workspace_creation_revision:record.revision};
         record.updated_at = record.workspace.updated_at;
         record.last_activity_at = record.workspace.updated_at;
         return (nextRegistry) => ({
@@ -820,6 +832,32 @@ export function createDevWorkstreamRegistryService({
     });
   }
 
+  // Read-only physical evidence. Missing/partial evidence stays ambiguous; this
+  // inspector never starts/repeats an operation or invents a not_started fact.
+  async function inspectPiLifecycleEffect(started) {
+    const unknown={outcome:"ambiguous_effect",reconciliation_required:true};
+    if(started.operation_type!=="mcp_mutation" || !started.reconciliation_key || !started.request_fingerprint_sha256) return unknown;
+    const {registry}=await readRegistryWithHealth();
+    if(started.tool_name==="dev_workspace_begin_workstream") {
+      const matches=registry.workstreams.filter(r=>r.metadata?.pi_bootstrap_id===started.reconciliation_key
+        && r.metadata.pi_bootstrap_fingerprint===started.request_fingerprint_sha256);
+      const r=matches[0];if(matches.length!==1||r.revision!==1||r.mode!=="shared"||r.workspace||r.state!=="active")return unknown;
+      return {outcome:"intended_effect_observed",reconciliation_required:false,workstream_id:r.workstream_id,
+        workspace_id:r.workspace_id,workstream_revision:r.revision,base_head:r.base_head};
+    }
+    if(started.tool_name==="dev_workspace_create_isolated") {
+      const matches=registry.workstreams.filter(r=>r.metadata?.pi_workspace_creation_key===started.reconciliation_key
+        && r.metadata.pi_workspace_creation_fingerprint===started.request_fingerprint_sha256);
+      const r=matches[0];if(matches.length!==1||r.state!=="active"||r.workspace?.state!=="active"
+        ||r.revision!==r.metadata.pi_workspace_creation_revision||r.workspace_id!==started.workspace_id&&started.workspace_id!=="dev_workspace_shared_repository_v1"
+        ||started.workstream_id!==r.workstream_id)return unknown;
+      const observed=await inspectRegisteredWorkspace(r.workspace);
+      if(!observed.healthy||!observed.locked||observed.git_worktree_head!==r.base_head)return unknown;
+      return {outcome:"intended_effect_observed",reconciliation_required:false,workstream_id:r.workstream_id,
+        workspace_id:r.workspace_id,workstream_revision:r.revision,base_head:r.base_head,state:r.workspace.state};
+    }
+    return unknown;
+  }
   async function beginRecovery(input = {}) {
     const allowed = new Set(["checkpoint_id", "source_workstream_id", "base_head", "label", "recovery_operation_id"]);
     assertObject(input, "checkpoint recovery workstream input", allowed);
@@ -1367,6 +1405,7 @@ export function createDevWorkstreamRegistryService({
     const dependsOn = normalizeIdList(input.depends_on, "depends_on");
     const declaredScope = normalizeDeclaredScope(input.declared_scope);
     const metadata = normalizeMetadata(input.metadata);
+    if(Object.keys(metadata).some(k=>k.startsWith("pi_bootstrap_")||k.startsWith("pi_workspace_creation_"))) throw new Error("RESERVED_PI_LIFECYCLE_IDENTITY");
     const baseHead = await headReader();
     if (typeof baseHead !== "string" || !gitSha1Pattern.test(baseHead.toLowerCase())) {
       throw new Error("Server HEAD reader returned an invalid Git SHA-1.");
@@ -1412,6 +1451,95 @@ export function createDevWorkstreamRegistryService({
       return (nextRegistry) => ({
         ...withOverlap(nextRegistry, findRecord(nextRegistry, workstreamId)),
         registry_revision: nextRegistry.revision,
+      });
+    });
+  }
+
+  async function beginBootstrap(input = {}) {
+    const allowed = new Set([
+      "bootstrap_id", "request_fingerprint_sha256", "label", "purpose",
+      "parent_workstream_id", "depends_on", "declared_scope",
+    ]);
+    assertObject(input, "Pi workstream bootstrap input", allowed);
+    const bootstrapId = assertBoundedString(input.bootstrap_id, "bootstrap_id", { min: 8, max: 128 });
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(bootstrapId)) {
+      throw new Error("bootstrap_id must be a stable bounded reconciliation key.");
+    }
+    const requestFingerprint = String(input.request_fingerprint_sha256 ?? "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/u.test(requestFingerprint)) {
+      throw new Error("request_fingerprint_sha256 must be a SHA-256 digest.");
+    }
+    const label = assertBoundedString(input.label, "label", {
+      min: 1,
+      max: DEV_WORKSTREAM_MAX_LABEL_CHARACTERS,
+    });
+    const purpose = input.purpose === undefined
+      ? "primary"
+      : assertEnum(input.purpose, "purpose", purposeSet);
+    const parentWorkstreamId = assertOptionalWorkstreamId(input.parent_workstream_id, "parent_workstream_id");
+    const dependsOn = normalizeIdList(input.depends_on, "depends_on");
+    const declaredScope = normalizeDeclaredScope(input.declared_scope);
+    const baseHead = await headReader();
+    if (typeof baseHead !== "string" || !gitSha1Pattern.test(baseHead.toLowerCase())) {
+      throw new Error("Server HEAD reader returned an invalid Git SHA-1.");
+    }
+    const normalizedBaseHead = baseHead.toLowerCase();
+
+    return mutate("pi_workstream_bootstrap", async (registry) => {
+      const existing = registry.workstreams.find((record) => record.metadata?.pi_bootstrap_id === bootstrapId);
+      if (existing) {
+        if (existing.metadata?.pi_bootstrap_fingerprint !== requestFingerprint) {
+          const error = new Error("PI_BOOTSTRAP_KEY_CONFLICT");
+          error.code = "PI_BOOTSTRAP_KEY_CONFLICT";
+          throw error;
+        }
+        return (nextRegistry) => ({
+          ...withOverlap(nextRegistry, findRecord(nextRegistry, existing.workstream_id)),
+          registry_revision: nextRegistry.revision,
+          bootstrap_reconciled: true,
+        });
+      }
+      if (registry.workstreams.length >= DEV_WORKSTREAM_MAX_RECORDS) {
+        throw new Error(`workstream registry reached the ${DEV_WORKSTREAM_MAX_RECORDS}-record limit.`);
+      }
+      let workstreamId;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const candidate = idGenerator(clock());
+        assertWorkstreamId(candidate, "generated workstream_id");
+        if (!findRecord(registry, candidate)) {
+          workstreamId = candidate;
+          break;
+        }
+      }
+      if (!workstreamId) throw new Error("Could not generate a unique workstream ID.");
+      assertDependencyTargets(registry, workstreamId, parentWorkstreamId, dependsOn);
+      const now = clock().toISOString();
+      registry.workstreams.push({
+        workstream_id: workstreamId,
+        schema_version: DEV_WORKSTREAM_SCHEMA_VERSION,
+        revision: 1,
+        label,
+        purpose,
+        state: "active",
+        mode: DEV_WORKSTREAM_SUPPORTED_MODE,
+        base_head: normalizedBaseHead,
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+        parent_workstream_id: parentWorkstreamId,
+        depends_on: dependsOn,
+        declared_scope: declaredScope,
+        workspace_id: DEV_WORKSTREAM_WORKSPACE_ID,
+        metadata: {
+          pi_bootstrap_id: bootstrapId,
+          pi_bootstrap_fingerprint: requestFingerprint,
+        },
+      });
+      assertAcyclic(registry);
+      return (nextRegistry) => ({
+        ...withOverlap(nextRegistry, findRecord(nextRegistry, workstreamId)),
+        registry_revision: nextRegistry.revision,
+        bootstrap_reconciled: false,
       });
     });
   }
@@ -1473,6 +1601,7 @@ export function createDevWorkstreamRegistryService({
       "declared_scope",
       "metadata",
     ]);
+    allowed.add("blocker_resolution_operation_id");
     assertObject(input, "dev_workspace_update_workstream input", allowed);
     const workstreamId = assertWorkstreamId(input.workstream_id);
     const expectedRevision = input.expected_revision;
@@ -1510,6 +1639,13 @@ export function createDevWorkstreamRegistryService({
         if (!legalNonTerminalTransitions[record.state]?.has(nextState)) {
           throw new Error(`Illegal workstream state transition: ${record.state} -> ${nextState}.`);
         }
+        if(record.state==="blocked" && nextState==="active") {
+          const {verifyPiBlockerResolution}=await import("./pi-lifecycle-scope.mjs");
+          const {dev_workspace_get_operation}=await import("./mcp-development-journal-tools.mjs");
+          if(!await verifyPiBlockerResolution({workstream:record,context:{workstream_id:record.workstream_id,workspace_id:record.workspace_id},resolution_operation_id:input.blocker_resolution_operation_id,getOperation:dev_workspace_get_operation})) {
+            throw Object.assign(new Error("BLOCKER_NOT_RESOLVED"),{code:"BLOCKER_NOT_RESOLVED"});
+          }
+        }
         record.state = nextState;
       }
       if (Object.hasOwn(input, "parent_workstream_id")) {
@@ -1522,7 +1658,14 @@ export function createDevWorkstreamRegistryService({
         record.declared_scope = normalizeDeclaredScope(input.declared_scope);
       }
       if (Object.hasOwn(input, "metadata")) {
-        record.metadata = normalizeMetadata(input.metadata);
+        const next=normalizeMetadata(input.metadata);
+        for(const key of ["pi_bootstrap_id","pi_bootstrap_fingerprint","pi_workspace_creation_key","pi_workspace_creation_fingerprint","pi_workspace_creation_revision"]) {
+          if(Object.hasOwn(record.metadata,key)) {
+            if(Object.hasOwn(next,key)&&next[key]!==record.metadata[key]) throw new Error("IMMUTABLE_PI_LIFECYCLE_IDENTITY");
+            next[key]=record.metadata[key];
+          } else if(Object.hasOwn(next,key)) throw new Error("RESERVED_PI_LIFECYCLE_IDENTITY");
+        }
+        record.metadata = normalizeMetadata(next);
       }
       assertDependencyTargets(
         registry,
@@ -1623,6 +1766,8 @@ export function createDevWorkstreamRegistryService({
 
   return {
     begin,
+    beginBootstrap,
+    inspectPiLifecycleEffect,
     get,
     list,
     update,
@@ -1646,6 +1791,8 @@ export function createDevWorkstreamRegistryService({
 const defaultService = createDevWorkstreamRegistryService();
 
 export const dev_workspace_begin_workstream = defaultService.begin;
+export const beginPiWorkstreamBootstrap = defaultService.beginBootstrap;
+export const inspectPiLifecycleOperationEffect = defaultService.inspectPiLifecycleEffect;
 export const dev_workspace_get_workstream = defaultService.get;
 export const dev_workspace_list_workstreams = defaultService.list;
 export const dev_workspace_update_workstream = defaultService.update;
