@@ -5723,7 +5723,13 @@ const piProductionController = createPiProductionExecutionController({ route: pi
       && step.arguments.expected_workstream_revision === workstream.revision && workstream.state === "active" && workstream.mode === "shared";
     if (step.scope === "candidate") {
       const candidate = await dev_workspace_get_integration_candidate({integration_candidate_id: step.arguments.integration_candidate_id});
-      return candidate.workstream_id === workstream.workstream_id && candidate.revision === step.arguments.expected_revision && candidate.state === "ready";
+      const integrationStateAllowed = candidate.state === "ready"
+        || (step.capability === "git.integrate"
+          && candidate.state === "blocked"
+          && candidate.failure_reason?.code === "MAIN_WORKTREE_OVERLAY_CONFLICT");
+      return candidate.workstream_id === workstream.workstream_id
+        && candidate.revision === step.arguments.expected_revision
+        && integrationStateAllowed;
     }
     if (step.scope === "main") {
       const status = await dev_git_status({});
