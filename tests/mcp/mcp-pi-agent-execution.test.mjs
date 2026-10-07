@@ -48,7 +48,7 @@ test("Pi runtime status reports a bounded ready sidecar surface", async () => {
       return {
         ok: true,
         package_name: PI_PACKAGE_NAME,
-        package_version: "1.0.0",
+        package_version: "1.0.4",
         node_version: "24.18.0",
         capabilities: {
           createAgentSession: true,
@@ -67,7 +67,7 @@ test("Pi runtime status reports a bounded ready sidecar surface", async () => {
   assert.equal(status.node_executable_source, "configured");
   assert.equal(status.reason, null);
   assert.equal(status.runner, "scripts/pi-runtime/runner.mjs");
-  assert.equal(status.probe.package_version, "1.0.0");
+  assert.equal(status.probe.package_version, "1.0.4");
   assert.equal(status.probe.capabilities.createCodemodeExtension, true);
   assert.equal(status.probe.capabilities.createMcpExtension, true);
 });
