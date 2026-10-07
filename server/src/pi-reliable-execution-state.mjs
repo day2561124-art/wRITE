@@ -84,7 +84,7 @@ function factualObjects(evidence) {
 function reconciliationBinding(action,context,evidence,binding=null) {
   const definition=capabilityDefinition(action.capability);
   const effective=binding??context;
-  const args={...action.input,...(definition.scope==="workspace"?{workspace_id:effective.workspace_id}:{})};
+  const args={...action.input,...(definition.scope==="workspace"?{workspace_id:effective.workspace_id}:definition.scope==="host_maintenance"?{workspace_id:"dev_workspace_shared_repository_v1"}:{})};
   if(binding && action.capability==="workspace.create_isolated") {args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;}
   return evidence.reconciliation_key===action.idempotency_key
     &&evidence.request_fingerprint_sha256===hashExecutionInput({tool_name:definition.tool,arguments:args});

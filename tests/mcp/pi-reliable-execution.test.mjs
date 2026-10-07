@@ -90,6 +90,20 @@ test("only verified not-admitted mutation can retry with the original key",async
   const r=await engine(store,a).execute(intent([write]));
   assert.equal(r.state.status,"COMPLETED");assert.equal(calls,2);assert.deepEqual(keys,[write.idempotency_key,write.idempotency_key]);
 });
+test("host maintenance not-admitted reconciliation retries with the dispatch fingerprint",async t=>{
+  const {store}=await fixture(t);let calls=0;const keys=[];
+  const host={step_id:"host",capability:"host.powershell",input:{command:"Write-Output ok",cwd:".",timeoutMs:30000},
+    idempotency_key:"host-maintenance-key-001",depends_on:[]};
+  const a=createPiReliableMcpAdapter({
+    callTool:async p=>{keys.push(p._meta.reconciliation_key);if(++calls===1)throw timeout();return {ok:true};},
+    queryOperation:async p=>({...p,reconciliation_state:"not_admitted",safe_same_key_retry:true}),
+    resolveWorkspace:async()=>({...context,workspace_type:"isolated_worktree",state:"active"}),
+    verifyScope:async({step})=>step.scope==="host_maintenance"&&step.arguments.workspace_id==="dev_workspace_shared_repository_v1"
+  });
+  const r=await engine(store,a).execute(intent([host]));
+  assert.equal(r.state.status,"COMPLETED");assert.equal(calls,2);
+  assert.deepEqual(keys,[host.idempotency_key,host.idempotency_key]);
+});
 for(const state of ["no_effect","recovery_required","unknown","partial","active"]) {
   test("ambiguous mutation "+state+" escalates without replay",async t=>{
     const {store}=await fixture(t);let calls=0;
