@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fiction.local/schema/fiction_nlu_style_features_v1.json",
+  "title": "Fiction NLU Explicit Style Features Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "config_sha256",
+    "assertion_scope",
+    "scope",
+    "sample_quality",
+    "counts",
+    "ratios",
+    "sentence_rhythm",
+    "paragraph_rhythm",
+    "punctuation_rates_per_1000",
+    "lexical_surface",
+    "literal_marker_rates_per_1000",
+    "dialogue",
+    "consistency"
+  ],
+  "properties": {
+    "schema_version": {"const": "fiction_nlu_style_features_v1"},
+    "config_version": {"const": "fiction_nlu_style_features_v1"},
+    "config_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "assertion_scope": {"const": "deterministic_explicit_style_measurements_not_style_profile_or_authorship_truth"},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passage_id","scene_id","novel_id","author_attribution_claim","style_profile_claim","semantic_quality_claim"],
+      "properties": {
+        "passage_id": {"type": "string", "pattern": "^PAS-[A-F0-9]{16}$"},
+        "scene_id": {"type": ["string","null"], "pattern": "^SCN-[A-F0-9]{16}$"},
+        "novel_id": {"type": ["string","null"], "pattern": "^NOV-[A-F0-9]{16}$"},
+        "author_attribution_claim": {"const": false},
+        "style_profile_claim": {"const": false},
+        "semantic_quality_claim": {"const": false}
+      }
+    },
+    "sample_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier","stable_for_passage_style","warnings"],
+      "properties": {
+        "tier": {"enum": ["short","moderate","stable"]},
+        "stable_for_passage_style": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["char_count","non_whitespace_char_count","content_char_count","han_char_count","latin_letter_count","digit_count","punctuation_count","whitespace_count","line_count","paragraph_count","sentence_count"],
+      "properties": {
+        "char_count": {"type": "integer", "minimum": 1},
+        "non_whitespace_char_count": {"type": "integer", "minimum": 1},
+        "content_char_count": {"type": "integer", "minimum": 0},
+        "han_char_count": {"type": "integer", "minimum": 0},
+        "latin_letter_count": {"type": "integer", "minimum": 0},
+        "digit_count": {"type": "integer", "minimum": 0},
+        "punctuation_count": {"type": "integer", "minimum": 0},
+        "whitespace_count": {"type": "integer", "minimum": 0},
+        "line_count": {"type": "integer", "minimum": 1},
+        "paragraph_count": {"type": "integer", "minimum": 1},
+        "sentence_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "ratios": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["whitespace_ratio","han_ratio","latin_ratio","digit_ratio","punctuation_ratio"],
+      "properties": {
+        "whitespace_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "han_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "latin_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "digit_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "punctuation_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "sentence_rhythm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mean_chars","median_chars","stddev_chars","p10_chars","p90_chars","coefficient_of_variation","short_sentence_ratio","long_sentence_ratio"],
+      "properties": {
+        "mean_chars": {"type": "number", "minimum": 0},
+        "median_chars": {"type": "number", "minimum": 0},
+        "stddev_chars": {"type": "number", "minimum": 0},
+        "p10_chars": {"type": "number", "minimum": 0},
+        "p90_chars": {"type": "number", "minimum": 0},
+        "coefficient_of_variation": {"type": "number", "minimum": 0},
+        "short_sentence_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "long_sentence_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "paragraph_rhythm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mean_chars","median_chars","stddev_chars","mean_sentences"],
+      "properties": {
+        "mean_chars": {"type": "number", "minimum": 0},
+        "median_chars": {"type": "number", "minimum": 0},
+        "stddev_chars": {"type": "number", "minimum": 0},
+        "mean_sentences": {"type": "number", "minimum": 0}
+      }
+    },
+    "punctuation_rates_per_1000": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comma","period","exclamation","question","semicolon","colon","enumeration_comma","ellipsis","dash","quote_mark"],
+      "properties": {
+        "comma": {"type": "number", "minimum": 0},
+        "period": {"type": "number", "minimum": 0},
+        "exclamation": {"type": "number", "minimum": 0},
+        "question": {"type": "number", "minimum": 0},
+        "semicolon": {"type": "number", "minimum": 0},
+        "colon": {"type": "number", "minimum": 0},
+        "enumeration_comma": {"type": "number", "minimum": 0},
+        "ellipsis": {"type": "number", "minimum": 0},
+        "dash": {"type": "number", "minimum": 0},
+        "quote_mark": {"type": "number", "minimum": 0}
+      }
+    },
+    "lexical_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unique_han_ratio","hapax_han_ratio","han_char_entropy_bits","mean_segmental_ttr_50","segment_count"],
+      "properties": {
+        "unique_han_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "hapax_han_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "han_char_entropy_bits": {"type": "number", "minimum": 0},
+        "mean_segmental_ttr_50": {"type": "number", "minimum": 0, "maximum": 1},
+        "segment_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "literal_marker_rates_per_1000": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["function_words","sentence_final_particles"],
+      "properties": {
+        "function_words": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+        "sentence_final_particles": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}}
+      }
+    },
+    "dialogue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quote_pair_count","dialogue_segment_count","quoted_non_whitespace_char_count","dialogue_char_ratio"],
+      "properties": {
+        "quote_pair_count": {"type": "integer", "minimum": 0},
+        "dialogue_segment_count": {"type": "integer", "minimum": 0},
+        "quoted_non_whitespace_char_count": {"type": "integer", "minimum": 0},
+        "dialogue_char_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid","errors","warnings"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
