@@ -45,6 +45,7 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("verification.affected", "dev_run_tests", "tests", true, ["suite"]),
   descriptor("verification.full", "dev_run_tests", "tests", true, ["suite"]),
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
+  descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),

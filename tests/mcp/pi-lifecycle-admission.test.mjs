@@ -51,6 +51,16 @@ for (const [capability, input, tool, args] of cases) test(`${capability} maps to
   assert.equal(step.tool, tool); assert.equal(step.effect, false); assert.equal(step.permission, "read");
   assert.deepEqual(step.arguments, args); assert.equal(step.input_hash, hashExecutionInput(input));
 });
+test("host PowerShell is a Pi-managed write bound to the canonical shared repository", () => {
+  const input = { command: "Write-Output 'pi-managed-powershell'", cwd: ".", timeoutMs: 30000 };
+  const source = intent("host.powershell", input, true);
+  const step = createMcpCapabilityAdapter().describe(source, "lifecycle");
+  assert.equal(step.tool, "powershell_run"); assert.equal(step.effect, true); assert.equal(step.permission, "write");
+  assert.equal(step.scope, "host_maintenance");
+  assert.deepEqual(step.arguments, { ...input, workspace_id: "dev_workspace_shared_repository_v1" });
+  assert.throws(() => createExecutionIntent({ ...source, permissions: { ...source.permissions, write: false } }), /PERMISSION_DENIED/);
+  assert.throws(() => createExecutionIntent(intent("host.powershell", { ...input, workspace_id: context.workspace_id }, true)), /INVALID_CONTRACT_FIELDS/);
+});
 test("checkpoint creation is a write with explicit permission, exact target and one key", () => {
   const source = intent("workspace.create_checkpoint", { label: "GPT checkpoint" }, true);
   const step = createMcpCapabilityAdapter().describe(source, "lifecycle");

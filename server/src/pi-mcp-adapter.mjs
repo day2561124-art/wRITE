@@ -33,6 +33,7 @@ export function createMcpCapabilityAdapter({ callTool, resolveWorkspace } = {}) 
       args.workstream_id=binding.workstream_id;args.expected_workstream_revision=binding.workstream_revision;
     }
     if (definition.scope === "workspace") args.workspace_id = context.workspace_id;
+    if (definition.scope === "host_maintenance") args.workspace_id = "dev_workspace_shared_repository_v1";
     if (definition.scope === "operation_list") {
       args.workspace_id = context.workspace_id;
       args.workstream_id = context.workstream_id;

@@ -168,17 +168,19 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  s.send({jsonrpc:'2.0',method:'notifications/initialized',params:{}});
  const status=await call({jsonrpc:'2.0',id:'status',method:'tools/call',params:{name:'dev_pi_execution_status',arguments:{}}});
  const direct=await call({jsonrpc:'2.0',id:'direct',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'}}});
+ const directPowerShell=await call({jsonrpc:'2.0',id:'direct-powershell',method:'tools/call',params:{name:'powershell_run',arguments:{command:"Write-Output 'must-not-run'",workspace_id:'dev_workspace_shared_repository_v1'}}});
  const forged=await call({jsonrpc:'2.0',id:'forged',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},_meta:{pi_internal:true}}});
  const diagnostic=await call({jsonrpc:'2.0',id:'diag',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},
  _meta:{pi_fallback:{purpose:'diagnostic',reason:'Inspect physical package',decision_id:'gpt-wire-diag'}}}});
  const bad=await call({jsonrpc:'2.0',id:'bad',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:'{'}}});
- console.log(JSON.stringify({status,direct,forged,diagnostic,bad}));
+ console.log(JSON.stringify({status,direct,directPowerShell,forged,diagnostic,bad}));
  }finally{s.close();}`;
  const {stdout}=await execFile(process.execPath,["--input-type=module","-e",code],{cwd:fileURLToPath(new URL("../..",import.meta.url)),
  windowsHide:true,timeout:120000,maxBuffer:1048576,env:{...process.env,MCP_TOOL_PROFILE:"chatgpt_developer",WRITER_WORKBENCH_TEST_JOURNAL_GROUP:group,
  WRITER_WORKBENCH_ISOLATED_TEST_JOURNAL:"1",WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT:"1",WRITER_WORKBENCH_ISOLATED_TEST_TRANSACTION:"1"}});
  const r=JSON.parse(stdout);assert.equal(JSON.parse(r.status.result.content[0].text).route.mode,"pi_default");
- assert.equal(r.direct.error.message,"PI_EXECUTION_INTENT_REQUIRED");assert.equal(r.forged.error.message,"PI_EXECUTION_INTENT_REQUIRED");
+ assert.equal(r.direct.error.message,"PI_EXECUTION_INTENT_REQUIRED");assert.equal(r.directPowerShell.error.message,"PI_EXECUTION_INTENT_REQUIRED");
+ assert.equal(r.forged.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.notEqual(r.diagnostic.result.isError,true);assert.equal(r.bad.result.isError,true);
  assert.equal((await journal.listOperations({operation_type:"pi_diagnostic_fallback"})).total,1);});
 

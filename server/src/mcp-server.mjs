@@ -5768,6 +5768,15 @@ const piProductionController = createPiProductionExecutionController({ route: pi
         && candidate.revision === step.arguments.expected_revision
         && integrationStateAllowed;
     }
+    if (step.scope === "host_maintenance") {
+      if (step.tool !== "powershell_run" || step.arguments.workspace_id !== "dev_workspace_shared_repository_v1") return false;
+      const status = await dev_git_status({});
+      return workstream.state === "active"
+        && workstream.mode === "isolated"
+        && workstream.workspace?.state === "active"
+        && status.execution_ok === true
+        && status.workspace_context?.current_head === workstream.base_head;
+    }
     if (step.scope === "main") {
       const status = await dev_git_status({});
       return status.execution_ok === true && status.workspace_context?.current_head === step.arguments.expectedHead;
