@@ -292,6 +292,11 @@ function boundedResultMetadata(value) {
   const output = {};
   for (const [key, raw] of Object.entries(value).slice(0, 64)) {
     if (!/^[A-Za-z0-9_.-]{1,80}$/u.test(key)) continue;
+    if (key === "resolution_record" && typeof raw === "string" && Array.from(raw).length <= 32 * 1024) {
+      let proof;
+      try { proof = JSON.parse(raw); } catch { /* Keep legacy metadata handling for non-JSON values. */ }
+      if (proof?.resolution_kind === "completed_git_commit") { output[key] = raw; continue; }
+    }
     if (raw === null || typeof raw === "boolean") output[key] = raw;
     else if (typeof raw === "number" && Number.isFinite(raw)) output[key] = raw;
     else if (typeof raw === "string" && Array.from(raw).length <= 2048 && !/(password|secret|token|credential|stdout|content|patch)/iu.test(key)) output[key] = raw;
@@ -817,7 +822,74 @@ export function createDevOperationJournalService({
       throw new Error("UNSAFE_COMPLETED_POWERSHELL_RESOLUTION");
     return {started,terminal,child,done};
   }
-  const validateResolution=(events,input)=>input?.resolution_kind==="completed_child_create"
+  function validateCompletedGitCommitResolution(events, input) {
+    const started = events.find(e => e.operation_id === input.operation_id && e.stage === "operation_started");
+    const terminal = events.find(e => e.operation_id === input.operation_id && terminalStageSet.has(e.stage));
+    const manifest = input.precommit_manifest;
+    const paths = started?.result?.requested_paths;
+    if (!started || !terminal || started.operation_type !== "git_commit" || started.tool_name !== "dev_git_commit"
+      || !["operation_failed", "operation_recovered"].includes(terminal.stage)
+      || terminal.result?.outcome !== "ambiguous_effect" || terminal.result?.reconciliation_required !== true
+      || terminal.event_hash !== input.expected_terminal_hash
+      || started.request_fingerprint_sha256 !== input.request_fingerprint_sha256
+      || !gitSha1Pattern.test(input.observed_commit ?? "") || input.observed_commit === started.result.before_head
+      || !gitSha1Pattern.test(started.result.before_head ?? "") || !sha256Pattern.test(started.result.workspace_snapshot_id ?? "")
+      || !Array.isArray(paths) || !paths.length || new Set(paths).size !== paths.length
+      || !Array.isArray(manifest) || manifest.length !== paths.length
+      || canonicalJson([...paths].sort()) !== canonicalJson(manifest.map(e => e.path).sort())
+      || manifest.some(e => !isObject(e) || Object.keys(e).sort().join(",") !== "artifact_type,bytes,path,sha256,state"
+        || e.artifact_type !== "file" || !["modified", "added", "untracked"].includes(e.state)
+        || !sha256Pattern.test(e.sha256 ?? "") || !Number.isSafeInteger(e.bytes) || e.bytes < 0)
+      || sha256Text(canonicalJson({head: started.result.before_head, manifest})) !== started.result.workspace_snapshot_id
+      || started.targets.length !== paths.length || started.targets.some(t => t.role !== "commit_path" || !paths.includes(t.path))
+      || events.some(e => e.parent_operation_id === started.operation_id && e.stage === "operation_started" && e.operation_type !== "pi_terminal_resolution")
+      || input.decision_owner !== "GPT" || !/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(input.decision_id ?? "")
+      || typeof input.reason !== "string" || !input.reason.trim() || input.reason.length > 1024) {
+      throw new Error("UNSAFE_COMPLETED_GIT_COMMIT_RESOLUTION");
+    }
+    return {started, terminal};
+  }
+
+  async function inspectCompletedGitCommit(started, terminal, input) {
+    const resolve = resolutionContextResolver ?? (async workspace_id => {
+      const {resolveDevWorkspaceExecutionContext} = await import("./mcp-development-workstream-tools.mjs");
+      return resolveDevWorkspaceExecutionContext({workspace_id}, {mutation:false});
+    });
+    const context = await resolve(started.workspace_id);
+    if (context.workspace_id !== started.workspace_id || context.workstream_id !== started.workstream_id)
+      throw new Error("RESOLUTION_WORKSPACE_MISMATCH");
+    const git = async args => (await execFileAsync(fixedGitExecutable, ["--no-optional-locks", ...args], {
+      cwd:context.root, env:controlledProcessEnvironment(), timeout:10_000, maxBuffer:1024 * 1024,
+    })).stdout.trim();
+    const checkHead = async () => {
+      if (await git(["rev-parse", "HEAD"]) !== input.observed_commit
+        || await git(["status", "--porcelain=v1", "--untracked-files=all"]))
+        throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
+    };
+    await checkHead();
+    const metadata = (await git(["show", "-s", "--format=%P%n%ct", input.observed_commit])).split(/\r?\n/u);
+    const committedAt = Number(metadata[1]) * 1000;
+    if (metadata[0] !== started.result.before_head || !Number.isSafeInteger(committedAt)
+      || committedAt < Math.floor(Date.parse(started.timestamp) / 1000) * 1000
+      || committedAt > Date.parse(terminal.timestamp)) throw new Error("RESOLUTION_GIT_HISTORY_MISMATCH");
+    const changed = (await git(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", input.observed_commit])).split("\0").filter(Boolean).sort();
+    if (canonicalJson(changed) !== canonicalJson([...started.result.requested_paths].sort()))
+      throw new Error("RESOLUTION_GIT_PATHS_MISMATCH");
+    const reflog = (await git(["reflog", "-2", "--format=%H%x00%gs%x00%ct", "HEAD"])).split(/\r?\n/u).map(line => line.split("\0"));
+    if (reflog[0]?.[0] !== input.observed_commit || !reflog[0]?.[1]?.startsWith("commit: ")
+      || reflog[1]?.[0] !== started.result.before_head || Number(reflog[0]?.[2]) * 1000 !== committedAt)
+      throw new Error("RESOLUTION_GIT_REFLOG_MISMATCH");
+    for (const entry of input.precommit_manifest) {
+      const actual = await captureDevArtifactState(context.root, entry.path);
+      if (!actual.exists || actual.artifact_type !== "file" || actual.sha256 !== entry.sha256 || actual.bytes !== entry.bytes)
+        throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
+    }
+    await checkHead();
+  }
+
+  const validateResolution=(events,input)=>input?.resolution_kind==="completed_git_commit"
+    ?validateCompletedGitCommitResolution(events,input)
+    :input?.resolution_kind==="completed_child_create"
     ?validateCompletedChildResolution(events,input)
     :input?.resolution_kind==="completed_powershell_observation"
       ?validateCompletedPowershellResolution(events,input):validateNoChildResolution(events,input);
@@ -830,12 +902,20 @@ export function createDevOperationJournalService({
       const proof=JSON.parse(event.result?.resolution_record??"null");
       const {started,terminal}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
+      if(proof.resolution_kind === "completed_git_commit" && (
+        admission?.reconciliation_key !== "resolution:" + started.operation_id
+        || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
+        || admission?.tool_name !== "pi.journal.resolve_completed_git_commit"
+        || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
+        || event.result.reconciliation_required !== false
+        || !event.links.some(link => link.relation === "committed_by" && link.commit === proof.observed_commit)
+      ))throw new Error("INVALID_TERMINAL_RESOLUTION");
       if(!admission || admission.result?.resolution_record!==canonicalJson(proof)
         || event.parent_operation_id!==started.operation_id || admission.parent_operation_id!==started.operation_id
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
         || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(
-          ["completed_child_create","completed_powershell_observation"].includes(proof.resolution_kind)
+          ["completed_child_create","completed_powershell_observation","completed_git_commit"].includes(proof.resolution_kind)
             ?"intended_effect_observed":"no_effect_observed")
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
@@ -1441,11 +1521,13 @@ export function createDevOperationJournalService({
   }
 
 
-  async function resolveTerminalMutation(input={}, resolutionKind=null) {
+  async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false}={}) {
     const completedChild=resolutionKind==="completed_child_create";
     const completedPowershell=resolutionKind==="completed_powershell_observation";
+    const completedGit=resolutionKind==="completed_git_commit";
     const resolutionFields=completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
-      :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]:[];
+      :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
+        :completedGit?["resolution_kind","observed_commit","precommit_manifest"]:[];
     const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...resolutionFields]);
     if(resolutionKind!==null&&input.resolution_kind!==resolutionKind)throw new Error("INVALID_TERMINAL_RESOLUTION");
     if(!isObject(input)||Object.keys(input).some(k=>!allowed.has(k)))throw new Error("INVALID_TERMINAL_RESOLUTION");
@@ -1458,6 +1540,17 @@ export function createDevOperationJournalService({
     }
     if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+    if(completedGit) {
+      const unrelatedPending = [...verification.active_operations, ...verification.dangling_operations].some(id => {
+        const event = verification.events.find(e => e.operation_id === id && e.stage === "operation_started");
+        return event?.operation_type !== "pi_terminal_resolution" || event.parent_operation_id !== started.operation_id
+          || event.result?.resolution_record !== canonicalJson(input);
+      });
+      if(started.diagnostic.hostname!==os.hostname()||isProcessRunning(started.diagnostic.owner_pid)
+        ||unrelatedPending)
+        throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
+      await inspectCompletedGitCommit(started,terminal,input);
+    }
     if(completedChild) {
       const resolve=resolutionContextResolver??(async workspace_id=>{
         const {resolveDevWorkspaceExecutionContext}=await import("./mcp-development-workstream-tools.mjs");
@@ -1469,14 +1562,16 @@ export function createDevOperationJournalService({
       const actual=await captureDevArtifactState(context.root,childDone.targets[0].path);
       if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
     }
+    if(dryRun)return {verified:true,operation_id:started.operation_id,observed_commit:input.observed_commit};
     const key="resolution:"+started.operation_id;
     const fingerprint=sha256Text(canonicalJson(input));
-    if(Array.from(canonicalJson(input)).length>2048)throw new Error("RESOLUTION_RECORD_LIMIT");
+    if(Array.from(canonicalJson(input)).length>(completedGit?32*1024:2048))throw new Error("RESOLUTION_RECORD_LIMIT");
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
         operation_type:"pi_terminal_resolution",tool_name:completedChild?"pi.journal.resolve_completed_child_create"
-          :completedPowershell?"pi.journal.resolve_completed_powershell":"pi.journal.resolve_no_child_create",
+          :completedPowershell?"pi.journal.resolve_completed_powershell"
+            :completedGit?"pi.journal.resolve_completed_git_commit":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
         reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}});
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
@@ -1486,9 +1581,11 @@ export function createDevOperationJournalService({
     const done=resolvedTerminals(verification.events).get(started.operation_id);
     if(done)return {reconciled:true,event:done};
     validateResolution(verification.events,input);
+    if(completedGit)await inspectCompletedGitCommit(started,terminal,input);
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
-      result:{outcome:(completedChild||completedPowershell)?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)}});}
+      result:{outcome:(completedChild||completedPowershell||completedGit)?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)},
+      ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
     await verify();return {reconciled:false,event};
   }
@@ -1496,6 +1593,8 @@ export function createDevOperationJournalService({
   const resolveNoChildMutation=input=>resolveTerminalMutation(input);
   const resolveCompletedChildMutation=input=>resolveTerminalMutation(input,"completed_child_create");
   const resolveCompletedPowershellMutation=input=>resolveTerminalMutation(input,"completed_powershell_observation");
+  const resolveCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit");
+  const inspectCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit",{dryRun:true});
 
   async function markDegraded(reason = "terminal_journal_append_failed") {
     explicitDegraded = true;
@@ -1858,6 +1957,8 @@ export function createDevOperationJournalService({
     resolveNoChildMutation,
     resolveCompletedChildMutation,
     resolveCompletedPowershellMutation,
+    resolveCompletedGitCommitMutation,
+    inspectCompletedGitCommitMutation,
     markDegraded,
     getOperation,
     executeReconciled,

@@ -4,7 +4,113 @@ import {mkdtemp,mkdir,readFile,readdir,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFile as execFileCallback} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createDevOperationJournalService,canonicalJson} from '../../server/src/mcp-development-journal-tools.mjs';
+const gitExec=promisify(execFileCallback);
+async function gitFixture({extra=false,live=false,many=false,pending=false}={}) {
+ const root=await mkdtemp(path.join(os.tmpdir(),'pi-git-resolution-'));
+ const git=async args=>(await gitExec('git',args,{cwd:root})).stdout.trim();
+ await git(['init']);await git(['config','user.name','Journal fixture']);await git(['config','user.email','fixture@example.invalid']);
+ await git(['config','core.autocrlf','false']);await writeFile(path.join(root,'probe.mjs'),'before\n');
+ await git(['add','probe.mjs']);await git(['commit','-m','baseline']);const before=await git(['rev-parse','HEAD']);
+ const content='GPT-approved content\n';await writeFile(path.join(root,'probe.mjs'),content);
+ const manifest=[{path:'probe.mjs',state:'modified',sha256:createHash('sha256').update(content).digest('hex'),bytes:Buffer.byteLength(content),artifact_type:'file'}];
+ if(many)for(let i=0;i<12;i++){const name='additional-'+i+'.mjs';await writeFile(path.join(root,name),content);manifest.push({...manifest[0],path:name,state:'untracked'});}
+ manifest.sort((a,b)=>a.path.localeCompare(b.path)||a.state.localeCompare(b.state));const requested=manifest.map(e=>e.path);
+ const context={root,workspace_id:'dev_workspace_123456789012345678901234',workstream_id:'dev_workstream_20261004-000000_123456789012'};
+ // Keep fixture journal outside Git's observed worktree.
+ const journalRoot=await mkdtemp(path.join(os.tmpdir(),'pi-git-resolution-events-'));
+ const options={storageRoot:journalRoot,resolutionContextResolver:async()=>context};
+ const j=createDevOperationJournalService(options);
+ const a=await j.begin({operation_type:'git_commit',tool_name:'dev_git_commit',workspace_id:context.workspace_id,workstream_id:context.workstream_id,
+  targets:requested.map(p=>({path:p,role:'commit_path'})),result:{before_head:before,requested_paths:requested,workspace_snapshot_id:createHash('sha256').update(canonicalJson({head:before,manifest})).digest('hex')}});
+ if(extra){await writeFile(path.join(root,'extra.mjs'),'extra\n');await git(['add','extra.mjs']);}
+ await git(['add',...requested]);await git(['commit','-m','requested change']);const commit=await git(['rev-parse','HEAD']);
+ if(pending)await j.begin({operation_type:'filesystem_patch',tool_name:'dev_apply_patch'});
+ let terminal=await j.recover(a.operation_id,{reconciles_event_id:a.journal_event_id,result:{outcome:'ambiguous_effect',reconciliation_required:true}});
+ // Fixture-only simulation of an exited producer; production history is never edited.
+ if(!live){let previous=null;for(const file of await readdir(journalRoot+'/events')){
+  const event=JSON.parse(await readFile(journalRoot+'/events/'+file,'utf8'));event.diagnostic.owner_pid=2147483647;event.previous_event_hash=previous;
+  const {event_hash,...body}=event;event.event_hash=createHash('sha256').update(canonicalJson(body)).digest('hex');previous=event.event_hash;
+  await writeFile(journalRoot+'/events/'+file,canonicalJson(event)+'\n');terminal=event;
+ }await writeFile(journalRoot+'/head.json',canonicalJson({schema_version:1,latest_sequence:terminal.sequence,latest_event_id:terminal.journal_event_id,latest_event_hash:terminal.event_hash}));}
+ const input={resolution_kind:'completed_git_commit',operation_id:a.operation_id,expected_terminal_hash:terminal.event_hash,request_fingerprint_sha256:null,
+  observed_commit:commit,precommit_manifest:manifest,decision_owner:'GPT',decision_id:'gpt-git-resolution-fixture',reason:'Exact parent, reflog, requested paths and admitted snapshot prove the effect'};
+ return {j:createDevOperationJournalService(options),input,root,git,options,terminal};
+}
+async function stoppedOwner(callback) {
+ return callback();
+}
+test('Git commit resolution verifies evidence, appends once, preserves history and survives restart',async()=>{
+ const f=await gitFixture();const files=await readdir(f.options.storageRoot+'/events');const originals=await Promise.all(files.map(p=>readFile(f.options.storageRoot+'/events/'+p,'utf8')));
+ await stoppedOwner(async()=>{
+  assert.equal((await f.j.status()).health,'degraded');await f.j.inspectCompletedGitCommitMutation(f.input);assert.equal((await f.j.status()).latest_sequence,2);
+  await f.j.resolveCompletedGitCommitMutation(f.input);const status=await f.j.status();
+  assert.equal(status.health,'healthy');assert.equal(status.chain_verified,true);assert.equal(status.reconciliation_required,false);assert.equal(status.active_operation_count,0);assert.equal(status.dangling_operation_count,0);
+ });
+ assert.deepEqual(await Promise.all(files.map(p=>readFile(f.options.storageRoot+'/events/'+p,'utf8'))),originals);
+ const reopened=createDevOperationJournalService(f.options);assert.equal((await reopened.status()).health,'healthy');
+ const op=await reopened.getOperation({operation_id:f.input.operation_id});assert.equal(op.events.at(-1).result.outcome,'ambiguous_effect');assert.equal(op.reconciliation_state,'completed');assert.equal(op.automatic_replay_allowed,false);
+ assert.equal((await reopened.resolveCompletedGitCommitMutation(f.input)).reconciled,true);assert.equal((await reopened.status()).latest_sequence,4);
+ await assert.rejects(reopened.resolveCompletedGitCommitMutation({...f.input,decision_id:'gpt-changed-decision'}),/RESOLUTION_DECISION_CONFLICT/);
+ assert.equal(await f.git(['rev-parse','HEAD']),f.input.observed_commit);
+});
+test('Git resolution rejects a live owner and caller-controlled extra fields',async()=>{
+ const f=await gitFixture({live:true});await assert.rejects(f.j.resolveCompletedGitCommitMutation(f.input),/RESOLUTION_OWNER_STILL_ACTIVE/);
+ await assert.rejects(f.j.resolveCompletedGitCommitMutation({...f.input,force:true}),/INVALID_TERMINAL_RESOLUTION/);assert.equal((await f.j.status()).latest_sequence,2);
+});
+test('Git resolution rejects false snapshot, terminal hash, fingerprint and Pi decision',async()=>{
+ const f=await gitFixture();for(const change of [{expected_terminal_hash:'b'.repeat(64)},{request_fingerprint_sha256:'b'.repeat(64)},{decision_owner:'Pi'},
+  {precommit_manifest:[{...f.input.precommit_manifest[0],sha256:'b'.repeat(64)}]}])
+  await assert.rejects(f.j.resolveCompletedGitCommitMutation({...f.input,...change}),/UNSAFE_COMPLETED_GIT_COMMIT_RESOLUTION/);
+ assert.equal((await f.j.status()).latest_sequence,2);
+});
+test('Git resolution refuses an extra committed path, dirty state, wrong HEAD and wrong workspace',async()=>{
+ const f=await gitFixture({extra:true});await stoppedOwner(()=>assert.rejects(f.j.resolveCompletedGitCommitMutation(f.input),/RESOLUTION_GIT_PATHS_MISMATCH/));
+ const clean=await gitFixture();await writeFile(path.join(clean.root,'probe.mjs'),'unexpected');
+ await stoppedOwner(()=>assert.rejects(clean.j.resolveCompletedGitCommitMutation(clean.input),/RESOLUTION_PHYSICAL_STATE_CHANGED/));
+ await stoppedOwner(()=>assert.rejects(createDevOperationJournalService({...clean.options,resolutionContextResolver:async()=>({root:clean.root,workspace_id:'wrong',workstream_id:'wrong'})}).resolveCompletedGitCommitMutation(clean.input),/RESOLUTION_WORKSPACE_MISMATCH/));
+ const wrong=await gitFixture();await stoppedOwner(()=>assert.rejects(wrong.j.resolveCompletedGitCommitMutation({...wrong.input,observed_commit:'b'.repeat(40)}),/RESOLUTION_PHYSICAL_STATE_CHANGED/));
+ for(const entry of [f,clean,wrong])assert.equal((await entry.j.status()).latest_sequence,2);
+});
+test('Concurrent identical Git resolutions append exactly one durable pair',async()=>{
+ const f=await gitFixture();const other=createDevOperationJournalService(f.options);
+ await stoppedOwner(()=>Promise.all([f.j.resolveCompletedGitCommitMutation(f.input),other.resolveCompletedGitCommitMutation(f.input)]));
+ assert.equal((await other.status()).latest_sequence,4);assert.equal((await other.status()).health,'healthy');
+});
+test('Git resolution keeps a full hash-bound proof exceeding legacy metadata limit',async()=>{
+ const f=await gitFixture({many:true});assert.ok(canonicalJson(f.input).length>2048);
+ await f.j.resolveCompletedGitCommitMutation(f.input);
+ assert.equal((await createDevOperationJournalService(f.options).status()).health,'healthy');
+});
+
+test('Git proof metadata exception preserves legacy non-JSON handling and bounds for other proof kinds',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'pi-resolution-metadata-'));
+ const j=createDevOperationJournalService({storageRoot:root});
+ const a=await j.begin({operation_type:'metadata_probe',tool_name:'metadata_probe',result:{resolution_record:'not JSON'}});
+ const done=await j.complete(a.operation_id,{result:{resolution_record:JSON.stringify({resolution_kind:'completed_child_create',reason:'x'.repeat(2100)})}});
+ assert.equal((await j.getOperation({operation_id:a.operation_id})).events[0].result.resolution_record,'not JSON');
+ assert.equal(done.result.resolution_record,undefined);assert.equal((await j.status()).health,'healthy');
+});
+test('Interrupted Git resolution resumes its admitted pair without replay or another admission',async()=>{
+ const f=await gitFixture();let calls=0;
+ const interrupted=createDevOperationJournalService({...f.options,resolutionContextResolver:async()=>{
+  if(++calls===2)throw Error('fixture interruption after resolution admission');
+  return {root:f.root,workspace_id:'dev_workspace_123456789012345678901234',workstream_id:'dev_workstream_20261004-000000_123456789012'};
+ }});
+ await assert.rejects(interrupted.resolveCompletedGitCommitMutation(f.input),/fixture interruption/);
+ assert.equal((await f.j.status()).latest_sequence,3);await f.j.resolveCompletedGitCommitMutation(f.input);
+ assert.equal((await f.j.status()).latest_sequence,4);assert.equal((await f.j.status()).health,'healthy');
+});
+test('Git resolution refuses unrelated pending work, wrong parent and reset reflog',async()=>{
+ const pending=await gitFixture({pending:true});
+ await assert.rejects(pending.j.resolveCompletedGitCommitMutation(pending.input),/RESOLUTION_OWNER_STILL_ACTIVE/);
+ const parent=await gitFixture();await writeFile(path.join(parent.root,'probe.mjs'),'third\n');await parent.git(['add','probe.mjs']);await parent.git(['commit','-m','third commit']);
+ await assert.rejects(parent.j.resolveCompletedGitCommitMutation({...parent.input,observed_commit:await parent.git(['rev-parse','HEAD'])}),/RESOLUTION_GIT_HISTORY_MISMATCH/);
+ const reset=await gitFixture();await reset.git(['reset','--soft',reset.input.observed_commit]);
+ await assert.rejects(reset.j.resolveCompletedGitCommitMutation(reset.input),/RESOLUTION_GIT_REFLOG_MISMATCH/);
+});
 async function fixture(child=false){
  const root=await mkdtemp(path.join(os.tmpdir(),'pi-terminal-resolution-'));
  const j=createDevOperationJournalService({storageRoot:path.join(root,'journal')});
