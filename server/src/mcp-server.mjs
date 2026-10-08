@@ -166,6 +166,7 @@ import {
 } from "./mcp-development-test-tools.mjs";
 import { createPiProductionRouteStore } from "./pi-production-execution-route.mjs";
 import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
+import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
 import { createPiLifecycleScopeVerifier } from "./pi-lifecycle-scope.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
@@ -209,6 +210,7 @@ import {
   dev_workspace_status,
   dev_workspace_unlock,
   dev_workspace_update_workstream,
+  resolveDevWorkspaceExecutionContext,
 } from "./mcp-development-workstream-tools.mjs";
 import {
   DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE,
@@ -2085,12 +2087,13 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts only the exact GPT-authored ExecutionIntent JSON contract; Pi schedules, persists, retries and reconciles concrete MCP capabilities without model requests or engineering decisions. Duplicate intent IDs return durable state. No automatic direct-tool fallback.",
+    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts the exact GPT-authored ExecutionIntent JSON contract, or request_kind=authorized_engineering with explicit workspace_id, goal, constraints, requested_actions, permissions and completion_conditions. The trusted adapter fills mechanical context for ordinary capabilities; high-risk capabilities require the full contract. Pi schedules, persists, retries and reconciles without model requests or engineering decisions. Duplicate intent IDs return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
     handler: async args => {
       let intent; try { intent = JSON.parse(args.intent_json); } catch { throw new Error("INVALID_EXECUTION_INTENT_JSON"); }
+      intent = await adaptAuthorizedPiRequest(intent, { resolveWorkspace: resolveDevWorkspaceExecutionContext });
       return jsonContent(await piProductionController.execute(intent));
     },
   },
@@ -5793,7 +5796,7 @@ const piProductionController = createPiProductionExecutionController({ route: pi
 async function callTool(params) {
   const name = params?.name;
   if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
-    await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback });
+    await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
   return callToolDirect(params);
