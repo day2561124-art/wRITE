@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "status": "candidate_verified",
+  "base_head": "fcfba25de3fc521ea73e326d190ab358ee58d513",
+  "branch": "codex/pi-execution-policy-simplification-v1",
+  "worktree": "E:/武裝學院的二三事/.pi-policy-v1",
+  "runtime_phase3b_candidate_head": "a88f09d7344f0b624b2cc39fef1a070f3d271a3c",
+  "active_workstreams_inspected": 7,
+  "overlapping_runtime_files": [
+    "server/src/mcp-server.mjs",
+    "server/src/pi-production-execution-controller.mjs"
+  ],
+  "overlap_note": "Controller import insertion overlaps tracing candidate; preserve both imports during future accepted integration.",
+  "environment": {
+    "node": "v24.18.0",
+    "platform": "win32",
+    "isolated_test_journal": true,
+    "isolated_test_checkpoint": true,
+    "isolated_test_transaction": true,
+    "dependency_root": "E:/武裝學院的二三事",
+    "pi_sidecar_dependencies": "existing installation reused via ignored candidate junction"
+  },
+  "verification": {
+    "unique_focused_checks_passed": 119,
+    "unchanged_regression_checks_passed": 78,
+    "final_production_policy_entrypoint": {
+      "exit_code": 0,
+      "tests": 41,
+      "passed": 41,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node --test --test-reporter=tap tests/mcp/pi-production-execution.test.mjs"
+    },
+    "regression_run": {
+      "tests": 119,
+      "passed": 118,
+      "failed": 1,
+      "skipped": 0,
+      "failure": "New registered-worktree test fixture used a noncanonical worktree root name. Fixed fixture to .writer-workbench-worktrees; final production/policy entrypoint including that test passed 41/41."
+    },
+    "mcp_smoke": {
+      "exit_code": 0,
+      "command": "node server/src/mcp-smoke-test.mjs",
+      "audit_records": 195,
+      "audit_restored_byte_for_byte": true
+    },
+    "diff_check": "passed",
+    "behaviors": [
+      "Explicit workspace read/search/Git status and capability/runtime status succeed on real test MCP without added Pi projection or fallback transaction",
+      "Actual non-elevated PowerShell succeeds through formal persisted Pi execution; duplicate intent dispatches once",
+      "Unauthorized direct mutation, shell, admin and compact high-risk capabilities rejected",
+      "Actual registered Git worktree context resolves; unknown workspace rejected",
+      "Traversal, absolute outside path, secrets, .git access, symlink/junction escape and oversized reads rejected",
+      "Actual Pi Codemode ambient capability, call-count, output and deadline guards passed without skips",
+      "Full historical ExecutionIntent and parent integration guard regressions passed"
+    ],
+    "retained_initial_failures": [
+      "Concurrent legacy audit fixtures interfered; serial isolated run passed audit checks",
+      "Workspace runner required the existing dependency-root setting; configured without source changes",
+      "New test fixture path corrected without weakening the workspace guard"
+    ]
+  },
+  "publication": {
+    "integrated": false,
+    "pushed": false,
+    "production_cutover": false,
+    "production_reload": false,
+    "production_registry_modified": false
+  },
+  "source_sha256": [
+    {
+      "path": "server/src/pi-execution-policy.mjs",
+      "sha256": "9a49d4b99b5b5e1c64af0d42ec6057d48fe014ed015507af3f3c70369334d3f6"
+    },
+    {
+      "path": "server/src/mcp-server.mjs",
+      "sha256": "2b4fc0afb54fa3b3afe9a97ef7ceaf7517895fa8121f0e1ee1bfdf3e3cf833e7"
+    },
+    {
+      "path": "server/src/pi-production-execution-controller.mjs",
+      "sha256": "e182b9c85101cedf3857d2ca0516c758b705aacee0ed0e3189f199ca4bfca8d6"
+    },
+    {
+      "path": "tests/mcp/pi-execution-policy.test.mjs",
+      "sha256": "b17548aaa5c72be8264e4872c7994713afbaae806fd5c520946e150115fc441f"
+    },
+    {
+      "path": "tests/mcp/pi-production-execution.test.mjs",
+      "sha256": "fdb44b9891eb98244a24bf2a17fd217f42043cff57fff9d3218f8cd24f5cc03f"
+    }
+  ],
+  "logs": [
+    {
+      "path": "outputs/pi-policy-v1/final-focused.tap",
+      "sha256": "1ca67d49ce9d8bd5e441c748aa4ff3205ebea0c661ced6580a32a55a4e4f508a",
+      "committed": false
+    },
+    {
+      "path": "outputs/pi-policy-v1/production-policy-final.tap",
+      "sha256": "f75f83dd6b7b647d71f8628c6611d08b4db863b4c1bc1dd024b2eb51b112eb7f",
+      "committed": false
+    },
+    {
+      "path": "outputs/pi-policy-v1/smoke-final.log",
+      "sha256": "5283518c16416944d062b7c262a1149c3607ed2ea8130f7d9aa3e97b5a38f61c",
+      "committed": false
+    }
+  ]
+}

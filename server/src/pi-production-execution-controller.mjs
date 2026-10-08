@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from "node:async_hooks";
+import {admitPiLightweightRead} from "./pi-execution-policy.mjs";
 import {createExecutionIntent} from "./pi-execution-contract.mjs";
 import {createPiReliableExecutionStore} from "./pi-reliable-execution-store.mjs";
 import {createPiReliableExecutionEngine} from "./pi-reliable-execution-engine.mjs";
@@ -10,8 +11,9 @@ import {reliableFailure,stableJson} from "./pi-reliable-execution-state.mjs";
 const managed=new AsyncLocalStorage();
 export const isPiManagedMcpCall=()=>managed.getStore()===true;
 export const runPiManagedMcpCall=(callback)=>managed.run(true,callback);
-export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback}){
+export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace}){
  if(managed.getStore()===true||(await route.inspect()).revision===0)return;
+ if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
  const p=params._meta?.pi_fallback;
  if(!p||Object.keys(p).sort().join(",")!=="decision_id,purpose,reason"||!["diagnostic","emergency"].includes(p.purpose)
   ||typeof p.reason!=="string"||!p.reason.trim()||p.reason.length>256||!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(p.decision_id))reliableFailure("PI_EXECUTION_INTENT_REQUIRED");
