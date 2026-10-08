@@ -1,0 +1,315 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-08T16:57:03.146Z",
+  "scope": "isolated integration preparation; no production integration, push, cutover or runtime replacement",
+  "target_main": "fcfba25de3fc521ea73e326d190ab358ee58d513",
+  "runtime_candidate": "3f972024dec8f2c6c6a86943dcd0fefa749fb9c4",
+  "policy_candidate": "5046c93fa18279bc08e0c234ad244a3c79cd1df5",
+  "merge_commit": "f7e9be18b22a3ee7436bde77c7250bde0697ff3e",
+  "delivery_commit_binding": "Git commit containing this report; report does not self-reference its SHA",
+  "branch": "codex/pi-runtime-policy-integration",
+  "worktree": "E:\\武裝學院的二三事\\.pi-runtime-policy-integration",
+  "merge": {
+    "status": "verified",
+    "common_base_matches_main": true,
+    "conflicts": [
+      "server/src/pi-production-execution-controller.mjs imports"
+    ],
+    "resolution": "Retain both traceSpan and admitPiLightweightRead imports; mcp-server auto-merged, both route protection and snapshot/tracing retained",
+    "candidate_worktrees_untouched": true,
+    "main_dirty_overlay_collisions": []
+  },
+  "original_operation": {
+    "status": "blocked",
+    "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+    "authoritative_phase": "EXECUTING",
+    "revision": 7,
+    "updated_at": "2026-10-08T14:54:01.379Z",
+    "final_outcome": "UNKNOWN",
+    "owner": {
+      "hostname": "SDCP",
+      "pid": 6176,
+      "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+    },
+    "active_call": {
+      "attempt": 1,
+      "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+      "idempotency_key": "phase3-live-begin-20261008-2146",
+      "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+      "mutation": true,
+      "phase": "EXECUTING",
+      "reconciliation_attempt": 0,
+      "step_id": "begin"
+    },
+    "receipts": 0,
+    "tool_results": 0,
+    "checkpoint_kind": "logical Pi projection checkpoint, not a physical Checkpoint Store checkpoint",
+    "logical_checkpoint": {
+      "at_revision": 7,
+      "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+      "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+      "phase": "EXECUTING",
+      "schema_version": 2,
+      "step_id": "begin",
+      "workspace_id": "dev_workspace_shared_repository_v1"
+    },
+    "owner_liveness": [
+      {
+        "checked_at_utc": "2026-10-08T16:41:27.4907218Z",
+        "pid": 6176,
+        "exists": false,
+        "name": null
+      },
+      {
+        "checked_at_utc": "2026-10-08T16:41:27.6613529Z",
+        "pid": 7348,
+        "exists": true,
+        "name": "node.exe"
+      }
+    ],
+    "reconciliation_keys": [
+      {
+        "step_id": "begin",
+        "arguments": {
+          "reconciliation_key": "phase3-live-begin-20261008-2146"
+        },
+        "duration_ms": 38459.8429,
+        "result": {
+          "reconciliation_key": "phase3-live-begin-20261008-2146",
+          "operation_id": null,
+          "reconciliation_state": "not_admitted",
+          "safe_to_reinitiate": true,
+          "reinitiate_requires_same_key": true,
+          "automatic_replay_allowed": false
+        }
+      },
+      {
+        "step_id": "isolate",
+        "arguments": {
+          "reconciliation_key": "phase3-live-isolate-20261008-2146"
+        },
+        "duration_ms": 2827.4807,
+        "result": {
+          "reconciliation_key": "phase3-live-isolate-20261008-2146",
+          "operation_id": null,
+          "reconciliation_state": "not_admitted",
+          "safe_to_reinitiate": true,
+          "reinitiate_requires_same_key": true,
+          "automatic_replay_allowed": false
+        }
+      }
+    ],
+    "mutations_submitted": 0,
+    "operation_history_scope": "latest durable projection and embedded call evidence; independent full-history and external side-effect enumeration not verified",
+    "lease_scope": "owner projection has no explicit lease expiry; PID absence alone does not settle outcome",
+    "recovery": "not resumed or resubmitted; no replacement intent; retain owner fencing and UNKNOWN",
+    "blocker": "Nonterminal durable owner/claim remains. No authoritative terminal recovery receipt. Route changes reject any durable owner (ROUTE_ACTIVE_EXECUTION); safe isolation from deployment path is not established."
+  },
+  "tests": {
+    "focused": {
+      "status": "verified",
+      "passed": 83,
+      "failed": 0,
+      "skipped": 0,
+      "duration_ms": 106243.4367,
+      "source_commit": "f7e9be18b22a3ee7436bde77c7250bde0697ff3e",
+      "coverage": [
+        "trusted read-only admission",
+        "ExecutionIntent contract and adapter",
+        "Pi PowerShell fixture dispatch",
+        "mutation protection",
+        "duplicate intent",
+        "long-tool timeout",
+        "ordinary-tool timeout",
+        "status snapshot",
+        "journal chain",
+        "checkpoint locking/recovery",
+        "trace privacy",
+        "lost-response durable retrieval"
+      ]
+    },
+    "affected_http_integration_control": {
+      "status": "verified",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "change": "Fixture copies mcp-request-tracing.mjs required by the HTTP adapter; no product safety change"
+    },
+    "required_gate": {
+      "status": "blocked",
+      "required_suites": [
+        "mcp",
+        "mcp_tunnel"
+      ],
+      "selection": {
+        "risk_class": "unknown_escalated",
+        "fallback_reason": "UNREVIEWED_CHANGE:docs/PI-EXECUTION-POLICY-SIMPLIFICATION-V1.evidence.json",
+        "changed_paths": [
+          "docs/PI-EXECUTION-POLICY-SIMPLIFICATION-V1.evidence.json",
+          "docs/PI-EXECUTION-POLICY-SIMPLIFICATION-V1.md",
+          "docs/PI-RUNTIME-PRESSURE-PHASE1.evidence.json",
+          "docs/PI-RUNTIME-PRESSURE-PHASE1.md",
+          "docs/PI-RUNTIME-PRESSURE-PHASE2.baseline.json.gz",
+          "docs/PI-RUNTIME-PRESSURE-PHASE2.candidate.json.gz",
+          "docs/PI-RUNTIME-PRESSURE-PHASE2.evidence.json",
+          "docs/PI-RUNTIME-PRESSURE-PHASE2.md",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3.evidence.json",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3.md",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3B.evidence.json",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3B.md",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3C.evidence.json",
+          "docs/PI-RUNTIME-PRESSURE-PHASE3C.md",
+          "scripts/pi-runtime-phase2-e2e.mjs",
+          "scripts/pi-runtime-phase2-live-readonly.mjs",
+          "scripts/pi-runtime-phase2-summarize.mjs",
+          "scripts/pi-runtime-phase2-trace.mjs",
+          "scripts/pi-runtime-phase3-http-e2e.mjs",
+          "scripts/pi-runtime-phase3-live-observe.mjs",
+          "scripts/pi-runtime-phase3-summarize.mjs",
+          "scripts/pi-runtime-phase3b-live-status.mjs",
+          "scripts/pi-runtime-phase3b-summarize.mjs",
+          "scripts/pi-runtime-phase3c-reconcile-live.mjs",
+          "scripts/pi-runtime-phase3c-status-benchmark.mjs",
+          "scripts/pi-runtime-phase3c-status-probe.mjs",
+          "scripts/pi-runtime-phase3c-summarize.mjs",
+          "scripts/pi-runtime-pressure-benchmark.mjs",
+          "server/src/mcp-development-checkpoint-tools.mjs",
+          "server/src/mcp-http-server.mjs",
+          "server/src/mcp-http-stdio-adapter.mjs",
+          "server/src/mcp-powershell-maintenance-tools.mjs",
+          "server/src/mcp-request-tracing.mjs",
+          "server/src/mcp-server.mjs",
+          "server/src/pi-execution-policy.mjs",
+          "server/src/pi-production-execution-controller.mjs",
+          "server/src/pi-reliable-execution-engine.mjs",
+          "tests/mcp/mcp-http-reliability.test.mjs",
+          "tests/mcp/mcp-request-tracing.test.mjs",
+          "tests/mcp/pi-execution-policy.test.mjs",
+          "tests/mcp/pi-production-execution.test.mjs",
+          "tests/mcp/pi-production-status-snapshot.test.mjs",
+          "tests/mcp/pi-runtime-phase2.test.mjs",
+          "tests/mcp/pi-runtime-phase3-http.test.mjs",
+          "tests/mcp/pi-runtime-pressure.test.mjs",
+          "tests/run-all.mjs"
+        ],
+        "required_suites": [
+          "mcp",
+          "mcp_tunnel"
+        ],
+        "focused": false
+      },
+      "first_mcp_attempt": {
+        "status": "failed",
+        "source_commit": "f7e9be18b22a3ee7436bde77c7250bde0697ff3e",
+        "exit_code": 1,
+        "first_failure": "mcp-http-integration-control fixture ERR_MODULE_NOT_FOUND: mcp-request-tracing.mjs"
+      },
+      "full_mcp_after_fixture_fix": "not tested; full runner must restart on exact final candidate",
+      "mcp_tunnel": "not tested; full MCP runner failed first",
+      "formal_registered_validation": "not performed; offline Git preflight is not a server-registered authoritative validation record",
+      "journal_platform_limit": "Full MCP Journal suite reports Windows file-symlink case skipped; other available guard checks ran"
+    }
+  },
+  "powershell": {
+    "fixture": "verified",
+    "local_deployed_live": "not tested",
+    "http_deployed_live": "not tested",
+    "chatgpt_production_path": "not tested",
+    "physical_fixture_dispatches": 11,
+    "lost_response": {
+      "classification": "client-injected response loss after HTTP body completed; real durable operation",
+      "caller_error": "PHASE3_RESPONSE_LOST",
+      "intent_id": "phase3-response-lost-0001",
+      "operation_id": "pi_operation_518cbab87637438a869d56777c6e4f7d",
+      "child_operation_id": "dev_operation_b37ef8fa9df24c9f8247c2c7183f98c5",
+      "state": "COMPLETED",
+      "duplicate_same_operation": true,
+      "stdout": "PI_PHASE2_OK",
+      "stderr": "PI_PHASE3_STDERR",
+      "exit_code": 0,
+      "elevated": false
+    },
+    "trace_privacy": true,
+    "correlation": true,
+    "owned_fixture_processes_drained": true,
+    "artifact_legacy_source_label": "HTTP fixture helper retains Phase 2 source_baseline label; actual executed source is bound by merge SHA and validated-source-hashes in raw archive",
+    "fixture_journal": {
+      "schema_version": 1,
+      "health": "degraded",
+      "chain_verified": true,
+      "latest_sequence": 280,
+      "latest_event_id": "dev_journal_event_6ab19c047667403fb9205dc7bb965ce6",
+      "latest_event_hash": "17494b643c1c967779a708a871aab4ace236091a6f5c8252d559bb3cde3aeba5",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": true,
+      "last_health_error": "ambiguous_terminal_operation_requires_reconciliation",
+      "storage": "server_owned_per_event_files"
+    }
+  },
+  "live_health": {
+    "journal": {
+      "schema_version": 1,
+      "health": "healthy",
+      "chain_verified": true,
+      "latest_sequence": 51382,
+      "latest_event_id": "dev_journal_event_02d83ac34b3a4241a438b2a4eeda7a5e",
+      "latest_event_hash": "c64af32c9e05b39012824587f2d4a23500a2f67dfa04e5b440a630413d872f22",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": false,
+      "last_health_error": null,
+      "storage": "server_owned_per_event_files"
+    },
+    "checkpoint": {
+      "schema_version": 1,
+      "health": "healthy",
+      "registry_revision": 289,
+      "storage": "server_owned_content_addressed_checkpoint_store",
+      "checkpoint_count": 283,
+      "active_count": 277,
+      "deleted_count": 6,
+      "physical_blob_bytes": 42493014,
+      "logical_checkpoint_bytes": 75318699,
+      "deduplicated_bytes_saved": 32825685,
+      "reclaimable_bytes": 0,
+      "reclaimable_blob_count": 0
+    },
+    "source_identity": {
+      "pi_execution_protocol": "writer-workbench/pi-production/v1",
+      "service": "writer-workbench-mcp",
+      "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+      "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+      "pid": 7348,
+      "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+      "startedAt": "2026-10-08T08:37:59.183Z",
+      "profile": "chatgpt_developer"
+    },
+    "read_only_sessions_closed": true
+  },
+  "latency": {
+    "scope": "One formal local deployed HTTP MCP read; not ChatGPT end-to-end, not a benchmark comparison",
+    "status_ms": 95296.166,
+    "journal_health_ms": 2586.2915000000066,
+    "checkpoint_health_ms": 3555.0620000000054,
+    "production_improvement": "not claimed; deployed service revision differs from candidates",
+    "internal_cost_attribution": "not newly measured; candidate tracing is not deployed"
+  },
+  "archive": {
+    "file": "PI-RUNTIME-POLICY-INTEGRATION.raw.json.gz",
+    "sha256": "4f4fac8d9c7e59f1258a0f4a50ebb4ceee39c85912b24a5b39399b69a3b969a4"
+  },
+  "git_verification": {
+    "diff_check": "passed",
+    "staged_diff_check": "passed",
+    "original_candidate_worktrees": "clean; unchanged HEADs verified again before delivery",
+    "main_head": "unchanged; dirty overlay retained",
+    "final_delivery_state": "verify clean worktree immediately after commit; SHA reported separately"
+  },
+  "integration_ready": false,
+  "next_action": "Keep original operation read-only pending authoritative Pi recovery decision. On this isolated final candidate, rerun required full mcp and mcp_tunnel suites and obtain exact-candidate formal validation; do not deploy or replay the UNKNOWN operation."
+}
