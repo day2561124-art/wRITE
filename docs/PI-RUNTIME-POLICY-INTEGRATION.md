@@ -2,6 +2,8 @@
 
 2026-10-09 Asia/Taipei. This is an isolated candidate, not a production integration or SEALED milestone.
 
+Latest result: **Integration Gate BLOCKED**. Complete mcp_tunnel passed. Complete MCP reached its final entrypoint and failed because the local dependency directory was absent; environment repaired and that entrypoint passed 1/1, but a complete rerun remains pending. Original Pi operation is still EXECUTING revision 7, outcome UNKNOWN, with no proven deployment isolation. This round changes verification documents only; prior product fixes remain intact.
+
 ## Candidate and merge
 
 Runtime `3f972024dec8f2c6c6a86943dcd0fefa749fb9c4` and Policy `5046c93fa18279bc08e0c234ad244a3c79cd1df5` share main base `fcfba25de3fc521ea73e326d190ab358ee58d513`. Both original candidate worktrees were clean and left untouched. New worktree: `E:\武裝學院的二三事\.pi-runtime-policy-integration`, branch `codex/pi-runtime-policy-integration`.
@@ -41,3 +43,26 @@ The single deployed status query took **95,296.166 ms**; Journal status took 2,5
 Companion `PI-RUNTIME-POLICY-INTEGRATION.evidence.json` and compressed raw JSON contain status replies, liveness checks, reconciliation lookups, source hashes, Git preflight, required suite selection, focused TAP, full MCP first-failure log, fixture retest, and HTTP fixture durable results. The delivery SHA is the Git commit containing this report; it is reported separately to avoid self-referential commit content.
 
 Git diff-check passed; the delivery procedure checks the staged candidate before committing. Integration Gate remains **BLOCKED** by the unresolved durable owner/outcome and incomplete required full validation. No integrate, push, cutover, routing change, runtime replacement, or SEALED claim occurred. Next lease: retain the original operation read-only pending authoritative Pi recovery decision; rerun full mcp and mcp_tunnel on the final isolated candidate, then obtain exact-candidate formal validation. Do not replay UNKNOWN mutation.
+
+## Final required Gate round — 2026-10-09 Asia/Taipei
+
+Tested candidate: `d2a5143e343b6d35cbab0054c513ac38ef81712b`. Prior 83/83 focused and 16/16 affected results remain applicable: executable source hashes match, no product code changed this round.
+
+- **mcp: FAIL**, exit 1, 764,768 ms; complete existing suite entrypoint, no test filtering.
+- **mcp_tunnel: PASS**, exit 0, 136,494 ms; complete existing suite entrypoint, no test filtering.
+
+The MCP failure is **test fixture/environment**, at its final `pi-bootstrap-wire` entrypoint: ENOENT while enumerating local worktree `node_modules`. Earlier scripts completed, including the repaired HTTP integration-control fixture. The fixture explicitly scans that directory instead of relying on parent Node resolution. Created an ignored junction in this owned worktree to existing main packages; no npm install, dependency changes or source modification. Targeted wire retest: **PASS**, exit 0. The complete-run FAIL remains preserved. A second complete MCP run would exceed this lease based on the observed first-run duration; full MCP after environment repair is **not tested**, not PASS.
+
+Original operation remains **EXECUTING, revision 7, outcome UNKNOWN**. Formal read-only status/linked publication/keys are archived; completed receipts 0, tool results 0. PID 6176 remains absent with parent 7348 as positive control. This does not establish safe terminal outcome or deployment isolation. No resume/resubmit/replacement operation or durable-state edit was performed. Linked Journal publication completed only pi.execution.persist; the recorded Pi state is still EXECUTING.
+
+Risk classification: **BLOCKED**. The retained durable owner triggers `ROUTE_ACTIVE_EXECUTION` for route change. Safety of runtime reload and every possible unrecorded side effect is not established; therefore SAFE_ISOLATED is not justified. The classification does not modify Pi state. Offline Git and tests are isolated from original durable state.
+
+Live Journal: **healthy**, chain verified **true**. Live Checkpoint Store: **healthy**. The read-only Journal snapshot also reported two active Journal operations; their IDs were not used for recovery, inspection or cleanup. Other engineering state remained untouched. Windows file-symlink case skipped by existing Journal test; not recorded PASS. Journal health is distinct from Pi terminal recovery.
+
+The deployed status read took 129548.340 ms; this is not ChatGPT E2E latency or proof of candidate production behavior. Deployed PowerShell E2E remains not tested.
+
+Full required suite result: **FAIL**. Overall Integration Gate: **BLOCKED**, formal delivery conditions **not satisfied**. No integrate, push, cutover, runtime hot replacement or SEALED claim.
+
+Companion final-gate compressed raw evidence SHA256: `dca23965c8d056bfa20492a25944ca647b83995472a0292a6eaf48f07f5dc1b7`. Original two candidate worktrees remain clean at their authorized HEADs; integration candidate has no unresolved Git paths. Final Git diff-check and document-only delivery commit are recorded separately.
+
+Next action: Rerun only the required full MCP suite in the prepared environment next lease; preserve completed mcp_tunnel and focused evidence with exact source bindings. Retain original operation read-only pending Engineering Authority authorized Pi reconciliation or sufficient deployment-isolation proof. No integrate/push/cutover.

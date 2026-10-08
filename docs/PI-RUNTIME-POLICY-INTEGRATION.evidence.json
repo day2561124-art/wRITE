@@ -204,10 +204,12 @@
         "exit_code": 1,
         "first_failure": "mcp-http-integration-control fixture ERR_MODULE_NOT_FOUND: mcp-request-tracing.mjs"
       },
-      "full_mcp_after_fixture_fix": "not tested; full runner must restart on exact final candidate",
-      "mcp_tunnel": "not tested; full MCP runner failed first",
+      "full_mcp_after_fixture_fix": "FAIL on d2a5143e343b6d35cbab0054c513ac38ef81712b",
+      "mcp_tunnel": "PASS on d2a5143e343b6d35cbab0054c513ac38ef81712b",
       "formal_registered_validation": "not performed; offline Git preflight is not a server-registered authoritative validation record",
-      "journal_platform_limit": "Full MCP Journal suite reports Windows file-symlink case skipped; other available guard checks ran"
+      "journal_platform_limit": "Full MCP Journal suite reports Windows file-symlink case skipped; other available guard checks ran",
+      "final_mcp": "failed",
+      "final_mcp_tunnel": "verified"
     }
   },
   "powershell": {
@@ -311,5 +313,188 @@
     "final_delivery_state": "verify clean worktree immediately after commit; SHA reported separately"
   },
   "integration_ready": false,
-  "next_action": "Keep original operation read-only pending authoritative Pi recovery decision. On this isolated final candidate, rerun required full mcp and mcp_tunnel suites and obtain exact-candidate formal validation; do not deploy or replay the UNKNOWN operation."
+  "next_action": "Rerun only the required full MCP suite in the prepared environment next lease; preserve completed mcp_tunnel and focused evidence with exact source bindings. Retain original operation read-only pending Engineering Authority authorized Pi reconciliation or sufficient deployment-isolation proof. No integrate/push/cutover.",
+  "final_gate_round": {
+    "observed_at_utc": "2026-10-08T17:17:46.510Z",
+    "tested_candidate": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+    "lineage": {
+      "tested_candidate": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+      "main_head": "fcfba25de3fc521ea73e326d190ab358ee58d513",
+      "runtime_head": "3f972024dec8f2c6c6a86943dcd0fefa749fb9c4",
+      "runtime_clean": true,
+      "policy_head": "5046c93fa18279bc08e0c234ad244a3c79cd1df5",
+      "policy_clean": true,
+      "candidate_clean_before_report": true,
+      "unmerged_paths": "",
+      "executable_hashes_unchanged": true
+    },
+    "suites": [
+      {
+        "started_utc": "2026-10-08T17:01:16.8785883Z",
+        "exit_code": 1,
+        "suite": "mcp",
+        "source_commit": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+        "finished_utc": "2026-10-08T17:14:01.6466730Z",
+        "status": "failed",
+        "duration_ms": 764768,
+        "completion_marker": null
+      },
+      {
+        "source_commit": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+        "finished_utc": "2026-10-08T17:04:28.9242823Z",
+        "exit_code": 0,
+        "suite": "mcp_tunnel",
+        "started_utc": "2026-10-08T17:02:12.4301504Z",
+        "status": "verified",
+        "duration_ms": 136494,
+        "completion_marker": [
+          "MCP tunnel launcher integration tests passed.",
+          "- Launcher default MCP HTTP profile: chatgpt_developer (107 tools: 106 child-owned plus parent-owned dev_mcp_reload)",
+          "- External MCP_TOOL_PROFILE override: chatgpt_public (40 tools, development write/test/PowerShell tools absent)"
+        ]
+      }
+    ],
+    "required_suite_result": "FAIL",
+    "risk_classification": "BLOCKED",
+    "original_operation": {
+      "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+      "authoritative_state": "EXECUTING",
+      "revision": 7,
+      "updated_at": "2026-10-08T14:54:01.379Z",
+      "outcome": "UNKNOWN",
+      "owner": {
+        "hostname": "SDCP",
+        "pid": 6176,
+        "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+      },
+      "active_call": {
+        "attempt": 1,
+        "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+        "idempotency_key": "phase3-live-begin-20261008-2146",
+        "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+        "mutation": true,
+        "phase": "EXECUTING",
+        "reconciliation_attempt": 0,
+        "step_id": "begin"
+      },
+      "receipts": 0,
+      "tool_results": 0,
+      "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+      "journal_publication_receipt": {
+        "operation_id": "dev_operation_a0590c98212b488da9eaf93670dd6df7",
+        "event_id": "dev_journal_event_da0efebdaad04e528a200c0d8af53c97",
+        "sequence": 51368,
+        "event_hash": "47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015"
+      },
+      "logical_checkpoint": {
+        "at_revision": 7,
+        "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+        "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+        "phase": "EXECUTING",
+        "schema_version": 2,
+        "step_id": "begin",
+        "workspace_id": "dev_workspace_shared_repository_v1"
+      },
+      "mutations_submitted": 0,
+      "read_session_closed": true,
+      "owner_liveness": [
+        {
+          "name": null,
+          "checked_at_utc": "2026-10-08T17:04:17.4270848Z",
+          "exists": false,
+          "pid": 6176
+        },
+        {
+          "name": "node.exe",
+          "checked_at_utc": "2026-10-08T17:04:17.6056400Z",
+          "exists": true,
+          "pid": 7348
+        }
+      ],
+      "lease_and_heartbeat": "No explicit expiry/heartbeat in the returned durable owner record; PID absence does not authorize terminal inference",
+      "effect_evidence": "Both original keys not_admitted, no result/receipt; no evidence sufficient to rule out every unrecorded side effect",
+      "history_boundary": "Latest durable projection, embedded tool-call history and read-only linked Journal publication; no full independent Pi history endpoint verified",
+      "deployment_risk": "Nonterminal owner is retained; route store rejects route changes with ROUTE_ACTIVE_EXECUTION. Runtime reload safety is unproven.",
+      "recovery_next_action": "Engineering Authority must choose an authorized authoritative Pi reconciliation procedure. Keep current operation read-only; do not resume, replay or replace."
+    },
+    "live_health": {
+      "journal": {
+        "schema_version": 1,
+        "health": "healthy",
+        "chain_verified": true,
+        "latest_sequence": 51384,
+        "latest_event_id": "dev_journal_event_ce294209fc64491aa4b8ed60eeafe084",
+        "latest_event_hash": "a0d8df0da568d38063ffaabc77056a7de6a6e8c170e5326f048810dba9cfe813",
+        "dangling_operation_count": 0,
+        "dangling_operations": [],
+        "active_operation_count": 2,
+        "active_operations": [
+          "dev_operation_d01ad2352b59473ead327f7a6bbf8ecb",
+          "dev_operation_e804c73502f040bea00a24600bf75d7e"
+        ],
+        "reconciliation_required": false,
+        "last_health_error": null,
+        "storage": "server_owned_per_event_files"
+      },
+      "checkpoint": {
+        "schema_version": 1,
+        "health": "healthy",
+        "registry_revision": 289,
+        "storage": "server_owned_content_addressed_checkpoint_store",
+        "checkpoint_count": 283,
+        "active_count": 277,
+        "deleted_count": 6,
+        "physical_blob_bytes": 42493014,
+        "logical_checkpoint_bytes": 75318699,
+        "deduplicated_bytes_saved": 32825685,
+        "reclaimable_bytes": 0,
+        "reclaimable_blob_count": 0
+      }
+    },
+    "observation_boundary": {
+      "deployed_service": {
+        "pi_execution_protocol": "writer-workbench/pi-production/v1",
+        "service": "writer-workbench-mcp",
+        "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+        "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+        "pid": 7348,
+        "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+        "startedAt": "2026-10-08T08:37:59.183Z",
+        "profile": "chatgpt_developer"
+      },
+      "status_call_ms": 129548.34000000001,
+      "scope": "Local deployed HTTP MCP read, not ChatGPT end-to-end; no candidate deployment or production improvement claim"
+    },
+    "journal_platform_limit": "Windows file-symlink case skipped by existing Journal test; not recorded PASS",
+    "integration_gate": "BLOCKED",
+    "formal_delivery_ready": false,
+    "formal_validation_record": "No server-registered exact-candidate validation performed while original owner remains unresolved",
+    "archive": {
+      "file": "PI-RUNTIME-POLICY-INTEGRATION.final-gate.raw.json.gz",
+      "sha256": "dca23965c8d056bfa20492a25944ca647b83995472a0292a6eaf48f07f5dc1b7",
+      "bytes": 22836
+    },
+    "next_action": "Rerun only the required full MCP suite in the prepared environment next lease; preserve completed mcp_tunnel and focused evidence with exact source bindings. Retain original operation read-only pending Engineering Authority authorized Pi reconciliation or sufficient deployment-isolation proof. No integrate/push/cutover.",
+    "failure_classification": "test_fixture_environment",
+    "mcp_failure": {
+      "test": "tests/mcp/pi-bootstrap-wire.test.mjs",
+      "error": "ENOENT scandir worktree/node_modules; explicit fixture dependency enumeration requires local directory",
+      "scope": "Last entrypoint in the complete required MCP runner; earlier entrypoints completed",
+      "repair": "Ignored owned node_modules junction to existing main installed packages; no npm install, no dependency writes, no product/test source change",
+      "retest": {
+        "exit_code": 0,
+        "status": "verified",
+        "result": {
+          "source_commit": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+          "fix": "Owned ignored node_modules junction to existing installed main dependencies; no package installation or source change",
+          "started_utc": "2026-10-08T17:15:17.8014971Z",
+          "classification": "test_fixture_environment",
+          "exit_code": 0,
+          "finished_utc": "2026-10-08T17:17:00.9248111Z",
+          "tap": "TAP version 13\r\n# [mcp-server exit] pid=24596 code=73\r\n# {\"real_MCP\":true,\"SDK_reused\":true,\"cold_pids\":[24596,32244],\"workstream_id\":\"dev_workstream_20261008-171543_753b0ee4ad07\",\"workspace_id\":\"dev_workspace_7e061f63d6724ab1b3c9d393\",\"checkpoint_id\":\"dev_checkpoint_421fab273ef6497fad29e69afd351073\",\"original_base\":\"4b0bbaddc6f4cb0f0a3d0143c78a4d8624bc51a1\",\"terminal_duplicate_new_dispatches\":0,\"journal\":{\"schema_version\":1,\"health\":\"healthy\",\"chain_verified\":true,\"latest_sequence\":158,\"latest_event_id\":\"dev_journal_event_2e565f9db3e044f79362178c05f322a7\",\"latest_event_hash\":\"b46cfac9b573b1a610a749cb692417b5f9c2358ec0058deec783ed01bf28f2ba\",\"dangling_operation_count\":0,\"dangling_operations\":[],\"active_operation_count\":0,\"active_operations\":[],\"reconciliation_required\":false,\"last_health_error\":null,\"storage\":\"server_owned_per_event_files\"},\"shared_main_unchanged\":true}\r\n# Subtest: actual MCP default ingress completes cold lifecycle and terminal no replay using existing official SDK\r\nok 1 - actual MCP default ingress completes cold lifecycle and terminal no replay using existing official SDK\r\n  ---\r\n  duration_ms: 102671.2822\r\n  type: 'test'\r\n  ...\r\n1..1\r\n# tests 1\r\n# suites 0\r\n# pass 1\r\n# fail 0\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 103028.6342\r\n"
+        }
+      },
+      "full_suite_after_environment_repair": "not tested; first run took 764768 ms, exceeding time remaining for another full run within this 25-minute lease"
+    }
+  }
 }
