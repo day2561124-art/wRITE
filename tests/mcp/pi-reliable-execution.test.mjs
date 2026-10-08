@@ -35,6 +35,76 @@ function adapter(callTool, queryOperation=async()=>({reconciliation_state:"not_a
     resolveWorkspace:async()=>({...context,workspace_type:"isolated_worktree",state:"active"}),...extra});
 }
 const timeout=()=>Object.assign(new Error("secret transport details"),{code:"TIMEOUT"});
+async function interruptedClaim(t,{alive=false,query,actions=[write]}={}) {
+  const f=await fixture(t,{isOwnerAlive:async()=>alive});let sends=0;
+  const a=adapter(async()=>{sends++;throw Error("must not dispatch");},query??(async p=>({...p,
+    reconciliation_state:"completed",operation_id:"dev_operation_"+"a".repeat(32)})));
+  await assert.rejects(engine(f.store,a,{executionHook:async point=>{
+    if(point==="after_claim")throw Error("worker disappeared");
+  }}).execute(intent(actions)),/worker disappeared/);
+  const claim=(await f.store.readHistory()).at(-1).execution_projection;
+  const args={operation_id:claim.state.operation_id,context:claim.intent.context,
+    expected_revision:claim.revision,expected_owner:claim.runtime.owner};
+  return {...f,a,args,claim,sends:()=>sends};
+}
+test("reconcile-only persists a completed receipt and stops before dependent dispatch",async t=>{
+  const f=await interruptedClaim(t,{actions:[write,{step_id:"read",capability:"filesystem.read",
+    input:{path:"package.json"},depends_on:["write"]}]});
+  const r=await engine(f.store,f.a).reconcileOnly(f.args);
+  assert.deepEqual(r.state.completed_steps,["write"]);assert.deepEqual(r.state.pending_steps,["read"]);
+  assert.equal(r.runtime.owner,null);assert.equal(r.runtime.active_call,null);assert.equal(f.sends(),0);
+  assert.equal(r.receipts.length,1);assert.equal(r.receipts[0].kind,"reconciled_facts");
+  assert.equal(r.result.pause_reason,"GPT_CONTINUATION_REQUIRED");
+  await assert.rejects(engine(f.store,f.a).reconcileOnly(f.args),{code:"STATE_REVISION_CONFLICT"});
+  assert.equal((await f.journal.status()).health,"healthy");
+});
+for(const state of ["not_admitted","active","unknown","partial"]) {
+  test("reconcile-only preserves unknown claim and owner for "+state,async t=>{
+    const f=await interruptedClaim(t,{query:async p=>({...p,reconciliation_state:state,safe_same_key_retry:true})});
+    const r=await engine(f.store,f.a).reconcileOnly(f.args);
+    assert.equal(r.projection_hash,f.claim.projection_hash);assert.equal(r.revision,f.claim.revision);
+    assert.deepEqual(r.runtime.owner,f.claim.runtime.owner);assert.deepEqual(r.runtime.active_call,f.claim.runtime.active_call);
+    assert.equal(r.result.dispatch_paused,true);assert.equal(f.sends(),0);
+  });
+}
+for(const alive of [true,null])test("reconcile-only refuses active or uncertain owner "+alive,async t=>{
+  const f=await interruptedClaim(t,{alive,query:async()=>{throw Error("must not query");}});
+  const r=await engine(f.store,f.a).reconcileOnly(f.args);
+  assert.equal(r.projection_hash,f.claim.projection_hash);assert.equal(f.sends(),0);
+  assert.equal(r.result.pause_reason,alive===true?"OWNER_ACTIVE":"OWNER_LIVENESS_UNCERTAIN");
+});
+test("reconcile-only requires exact owner, revision and operation context",async t=>{
+  const f=await interruptedClaim(t);
+  for(const [edit,code] of [[{expected_owner:{...f.args.expected_owner,pid:1}},"OWNER_CONFLICT"],
+    [{expected_revision:1},"STATE_REVISION_CONFLICT"],[{context:{...context,workstream_id:null}},"WORKSPACE_CONTEXT_MISMATCH"],
+    [{operation_id:"pi_operation_"+"f".repeat(32)},"UNKNOWN_PI_OPERATION"],
+    [{expected_revision:undefined},"INVALID_RECONCILIATION_REQUEST"]])
+    await assert.rejects(engine(f.store,f.a).reconcileOnly({...f.args,...edit}),{code});
+  assert.equal((await f.store.inspect(f.args)).projection_hash,f.claim.projection_hash);
+});
+test("reconcile-only rejects forged completed receipt without transferring ownership",async t=>{
+  const f=await interruptedClaim(t,{query:async p=>({...p,reconciliation_key:"foreign-key",reconciliation_state:"completed",
+    operation_id:"dev_operation_"+"a".repeat(32)})});
+  const r=await engine(f.store,f.a).reconcileOnly(f.args);assert.equal(r.projection_hash,f.claim.projection_hash);
+});
+test("reconcile-only validates receipt before writes and fences races after lookup",async t=>{
+  const f=await interruptedClaim(t);const broken={...f.a,reconcile:async()=>({verdict:"completed",receipt:{}})};
+  await assert.rejects(engine(f.store,broken).reconcileOnly(f.args));
+  assert.equal((await f.store.inspect(f.args)).projection_hash,f.claim.projection_hash);
+  const racing={...f.a,reconcile:async(...args)=>{
+    const result=await f.a.reconcile(...args);
+    await f.store.command({...f.args,command:{type:"owner_acquired",owner:{...f.args.expected_owner,
+      worker_id:"pi_worker_"+"b".repeat(32)},replaced_worker_id:f.args.expected_owner.worker_id}});
+    return result;
+  }};
+  await assert.rejects(engine(f.store,racing).reconcileOnly(f.args),{code:"STATE_REVISION_CONFLICT"});
+  assert.equal((await f.store.inspect({operation_id:f.args.operation_id,context})).runtime.active_call.call_id,f.claim.runtime.active_call.call_id);
+});
+test("reconcile-only lookup failure leaves durable history unchanged",async t=>{
+  const f=await interruptedClaim(t,{query:async()=>{throw timeout();}});
+  const r=await engine(f.store,f.a).reconcileOnly(f.args);
+  assert.equal(r.projection_hash,f.claim.projection_hash);assert.equal(r.result.pause_reason,"RECONCILIATION_UNAVAILABLE");
+});
 function engine(store,a,options={}) {
   return createPiReliableExecutionEngine({store,adapter:a,retryPolicy:{max_attempts:3,base_delay_ms:1,max_delay_ms:4},...options});
 }

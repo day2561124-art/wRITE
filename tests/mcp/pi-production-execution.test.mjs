@@ -132,7 +132,18 @@ async function worker(f,i,point,publication=false){
 }
 for(const point of ["after_claim","after_dispatch","after_receipt"])test("production worker process exit "+point+" recovers once",async t=>{
  const f=await fixture(t);f.root=path.dirname(f.journal.storageRoot);await enable(f);const i=intent("worker-"+point,true);
- await assert.rejects(worker(f,i,point),e=>e.code===73);const result=JSON.parse((await worker(f,i,"none")).stdout);
+ await assert.rejects(worker(f,i,point),e=>e.code===73);
+ if(point==="after_dispatch") {
+  const host=controller(f,async()=>{throw Error("reconcile must not dispatch");},{queryOperation:a=>f.journal.getOperation(a)});
+  const claim=await host.inspect({intent_id:i.intent_id,context});
+  const reconciled=await host.reconcileOnly({operation_id:claim.state.operation_id,context,
+    expected_revision:claim.revision,expected_owner:claim.runtime.owner});
+  assert.deepEqual(reconciled.state.completed_steps,["requested"]);
+  assert.equal(reconciled.runtime.owner,null);assert.equal(reconciled.runtime.active_call,null);
+  assert.equal(reconciled.state.status,"EXECUTING");assert.equal(reconciled.result.reconciliation_only,true);
+  assert.equal(await readFile(path.join(f.root,"effects.txt"),"utf8"),"1");
+ }
+ const result=JSON.parse((await worker(f,i,"none")).stdout);
  assert.equal(result.state.status,"COMPLETED");assert.equal(await readFile(path.join(f.root,"effects.txt"),"utf8"),"1");
  assert.equal((await f.journal.listOperations({operation_type:"mcp_mutation"})).total,1);});
 for(const point of ["after_started","after_completed"])test("production publication exit "+point+" restores default enrollment",async t=>{
@@ -163,6 +174,14 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  t.after(async()=>{assert.equal(path.dirname(root),os.tmpdir());await rm(root,{recursive:true,force:true});});
  const journal=createDevOperationJournalService({storageRoot:path.join(root,"operation-journal")});
  await createPiProductionRouteStore({journal}).change({...decision,expected_revision:0},{validateGate:async()=>true});
+ const claimHost=createPiProductionExecutionController({journal,route:createPiProductionRouteStore({journal}),
+  executionHook:async point=>{if(point==="after_claim")throw Error("paused worker");},
+  transport:{callTool:async()=>{throw Error("must not dispatch");},queryOperation:a=>journal.getOperation(a),resolveWorkspace:async()=>context}});
+ const pausedIntent=intent("wire-reconcile-active-owner",true);
+ await assert.rejects(claimHost.execute(pausedIntent),/paused worker/);
+ const claim=await claimHost.inspect({intent_id:pausedIntent.intent_id,context});
+ const reconcileRequest={request_kind:"reconcile_only",operation_id:claim.state.operation_id,context,
+  expected_revision:claim.revision,expected_owner:claim.runtime.owner};
  const sessionUrl=new URL("../../server/src/mcp-http-stdio-adapter.mjs",import.meta.url).href;
  const code=`import {createStdioSession} from ${JSON.stringify(sessionUrl)};
  const s=createStdioSession({readonlyRetryMaxAttempts:0});const call=m=>new Promise((r,j)=>s.call(m,(e,v)=>e?j(e):r(v)));
@@ -175,7 +194,8 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  const diagnostic=await call({jsonrpc:'2.0',id:'diag',method:'tools/call',params:{name:'dev_read_file',arguments:{path:'package.json'},
  _meta:{pi_fallback:{purpose:'diagnostic',reason:'Inspect physical package',decision_id:'gpt-wire-diag'}}}});
  const bad=await call({jsonrpc:'2.0',id:'bad',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:'{'}}});
- console.log(JSON.stringify({status,direct,directPowerShell,forged,diagnostic,bad}));
+ const reconcile=await call({jsonrpc:'2.0',id:'reconcile',method:'tools/call',params:{name:'dev_pi_execute_intent',arguments:{intent_json:${JSON.stringify(JSON.stringify(reconcileRequest))}}}});
+ console.log(JSON.stringify({status,direct,directPowerShell,forged,diagnostic,bad,reconcile}));
  }finally{s.close();}`;
  const {stdout}=await execFile(process.execPath,["--input-type=module","-e",code],{cwd:fileURLToPath(new URL("../..",import.meta.url)),
  windowsHide:true,timeout:120000,maxBuffer:1048576,env:{...process.env,MCP_TOOL_PROFILE:"chatgpt_developer",WRITER_WORKBENCH_TEST_JOURNAL_GROUP:group,
@@ -184,6 +204,9 @@ test("real MCP production ingress and explicit direct diagnostic share durable r
  assert.equal(r.direct.error.message,"PI_EXECUTION_INTENT_REQUIRED");assert.equal(r.directPowerShell.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.equal(r.forged.error.message,"PI_EXECUTION_INTENT_REQUIRED");
  assert.notEqual(r.diagnostic.result.isError,true);assert.equal(r.bad.result.isError,true);
+ const reconciled=JSON.parse(r.reconcile.result.content[0].text);
+ assert.equal(reconciled.result.reconciliation_only,true);assert.equal(reconciled.result.pause_reason,"OWNER_ACTIVE");
+ assert.equal(reconciled.projection_hash,claim.projection_hash);
  assert.equal((await journal.listOperations({operation_type:"pi_diagnostic_fallback"})).total,1);});
 
 import {Readable} from "node:stream";

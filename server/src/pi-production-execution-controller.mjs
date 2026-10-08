@@ -72,6 +72,11 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   status:async()=>{await createPiReliableExecutionStore({journal}).readHistory();return route.inspect();},
   admit:async source=>{const {intent,store}=await prepare(source);return output(await store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));},
   execute:async source=>{const {intent,engine}=await traceSpan("pi.prepare",()=>prepare(source));return output(await engine.execute(intent));},
+  reconcileOnly:async args=>{
+   const original=await inspectOperation(args);
+   const {engine}=await prepare(original.intent);
+   return output(await engine.reconcileOnly(args));
+  },
   inspect:args=>inspectOperation(args),
   inspectStatus:args=>inspectOperation(args,true)
  });
