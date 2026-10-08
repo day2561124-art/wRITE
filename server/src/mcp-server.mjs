@@ -5953,6 +5953,7 @@ const dispatchQueueOverloadMessage = (
 );
 
 let pending = Promise.resolve();
+let metadataPending = Promise.resolve();
 let pendingDispatchMessages = 0;
 
 function enqueueMessage(message, framing) {
@@ -5967,7 +5968,14 @@ function enqueueMessage(message, framing) {
   }
 
   pendingDispatchMessages += 1;
-  pending = pending
+  // This exact handler reads only the immutable server-owned schema registry.
+  // Keep its own serial lane; arbitrary reads and every mutation retain the
+  // existing execution queue. dispatch still enforces readiness and profile.
+  const metadata = message?.method === "tools/call"
+    && message?.params?.name === "dev_capability_get_schema"
+    && toolRegistry.get("dev_capability_get_schema")?.risk === "read"
+    && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
+  const next = (metadata ? metadataPending : pending)
     .then(async () => {
       const response = await dispatch(message);
       if (response) {
@@ -5983,6 +5991,8 @@ function enqueueMessage(message, framing) {
     .finally(() => {
       pendingDispatchMessages -= 1;
     });
+  if (metadata) metadataPending = next;
+  else pending = next;
   return true;
 }
 
