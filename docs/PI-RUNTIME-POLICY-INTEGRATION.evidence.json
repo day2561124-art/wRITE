@@ -204,12 +204,12 @@
         "exit_code": 1,
         "first_failure": "mcp-http-integration-control fixture ERR_MODULE_NOT_FOUND: mcp-request-tracing.mjs"
       },
-      "full_mcp_after_fixture_fix": "FAIL on d2a5143e343b6d35cbab0054c513ac38ef81712b",
-      "mcp_tunnel": "PASS on d2a5143e343b6d35cbab0054c513ac38ef81712b",
+      "full_mcp_after_fixture_fix": "PASS on 7b6e7766e30458ea82368ccdeecdc503a66f97a5",
+      "mcp_tunnel": "PASS retained with unchanged executable source",
       "formal_registered_validation": "not performed; offline Git preflight is not a server-registered authoritative validation record",
       "journal_platform_limit": "Full MCP Journal suite reports Windows file-symlink case skipped; other available guard checks ran",
-      "final_mcp": "failed",
-      "final_mcp_tunnel": "verified"
+      "final_mcp": "PASS",
+      "final_mcp_tunnel": "verified retained"
     }
   },
   "powershell": {
@@ -313,7 +313,7 @@
     "final_delivery_state": "verify clean worktree immediately after commit; SHA reported separately"
   },
   "integration_ready": false,
-  "next_action": "Rerun only the required full MCP suite in the prepared environment next lease; preserve completed mcp_tunnel and focused evidence with exact source bindings. Retain original operation read-only pending Engineering Authority authorized Pi reconciliation or sufficient deployment-isolation proof. No integrate/push/cutover.",
+  "next_action": "Full MCP Gate is closed. Stop additional tests/features. Engineering Authority must provide an existing formal non-dispatch reconciliation path or authoritative deployment-isolation evidence for the original operation; do not invoke execute to probe recovery.",
   "final_gate_round": {
     "observed_at_utc": "2026-10-08T17:17:46.510Z",
     "tested_candidate": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
@@ -496,5 +496,199 @@
       },
       "full_suite_after_environment_repair": "not tested; first run took 764768 ms, exceeding time remaining for another full run within this 25-minute lease"
     }
+  },
+  "gate_closure_round": {
+    "observed_at_utc": "2026-10-08T17:52:56.098Z",
+    "tested_candidate": "7b6e7766e30458ea82368ccdeecdc503a66f97a5",
+    "mcp": {
+      "suite": "mcp",
+      "pi_dependency_root": "E:\\武裝學院的二三事\\scripts\\pi-runtime\\node_modules",
+      "exit_code": 0,
+      "started_utc": "2026-10-08T17:37:34.6143977Z",
+      "dependency_root": "E:\\武裝學院的二三事\\node_modules",
+      "source_commit": "7b6e7766e30458ea82368ccdeecdc503a66f97a5",
+      "finished_utc": "2026-10-08T17:51:45.7903089Z",
+      "status": "PASS",
+      "duration_ms": 851176,
+      "completion_marker": "MCP contract tests passed.",
+      "failure_classification": "none"
+    },
+    "mcp_tunnel": {
+      "status": "PASS_RETAINED",
+      "source_commit": "d2a5143e343b6d35cbab0054c513ac38ef81712b",
+      "exit_code": 0,
+      "rerun": false,
+      "provenance": "prior archived full result; only docs changed since its tested commit and executable hashes unchanged",
+      "source_delta": [
+        "docs/PI-RUNTIME-POLICY-INTEGRATION.evidence.json",
+        "docs/PI-RUNTIME-POLICY-INTEGRATION.final-gate.raw.json.gz",
+        "docs/PI-RUNTIME-POLICY-INTEGRATION.md"
+      ],
+      "prior_archive_sha256": "dca23965c8d056bfa20492a25944ca647b83995472a0292a6eaf48f07f5dc1b7"
+    },
+    "focused_affected": {
+      "status": "VALID_RETAINED",
+      "focused_passed": 83,
+      "affected_passed": 16,
+      "source_hashes_unchanged": true
+    },
+    "original_operation": {
+      "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+      "status": "EXECUTING",
+      "revision": 7,
+      "outcome": "UNKNOWN",
+      "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+      "unchanged_since_previous_authoritative_read": true,
+      "receipts": 0,
+      "tool_results": 0,
+      "completed_steps": [],
+      "owner": {
+        "hostname": "SDCP",
+        "pid": 6176,
+        "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+      },
+      "active_call": {
+        "attempt": 1,
+        "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+        "idempotency_key": "phase3-live-begin-20261008-2146",
+        "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+        "mutation": true,
+        "phase": "EXECUTING",
+        "reconciliation_attempt": 0,
+        "step_id": "begin"
+      },
+      "lifecycle_binding": null,
+      "journal_receipt": {
+        "operation_id": "dev_operation_a0590c98212b488da9eaf93670dd6df7",
+        "event_id": "dev_journal_event_da0efebdaad04e528a200c0d8af53c97",
+        "sequence": 51368,
+        "event_hash": "47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015"
+      },
+      "logical_checkpoint": {
+        "at_revision": 7,
+        "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+        "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+        "phase": "EXECUTING",
+        "schema_version": 2,
+        "step_id": "begin",
+        "workspace_id": "dev_workspace_shared_repository_v1"
+      },
+      "owner_liveness": [
+        {
+          "checked_at_utc": "2026-10-08T17:41:04.2590344Z",
+          "exists": false,
+          "pid": 6176,
+          "name": null
+        },
+        {
+          "checked_at_utc": "2026-10-08T17:41:04.4204675Z",
+          "exists": true,
+          "pid": 7348,
+          "name": "node.exe"
+        }
+      ],
+      "lease_heartbeat": "No separate expiry/heartbeat field returned; localOwnerAlive checks hostname and PID. Worker ID plus expected_revision CAS provide fencing, not a disposable lease.",
+      "executor_takeover": "No changed revision/projection or new owner observed; no child operation admitted for either original key, but unrecorded effects cannot be universally excluded",
+      "reconciliation_completed": false,
+      "mutation_calls": 0,
+      "formal_evidence": "Current formal MCP status, tools/list, original keys, fingerprint-qualified active begin lookup; current projection matches previously archived immutable publication",
+      "safe_isolated": false,
+      "risk": "BLOCKED",
+      "blocker": "No deployed non-dispatch Pi reconcile/fence entrypoint. Execute-only engine can retry begin or advance to subsequent mutation; prohibited by this authorization. Durable owner/active claim persists; deployment/reload isolation is unproven."
+    },
+    "recovery_contract": {
+      "status": "NO_ELIGIBLE_PUBLIC_ENTRYPOINT",
+      "deployed_tool_count": 107,
+      "deployed_recovery_related_tools": [
+        "dev_pi_execute_intent",
+        "dev_pi_execution_status",
+        "dev_pi_runtime_status",
+        "dev_pi_execute_readonly",
+        "dev_workspace_recover_checkpoint"
+      ],
+      "controller_api": [
+        "status",
+        "admit",
+        "execute",
+        "inspect",
+        "inspectStatus"
+      ],
+      "engine_api": [
+        "execute"
+      ],
+      "owner_acquisition": "Expected revision CAS and replaced_worker_id fencing; requires confirmed dead owner",
+      "owner_release": "Requires current worker ownership and no active call",
+      "reconciliation": "Private execution-loop step; not_started schedules retry, completed can advance pending actions",
+      "internal_store_api_used": false,
+      "checkpoint_recovery_used": false,
+      "no_execute_intent_call": true,
+      "no_new_recovery_bypass": true,
+      "source_scope": "Candidate source API audit and actual deployed public MCP schemas; no running-process internal code attestation is claimed"
+    },
+    "supplemental_installation_evidence": {
+      "source": "User-provided lifecycle evidence, independent of original Runtime operation",
+      "operation_id": "pi_operation_a2b7ca2bd8714e50925e871269f94a98",
+      "workstream_id": "dev_workstream_20261008-171725_f6f8ff492487",
+      "reported_mcp_begin": "completed",
+      "reported_pi_state": "EXECUTING revision 7, completed_steps not converged",
+      "assessment": "Additional production lifecycle risk: missing Pi receipt does not imply no MCP effect. It cannot be used to classify or reconcile Runtime begin. No installation operation status/receipt/owner was queried or mutated.",
+      "takeover": false,
+      "evidence_mixed": false
+    },
+    "health": {
+      "journal": {
+        "schema_version": 1,
+        "health": "healthy",
+        "chain_verified": true,
+        "latest_sequence": 51394,
+        "latest_event_id": "dev_journal_event_6911433cfaef41bea335183c48371214",
+        "latest_event_hash": "0bc4ce81231fc127a70eba4880639175074862585e0e5915d27383f5a6842db3",
+        "dangling_operation_count": 0,
+        "dangling_operations": [],
+        "active_operation_count": 0,
+        "active_operations": [],
+        "reconciliation_required": false,
+        "last_health_error": null,
+        "storage": "server_owned_per_event_files"
+      },
+      "checkpoint": {
+        "schema_version": 1,
+        "health": "healthy",
+        "registry_revision": 289,
+        "storage": "server_owned_content_addressed_checkpoint_store",
+        "checkpoint_count": 283,
+        "active_count": 277,
+        "deleted_count": 6,
+        "physical_blob_bytes": 42493014,
+        "logical_checkpoint_bytes": 75318699,
+        "deduplicated_bytes_saved": 32825685,
+        "reclaimable_bytes": 0,
+        "reclaimable_blob_count": 0
+      }
+    },
+    "observation_boundary": {
+      "service": {
+        "pi_execution_protocol": "writer-workbench/pi-production/v1",
+        "service": "writer-workbench-mcp",
+        "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+        "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+        "pid": 7348,
+        "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+        "startedAt": "2026-10-08T08:37:59.183Z",
+        "profile": "chatgpt_developer"
+      },
+      "status_call_ms": 115346.3873,
+      "scope": "Formal local deployed HTTP MCP, not ChatGPT end-to-end or candidate production performance"
+    },
+    "source_changes": "none; documentation/evidence only",
+    "integration_gate": "BLOCKED",
+    "ready_for_integration": false,
+    "platform_limit": "Existing Windows Journal file-symlink test skipped; not recorded PASS",
+    "archive": {
+      "file": "PI-RUNTIME-POLICY-INTEGRATION.closure.raw.json.gz",
+      "sha256": "28dbb7881a4df8782d6ef3e16624622d028a545375b6096e8bf42f5376de6735",
+      "bytes": 83409
+    },
+    "next_action": "Full MCP Gate is closed. Stop additional tests/features. Engineering Authority must provide an existing formal non-dispatch reconciliation path or authoritative deployment-isolation evidence for the original operation; do not invoke execute to probe recovery."
   }
 }

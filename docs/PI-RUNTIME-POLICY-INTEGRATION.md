@@ -2,7 +2,7 @@
 
 2026-10-09 Asia/Taipei. This is an isolated candidate, not a production integration or SEALED milestone.
 
-Latest result: **Integration Gate BLOCKED**. Complete mcp_tunnel passed. Complete MCP reached its final entrypoint and failed because the local dependency directory was absent; environment repaired and that entrypoint passed 1/1, but a complete rerun remains pending. Original Pi operation is still EXECUTING revision 7, outcome UNKNOWN, with no proven deployment isolation. This round changes verification documents only; prior product fixes remain intact.
+Latest result: **Integration Gate BLOCKED**. Complete MCP PASS on `7b6e7766e30458ea82368ccdeecdc503a66f97a5`; complete mcp_tunnel PASS remains valid through unchanged executable source. Original Runtime operation is EXECUTING revision 7, outcome UNKNOWN. No deployed non-dispatch reconciliation entrypoint is available, and deployment isolation is unproven.
 
 ## Candidate and merge
 
@@ -66,3 +66,21 @@ Full required suite result: **FAIL**. Overall Integration Gate: **BLOCKED**, for
 Companion final-gate compressed raw evidence SHA256: `dca23965c8d056bfa20492a25944ca647b83995472a0292a6eaf48f07f5dc1b7`. Original two candidate worktrees remain clean at their authorized HEADs; integration candidate has no unresolved Git paths. Final Git diff-check and document-only delivery commit are recorded separately.
 
 Next action: Rerun only the required full MCP suite in the prepared environment next lease; preserve completed mcp_tunnel and focused evidence with exact source bindings. Retain original operation read-only pending Engineering Authority authorized Pi reconciliation or sufficient deployment-isolation proof. No integrate/push/cutover.
+
+## Final Gate Closure — 2026-10-09 Asia/Taipei
+
+- Complete official MCP entrypoint: **PASS**, exit 0, 851,176 ms, source `7b6e7766e30458ea82368ccdeecdc503a66f97a5`. No filtering or early-success substitution.
+- Existing complete mcp_tunnel: **PASS_RETAINED**; no rerun. Prior full result/archive checksum valid, and only documentation changed since its tested commit. Existing 83/83 focused and 16/16 affected checks remain valid by unchanged source hashes.
+- Both dependency junctions verified against expected installed main/root and Pi-runtime dependency directories; no installation or shared dependency change.
+
+Original operation **pi_operation_ab4776c172b84bfa921ee99117a6728d** remains **EXECUTING, revision 7, outcome UNKNOWN**. Projection hash unchanged; receipts 0, tool results 0. Host probe: original PID 6176 absent, deployed parent 7348 present. Original keys and the fingerprint-qualified active begin lookup returned not_admitted; no other worker/child admission is observed, but unknown effects are not inferred to be absent. There is no explicit lease/heartbeat expiry to discard this claim.
+
+**Reconciliation not completed; SAFE_ISOLATED not established.** Formal deployed tools/list exposes no reconcile-only or owner-fence-only Pi tool. `dev_workspace_recover_checkpoint` forks a checkpoint and is not operation-owner recovery. The production controller exposes execute/admit/inspect/status; the engine exposes execute only. Its private reconciliation can schedule retry after not_started or advance to pending mutations after completed. Owner release requires ownership and no active call. Calling execute or internal store commands is therefore not an authorized non-dispatch repair. No resume, replay, replacement intent, CAS/storage write, checkpoint recovery or installation action was performed. The original durable owner still conflicts with route changes; runtime reload/deployment isolation remains unproven.
+
+The separately supplied roleplay operation evidence reports MCP begin completed with a real workstream while Pi remains EXECUTING revision 7. This reinforces the lifecycle convergence risk and forbids interpreting all missing Pi receipts as no effect. It is user-provided diagnostic evidence, not independently queried here, and was not mixed with Runtime receipts, owner or recovery decisions. No new lifecycle implementation is added.
+
+Live Journal **healthy**, chain verified **true**; Checkpoint Store **healthy**. Existing Windows Journal file-symlink test skipped; not recorded PASS.
+
+Final Integration Gate: **BLOCKED**, not READY_FOR_INTEGRATION. Only verification documents/evidence changed; no integrate, push, cutover, routing mutation or hot replacement. Full raw source/API audit, formal read-only responses and complete MCP log are archived in `PI-RUNTIME-POLICY-INTEGRATION.closure.raw.json.gz`, SHA256 `28dbb7881a4df8782d6ef3e16624622d028a545375b6096e8bf42f5376de6735`. Final diff-check/clean delivery SHA are reported after the documentation commit.
+
+Next action: Full MCP Gate is closed. Stop additional tests/features. Engineering Authority must provide an existing formal non-dispatch reconciliation path or authoritative deployment-isolation evidence for the original operation; do not invoke execute to probe recovery.
