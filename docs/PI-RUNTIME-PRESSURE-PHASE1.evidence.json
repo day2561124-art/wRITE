@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "base_head": "fcfba25de3fc521ea73e326d190ab358ee58d513",
+  "branch": "codex/pi-runtime-pressure-phase1",
+  "node_version": "24.18.0",
+  "pi_version": "1.0.4",
+  "before": {
+    "fixture": {
+      "checkpoints": 200,
+      "distinct_contents": 1,
+      "blobs": 8,
+      "blob_bytes": 65536
+    },
+    "timestamp": "2026-10-08T12:44:23.533Z",
+    "measurements": {
+      "list_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 248.57709999999952,
+        "p95_ms": 334.27790000000005,
+        "max_ms": 378.03819999999996,
+        "errors": []
+      },
+      "list_concurrent_8": {
+        "calls": 24,
+        "successes": 24,
+        "success_rate": 1,
+        "p50_ms": 1249.6827999999987,
+        "p95_ms": 2200.3165999999983,
+        "max_ms": 2396.7430999999997,
+        "errors": []
+      },
+      "get_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 242.4953000000005,
+        "p95_ms": 346.96799999999894,
+        "max_ms": 382.5440000000017,
+        "errors": []
+      },
+      "get_concurrent_8": {
+        "calls": 24,
+        "successes": 24,
+        "success_rate": 1,
+        "p50_ms": 1114.4709000000003,
+        "p95_ms": 2163.118200000001,
+        "max_ms": 2230.8079999999973,
+        "errors": []
+      },
+      "status_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 1120.2836000000025,
+        "p95_ms": 1332.482899999999,
+        "max_ms": 1393.9363999999987,
+        "errors": []
+      },
+      "status_concurrent_8": {
+        "calls": 24,
+        "successes": 6,
+        "success_rate": 0.25,
+        "p50_ms": 2165.4694999999992,
+        "p95_ms": 2556.027500000004,
+        "max_ms": 2792.120600000002,
+        "errors": [
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds.",
+          "CHECKPOINT_STORE_BUSY: Could not acquire checkpoint-store maintenance lock within 2 seconds."
+        ]
+      },
+      "list_external_lock_150ms": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 423.86009999999806,
+        "p95_ms": 482.90269999999873,
+        "max_ms": 555.9126000000033,
+        "errors": []
+      }
+    }
+  },
+  "after": {
+    "fixture": {
+      "checkpoints": 200,
+      "distinct_contents": 1,
+      "blobs": 8,
+      "blob_bytes": 65536
+    },
+    "timestamp": "2026-10-08T12:58:44.811Z",
+    "measurements": {
+      "list_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 75.6255000000001,
+        "p95_ms": 92.02140000000009,
+        "max_ms": 98.76549999999997,
+        "errors": []
+      },
+      "list_concurrent_8": {
+        "calls": 24,
+        "successes": 24,
+        "success_rate": 1,
+        "p50_ms": 551.5973000000004,
+        "p95_ms": 994.3462000000004,
+        "max_ms": 1036.4209,
+        "errors": []
+      },
+      "get_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 101.02700000000004,
+        "p95_ms": 106.88310000000001,
+        "max_ms": 108.4348,
+        "errors": []
+      },
+      "get_concurrent_8": {
+        "calls": 24,
+        "successes": 24,
+        "success_rate": 1,
+        "p50_ms": 510.9293999999991,
+        "p95_ms": 991.1730000000007,
+        "max_ms": 1001.7723000000005,
+        "errors": []
+      },
+      "status_normal": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 141.1151000000009,
+        "p95_ms": 190.85070000000087,
+        "max_ms": 244.77080000000024,
+        "errors": []
+      },
+      "status_concurrent_8": {
+        "calls": 24,
+        "successes": 24,
+        "success_rate": 1,
+        "p50_ms": 740.0751000000018,
+        "p95_ms": 1400.2558000000008,
+        "max_ms": 1423.4540000000015,
+        "errors": []
+      },
+      "list_external_lock_150ms": {
+        "calls": 20,
+        "successes": 20,
+        "success_rate": 1,
+        "p50_ms": 263.7347000000009,
+        "p95_ms": 285.9753000000019,
+        "max_ms": 287.0604999999996,
+        "errors": []
+      }
+    }
+  },
+  "live_observations": [
+    {
+      "elapsed_ms": 63659,
+      "calls": 1,
+      "success": true,
+      "tool": "dev_workspace_list_workstreams"
+    },
+    {
+      "elapsed_ms": 79257,
+      "calls": 1,
+      "success": true,
+      "tool": "dev_pi_execution_status"
+    }
+  ],
+  "limitations": [
+    "Live observations include connector/queue/recovery overhead and are not attributable stage timings.",
+    "Synthetic checkpoint fixture: 200 identities sharing one content; no production latency claim.",
+    "The global MCP queue, journal verification and routing behavior remain unchanged."
+  ],
+  "operation_observation": {
+    "limit": 20,
+    "success": true,
+    "tool": "dev_workspace_list_operations",
+    "filter": "dangling",
+    "total": 0,
+    "elapsed_ms": 41775,
+    "calls": 1
+  },
+  "benchmark_host_conditions": "Final benchmark overlapped fixture-only storage regression on the same host; measurements are a single-run microbenchmark, not controlled production latency."
+}

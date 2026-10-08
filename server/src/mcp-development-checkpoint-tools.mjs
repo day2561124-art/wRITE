@@ -61,6 +61,8 @@ export const DEV_CHECKPOINT_MAX_PHYSICAL_BLOB_BYTES = 512 * 1024 * 1024;
 export const DEV_CHECKPOINT_MAX_LIST_RESULTS = 100;
 export const DEV_CHECKPOINT_MAX_READ_BYTES = 256 * 1024;
 export const DEV_CHECKPOINT_MAX_DIRECTORY_SCAN_ENTRIES = 10_000;
+export const DEV_CHECKPOINT_VERIFY_CONCURRENCY = 8;
+export const DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES = 64;
 
 export const DEV_CHECKPOINT_STORAGE_ROOT = process.env.WRITER_WORKBENCH_ISOLATED_TEST_CHECKPOINT === "1"
   ? path.join(os.tmpdir(), `writer-workbench-checkpoint-test-${process.pid}`, "checkpoints")
@@ -110,6 +112,24 @@ function checkpointError(code, message, details = {}) {
   error.code = code;
   Object.assign(error, details);
   return error;
+}
+
+// Drain every in-flight read before propagating failure: callers retain the
+// maintenance lock until all workers have stopped. No writes are parallelized.
+async function mapCheckpointReads(values, read) {
+  const results = new Array(values.length);
+  let next = 0;
+  let failure;
+  let failed = false;
+  await Promise.all(Array.from({ length: Math.min(values.length, DEV_CHECKPOINT_VERIFY_CONCURRENCY) }, async () => {
+    while (!failed && next < values.length) {
+      const index = next++;
+      try { results[index] = await read(values[index]); }
+      catch (error) { if (!failed) failure = error; failed = true; }
+    }
+  }));
+  if (failed) throw failure;
+  return results;
 }
 
 function assertObjectKeys(input, label, allowed) {
@@ -318,9 +338,16 @@ async function acquireStoreLock(lockPath) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const handle = await open(lockPath, "wx");
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, hostname: os.hostname(), acquired_at: new Date().toISOString() })}\n`, "utf8");
-      await handle.sync();
-      return handle;
+      try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, hostname: os.hostname(), acquired_at: new Date().toISOString() })}\n`, "utf8");
+        await handle.sync();
+        return handle;
+      } catch (error) {
+        // This process exclusively created the file; failed metadata publication
+        // must not leak its handle or leave a live-owner maintenance lock behind.
+        await releaseStoreLock(handle, lockPath);
+        throw error;
+      }
     } catch (error) {
       if (!["EEXIST", "EPERM", "EBUSY"].includes(error?.code)) throw error;
       try {
@@ -590,7 +617,9 @@ export function createDevCheckpointService({
     try {
       const info = await lstat(target);
       if (info.isSymbolicLink() || !info.isFile() || info.size > effectiveQuotas.maxManifestBytes) throw new Error("Checkpoint identity manifest path is unsafe.");
-      return validateIdentityManifest(JSON.parse(await readFile(target, "utf8")));
+      const manifest = validateIdentityManifest(JSON.parse(await readFile(target, "utf8")));
+      if (manifest.checkpoint_id !== checkpointId) throw new Error("Checkpoint identity manifest filename/ID mismatch.");
+      return manifest;
     } catch (error) {
       if (error?.code === "ENOENT") throw checkpointError("CHECKPOINT_NOT_FOUND", `Unknown checkpoint: ${checkpointId}.`);
       if (error?.code?.startsWith?.("CHECKPOINT_")) throw error;
@@ -622,25 +651,30 @@ export function createDevCheckpointService({
     return ids.sort();
   }
 
-  async function reconcileRegistryUnlocked() {
+  async function reconcileRegistryUnlocked(identityManifests = new Map()) {
     const registry = await readRegistryUnlocked();
     const identities = await listIdentityIdsUnlocked();
+    const identityIds = new Set(identities);
     const byId = new Map(registry.checkpoints.map((entry) => [entry.checkpoint_id, entry]));
     let changed = false;
-    for (const checkpointId of identities) {
-      const identity = await readIdentity(checkpointId);
-      const existing = byId.get(checkpointId);
-      if (!existing) {
-        const entry = registryEntryFromIdentity(identity);
-        registry.checkpoints.push(entry);
-        byId.set(checkpointId, entry);
-        changed = true;
-      } else if (existing.checkpoint_content_id !== identity.checkpoint_content_id || existing.manifest_identity !== identity.manifest_identity || existing.workstream_id !== identity.workstream_id || existing.workspace_id !== identity.workspace_id) {
-        throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint registry/manifest identity mismatch: ${checkpointId}.`);
+    for (let offset = 0; offset < identities.length; offset += DEV_CHECKPOINT_VERIFY_CONCURRENCY) {
+      const manifests = await mapCheckpointReads(identities.slice(offset, offset + DEV_CHECKPOINT_VERIFY_CONCURRENCY), readIdentity);
+      for (const identity of manifests) {
+        const checkpointId = identity.checkpoint_id;
+        if (identityManifests.size < DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES) identityManifests.set(checkpointId, identity);
+        const existing = byId.get(checkpointId);
+        if (!existing) {
+          const entry = registryEntryFromIdentity(identity);
+          registry.checkpoints.push(entry);
+          byId.set(checkpointId, entry);
+          changed = true;
+        } else if (existing.checkpoint_content_id !== identity.checkpoint_content_id || existing.manifest_identity !== identity.manifest_identity || existing.workstream_id !== identity.workstream_id || existing.workspace_id !== identity.workspace_id) {
+          throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint registry/manifest identity mismatch: ${checkpointId}.`);
+        }
       }
     }
     for (const entry of registry.checkpoints) {
-      if (!identities.includes(entry.checkpoint_id)) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint registry references missing immutable identity manifest: ${entry.checkpoint_id}.`);
+      if (!identityIds.has(entry.checkpoint_id)) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint registry references missing immutable identity manifest: ${entry.checkpoint_id}.`);
     }
     if (changed) await writeRegistryUnlocked(registry);
     return registry;
@@ -695,10 +729,21 @@ export function createDevCheckpointService({
     return records;
   }
 
-  async function validateCheckpointManifestsUnlocked(registry) {
-    for (const entry of registry.checkpoints) {
-      const identity = await readIdentity(entry.checkpoint_id);
-      const content = await readContent(identity.checkpoint_content_id);
+  async function validateCheckpointManifestsUnlocked(registry, identityManifests = new Map()) {
+    // Request-local evidence only, while the same maintenance lock is held.
+    // Deduplicated checkpoints share immutable content, never lifecycle state.
+    const contents = new Map();
+    const referenced = new Map();
+    let logicalBytes = 0;
+    await mapCheckpointReads(registry.checkpoints, async (entry) => {
+      const identity = identityManifests.get(entry.checkpoint_id) ?? await readIdentity(entry.checkpoint_id);
+      let pending = contents.get(identity.checkpoint_content_id);
+      if (!pending) {
+        pending = readContent(identity.checkpoint_content_id);
+        if (contents.size >= DEV_CHECKPOINT_MANIFEST_CACHE_ENTRIES) contents.delete(contents.keys().next().value);
+        contents.set(identity.checkpoint_content_id, pending);
+      }
+      const content = await pending;
       if (
         identity.checkpoint_content_id !== entry.checkpoint_content_id
         || identity.manifest_identity !== entry.manifest_identity
@@ -707,16 +752,7 @@ export function createDevCheckpointService({
       ) {
         throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint registry/identity/content mismatch: ${entry.checkpoint_id}.`);
       }
-    }
-  }
-
-  async function activeRootSetUnlocked(registry, { verify = true } = {}) {
-    const referenced = new Map();
-    let logicalBytes = 0;
-    for (const entry of registry.checkpoints.filter((candidate) => candidate.state === "active")) {
-      const identity = await readIdentity(entry.checkpoint_id);
-      const content = await readContent(identity.checkpoint_content_id);
-      if (identity.git_head !== content.git_head || identity.workspace_snapshot_id !== content.workspace_snapshot_id) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint identity/content mismatch: ${entry.checkpoint_id}.`);
+      if (entry.state !== "active") return;
       for (const artifact of content.artifacts) {
         if (!artifact.blob) continue;
         logicalBytes += artifact.blob.bytes;
@@ -724,15 +760,14 @@ export function createDevCheckpointService({
         if (prior && prior.bytes !== artifact.blob.bytes) throw checkpointError("CHECKPOINT_STORE_CORRUPT", `Checkpoint blob descriptor collision: ${artifact.blob.sha256}.`);
         referenced.set(artifact.blob.sha256, artifact.blob);
       }
-    }
-    if (verify) for (const descriptor of referenced.values()) await verifyBlob(descriptor);
+    });
     return { referenced, logicalBytes };
   }
 
-  async function storeStatisticsUnlocked(registry, { verify = true } = {}) {
-    await validateCheckpointManifestsUnlocked(registry);
+  async function storeStatisticsUnlocked(registry, { verify = true, identityManifests = new Map() } = {}) {
+    const roots = await validateCheckpointManifestsUnlocked(registry, identityManifests);
     const blobs = await listBlobRecordsUnlocked({ verifyDigests: verify });
-    const roots = await activeRootSetUnlocked(registry, { verify });
+    if (verify) await mapCheckpointReads([...roots.referenced.values()], async (descriptor) => { await verifyBlob(descriptor); });
     const physicalBytes = blobs.reduce((sum, item) => sum + item.bytes, 0);
     const referencedPhysicalBytes = blobs.filter((item) => roots.referenced.has(item.sha256)).reduce((sum, item) => sum + item.bytes, 0);
     const reclaimable = blobs.filter((item) => !roots.referenced.has(item.sha256));
@@ -746,19 +781,21 @@ export function createDevCheckpointService({
       reclaimable_bytes: reclaimable.reduce((sum, item) => sum + item.bytes, 0),
       reclaimable_blob_count: reclaimable.length,
       reclaimable,
+      blobs,
     };
   }
 
   async function loadCheckpoint(checkpointId, { requireActive = false, verifyBlobs = false } = {}) {
     return withLock(async () => {
-      const registry = await reconcileRegistryUnlocked();
+      const identities = new Map();
+      const registry = await reconcileRegistryUnlocked(identities);
       const entry = registry.checkpoints.find((candidate) => candidate.checkpoint_id === assertCheckpointId(checkpointId));
       if (!entry) throw checkpointError("CHECKPOINT_NOT_FOUND", `Unknown checkpoint: ${checkpointId}.`);
       if (requireActive && entry.state !== "active") throw checkpointError("CHECKPOINT_DELETED", "Deleted checkpoint is not an active recovery/read root.");
-      const identity = await readIdentity(checkpointId);
+      const identity = identities.get(checkpointId) ?? await readIdentity(checkpointId);
       const content = await readContent(identity.checkpoint_content_id);
       if (identity.git_head !== content.git_head || identity.workspace_snapshot_id !== content.workspace_snapshot_id) throw checkpointError("CHECKPOINT_STORE_CORRUPT", "Checkpoint identity/content snapshot mismatch.");
-      if (verifyBlobs) for (const artifact of content.artifacts) if (artifact.blob) await verifyBlob(artifact.blob);
+      if (verifyBlobs) await mapCheckpointReads(content.artifacts.filter((artifact) => artifact.blob), async (artifact) => { await verifyBlob(artifact.blob); });
       return { entry: structuredClone(entry), identity, content };
     });
   }
@@ -815,13 +852,14 @@ export function createDevCheckpointService({
     let reusedBytes = 0;
     try {
       const result = await withLock(async () => {
-        const registry = await reconcileRegistryUnlocked();
+        const identityManifests = new Map();
+        const registry = await reconcileRegistryUnlocked(identityManifests);
         const activeWorkspaceCount = registry.checkpoints.filter((entry) => entry.state === "active" && entry.workspace_id === context.workspace_id).length;
         const activeWorkstreamCount = registry.checkpoints.filter((entry) => entry.state === "active" && entry.workstream_id === context.workstream_id).length;
         if (activeWorkspaceCount >= effectiveQuotas.maxCheckpointsPerWorkspace || activeWorkstreamCount >= effectiveQuotas.maxCheckpointsPerWorkstream) throw checkpointError("CHECKPOINT_QUOTA_EXCEEDED", "Checkpoint count quota exceeded; explicit deletion is required before creating more checkpoints.");
-        const statistics = await storeStatisticsUnlocked(registry, { verify: true });
+        const statistics = await storeStatisticsUnlocked(registry, { verify: true, identityManifests });
         const uniqueDescriptors = new Map(capture.artifacts.filter((artifact) => artifact.blob).map((artifact) => [artifact.blob.sha256, artifact.blob]));
-        const blobRecords = await listBlobRecordsUnlocked();
+        const blobRecords = statistics.blobs;
         const existing = new Set(blobRecords.map((item) => item.sha256));
         const missingBytes = [...uniqueDescriptors.values()].filter((descriptor) => !existing.has(descriptor.sha256)).reduce((sum, descriptor) => sum + descriptor.bytes, 0);
         if (statistics.physical_blob_bytes + missingBytes > effectiveQuotas.maxPhysicalBlobBytes) throw checkpointError("CHECKPOINT_QUOTA_EXCEEDED", "Checkpoint physical blob-store quota exceeded; no automatic retention deletion is permitted.");
@@ -944,7 +982,7 @@ export function createDevCheckpointService({
     if (loaded.entry.internal_purpose) throw checkpointError("CHECKPOINT_INTERNAL", "Internal transaction recovery checkpoints are not exposed through the public checkpoint detail surface.");
     let health = "healthy";
     if (loaded.entry.state === "active") {
-      try { for (const artifact of loaded.content.artifacts) if (artifact.blob) await verifyBlob(artifact.blob); } catch { health = "corrupt"; }
+      try { await mapCheckpointReads(loaded.content.artifacts.filter((artifact) => artifact.blob), async (artifact) => { await verifyBlob(artifact.blob); }); } catch { health = "corrupt"; }
     } else health = "degraded";
     return {
       ...structuredClone(loaded.entry),
@@ -1263,13 +1301,14 @@ export function createDevCheckpointService({
   async function status() {
     try {
       return await withLock(async () => {
-        const registry = await reconcileRegistryUnlocked();
-        const statistics = await storeStatisticsUnlocked(registry, { verify: true });
-        const { reclaimable, ...publicStats } = statistics;
+        const identityManifests = new Map();
+        const registry = await reconcileRegistryUnlocked(identityManifests);
+        const statistics = await storeStatisticsUnlocked(registry, { verify: true, identityManifests });
+        const { reclaimable, blobs, ...publicStats } = statistics;
         return { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: "healthy", registry_revision: registry.revision, storage: "server_owned_content_addressed_checkpoint_store", ...publicStats };
       });
     } catch (error) {
-      return { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: "corrupt", registry_revision: null, storage: "server_owned_content_addressed_checkpoint_store", checkpoint_count: null, active_count: null, deleted_count: null, physical_blob_bytes: null, logical_checkpoint_bytes: null, deduplicated_bytes_saved: null, reclaimable_bytes: null, reclaimable_blob_count: null, last_health_error: String(error.message).slice(0, 1024) };
+      return { schema_version: DEV_CHECKPOINT_SCHEMA_VERSION, health: error.code === "CHECKPOINT_STORE_BUSY" ? "degraded" : "corrupt", registry_revision: null, storage: "server_owned_content_addressed_checkpoint_store", checkpoint_count: null, active_count: null, deleted_count: null, physical_blob_bytes: null, logical_checkpoint_bytes: null, deduplicated_bytes_saved: null, reclaimable_bytes: null, reclaimable_blob_count: null, last_health_error: String(error.message).slice(0, 1024), last_health_error_code: error.code ?? null };
     }
   }
 
@@ -1280,8 +1319,9 @@ export function createDevCheckpointService({
     const operation = await journalApi.begin({ operation_type: "checkpoint_gc", tool_name: "dev_workspace_checkpoint_gc", workspace_id: "dev_workspace_shared_repository_v1", result: { dry_run: dryRun } });
     try {
       const result = await withLock(async () => {
-        const registry = await reconcileRegistryUnlocked();
-        const statistics = await storeStatisticsUnlocked(registry, { verify: true });
+        const identityManifests = new Map();
+        const registry = await reconcileRegistryUnlocked(identityManifests);
+        const statistics = await storeStatisticsUnlocked(registry, { verify: true, identityManifests });
         let reclaimedBytes = 0;
         let reclaimedCount = 0;
         if (!dryRun) {
