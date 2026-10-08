@@ -200,7 +200,7 @@ export function createStdioSession(options = {}) {
   }
 
   function registerListener(id, callback, options = {}) {
-    const timeoutMs = boundedInteger(options.timeoutMs, callTimeoutMs, 100, 30 * 60 * 1000);
+    const timeoutMs = boundedInteger(options.timeoutMs, callTimeoutMs, 100, MAX_LONG_TOOL_CALL_TIMEOUT_MS);
     const listenerGeneration = generation;
     const timer = setTimeout(() => {
       const entry = listeners.get(id);

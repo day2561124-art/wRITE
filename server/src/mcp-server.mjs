@@ -2107,13 +2107,15 @@ const toolDefinitions = [
       workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
     }),
     handler: async args => {
-      const route = await piProductionController.status();
-      if (Object.keys(args).length === 0) return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
+      if (Object.keys(args).length === 0) {
+        const route = await piProductionController.status();
+        return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
+      }
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap
         ? args.workstream_id!==undefined || args.workspace_id!==undefined
         : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
-      return jsonContent({ route, operation: await piProductionController.inspect({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
-        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }) });
+      return jsonContent(await piProductionController.inspectStatus({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
+        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }));
     },
   },
   {

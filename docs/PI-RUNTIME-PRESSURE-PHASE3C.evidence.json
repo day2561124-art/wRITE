@@ -1,0 +1,4632 @@
+{
+  "schema_version": 1,
+  "phase": "3C",
+  "baseline_commit": "a88f09d7344f0b624b2cc39fef1a070f3d271a3c",
+  "generated_at_utc": "2026-10-08T16:31:45.549Z",
+  "lease": {
+    "start_utc": "2026-10-08T14:42:28Z",
+    "deadline_utc": "2026-10-08T15:07:28Z"
+  },
+  "closure_round": {
+    "start_utc": "2026-10-08T16:28:32Z",
+    "scope": "Finish existing regressions, diff-check and candidate commit only",
+    "latest_user_constraint": "No resubmit, resume or replacement intent; original live operation may only be inspected read-only."
+  },
+  "branch": "codex/pi-runtime-pressure-phase1",
+  "candidate_clean_at_start": true,
+  "ownership": {
+    "active_workstreams": 7,
+    "journal_owner": "Pi Continuation",
+    "reliable_store_owner": "UER",
+    "conflicting_files_modified": false
+  },
+  "original_operation": {
+    "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+    "intent_id": "phase3-live-bootstrap-20261008-2146",
+    "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+    "exact_intent": {
+      "bootstrap": true,
+      "completion_conditions": [
+        "Verify exact output and durable evidence"
+      ],
+      "constraints": [
+        "No existing production routing or other workspace changes"
+      ],
+      "context": {
+        "project_id": "writer_workbench",
+        "workspace_id": "dev_workspace_shared_repository_v1",
+        "workstream_id": null
+      },
+      "decision_boundaries": [
+        "implementation_failure",
+        "architecture_conflict",
+        "test_expectation_conflict",
+        "scope_expansion",
+        "multiple_implementation_choices",
+        "unexpected_semantic_behavior",
+        "requirement_ambiguity",
+        "git_semantic_conflict",
+        "validation_failure",
+        "unsafe_ambiguous_mutation"
+      ],
+      "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+      "intent_id": "phase3-live-bootstrap-20261008-2146",
+      "mutation_plan": [
+        {
+          "expected_change": "Execute precisely authored capability once",
+          "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+          "step_id": "begin",
+          "target": "bootstrap_workstream"
+        },
+        {
+          "expected_change": "Execute precisely authored capability once",
+          "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "step_id": "isolate",
+          "target": "bootstrap_workstream"
+        }
+      ],
+      "permissions": {
+        "commit": false,
+        "integrate": false,
+        "push": false,
+        "read": true,
+        "tests": false,
+        "workspace_create": true,
+        "write": true
+      },
+      "requested_actions": [
+        {
+          "capability": "workspace.begin_workstream",
+          "depends_on": [],
+          "idempotency_key": "phase3-live-begin-20261008-2146",
+          "input": {
+            "declared_scope": [
+              "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+            ],
+            "label": "Pi Pressure Phase3 owned live verification"
+          },
+          "step_id": "begin"
+        },
+        {
+          "capability": "workspace.create_isolated",
+          "depends_on": [
+            "begin"
+          ],
+          "idempotency_key": "phase3-live-isolate-20261008-2146",
+          "input": {},
+          "step_id": "isolate"
+        }
+      ],
+      "schema_version": 1,
+      "verification": {
+        "affected": [],
+        "focused": [],
+        "full": []
+      }
+    },
+    "initial_status": "PREPARING",
+    "initial_revision": 4,
+    "recovery_gate": "Verified exact durable contract/state, healthy chain, absent owner with host positive control, both original keys formally not_admitted/reinitiate_requires_same_key; Pi rechecks fencing and CAS.",
+    "resume_attempts": 1,
+    "replacement_intents": 0,
+    "result": "UNKNOWN",
+    "recovery_closure": "BLOCKED",
+    "authoritative_post_status": {
+      "route": {
+        "decision_id": "gpt-phase-f-default-20261004-793bf759",
+        "decision_owner": "GPT",
+        "gate_hash": "cc019712463af7fd0f8878bf4afdbdbe806a85548f85cf1c994eb0446a04574a",
+        "mode": "pi_default",
+        "previous_route_hash": null,
+        "revision": 1,
+        "route_hash": "58ef3587fec839f80e2ec0bdc3b59d6bb6bb193ab2863e5b50023c3f2f3f28e0",
+        "schema_version": 1,
+        "updated_at": "2026-10-03T19:08:33.015Z"
+      },
+      "operation": {
+        "action_type": "tool_call_started",
+        "command": {
+          "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+          "step_id": "begin",
+          "type": "tool_call_started",
+          "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+        },
+        "intent": {
+          "bootstrap": true,
+          "completion_conditions": [
+            "Verify exact output and durable evidence"
+          ],
+          "constraints": [
+            "No existing production routing or other workspace changes"
+          ],
+          "context": {
+            "project_id": "writer_workbench",
+            "workspace_id": "dev_workspace_shared_repository_v1",
+            "workstream_id": null
+          },
+          "decision_boundaries": [
+            "implementation_failure",
+            "architecture_conflict",
+            "test_expectation_conflict",
+            "scope_expansion",
+            "multiple_implementation_choices",
+            "unexpected_semantic_behavior",
+            "requirement_ambiguity",
+            "git_semantic_conflict",
+            "validation_failure",
+            "unsafe_ambiguous_mutation"
+          ],
+          "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+          "intent_id": "phase3-live-bootstrap-20261008-2146",
+          "mutation_plan": [
+            {
+              "expected_change": "Execute precisely authored capability once",
+              "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+              "step_id": "begin",
+              "target": "bootstrap_workstream"
+            },
+            {
+              "expected_change": "Execute precisely authored capability once",
+              "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "step_id": "isolate",
+              "target": "bootstrap_workstream"
+            }
+          ],
+          "permissions": {
+            "commit": false,
+            "integrate": false,
+            "push": false,
+            "read": true,
+            "tests": false,
+            "workspace_create": true,
+            "write": true
+          },
+          "requested_actions": [
+            {
+              "capability": "workspace.begin_workstream",
+              "depends_on": [],
+              "idempotency_key": "phase3-live-begin-20261008-2146",
+              "input": {
+                "declared_scope": [
+                  "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                ],
+                "label": "Pi Pressure Phase3 owned live verification"
+              },
+              "step_id": "begin"
+            },
+            {
+              "capability": "workspace.create_isolated",
+              "depends_on": [
+                "begin"
+              ],
+              "idempotency_key": "phase3-live-isolate-20261008-2146",
+              "input": {},
+              "step_id": "isolate"
+            }
+          ],
+          "schema_version": 1,
+          "verification": {
+            "affected": [],
+            "focused": [],
+            "full": []
+          }
+        },
+        "previous_projection_hash": "086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d",
+        "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+        "revision": 7,
+        "runtime": {
+          "active_call": {
+            "attempt": 1,
+            "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+            "idempotency_key": "phase3-live-begin-20261008-2146",
+            "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+            "mutation": true,
+            "phase": "EXECUTING",
+            "reconciliation_attempt": 0,
+            "step_id": "begin"
+          },
+          "lifecycle_binding": null,
+          "owner": {
+            "hostname": "SDCP",
+            "pid": 6176,
+            "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+          },
+          "retry_at": null,
+          "retry_policy": {
+            "base_delay_ms": 250,
+            "max_attempts": 3,
+            "max_delay_ms": 5000
+          }
+        },
+        "schema_version": 2,
+        "state": {
+          "bootstrap": true,
+          "checkpoint": {
+            "at_revision": 7,
+            "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "phase": "EXECUTING",
+            "schema_version": 2,
+            "step_id": "begin",
+            "workspace_id": "dev_workspace_shared_repository_v1"
+          },
+          "completed_at": null,
+          "completed_steps": [],
+          "created_at": "2026-10-08T13:52:46.360Z",
+          "current_phase": "EXECUTING",
+          "current_step": "begin",
+          "idempotency_keys": {
+            "begin": "phase3-live-begin-20261008-2146",
+            "isolate": "phase3-live-isolate-20261008-2146"
+          },
+          "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+          "intent_id": "phase3-live-bootstrap-20261008-2146",
+          "last_error": null,
+          "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+          "parent_operation_id": null,
+          "pending_steps": [
+            "begin",
+            "isolate"
+          ],
+          "project_id": "writer_workbench",
+          "resume_point": null,
+          "retry_count": 0,
+          "schema_version": 1,
+          "status": "EXECUTING",
+          "tool_calls": [
+            {
+              "attempt": 1,
+              "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+              "idempotency_key": "phase3-live-begin-20261008-2146",
+              "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+              "mutation": true,
+              "phase": "EXECUTING",
+              "reconciliation_attempt": 0,
+              "started_at": "2026-10-08T14:54:01.379Z",
+              "step_id": "begin"
+            }
+          ],
+          "tool_results": [],
+          "updated_at": "2026-10-08T14:54:01.379Z",
+          "verification_state": {
+            "affected": "not_requested",
+            "focused": "not_requested",
+            "full": "not_requested"
+          },
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        "receipts": [],
+        "journal_receipt": {
+          "operation_id": "dev_operation_a0590c98212b488da9eaf93670dd6df7",
+          "event_id": "dev_journal_event_da0efebdaad04e528a200c0d8af53c97",
+          "sequence": 51368,
+          "event_hash": "47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015"
+        },
+        "result": {
+          "schema_version": 2,
+          "phase": "F",
+          "mode": "production_default",
+          "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+          "intent_id": "phase3-live-bootstrap-20261008-2146",
+          "revision": 7,
+          "status": "EXECUTING",
+          "completed": [],
+          "remaining": [
+            "begin",
+            "isolate"
+          ],
+          "verification": {
+            "affected": "not_requested",
+            "focused": "not_requested",
+            "full": "not_requested"
+          },
+          "checkpoint": {
+            "at_revision": 7,
+            "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "phase": "EXECUTING",
+            "schema_version": 2,
+            "step_id": "begin",
+            "workspace_id": "dev_workspace_shared_repository_v1"
+          },
+          "resume_point": null,
+          "decision_required": false,
+          "retry_at": null,
+          "persistence_enabled": true,
+          "execution_enabled": true,
+          "resume_dispatch_enabled": true,
+          "execution_context": null,
+          "engineering_review_required": true,
+          "production_default_changed": true,
+          "model_requests": 0,
+          "decision_owner": "GPT",
+          "execution_owner": "Pi",
+          "tool_owner": "MCP",
+          "legacy_migration": false
+        }
+      }
+    },
+    "last_formal_status": "EXECUTING",
+    "warning": "If post query is incomplete, last formal state predates the resume. Bounded filesystem observations are not terminal authority.",
+    "local_bounded_history": {
+      "head_sequence": 51382,
+      "events": [
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "5716a0e9f51156fd7d092015b0a432391fa41c8a02b056177790bbe93d599066",
+          "journal_event_id": "dev_journal_event_95a367e8c5b041e8b7115259ca12d373",
+          "links": [],
+          "operation_id": "dev_operation_6527e47236ed4e0bafc5c5afade647d7",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "67db37bcaa37bf987b523fee6bacb5d231ff32da3a2fa4664b1f1652b99e2519",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "operation_created",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "10b025781a48b450636c39a15fed425526eb31b6a82c6caa581a8468ed963bdb",
+            "result_hash": "6efcaee4b14bb11af3de65bf16ef5b0629a7e12da0957ba0402a583a195b5a26",
+            "state_after": "CREATED",
+            "state_before": null,
+            "state_revision": 1,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51355,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T13:53:03.057Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "3559468226f9f9304527e15fadb2b680a94e388dfaca5e3ad7815cebfb65d3e2",
+          "execution_projection": {
+            "action_type": "operation_created",
+            "command": {
+              "production_binding": {
+                "route_hash": "58ef3587fec839f80e2ec0bdc3b59d6bb6bb193ab2863e5b50023c3f2f3f28e0",
+                "route_revision": 1
+              },
+              "type": "operation_created"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": null,
+            "projection_hash": "10b025781a48b450636c39a15fed425526eb31b6a82c6caa581a8468ed963bdb",
+            "revision": 1,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": null,
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "CREATED",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "CREATED",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T13:52:46.360Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_95d1fc36dac44da0ab72a5caafcfaeae",
+          "links": [],
+          "operation_id": "dev_operation_6527e47236ed4e0bafc5c5afade647d7",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "5716a0e9f51156fd7d092015b0a432391fa41c8a02b056177790bbe93d599066",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "operation_created",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "10b025781a48b450636c39a15fed425526eb31b6a82c6caa581a8468ed963bdb",
+            "result_hash": "6efcaee4b14bb11af3de65bf16ef5b0629a7e12da0957ba0402a583a195b5a26",
+            "state_after": "CREATED",
+            "state_before": null,
+            "state_revision": 1,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51356,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T13:53:03.057Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "75461399499d2a917f8522d3d977c350050b52014061adfdb8be311121331bd3",
+          "journal_event_id": "dev_journal_event_dcaa9c2658154d638c31af5d959e589f",
+          "links": [],
+          "operation_id": "dev_operation_017f852c11144a1580b8ee7a94922bd9",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "3559468226f9f9304527e15fadb2b680a94e388dfaca5e3ad7815cebfb65d3e2",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "owner_acquired",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "d4fd6a3bf460152d23c51aa7cabfe71fb13a9292bff10336f3686911eaf6969d",
+            "result_hash": "2d2ea5eb0f4ce09ddb6253c88d8114b66f918362f9a1da79a7291b6032050cfa",
+            "state_after": "CREATED",
+            "state_before": "CREATED",
+            "state_revision": 2,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51357,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T13:54:01.185Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "8e65e892fa201e607b15de6c234d8b5114f9edf23732daf6184a35d9ba1ab801",
+          "execution_projection": {
+            "action_type": "owner_acquired",
+            "command": {
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 27008,
+                "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+              },
+              "replaced_worker_id": null,
+              "type": "owner_acquired"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "10b025781a48b450636c39a15fed425526eb31b6a82c6caa581a8468ed963bdb",
+            "projection_hash": "d4fd6a3bf460152d23c51aa7cabfe71fb13a9292bff10336f3686911eaf6969d",
+            "revision": 2,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 27008,
+                "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "CREATED",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "CREATED",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T13:53:44.448Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_81bd0b707ae14e7f8a424a850fa20954",
+          "links": [],
+          "operation_id": "dev_operation_017f852c11144a1580b8ee7a94922bd9",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "75461399499d2a917f8522d3d977c350050b52014061adfdb8be311121331bd3",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "owner_acquired",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "d4fd6a3bf460152d23c51aa7cabfe71fb13a9292bff10336f3686911eaf6969d",
+            "result_hash": "2d2ea5eb0f4ce09ddb6253c88d8114b66f918362f9a1da79a7291b6032050cfa",
+            "state_after": "CREATED",
+            "state_before": "CREATED",
+            "state_revision": 2,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51358,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T13:54:01.185Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "18a17898e597fbfe68b1ea68770a38e11cc51fba0cbe4cfce3df4bd63d6ceef4",
+          "journal_event_id": "dev_journal_event_6cb2c9d67fe84d3598dc4bbe51ad9a3e",
+          "links": [],
+          "operation_id": "dev_operation_803e07754e9449d19b48ff3a61769dc8",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "8e65e892fa201e607b15de6c234d8b5114f9edf23732daf6184a35d9ba1ab801",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46",
+            "result_hash": "145b10301ce4bc9688b2cd646a73c7dd9b78844fa4a99b58cd838eb7e5b09f4f",
+            "state_after": "ADMITTED",
+            "state_before": "CREATED",
+            "state_revision": 3,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51359,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T13:54:50.304Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "8b49c69ec867b7bea8b6ccfdabc7a0936d874c902545e667bf99b800c3d5e832",
+          "execution_projection": {
+            "action_type": "phase_changed",
+            "command": {
+              "status": "ADMITTED",
+              "type": "phase_changed",
+              "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "d4fd6a3bf460152d23c51aa7cabfe71fb13a9292bff10336f3686911eaf6969d",
+            "projection_hash": "c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46",
+            "revision": 3,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 27008,
+                "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "ADMITTED",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "ADMITTED",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T13:54:34.906Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_46060eee855b46f897008a3e72c43d32",
+          "links": [],
+          "operation_id": "dev_operation_803e07754e9449d19b48ff3a61769dc8",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "18a17898e597fbfe68b1ea68770a38e11cc51fba0cbe4cfce3df4bd63d6ceef4",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46",
+            "result_hash": "145b10301ce4bc9688b2cd646a73c7dd9b78844fa4a99b58cd838eb7e5b09f4f",
+            "state_after": "ADMITTED",
+            "state_before": "CREATED",
+            "state_revision": 3,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51360,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T13:54:50.304Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "df0b52b25d4dc5e8ba32641f3e953cc080dd5d30abd77a3f04245a842f921d1f",
+          "journal_event_id": "dev_journal_event_e6d45df5a8c74df5a6886d5c28e76f65",
+          "links": [],
+          "operation_id": "dev_operation_58072f2a2e56434f86cec2cc335c4ddb",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "8b49c69ec867b7bea8b6ccfdabc7a0936d874c902545e667bf99b800c3d5e832",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a",
+            "result_hash": "3317df2960a73f28e24af66fc2d9ccbbbba0434e4ccfbe6751f3885fd04da386",
+            "state_after": "PREPARING",
+            "state_before": "ADMITTED",
+            "state_revision": 4,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51361,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T13:55:42.771Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 27008
+          },
+          "event_hash": "f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e",
+          "execution_projection": {
+            "action_type": "phase_changed",
+            "command": {
+              "status": "PREPARING",
+              "type": "phase_changed",
+              "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46",
+            "projection_hash": "388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a",
+            "revision": 4,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 27008,
+                "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "PREPARING",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "PREPARING",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T13:55:25.323Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f",
+          "links": [],
+          "operation_id": "dev_operation_58072f2a2e56434f86cec2cc335c4ddb",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "df0b52b25d4dc5e8ba32641f3e953cc080dd5d30abd77a3f04245a842f921d1f",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a",
+            "result_hash": "3317df2960a73f28e24af66fc2d9ccbbbba0434e4ccfbe6751f3885fd04da386",
+            "state_after": "PREPARING",
+            "state_before": "ADMITTED",
+            "state_revision": 4,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51362,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T13:55:42.771Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "2f735c40e2bb0d682b1bd8d64c52dbd8728917ceeda823e268e5268f79f61871",
+          "journal_event_id": "dev_journal_event_41e2b2e26a1d4a8bbc94e5a30ee9e2b1",
+          "links": [],
+          "operation_id": "dev_operation_16a38f3603f44fe7952f26363f6a8115",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "owner_acquired",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "feb7a8a6c3d1ff2f80bfaf5abac7933bffeca3d70d26d47d9da9aeb2d2fb62bc",
+            "result_hash": "5fab8477db46c344245a2cc18d54c4e99721543bb0156e9c5b8fdcf762d526d7",
+            "state_after": "PREPARING",
+            "state_before": "PREPARING",
+            "state_revision": 5,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51363,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T14:52:19.686Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "b21e7ffe67f079a7650a89b908b8f4341b758b256e354bccff42b0ac863fbe81",
+          "execution_projection": {
+            "action_type": "owner_acquired",
+            "command": {
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 6176,
+                "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+              },
+              "replaced_worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d",
+              "type": "owner_acquired"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a",
+            "projection_hash": "feb7a8a6c3d1ff2f80bfaf5abac7933bffeca3d70d26d47d9da9aeb2d2fb62bc",
+            "revision": 5,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 6176,
+                "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "PREPARING",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "PREPARING",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T14:52:00.901Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_9e351ab7d833453da7ad44b9dc4cc71b",
+          "links": [],
+          "operation_id": "dev_operation_16a38f3603f44fe7952f26363f6a8115",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "2f735c40e2bb0d682b1bd8d64c52dbd8728917ceeda823e268e5268f79f61871",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "owner_acquired",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "feb7a8a6c3d1ff2f80bfaf5abac7933bffeca3d70d26d47d9da9aeb2d2fb62bc",
+            "result_hash": "5fab8477db46c344245a2cc18d54c4e99721543bb0156e9c5b8fdcf762d526d7",
+            "state_after": "PREPARING",
+            "state_before": "PREPARING",
+            "state_revision": 5,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51364,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T14:52:19.686Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "c7b3dbe1c7ad61c497ed914e5c59fe22d1afc32f698dfd228f9812b5c1078d08",
+          "journal_event_id": "dev_journal_event_04851fa20abf4cc78862a6ceb46f3529",
+          "links": [],
+          "operation_id": "dev_operation_6d15e5e4b121408b9c85a4aca77bb372",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "b21e7ffe67f079a7650a89b908b8f4341b758b256e354bccff42b0ac863fbe81",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d",
+            "result_hash": "ab02a4707e6c0d6475ac85c0392cc95463851dd97e085577ef0f70e5f258af2c",
+            "state_after": "EXECUTING",
+            "state_before": "PREPARING",
+            "state_revision": 6,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51365,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T14:53:20.127Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "77bd38e20273ee2d81aa6b6bdc9d903b1db63d90470904c9f99b32af759e208a",
+          "execution_projection": {
+            "action_type": "phase_changed",
+            "command": {
+              "status": "EXECUTING",
+              "type": "phase_changed",
+              "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "feb7a8a6c3d1ff2f80bfaf5abac7933bffeca3d70d26d47d9da9aeb2d2fb62bc",
+            "projection_hash": "086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d",
+            "revision": 6,
+            "runtime": {
+              "active_call": null,
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 6176,
+                "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": null,
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "EXECUTING",
+              "current_step": null,
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "EXECUTING",
+              "tool_calls": [],
+              "tool_results": [],
+              "updated_at": "2026-10-08T14:53:01.505Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_b7f24aff3fa14bf186a2663de04bd451",
+          "links": [],
+          "operation_id": "dev_operation_6d15e5e4b121408b9c85a4aca77bb372",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "c7b3dbe1c7ad61c497ed914e5c59fe22d1afc32f698dfd228f9812b5c1078d08",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "phase_changed",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d",
+            "result_hash": "ab02a4707e6c0d6475ac85c0392cc95463851dd97e085577ef0f70e5f258af2c",
+            "state_after": "EXECUTING",
+            "state_before": "PREPARING",
+            "state_revision": 6,
+            "step_id": null
+          },
+          "schema_version": 1,
+          "sequence": 51366,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T14:53:20.127Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "6879b32aeb74b859adb5b9f798ce1a93431f18eba62c77bd167f1ebeb22c133c",
+          "journal_event_id": "dev_journal_event_5cc4ecfeff9e489582ff3f6aff93fff9",
+          "links": [],
+          "operation_id": "dev_operation_a0590c98212b488da9eaf93670dd6df7",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "77bd38e20273ee2d81aa6b6bdc9d903b1db63d90470904c9f99b32af759e208a",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "tool_call_started",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+            "result_hash": "ca683dce249e490f4bfe06e9bcabdaf3ecdcc4c5a2438eb7a125c036805671dc",
+            "state_after": "EXECUTING",
+            "state_before": "EXECUTING",
+            "state_revision": 7,
+            "step_id": "begin"
+          },
+          "schema_version": 1,
+          "sequence": 51367,
+          "stage": "operation_started",
+          "targets": [],
+          "timestamp": "2026-10-08T14:54:20.298Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        {
+          "actor": {
+            "profile": "chatgpt_developer",
+            "runtime": "writer_workbench",
+            "tool_name": "pi.execution.persist"
+          },
+          "diagnostic": {
+            "hostname": "SDCP",
+            "owner_pid": 6176
+          },
+          "event_hash": "47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015",
+          "execution_projection": {
+            "action_type": "tool_call_started",
+            "command": {
+              "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+              "step_id": "begin",
+              "type": "tool_call_started",
+              "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+            },
+            "intent": {
+              "bootstrap": true,
+              "completion_conditions": [
+                "Verify exact output and durable evidence"
+              ],
+              "constraints": [
+                "No existing production routing or other workspace changes"
+              ],
+              "context": {
+                "project_id": "writer_workbench",
+                "workspace_id": "dev_workspace_shared_repository_v1",
+                "workstream_id": null
+              },
+              "decision_boundaries": [
+                "implementation_failure",
+                "architecture_conflict",
+                "test_expectation_conflict",
+                "scope_expansion",
+                "multiple_implementation_choices",
+                "unexpected_semantic_behavior",
+                "requirement_ambiguity",
+                "git_semantic_conflict",
+                "validation_failure",
+                "unsafe_ambiguous_mutation"
+              ],
+              "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "mutation_plan": [
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "step_id": "begin",
+                  "target": "bootstrap_workstream"
+                },
+                {
+                  "expected_change": "Execute precisely authored capability once",
+                  "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                  "step_id": "isolate",
+                  "target": "bootstrap_workstream"
+                }
+              ],
+              "permissions": {
+                "commit": false,
+                "integrate": false,
+                "push": false,
+                "read": true,
+                "tests": false,
+                "workspace_create": true,
+                "write": true
+              },
+              "requested_actions": [
+                {
+                  "capability": "workspace.begin_workstream",
+                  "depends_on": [],
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input": {
+                    "declared_scope": [
+                      "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+                    ],
+                    "label": "Pi Pressure Phase3 owned live verification"
+                  },
+                  "step_id": "begin"
+                },
+                {
+                  "capability": "workspace.create_isolated",
+                  "depends_on": [
+                    "begin"
+                  ],
+                  "idempotency_key": "phase3-live-isolate-20261008-2146",
+                  "input": {},
+                  "step_id": "isolate"
+                }
+              ],
+              "schema_version": 1,
+              "verification": {
+                "affected": [],
+                "focused": [],
+                "full": []
+              }
+            },
+            "previous_projection_hash": "086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d",
+            "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+            "revision": 7,
+            "runtime": {
+              "active_call": {
+                "attempt": 1,
+                "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+                "idempotency_key": "phase3-live-begin-20261008-2146",
+                "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                "mutation": true,
+                "phase": "EXECUTING",
+                "reconciliation_attempt": 0,
+                "step_id": "begin"
+              },
+              "lifecycle_binding": null,
+              "owner": {
+                "hostname": "SDCP",
+                "pid": 6176,
+                "worker_id": "pi_worker_e41b5d0cf75548a394fdad562e714c6d"
+              },
+              "retry_at": null,
+              "retry_policy": {
+                "base_delay_ms": 250,
+                "max_attempts": 3,
+                "max_delay_ms": 5000
+              }
+            },
+            "schema_version": 2,
+            "state": {
+              "bootstrap": true,
+              "checkpoint": {
+                "at_revision": 7,
+                "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+                "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+                "phase": "EXECUTING",
+                "schema_version": 2,
+                "step_id": "begin",
+                "workspace_id": "dev_workspace_shared_repository_v1"
+              },
+              "completed_at": null,
+              "completed_steps": [],
+              "created_at": "2026-10-08T13:52:46.360Z",
+              "current_phase": "EXECUTING",
+              "current_step": "begin",
+              "idempotency_keys": {
+                "begin": "phase3-live-begin-20261008-2146",
+                "isolate": "phase3-live-isolate-20261008-2146"
+              },
+              "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+              "intent_id": "phase3-live-bootstrap-20261008-2146",
+              "last_error": null,
+              "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+              "parent_operation_id": null,
+              "pending_steps": [
+                "begin",
+                "isolate"
+              ],
+              "project_id": "writer_workbench",
+              "resume_point": null,
+              "retry_count": 0,
+              "schema_version": 1,
+              "status": "EXECUTING",
+              "tool_calls": [
+                {
+                  "attempt": 1,
+                  "call_id": "pi_call_826006f41b66429f8b0b01bc0dd603da",
+                  "idempotency_key": "phase3-live-begin-20261008-2146",
+                  "input_hash": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+                  "mutation": true,
+                  "phase": "EXECUTING",
+                  "reconciliation_attempt": 0,
+                  "started_at": "2026-10-08T14:54:01.379Z",
+                  "step_id": "begin"
+                }
+              ],
+              "tool_results": [],
+              "updated_at": "2026-10-08T14:54:01.379Z",
+              "verification_state": {
+                "affected": "not_requested",
+                "focused": "not_requested",
+                "full": "not_requested"
+              },
+              "workspace_id": "dev_workspace_shared_repository_v1",
+              "workstream_id": null
+            }
+          },
+          "journal_event_id": "dev_journal_event_da0efebdaad04e528a200c0d8af53c97",
+          "links": [],
+          "operation_id": "dev_operation_a0590c98212b488da9eaf93670dd6df7",
+          "operation_type": "pi_execution_projection",
+          "parent_operation_id": null,
+          "previous_event_hash": "6879b32aeb74b859adb5b9f798ce1a93431f18eba62c77bd167f1ebeb22c133c",
+          "reconciles_event_id": null,
+          "reconciliation_key": null,
+          "request_fingerprint_sha256": null,
+          "result": {
+            "action_type": "tool_call_started",
+            "execution_schema_version": 2,
+            "input_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+            "intent_id": "phase3-live-bootstrap-20261008-2146",
+            "logical_operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+            "projection_hash": "9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb",
+            "result_hash": "ca683dce249e490f4bfe06e9bcabdaf3ecdcc4c5a2438eb7a125c036805671dc",
+            "state_after": "EXECUTING",
+            "state_before": "EXECUTING",
+            "state_revision": 7,
+            "step_id": "begin"
+          },
+          "schema_version": 1,
+          "sequence": 51368,
+          "stage": "operation_completed",
+          "targets": [],
+          "timestamp": "2026-10-08T14:54:20.298Z",
+          "tool_name": "pi.execution.persist",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        }
+      ],
+      "chain_verified_by_this_read": false
+    },
+    "process_probe": [
+      {
+        "checked_at_utc": "2026-10-08T14:58:39.3283798Z",
+        "pid": 6176,
+        "exists": false,
+        "name": null
+      },
+      {
+        "checked_at_utc": "2026-10-08T14:58:39.5225298Z",
+        "pid": 7348,
+        "exists": true,
+        "name": "node.exe"
+      }
+    ],
+    "retained_owned_session": "ed450214-ef29-476f-97ff-881d2b622600",
+    "mutation_retries_after_timeout": 0
+  },
+  "runtime_fixes": {
+    "status": {
+      "files": [
+        "server/src/pi-production-execution-controller.mjs",
+        "server/src/mcp-server.mjs"
+      ],
+      "cause": "Same read-only operation-status request reloaded execution history five times and route history three times; repeated full validation. No request-local snapshot reuse.",
+      "change": "One fully validated execution snapshot and one validated route history per request; preserved context/enrollment proof and no cross-request caching. Mutation prepare/admission/CAS unchanged.",
+      "measured_scope": "isolated real-journal controller fixture; no production deployment or live after claim"
+    },
+    "timer": {
+      "file": "server/src/mcp-http-stdio-adapter.mjs",
+      "cause": "timeoutForRequest selected existing long-tool timeout 28800000ms; registerListener accepted at most1800000ms, so it silently reverted to ordinary 300000ms in the deployed service.",
+      "change": "Validate listener timeout against the same existing MAX_LONG_TOOL_CALL_TIMEOUT_MS. Existing timeout values/tool allowlist and ordinary status timer unchanged.",
+      "before_regression_failed": true,
+      "before_failure_output": "[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=17 signal=null restarting=false recovering=false closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=false closed=false\r\nnode:internal/modules/run_main:107\r\n    triggerUncaughtException(\r\n    ^\r\n\r\nAssertionError [ERR_ASSERTION]: actual Pi timer must preserve the configured long-tool deadline rather than fall back to ordinary timeout\r\n    at verifyDefaultLongToolTimerPreservesConfiguredTimeout (file:///E:/%E6%AD%A6%E8%A3%9D%E5%AD%B8%E9%99%A2%E7%9A%84%E4%BA%8C%E4%B8%89%E4%BA%8B/.runtime-phase1/tests/mcp/mcp-http-reliability.test.mjs:411:5)\r\n    at async file:///E:/%E6%AD%A6%E8%A3%9D%E5%AD%B8%E9%99%A2%E7%9A%84%E4%BA%8C%E4%B8%89%E4%BA%8B/.runtime-phase1/tests/mcp/mcp-http-reliability.test.mjs:424:1 {\r\n  generatedMessage: false,\r\n  code: 'ERR_ASSERTION',\r\n  actual: false,\r\n  expected: true,\r\n  operator: '==',\r\n  diff: 'simple'\r\n}\r\n\r\nNode.js v24.18.0\r\n",
+      "live_evidence": {
+        "name": "McpError",
+        "code": -32000,
+        "message": "MCP error -32000: Error: MCP child call timed out after 300000ms"
+      },
+      "executor_after_timeout_present": false,
+      "boundary": "Live typed error proves actual child-call deadline 300000ms; source mismatch and fail-before/pass-after timer test confirm mechanism. Original external HTTP504 emitter remains unknown."
+    }
+  },
+  "latency": {
+    "phase3b_live_status_ms": 128700.8791,
+    "phase3c_reproduced_live_status_ms": 129965.4797,
+    "live_scope": "existing deployed loopback HTTP/MCP, not ChatGPT end-to-end",
+    "fixture": {
+      "scope": "isolated real-journal controller fixture; not local live MCP/HTTP/ChatGPT E2E",
+      "baseline_commit": "a88f09d7344f0b624b2cc39fef1a070f3d271a3c",
+      "requests": [
+        {
+          "variant": "baseline",
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "duration_ms": 95.38299999999998,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.326299999999947
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.651499999999999
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.672000000000025
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 9.915599999999984
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.697100000000034
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.462600000000009
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.516500000000008
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.717300000000023
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "f535415f-ef0b-41e0-a974-d6c911f2ca62",
+          "duration_ms": 22.538599999999974,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 9.610599999999977
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.242399999999975
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "duration_ms": 91.5967,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.52940000000001
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.431500000000028
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 9.981499999999983
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.954500000000053
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.823499999999967
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.119800000000055
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 12.313800000000015
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.074600000000032
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "41008e1c-ee18-471c-8a1d-19b81a145115",
+          "duration_ms": 24.8125,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.403500000000008
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.10329999999999
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "duration_ms": 93.69820000000004,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.101499999999987
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 12.420099999999934
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.543800000000033
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.77940000000001
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.049299999999903
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.41560000000004
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.542300000000068
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.68769999999995
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "7bc15a0b-5509-4a2b-9636-abb571dbe3e2",
+          "duration_ms": 22.175499999999943,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 9.596199999999953
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.028900000000021
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "duration_ms": 88.29399999999998,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.157100000000014
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.199400000000082
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.403799999999933
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.238200000000006
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.430600000000027
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.56389999999999
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.084299999999985
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.755600000000072
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "0cf6c1dc-df9f-4e8b-bb5d-e0febc52f7f0",
+          "duration_ms": 24.931200000000104,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.359699999999975
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 12.95189999999991
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "duration_ms": 92.81539999999995,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.162599999999998
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.551600000000008
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.346000000000004
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.12749999999994
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.273199999999974
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 13.372999999999934
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.988800000000083
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.95150000000001
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "9c785c79-fc49-47a1-8f09-60b8fd00c069",
+          "duration_ms": 24.148200000000088,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.222500000000082
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.313800000000015
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "duration_ms": 94.53639999999996,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.274700000000053
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.186599999999999
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.295799999999986
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.272800000000075
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.63289999999995
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.57400000000007
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.564499999999953
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.583999999999833
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "f6f9e4e3-e95d-47e9-9ff7-d090b69d1d9c",
+          "duration_ms": 25.487100000000055,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.990999999999985
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.792299999999841
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "duration_ms": 102.66740000000004,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.088999999999942
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 10.570699999999988
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.029999999999973
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.432000000000016
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.254400000000032
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 12.674199999999928
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 13.084400000000187
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 12.757900000000063
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "c2a02fcb-fd0b-4548-beec-236ab2509b76",
+          "duration_ms": 26.72779999999989,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.764599999999973
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 13.330099999999902
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "duration_ms": 89.11490000000003,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.196500000000015
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 9.874000000000024
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 11.231700000000046
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.345100000000002
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.306100000000015
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.052699999999959
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 9.95679999999993
+            },
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 9.938000000000102
+            }
+          ]
+        },
+        {
+          "variant": "candidate",
+          "correlation_id": "718d0422-4daa-442d-a138-e95e362898c4",
+          "duration_ms": 23.243099999999913,
+          "ok": true,
+          "stages": [
+            {
+              "method": "readExecutionProjections",
+              "duration_ms": 10.335299999999961
+            },
+            {
+              "method": "readProductionRoutes",
+              "duration_ms": 11.5474999999999
+            }
+          ]
+        }
+      ],
+      "traces": [
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.379599999999982,
+          "ok": true
+        },
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.683799999999962,
+          "ok": true
+        },
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.projection_read",
+          "duration_ms": 9.920600000000036,
+          "ok": true
+        },
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.702800000000025,
+          "ok": true
+        },
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.route_read",
+          "duration_ms": 11.603799999999978,
+          "ok": true
+        },
+        {
+          "correlation_id": "11c7b656-cbfd-471e-802e-f72b76042b1a",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.722300000000018,
+          "ok": true
+        },
+        {
+          "correlation_id": "f535415f-ef0b-41e0-a974-d6c911f2ca62",
+          "stage": "journal.projection_read",
+          "duration_ms": 9.630200000000002,
+          "ok": true
+        },
+        {
+          "correlation_id": "f535415f-ef0b-41e0-a974-d6c911f2ca62",
+          "stage": "journal.route_read",
+          "duration_ms": 10.45799999999997,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.533799999999985,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.projection_read",
+          "duration_ms": 9.990699999999947,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.95920000000001,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.827699999999936,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.route_read",
+          "duration_ms": 10.413599999999974,
+          "ok": true
+        },
+        {
+          "correlation_id": "9e0af089-196f-45b3-9983-60ee7e0bdb27",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.07809999999995,
+          "ok": true
+        },
+        {
+          "correlation_id": "41008e1c-ee18-471c-8a1d-19b81a145115",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.409099999999967,
+          "ok": true
+        },
+        {
+          "correlation_id": "41008e1c-ee18-471c-8a1d-19b81a145115",
+          "stage": "journal.route_read",
+          "duration_ms": 11.269499999999994,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.105299999999943,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.547400000000039,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.785699999999906,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.053999999999974,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.route_read",
+          "duration_ms": 10.52170000000001,
+          "ok": true
+        },
+        {
+          "correlation_id": "dd68fee0-1b8f-44f9-847b-0a0c20069f99",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.691400000000044,
+          "ok": true
+        },
+        {
+          "correlation_id": "7bc15a0b-5509-4a2b-9636-abb571dbe3e2",
+          "stage": "journal.projection_read",
+          "duration_ms": 9.600099999999998,
+          "ok": true
+        },
+        {
+          "correlation_id": "7bc15a0b-5509-4a2b-9636-abb571dbe3e2",
+          "stage": "journal.route_read",
+          "duration_ms": 11.214999999999918,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.162900000000036,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.407500000000027,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.24210000000005,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.43470000000002,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.route_read",
+          "duration_ms": 10.666999999999916,
+          "ok": true
+        },
+        {
+          "correlation_id": "c4b75db9-4b58-49a5-a0ee-1bafad3f54e7",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.758800000000065,
+          "ok": true
+        },
+        {
+          "correlation_id": "0cf6c1dc-df9f-4e8b-bb5d-e0febc52f7f0",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.364300000000071,
+          "ok": true
+        },
+        {
+          "correlation_id": "0cf6c1dc-df9f-4e8b-bb5d-e0febc52f7f0",
+          "stage": "journal.route_read",
+          "duration_ms": 13.187599999999975,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.166900000000055,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.349199999999996,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.130700000000047,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.277400000000057,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.route_read",
+          "duration_ms": 13.56529999999998,
+          "ok": true
+        },
+        {
+          "correlation_id": "36e38b18-9dff-4910-b9a4-aa8c0ce48f05",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.955600000000004,
+          "ok": true
+        },
+        {
+          "correlation_id": "9c785c79-fc49-47a1-8f09-60b8fd00c069",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.227300000000014,
+          "ok": true
+        },
+        {
+          "correlation_id": "9c785c79-fc49-47a1-8f09-60b8fd00c069",
+          "stage": "journal.route_read",
+          "duration_ms": 11.543000000000006,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.279899999999998,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.299499999999966,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.277100000000019,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.638699999999972,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.route_read",
+          "duration_ms": 10.67570000000012,
+          "ok": true
+        },
+        {
+          "correlation_id": "b01ad541-d292-4f75-a8f1-c3ef04400327",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.586999999999989,
+          "ok": true
+        },
+        {
+          "correlation_id": "f6f9e4e3-e95d-47e9-9ff7-d090b69d1d9c",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.996200000000044,
+          "ok": true
+        },
+        {
+          "correlation_id": "f6f9e4e3-e95d-47e9-9ff7-d090b69d1d9c",
+          "stage": "journal.route_read",
+          "duration_ms": 12.102499999999964,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.094499999999925,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.03390000000013,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.435899999999947,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.25870000000009,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.route_read",
+          "duration_ms": 12.861599999999953,
+          "ok": true
+        },
+        {
+          "correlation_id": "0a92c3ae-1895-42cc-807b-2eb91ad1a741",
+          "stage": "journal.projection_read",
+          "duration_ms": 12.761700000000019,
+          "ok": true
+        },
+        {
+          "correlation_id": "c2a02fcb-fd0b-4548-beec-236ab2509b76",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.768799999999828,
+          "ok": true
+        },
+        {
+          "correlation_id": "c2a02fcb-fd0b-4548-beec-236ab2509b76",
+          "stage": "journal.route_read",
+          "duration_ms": 13.510700000000043,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.205999999999904,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.projection_read",
+          "duration_ms": 11.235400000000027,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.352100000000064,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.310400000000072,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.route_read",
+          "duration_ms": 11.153099999999995,
+          "ok": true
+        },
+        {
+          "correlation_id": "a4890e79-978a-4db0-9524-52264b0425a1",
+          "stage": "journal.projection_read",
+          "duration_ms": 9.942099999999982,
+          "ok": true
+        },
+        {
+          "correlation_id": "718d0422-4daa-442d-a138-e95e362898c4",
+          "stage": "journal.projection_read",
+          "duration_ms": 10.339400000000069,
+          "ok": true
+        },
+        {
+          "correlation_id": "718d0422-4daa-442d-a138-e95e362898c4",
+          "stage": "journal.route_read",
+          "duration_ms": 11.7179000000001,
+          "ok": true
+        }
+      ],
+      "baseline": {
+        "calls": 8,
+        "successes": 8,
+        "success_rate": 1,
+        "p50_ms": 92.81539999999995,
+        "p95_ms": 102.66740000000004,
+        "max_ms": 102.66740000000004,
+        "projection_reads_per_request": 5,
+        "route_reads_per_request": 3
+      },
+      "candidate": {
+        "calls": 8,
+        "successes": 8,
+        "success_rate": 1,
+        "p50_ms": 24.148200000000088,
+        "p95_ms": 26.72779999999989,
+        "max_ms": 26.72779999999989,
+        "projection_reads_per_request": 1,
+        "route_reads_per_request": 1
+      },
+      "exact_result_equality": true
+    },
+    "failed_live_journal_reader_probes": {
+      "baseline": "CORRUPT_STATE; no successful sample",
+      "candidate": "JOURNAL_LOCK_CONTENDED; no successful sample",
+      "interpretation": "No live before/after latency conclusion. Candidate journal reader differed from active deployed journal reader; shared contention encountered. No shared Journal repair or forced unlock."
+    },
+    "unknown_segments": [
+      "original HTTP504 emitter/gateway deadline",
+      "external queue",
+      "complete decomposition of 129965ms",
+      "original capability outcome after child-call timeout"
+    ],
+    "no_production_latency_improvement_claim": true
+  },
+  "verification_levels": {
+    "fixture_powershell": "see final regression results",
+    "local_live_recovery": "BLOCKED",
+    "local_live_powershell": "not tested",
+    "http_live_powershell": "not tested",
+    "chatgpt_product_path": "not verified"
+  },
+  "health": {
+    "initial_journal": {
+      "schema_version": 1,
+      "health": "healthy",
+      "chain_verified": true,
+      "latest_sequence": 51362,
+      "latest_event_id": "dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f",
+      "latest_event_hash": "f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": false,
+      "last_health_error": null,
+      "storage": "server_owned_per_event_files"
+    },
+    "initial_checkpoint": {
+      "schema_version": 1,
+      "health": "healthy",
+      "registry_revision": 289,
+      "storage": "server_owned_content_addressed_checkpoint_store",
+      "checkpoint_count": 283,
+      "active_count": 277,
+      "deleted_count": 6,
+      "physical_blob_bytes": 42493014,
+      "logical_checkpoint_bytes": 75318699,
+      "deduplicated_bytes_saved": 32825685,
+      "reclaimable_bytes": 0,
+      "reclaimable_blob_count": 0
+    },
+    "post_journal": {
+      "schema_version": 1,
+      "health": "healthy",
+      "chain_verified": true,
+      "latest_sequence": 51368,
+      "latest_event_id": "dev_journal_event_da0efebdaad04e528a200c0d8af53c97",
+      "latest_event_hash": "47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": false,
+      "last_health_error": null,
+      "storage": "server_owned_per_event_files"
+    },
+    "post_checkpoint": {
+      "schema_version": 1,
+      "health": "healthy",
+      "registry_revision": 289,
+      "storage": "server_owned_content_addressed_checkpoint_store",
+      "checkpoint_count": 283,
+      "active_count": 277,
+      "deleted_count": 6,
+      "physical_blob_bytes": 42493014,
+      "logical_checkpoint_bytes": 75318699,
+      "deduplicated_bytes_saved": 32825685,
+      "reclaimable_bytes": 0,
+      "reclaimable_blob_count": 0
+    },
+    "warning": "Health/chain verification does not prove the logical Pi operation is terminal."
+  },
+  "tests": {
+    "command": "node --test tests/mcp/pi-production-status-snapshot.test.mjs tests/mcp/pi-production-execution.test.mjs tests/mcp/pi-execution-contract.test.mjs tests/mcp/mcp-request-tracing.test.mjs tests/mcp/mcp-http-reliability.test.mjs tests/mcp/pi-runtime-pressure.test.mjs tests/mcp/pi-runtime-phase2.test.mjs tests/mcp/pi-runtime-phase3-http.test.mjs",
+    "total": 65,
+    "passed": 65,
+    "failed": 0,
+    "raw_tap": "[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=17 signal=null restarting=false recovering=false closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=false closed=false\r\nMCP HTTP reliability crash/hang/overflow, framing, and long-tool timeout regressions passed.\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90001 generation=2 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90002 generation=3 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=17 signal=null restarting=false recovering=false closed=false\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=false closed=false\r\nR5 bounded read retry, deterministic jitter, shared storm budget and mutation no-replay passed.\r\n[mcp-server] child exited pid=90000 generation=1 code=null signal=SIGTERM restarting=false recovering=true closed=false\r\n✔ tests\\mcp\\mcp-http-reliability.test.mjs (2183.7573ms)\r\n✔ fixed diagnostic shape strips commands, secrets, paths, request IDs and error text (4.6642ms)\r\n✔ concurrent scopes preserve correlation and original results/errors (16.8525ms)\r\n✔ bounded buffer and asynchronous IPC never retain arbitrary payloads or unbounded pending data (5.5244ms)\r\n✔ transport trace metadata preserves authored arguments and security metadata (1.2043ms)\r\n✔ restart projections reject corrupt identities and retry resumes only its captured phase (16.1547ms)\r\n✔ same idempotency key cannot designate multiple logical mutations (6.3521ms)\r\n✔ verification levels cannot silently substitute a different suite or omit a declared gate (3.8833ms)\r\n✔ intent size and nesting are bounded before scheduling (8.1152ms)\r\n✔ intent is an immutable JSON execution contract; input changes cannot expand admitted scope (1.6153ms)\r\n✔ rejects missing authority, incomplete contract, extra routing fields and non-JSON values (3.2967ms)\r\n✔ scheduler cannot invent dependencies, capabilities, execution content or verification actions (2.3482ms)\r\n✔ all mutation requires an explicit permission, stable unique key and exact GPT content binding (2.3719ms)\r\n✔ state machine fails closed on phase skipping and cannot reopen terminal operations (4.3072ms)\r\n✔ transient transport and timeout never authorize blind replay of uncertain mutation (1.0229ms)\r\n✔ semantic errors require GPT decisions; permission and corrupt state stop execution (0.4896ms)\r\n✔ reconciliation requires attributable physical evidence, not absence of a success response (2.0181ms)\r\n✔ legacy workspace.create target remains readable while workspace.create_isolated stays strict (11.2349ms)\r\n✔ production route begins legacy and does not cut over implicitly (83.5606ms)\r\n✔ cutover requires exact GPT decision and trusted successful gate (108.6356ms)\r\n✔ route persists in Development Journal and fresh store recovers hash (91.6374ms)\r\n✔ route CAS prevents concurrent contradictory cutover (155.4654ms)\r\n✔ default executes precise GPT intent and duplicate does not dispatch (1675.456ms)\r\n✔ production admission is unbounded by canary cohort capacity (1696.6473ms)\r\n✔ old explicit reliable operation is not migrated (173.0604ms)\r\n✔ generic reliable store cannot bypass production authority (217.8583ms)\r\n✔ fallback never dispatches automatically after validation failure (843.3772ms)\r\n✔ disabled route stops a pending effect and completed duplicate stays readable (1477.4088ms)\r\n✔ default direct calls require explicit audited fallback and reject forged internal metadata (82.0418ms)\r\n✔ fallback requires mutation idempotency and fails closed when audit fails (96.0273ms)\r\n✔ hash-valid malformed route history fails safe (85.9502ms)\r\n✔ route decision retransmission returns original durable result (294.0177ms)\r\n✔ active Pi worker fences a route change (1252.7963ms)\r\n✔ production project and inspection context remain authoritative (197.41ms)\r\n✔ paused default still requires fallback authority (130.8892ms)\r\n✔ MCP mutation boundary uses resolved physical scope and duplicate skips resolver (122.3932ms)\r\n✔ partial route publication fails closed (63.0788ms)\r\n✔ production worker process exit after_claim recovers once (2657.2759ms)\r\n✔ production worker process exit after_dispatch recovers once (2177.2847ms)\r\n✔ production worker process exit after_receipt recovers once (1904.0332ms)\r\n✔ production publication exit after_started restores default enrollment (1687.5261ms)\r\n✔ production publication exit after_completed restores default enrollment (1301.4776ms)\r\n✔ submission host reconnects using exact same Intent (823.5407ms)\r\n✔ submission host does not retry semantic rejection (42.3736ms)\r\n✔ submission host rejects a completed result for a different Intent (811.7964ms)\r\n✔ submission host polls pending state and preserves completion semantics on deadline (943.6292ms)\r\n✔ real MCP production ingress and explicit direct diagnostic share durable route (3211.7599ms)\r\n✔ Intent stdin preserves UTF-8 split across transport chunks (2.9044ms)\r\n✔ parent integration rejects unauthorised direct calls before runtime dispatch (81.4292ms)\r\n✔ production engineering cutover preserves public product reads and profile authority (2279.9511ms)\r\n✔ status validates one fresh execution and route snapshot without dispatch (260.4101ms)\r\n✔ a later status sees completed durable state rather than an earlier snapshot (1553.182ms)\r\n✔ parallel status calls have independent snapshots and context remains enforced (347.928ms)\r\n✔ a subsequent corrupt history still fails closed; no cached success (234.2873ms)\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":81.90220000000045}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3721.7502000000004}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3878.9264999999978}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":216.701299999997}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3956.4585000000006}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":8290.445799999998}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":12315.552199999998}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":16546.484699999997}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":3.6922000000049593}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":4.9958000000042375}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":5.704299999997602}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":6775.512499999997}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"DECISION_REQUIRED\",\"ms\":4098.930899999999}\r\n✔ schema metadata progresses during real Pi PowerShell execution without authorizing replay (52484.0423ms)\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":81.79550000000017}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3589.6191}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3721.420399999999}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3811.093499999999}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":4289.999100000001}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":326.79739999999947}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":3931.7488999999987}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":8098.185300000001}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":12594.408600000002}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":17712.797899999998}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":8.493799999996554}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":9.203999999997905}\r\n{\"tool\":\"dev_capability_get_schema\",\"status\":null,\"ms\":9.78859999999986}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":8810.484499999999}\r\n{\"tool\":\"dev_pi_execution_status\",\"status\":null,\"ms\":315.4953999999998}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"COMPLETED\",\"ms\":885.9877000000051}\r\n{\"tool\":\"dev_pi_execute_intent\",\"status\":\"DECISION_REQUIRED\",\"ms\":7120.762399999992}\r\n✔ HTTP correlation survives concurrent Pi dispatch and completed-response loss without replay (78514.4218ms)\r\n✔ parallel reads retain exact deduplication statistics and public bounded shape (2397.4389ms)\r\n✔ request-local reuse never hides content corruption on a later request (1786.6507ms)\r\n✔ statistics read each identity once and each distinct content once without skipping deleted content (2640.1573ms)\r\n✔ hash-valid identity under the wrong filename fails closed (1781.656ms)\r\n✔ cache overflow still verifies every identity and supports an uncached checkpoint read (1826.5934ms)\r\n✔ read fanout is bounded and failure drains pending reads before releasing the maintenance lock (1566.0309ms)\r\n✔ a busy live owner is preserved and status reports degraded with a typed diagnostic (6701.846ms)\r\n✔ lock metadata sync failure closes its own handle and releases only its newly acquired lock (1311.459ms)\r\n✔ orphan identity reconciliation and a concurrent logical delete retain lifecycle consistency (1875.2405ms)\r\nℹ tests 65\r\nℹ suites 0\r\nℹ pass 65\r\nℹ fail 0\r\nℹ cancelled 0\r\nℹ skipped 0\r\nℹ todo 0\r\nℹ duration_ms 79277.2125\r\n",
+    "raw_tap_sha256": "c0a50426df753924e0b10ec0000c66ed0fdbd2405898f2668fd876ef056cbf1a",
+    "all_suite_run": false
+  },
+  "live_initial_capture": {
+    "schema_version": 1,
+    "scope": "formal local HTTP MCP status for the same original live operation",
+    "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+    "intent_id": "phase3-live-bootstrap-20261008-2146",
+    "calls": [
+      {
+        "name": "dev_pi_execution_status",
+        "arguments": {
+          "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+          "bootstrap": true
+        },
+        "started_utc": "2026-10-08T14:42:55.829Z",
+        "started_elapsed_ms": 713.1694,
+        "duration_ms": 129965.4797,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"route\": {\n    \"decision_id\": \"gpt-phase-f-default-20261004-793bf759\",\n    \"decision_owner\": \"GPT\",\n    \"gate_hash\": \"cc019712463af7fd0f8878bf4afdbdbe806a85548f85cf1c994eb0446a04574a\",\n    \"mode\": \"pi_default\",\n    \"previous_route_hash\": null,\n    \"revision\": 1,\n    \"route_hash\": \"58ef3587fec839f80e2ec0bdc3b59d6bb6bb193ab2863e5b50023c3f2f3f28e0\",\n    \"schema_version\": 1,\n    \"updated_at\": \"2026-10-03T19:08:33.015Z\"\n  },\n  \"operation\": {\n    \"action_type\": \"phase_changed\",\n    \"command\": {\n      \"status\": \"PREPARING\",\n      \"type\": \"phase_changed\",\n      \"worker_id\": \"pi_worker_94a8fa3836614899b0d41f958c2ce50d\"\n    },\n    \"intent\": {\n      \"bootstrap\": true,\n      \"completion_conditions\": [\n        \"Verify exact output and durable evidence\"\n      ],\n      \"constraints\": [\n        \"No existing production routing or other workspace changes\"\n      ],\n      \"context\": {\n        \"project_id\": \"writer_workbench\",\n        \"workspace_id\": \"dev_workspace_shared_repository_v1\",\n        \"workstream_id\": null\n      },\n      \"decision_boundaries\": [\n        \"implementation_failure\",\n        \"architecture_conflict\",\n        \"test_expectation_conflict\",\n        \"scope_expansion\",\n        \"multiple_implementation_choices\",\n        \"unexpected_semantic_behavior\",\n        \"requirement_ambiguity\",\n        \"git_semantic_conflict\",\n        \"validation_failure\",\n        \"unsafe_ambiguous_mutation\"\n      ],\n      \"goal\": \"GPT-authorized Phase3 independent live Pi PowerShell verification\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"mutation_plan\": [\n        {\n          \"expected_change\": \"Execute precisely authored capability once\",\n          \"input_sha256\": \"655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08\",\n          \"step_id\": \"begin\",\n          \"target\": \"bootstrap_workstream\"\n        },\n        {\n          \"expected_change\": \"Execute precisely authored capability once\",\n          \"input_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\n          \"step_id\": \"isolate\",\n          \"target\": \"bootstrap_workstream\"\n        }\n      ],\n      \"permissions\": {\n        \"commit\": false,\n        \"integrate\": false,\n        \"push\": false,\n        \"read\": true,\n        \"tests\": false,\n        \"workspace_create\": true,\n        \"write\": true\n      },\n      \"requested_actions\": [\n        {\n          \"capability\": \"workspace.begin_workstream\",\n          \"depends_on\": [],\n          \"idempotency_key\": \"phase3-live-begin-20261008-2146\",\n          \"input\": {\n            \"declared_scope\": [\n              \"docs/PI-RUNTIME-PRESSURE-PHASE3*\"\n            ],\n            \"label\": \"Pi Pressure Phase3 owned live verification\"\n          },\n          \"step_id\": \"begin\"\n        },\n        {\n          \"capability\": \"workspace.create_isolated\",\n          \"depends_on\": [\n            \"begin\"\n          ],\n          \"idempotency_key\": \"phase3-live-isolate-20261008-2146\",\n          \"input\": {},\n          \"step_id\": \"isolate\"\n        }\n      ],\n      \"schema_version\": 1,\n      \"verification\": {\n        \"affected\": [],\n        \"focused\": [],\n        \"full\": []\n      }\n    },\n    \"previous_projection_hash\": \"c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46\",\n    \"projection_hash\": \"388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a\",\n    \"revision\": 4,\n    \"runtime\": {\n      \"active_call\": null,\n      \"lifecycle_binding\": null,\n      \"owner\": {\n        \"hostname\": \"SDCP\",\n        \"pid\": 27008,\n        \"worker_id\": \"pi_worker_94a8fa3836614899b0d41f958c2ce50d\"\n      },\n      \"retry_at\": null,\n      \"retry_policy\": {\n        \"base_delay_ms\": 250,\n        \"max_attempts\": 3,\n        \"max_delay_ms\": 5000\n      }\n    },\n    \"schema_version\": 2,\n    \"state\": {\n      \"bootstrap\": true,\n      \"checkpoint\": null,\n      \"completed_at\": null,\n      \"completed_steps\": [],\n      \"created_at\": \"2026-10-08T13:52:46.360Z\",\n      \"current_phase\": \"PREPARING\",\n      \"current_step\": null,\n      \"idempotency_keys\": {\n        \"begin\": \"phase3-live-begin-20261008-2146\",\n        \"isolate\": \"phase3-live-isolate-20261008-2146\"\n      },\n      \"intent_hash\": \"730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"last_error\": null,\n      \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n      \"parent_operation_id\": null,\n      \"pending_steps\": [\n        \"begin\",\n        \"isolate\"\n      ],\n      \"project_id\": \"writer_workbench\",\n      \"resume_point\": null,\n      \"retry_count\": 0,\n      \"schema_version\": 1,\n      \"status\": \"PREPARING\",\n      \"tool_calls\": [],\n      \"tool_results\": [],\n      \"updated_at\": \"2026-10-08T13:55:25.323Z\",\n      \"verification_state\": {\n        \"affected\": \"not_requested\",\n        \"focused\": \"not_requested\",\n        \"full\": \"not_requested\"\n      },\n      \"workspace_id\": \"dev_workspace_shared_repository_v1\",\n      \"workstream_id\": null\n    },\n    \"receipts\": [],\n    \"journal_receipt\": {\n      \"operation_id\": \"dev_operation_58072f2a2e56434f86cec2cc335c4ddb\",\n      \"event_id\": \"dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f\",\n      \"sequence\": 51362,\n      \"event_hash\": \"f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e\"\n    },\n    \"result\": {\n      \"schema_version\": 2,\n      \"phase\": \"F\",\n      \"mode\": \"production_default\",\n      \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"revision\": 4,\n      \"status\": \"PREPARING\",\n      \"completed\": [],\n      \"remaining\": [\n        \"begin\",\n        \"isolate\"\n      ],\n      \"verification\": {\n        \"affected\": \"not_requested\",\n        \"focused\": \"not_requested\",\n        \"full\": \"not_requested\"\n      },\n      \"checkpoint\": null,\n      \"resume_point\": null,\n      \"decision_required\": false,\n      \"retry_at\": null,\n      \"persistence_enabled\": true,\n      \"execution_enabled\": true,\n      \"resume_dispatch_enabled\": true,\n      \"execution_context\": null,\n      \"engineering_review_required\": true,\n      \"production_default_changed\": true,\n      \"model_requests\": 0,\n      \"decision_owner\": \"GPT\",\n      \"execution_owner\": \"Pi\",\n      \"tool_owner\": \"MCP\",\n      \"legacy_migration\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_journal_status",
+        "arguments": {},
+        "started_utc": "2026-10-08T14:45:05.801Z",
+        "started_elapsed_ms": 130686.3465,
+        "duration_ms": 3367.965200000006,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"schema_version\": 1,\n  \"health\": \"healthy\",\n  \"chain_verified\": true,\n  \"latest_sequence\": 51362,\n  \"latest_event_id\": \"dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f\",\n  \"latest_event_hash\": \"f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e\",\n  \"dangling_operation_count\": 0,\n  \"dangling_operations\": [],\n  \"active_operation_count\": 0,\n  \"active_operations\": [],\n  \"reconciliation_required\": false,\n  \"last_health_error\": null,\n  \"storage\": \"server_owned_per_event_files\"\n}"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_checkpoint_status",
+        "arguments": {},
+        "started_utc": "2026-10-08T14:45:09.176Z",
+        "started_elapsed_ms": 134061.82280000002,
+        "duration_ms": 5502.345799999981,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"schema_version\": 1,\n  \"health\": \"healthy\",\n  \"registry_revision\": 289,\n  \"storage\": \"server_owned_content_addressed_checkpoint_store\",\n  \"checkpoint_count\": 283,\n  \"active_count\": 277,\n  \"deleted_count\": 6,\n  \"physical_blob_bytes\": 42493014,\n  \"logical_checkpoint_bytes\": 75318699,\n  \"deduplicated_bytes_saved\": 32825685,\n  \"reclaimable_bytes\": 0,\n  \"reclaimable_blob_count\": 0\n}"
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "readiness": [
+      {
+        "elapsed_ms": 712.9569000000001,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 0,
+        "runtime": {
+          "state": "idle",
+          "current_step": null,
+          "started_at": null,
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 5728.104,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 10738.4311,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 15748.4104,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 20760.635299999998,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 25779.033799999997,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 30787.3504,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "transaction",
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 35800.8228,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 40819.0159,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 45830.0945,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 50839.8844,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 55852.3651,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 60862.4029,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 65865.7301,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 70882.41249999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 75896.4326,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 80908.41459999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 85920.8563,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 90933.3149,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 95939.7288,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 100945.34109999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 105958.5944,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 110968.94959999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 115980.62449999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 120990.38669999999,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 126005.7995,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 131021.5131,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 136038.8978,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 21892,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T14:42:55.841Z",
+          "completed_at": "2026-10-08T14:43:30.125Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      }
+    ],
+    "health": [
+      {
+        "endpoint": "/health",
+        "http_status": 200,
+        "duration_ms": 50.56350000000003,
+        "value": {
+          "pi_execution_protocol": "writer-workbench/pi-production/v1",
+          "service": "writer-workbench-mcp",
+          "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+          "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+          "pid": 7348,
+          "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+          "startedAt": "2026-10-08T08:37:59.183Z",
+          "profile": "chatgpt_developer"
+        }
+      },
+      {
+        "endpoint": "/live",
+        "http_status": 200,
+        "duration_ms": 3.3998000000000275,
+        "value": {
+          "pi_execution_protocol": "writer-workbench/pi-production/v1",
+          "service": "writer-workbench-mcp",
+          "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+          "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+          "pid": 7348,
+          "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+          "startedAt": "2026-10-08T08:37:59.183Z",
+          "profile": "chatgpt_developer",
+          "live": true,
+          "component": "http_parent",
+          "uptime_ms": 21896163,
+          "session_count": 11,
+          "ready_session_count": 10,
+          "recovering_session_count": 0,
+          "failed_session_count": 0
+        }
+      }
+    ],
+    "mutations_submitted": 0,
+    "source_boundary": "existing deployed service; candidate tracing not deployed",
+    "connect_ms": 708.3697,
+    "own_session_id": "41f7c321-0702-4790-a7ef-cb49c8c09cd1",
+    "completed_status_queries": true,
+    "own_read_session_closed": true
+  },
+  "live_recovery_capture": {
+    "scope": "same original operation, official deployed loopback HTTP MCP Pi ingress",
+    "intent_id": "phase3-live-bootstrap-20261008-2146",
+    "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+    "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+    "prior_status": {
+      "action_type": "phase_changed",
+      "command": {
+        "status": "PREPARING",
+        "type": "phase_changed",
+        "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+      },
+      "intent": {
+        "bootstrap": true,
+        "completion_conditions": [
+          "Verify exact output and durable evidence"
+        ],
+        "constraints": [
+          "No existing production routing or other workspace changes"
+        ],
+        "context": {
+          "project_id": "writer_workbench",
+          "workspace_id": "dev_workspace_shared_repository_v1",
+          "workstream_id": null
+        },
+        "decision_boundaries": [
+          "implementation_failure",
+          "architecture_conflict",
+          "test_expectation_conflict",
+          "scope_expansion",
+          "multiple_implementation_choices",
+          "unexpected_semantic_behavior",
+          "requirement_ambiguity",
+          "git_semantic_conflict",
+          "validation_failure",
+          "unsafe_ambiguous_mutation"
+        ],
+        "goal": "GPT-authorized Phase3 independent live Pi PowerShell verification",
+        "intent_id": "phase3-live-bootstrap-20261008-2146",
+        "mutation_plan": [
+          {
+            "expected_change": "Execute precisely authored capability once",
+            "input_sha256": "655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08",
+            "step_id": "begin",
+            "target": "bootstrap_workstream"
+          },
+          {
+            "expected_change": "Execute precisely authored capability once",
+            "input_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "step_id": "isolate",
+            "target": "bootstrap_workstream"
+          }
+        ],
+        "permissions": {
+          "commit": false,
+          "integrate": false,
+          "push": false,
+          "read": true,
+          "tests": false,
+          "workspace_create": true,
+          "write": true
+        },
+        "requested_actions": [
+          {
+            "capability": "workspace.begin_workstream",
+            "depends_on": [],
+            "idempotency_key": "phase3-live-begin-20261008-2146",
+            "input": {
+              "declared_scope": [
+                "docs/PI-RUNTIME-PRESSURE-PHASE3*"
+              ],
+              "label": "Pi Pressure Phase3 owned live verification"
+            },
+            "step_id": "begin"
+          },
+          {
+            "capability": "workspace.create_isolated",
+            "depends_on": [
+              "begin"
+            ],
+            "idempotency_key": "phase3-live-isolate-20261008-2146",
+            "input": {},
+            "step_id": "isolate"
+          }
+        ],
+        "schema_version": 1,
+        "verification": {
+          "affected": [],
+          "focused": [],
+          "full": []
+        }
+      },
+      "previous_projection_hash": "c421eb129e1c596ef108b9d3fe310ae1dc7ec6307215c2fea85374e3813a3b46",
+      "projection_hash": "388455320bcabc288dc9ca09c5eb225454351972f4d0a1cde1e77ccd4ca3fa9a",
+      "revision": 4,
+      "runtime": {
+        "active_call": null,
+        "lifecycle_binding": null,
+        "owner": {
+          "hostname": "SDCP",
+          "pid": 27008,
+          "worker_id": "pi_worker_94a8fa3836614899b0d41f958c2ce50d"
+        },
+        "retry_at": null,
+        "retry_policy": {
+          "base_delay_ms": 250,
+          "max_attempts": 3,
+          "max_delay_ms": 5000
+        }
+      },
+      "schema_version": 2,
+      "state": {
+        "bootstrap": true,
+        "checkpoint": null,
+        "completed_at": null,
+        "completed_steps": [],
+        "created_at": "2026-10-08T13:52:46.360Z",
+        "current_phase": "PREPARING",
+        "current_step": null,
+        "idempotency_keys": {
+          "begin": "phase3-live-begin-20261008-2146",
+          "isolate": "phase3-live-isolate-20261008-2146"
+        },
+        "intent_hash": "730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779",
+        "intent_id": "phase3-live-bootstrap-20261008-2146",
+        "last_error": null,
+        "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+        "parent_operation_id": null,
+        "pending_steps": [
+          "begin",
+          "isolate"
+        ],
+        "project_id": "writer_workbench",
+        "resume_point": null,
+        "retry_count": 0,
+        "schema_version": 1,
+        "status": "PREPARING",
+        "tool_calls": [],
+        "tool_results": [],
+        "updated_at": "2026-10-08T13:55:25.323Z",
+        "verification_state": {
+          "affected": "not_requested",
+          "focused": "not_requested",
+          "full": "not_requested"
+        },
+        "workspace_id": "dev_workspace_shared_repository_v1",
+        "workstream_id": null
+      },
+      "receipts": [],
+      "journal_receipt": {
+        "operation_id": "dev_operation_58072f2a2e56434f86cec2cc335c4ddb",
+        "event_id": "dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f",
+        "sequence": 51362,
+        "event_hash": "f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e"
+      },
+      "result": {
+        "schema_version": 2,
+        "phase": "F",
+        "mode": "production_default",
+        "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+        "intent_id": "phase3-live-bootstrap-20261008-2146",
+        "revision": 4,
+        "status": "PREPARING",
+        "completed": [],
+        "remaining": [
+          "begin",
+          "isolate"
+        ],
+        "verification": {
+          "affected": "not_requested",
+          "focused": "not_requested",
+          "full": "not_requested"
+        },
+        "checkpoint": null,
+        "resume_point": null,
+        "decision_required": false,
+        "retry_at": null,
+        "persistence_enabled": true,
+        "execution_enabled": true,
+        "resume_dispatch_enabled": true,
+        "execution_context": null,
+        "engineering_review_required": true,
+        "production_default_changed": true,
+        "model_requests": 0,
+        "decision_owner": "GPT",
+        "execution_owner": "Pi",
+        "tool_owner": "MCP",
+        "legacy_migration": false
+      }
+    },
+    "owner_liveness_verified": true,
+    "calls": [
+      {
+        "name": "dev_workspace_journal_status",
+        "started_utc": "2026-10-08T14:49:25.286Z",
+        "duration_ms": 45540.0119,
+        "result": {
+          "schema_version": 1,
+          "health": "healthy",
+          "chain_verified": true,
+          "latest_sequence": 51362,
+          "latest_event_id": "dev_journal_event_734f9bdaa15e4aadbb7ee7f4c4ef7d1f",
+          "latest_event_hash": "f1351e82f10154a36a21e377affef3cbcc4868dae18af73186b0401c30650c8e",
+          "dangling_operation_count": 0,
+          "dangling_operations": [],
+          "active_operation_count": 0,
+          "active_operations": [],
+          "reconciliation_required": false,
+          "last_health_error": null,
+          "storage": "server_owned_per_event_files"
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_get_operation",
+        "started_utc": "2026-10-08T14:50:10.834Z",
+        "duration_ms": 4228.400500000003,
+        "result": {
+          "reconciliation_key": "phase3-live-begin-20261008-2146",
+          "operation_id": null,
+          "reconciliation_state": "not_admitted",
+          "safe_to_reinitiate": true,
+          "reinitiate_requires_same_key": true,
+          "automatic_replay_allowed": false
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_get_operation",
+        "started_utc": "2026-10-08T14:50:15.068Z",
+        "duration_ms": 4156.625199999995,
+        "result": {
+          "reconciliation_key": "phase3-live-isolate-20261008-2146",
+          "operation_id": null,
+          "reconciliation_state": "not_admitted",
+          "safe_to_reinitiate": true,
+          "reinitiate_requires_same_key": true,
+          "automatic_replay_allowed": false
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "started_utc": "2026-10-08T14:50:19.231Z",
+        "duration_ms": 300023.3152,
+        "error": {
+          "name": "McpError",
+          "code": -32000,
+          "message": "MCP error -32000: Error: MCP child call timed out after 300000ms"
+        }
+      }
+    ],
+    "mutation_submissions": 1,
+    "replacement_intents": 0,
+    "production_routing_changed": false,
+    "own_session_id": "ed450214-ef29-476f-97ff-881d2b622600",
+    "blocker": {
+      "name": "McpError",
+      "code": -32000,
+      "message": "MCP error -32000: Error: MCP child call timed out after 300000ms"
+    },
+    "session_retained_for_unknown_outcome": true,
+    "next_action": "Query the SAME original operation; preserve this HTTP session until Pi reconciliation proves safe closure. Never resubmit a mutation blindly."
+  },
+  "post_timeout_capture": {
+    "schema_version": 1,
+    "scope": "formal local HTTP MCP status for the same original live operation",
+    "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+    "intent_id": "phase3-live-bootstrap-20261008-2146",
+    "calls": [
+      {
+        "name": "dev_pi_execution_status",
+        "arguments": {
+          "operation_id": "pi_operation_ab4776c172b84bfa921ee99117a6728d",
+          "bootstrap": true
+        },
+        "started_utc": "2026-10-08T15:00:15.093Z",
+        "started_elapsed_ms": 773.8815999999999,
+        "duration_ms": 139591.9714,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"route\": {\n    \"decision_id\": \"gpt-phase-f-default-20261004-793bf759\",\n    \"decision_owner\": \"GPT\",\n    \"gate_hash\": \"cc019712463af7fd0f8878bf4afdbdbe806a85548f85cf1c994eb0446a04574a\",\n    \"mode\": \"pi_default\",\n    \"previous_route_hash\": null,\n    \"revision\": 1,\n    \"route_hash\": \"58ef3587fec839f80e2ec0bdc3b59d6bb6bb193ab2863e5b50023c3f2f3f28e0\",\n    \"schema_version\": 1,\n    \"updated_at\": \"2026-10-03T19:08:33.015Z\"\n  },\n  \"operation\": {\n    \"action_type\": \"tool_call_started\",\n    \"command\": {\n      \"call_id\": \"pi_call_826006f41b66429f8b0b01bc0dd603da\",\n      \"step_id\": \"begin\",\n      \"type\": \"tool_call_started\",\n      \"worker_id\": \"pi_worker_e41b5d0cf75548a394fdad562e714c6d\"\n    },\n    \"intent\": {\n      \"bootstrap\": true,\n      \"completion_conditions\": [\n        \"Verify exact output and durable evidence\"\n      ],\n      \"constraints\": [\n        \"No existing production routing or other workspace changes\"\n      ],\n      \"context\": {\n        \"project_id\": \"writer_workbench\",\n        \"workspace_id\": \"dev_workspace_shared_repository_v1\",\n        \"workstream_id\": null\n      },\n      \"decision_boundaries\": [\n        \"implementation_failure\",\n        \"architecture_conflict\",\n        \"test_expectation_conflict\",\n        \"scope_expansion\",\n        \"multiple_implementation_choices\",\n        \"unexpected_semantic_behavior\",\n        \"requirement_ambiguity\",\n        \"git_semantic_conflict\",\n        \"validation_failure\",\n        \"unsafe_ambiguous_mutation\"\n      ],\n      \"goal\": \"GPT-authorized Phase3 independent live Pi PowerShell verification\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"mutation_plan\": [\n        {\n          \"expected_change\": \"Execute precisely authored capability once\",\n          \"input_sha256\": \"655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08\",\n          \"step_id\": \"begin\",\n          \"target\": \"bootstrap_workstream\"\n        },\n        {\n          \"expected_change\": \"Execute precisely authored capability once\",\n          \"input_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\n          \"step_id\": \"isolate\",\n          \"target\": \"bootstrap_workstream\"\n        }\n      ],\n      \"permissions\": {\n        \"commit\": false,\n        \"integrate\": false,\n        \"push\": false,\n        \"read\": true,\n        \"tests\": false,\n        \"workspace_create\": true,\n        \"write\": true\n      },\n      \"requested_actions\": [\n        {\n          \"capability\": \"workspace.begin_workstream\",\n          \"depends_on\": [],\n          \"idempotency_key\": \"phase3-live-begin-20261008-2146\",\n          \"input\": {\n            \"declared_scope\": [\n              \"docs/PI-RUNTIME-PRESSURE-PHASE3*\"\n            ],\n            \"label\": \"Pi Pressure Phase3 owned live verification\"\n          },\n          \"step_id\": \"begin\"\n        },\n        {\n          \"capability\": \"workspace.create_isolated\",\n          \"depends_on\": [\n            \"begin\"\n          ],\n          \"idempotency_key\": \"phase3-live-isolate-20261008-2146\",\n          \"input\": {},\n          \"step_id\": \"isolate\"\n        }\n      ],\n      \"schema_version\": 1,\n      \"verification\": {\n        \"affected\": [],\n        \"focused\": [],\n        \"full\": []\n      }\n    },\n    \"previous_projection_hash\": \"086d159782d1922e6532e150f06cea730ff14b59962d269a061b05b5c453cf4d\",\n    \"projection_hash\": \"9a85232d2e6f8b74f0cfc6f87a1001f43644bc628feeefdac9f9344c09b7dbbb\",\n    \"revision\": 7,\n    \"runtime\": {\n      \"active_call\": {\n        \"attempt\": 1,\n        \"call_id\": \"pi_call_826006f41b66429f8b0b01bc0dd603da\",\n        \"idempotency_key\": \"phase3-live-begin-20261008-2146\",\n        \"input_hash\": \"655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08\",\n        \"mutation\": true,\n        \"phase\": \"EXECUTING\",\n        \"reconciliation_attempt\": 0,\n        \"step_id\": \"begin\"\n      },\n      \"lifecycle_binding\": null,\n      \"owner\": {\n        \"hostname\": \"SDCP\",\n        \"pid\": 6176,\n        \"worker_id\": \"pi_worker_e41b5d0cf75548a394fdad562e714c6d\"\n      },\n      \"retry_at\": null,\n      \"retry_policy\": {\n        \"base_delay_ms\": 250,\n        \"max_attempts\": 3,\n        \"max_delay_ms\": 5000\n      }\n    },\n    \"schema_version\": 2,\n    \"state\": {\n      \"bootstrap\": true,\n      \"checkpoint\": {\n        \"at_revision\": 7,\n        \"intent_hash\": \"730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779\",\n        \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n        \"phase\": \"EXECUTING\",\n        \"schema_version\": 2,\n        \"step_id\": \"begin\",\n        \"workspace_id\": \"dev_workspace_shared_repository_v1\"\n      },\n      \"completed_at\": null,\n      \"completed_steps\": [],\n      \"created_at\": \"2026-10-08T13:52:46.360Z\",\n      \"current_phase\": \"EXECUTING\",\n      \"current_step\": \"begin\",\n      \"idempotency_keys\": {\n        \"begin\": \"phase3-live-begin-20261008-2146\",\n        \"isolate\": \"phase3-live-isolate-20261008-2146\"\n      },\n      \"intent_hash\": \"730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"last_error\": null,\n      \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n      \"parent_operation_id\": null,\n      \"pending_steps\": [\n        \"begin\",\n        \"isolate\"\n      ],\n      \"project_id\": \"writer_workbench\",\n      \"resume_point\": null,\n      \"retry_count\": 0,\n      \"schema_version\": 1,\n      \"status\": \"EXECUTING\",\n      \"tool_calls\": [\n        {\n          \"attempt\": 1,\n          \"call_id\": \"pi_call_826006f41b66429f8b0b01bc0dd603da\",\n          \"idempotency_key\": \"phase3-live-begin-20261008-2146\",\n          \"input_hash\": \"655db25a92ee02a0ef95ea39d9c0e4d55268a6c712a3249cf6abf87273ffbd08\",\n          \"mutation\": true,\n          \"phase\": \"EXECUTING\",\n          \"reconciliation_attempt\": 0,\n          \"started_at\": \"2026-10-08T14:54:01.379Z\",\n          \"step_id\": \"begin\"\n        }\n      ],\n      \"tool_results\": [],\n      \"updated_at\": \"2026-10-08T14:54:01.379Z\",\n      \"verification_state\": {\n        \"affected\": \"not_requested\",\n        \"focused\": \"not_requested\",\n        \"full\": \"not_requested\"\n      },\n      \"workspace_id\": \"dev_workspace_shared_repository_v1\",\n      \"workstream_id\": null\n    },\n    \"receipts\": [],\n    \"journal_receipt\": {\n      \"operation_id\": \"dev_operation_a0590c98212b488da9eaf93670dd6df7\",\n      \"event_id\": \"dev_journal_event_da0efebdaad04e528a200c0d8af53c97\",\n      \"sequence\": 51368,\n      \"event_hash\": \"47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015\"\n    },\n    \"result\": {\n      \"schema_version\": 2,\n      \"phase\": \"F\",\n      \"mode\": \"production_default\",\n      \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n      \"intent_id\": \"phase3-live-bootstrap-20261008-2146\",\n      \"revision\": 7,\n      \"status\": \"EXECUTING\",\n      \"completed\": [],\n      \"remaining\": [\n        \"begin\",\n        \"isolate\"\n      ],\n      \"verification\": {\n        \"affected\": \"not_requested\",\n        \"focused\": \"not_requested\",\n        \"full\": \"not_requested\"\n      },\n      \"checkpoint\": {\n        \"at_revision\": 7,\n        \"intent_hash\": \"730ee2354cb32fbf57caa898d8a89321b6ebebfc11bb30e1d0c32e568c0e2779\",\n        \"operation_id\": \"pi_operation_ab4776c172b84bfa921ee99117a6728d\",\n        \"phase\": \"EXECUTING\",\n        \"schema_version\": 2,\n        \"step_id\": \"begin\",\n        \"workspace_id\": \"dev_workspace_shared_repository_v1\"\n      },\n      \"resume_point\": null,\n      \"decision_required\": false,\n      \"retry_at\": null,\n      \"persistence_enabled\": true,\n      \"execution_enabled\": true,\n      \"resume_dispatch_enabled\": true,\n      \"execution_context\": null,\n      \"engineering_review_required\": true,\n      \"production_default_changed\": true,\n      \"model_requests\": 0,\n      \"decision_owner\": \"GPT\",\n      \"execution_owner\": \"Pi\",\n      \"tool_owner\": \"MCP\",\n      \"legacy_migration\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_journal_status",
+        "arguments": {},
+        "started_utc": "2026-10-08T15:02:34.693Z",
+        "started_elapsed_ms": 140373.5409,
+        "duration_ms": 3552.7269000000088,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"schema_version\": 1,\n  \"health\": \"healthy\",\n  \"chain_verified\": true,\n  \"latest_sequence\": 51368,\n  \"latest_event_id\": \"dev_journal_event_da0efebdaad04e528a200c0d8af53c97\",\n  \"latest_event_hash\": \"47397d8b856b41481ac3d80a0c2407ba8095ef16ae15401eac80b74b26ed6015\",\n  \"dangling_operation_count\": 0,\n  \"dangling_operations\": [],\n  \"active_operation_count\": 0,\n  \"active_operations\": [],\n  \"reconciliation_required\": false,\n  \"last_health_error\": null,\n  \"storage\": \"server_owned_per_event_files\"\n}"
+            }
+          ]
+        },
+        "ok": true
+      },
+      {
+        "name": "dev_workspace_checkpoint_status",
+        "arguments": {},
+        "started_utc": "2026-10-08T15:02:38.253Z",
+        "started_elapsed_ms": 143933.8527,
+        "duration_ms": 5346.1408999999985,
+        "response": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"schema_version\": 1,\n  \"health\": \"healthy\",\n  \"registry_revision\": 289,\n  \"storage\": \"server_owned_content_addressed_checkpoint_store\",\n  \"checkpoint_count\": 283,\n  \"active_count\": 277,\n  \"deleted_count\": 6,\n  \"physical_blob_bytes\": 42493014,\n  \"logical_checkpoint_bytes\": 75318699,\n  \"deduplicated_bytes_saved\": 32825685,\n  \"reclaimable_bytes\": 0,\n  \"reclaimable_blob_count\": 0\n}"
+            }
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "readiness": [
+      {
+        "elapsed_ms": 773.6594,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 0,
+        "runtime": {
+          "state": "idle",
+          "current_step": null,
+          "started_at": null,
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 5783.463100000001,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 10802.7558,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 15812.5573,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 20831.6636,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 25850.0478,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 30862.6073,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "journal",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 35879.2453,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "transaction",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 40889.1607,
+        "http_status": 503,
+        "ready": false,
+        "code": "RUNTIME_NOT_READY",
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "running",
+          "current_step": "transaction",
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": null,
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 45910.1735,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 50916.1132,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 55937.8868,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 60953.5443,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 65971.9837,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 70984.0019,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 75996.4272,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 81008.7449,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 86024.2638,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 91037.8054,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 96043.9516,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 101051.7782,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 106068.5481,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 111079.3152,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 116095.1116,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 121115.8994,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 126134.7604,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 131144.1774,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 136153.4263,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 141159.72580000001,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      },
+      {
+        "elapsed_ms": 146169.2055,
+        "http_status": 200,
+        "ready": true,
+        "code": null,
+        "child_pid": 32068,
+        "pending_calls": 1,
+        "runtime": {
+          "state": "ready",
+          "current_step": null,
+          "started_at": "2026-10-08T15:00:15.105Z",
+          "completed_at": "2026-10-08T15:00:56.300Z",
+          "failed_at": null,
+          "last_error": null,
+          "generation": 1
+        },
+        "last_exit": null,
+        "call_timeout_ms": 300000,
+        "long_tool_call_timeout_ms": 28800000
+      }
+    ],
+    "health": [
+      {
+        "endpoint": "/health",
+        "http_status": 200,
+        "duration_ms": 56.227300000000014,
+        "value": {
+          "pi_execution_protocol": "writer-workbench/pi-production/v1",
+          "service": "writer-workbench-mcp",
+          "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+          "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+          "pid": 7348,
+          "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+          "startedAt": "2026-10-08T08:37:59.183Z",
+          "profile": "chatgpt_developer"
+        }
+      },
+      {
+        "endpoint": "/live",
+        "http_status": 200,
+        "duration_ms": 3.6890000000000214,
+        "value": {
+          "pi_execution_protocol": "writer-workbench/pi-production/v1",
+          "service": "writer-workbench-mcp",
+          "repositoryId": "ead8b86140d0b35129e0aebae56003b42a18fdc957d3954689f8f14be7404f02",
+          "revision": "23a1422db197bf73ad1e53fa37703da3962e2ee5b003e99b5bee34f4a1195896",
+          "pid": 7348,
+          "instanceId": "21994c28-0879-4ce7-b270-35dda0addc99",
+          "startedAt": "2026-10-08T08:37:59.183Z",
+          "profile": "chatgpt_developer",
+          "live": true,
+          "component": "http_parent",
+          "uptime_ms": 22935367,
+          "session_count": 11,
+          "ready_session_count": 9,
+          "recovering_session_count": 0,
+          "failed_session_count": 0
+        }
+      }
+    ],
+    "mutations_submitted": 0,
+    "source_boundary": "existing deployed service; candidate tracing not deployed",
+    "connect_ms": 768.6506999999999,
+    "own_session_id": "c98e0d00-a28c-4921-98a9-2e7fbe67f643",
+    "completed_status_queries": true,
+    "own_read_session_closed": true
+  },
+  "integration_gate": {
+    "ready": false,
+    "reason": "Original mutation claim has unresolved live outcome; no live Pi PowerShell E2E; candidate fixes not deployed or accepted."
+  },
+  "git": {
+    "diff_check": "passed: working-tree and staged diff-check; repeated before candidate commit",
+    "commit_sha": "see commit containing this evidence"
+  },
+  "next_action": "STOP after isolated candidate commit. Original operation remains EXECUTING/UNKNOWN: no resubmit, no further resume, no replacement intent. Only read-only status/receipt inspection is currently authorized. Preserve owned session ed450214-ef29-476f-97ff-881d2b622600 pending lifecycle review. Integration Gate remains false; any additional recovery or deployment requires a subsequent explicit engineering decision."
+}

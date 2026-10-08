@@ -27,15 +27,16 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   readExecutionProjections:(...args)=>traceSpan("journal.projection_read",()=>boundJournal.readExecutionProjections(...args)),
   appendExecutionProjection:(...args)=>traceSpan("journal.projection_append",()=>boundJournal.appendExecutionProjection(...args))};
  if(!transport||typeof transport.callTool!=="function"||typeof transport.resolveWorkspace!=="function")reliableFailure("INVALID_PRODUCTION_HOST_BINDING");
- async function prepare(source){
+ async function prepare(source,{readJournal=journal,events:inspectionEvents,routeEvents:inspectionRoutes}={}){
   const intent=createExecutionIntent(source);if(intent.context.project_id!=="writer_workbench")reliableFailure("PERMISSION_DENIED");
-  const events=await createPiReliableExecutionStore({journal}).readHistory();validatePiExecutionHistory(events);
+  const events=inspectionEvents??await createPiReliableExecutionStore({journal}).readHistory();
+  if(inspectionEvents===undefined)validatePiExecutionHistory(events);
   const created=events.find(e=>e.execution_projection.intent.intent_id===intent.intent_id&&e.execution_projection.revision===1);
-  const active=await traceSpan("journal.route_read",()=>route.inspect());
+  const active=inspectionRoutes?validatePiProductionRouteHistory(inspectionRoutes):await traceSpan("journal.route_read",()=>route.inspect());
   if(created&&!created.execution_projection.command?.production_binding)reliableFailure("LEGACY_OPERATION_NOT_MIGRATED");
   if(!created&&active.mode!=="pi_default")reliableFailure("PRODUCTION_ROUTE_DISABLED");
   const binding=created?.execution_projection.command.production_binding??{route_revision:active.revision,route_hash:active.route_hash};
-  if(created){const admissionRoute=[...(await route.history())].reverse().find(e=>e.sequence<created.sequence);
+  if(created){const admissionRoute=[...(inspectionRoutes??await route.history())].reverse().find(e=>e.sequence<created.sequence);
    const proof=admissionRoute?JSON.parse(admissionRoute.result.route_record):null;
    if(!proof||proof.mode!=="pi_default"||proof.revision!==binding.route_revision||proof.route_hash!==binding.route_hash)reliableFailure("CORRUPT_ROUTE_STATE");}
   const admissionGuard=async({history,existing,allEvents})=>{
@@ -44,7 +45,7 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
    const current=validatePiProductionRouteHistory(allEvents.filter(e=>e.operation_type==="pi_production_route"&&e.stage==="operation_completed"));
    if(current.mode!=="pi_default"||current.revision!==binding.route_revision||current.route_hash!==binding.route_hash)reliableFailure("PRODUCTION_ROUTE_DISABLED");
   };
-  const store=createPiReliableExecutionStore({journal,productionBinding:binding,admissionGuard});
+  const store=createPiReliableExecutionStore({journal:readJournal,productionBinding:binding,admissionGuard});
   const adapter=createPiReliableMcpAdapter({...transport,callTool:async params=>{
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
    return runPiManagedMcpCall(()=>transport.callTool(params));
@@ -52,14 +53,25 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
   return {intent,store,engine:createPiReliableExecutionEngine({store,adapter,...(retryPolicy?{retryPolicy}:{}),executionHook})};
  }
  function output(r){return {...r,result:{...r.result,phase:"F",mode:"production_default",production_default_changed:true,legacy_migration:false,engineering_review_required:true}};}
+ async function inspectOperation(args,includeRoute=false){
+  // Reuse only this request's fully validated snapshot. Mutation/admission uses
+  // fresh reads and append-lock CAS; no historical prefix or cross-call cache.
+  const history=await createPiReliableExecutionStore({journal}).readHistory();
+  const operation_id=args.operation_id??[...history].reverse().find(e=>e.execution_projection.intent.intent_id===args.intent_id)?.execution_projection.state.operation_id;
+  if(!operation_id)reliableFailure("UNKNOWN_PI_OPERATION");
+  const readJournal={...journal,readExecutionProjections:async()=>history};
+  const r=await createPiReliableExecutionStore({journal:readJournal}).inspect({...args,operation_id});
+  const routeEvents=await traceSpan("journal.route_read",()=>route.history());
+  await prepare(r.intent,{readJournal,events:history,routeEvents});
+  const operation=output(r);
+  return includeRoute?{route:validatePiProductionRouteHistory(routeEvents),operation}:operation;
+ }
  return Object.freeze({
   status:async()=>{await createPiReliableExecutionStore({journal}).readHistory();return route.inspect();},
   admit:async source=>{const {intent,store}=await prepare(source);return output(await store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));},
   execute:async source=>{const {intent,engine}=await traceSpan("pi.prepare",()=>prepare(source));return output(await engine.execute(intent));},
-  inspect:async args=>{const history=await createPiReliableExecutionStore({journal}).readHistory();
-   const operation_id=args.operation_id??[...history].reverse().find(e=>e.execution_projection.intent.intent_id===args.intent_id)?.execution_projection.state.operation_id;
-   if(!operation_id)reliableFailure("UNKNOWN_PI_OPERATION");
-   const r=await createPiReliableExecutionStore({journal}).inspect({...args,operation_id});const {intent,store}=await prepare(r.intent);return output(await store.inspect({...args,operation_id,context:intent.context}));}
+  inspect:args=>inspectOperation(args),
+  inspectStatus:args=>inspectOperation(args,true)
  });
 }
 
