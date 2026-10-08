@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import { hostname } from "node:os";
 import { reliableTerminal, reliableFailure } from "./pi-reliable-execution-state.mjs";
 import { reliableErrorCode } from "./pi-mcp-reliable-adapter.mjs";
@@ -8,14 +9,14 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
   sleep=delay,clock=()=>new Date().toISOString(),executionHook}={}) {
   if(!store||!adapter||typeof sleep!=="function"||typeof clock!=="function")reliableFailure("HOST_ENGINE_UNBOUND");
   async function execute(source) {
-    let record=await store.admit(source,{retry_policy:retryPolicy});
+    let record=await traceSpan("pi.admission",()=>store.admit(source,{retry_policy:retryPolicy}));
     const stopped=()=>reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
     if(stopped())return record;
     const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
     const binding=()=>({binding:record.runtime.lifecycle_binding??null});
     const args=()=>({operation_id:record.state.operation_id,context:record.intent.context,expected_revision:record.revision});
     const inspect=()=>store.inspect({operation_id:record.state.operation_id,context:record.intent.context});
-    async function send(command) {record=await store.command({...args(),command});return record;}
+    async function send(command) {record=await traceSpan("pi.state_transition",()=>store.command({...args(),command}));return record;}
     const own=command=>send({...command,worker_id:worker.worker_id});
     async function stop(code,status="DECISION_REQUIRED",receipt=null) {
       return own({type:"decision_requested",code,status,receipt});
@@ -43,7 +44,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       if(call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)return stop("RECONCILIATION_RETRY_EXHAUSTED");
       await own({type:"reconciliation_started",call_id:call.call_id});
       let observed;
-      try {observed=await adapter.reconcile(record.intent,call.step_id,binding());}
+      try {observed=await traceSpan("pi.reconciliation",()=>adapter.reconcile(record.intent,call.step_id,binding()));}
       catch(error) {
         const code=reliableErrorCode(error);
         if(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT"].includes(code)
@@ -104,7 +105,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       let response;
       try {
         await executionHook?.("before_dispatch",record);
-        response=await adapter.execute(record.intent,stepId,binding());
+        response=await traceSpan("pi.capability_dispatch",()=>adapter.execute(record.intent,stepId,binding()));
         await executionHook?.("after_dispatch",record);
       } catch(error) {
         const code=reliableErrorCode(error);

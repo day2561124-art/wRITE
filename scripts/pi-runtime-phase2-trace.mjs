@@ -64,6 +64,8 @@ registerHooks({load(url,context,next) {
   if(name==='mcp-server.mjs') {
     source=source.replace('function enqueueMessage(message, framing) {','function enqueueMessage(message, framing) {\n__phase2Receive(message);');
     source=source.replace('const response = await dispatch(message);','const response = await __phase2Dispatch(message,()=>dispatch(message));');
+    source=source.replace('const response = await traceSpan("mcp.dispatch",()=>dispatch(message));',
+      'const response = await __phase2Dispatch(message,()=>traceSpan("mcp.dispatch",()=>dispatch(message)));');
     source=source.replace('await ensureRuntimeReady();','await __phase2Span("runtime.readiness",()=>ensureRuntimeReady());');
     source=source.replaceAll('await tool.handler(effectiveArgs)','await __phase2Span("capability."+tool.name,()=>tool.handler(effectiveArgs))');
     source=source.replace('await writeMessage(response, framing);','await __phase2Span("mcp.serialize_and_write",()=>writeMessage(response, framing));');

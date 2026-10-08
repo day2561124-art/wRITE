@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
@@ -586,7 +587,7 @@ export function createDevCheckpointService({
 
   async function withLock(operation) {
     await ensureStore();
-    const handle = await acquireStoreLock(paths.lock);
+    const handle = await traceSpan("checkpoint.lock_wait",()=>acquireStoreLock(paths.lock));
     try { return await operation(); } finally { await releaseStoreLock(handle, paths.lock); }
   }
 

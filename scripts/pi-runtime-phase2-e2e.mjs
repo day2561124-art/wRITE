@@ -23,7 +23,7 @@ export function phase2Intent(id,context,actions,bootstrap=false) {
     permissions:{read:true,workspace_create:bootstrap,write:true,tests:false,commit:false,integrate:false,push:false},
     decision_boundaries:[...REQUIRED_DECISION_BOUNDARIES]};
 }
-export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}) {
+export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false,transportFactory=null,beforeFaults=null}={}) {
   const root=await mkdtemp(path.join(os.tmpdir(),'pi-phase2-')),repo=path.join(root,'repo');
   await mkdir(repo);
   const git=args=>exec(process.platform==='win32'?'git.exe':'git',args,{cwd:repo,windowsHide:true,shell:false,timeout:30000,maxBuffer:1024*1024});
@@ -34,6 +34,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}
     for(const dir of ['server','scripts'])await cp(path.join(source,dir),path.join(repo,dir),
       {recursive:true,filter:p=>!['node_modules','.tmp'].includes(path.basename(p))});
     await cp(path.join(source,'package.json'),path.join(repo,'package.json'));
+    if(transportFactory)await cp(path.join(source,'package-lock.json'),path.join(repo,'package-lock.json'));
     await writeFile(path.join(repo,'.gitignore'),'node_modules/\ndata/outputs/\n');
     await symlink(path.resolve(source,'..','node_modules'),path.join(repo,'node_modules'),'junction');
     await git(['init','-b','main']);
@@ -49,7 +50,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}
       decision_id:'gpt-phase2-fixture',gate_hash:'a'.repeat(64)},{validateGate:async()=>true});
     const env={...process.env,MCP_TOOL_PROFILE:'chatgpt_developer',PI_PRESSURE_PHASE2_FIXTURE_ROOT:repo};
     for(const key of Object.keys(env))if(key.startsWith('WRITER_WORKBENCH_ISOLATED_TEST_'))delete env[key];
-    transport=new StdioClientTransport({command:process.execPath,args:['--import',
+    transport=transportFactory?await transportFactory({repo,root,env}):new StdioClientTransport({command:process.execPath,args:['--import',
       new URL('./pi-runtime-phase2-trace.mjs',import.meta.url).href,path.join(repo,'server/src/mcp-server.mjs')],cwd:repo,env,stderr:'pipe'});
     transport.stderr?.on('data',chunk=>process.stderr.write(chunk));
     client=new Client({name:'pi-phase2-e2e',version:'1'});await client.connect(transport);
@@ -105,6 +106,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}
       ...Array.from({length:3},()=>call('dev_capability_get_schema',{capability_name:'host.powershell'})),
     ]);
     assert.equal(competition[0].state.status,'COMPLETED');
+    const extraDispatches=beforeFaults?await beforeFaults({call,powershell,receipt,runs,context}):0;
     const nonzero=await call('dev_pi_execute_intent',{intent_json:JSON.stringify(powershell('phase2-nonzero-0001','exit 7'))});
     const nonzeroFact=receipt(nonzero);
     assert.equal(nonzeroFact.exit_code,7);
@@ -121,13 +123,13 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}
     assert.equal(health.last_health_error,'ambiguous_terminal_operation_requires_reconciliation');
     const events=(await journal.verify()).events;
     const started=events.filter(e=>e.operation_type==='powershell_maintenance'&&e.stage==='operation_started');
-    assert.equal(started.length,normalCalls+2+4+1,'duplicates, denied calls and unresolved timeout retry must never spawn another command');
+    assert.equal(started.length,normalCalls+2+4+1+extraDispatches,'duplicates, denied calls and unresolved timeout retry must never spawn another command');
     const timeoutFact=events.find(e=>e.operation_type==='powershell_maintenance'&&e.stage==='operation_completed'&&e.result?.timed_out===true)?.result;
     assert(timeoutFact);
     assert.equal((await git(['rev-parse','HEAD'])).stdout.trim(),head);
     assert.equal((await git(['status','--porcelain'])).stdout,'');
     await client.close();client=null;
-    const trace=(await readFile(path.join(root,'trace.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+    const trace=transport.readFixtureTrace?await transport.readFixtureTrace():(await readFile(path.join(root,'trace.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
     const evidence={scope:'isolated actual MCP stdio ingress; not production/ChatGPT connector',pi_dependency_version:'1.0.4',
       source_commit:'8e9b561b86e009e8df86734d980aa586538d8f2e',context,runs,samples,trace,
       server_sha256:createHash('sha256').update(await readFile(path.join(repo,'server/src/mcp-server.mjs'))).digest('hex'),
@@ -145,6 +147,7 @@ export async function runPhase2E2E({normalCalls=8,outputPath=null,keep=false}={}
     throw error;
   } finally {
     if(client)await client.close().catch(()=>{});
+    await transport?.cleanupFixture?.();
     if(!keep) {
       assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
       assert(path.basename(root).startsWith('pi-phase2-'));

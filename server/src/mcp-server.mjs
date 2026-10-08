@@ -1,5 +1,8 @@
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
+import {performance} from "node:perf_hooks";
+import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,traceId,traceSpan} from "./mcp-request-tracing.mjs";
+if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
@@ -1187,7 +1190,7 @@ async function auditedToolCall(tool, args, actor) {
     if (tool.name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(tool.name)) {
       await assertDevJournalMutationAllowed();
     }
-    result = await tool.handler(effectiveArgs);
+    result = await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     result = {
       isError: true,
@@ -5854,7 +5857,7 @@ async function callToolDirect(params) {
 
   try {
     const effectiveArgs = prepareToolArguments(tool, args);
-    return await tool.handler(effectiveArgs);
+    return await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     return {
       isError: true,
@@ -5910,7 +5913,7 @@ async function dispatch(message) {
     });
   }
 
-  await ensureRuntimeReady();
+  await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
 
   if (message.method === "tools/call") {
     try {
@@ -5968,6 +5971,8 @@ function enqueueMessage(message, framing) {
   }
 
   pendingDispatchMessages += 1;
+  const correlation=traceId(message?.params?._meta?.[REQUEST_TRACE_META_KEY]);
+  const queuedAt=performance.now();
   // This exact handler reads only the immutable server-owned schema registry.
   // Keep its own serial lane; arbitrary reads and every mutation retain the
   // existing execution queue. dispatch still enforces readiness and profile.
@@ -5977,16 +5982,17 @@ function enqueueMessage(message, framing) {
     && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
   const next = (metadata ? metadataPending : pending)
     .then(async () => {
-      const response = await dispatch(message);
-      if (response) {
-        await writeMessage(response, framing);
-      }
+      publishTrace(correlation,"mcp.queue_wait",performance.now()-queuedAt);
+      await runRequestTrace(correlation,async()=>{
+        const response = await traceSpan("mcp.dispatch",()=>dispatch(message));
+        if (response) await traceSpan("mcp.serialize_write",()=>writeMessage(response,framing));
+      });
     })
     .catch(async (error) => {
-      await writeMessage(
+      await runRequestTrace(correlation,()=>traceSpan("mcp.serialize_write",()=>writeMessage(
         makeError(message?.id ?? null, -32603, error.message),
         framing,
-      );
+      )));
     })
     .finally(() => {
       pendingDispatchMessages -= 1;
@@ -6319,9 +6325,9 @@ function publishRuntimeReadiness(status) {
 }
 
 const ensureRuntimeReady = createRuntimeReadiness([
-  ["journal", initializeDevJournalRuntime],
-  ["checkpoint", initializeDevCheckpointRuntime],
-  ["transaction", initializeDevTransactionRuntime],
+  ["journal", ()=>traceSpan("journal.readiness",initializeDevJournalRuntime)],
+  ["checkpoint", ()=>traceSpan("checkpoint.readiness",initializeDevCheckpointRuntime)],
+  ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
 ], () => {}, publishRuntimeReadiness);
 
 process.stdin.on("data", (chunk) => {

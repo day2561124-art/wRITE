@@ -4,6 +4,8 @@ import { once } from 'events';
 import { attachWorldSimulationPreparedTurnBrokerIpc } from './world-simulation-prepared-turn-broker-ipc.mjs';
 import { attachWorkspaceSnapshotAuthorityIpc } from './mcp-workspace-snapshot-authority-ipc.mjs';
 import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
+import {performance} from 'node:perf_hooks';
+import {REQUEST_TRACE_PROTOCOL,REQUEST_TRACE_META_KEY,createTraceBuffer,publishTrace,requestTraceChannel,sanitizeTrace,traceId,withTraceId} from './mcp-request-tracing.mjs';
 import { terminateProcessTree } from './process-control.mjs';
 
 // Minimal stdio proxy: spawn a per-connection child process running mcp-server.mjs
@@ -75,6 +77,7 @@ export function createReadonlyRetryBudget({ maxRetries = 16, maxConcurrent = 2,
 
 export function createStdioSession(options = {}) {
   const listeners = new Map();
+  const requestTraces=createTraceBuffer();
   const logicalCalls = new Set();
   const readOnlyTools = new Set();
   const retryBudget = options.readonlyRetryBudget ?? createReadonlyRetryBudget();
@@ -237,6 +240,13 @@ export function createStdioSession(options = {}) {
       )
       : () => {};
     const onRuntimeReadinessMessage = (message) => {
+      if(message?.protocol===REQUEST_TRACE_PROTOCOL&&child===nextChild&&Array.isArray(message.records)) {
+        for(const record of message.records.slice(0,64)) {
+          const safe=sanitizeTrace(record);
+          if(safe){requestTraces.accept(safe);if(requestTraceChannel.hasSubscribers)requestTraceChannel.publish(safe);}
+        }
+        return;
+      }
       if (
         message?.protocol !== RUNTIME_READINESS_PROTOCOL
         || message?.kind !== 'status'
@@ -422,6 +432,7 @@ export function createStdioSession(options = {}) {
       env: {
         ...process.env,
         MCP_TOOL_PROFILE: process.env.MCP_TOOL_PROFILE ?? 'chatgpt_public',
+        MCP_REQUEST_TRACING: '1',
         ...(options.workspaceSnapshotAuthority
           ? { WRITER_WORKBENCH_PARENT_SNAPSHOT_AUTHORITY: '1' }
           : {}),
@@ -666,7 +677,9 @@ export function createStdioSession(options = {}) {
 
   function call(message, cb) {
     captureLifecycleMessage(message);
-    const request = structuredClone(message);
+    const correlation=traceId(message?.params?._meta?.[REQUEST_TRACE_META_KEY]);
+    const started=performance.now();
+    const request = withTraceId(structuredClone(message),correlation);
     const originalId = request.id ?? randomUUID();
     request.id = originalId;
     // Eligibility comes only from the server catalog, never caller-supplied hints.
@@ -676,10 +689,12 @@ export function createStdioSession(options = {}) {
       if (finished) return;
       finished = true;
       logicalCalls.delete(finish);
+      requestTraces.accept(publishTrace(correlation,'transport.round_trip',performance.now()-started,!error));
       if (!error && request.method === 'tools/list' && Array.isArray(response?.result?.tools)) {
         captureReadOnlyCatalog(response);
       }
-      cb(error, response ? { ...response, id: originalId } : null);
+      const traced=response?.result?{...response,result:{...response.result,_meta:{...response.result._meta,[REQUEST_TRACE_META_KEY]:correlation}}}:response;
+      cb(error, traced ? { ...traced, id: originalId } : null);
     };
     logicalCalls.add(finish);
     const attempt = (retryNumber) => new Promise((resolve, reject) => {
@@ -844,6 +859,7 @@ export function createStdioSession(options = {}) {
       },
       last_recovery: lastRecovery,
       runtime_readiness: { ...runtimeReadiness },
+      request_traces: requestTraces.snapshot(),
       closed,
       initialized: initializeRequest !== null,
       last_exit: lastExit,

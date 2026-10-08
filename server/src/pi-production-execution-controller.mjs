@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from "node:async_hooks";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import {createExecutionIntent} from "./pi-execution-contract.mjs";
 import {createPiReliableExecutionStore} from "./pi-reliable-execution-store.mjs";
 import {createPiReliableExecutionEngine} from "./pi-reliable-execution-engine.mjs";
@@ -21,12 +22,16 @@ export async function guardPiDirectExecution({route,tool,mutation=false,params={
 }
 const defaultJournal={readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,recoverExecutionPublication:recoverDevExecutionPublication};
 export function createPiProductionExecutionController({journal=defaultJournal,route=createPiProductionRouteStore(),transport,retryPolicy,executionHook}={}){
+ const boundJournal=journal;
+ journal={...boundJournal,
+  readExecutionProjections:(...args)=>traceSpan("journal.projection_read",()=>boundJournal.readExecutionProjections(...args)),
+  appendExecutionProjection:(...args)=>traceSpan("journal.projection_append",()=>boundJournal.appendExecutionProjection(...args))};
  if(!transport||typeof transport.callTool!=="function"||typeof transport.resolveWorkspace!=="function")reliableFailure("INVALID_PRODUCTION_HOST_BINDING");
  async function prepare(source){
   const intent=createExecutionIntent(source);if(intent.context.project_id!=="writer_workbench")reliableFailure("PERMISSION_DENIED");
   const events=await createPiReliableExecutionStore({journal}).readHistory();validatePiExecutionHistory(events);
   const created=events.find(e=>e.execution_projection.intent.intent_id===intent.intent_id&&e.execution_projection.revision===1);
-  const active=await route.inspect();
+  const active=await traceSpan("journal.route_read",()=>route.inspect());
   if(created&&!created.execution_projection.command?.production_binding)reliableFailure("LEGACY_OPERATION_NOT_MIGRATED");
   if(!created&&active.mode!=="pi_default")reliableFailure("PRODUCTION_ROUTE_DISABLED");
   const binding=created?.execution_projection.command.production_binding??{route_revision:active.revision,route_hash:active.route_hash};
@@ -50,7 +55,7 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
  return Object.freeze({
   status:async()=>{await createPiReliableExecutionStore({journal}).readHistory();return route.inspect();},
   admit:async source=>{const {intent,store}=await prepare(source);return output(await store.admit(intent,...(retryPolicy?[{retry_policy:retryPolicy}]:[])));},
-  execute:async source=>{const {intent,engine}=await prepare(source);return output(await engine.execute(intent));},
+  execute:async source=>{const {intent,engine}=await traceSpan("pi.prepare",()=>prepare(source));return output(await engine.execute(intent));},
   inspect:async args=>{const history=await createPiReliableExecutionStore({journal}).readHistory();
    const operation_id=args.operation_id??[...history].reverse().find(e=>e.execution_projection.intent.intent_id===args.intent_id)?.execution_projection.state.operation_id;
    if(!operation_id)reliableFailure("UNKNOWN_PI_OPERATION");
