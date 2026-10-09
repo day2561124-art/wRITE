@@ -7,6 +7,8 @@ import {
   open,
   readFile,
   readlink,
+  readdir,
+  rmdir,
   rename,
   unlink,
   writeFile,
@@ -14,7 +16,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { acquireDevTestRecoveryLease, createDevTestRunner } from "./mcp-development-test-tools.mjs";
+import { acquireDevTestRecoveryLease, cleanupDevTestDependencyBridge, createDevTestRunner } from "./mcp-development-test-tools.mjs";
 import { selectIntegrationVerificationPlan } from "./mcp-integration-verification-router.mjs";
 import { buildIntegrationVerificationManifest } from "./mcp-verification-manifest.mjs";
 import { runControlledDiagnosticRetry } from "./mcp-verification-controlled-retry.mjs";
@@ -945,14 +947,30 @@ export function createDevIntegrationService({
     }
   }
 
-  async function cleanupIntegrationWorktree(integrationPath) {
+  async function cleanupIntegrationWorktree(integrationPath, { unregisteredResidue = false } = {}) {
     try {
-      const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
-      if (status.dirty || status.staged.length > 0 || status.conflicted.length > 0 || status.untracked.length > 0) {
-        return { cleaned: false, error: "Integration worktree is dirty; cleanup refused without force." };
+      if (!unregisteredResidue) {
+        const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
+        if (status.dirty || status.staged.length > 0 || status.conflicted.length > 0 || status.untracked.length > 0) {
+          return { cleaned: false, error: "Integration worktree is dirty; cleanup refused without force." };
+        }
+        await gitRunner(["worktree", "unlock", integrationPath], { cwd: repoRoot, allowFailure: true });
+        await gitRunner(["worktree", "remove", integrationPath], { cwd: repoRoot, timeout: 60_000 });
       }
-      await gitRunner(["worktree", "unlock", integrationPath], { cwd: repoRoot, allowFailure: true });
-      await gitRunner(["worktree", "remove", integrationPath], { cwd: repoRoot, timeout: 60_000 });
+      // Windows Git can remove the registration but leave a dependency junction.
+      // Only remove an empty directory or the runner's exact owned bridge; do
+      // not report cleanup success while other files or unknown links remain.
+      const residue = await lstat(integrationPath).catch(error => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      if (residue) {
+        if (residue.isSymbolicLink() || !residue.isDirectory()) throw new Error("Unsafe integration cleanup residue.");
+        const names = await readdir(integrationPath);
+        if (names.some(name => name !== "node_modules")) throw new Error("Integration cleanup residue contains unowned files.");
+        if (names.includes("node_modules")) await cleanupDevTestDependencyBridge(integrationPath, dependencyRoot);
+        await rmdir(integrationPath); // Nonrecursive: newly added files fail closed.
+      }
       return { cleaned: true, error: null };
     } catch (error) {
       return { cleaned: false, error: error.message };
@@ -1257,9 +1275,12 @@ export function createDevIntegrationService({
       let exists = true;
       try { const info = await lstat(integrationPath); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("UNSAFE_WORKTREE"); }
       catch (error) { if (error?.code !== "ENOENT") throw error; exists = false; }
+      let unregisteredResidue = false;
       if (exists) {
         const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
         const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
+        unregisteredResidue = !block && recovering;
+        if (!unregisteredResidue) {
         const lines = block?.split(/\r?\n/u) ?? [];
         const lockLine = lines.find(line => line.startsWith("locked"));
         if (!lines.includes(`HEAD ${candidate.integration_commit}`) || !lines.includes("detached")
@@ -1268,6 +1289,7 @@ export function createDevIntegrationService({
         }
         if (parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout).dirty) {
           throw new Error("VALIDATION_RECOVERY_DIRTY_WORKTREE");
+        }
         }
       } else if (!recovering) throw new Error("VALIDATION_RECOVERY_WORKTREE_MISSING");
       if (!recovering) candidate = await updateCandidate(candidateId, candidate.revision, record => {
@@ -1279,7 +1301,7 @@ export function createDevIntegrationService({
         record.integration_workspace.state = "cleanup_pending";
         record.integration_workspace.cleanup_pending = true;
       });
-      const cleanup = exists ? await cleanupIntegrationWorktree(integrationPath) : { cleaned: true, error: null };
+      const cleanup = exists ? await cleanupIntegrationWorktree(integrationPath, { unregisteredResidue }) : { cleaned: true, error: null };
       if (candidate.integration_workspace.state !== "removed" || !cleanup.cleaned) {
         candidate = await updateCandidate(candidateId, candidate.revision, record => {
           record.integration_workspace.state = cleanup.cleaned ? "removed" : "cleanup_pending";

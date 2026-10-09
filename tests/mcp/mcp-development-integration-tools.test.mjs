@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -713,12 +713,15 @@ test("service rejects caller-controlled integration plumbing fields", async () =
 test("hard interruption recovers only bound dead validation, including interrupted cleanup and append", async () => {
   const harness = await createHarness("interrupted-validation");
   try {
-    const source = await harness.createSource({ changes: { "docs/recovery.txt": "recovery\n" } });
+    const source = await harness.createSource({ changes: { "docs/recovery.txt": "recovery\n", ".gitignore": "node_modules/\n" } });
     const runtime = path.join(harness.root, "runtime");
     const journalRoot = path.join(runtime, "journal");
     const lockPath = path.join(runtime, "test.lock");
     const journal = createDevOperationJournalService({ storageRoot: journalRoot });
-    const overrides = { journal, testLockPath: lockPath };
+    const dependencyRoot = path.join(harness.root, "dependencies");
+    await mkdir(path.join(dependencyRoot, "node_modules"), { recursive: true });
+    await writeFile(path.join(dependencyRoot, "node_modules", "preserve.txt"), "dependencies\n");
+    const overrides = { journal, testLockPath: lockPath, dependencyRoot };
     const service = harness.createService(overrides);
     const candidate = await service.preflight({ workstream_id: source.workstream_id });
     const workstream = harness.workstreams.get(source.workstream_id);
@@ -775,6 +778,8 @@ test("hard interruption recovers only bound dead validation, including interrupt
     await assert.rejects(service.recoverInterruptedValidation(input), /RUNNER_CONFLICT/);
     await writeFile(lockPath, originalLock);
     const integrationPath = path.join(harness.root, ".writer-workbench-integrations", current.integration_candidate_id);
+    await symlink(path.join(dependencyRoot, "node_modules"), path.join(integrationPath, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir");
     await writeFile(path.join(integrationPath, "untracked.txt"), "preserve me");
     await assert.rejects(service.recoverInterruptedValidation(input), /DIRTY_WORKTREE/);
     await rm(path.join(integrationPath, "untracked.txt"));
@@ -797,6 +802,8 @@ test("hard interruption recovers only bound dead validation, including interrupt
     await assert.rejects(appendFailure.recoverInterruptedValidation({ ...input, expected_revision: current.revision }), /append interrupted/);
     current = await service.getCandidate({ integration_candidate_id: current.integration_candidate_id });
     assert.equal(current.integration_workspace.state, "removed");
+    await assert.rejects(access(integrationPath), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(dependencyRoot, "node_modules", "preserve.txt"), "utf8"), "dependencies\n");
     assert.equal((await journal.verify()).dangling_operations.length, 2);
     const revisionBeforeResume = current.revision;
     current = await service.recoverInterruptedValidation({ ...input, expected_revision: current.revision });
@@ -805,6 +812,19 @@ test("hard interruption recovers only bound dead validation, including interrupt
     assert.equal(proof.dangling_operations.length, 0);
     assert.equal(proof.active_operations.length, 0);
     assert.equal(proof.events.filter(e => e.stage === "operation_recovered").length, 3);
+    // A leftover unregistered directory is never recursively removed. A retry
+    // can clean only the exact owned junction after unrelated files are gone.
+    await mkdir(integrationPath);
+    await writeFile(path.join(integrationPath, "preserve.txt"), "unowned\n");
+    current = await service.recoverInterruptedValidation({ ...input, expected_revision: current.revision });
+    assert.equal(current.integration_workspace.cleanup_pending, true);
+    assert.equal(await readFile(path.join(integrationPath, "preserve.txt"), "utf8"), "unowned\n");
+    await rm(path.join(integrationPath, "preserve.txt"));
+    await symlink(path.join(dependencyRoot, "node_modules"), path.join(integrationPath, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir");
+    current = await service.recoverInterruptedValidation({ ...input, expected_revision: current.revision });
+    assert.equal(current.integration_workspace.state, "removed");
+    await assert.rejects(access(integrationPath), { code: "ENOENT" });
     const successor = await service.preflight({ workstream_id: source.workstream_id });
     assert.equal(successor.state, "preflight_passed");
     assert.notEqual(successor.integration_candidate_id, current.integration_candidate_id);

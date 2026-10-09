@@ -418,21 +418,24 @@ async function prepareWorkspaceDependencyBridge(context, dependencyRoot) {
     await unlink(bridgePath).catch(() => {});
     throw new Error("Workspace dependency bridge verification failed.");
   }
-  return async () => {
-    const info = await lstat(bridgePath).catch((error) => {
-      if (error?.code === "ENOENT") return null;
-      throw error;
-    });
-    if (!info) return;
-    if (!info.isSymbolicLink()) {
-      throw new Error("Workspace dependency bridge changed type during test execution; cleanup refused.");
-    }
-    const currentRealPath = await realpath(bridgePath);
-    if (currentRealPath !== sourceRealPath) {
-      throw new Error("Workspace dependency bridge target changed during test execution; cleanup refused.");
-    }
-    await unlink(bridgePath);
-  };
+  return () => cleanupDevTestDependencyBridge(repositoryRoot, dependencyRoot);
+}
+
+export async function cleanupDevTestDependencyBridge(repositoryRoot, dependencyRoot) {
+  const bridgePath = path.join(repositoryRoot, "node_modules");
+  const info = await lstat(bridgePath).catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return;
+  if (!info.isSymbolicLink()) {
+    throw new Error("Workspace dependency bridge changed type during test execution; cleanup refused.");
+  }
+  const currentRealPath = await realpath(bridgePath);
+  if (currentRealPath !== await realpath(path.join(dependencyRoot, "node_modules"))) {
+    throw new Error("Workspace dependency bridge target changed during test execution; cleanup refused.");
+  }
+  await unlink(bridgePath);
 }
 
 async function runDefinition(suite, definition, outputMaxCharacters, lockHandle, repositoryRoot, dependencyRoot) {
