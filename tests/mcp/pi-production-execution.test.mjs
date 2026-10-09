@@ -7,10 +7,20 @@ import os from "node:os";
 import path from "node:path";
 import {createDevOperationJournalService} from "../../server/src/mcp-development-journal-tools.mjs";
 import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "../../server/src/pi-production-execution-route.mjs";
-import {createPiProductionExecutionController,guardPiDirectExecution} from "../../server/src/pi-production-execution-controller.mjs";
+import {createPiProductionExecutionController,guardPiDirectExecution,runPiManagedMcpCall,assertPiManagedMcpCall} from "../../server/src/pi-production-execution-controller.mjs";
 import {createPiReliableExecutionStore} from "../../server/src/pi-reliable-execution-store.mjs";
 import {REQUIRED_DECISION_BOUNDARIES,hashExecutionInput,createExecutionIntent} from "../../server/src/pi-execution-contract.mjs";
 const context={project_id:"writer_workbench",workstream_id:"dev_workstream_20261003-153931_7730524b821e",workspace_id:"dev_workspace_65ed265de3494399b7ad40b2"};
+test("managed MCP contexts cannot retain dispatch permission after revocation",async()=>{
+ let revoked=false;
+ const authorize=async()=>{if(revoked)throw Object.assign(Error("OPERATION_ISOLATED"),{code:"OPERATION_ISOLATED"});};
+ await assert.rejects(runPiManagedMcpCall(async()=>{}),{code:"DISPATCH_AUTHORITY_REQUIRED"});
+ await runPiManagedMcpCall(async()=>{
+  await assertPiManagedMcpCall();revoked=true;
+  await assert.rejects(assertPiManagedMcpCall(),{code:"OPERATION_ISOLATED"});
+  await assert.rejects(guardPiDirectExecution({route:{inspect:async()=>{throw Error("must not bypass");}},tool:"dev_workspace_commit",mutation:true}),{code:"OPERATION_ISOLATED"});
+ },authorize);
+});
 function intent(id="default-intent-001",write=false){const input=write?{path:"scripts/probe.mjs",content:"// GPT exact content"}:{path:"package.json"};
  const action={step_id:"requested",capability:write?"filesystem.write":"filesystem.read",input,depends_on:[],...(write?{idempotency_key:"production-key-"+id}:{})};
  return {schema_version:1,intent_id:id,goal:"Execute exact GPT request",context,constraints:["Preserve scope"],requested_actions:[action],

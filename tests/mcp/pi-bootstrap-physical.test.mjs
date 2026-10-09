@@ -25,7 +25,7 @@ test('registry bootstrap and workspace creation survive service restart without 
  assert.equal(first.base_head,f.head);const recovered=await f.create().inspectPiLifecycleEffect(start);assert.equal(recovered.workstream_id,first.workstream_id);assert.equal(recovered.outcome,'intended_effect_observed');
  const duplicate=await f.create().beginBootstrap({...args,bootstrap_id:start.reconciliation_key,request_fingerprint_sha256:start.request_fingerprint_sha256});assert.equal(duplicate.workstream_id,first.workstream_id);
  const isolationArgs={workstream_id:first.workstream_id,expected_workstream_revision:1},isolation=request('dev_workspace_create_isolated',isolationArgs,'physical-isolate-0001');isolation.workspace_id=first.workspace_id;isolation.workstream_id=first.workstream_id;
- const invoke=service=>runPiManagedMcpCall(()=>runWithMcpOperationReconciliationContext(isolation,()=>service.createIsolated(isolationArgs)));
+ const invoke=service=>runPiManagedMcpCall(()=>runWithMcpOperationReconciliationContext(isolation,()=>service.createIsolated(isolationArgs)),async()=>true);
  const workspace=await invoke(f.service);assert.equal(workspace.state,'active');assert.equal(workspace.base_head,f.head);
  const observation=await f.create().inspectPiLifecycleEffect(isolation);assert.equal(observation.workspace_id,workspace.workspace_id);assert.equal(observation.outcome,'intended_effect_observed');
  const repeated=await invoke(f.create());assert.equal(repeated.workspace_id,workspace.workspace_id);const all=await f.service.list({});assert.equal(all.workstreams.length,1);

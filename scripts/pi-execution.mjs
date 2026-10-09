@@ -26,7 +26,7 @@ export async function submitPiExecutionIntent(source,{sessionFactory=connect,sle
   last=facts(await rpc(session,{jsonrpc:"2.0",id:"pi-cli-submit-"+(++sequence),method:"tools/call",params:{name:"dev_pi_execute_intent",arguments:args}}));
   if(!last?.state?.operation_id||last.intent?.intent_id!==intent.intent_id||hashExecutionInput(last.intent)!==hashExecutionInput(intent)
    ||last.state.intent_id!==intent.intent_id||last.state.intent_hash!==hashExecutionInput(intent))fail("INVALID_PI_RESPONSE");
-  if(done.has(last.state.status))return last;
+  if(done.has(last.state.status)||last.runtime?.isolation)return last;
   await sleep(1000);
  }catch(error){if(!transient.has(error?.code)||++retries>3)throw error;
   session?.close();session=null;await sleep(Math.min(5000,250*2**(retries-1)));

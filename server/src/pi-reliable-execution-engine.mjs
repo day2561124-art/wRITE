@@ -10,7 +10,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
   if(!store||!adapter||typeof sleep!=="function"||typeof clock!=="function")reliableFailure("HOST_ENGINE_UNBOUND");
   async function execute(source) {
     let record=await traceSpan("pi.admission",()=>store.admit(source,{retry_policy:retryPolicy}));
-    const stopped=()=>reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
+    const stopped=()=>record.runtime.isolation||reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
     if(stopped())return record;
     const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
     const binding=()=>({binding:record.runtime.lifecycle_binding??null});
@@ -105,9 +105,13 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       let response;
       try {
         await executionHook?.("before_dispatch",record);
-        response=await traceSpan("pi.capability_dispatch",()=>adapter.execute(record.intent,stepId,binding()));
+        const fence={...args(),expected_projection_hash:record.projection_hash,worker_id:worker.worker_id,call_id:callId};
+        const authorizeDispatch=()=>store.assertDispatchAuthorized(fence);
+        await authorizeDispatch();
+        response=await traceSpan("pi.capability_dispatch",()=>adapter.execute(record.intent,stepId,{...binding(),authorizeDispatch}));
         await executionHook?.("after_dispatch",record);
       } catch(error) {
+        if(["OPERATION_ISOLATED","STATE_REVISION_CONFLICT","STATE_PROJECTION_CONFLICT","OWNER_CONFLICT","STALE_TOOL_RESPONSE"].includes(error.code))return inspect();
         const code=reliableErrorCode(error);
         const classification=adapter.classify({code,mutation:step.effect,execution_state:"unknown"});
         if(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT"].includes(code)&&adapter.reconnect) {
@@ -136,6 +140,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
     let record=await store.inspect(args);
     if(!record.runtime.owner||stableJson(record.runtime.owner)!==stableJson(args.expected_owner))reliableFailure("OWNER_CONFLICT");
     const paused=code=>({...record,result:{...record.result,reconciliation_only:true,dispatch_paused:true,pause_reason:code}});
+    if(record.runtime.isolation)return paused("OPERATION_ISOLATED");
     const call=record.runtime.active_call;
     if(!call?.mutation||!["EXECUTING","VERIFYING","COMMITTING","RECONCILING"].includes(record.state.status)
       ||record.runtime.retry_at!==null||call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)

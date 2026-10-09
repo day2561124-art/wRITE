@@ -10,10 +10,20 @@ import {createPiProductionRouteStore,validatePiProductionRouteHistory} from "./p
 import {readDevExecutionProjections,appendDevExecutionProjection,recoverDevExecutionPublication} from "./mcp-development-journal-tools.mjs";
 import {reliableFailure,stableJson} from "./pi-reliable-execution-state.mjs";
 const managed=new AsyncLocalStorage();
-export const isPiManagedMcpCall=()=>managed.getStore()===true;
-export const runPiManagedMcpCall=(callback)=>managed.run(true,callback);
+export const isPiManagedMcpCall=()=>typeof managed.getStore()==="function";
+export const assertPiManagedMcpCall=async()=>{
+ const authorizeDispatch=managed.getStore();
+ if(typeof authorizeDispatch==="function")await authorizeDispatch();
+};
+export const runPiManagedMcpCall=async(callback,authorizeDispatch)=>{
+ if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
+ await authorizeDispatch();
+ return managed.run(authorizeDispatch,callback);
+};
 export async function guardPiDirectExecution({route,tool,mutation=false,params={},auditFallback,resolveWorkspace}){
- if(managed.getStore()===true||(await route.inspect()).revision===0)return;
+ const authorizeDispatch=managed.getStore();
+ if(typeof authorizeDispatch==="function"){await authorizeDispatch();return;}
+ if((await route.inspect()).revision===0)return;
  if(await admitPiLightweightRead({tool,mutation,params,resolveWorkspace}))return;
  const p=params._meta?.pi_fallback;
  if(!p||Object.keys(p).sort().join(",")!=="decision_id,purpose,reason"||!["diagnostic","emergency"].includes(p.purpose)
@@ -48,9 +58,11 @@ export function createPiProductionExecutionController({journal=defaultJournal,ro
    if(current.mode!=="pi_default"||current.revision!==binding.route_revision||current.route_hash!==binding.route_hash)reliableFailure("PRODUCTION_ROUTE_DISABLED");
   };
   const store=createPiReliableExecutionStore({journal:readJournal,productionBinding:binding,admissionGuard});
-  const adapter=createPiReliableMcpAdapter({...transport,callTool:async params=>{
+  const adapter=createPiReliableMcpAdapter({...transport,callTool:async (params,{authorizeDispatch}={})=>{
    if((await route.inspect()).mode!=="pi_default")reliableFailure("PERMISSION_DENIED");
-   return runPiManagedMcpCall(()=>transport.callTool(params));
+   if(typeof authorizeDispatch!=="function")reliableFailure("DISPATCH_AUTHORITY_REQUIRED");
+   await authorizeDispatch();
+   return runPiManagedMcpCall(()=>transport.callTool(params),authorizeDispatch);
   }});
   return {intent,store,engine:createPiReliableExecutionEngine({store,adapter,...(retryPolicy?{retryPolicy}:{}),executionHook})};
  }

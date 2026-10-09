@@ -669,6 +669,9 @@ export function createDevWorkstreamRegistryService({
             current = createEmptyRegistry();
           }
           const working = cloneRegistry(current);
+          // Recheck a Pi context after waiting for the registry transaction.
+          const {assertPiManagedMcpCall}=await import("./pi-production-execution-controller.mjs");
+          await assertPiManagedMcpCall();
           const resultFactory = await mutation(working, current);
           const now = clock().toISOString();
           working.schema_version = DEV_WORKSTREAM_SCHEMA_VERSION;

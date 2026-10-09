@@ -1192,6 +1192,7 @@ async function auditedToolCall(tool, args, actor) {
     if (tool.name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(tool.name)) {
       await assertDevJournalMutationAllowed();
     }
+    await assertPiManagedMcpCall();
     result = await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     result = {
@@ -1797,7 +1798,7 @@ const devWorkspaceExecutionProperties = Object.freeze({
 
 import {CAPABILITY_DEFINITIONS} from "./pi-execution-contract.mjs";
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
-import {isPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
+import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
 import {createPiRuntimeCapabilityMetadata} from "./pi-runtime-capability-metadata.mjs";
 const toolDefinitions = [
@@ -5833,6 +5834,8 @@ async function callToolDirect(params) {
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
     if (!key) return auditedToolCall(tool, mutationArgs, actor);
+    const {createPiReliableExecutionStore}=await import("./pi-reliable-execution-store.mjs");
+    await createPiReliableExecutionStore().assertMutationAuthorized(key);
     const effectiveArgs = prepareToolArguments(tool, mutationArgs);
     const guardError = confirmationGuardError(tool, effectiveArgs);
     if (guardError) throw new Error(guardError);
@@ -5866,6 +5869,7 @@ async function callToolDirect(params) {
 
   try {
     const effectiveArgs = prepareToolArguments(tool, args);
+    await assertPiManagedMcpCall();
     return await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     return {
