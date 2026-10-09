@@ -189,7 +189,7 @@ async function removeStaleLock(lockPath) {
 
     const childPid = Number.isInteger(record.child_pid) ? record.child_pid : null;
     if (childPid) {
-      if (isProcessRunning(childPid)) return false;
+      if (isProcessRunning(childPid) || isProcessRunning(record.owner_pid)) return false;
       await rm(lockPath, { force: true });
       return true;
     }
@@ -239,6 +239,14 @@ async function acquireRunLock(lockPath, suite) {
     }
   }
   return null;
+}
+
+// Recovery uses the same runner lease as execution. Holding it fences new runs
+// while the integration service inspects and cleans an interrupted worktree.
+export async function acquireDevTestRecoveryLease(lockPath = productionLockPath, candidateId) {
+  const handle = await acquireRunLock(lockPath, `integration_recovery:${candidateId}`);
+  if (!handle) throw new Error("TEST_RUN_LOCK_BUSY");
+  return () => releaseRunLock(handle, lockPath);
 }
 
 async function bindRunLockToChild(handle, suite, childPid) {
@@ -536,6 +544,8 @@ export function createDevTestRunner({
   outputMaxCharacters = DEV_TEST_OUTPUT_MAX_CHARACTERS,
   workspaceContextResolver = async () => sharedTestWorkspaceContext(),
   dependencyRoot = process.env.WRITER_WORKBENCH_DEPENDENCY_ROOT?.trim() || projectRoot,
+  journal = { begin: beginDevJournalOperation, complete: completeDevJournalOperation,
+    fail: failDevJournalOperation, markDegraded: markDevJournalDegraded },
 } = {}) {
   return async function runTests(input = {}) {
     const startedAt = Date.now();
@@ -580,7 +590,7 @@ export function createDevTestRunner({
     let workspaceSnapshot;
     try {
       workspaceSnapshot = await computeWorkspaceSnapshot(context);
-      journalOperation = await beginDevJournalOperation({
+      journalOperation = await journal.begin({
         operation_type: "test_evidence",
         tool_name: "dev_run_tests",
         workstream_id: context.workstream_id,
@@ -607,7 +617,7 @@ export function createDevTestRunner({
       dependencyBridgeCleanup = await prepareWorkspaceDependencyBridge(context, dependencyRoot);
     } catch (error) {
       try {
-        await failDevJournalOperation(journalOperation.operation_id, {
+        await journal.fail(journalOperation.operation_id, {
           result: {
             suite,
             execution_ok: false,
@@ -621,7 +631,7 @@ export function createDevTestRunner({
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_run_tests setup failure terminal append failed: ${journalError.message}`);
+        await journal.markDegraded(`dev_run_tests setup failure terminal append failed: ${journalError.message}`);
       }
       await releaseRunLock(lockHandle, lockPath);
       return {
@@ -717,7 +727,7 @@ export function createDevTestRunner({
       catch { verificationManifest = null; verificationManifestSha256 = null; }
     }
     try {
-      await completeDevJournalOperation(journalOperation.operation_id, {
+      await journal.complete(journalOperation.operation_id, {
         result: {
           suite,
           passed: result.passed === true,
@@ -734,7 +744,7 @@ export function createDevTestRunner({
         },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_run_tests terminal append failed: ${error.message}`);
+      await journal.markDegraded(`dev_run_tests terminal append failed: ${error.message}`);
       result = {
         ...result,
         execution_ok: false,

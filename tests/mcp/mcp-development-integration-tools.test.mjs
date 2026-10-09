@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import "./mcp-integration-verification-router.test.mjs";
 import "./mcp-verification-manifest.test.mjs";
@@ -16,6 +17,7 @@ import {
   beginDevJournalOperation,
   completeDevJournalOperation,
   computeWorkspaceSnapshot,
+  createDevOperationJournalService,
   dev_workspace_get_provenance,
 } from "../../server/src/mcp-development-journal-tools.mjs";
 
@@ -706,6 +708,108 @@ test("service rejects caller-controlled integration plumbing fields", async () =
   } finally {
     await harness.cleanup();
   }
+});
+
+test("hard interruption recovers only bound dead validation, including interrupted cleanup and append", async () => {
+  const harness = await createHarness("interrupted-validation");
+  try {
+    const source = await harness.createSource({ changes: { "docs/recovery.txt": "recovery\n" } });
+    const runtime = path.join(harness.root, "runtime");
+    const journalRoot = path.join(runtime, "journal");
+    const lockPath = path.join(runtime, "test.lock");
+    const journal = createDevOperationJournalService({ storageRoot: journalRoot });
+    const overrides = { journal, testLockPath: lockPath };
+    const service = harness.createService(overrides);
+    const candidate = await service.preflight({ workstream_id: source.workstream_id });
+    const workstream = harness.workstreams.get(source.workstream_id);
+    const workspace = { ...harness.workspaces.get(source.workspace_id), healthy: true,
+      registered_branch_matches: true, registry_mapping_consistent: true, git_worktree_head: source.sourceHead };
+    const worker = `
+      import {writeFile} from 'node:fs/promises';
+      import os from 'node:os';
+      import {createDevIntegrationService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-integration-tools.mjs")).href)};
+      import {createDevOperationJournalService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-journal-tools.mjs")).href)};
+      import {fingerprintMcpMutationRequest} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-operation-reconciliation-context.mjs")).href)};
+      const journal = createDevOperationJournalService({storageRoot:${JSON.stringify(journalRoot)}});
+      const service = createDevIntegrationService({
+        repositoryRoot:${JSON.stringify(harness.repositoryRoot)},
+        registryPath:${JSON.stringify(path.join(runtime, "integration_registry.json"))},
+        registryLockPath:${JSON.stringify(path.join(runtime, "integration_registry.lock"))},
+        applyLockPath:${JSON.stringify(path.join(runtime, "integration_apply.lock"))},
+        integrationRootPath:${JSON.stringify(path.join(harness.root, ".writer-workbench-integrations"))},
+        journal, workstreamReader:async()=>(${JSON.stringify(workstream)}), workspaceReader:async()=>(${JSON.stringify(workspace)}),
+        validationRunner:async()=>{
+          await journal.begin({operation_type:'test_evidence',tool_name:'dev_run_tests',
+            workspace_id:${JSON.stringify(source.workspace_id)},workstream_id:${JSON.stringify(source.workstream_id)},
+            result:{suite:'mcp',head:${JSON.stringify(source.sourceHead)}}});
+          await writeFile(${JSON.stringify(lockPath)},JSON.stringify({owner_pid:process.pid,child_pid:process.pid,
+            hostname:os.hostname(),suite:'mcp',started_at:new Date().toISOString()}));
+          process.exit(77);
+        }
+      });
+      const input=${JSON.stringify({ integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision })};
+      await journal.executeReconciled({reconciliation_key:'integration-test-hard-interruption',tool_name:'dev_workspace_validate_integration',
+        request_fingerprint_sha256:fingerprintMcpMutationRequest('dev_workspace_validate_integration',input)},
+        ()=>service.validateIntegration(input));
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", worker], { cwd: path.resolve("."), windowsHide: true, stdio: "pipe" });
+    let stderr = "";
+    child.stderr.on("data", data => { stderr += data; });
+    const exit = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(exit, 77, stderr);
+    let current = await service.getCandidate({ integration_candidate_id: candidate.integration_candidate_id });
+    assert.equal(current.state, "testing");
+    assert.equal(current.validation_report, null);
+    let proof = await journal.verify();
+    assert.equal(proof.dangling_operations.length, 3);
+    const start = proof.events.find(e => e.operation_type === "integration_validation");
+    const input = { integration_candidate_id: current.integration_candidate_id, expected_revision: current.revision,
+      operation_id: start.operation_id, expected_start_hash: start.event_hash };
+    const journalHead = proof.head.latest_event_hash;
+    await journal.reconcileDangling();
+    assert.equal((await journal.verify()).head.latest_event_hash, journalHead, "generic recovery must not claim no-effect for tests");
+    await assert.rejects(service.recoverInterruptedValidation({ ...input, expected_revision: input.expected_revision - 1 }), /STALE_REVISION/);
+    await assert.rejects(service.recoverInterruptedValidation({ ...input, expected_start_hash: "0".repeat(64) }), /BINDING_MISMATCH/);
+    const originalLock = await readFile(lockPath);
+    await writeFile(lockPath, JSON.stringify({ owner_pid: process.pid, hostname: os.hostname(), suite: "mcp" }));
+    await assert.rejects(service.recoverInterruptedValidation(input), /RUNNER_CONFLICT/);
+    await writeFile(lockPath, originalLock);
+    const integrationPath = path.join(harness.root, ".writer-workbench-integrations", current.integration_candidate_id);
+    await writeFile(path.join(integrationPath, "untracked.txt"), "preserve me");
+    await assert.rejects(service.recoverInterruptedValidation(input), /DIRTY_WORKTREE/);
+    await rm(path.join(integrationPath, "untracked.txt"));
+    assert.equal((await service.getCandidate({ integration_candidate_id: current.integration_candidate_id })).revision, input.expected_revision);
+    const cleanupFailure = harness.createService({ ...overrides, gitRunner: async (args, options) => {
+      if (args[0] === "worktree" && args[1] === "remove") throw new Error("fixture cleanup interrupted");
+      return git(options.cwd, args, options);
+    } });
+    current = await cleanupFailure.recoverInterruptedValidation(input);
+    assert.equal(current.state, "failed");
+    assert.equal(current.validation_report.status, "interrupted");
+    assert.equal(current.validation_report.passed, false);
+    assert.equal(current.integration_workspace.cleanup_pending, true);
+    assert.equal((await journal.verify()).dangling_operations.length, 3);
+    let appendCount = 0;
+    const appendFailure = harness.createService({ ...overrides, journal: { ...journal, recover: async (...args) => {
+      if (++appendCount === 2) throw new Error("fixture append interrupted");
+      return journal.recover(...args);
+    } } });
+    await assert.rejects(appendFailure.recoverInterruptedValidation({ ...input, expected_revision: current.revision }), /append interrupted/);
+    current = await service.getCandidate({ integration_candidate_id: current.integration_candidate_id });
+    assert.equal(current.integration_workspace.state, "removed");
+    assert.equal((await journal.verify()).dangling_operations.length, 2);
+    const revisionBeforeResume = current.revision;
+    current = await service.recoverInterruptedValidation({ ...input, expected_revision: current.revision });
+    assert.equal(current.revision, revisionBeforeResume, "already cleaned candidate is not rewritten");
+    proof = await journal.verify();
+    assert.equal(proof.dangling_operations.length, 0);
+    assert.equal(proof.active_operations.length, 0);
+    assert.equal(proof.events.filter(e => e.stage === "operation_recovered").length, 3);
+    const successor = await service.preflight({ workstream_id: source.workstream_id });
+    assert.equal(successor.state, "preflight_passed");
+    assert.notEqual(successor.integration_candidate_id, current.integration_candidate_id);
+    assert.equal(successor.integration_commit, current.integration_commit);
+  } finally { await harness.cleanup(); }
 });
 
 console.log("MCP development controlled integration runtime tests passed.");

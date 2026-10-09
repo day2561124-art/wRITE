@@ -643,6 +643,14 @@ try {
   assert.match(launchingBusy.stderr, /already running/u);
   await rm(launchingLockPath, { force: true });
 
+  // A dead test child does not fence a still-live owner writing its terminal.
+  await writeFile(launchingLockPath, JSON.stringify({ owner_pid: process.pid,
+    child_pid: 2147483647, hostname: os.hostname(), suite: "all" }));
+  const terminalPending = await launchingRunner({ suite: "all" });
+  assert.equal(terminalPending.failure_code, "TEST_RUN_LOCK_BUSY");
+  assert.equal(JSON.parse(await readFile(launchingLockPath, "utf8")).owner_pid, process.pid);
+  await rm(launchingLockPath);
+
   const spawnFailureRunner = createDevTestRunner({
     suiteDefinitions: {
       all: testDefinition([], {
