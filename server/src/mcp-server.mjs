@@ -1,5 +1,8 @@
 import { fingerprintMcpMutationRequest, normalizeMcpReconciliationKey, MCP_RECONCILIATION_KEY_PATTERN_SOURCE } from "./mcp-operation-reconciliation-context.mjs";
 import "./mcp-stdio-guard.mjs";
+import {performance} from "node:perf_hooks";
+import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,traceId,traceSpan} from "./mcp-request-tracing.mjs";
+if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
@@ -163,6 +166,7 @@ import {
 } from "./mcp-development-test-tools.mjs";
 import { createPiProductionRouteStore } from "./pi-production-execution-route.mjs";
 import { createPiProductionExecutionController, guardPiDirectExecution } from "./pi-production-execution-controller.mjs";
+import { adaptAuthorizedPiRequest } from "./pi-execution-policy.mjs";
 import { createPiLifecycleScopeVerifier } from "./pi-lifecycle-scope.mjs";
 import { dev_pi_runtime_status, dev_pi_execute_readonly } from "./mcp-pi-agent-tools.mjs";
 import { PI_READ_ONLY_LIMITS } from "./pi-codemode-bridge.mjs";
@@ -206,6 +210,7 @@ import {
   dev_workspace_status,
   dev_workspace_unlock,
   dev_workspace_update_workstream,
+  resolveDevWorkspaceExecutionContext,
 } from "./mcp-development-workstream-tools.mjs";
 import {
   DEV_INTEGRATION_CANDIDATE_ID_PATTERN_SOURCE,
@@ -1187,7 +1192,8 @@ async function auditedToolCall(tool, args, actor) {
     if (tool.name.startsWith("dev_") || ["powershell_run", "powershell_admin_run"].includes(tool.name)) {
       await assertDevJournalMutationAllowed();
     }
-    result = await tool.handler(effectiveArgs);
+    await assertPiManagedMcpCall();
+    result = await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     result = {
       isError: true,
@@ -1792,7 +1798,7 @@ const devWorkspaceExecutionProperties = Object.freeze({
 
 import {CAPABILITY_DEFINITIONS} from "./pi-execution-contract.mjs";
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
-import {isPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
+import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
 import {createPiRuntimeCapabilityMetadata} from "./pi-runtime-capability-metadata.mjs";
 const toolDefinitions = [
@@ -2082,12 +2088,17 @@ const toolDefinitions = [
   },
   {
     name: "dev_pi_execute_intent",
-    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts only the exact GPT-authored ExecutionIntent JSON contract; Pi schedules, persists, retries and reconciles concrete MCP capabilities without model requests or engineering decisions. Duplicate intent IDs return durable state. No automatic direct-tool fallback.",
+    description: "Default engineering execution ingress when Pi production routing is enabled. Accepts the exact GPT-authored ExecutionIntent JSON contract, or request_kind=authorized_engineering for ordinary authorized work. request_kind=reconcile_only requires only exact operation_id, context, expected_revision and expected_owner; it recognizes completed MCP receipts without admission, dispatch, retry or pending-action continuation. High-risk capabilities retain the full contract. Duplicate intents return durable state.",
     risk: "high-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({ intent_json: { type: "string", minLength: 1, maxLength: 524288 } }, ["intent_json"]),
     handler: async args => {
       let intent; try { intent = JSON.parse(args.intent_json); } catch { throw new Error("INVALID_EXECUTION_INTENT_JSON"); }
+      if (intent?.request_kind === "reconcile_only") {
+        const {request_kind,...request}=intent;
+        return jsonContent(await piProductionController.reconcileOnly(request));
+      }
+      intent = await adaptAuthorizedPiRequest(intent, { resolveWorkspace: resolveDevWorkspaceExecutionContext });
       return jsonContent(await piProductionController.execute(intent));
     },
   },
@@ -2104,13 +2115,15 @@ const toolDefinitions = [
       workspace_id: { type: "string", pattern: DEV_WORKSPACE_EXECUTION_ID_PATTERN_SOURCE, maxLength: 64 },
     }),
     handler: async args => {
-      const route = await piProductionController.status();
-      if (Object.keys(args).length === 0) return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
+      if (Object.keys(args).length === 0) {
+        const route = await piProductionController.status();
+        return jsonContent({ route, default_path: route.revision > 0 ? "GPT -> Pi -> MCP" : "GPT -> MCP", legacy_migration: false, decision_owner: "GPT", execution_owner: "Pi", tool_owner: "MCP" });
+      }
       if ((!args.operation_id === !args.intent_id) || (args.bootstrap
         ? args.workstream_id!==undefined || args.workspace_id!==undefined
         : !args.workstream_id || !args.workspace_id)) throw new Error("PI_OPERATION_CONTEXT_REQUIRED");
-      return jsonContent({ route, operation: await piProductionController.inspect({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
-        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }) });
+      return jsonContent(await piProductionController.inspectStatus({ ...(args.operation_id ? {operation_id: args.operation_id} : {intent_id: args.intent_id}),
+        context: { project_id: "writer_workbench", workstream_id: args.bootstrap?null:args.workstream_id, workspace_id: args.bootstrap?"dev_workspace_shared_repository_v1":args.workspace_id } }));
     },
   },
   {
@@ -5788,7 +5801,7 @@ const piProductionController = createPiProductionExecutionController({ route: pi
 async function callTool(params) {
   const name = params?.name;
   if (workspaceRoutingEnabledForProfile && (workspaceAwareDeveloperToolNames.has(name) || ["dev_workspace_begin_workstream","dev_workspace_update_workstream","dev_workspace_end_workstream","dev_workspace_create_isolated","dev_workspace_create_checkpoint","dev_workspace_integrate","dev_git_push","dev_pi_execute_readonly"].includes(name))) {
-    await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback });
+    await guardPiDirectExecution({ route: piProductionRoute, tool: name, mutation: toolRegistry.get(name)?.risk !== "read", params, auditFallback: auditPiFallback, resolveWorkspace: resolveDevWorkspaceExecutionContext });
   }
   if (name === "dev_pi_execute_intent" && params?._meta?.reconciliation_key !== undefined) throw new Error("PI_INTENT_OWNS_IDEMPOTENCY");
   return callToolDirect(params);
@@ -5821,6 +5834,8 @@ async function callToolDirect(params) {
     // MCP metadata carries transport identity without weakening strict tool argument schemas.
     const key = normalizeMcpReconciliationKey(params._meta?.reconciliation_key);
     if (!key) return auditedToolCall(tool, mutationArgs, actor);
+    const {createPiReliableExecutionStore}=await import("./pi-reliable-execution-store.mjs");
+    await createPiReliableExecutionStore().assertMutationAuthorized(key);
     const effectiveArgs = prepareToolArguments(tool, mutationArgs);
     const guardError = confirmationGuardError(tool, effectiveArgs);
     if (guardError) throw new Error(guardError);
@@ -5854,7 +5869,8 @@ async function callToolDirect(params) {
 
   try {
     const effectiveArgs = prepareToolArguments(tool, args);
-    return await tool.handler(effectiveArgs);
+    await assertPiManagedMcpCall();
+    return await traceSpan("capability.execution",()=>tool.handler(effectiveArgs));
   } catch (error) {
     return {
       isError: true,
@@ -5910,7 +5926,7 @@ async function dispatch(message) {
     });
   }
 
-  await ensureRuntimeReady();
+  await traceSpan("runtime.readiness",()=>ensureRuntimeReady());
 
   if (message.method === "tools/call") {
     try {
@@ -5953,6 +5969,7 @@ const dispatchQueueOverloadMessage = (
 );
 
 let pending = Promise.resolve();
+let metadataPending = Promise.resolve();
 let pendingDispatchMessages = 0;
 
 function enqueueMessage(message, framing) {
@@ -5967,22 +5984,34 @@ function enqueueMessage(message, framing) {
   }
 
   pendingDispatchMessages += 1;
-  pending = pending
+  const correlation=traceId(message?.params?._meta?.[REQUEST_TRACE_META_KEY]);
+  const queuedAt=performance.now();
+  // This exact handler reads only the immutable server-owned schema registry.
+  // Keep its own serial lane; arbitrary reads and every mutation retain the
+  // existing execution queue. dispatch still enforces readiness and profile.
+  const metadata = message?.method === "tools/call"
+    && message?.params?.name === "dev_capability_get_schema"
+    && toolRegistry.get("dev_capability_get_schema")?.risk === "read"
+    && toolRegistry.get("dev_capability_get_schema")?.annotations?.readOnlyHint === true;
+  const next = (metadata ? metadataPending : pending)
     .then(async () => {
-      const response = await dispatch(message);
-      if (response) {
-        await writeMessage(response, framing);
-      }
+      publishTrace(correlation,"mcp.queue_wait",performance.now()-queuedAt);
+      await runRequestTrace(correlation,async()=>{
+        const response = await traceSpan("mcp.dispatch",()=>dispatch(message));
+        if (response) await traceSpan("mcp.serialize_write",()=>writeMessage(response,framing));
+      });
     })
     .catch(async (error) => {
-      await writeMessage(
+      await runRequestTrace(correlation,()=>traceSpan("mcp.serialize_write",()=>writeMessage(
         makeError(message?.id ?? null, -32603, error.message),
         framing,
-      );
+      )));
     })
     .finally(() => {
       pendingDispatchMessages -= 1;
     });
+  if (metadata) metadataPending = next;
+  else pending = next;
   return true;
 }
 
@@ -6309,9 +6338,9 @@ function publishRuntimeReadiness(status) {
 }
 
 const ensureRuntimeReady = createRuntimeReadiness([
-  ["journal", initializeDevJournalRuntime],
-  ["checkpoint", initializeDevCheckpointRuntime],
-  ["transaction", initializeDevTransactionRuntime],
+  ["journal", ()=>traceSpan("journal.readiness",initializeDevJournalRuntime)],
+  ["checkpoint", ()=>traceSpan("checkpoint.readiness",initializeDevCheckpointRuntime)],
+  ["transaction", ()=>traceSpan("transaction.readiness",initializeDevTransactionRuntime)],
 ], () => {}, publishRuntimeReadiness);
 
 process.stdin.on("data", (chunk) => {

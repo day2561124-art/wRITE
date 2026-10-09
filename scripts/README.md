@@ -3,6 +3,28 @@
 所有腳本都以 repository root 為工作目錄，不會自動 stage、commit、tag、approve、
 activate 或 restore。
 
+### 中斷的 Integration Validation
+
+`integration-maintenance.mjs` 直接調用既有 Integration Service／Test Runner，
+不啟動 MCP listener、不部署 Runtime，也不執行 integrate 或 push。長任務沒有
+MCP 同步呼叫期限；各 suite 保留原有 timeout，結果仍寫入正式 Registry 與 Journal。
+`--repository-root` 只能指定同一 Git common directory 的 checkout；從已檢驗的
+隔離候選執行維護程式時，可明確指定原本 Registry 所屬的 repository root。
+
+1. `status --candidate ID` 核對 candidate 與 Journal。
+2. `recover --candidate ID --revision N --operation OP --start-hash SHA256`
+   核對原始 Journal start、死亡 owner、Runner lease、Worktree ownership 與 clean tree，
+   使用既有 CAS 和非 force cleanup。保留失敗候選與 `interrupted` 報告，不宣稱測試成功。
+   Cleanup 或 append 再次中斷時，以最新 revision 及同一 start hash 續接。
+3. `preflight --candidate ID --revision N` 只接受已恢復並清理的中斷候選，
+   透過原有 Preflight 為同一 completed workstream 建立後繼候選。
+4. `validate --candidate SUCCESSOR_ID --revision N` 完整執行既有驗證契約，
+   不重播先前中斷的 mutation。Journal reconciliation key 固定綁定 candidate／revision。
+
+各命令可附 `--repository-root PATH --report PATH`。有存活或未知 owner、dirty worktree、
+其他工作流的 Runner lease、錯誤 CAS／start hash 時拒絕恢復。Pi UNKNOWN operation
+不屬於此維護入口，也不會被修改。
+
 | Script | 用途 |
 | --- | --- |
 | `safe-status.ps1` | 顯示完整/僅 tracked 狀態、diff stat 與 active engine hash |

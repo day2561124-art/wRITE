@@ -9,6 +9,10 @@ import { createWorkspaceSnapshotAuthority } from './mcp-workspace-snapshot-autho
 import { createWorkspaceChangeClock } from './mcp-workspace-change-clock.mjs';
 import { createWorkspaceChangeClockProvider } from './mcp-workspace-change-clock-provider.mjs';
 import { createMcpRuntimeDiagnostics } from './mcp-runtime-diagnostics.mjs';
+import {performance} from 'node:perf_hooks';
+import {createTraceBuffer,publishTrace,requestTraceChannel,traceId,withTraceId} from './mcp-request-tracing.mjs';
+const httpRequestTraces=createTraceBuffer();
+requestTraceChannel.subscribe(record=>httpRequestTraces.accept(record));
 import fs from 'fs';
 import { createParentIntegrationControl, INTEGRATE_TOOL_NAME } from './mcp-http-integration-control.mjs';
 
@@ -997,6 +1001,7 @@ const server = http.createServer(async (req, res) => {
       ...instanceIdentity,
       ...readiness,
       session_id: readinessSessionId,
+      http_request_traces: httpRequestTraces.snapshot(),
     });
     return;
   }
@@ -1041,6 +1046,9 @@ const server = http.createServer(async (req, res) => {
   const sessionId = getSessionId(req);
 
   if (req.method === 'POST') {
+    const correlation=traceId(),receivedAt=performance.now();
+    res.setHeader('X-Mcp-Correlation-Id',correlation);
+    res.once('finish',()=>publishTrace(correlation,'http.response_finish',performance.now()-receivedAt));
     let entry;
     let requestStarted = false;
 
@@ -1060,6 +1068,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const bodyResult = await readPostBody(req, maxPostBodyBytes);
+    publishTrace(correlation,'http.body_read',performance.now()-receivedAt,bodyResult.status==='ok');
     if (bodyResult.status === 'too_large') {
       diagnostics.captureIncident('http_payload_too_large', {
         max_body_bytes: maxPostBodyBytes,
@@ -1076,7 +1085,8 @@ const server = http.createServer(async (req, res) => {
       if (requestStarted && entry) endBridgeRequest(entry);
       return;
     }
-    const parsed = bodyResult.status === 'ok' ? bodyResult.value : undefined;
+    const parsed = bodyResult.status === 'ok' ? (Array.isArray(bodyResult.value)
+      ?bodyResult.value.map(message=>withTraceId(message,traceId())):withTraceId(bodyResult.value,correlation)) : undefined;
 
     if (!entry) {
       if (

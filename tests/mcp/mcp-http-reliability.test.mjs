@@ -395,6 +395,33 @@ async function verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly() {
 }
 
 await verifyLongRunningDevelopmentToolUsesExtendedTimeoutOnly();
+async function verifyDefaultLongToolTimerPreservesConfiguredTimeout() {
+  const fake = createFakeSpawn('long-tool-slow');
+  const session = createStdioSession({ spawnProcess: fake.spawnProcess });
+  const originalSetTimeout = globalThis.setTimeout;
+  const scheduled = [];
+  try {
+    await initializeSession(session, 'default-long-tool-timer');
+    globalThis.setTimeout = (callback, ms, ...args) => {
+      scheduled.push(ms);
+      return originalSetTimeout(callback, ms, ...args);
+    };
+    await rpcCall(session, { jsonrpc: '2.0', id: 'default-intent-timer', method: 'tools/call',
+      params: { name: 'dev_pi_execute_intent', arguments: {} } });
+    assert(scheduled.includes(session.getStatus().long_tool_call_timeout_ms),
+      'actual Pi timer must preserve the configured long-tool deadline rather than fall back to ordinary timeout');
+    scheduled.length = 0;
+    await rpcCall(session, { jsonrpc: '2.0', id: 'ordinary-status-timer', method: 'tools/call',
+      params: { name: 'dev_pi_execution_status', arguments: {} } });
+    assert(scheduled.includes(session.getStatus().call_timeout_ms));
+    assert.equal(scheduled.includes(session.getStatus().long_tool_call_timeout_ms), false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    if (session.child) session.child.exitCode = 0;
+    session.close();
+  }
+}
+await verifyDefaultLongToolTimerPreservesConfiguredTimeout();
 console.log('MCP HTTP reliability crash/hang/overflow, framing, and long-tool timeout regressions passed.');
 
 

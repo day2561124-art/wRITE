@@ -7,6 +7,8 @@ import {
   open,
   readFile,
   readlink,
+  readdir,
+  rmdir,
   rename,
   unlink,
   writeFile,
@@ -14,7 +16,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createDevTestRunner } from "./mcp-development-test-tools.mjs";
+import { acquireDevTestRecoveryLease, cleanupDevTestDependencyBridge, createDevTestRunner } from "./mcp-development-test-tools.mjs";
 import { selectIntegrationVerificationPlan } from "./mcp-integration-verification-router.mjs";
 import { buildIntegrationVerificationManifest } from "./mcp-verification-manifest.mjs";
 import { runControlledDiagnosticRetry } from "./mcp-verification-controlled-retry.mjs";
@@ -32,6 +34,8 @@ import {
   computeWorkspaceSnapshot,
   failDevJournalOperation,
   markDevJournalDegraded,
+  recoverDevJournalOperation,
+  verifyDevJournal,
 } from "./mcp-development-journal-tools.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -474,7 +478,7 @@ export async function selectCandidateVerificationPlan(root, candidate, gitRunner
   return selectIntegrationVerificationPlan(splitNullPaths(diff.stdout));
 }
 
-async function productionValidationRunner(root, candidate) {
+async function productionValidationRunner(root, candidate, runnerOptions = {}) {
   const contextResolver = async () => ({
     workspace_id: candidate.workspace_id,
     workstream_id: candidate.workstream_id,
@@ -491,7 +495,7 @@ async function productionValidationRunner(root, candidate) {
   // Route on the immutable candidate delta, never the clean materialized
   // worktree or an unrelated dirty main. Git diff failure fails validation.
   const plan = await selectCandidateVerificationPlan(root, candidate);
-  const runner = createDevTestRunner({ workspaceContextResolver: contextResolver });
+  const runner = createDevTestRunner({ ...runnerOptions, workspaceContextResolver: contextResolver });
   const results = [];
   const diagnosticRetries = [];
   for (const suite of plan.required_suites) {
@@ -535,6 +539,11 @@ export function createDevIntegrationService({
   validationRunner = productionValidationRunner,
   clock = () => new Date(),
   candidateIdGenerator = generateCandidateId,
+  journal = { begin: beginDevJournalOperation, complete: completeDevJournalOperation,
+    fail: failDevJournalOperation, markDegraded: markDevJournalDegraded,
+    recover: recoverDevJournalOperation, verify: verifyDevJournal },
+  testLockPath = path.join(repositoryRoot, "tests", ".tmp", "dev-run-tests.lock"),
+  dependencyRoot = repositoryRoot,
 } = {}) {
   const repoRoot = path.resolve(repositoryRoot);
   const registryFile = path.resolve(registryPath);
@@ -938,14 +947,30 @@ export function createDevIntegrationService({
     }
   }
 
-  async function cleanupIntegrationWorktree(integrationPath) {
+  async function cleanupIntegrationWorktree(integrationPath, { unregisteredResidue = false } = {}) {
     try {
-      const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
-      if (status.dirty || status.staged.length > 0 || status.conflicted.length > 0 || status.untracked.length > 0) {
-        return { cleaned: false, error: "Integration worktree is dirty; cleanup refused without force." };
+      if (!unregisteredResidue) {
+        const status = parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout);
+        if (status.dirty || status.staged.length > 0 || status.conflicted.length > 0 || status.untracked.length > 0) {
+          return { cleaned: false, error: "Integration worktree is dirty; cleanup refused without force." };
+        }
+        await gitRunner(["worktree", "unlock", integrationPath], { cwd: repoRoot, allowFailure: true });
+        await gitRunner(["worktree", "remove", integrationPath], { cwd: repoRoot, timeout: 60_000 });
       }
-      await gitRunner(["worktree", "unlock", integrationPath], { cwd: repoRoot, allowFailure: true });
-      await gitRunner(["worktree", "remove", integrationPath], { cwd: repoRoot, timeout: 60_000 });
+      // Windows Git can remove the registration but leave a dependency junction.
+      // Only remove an empty directory or the runner's exact owned bridge; do
+      // not report cleanup success while other files or unknown links remain.
+      const residue = await lstat(integrationPath).catch(error => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      if (residue) {
+        if (residue.isSymbolicLink() || !residue.isDirectory()) throw new Error("Unsafe integration cleanup residue.");
+        const names = await readdir(integrationPath);
+        if (names.some(name => name !== "node_modules")) throw new Error("Integration cleanup residue contains unowned files.");
+        if (names.includes("node_modules")) await cleanupDevTestDependencyBridge(integrationPath, dependencyRoot);
+        await rmdir(integrationPath); // Nonrecursive: newly added files fail closed.
+      }
       return { cleaned: true, error: null };
     } catch (error) {
       return { cleaned: false, error: error.message };
@@ -953,6 +978,14 @@ export function createDevIntegrationService({
   }
 
   async function validateIntegration(input = {}) {
+    // Reuse the apply lease rather than introduce another executor or lock.
+    const lock = await acquireFileLock(applyLock, "integration_validation");
+    if (!lock) throw new Error("INTEGRATION_APPLY_BUSY");
+    try { return await validateIntegrationUnlocked(input); }
+    finally { await releaseFileLock(lock, applyLock); }
+  }
+
+  async function validateIntegrationUnlocked(input = {}) {
     const allowed = new Set(["integration_candidate_id", "expected_revision"]);
     assertObject(input, "dev_workspace_validate_integration input", allowed);
     const candidateId = assertCandidateId(input.integration_candidate_id);
@@ -972,7 +1005,7 @@ export function createDevIntegrationService({
       });
     }
 
-    const journalOperation = await beginDevJournalOperation({
+    const journalOperation = await journal.begin({
       operation_type: "integration_validation",
       tool_name: "dev_workspace_validate_integration",
       workstream_id: candidate.workstream_id,
@@ -1027,7 +1060,8 @@ export function createDevIntegrationService({
     let verificationPlan;
     let diagnosticRetries = [];
     try {
-      const output = await validationRunner(integrationPath, candidate);
+      const output = await validationRunner(integrationPath, candidate,
+        { journal, lockPath: testLockPath, dependencyRoot });
       if (Array.isArray(output)) {
         // Compatibility with injected validation runners; derive the same
         // exact candidate delta rather than inventing selection evidence.
@@ -1112,7 +1146,7 @@ export function createDevIntegrationService({
       .filter((result) => operationIdPattern.test(result?.operation_id ?? ""))
       .map((result) => ({ relation: "validated_by", operation_id: result.operation_id }));
     try {
-      await completeDevJournalOperation(journalOperation.operation_id, {
+      await journal.complete(journalOperation.operation_id, {
         links: [
           { relation: "used", commit: candidate.source_head },
           { relation: "used", commit: candidate.integration_commit },
@@ -1139,7 +1173,7 @@ export function createDevIntegrationService({
         },
       });
     } catch (error) {
-      await markDevJournalDegraded(`dev_workspace_validate_integration terminal append failed: ${error.message}`);
+      await journal.markDegraded(`dev_workspace_validate_integration terminal append failed: ${error.message}`);
       const provenanceError = new Error(`Integration validation completed but provenance terminal append failed: ${error.message}`);
       provenanceError.code = "JOURNAL_TERMINAL_APPEND_FAILED";
       throw provenanceError;
@@ -1148,7 +1182,7 @@ export function createDevIntegrationService({
     } catch (error) {
       if (error?.code === "JOURNAL_TERMINAL_APPEND_FAILED") throw error;
       try {
-        await failDevJournalOperation(journalOperation.operation_id, {
+        await journal.fail(journalOperation.operation_id, {
           result: {
             integration_candidate_id: candidate.integration_candidate_id,
             source_head: candidate.source_head,
@@ -1160,11 +1194,134 @@ export function createDevIntegrationService({
           },
         });
       } catch (journalError) {
-        await markDevJournalDegraded(`dev_workspace_validate_integration failure terminal append failed: ${journalError.message}`);
+        await journal.markDegraded(`dev_workspace_validate_integration failure terminal append failed: ${journalError.message}`);
         throw new Error(`Integration validation failed and provenance terminal append failed: ${journalError.message}`);
       }
       throw error;
     }
+  }
+
+  // Host maintenance only: never dispatch tests, infer a PASS, or touch a Pi
+  // operation. Exact candidate CAS and immutable Journal start hash are fences.
+  // A retry uses ordinary preflight to create a successor; failed history stays.
+  async function recoverInterruptedValidation(input = {}) {
+    assertObject(input, "recoverInterruptedValidation input", new Set([
+      "integration_candidate_id", "expected_revision", "operation_id", "expected_start_hash",
+    ]));
+    const candidateId = assertCandidateId(input.integration_candidate_id);
+    if (!Number.isSafeInteger(input.expected_revision) || !operationIdPattern.test(input.operation_id ?? "")
+      || !/^[a-f0-9]{64}$/u.test(input.expected_start_hash ?? "")) throw new Error("INVALID_RECOVERY_FENCE");
+    const lock = await acquireFileLock(applyLock, "integration_validation_recovery");
+    if (!lock) throw new Error("INTEGRATION_APPLY_BUSY");
+    let releaseRunner;
+    try {
+      let candidate = await getCandidate({ integration_candidate_id: candidateId });
+      if (candidate.revision !== input.expected_revision) throw new Error("INTEGRATION_STALE_REVISION");
+      const recovering = candidate.state === "failed"
+        && candidate.failure_reason?.code === "INTEGRATION_VALIDATION_INTERRUPTED"
+        && candidate.failure_reason.operation_id === input.operation_id;
+      if ((!recovering && !["materialized", "testing"].includes(candidate.state))
+        || (!recovering && candidate.validation_report !== null)) throw new Error("VALIDATION_RECOVERY_STATE_MISMATCH");
+      const verification = await journal.verify();
+      const events = verification.events;
+      const start = events.find(e => e.operation_id === input.operation_id && e.stage === "operation_started");
+      if (!start || start.event_hash !== input.expected_start_hash || start.operation_type !== "integration_validation"
+        || start.tool_name !== "dev_workspace_validate_integration" || start.workspace_id !== candidate.workspace_id
+        || start.workstream_id !== candidate.workstream_id || start.result.integration_candidate_id !== candidateId
+        || start.result.integration_commit !== candidate.integration_commit || start.result.source_head !== candidate.source_head
+        || start.result.target_head !== candidate.target_head) throw new Error("VALIDATION_RECOVERY_BINDING_MISMATCH");
+      const boundary = start.parent_operation_id
+        ? events.find(e => e.operation_id === start.parent_operation_id && e.stage === "operation_started") : null;
+      if (start.parent_operation_id && (!boundary || boundary.operation_type !== "mcp_mutation"
+        || boundary.tool_name !== start.tool_name
+        || ![start.workspace_id, "dev_workspace_shared_repository_v1"].includes(boundary.workspace_id)
+        || boundary.diagnostic?.owner_pid !== start.diagnostic?.owner_pid)) {
+        throw new Error("VALIDATION_RECOVERY_BOUNDARY_MISMATCH");
+      }
+      const ids = new Set([start.operation_id, ...(boundary ? [boundary.operation_id] : [])]);
+      for (const e of events.filter(e => e.stage === "operation_started"
+        && (e.parent_operation_id === start.operation_id || (boundary && e.parent_operation_id === boundary.operation_id)))) {
+        if (e.operation_id === start.operation_id) continue;
+        if (e.operation_type !== "test_evidence" || e.tool_name !== "dev_run_tests"
+          || e.workspace_id !== start.workspace_id || e.workstream_id !== start.workstream_id
+          || e.result.head !== candidate.integration_commit) throw new Error("VALIDATION_RECOVERY_UNEXPECTED_CHILD");
+        ids.add(e.operation_id);
+      }
+      const starts = events.filter(e => ids.has(e.operation_id) && e.stage === "operation_started");
+      for (const e of starts) {
+        if (e.diagnostic?.hostname !== os.hostname() || !Number.isInteger(e.diagnostic.owner_pid)
+          || isProcessRunning(e.diagnostic.owner_pid)) throw new Error("VALIDATION_RECOVERY_OWNER_ACTIVE_OR_UNKNOWN");
+        const terminal = events.find(t => t.operation_id === e.operation_id && t.stage !== "operation_started");
+        if (terminal && !(recovering && terminal.stage === "operation_recovered"
+          && terminal.result.recovery_candidate_id === candidateId && terminal.result.interrupted === true)) {
+          throw new Error("VALIDATION_RECOVERY_TERMINAL_CONFLICT");
+        }
+      }
+      // The global runner lock may belong to a different workstream. Only claim
+      // this validation's dead lease (or our own resumable recovery lease).
+      try {
+        const runner = JSON.parse(await readFile(testLockPath, "utf8"));
+        const ownRecovery = runner.suite === `integration_recovery:${candidateId}`;
+        if (runner.hostname !== os.hostname() || isProcessRunning(runner.owner_pid)
+          || isProcessRunning(runner.child_pid) || (!ownRecovery && !starts.some(e =>
+            e.operation_type === "test_evidence" && e.diagnostic.owner_pid === runner.owner_pid
+            && e.result.suite === runner.suite))) throw new Error("VALIDATION_RECOVERY_RUNNER_CONFLICT");
+      } catch (error) { if (error?.code !== "ENOENT") throw error; }
+      releaseRunner = await acquireDevTestRecoveryLease(testLockPath, candidateId);
+      const integrationPath = path.join(integrationRoot, candidateId);
+      if (candidate.integration_workspace.relative_path !== relativeIntegrationPath(candidateId, integrationRoot, repoRoot)) {
+        throw new Error("VALIDATION_RECOVERY_WORKTREE_MAPPING_MISMATCH");
+      }
+      let exists = true;
+      try { const info = await lstat(integrationPath); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("UNSAFE_WORKTREE"); }
+      catch (error) { if (error?.code !== "ENOENT") throw error; exists = false; }
+      let unregisteredResidue = false;
+      if (exists) {
+        const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
+        const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
+        unregisteredResidue = !block && recovering;
+        if (!unregisteredResidue) {
+        const lines = block?.split(/\r?\n/u) ?? [];
+        const lockLine = lines.find(line => line.startsWith("locked"));
+        if (!lines.includes(`HEAD ${candidate.integration_commit}`) || !lines.includes("detached")
+          || (lockLine !== `locked Writer Workbench integration ${candidateId}` && !(recovering && !lockLine))) {
+          throw new Error("VALIDATION_RECOVERY_WORKTREE_OWNERSHIP_MISMATCH");
+        }
+        if (parseStatus((await gitRunner(["status", "--porcelain=v1", "--untracked-files=all"], { cwd: integrationPath })).stdout).dirty) {
+          throw new Error("VALIDATION_RECOVERY_DIRTY_WORKTREE");
+        }
+        }
+      } else if (!recovering) throw new Error("VALIDATION_RECOVERY_WORKTREE_MISSING");
+      if (!recovering) candidate = await updateCandidate(candidateId, candidate.revision, record => {
+        transitionCandidate(record, "failed");
+        record.failure_reason = { code: "INTEGRATION_VALIDATION_INTERRUPTED", operation_id: start.operation_id };
+        record.validation_report = { status: "interrupted", passed: false, execution_ok: false,
+          integration_commit: record.integration_commit, suites: [], completed_at: clock().toISOString(),
+          interruption_operation_id: start.operation_id, interruption_start_hash: start.event_hash };
+        record.integration_workspace.state = "cleanup_pending";
+        record.integration_workspace.cleanup_pending = true;
+      });
+      const cleanup = exists ? await cleanupIntegrationWorktree(integrationPath, { unregisteredResidue }) : { cleaned: true, error: null };
+      if (candidate.integration_workspace.state !== "removed" || !cleanup.cleaned) {
+        candidate = await updateCandidate(candidateId, candidate.revision, record => {
+          record.integration_workspace.state = cleanup.cleaned ? "removed" : "cleanup_pending";
+          record.integration_workspace.cleanup_pending = !cleanup.cleaned;
+          record.integration_workspace.last_error = cleanup.error;
+        });
+      }
+      if (!cleanup.cleaned) return candidate;
+      // Append inner terminals before the boundary, retaining all starts and
+      // truthful worktree effects. No test result is claimed from a killed run.
+      for (const e of starts.sort((a, b) => b.sequence - a.sequence)) {
+        if (events.some(t => t.operation_id === e.operation_id && t.stage !== "operation_started")) continue;
+        await journal.recover(e.operation_id, { reconciles_event_id: e.journal_event_id,
+          result: { outcome: "intended_effect_observed", interrupted: true, passed: false,
+            reconciliation_required: false, recovery_candidate_id: candidateId,
+            recovery_start_hash: start.event_hash, cleanup_completed: true } });
+      }
+      await journal.verify();
+      return candidate;
+    } finally { if (releaseRunner) await releaseRunner(); await releaseFileLock(lock, applyLock); }
   }
 
   async function operationState() {
@@ -1452,6 +1609,7 @@ export function createDevIntegrationService({
     getCandidate,
     listCandidates,
     validateIntegration,
+    recoverInterruptedValidation,
     integrate,
     registryPath: registryFile,
     integrationRootPath: integrationRoot,

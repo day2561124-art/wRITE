@@ -96,6 +96,7 @@ export function makeReliableProjection(body) {
 }
 // A deterministic reducer: the only state changes admitted by the durable history validator.
 export function reduceReliableProjection(prior,command,now) {
+  if(prior.runtime.isolation)reliableFailure("OPERATION_ISOLATED");
   if(reliableTerminal(prior.state.status))reliableFailure("TERMINAL_OPERATION");
   if(!Number.isFinite(Date.parse(now))||new Date(now).toISOString()!==now
     ||Date.parse(now)<Date.parse(prior.state.updated_at))reliableFailure("NON_MONOTONIC_STATE_TIME");
@@ -131,6 +132,18 @@ export function reduceReliableProjection(prior,command,now) {
     checkpoint(action.step_id);state.current_step=null;runtime.active_call=null;runtime.retry_at=null;state.last_error=null;
   };
   switch(command.type) {
+    case "execution_isolated":
+      exact(command,["type","decision_id","reason","expected_projection_hash","expected_owner"]);
+      if(!/^gpt-[A-Za-z0-9._:-]{1,120}$/u.test(command.decision_id)
+        ||typeof command.reason!=="string"||!command.reason.trim()||command.reason.length>256
+        ||command.expected_projection_hash!==prior.projection_hash
+        ||stableJson(command.expected_owner)!==stableJson(runtime.owner)
+        ||!runtime.owner||!active?.mutation)reliableFailure("INVALID_ISOLATION_COMMAND");
+      // Revoke future execution, without settling the unknown call or removing
+      // its owner, claim, checkpoint, receipts or original evidence.
+      runtime.isolation={decision_id:command.decision_id,reason:command.reason,
+        anchor_revision:prior.revision,anchor_projection_hash:prior.projection_hash,
+        isolated_at:now};break;
     case "owner_acquired":
       exact(command,["type","owner","replaced_worker_id"]);validateOwner(command.owner);
       if(command.replaced_worker_id!==(runtime.owner?.worker_id??null))reliableFailure("OWNER_CONFLICT");
@@ -247,7 +260,8 @@ export function validateReliableProjection(value,prior) {
     if(value.schema_version!==2||projection_hash!==projectionHash(body)
       ||Buffer.byteLength(stableJson(value))>768*1024)reliableFailure("CORRUPT_STATE");
     const intent=createExecutionIntent(value.intent);const state=validateOperationState(value.state);
-    exact(value.runtime,intent.bootstrap?["retry_policy","owner","active_call","retry_at","lifecycle_binding"]:["retry_policy","owner","active_call","retry_at"]);
+    exact(value.runtime,["retry_policy","owner","active_call","retry_at",
+      ...(intent.bootstrap?["lifecycle_binding"]:[]),...(Object.hasOwn(value.runtime,"isolation")?["isolation"]:[])]);
     validateRetryPolicy(value.runtime.retry_policy);
     if(value.runtime.owner!==null)validateOwner(value.runtime.owner);
     if(!prior) {
@@ -255,6 +269,7 @@ export function validateReliableProjection(value,prior) {
       if(Object.hasOwn(value.command,"canary_binding"))validateCanaryBinding(value.command.canary_binding,intent);
       if(Object.hasOwn(value.command,"production_binding"))validateProductionBinding(value.command.production_binding);
       if(value.command.type!=="operation_created"||value.action_type!=="operation_created"||value.revision!==1
+        ||Object.hasOwn(value.runtime,"isolation")
         ||value.previous_projection_hash!==null||value.runtime.owner!==null||value.runtime.active_call!==null
         ||value.runtime.retry_at!==null||(intent.bootstrap && value.runtime.lifecycle_binding!==null)||stableJson(state)!==stableJson(initialReliableState(intent,{
           operation_id:state.operation_id,parent_operation_id:state.parent_operation_id,timestamp:state.created_at})))reliableFailure("CORRUPT_STATE");

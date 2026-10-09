@@ -1342,6 +1342,16 @@ export function createDevOperationJournalService({
         }
       }
 
+      // Test execution and integration worktree creation have effects outside
+      // artifact targets. Only the integration service can bind their cleanup
+      // to the candidate and runner ownership; do not manufacture no-effect.
+      if (["integration_validation", "test_evidence"].includes(started.operation_type)) {
+        lastHealthError = `Interrupted validation requires scoped recovery: ${operationId}.`;
+        runtimeHealth = "degraded";
+        reconciliationRequired = true;
+        return verify();
+      }
+
       let outcome = "no_effect_observed";
       let ambiguous = false;
       let observedTargets = [];
@@ -2138,6 +2148,7 @@ export const beginDevJournalOperation = (input) => defaultJournal.begin(input);
 export const completeDevJournalOperation = (operationId, input) => defaultJournal.complete(operationId, input);
 export const failDevJournalOperation = (operationId, input) => defaultJournal.fail(operationId, input);
 export const recoverDevJournalOperation = (operationId, input) => defaultJournal.recover(operationId, input);
+export const verifyDevJournal = () => defaultJournal.verify();
 export const assertDevJournalMutationAllowed = () => defaultJournal.assertMutationAllowed();
 export const markDevJournalDegraded = (reason) => defaultJournal.markDegraded(reason);
 

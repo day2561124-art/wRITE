@@ -57,8 +57,14 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
   async function execute(source,stepId,options={}) {
     const intent=createExecutionIntent(source),step=describe(intent,stepId,options);
     await guard(intent,step);
-    const evidence=reliableJson(await timedRequest(()=>callTool({name:step.tool,arguments:step.arguments,
-      ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})}),requestTimeoutMs));
+    // The transport deadline starts at dispatch, after durable authorization.
+    // A slow Journal read must not leave a timed-out callback that sends later.
+    await options.authorizeDispatch?.();
+    const evidence=reliableJson(await timedRequest(()=>{
+      return callTool({name:step.tool,arguments:step.arguments,
+        ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
+        {authorizeDispatch:options.authorizeDispatch});
+    },requestTimeoutMs));
     const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);

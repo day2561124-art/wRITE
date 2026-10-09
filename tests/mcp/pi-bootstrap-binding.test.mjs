@@ -56,6 +56,22 @@ test('lost bootstrap response reconciles exact durable facts and never repeats p
  const a=adapter(async p=>{calls.push(p);if(p.name==='dev_workspace_begin_workstream')throw Object.assign(Error('lost'),{code:'TIMEOUT'});return isolate;},async p=>({...p,reconciliation_state:'completed',operation_id:'dev_operation_'+'b'.repeat(32),original_result:begin}));
  const r=await createPiReliableExecutionEngine({store,adapter:a}).execute(intent());assert.equal(r.state.status,'COMPLETED');assert.equal(calls.length,2);assert.equal(r.receipts[0].kind,'reconciled_facts');assert.equal(r.runtime.lifecycle_binding.workspace_id,ws);
 });
+
+test('reconcile-only recognizes a durable begin receipt and leaves isolate dependent and pending',async t=>{
+ const {journal}=await fixture(t),store=createPiReliableExecutionStore({journal,isOwnerAlive:async()=>false});let effects=0;
+ const a=adapter(async()=>{throw Error('must not dispatch');},p=>journal.getOperation(p));
+ const e=createPiReliableExecutionEngine({store,adapter:a,executionHook:async p=>{if(p==='after_claim')throw Error('worker disappeared');}});
+ await assert.rejects(e.execute(intent()),/worker disappeared/);
+ const step=a.describe(intent(),'begin');
+ await journal.executeReconciled({tool_name:step.tool,reconciliation_key:step.idempotency_key,
+  request_fingerprint_sha256:step.request_fingerprint_sha256},async()=>{effects++;return {content:[{type:'text',text:JSON.stringify({...begin,workstream_revision:1})}]};});
+ const claim=(await store.readHistory()).at(-1).execution_projection;
+ const r=await e.reconcileOnly({operation_id:claim.state.operation_id,context:claim.intent.context,
+  expected_revision:claim.revision,expected_owner:claim.runtime.owner});
+ assert.equal(effects,1);assert.deepEqual(r.state.completed_steps,['begin']);assert.deepEqual(r.state.pending_steps,['isolate']);
+ assert.equal(r.runtime.lifecycle_binding.workstream_id,wid);assert.equal(r.runtime.lifecycle_binding.workstream_revision,1);
+ assert.equal(r.runtime.owner,null);assert.equal(r.runtime.active_call,null);assert.equal(r.result.dispatch_paused,true);
+});
 test('partial or unknown bootstrap effect requires GPT and creates no isolated workspace',async t=>{
  for(const kind of ['unknown','partial']){const {store}=await fixture(t);let calls=0;const v=intent();v.intent_id+='-'+kind;v.requested_actions[0].idempotency_key+='-'+kind;v.requested_actions[1].idempotency_key+='-'+kind;
   const a=adapter(async()=>{calls++;throw Object.assign(Error('lost'),{code:'TIMEOUT'});},async p=>({...p,reconciliation_state:kind}));

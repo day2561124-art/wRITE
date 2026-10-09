@@ -1,0 +1,5028 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "raw_sha256": "6b9255f3f4efc91bff6131821e1f8dbdcac7339644b5d816719622dcf77ab395",
+    "scope": "isolated actual MCP stdio ingress; not production/ChatGPT connector",
+    "baseline_commit": "8e9b561b86e009e8df86734d980aa586538d8f2e",
+    "normal": {
+      "calls": 8,
+      "successes": 8,
+      "p50_ms": 5845.626199999999,
+      "p95_ms": 7879.513399999996,
+      "max_ms": 7879.513399999996,
+      "success_rate": 1
+    },
+    "concurrent4": {
+      "calls": 4,
+      "successes": 4,
+      "p50_ms": 18121.828600000008,
+      "p95_ms": 38012.4636,
+      "max_ms": 38012.4636,
+      "success_rate": 1
+    },
+    "metadata_competition": {
+      "calls": 3,
+      "successes": 3,
+      "p50_ms": 12220.857099999994,
+      "p95_ms": 12222.561000000002,
+      "max_ms": 12222.561000000002,
+      "success_rate": 1
+    },
+    "normal_metadata": {
+      "calls": 1,
+      "successes": 1,
+      "p50_ms": 89.4994000000006,
+      "p95_ms": 89.4994000000006,
+      "max_ms": 89.4994000000006,
+      "success_rate": 1
+    },
+    "requests": [
+      {
+        "name": "dev_capability_get_schema",
+        "ms": 89.4994000000006,
+        "ok": true,
+        "request_result": null,
+        "request_id": "1",
+        "queue_wait_ms": 0.07019999999999982,
+        "stages": {
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 15.492000000000075,
+            "exclusive_ms": 15.492000000000075
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 21.804700000000025,
+            "exclusive_ms": 6.31269999999995
+          },
+          "mcp-development-journal-tools.initialize": {
+            "calls": 1,
+            "inclusive_ms": 22.816799999999944,
+            "exclusive_ms": 1.0120999999999185
+          },
+          "mcp-development-checkpoint-tools.acquireStoreLock": {
+            "calls": 2,
+            "inclusive_ms": 33.91939999999977,
+            "exclusive_ms": 33.91939999999977
+          },
+          "mcp-development-checkpoint-tools.withLock": {
+            "calls": 2,
+            "inclusive_ms": 46.20229999999992,
+            "exclusive_ms": 12.282900000000154
+          },
+          "mcp-development-checkpoint-tools.initialize": {
+            "calls": 1,
+            "inclusive_ms": 26.923500000000104,
+            "exclusive_ms": 0.9190000000000964
+          },
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 81.64179999999999,
+            "exclusive_ms": 11.703700000000026
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.39630000000011023,
+            "exclusive_ms": 0.39630000000011023
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 1.9674999999999727,
+            "exclusive_ms": 1.5711999999998625
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 84.50069999999994,
+            "exclusive_ms": 0.891399999999976
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 5186.380499999999,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "2",
+        "queue_wait_ms": 0.06410000000005311,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.005999999999858119,
+            "exclusive_ms": 0.005999999999858119
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 6,
+            "inclusive_ms": 15.736200000000736,
+            "exclusive_ms": 15.736200000000736
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 130,
+            "inclusive_ms": 661.6845000000019,
+            "exclusive_ms": 661.6845000000019
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 65,
+            "inclusive_ms": 1000.5715,
+            "exclusive_ms": 338.8869999999981
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 17,
+            "inclusive_ms": 302.768600000001,
+            "exclusive_ms": 12.88340000000062
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 25,
+            "inclusive_ms": 391.66770000000065,
+            "exclusive_ms": 11.784400000001597
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 3,
+            "inclusive_ms": 49.00420000000031,
+            "exclusive_ms": 1.5508999999997286
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 24.51909999999998,
+            "exclusive_ms": 4.493399999999838
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 12,
+            "inclusive_ms": 1792.8010000000006,
+            "exclusive_ms": 1411.0306
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 145.28470000000016,
+            "exclusive_ms": 5.854000000000042
+          },
+          "pi.state_command": {
+            "calls": 11,
+            "inclusive_ms": 2240.6132000000007,
+            "exclusive_ms": 204.33539999999948
+          },
+          "capability.dev_workspace_begin_workstream": {
+            "calls": 1,
+            "inclusive_ms": 120.37159999999972,
+            "exclusive_ms": 120.37159999999972
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 3,
+            "inclusive_ms": 7387.881899999999,
+            "exclusive_ms": 105.4709999999991
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 3,
+            "inclusive_ms": 7842.618,
+            "exclusive_ms": 295.4758000000011
+          },
+          "pi.dispatch": {
+            "calls": 2,
+            "inclusive_ms": 2705.1095000000005,
+            "exclusive_ms": 7.334799999999859
+          },
+          "capability.dev_workspace_create_isolated": {
+            "calls": 1,
+            "inclusive_ms": 1973.1359999999995,
+            "exclusive_ms": 1973.1359999999995
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5128.0795,
+            "exclusive_ms": 12.552999999998974
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5183.6419,
+            "exclusive_ms": 1.053899999999885
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 5334.688099999999,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "3",
+        "queue_wait_ms": 0.12849999999980355,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.010199999999713327,
+            "exclusive_ms": 0.010199999999713327
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.912699999999859,
+            "exclusive_ms": 9.912699999999859
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 730.5880000000107,
+            "exclusive_ms": 730.5880000000107
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1284.048699999994,
+            "exclusive_ms": 553.4606999999833
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 318.3068000000021,
+            "exclusive_ms": 11.757400000005873
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 470.59729999999945,
+            "exclusive_ms": 14.061600000003637
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 34.77910000000065,
+            "exclusive_ms": 1.4767000000001644
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 77.48059999999987,
+            "exclusive_ms": 40.96320000000014
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2077.8005999999996,
+            "exclusive_ms": 1441.2602999999972
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 246.92160000000058,
+            "exclusive_ms": 39.952400000001944
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2824.1116999999986,
+            "exclusive_ms": 501.78429999999844
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 427.04459999999926,
+            "exclusive_ms": 427.04459999999926
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 888.4344000000001,
+            "exclusive_ms": 423.31710000000203
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6277.0511000000015,
+            "exclusive_ms": 63.88550000000123
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6881.333700000001,
+            "exclusive_ms": 510.28409999999803
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2089.4162000000015,
+            "exclusive_ms": 521.0506999999998
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5277.4619999999995,
+            "exclusive_ms": 39.53189999999904
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5331.4223999999995,
+            "exclusive_ms": 1.0809999999992215
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 4671.562699999999,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "4",
+        "queue_wait_ms": 0.051800000001094304,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.006600000000617001,
+            "exclusive_ms": 0.006600000000617001
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 12.508200000000215,
+            "exclusive_ms": 12.508200000000215
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 512.9581000000107,
+            "exclusive_ms": 512.9581000000107
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1073.6041999999998,
+            "exclusive_ms": 560.646099999989
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 300.64630000000034,
+            "exclusive_ms": 9.69050000000243
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 457.3689000000031,
+            "exclusive_ms": 14.460600000005797
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 42.637800000000425,
+            "exclusive_ms": 1.4606999999996333
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 104.48149999999987,
+            "exclusive_ms": 62.697000000000116
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1322.633600000001,
+            "exclusive_ms": 920.2266999999974
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 229.56590000000142,
+            "exclusive_ms": 61.77820000000247
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2232.0074000000004,
+            "exclusive_ms": 639.8562999999958
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 360.3252999999986,
+            "exclusive_ms": 360.3252999999986
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 797.7134000000005,
+            "exclusive_ms": 393.3958000000039
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5527.080399999999,
+            "exclusive_ms": 60.34309999999823
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6186.036200000002,
+            "exclusive_ms": 552.1860000000015
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2034.8014999999996,
+            "exclusive_ms": 495.5896999999968
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 4610.475399999999,
+            "exclusive_ms": 9.61909999999807
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4668.720300000001,
+            "exclusive_ms": 0.9722999999994499
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 5298.800899999998,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "5",
+        "queue_wait_ms": 0.064700000000812,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.0046999999995023245,
+            "exclusive_ms": 0.0046999999995023245
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 11.832199999997101,
+            "exclusive_ms": 11.832199999997101
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 520.1932999999899,
+            "exclusive_ms": 520.1932999999899
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1183.5656999999974,
+            "exclusive_ms": 663.3724000000075
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 314.094699999996,
+            "exclusive_ms": 9.457399999999325
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 503.4715999999844,
+            "exclusive_ms": 14.542399999989357
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 44.58590000000186,
+            "exclusive_ms": 1.0567000000010012
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 126.31240000000071,
+            "exclusive_ms": 82.16229999999996
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1578.5625999999975,
+            "exclusive_ms": 1129.8056999999972
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 276.2475000000013,
+            "exclusive_ms": 80.8311000000067
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2694.5261999999966,
+            "exclusive_ms": 831.0951000000096
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 351.1235000000015,
+            "exclusive_ms": 351.1235000000015
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 849.3911999999982,
+            "exclusive_ms": 452.0825999999979
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6204.298699999999,
+            "exclusive_ms": 62.13040000000365
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6943.723399999997,
+            "exclusive_ms": 618.955299999996
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2129.5191000000013,
+            "exclusive_ms": 457.1647000000012
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5235.7916000000005,
+            "exclusive_ms": 9.186400000000503
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5295.943100000002,
+            "exclusive_ms": 0.9469000000044616
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 5845.626199999999,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "6",
+        "queue_wait_ms": 0.10900000000037835,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.009900000000925502,
+            "exclusive_ms": 0.009900000000925502
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 11.401699999998527,
+            "exclusive_ms": 11.401699999998527
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 520.5000999999975,
+            "exclusive_ms": 520.5000999999975
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1253.6424000000115,
+            "exclusive_ms": 733.1423000000141
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 337.85319999999774,
+            "exclusive_ms": 9.861899999988964
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 525.3179000000018,
+            "exclusive_ms": 14.076100000005681
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 45.48639999999796,
+            "exclusive_ms": 1.1784999999981665
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 152.9392000000007,
+            "exclusive_ms": 105.64480000000185
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1848.864799999992,
+            "exclusive_ms": 1373.1198999999906
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 335.34080000000176,
+            "exclusive_ms": 106.58420000000115
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3184.149999999998,
+            "exclusive_ms": 1063.081600000005
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 353.02520000000004,
+            "exclusive_ms": 353.02520000000004
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 791.9219000000012,
+            "exclusive_ms": 388.32330000000366
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6695.072800000002,
+            "exclusive_ms": 64.48310000000492
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7429.985199999999,
+            "exclusive_ms": 599.3817999999919
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2098.879499999999,
+            "exclusive_ms": 487.4523999999983
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5781.160399999997,
+            "exclusive_ms": 9.850899999997637
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5842.475200000001,
+            "exclusive_ms": 1.3575000000018917
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 6047.735800000002,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "7",
+        "queue_wait_ms": 0.0783000000010361,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.03470000000015716,
+            "exclusive_ms": 0.03470000000015716
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.476800000007643,
+            "exclusive_ms": 9.476800000007643
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 500.2270999999746,
+            "exclusive_ms": 500.2270999999746
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1263.6274000000121,
+            "exclusive_ms": 763.4003000000375
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 344.09340000000157,
+            "exclusive_ms": 9.758399999998801
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 546.226999999999,
+            "exclusive_ms": 15.305399999993824
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 46.961200000001554,
+            "exclusive_ms": 1.2142999999996391
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 170.26499999999942,
+            "exclusive_ms": 121.3230999999978
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2002.7945999999938,
+            "exclusive_ms": 1519.846699999991
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 379.26070000000254,
+            "exclusive_ms": 123.5254000000059
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3429.7298000000046,
+            "exclusive_ms": 1162.6606000000102
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 351.1228999999985,
+            "exclusive_ms": 351.1228999999985
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 759.1427999999978,
+            "exclusive_ms": 365.5327999999972
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6864.841199999995,
+            "exclusive_ms": 54.0612999999903
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7622.137600000002,
+            "exclusive_ms": 639.1822000000066
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1999.9709000000003,
+            "exclusive_ms": 397.3921999999984
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5988.992200000001,
+            "exclusive_ms": 9.76579999999376
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 6044.951499999999,
+            "exclusive_ms": 1.121499999997468
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 6476.641199999998,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "8",
+        "queue_wait_ms": 0.029499999996914994,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004099999998288695,
+            "exclusive_ms": 0.004099999998288695
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.698000000003958,
+            "exclusive_ms": 9.698000000003958
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 524.2582000000184,
+            "exclusive_ms": 524.2582000000184
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1348.1860999999772,
+            "exclusive_ms": 823.9278999999588
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 353.5106999999989,
+            "exclusive_ms": 9.25360000001092
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 553.8819000000003,
+            "exclusive_ms": 14.30750000000262
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 72.74170000000595,
+            "exclusive_ms": 1.1363000000055763
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 191.8969999999972,
+            "exclusive_ms": 140.28669999999693
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2154.564700000017,
+            "exclusive_ms": 1651.6244000000224
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 394.28740000000107,
+            "exclusive_ms": 135.98539999999775
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3746.9159000000072,
+            "exclusive_ms": 1322.7731999999887
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 364.6958000000013,
+            "exclusive_ms": 364.6958000000013
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 787.0940999999948,
+            "exclusive_ms": 367.957699999999
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 7316.030199999994,
+            "exclusive_ms": 52.2074999999968
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 8080.653600000005,
+            "exclusive_ms": 627.2757000000056
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2072.553,
+            "exclusive_ms": 418.01749999999447
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 6415.499300000003,
+            "exclusive_ms": 9.84599999999773
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 6474.141300000003,
+            "exclusive_ms": 0.8858000000036554
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 7183.900399999999,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "9",
+        "queue_wait_ms": 0.048499999997147825,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.01870000000053551,
+            "exclusive_ms": 0.01870000000053551
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.77740000000631,
+            "exclusive_ms": 9.77740000000631
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 524.1019999999917,
+            "exclusive_ms": 524.1019999999917
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1462.686500000018,
+            "exclusive_ms": 938.5845000000263
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 421.8737999999721,
+            "exclusive_ms": 11.458399999952235
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 615.4423000000097,
+            "exclusive_ms": 16.73630000000412
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 49.839099999997416,
+            "exclusive_ms": 1.5785999999934575
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 194.25920000000042,
+            "exclusive_ms": 144.56360000000132
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2446.0746,
+            "exclusive_ms": 1878.343600000022
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 432.29909999999654,
+            "exclusive_ms": 162.22609999999986
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 4316.801600000006,
+            "exclusive_ms": 1552.1990999999907
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 342.258600000001,
+            "exclusive_ms": 342.258600000001
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 775.089899999999,
+            "exclusive_ms": 373.07530000000406
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 8015.4908,
+            "exclusive_ms": 60.19580000000133
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 8877.0265,
+            "exclusive_ms": 721.1682000000073
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2157.400499999996,
+            "exclusive_ms": 432.4100000000035
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 7111.103799999997,
+            "exclusive_ms": 10.343399999997928
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 7180.384300000005,
+            "exclusive_ms": 1.3447000000014668
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 7879.513399999996,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "10",
+        "queue_wait_ms": 0.042499999995925464,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.011800000000221189,
+            "exclusive_ms": 0.011800000000221189
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 12.508999999998196,
+            "exclusive_ms": 12.508999999998196
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 515.1463000000149,
+            "exclusive_ms": 515.1463000000149
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1549.2379000000146,
+            "exclusive_ms": 1034.0915999999997
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 436.65759999999864,
+            "exclusive_ms": 9.7158999999956
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 646.181099999987,
+            "exclusive_ms": 17.80499999998574
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 55.22149999999965,
+            "exclusive_ms": 1.6189999999987776
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 237.8559000000023,
+            "exclusive_ms": 180.68540000000212
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2678.158000000003,
+            "exclusive_ms": 2085.4495999999926
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 494.0535000000018,
+            "exclusive_ms": 179.59909999999945
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 4671.388599999991,
+            "exclusive_ms": 1691.875
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 343.9392000000007,
+            "exclusive_ms": 343.9392000000007
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 897.064099999996,
+            "exclusive_ms": 488.0699999999997
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 8841.157599999999,
+            "exclusive_ms": 58.94230000000243
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 9798.120299999995,
+            "exclusive_ms": 803.0762999999934
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2394.831299999998,
+            "exclusive_ms": 444.4374000000025
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 7807.316700000003,
+            "exclusive_ms": 9.187400000009802
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 7877.064399999996,
+            "exclusive_ms": 0.9040999999997439
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 817.1398000000045,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "11",
+        "queue_wait_ms": 0.02569999999832362,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004399999997986015,
+            "exclusive_ms": 0.004399999997986015
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 6.309100000005856,
+            "exclusive_ms": 6.309100000005856
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 16,
+            "inclusive_ms": 81.35180000001128,
+            "exclusive_ms": 81.35180000001128
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 8,
+            "inclusive_ms": 257.0528000000122,
+            "exclusive_ms": 175.70100000000093
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 2,
+            "inclusive_ms": 65.57239999999729,
+            "exclusive_ms": 1.4694999999992433
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 3,
+            "inclusive_ms": 100.43010000000504,
+            "exclusive_ms": 2.3070999999981723
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 63.8949000000066,
+            "exclusive_ms": 1.436200000003737
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 293.5645000000004,
+            "exclusive_ms": 196.62089999999444
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 1,
+            "inclusive_ms": 179.0699999999997,
+            "exclusive_ms": 112.65789999999834
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 451.35429999999906,
+            "exclusive_ms": 204.90289999999368
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 746.4503999999943,
+            "exclusive_ms": 1.5315999999947962
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 814.6725000000006,
+            "exclusive_ms": 30.384500000000116
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 815.004399999998,
+            "exclusive_ms": 0.33189999999740394
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 815.4518000000025,
+            "exclusive_ms": 0.44300000000657747
+          }
+        }
+      },
+      {
+        "name": "powershell_run",
+        "ms": 39.16259999999602,
+        "ok": false,
+        "error": "MCP error -32602: PI_EXECUTION_INTENT_REQUIRED",
+        "request_id": "12",
+        "queue_wait_ms": 0.02299999999377178,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004100000005564652,
+            "exclusive_ms": 0.004100000005564652
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 9.840900000002875,
+            "exclusive_ms": 9.840900000002875
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 32.02900000000227,
+            "exclusive_ms": 22.188099999999395
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 1,
+            "inclusive_ms": 32.77130000000034,
+            "exclusive_ms": 0.7422999999980675
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 34.51780000000144,
+            "exclusive_ms": 1.7423999999955413
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 68.3064000000013,
+        "ok": false,
+        "error": "PERMISSION_DENIED",
+        "request_id": "13",
+        "queue_wait_ms": 0.040899999999965075,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.009100000002945308,
+            "exclusive_ms": 0.009100000002945308
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 5.147799999991548,
+            "exclusive_ms": 5.147799999991548
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 9.989899999993213,
+            "exclusive_ms": 9.989899999993213
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 28.221299999997427,
+            "exclusive_ms": 18.231400000004214
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 1,
+            "inclusive_ms": 28.617700000002515,
+            "exclusive_ms": 0.39640000000508735
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 0.3496000000013737,
+            "exclusive_ms": 0.3496000000013737
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 0.6782000000021071,
+            "exclusive_ms": 0.3286000000007334
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 65.22030000000086,
+            "exclusive_ms": 30.77660000000469
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 65.59560000000056,
+            "exclusive_ms": 0.3752999999996973
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 66.375,
+            "exclusive_ms": 0.7702999999964959
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 8945.910399999993,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "14",
+        "queue_wait_ms": 0.022799999998824205,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004199999995762482,
+            "exclusive_ms": 0.004199999995762482
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 11.499600000010105,
+            "exclusive_ms": 11.499600000010105
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 561.7790000000023,
+            "exclusive_ms": 561.7790000000023
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1806.0685999999987,
+            "exclusive_ms": 1244.2895999999964
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 502.9464999999691,
+            "exclusive_ms": 10.410199999954784
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 755.7910999999731,
+            "exclusive_ms": 16.538699999990058
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 64.88850000000821,
+            "exclusive_ms": 1.7070000000021537
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 258.49269999999524,
+            "exclusive_ms": 190.45109999999113
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 3187.551700000018,
+            "exclusive_ms": 2478.645400000045
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 573.6807999999946,
+            "exclusive_ms": 216.75549999999203
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 5585.141899999995,
+            "exclusive_ms": 2032.1198000000077
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 389.20620000000054,
+            "exclusive_ms": 389.20620000000054
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 875.094299999997,
+            "exclusive_ms": 414.92259999999806
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 9891.8646,
+            "exclusive_ms": 61.40219999999681
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 10918.346099999995,
+            "exclusive_ms": 858.4760999999999
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2450.362000000001,
+            "exclusive_ms": 445.0482999999949
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 8877.700799999999,
+            "exclusive_ms": 10.02340000001277
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 8944.072699999997,
+            "exclusive_ms": 0.7938000000067404
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 18121.828600000008,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "15",
+        "queue_wait_ms": 8944.183400000002,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.006199999996169936,
+            "exclusive_ms": 0.006199999996169936
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 10.857100000001083,
+            "exclusive_ms": 10.857100000001083
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 551.5917000000627,
+            "exclusive_ms": 551.5917000000627
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1791.315400000065,
+            "exclusive_ms": 1239.7237000000023
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 500.39979999999923,
+            "exclusive_ms": 10.24300000002404
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 741.6057000000073,
+            "exclusive_ms": 15.125999999945634
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 71.70780000000377,
+            "exclusive_ms": 1.5901999999914551
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 308.5604999999996,
+            "exclusive_ms": 237.73909999999887
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 3347.3433999999907,
+            "exclusive_ms": 2652.6820000000153
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 622.2008999999962,
+            "exclusive_ms": 229.32540000000154
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 5834.605399999986,
+            "exclusive_ms": 2173.2259999999806
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 361.51819999999134,
+            "exclusive_ms": 361.51819999999134
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 809.1680999999953,
+            "exclusive_ms": 378.1918000000005
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 10054.1956,
+            "exclusive_ms": 60.15919999998732
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 11026.333099999996,
+            "exclusive_ms": 803.3893999999709
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2326.678899999999,
+            "exclusive_ms": 437.6573999999964
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 9101.917700000005,
+            "exclusive_ms": 9.872000000024855
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 9173.742900000005,
+            "exclusive_ms": 0.8445000000137952
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 27795.153300000005,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "16",
+        "queue_wait_ms": 18120.170899999997,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.00909999999566935,
+            "exclusive_ms": 0.00909999999566935
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 11.634600000004866,
+            "exclusive_ms": 11.634600000004866
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 548.9891000000207,
+            "exclusive_ms": 548.9891000000207
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1895.4034000000538,
+            "exclusive_ms": 1346.414300000033
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 525.0115000000078,
+            "exclusive_ms": 10.301999999996042
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 768.2184999999445,
+            "exclusive_ms": 16.630199999912293
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 82.64360000001034,
+            "exclusive_ms": 1.227500000008149
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 306.58929999999236,
+            "exclusive_ms": 236.63330000000133
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 3475.9361999999674,
+            "exclusive_ms": 2749.3840999999666
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 640.3466999999946,
+            "exclusive_ms": 238.25729999999749
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 6104.1340000000055,
+            "exclusive_ms": 2298.5204000000813
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 346.66079999999783,
+            "exclusive_ms": 346.66079999999783
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 829.8482999999978,
+            "exclusive_ms": 406.1355000000185
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 10580.468599999993,
+            "exclusive_ms": 68.01959999997052
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 11746.064299999998,
+            "exclusive_ms": 974.2798999999795
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2532.678800000009,
+            "exclusive_ms": 407.79550000000745
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 9593.185000000012,
+            "exclusive_ms": 9.436200000011013
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 9671.539600000004,
+            "exclusive_ms": 1.2102000000013504
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 38012.4636,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "17",
+        "queue_wait_ms": 27793.67420000001,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.010099999999511056,
+            "exclusive_ms": 0.010099999999511056
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 12.320500000016182,
+            "exclusive_ms": 12.320500000016182
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 581.7051000000502,
+            "exclusive_ms": 581.7051000000502
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1987.7716999999975,
+            "exclusive_ms": 1406.0665999999474
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 542.348199999964,
+            "exclusive_ms": 10.251799999983632
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 809.4727999999886,
+            "exclusive_ms": 17.269499999980326
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 101.01559999999881,
+            "exclusive_ms": 1.6864000000059605
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 349.7972999999911,
+            "exclusive_ms": 267.75560000000405
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 3722.523699999976,
+            "exclusive_ms": 2961.2210999999807
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 760.7681999999913,
+            "exclusive_ms": 286.1484999999957
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 6494.973100000017,
+            "exclusive_ms": 2474.97480000004
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 338.88799999999173,
+            "exclusive_ms": 338.88799999999173
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 770.3395999999921,
+            "exclusive_ms": 356.59840000001714
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 11060.399699999994,
+            "exclusive_ms": 58.13409999998112
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 12208.448900000003,
+            "exclusive_ms": 961.39390000001
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2520.842199999999,
+            "exclusive_ms": 469.9956999999995
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 10135.925600000002,
+            "exclusive_ms": 9.544800000003306
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 10215.217999999993,
+            "exclusive_ms": 1.253099999987171
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 12218.256600000008,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "request_id": "18",
+        "queue_wait_ms": 0.0283999999955995,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004500000010011718,
+            "exclusive_ms": 0.004500000010011718
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 5.7700000000040745,
+            "exclusive_ms": 5.7700000000040745
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 539.5147999999172,
+            "exclusive_ms": 539.5147999999172
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1929.2946000000084,
+            "exclusive_ms": 1389.7798000000912
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 540.1839999999793,
+            "exclusive_ms": 9.69599999996717
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 805.8566999999748,
+            "exclusive_ms": 16.254599999985658
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 78.83860000000277,
+            "exclusive_ms": 1.6919999999954598
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 366.6085000000021,
+            "exclusive_ms": 290.14599999999336
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 3804.3843000000197,
+            "exclusive_ms": 3062.75850000004
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 694.1778000000049,
+            "exclusive_ms": 277.36410000000615
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 6716.269199999995,
+            "exclusive_ms": 2561.227800000008
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 2370.7639999999956,
+            "exclusive_ms": 2370.7639999999956
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 2810.323000000004,
+            "exclusive_ms": 363.78020000000834
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 15093.356,
+            "exclusive_ms": 52.27589999999327
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 16131.805999999997,
+            "exclusive_ms": 861.829700000002
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4360.724900000001,
+            "exclusive_ms": 403.5317000000068
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 12146.770099999994,
+            "exclusive_ms": 8.98969999999099
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 12216.087700000004,
+            "exclusive_ms": 0.7083999999886146
+          }
+        }
+      },
+      {
+        "name": "dev_capability_get_schema",
+        "ms": 12219.589500000002,
+        "ok": true,
+        "request_result": null,
+        "request_id": "19",
+        "queue_wait_ms": 12216.311300000001,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003599999996367842,
+            "exclusive_ms": 0.003599999996367842
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.25989999999001157,
+            "exclusive_ms": 0.25989999999001157
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.5693999999930384,
+            "exclusive_ms": 0.3095000000030268
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 0.9436000000132481,
+            "exclusive_ms": 0.37060000002384186
+          }
+        }
+      },
+      {
+        "name": "dev_capability_get_schema",
+        "ms": 12220.857099999994,
+        "ok": true,
+        "request_result": null,
+        "request_id": "20",
+        "queue_wait_ms": 12217.926900000006,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003400000001420267,
+            "exclusive_ms": 0.003400000001420267
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.11409999999159481,
+            "exclusive_ms": 0.11409999999159481
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.33230000000912696,
+            "exclusive_ms": 0.21820000001753215
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 0.7053999999916414,
+            "exclusive_ms": 0.36969999998109415
+          }
+        }
+      },
+      {
+        "name": "dev_capability_get_schema",
+        "ms": 12222.561000000002,
+        "ok": true,
+        "request_result": null,
+        "request_id": "21",
+        "queue_wait_ms": 12219.210000000006,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004000000000814907,
+            "exclusive_ms": 0.004000000000814907
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.13580000000365544,
+            "exclusive_ms": 0.13580000000365544
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.4633999999932712,
+            "exclusive_ms": 0.32759999998961575
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1.004000000000815,
+            "exclusive_ms": 0.5366000000067288
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 8058.766700000007,
+        "ok": true,
+        "request_result": "DECISION_REQUIRED",
+        "request_id": "22",
+        "queue_wait_ms": 0.03539999999338761,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.013300000005983748,
+            "exclusive_ms": 0.013300000005983748
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 8.71469999999681,
+            "exclusive_ms": 8.71469999999681
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 80,
+            "inclusive_ms": 404.67340000004333,
+            "exclusive_ms": 404.67340000004333
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 40,
+            "inclusive_ms": 1524.151699999973,
+            "exclusive_ms": 1119.4782999999297
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 11,
+            "inclusive_ms": 430.88989999999467,
+            "exclusive_ms": 7.844000000011874
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 15,
+            "inclusive_ms": 570.9698000000208,
+            "exclusive_ms": 11.73810000004596
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 79.59419999999227,
+            "exclusive_ms": 1.5011999999987893
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 376.1310999999987,
+            "exclusive_ms": 291.0144
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 7,
+            "inclusive_ms": 2726.8988000000245,
+            "exclusive_ms": 2194.0920000000333
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 755.8122999999905,
+            "exclusive_ms": 296.8617999999842
+          },
+          "pi.state_command": {
+            "calls": 6,
+            "inclusive_ms": 4529.039399999994,
+            "exclusive_ms": 1732.2055999999575
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 258.20900000000256,
+            "exclusive_ms": 258.20900000000256
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 734.0926999999938,
+            "exclusive_ms": 387.8702999999805
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 8851.575599999996,
+            "exclusive_ms": 51.396200000002864
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 9927.54759999999,
+            "exclusive_ms": 876.0872999999847
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2315.820399999997,
+            "exclusive_ms": 406.7914000000019
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 7983.405899999998,
+            "exclusive_ms": 6.602700000017649
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 8056.075100000002,
+            "exclusive_ms": 0.9814000000042142
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 9043.90830000001,
+        "ok": false,
+        "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+        "request_id": "23",
+        "queue_wait_ms": 0.04980000000796281,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008399999991524965,
+            "exclusive_ms": 0.008399999991524965
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 10.018599999995786,
+            "exclusive_ms": 10.018599999995786
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 76,
+            "inclusive_ms": 394.6751999999833,
+            "exclusive_ms": 394.6751999999833
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 38,
+            "inclusive_ms": 1543.708399999974,
+            "exclusive_ms": 1149.0331999999908
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 11,
+            "inclusive_ms": 459.7226999999839,
+            "exclusive_ms": 8.01140000000305
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 14,
+            "inclusive_ms": 564.7504999999946,
+            "exclusive_ms": 9.786000000021886
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 81.26820000000589,
+            "exclusive_ms": 1.441500000000815
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 371.04120000000694,
+            "exclusive_ms": 292.6209999999992
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 7,
+            "inclusive_ms": 2467.2633999999816,
+            "exclusive_ms": 1947.1268999999884
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 787.3718999999983,
+            "exclusive_ms": 314.57159999999567
+          },
+          "pi.state_command": {
+            "calls": 6,
+            "inclusive_ms": 4255.973400000003,
+            "exclusive_ms": 1730.825100000031
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 1315.8829000000114,
+            "exclusive_ms": 1315.8829000000114
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 1848.6353999999992,
+            "exclusive_ms": 442.66559999997844
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 10960.411100000012,
+            "exclusive_ms": 58.24360000003071
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 12140.145399999994,
+            "exclusive_ms": 955.9452999999776
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 3539.2780000000057,
+            "exclusive_ms": 402.30940000001283
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 8960.597299999994,
+            "exclusive_ms": 6.932799999980489
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 9041.222800000003,
+            "exclusive_ms": 1.1243000000104075
+          }
+        }
+      },
+      {
+        "name": "dev_pi_execute_intent",
+        "ms": 86.23199999998906,
+        "ok": false,
+        "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+        "request_id": "24",
+        "queue_wait_ms": 0.08720000000903383,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.00849999999627471,
+            "exclusive_ms": 0.00849999999627471
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 5.694000000003143,
+            "exclusive_ms": 5.694000000003143
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 11.611399999994319,
+            "exclusive_ms": 11.611399999994319
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 44.2505000000092,
+            "exclusive_ms": 32.63910000001488
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 1,
+            "inclusive_ms": 45.07279999999446,
+            "exclusive_ms": 0.8222999999852618
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 81.8072000000102,
+            "exclusive_ms": 31.040400000012596
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 82.46450000000186,
+            "exclusive_ms": 0.6572999999916647
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 83.88199999999779,
+            "exclusive_ms": 1.4089999999996508
+          }
+        }
+      }
+    ],
+    "runs": [
+      {
+        "intent_id": "phase2-normal-0-0001",
+        "operation_id": "pi_operation_4c80c06f1c2145b4971f0d7f6c00f969",
+        "child_operation_id": "dev_operation_97badef3a57344168e7b4ab9b46c62ad",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 427
+      },
+      {
+        "intent_id": "phase2-normal-1-0001",
+        "operation_id": "pi_operation_d685a92c418e4570b59b6cd1afe9aaee",
+        "child_operation_id": "dev_operation_1f67e47af3b746818e3d63b53fb32c9f",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 360
+      },
+      {
+        "intent_id": "phase2-normal-2-0001",
+        "operation_id": "pi_operation_75122d9e5c3f4a06a84917f4f5c379a4",
+        "child_operation_id": "dev_operation_b73fe606dbf84ac38a9eb7c8626addbc",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 351
+      },
+      {
+        "intent_id": "phase2-normal-3-0001",
+        "operation_id": "pi_operation_7c91768875224d519b41f398b81b9f69",
+        "child_operation_id": "dev_operation_d5a117eb10c44d5cb110310b5ddaa35f",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 353
+      },
+      {
+        "intent_id": "phase2-normal-4-0001",
+        "operation_id": "pi_operation_161b1a0ff3a94b02aef6aea77944c4b4",
+        "child_operation_id": "dev_operation_d0612494d29945d582b7e2d4d6de0942",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 351
+      },
+      {
+        "intent_id": "phase2-normal-5-0001",
+        "operation_id": "pi_operation_476d4451cc024feea4bd41c48d35dc18",
+        "child_operation_id": "dev_operation_711f2883a7d34bd0921ef8d3ff282ea6",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 365
+      },
+      {
+        "intent_id": "phase2-normal-6-0001",
+        "operation_id": "pi_operation_565a213ac4944e9ea3c994f59b86d319",
+        "child_operation_id": "dev_operation_dc38156810f74568a14021819c1b655f",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 342
+      },
+      {
+        "intent_id": "phase2-normal-7-0001",
+        "operation_id": "pi_operation_062ab26f36aa436b8617882c6faf4052",
+        "child_operation_id": "dev_operation_ddf5658977df4cf7bf39c43b09516b92",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 344
+      }
+    ],
+    "context": {
+      "project_id": "writer_workbench",
+      "workspace_id": "dev_workspace_a6e3866fcf8948ee878deee4",
+      "workstream_id": "dev_workstream_20261008-132824_5c7111cfabb7"
+    },
+    "duplicate_same_operation": true,
+    "unauthorized_no_dispatch": true,
+    "nonzero": {
+      "status": "DECISION_REQUIRED",
+      "exit_code": 7,
+      "ok": false,
+      "error": {
+        "schema_version": 2,
+        "phase": "F",
+        "mode": "production_default",
+        "operation_id": "pi_operation_470fbfdf33624c13a8d7563ee56757d6",
+        "intent_id": "phase2-nonzero-0001",
+        "revision": 7,
+        "status": "DECISION_REQUIRED",
+        "completed": [],
+        "remaining": [
+          "ps"
+        ],
+        "verification": {
+          "affected": "not_requested",
+          "focused": "not_requested",
+          "full": "not_requested"
+        },
+        "checkpoint": {
+          "at_revision": 6,
+          "intent_hash": "78ef9b5d92cb833016f9557e51ceabf7f0138dd13890d51feefcdcfd513c6f8f",
+          "operation_id": "pi_operation_470fbfdf33624c13a8d7563ee56757d6",
+          "phase": "EXECUTING",
+          "schema_version": 2,
+          "step_id": "ps",
+          "workspace_id": "dev_workspace_a6e3866fcf8948ee878deee4"
+        },
+        "resume_point": {
+          "phase": "EXECUTING",
+          "step_id": "ps"
+        },
+        "decision_required": true,
+        "retry_at": null,
+        "persistence_enabled": true,
+        "execution_enabled": true,
+        "resume_dispatch_enabled": true,
+        "engineering_review_required": true,
+        "production_default_changed": true,
+        "model_requests": 0,
+        "decision_owner": "GPT",
+        "execution_owner": "Pi",
+        "tool_owner": "MCP",
+        "legacy_migration": false
+      }
+    },
+    "timeout": {
+      "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+      "retry_error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+      "timed_out": true,
+      "exit_code": 1,
+      "ok": false,
+      "reconciliation": "required; automatic restoration deliberately not asserted"
+    },
+    "physical_dispatches": 15,
+    "journal": {
+      "schema_version": 1,
+      "health": "degraded",
+      "chain_verified": true,
+      "latest_sequence": 376,
+      "latest_event_id": "dev_journal_event_3be9055967184d909ed4f362ff7dacb7",
+      "latest_event_hash": "e5b6a0f2f6f602c7acacd87cb25fa6968e5e9c9c19a07b77f70ea04e6dac830b",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": true,
+      "last_health_error": "ambiguous_terminal_operation_requires_reconciliation",
+      "storage": "server_owned_per_event_files"
+    },
+    "uncorrelated_response_spans": [
+      {
+        "kind": "span",
+        "id": 2,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.8837999999999511,
+        "exclusive_ms": 0.8837999999999511,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 17,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.16729999999984102,
+        "exclusive_ms": 0.16729999999984102,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 302,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.3545000000003711,
+        "exclusive_ms": 0.3545000000003711,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 531,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.26339999999981956,
+        "exclusive_ms": 0.26339999999981956,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 760,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.33990000000085274,
+        "exclusive_ms": 0.33990000000085274,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 989,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.3654000000024098,
+        "exclusive_ms": 0.3654000000024098,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 1218,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.4326999999975669,
+        "exclusive_ms": 0.4326999999975669,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 1447,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.4697999999989406,
+        "exclusive_ms": 0.4697999999989406,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 1676,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.40230000000155997,
+        "exclusive_ms": 0.40230000000155997,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 1905,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.5460999999995693,
+        "exclusive_ms": 0.5460999999995693,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2134,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.16640000000188593,
+        "exclusive_ms": 0.16640000000188593,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2176,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.12919999999576248,
+        "exclusive_ms": 0.12919999999576248,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2183,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.13390000000072177,
+        "exclusive_ms": 0.13390000000072177,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2196,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07959999999729916,
+        "exclusive_ms": 0.07959999999729916,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2425,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.2496000000028289,
+        "exclusive_ms": 0.2496000000028289,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2654,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.236799999998766,
+        "exclusive_ms": 0.236799999998766,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 2883,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.2502999999996973,
+        "exclusive_ms": 0.2502999999996973,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3112,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.2427999999927124,
+        "exclusive_ms": 0.2427999999927124,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3341,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.3109999999869615,
+        "exclusive_ms": 0.3109999999869615,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3346,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.06630000000586733,
+        "exclusive_ms": 0.06630000000586733,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3351,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07310000000870787,
+        "exclusive_ms": 0.07310000000870787,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3356,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07669999999052379,
+        "exclusive_ms": 0.07669999999052379,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3534,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.25089999999909196,
+        "exclusive_ms": 0.25089999999909196,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3705,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.1648999999888474,
+        "exclusive_ms": 0.1648999999888474,
+        "ok": true,
+        "pid": 25396
+      },
+      {
+        "kind": "span",
+        "id": 3716,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.15009999999892898,
+        "exclusive_ms": 0.15009999999892898,
+        "ok": true,
+        "pid": 25396
+      }
+    ],
+    "caveat": "Inclusive stages nest; do not add them. Response spans are aggregate only. SDK ingress is not ChatGPT/HTTP ingress."
+  },
+  "candidate": {
+    "raw_sha256": "7e2431094c867feb5aa0ba25c145ab360dad6868bd308198f632d800e6d9bf5d",
+    "scope": "isolated actual MCP stdio ingress; not production/ChatGPT connector",
+    "baseline_commit": "8e9b561b86e009e8df86734d980aa586538d8f2e",
+    "server_sha256": "f3481677ba8a544a8d0a5f677d137d53ded2ba4a754c9feb21981e8530a2676d",
+    "normal": {
+      "calls": 8,
+      "successes": 8,
+      "p50_ms": 4858.4667000000045,
+      "p95_ms": 5939.3196000000025,
+      "max_ms": 5939.3196000000025,
+      "success_rate": 1
+    },
+    "concurrent4": {
+      "calls": 4,
+      "successes": 4,
+      "p50_ms": 10749.205000000002,
+      "p95_ms": 22641.435399999995,
+      "max_ms": 22641.435399999995,
+      "success_rate": 1
+    },
+    "metadata_competition": {
+      "calls": 3,
+      "successes": 3,
+      "p50_ms": 4.630399999994552,
+      "p95_ms": 6.3968000000022585,
+      "max_ms": 6.3968000000022585,
+      "success_rate": 1
+    },
+    "normal_metadata": {
+      "calls": 1,
+      "successes": 1,
+      "p50_ms": 62.85649999999987,
+      "p95_ms": 62.85649999999987,
+      "max_ms": 62.85649999999987,
+      "success_rate": 1
+    },
+    "requests": [
+      {
+        "request_id": "1",
+        "name": "dev_capability_get_schema",
+        "ms": 62.85649999999987,
+        "ok": true,
+        "request_result": null,
+        "queue_wait_ms": 0.0724999999999909,
+        "stages": {
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 14.470100000000002,
+            "exclusive_ms": 14.470100000000002
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 21.554700000000025,
+            "exclusive_ms": 7.084600000000023
+          },
+          "mcp-development-journal-tools.initialize": {
+            "calls": 1,
+            "inclusive_ms": 22.40530000000001,
+            "exclusive_ms": 0.8505999999999858
+          },
+          "mcp-development-checkpoint-tools.acquireStoreLock": {
+            "calls": 2,
+            "inclusive_ms": 9.120000000000005,
+            "exclusive_ms": 9.120000000000005
+          },
+          "mcp-development-checkpoint-tools.withLock": {
+            "calls": 2,
+            "inclusive_ms": 20.887200000000007,
+            "exclusive_ms": 11.767200000000003
+          },
+          "mcp-development-checkpoint-tools.initialize": {
+            "calls": 1,
+            "inclusive_ms": 12.032199999999989,
+            "exclusive_ms": 0.8532999999999902
+          },
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 55.70849999999996,
+            "exclusive_ms": 11.56269999999995
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.37000000000000455,
+            "exclusive_ms": 0.37000000000000455
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 1.636700000000019,
+            "exclusive_ms": 1.2667000000000144
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 58.08540000000005,
+            "exclusive_ms": 0.7402000000000726
+          }
+        }
+      },
+      {
+        "request_id": "2",
+        "name": "dev_pi_execute_intent",
+        "ms": 2585.2673999999997,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.07149999999990087,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.00659999999993488,
+            "exclusive_ms": 0.00659999999993488
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 6,
+            "inclusive_ms": 11.261699999999564,
+            "exclusive_ms": 11.261699999999564
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 130,
+            "inclusive_ms": 394.772099999999,
+            "exclusive_ms": 394.772099999999
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 65,
+            "inclusive_ms": 628.539299999999,
+            "exclusive_ms": 233.7672
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 17,
+            "inclusive_ms": 165.59609999999952,
+            "exclusive_ms": 5.622599999999693
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 25,
+            "inclusive_ms": 268.0751999999993,
+            "exclusive_ms": 8.212800000000698
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 3,
+            "inclusive_ms": 24.231500000000096,
+            "exclusive_ms": 0.933699999999817
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 21.642700000000104,
+            "exclusive_ms": 3.957700000000159
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 12,
+            "inclusive_ms": 600.5944999999999,
+            "exclusive_ms": 372.94840000000045
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 60.79860000000008,
+            "exclusive_ms": 5.09470000000033
+          },
+          "pi.state_command": {
+            "calls": 11,
+            "inclusive_ms": 972.6122,
+            "exclusive_ms": 168.7480000000005
+          },
+          "capability.dev_workspace_begin_workstream": {
+            "calls": 1,
+            "inclusive_ms": 76.47129999999993,
+            "exclusive_ms": 76.47129999999993
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 3,
+            "inclusive_ms": 3834.2224,
+            "exclusive_ms": 62.982299999999896
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 3,
+            "inclusive_ms": 4036.9912000000004,
+            "exclusive_ms": 106.09839999999986
+          },
+          "pi.dispatch": {
+            "calls": 2,
+            "inclusive_ms": 1475.6952999999999,
+            "exclusive_ms": 5.602799999999661
+          },
+          "capability.dev_workspace_create_isolated": {
+            "calls": 1,
+            "inclusive_ms": 1117.2548000000002,
+            "exclusive_ms": 1117.2548000000002
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 2539.5671,
+            "exclusive_ms": 8.818300000000363
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2583.1000999999997,
+            "exclusive_ms": 0.5466999999998734
+          }
+        }
+      },
+      {
+        "request_id": "3",
+        "name": "dev_pi_execute_intent",
+        "ms": 3559.215900000001,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.11110000000007858,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008699999999862484,
+            "exclusive_ms": 0.008699999999862484
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 8.070200000001023,
+            "exclusive_ms": 8.070200000001023
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 426.84290000000146,
+            "exclusive_ms": 426.84290000000146
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 800.9554000000021,
+            "exclusive_ms": 374.11250000000064
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 232.77189999999882,
+            "exclusive_ms": 8.0179999999973
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 335.4766000000018,
+            "exclusive_ms": 10.792900000001737
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 32.59889999999996,
+            "exclusive_ms": 0.9562999999998283
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 58.85429999999997,
+            "exclusive_ms": 27.64300000000003
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 985.8677000000025,
+            "exclusive_ms": 668.8422000000032
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 149.83359999999993,
+            "exclusive_ms": 40.63659999999936
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 1615.0457999999999,
+            "exclusive_ms": 417.2963999999961
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 336.10599999999977,
+            "exclusive_ms": 336.10599999999977
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 709.1829000000007,
+            "exclusive_ms": 345.2973000000011
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 4311.807699999999,
+            "exclusive_ms": 47.382099999997536
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 4819.7692,
+            "exclusive_ms": 434.7625000000003
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1678.3901999999998,
+            "exclusive_ms": 398.46410000000014
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 3512.5295,
+            "exclusive_ms": 10.405600000000504
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 3556.4738,
+            "exclusive_ms": 0.836500000000342
+          }
+        }
+      },
+      {
+        "request_id": "4",
+        "name": "dev_pi_execute_intent",
+        "ms": 4242.382999999998,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.07309999999961292,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.005300000000715954,
+            "exclusive_ms": 0.005300000000715954
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 7.0832000000000335,
+            "exclusive_ms": 7.0832000000000335
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 416.7186999999976,
+            "exclusive_ms": 416.7186999999976
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 866.5131999999985,
+            "exclusive_ms": 449.7945000000009
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 249.84990000000016,
+            "exclusive_ms": 7.88459999999759
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 351.93110000000434,
+            "exclusive_ms": 11.08320000000549
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 43.8676000000014,
+            "exclusive_ms": 1.0175000000017462
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 105.39100000000053,
+            "exclusive_ms": 60.88830000000053
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1146.8437999999987,
+            "exclusive_ms": 831.4815000000026
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 215.6797999999999,
+            "exclusive_ms": 59.28069999999934
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 1851.6336000000047,
+            "exclusive_ms": 530.8127000000022
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 327.09100000000035,
+            "exclusive_ms": 327.09100000000035
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 801.6080000000002,
+            "exclusive_ms": 432.91929999999957
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5089.232099999999,
+            "exclusive_ms": 49.02399999999761
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 5767.634000000002,
+            "exclusive_ms": 590.742000000002
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2003.512200000001,
+            "exclusive_ms": 453.1316999999981
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 4185.437000000001,
+            "exclusive_ms": 9.220399999994697
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4239.1381,
+            "exclusive_ms": 0.959499999999025
+          }
+        }
+      },
+      {
+        "request_id": "5",
+        "name": "dev_pi_execute_intent",
+        "ms": 4666.070100000001,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.027700000000550062,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008499999999912689,
+            "exclusive_ms": 0.008499999999912689
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.922900000001391,
+            "exclusive_ms": 9.922900000001391
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 469.12129999999524,
+            "exclusive_ms": 469.12129999999524
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1041.5459000000028,
+            "exclusive_ms": 572.4246000000076
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 291.6543000000038,
+            "exclusive_ms": 8.167600000004313
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 438.5534000000007,
+            "exclusive_ms": 13.438099999993938
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 37.78180000000066,
+            "exclusive_ms": 0.7144000000007509
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 117.71179999999913,
+            "exclusive_ms": 76.19679999999789
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1492.8160999999982,
+            "exclusive_ms": 1080.7329999999947
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 231.751400000001,
+            "exclusive_ms": 66.09989999999925
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2505.4925999999978,
+            "exclusive_ms": 762.6778000000013
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 329.8011000000006,
+            "exclusive_ms": 329.8011000000006
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 711.4185999999991,
+            "exclusive_ms": 340.9905999999992
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5415.6525,
+            "exclusive_ms": 49.71740000000136
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6007.145200000001,
+            "exclusive_ms": 493.25380000000223
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1743.9099000000006,
+            "exclusive_ms": 379.1234999999997
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 4608.011699999999,
+            "exclusive_ms": 9.14600000000064
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4662.9187999999995,
+            "exclusive_ms": 1.3814999999995052
+          }
+        }
+      },
+      {
+        "request_id": "6",
+        "name": "dev_pi_execute_intent",
+        "ms": 4939.240899999997,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.03319999999985157,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008700000000317232,
+            "exclusive_ms": 0.008700000000317232
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.374400000000605,
+            "exclusive_ms": 9.374400000000605
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 424.55270000003657,
+            "exclusive_ms": 424.55270000003657
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1008.5805000000037,
+            "exclusive_ms": 584.0277999999671
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 280.85769999999866,
+            "exclusive_ms": 8.822000000000116
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 399.8336999999992,
+            "exclusive_ms": 11.689299999996365
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 47.708300000003874,
+            "exclusive_ms": 1.59110000000328
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 156.53319999999985,
+            "exclusive_ms": 108.80019999999968
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1512.8377999999993,
+            "exclusive_ms": 1134.692799999997
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 337.47679999999855,
+            "exclusive_ms": 101.75509999999667
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2440.2134000000005,
+            "exclusive_ms": 786.2359000000033
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 353.9029999999984,
+            "exclusive_ms": 353.9029999999984
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 803.2777999999998,
+            "exclusive_ms": 398.053899999999
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5785.990099999997,
+            "exclusive_ms": 53.62629999999626
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6438.244199999999,
+            "exclusive_ms": 538.929200000006
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1936.5270999999993,
+            "exclusive_ms": 410.8780999999981
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 4879.361500000001,
+            "exclusive_ms": 8.611000000002605
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4936.772199999999,
+            "exclusive_ms": 1.2206999999980326
+          }
+        }
+      },
+      {
+        "request_id": "7",
+        "name": "dev_pi_execute_intent",
+        "ms": 5646.640900000002,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.04920000000129221,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.01810000000114087,
+            "exclusive_ms": 0.01810000000114087
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.822799999998097,
+            "exclusive_ms": 9.822799999998097
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 434.33430000000226,
+            "exclusive_ms": 434.33430000000226
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1118.2098000000042,
+            "exclusive_ms": 683.8755000000019
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 316.1554999999971,
+            "exclusive_ms": 8.813099999992119
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 461.97870000000694,
+            "exclusive_ms": 12.975800000007439
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 42.08360000000175,
+            "exclusive_ms": 1.156200000004901
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 138.94059999999808,
+            "exclusive_ms": 97.72339999999531
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1780.7634999999973,
+            "exclusive_ms": 1369.6425999999992
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 305.4359000000004,
+            "exclusive_ms": 115.25340000000142
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3067.3609999999935,
+            "exclusive_ms": 1037.2129999999888
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 359.52620000000024,
+            "exclusive_ms": 359.52620000000024
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 799.8827000000019,
+            "exclusive_ms": 387.8017
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6507.794300000001,
+            "exclusive_ms": 62.051100000004226
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7246.379400000002,
+            "exclusive_ms": 612.3722999999991
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2069.5501000000004,
+            "exclusive_ms": 443.2462999999989
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5588.833599999998,
+            "exclusive_ms": 7.5460000000057335
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5644.205699999999,
+            "exclusive_ms": 0.8338999999978114
+          }
+        }
+      },
+      {
+        "request_id": "8",
+        "name": "dev_pi_execute_intent",
+        "ms": 5631.505300000001,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.04760000000169384,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008900000000721775,
+            "exclusive_ms": 0.008900000000721775
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 9.306399999997666,
+            "exclusive_ms": 9.306399999997666
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 393.12809999998717,
+            "exclusive_ms": 393.12809999998717
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1055.2063000000016,
+            "exclusive_ms": 662.0782000000145
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 291.984000000004,
+            "exclusive_ms": 7.574800000002142
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 417.4575000000041,
+            "exclusive_ms": 10.65740000000369
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 51.94759999999951,
+            "exclusive_ms": 1.0001000000011118
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 189.64060000000245,
+            "exclusive_ms": 137.4723000000049
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1705.9183999999987,
+            "exclusive_ms": 1317.5321999999942
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 354.0189999999966,
+            "exclusive_ms": 135.33869999999297
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3026.927599999992,
+            "exclusive_ms": 1142.9369999999908
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 362.1998999999996,
+            "exclusive_ms": 362.1998999999996
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 830.3353999999999,
+            "exclusive_ms": 413.8964999999989
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6506.374500000002,
+            "exclusive_ms": 45.580000000005384
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7211.0400000000045,
+            "exclusive_ms": 584.2316000000028
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2000.4326,
+            "exclusive_ms": 396.7788999999975
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5579.1783,
+            "exclusive_ms": 8.158500000008644
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5629.001799999998,
+            "exclusive_ms": 1.1222999999954482
+          }
+        }
+      },
+      {
+        "request_id": "9",
+        "name": "dev_pi_execute_intent",
+        "ms": 5939.3196000000025,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.02719999999681022,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.008799999999610009,
+            "exclusive_ms": 0.008799999999610009
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 6.870000000002619,
+            "exclusive_ms": 6.870000000002619
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 396.63449999994555,
+            "exclusive_ms": 396.63449999994555
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1073.9272999999848,
+            "exclusive_ms": 677.2928000000393
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 288.67409999998927,
+            "exclusive_ms": 6.397599999985687
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 455.178200000013,
+            "exclusive_ms": 11.275800000035815
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 37.98530000000392,
+            "exclusive_ms": 0.786500000005617
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 161.6899999999987,
+            "exclusive_ms": 121.714299999996
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1937.9050000000097,
+            "exclusive_ms": 1511.7993000000206
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 367.96140000000014,
+            "exclusive_ms": 129.297300000002
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3281.9626000000135,
+            "exclusive_ms": 1152.09169999999
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 342.48649999999907,
+            "exclusive_ms": 342.48649999999907
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 781.1246000000028,
+            "exclusive_ms": 401.33720000000903
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6775.3151,
+            "exclusive_ms": 43.6885999999904
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7576.380699999998,
+            "exclusive_ms": 708.9112999999888
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 2081.3894,
+            "exclusive_ms": 419.03050000000076
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5899.969100000002,
+            "exclusive_ms": 6.965699999989738
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5937.446499999998,
+            "exclusive_ms": 0.8580999999976484
+          }
+        }
+      },
+      {
+        "request_id": "10",
+        "name": "dev_pi_execute_intent",
+        "ms": 4858.4667000000045,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.02419999999983702,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.00480000000243308,
+            "exclusive_ms": 0.00480000000243308
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 6.72780000000057,
+            "exclusive_ms": 6.72780000000057
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 318.31069999999454,
+            "exclusive_ms": 318.31069999999454
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 909.7822000000451,
+            "exclusive_ms": 591.4715000000506
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 246.29500000000553,
+            "exclusive_ms": 5.070000000006985
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 387.9892000000109,
+            "exclusive_ms": 8.06459999998333
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 35.675200000005134,
+            "exclusive_ms": 0.7478999999948428
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 145.0020000000004,
+            "exclusive_ms": 104.33260000000155
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1546.5086999999985,
+            "exclusive_ms": 1197.4687999999878
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 279.04099999999744,
+            "exclusive_ms": 100.1988999999885
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2668.7634000000035,
+            "exclusive_ms": 935.3205000000016
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 310.3320999999996,
+            "exclusive_ms": 310.3320999999996
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 660.2840999999971,
+            "exclusive_ms": 316.5688999999984
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5549.517200000009,
+            "exclusive_ms": 28.591000000007625
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6197.9997,
+            "exclusive_ms": 565.7671999999875
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1720.9034000000029,
+            "exclusive_ms": 362.31579999999667
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 4819.052300000003,
+            "exclusive_ms": 5.342499999998836
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 4857.075799999999,
+            "exclusive_ms": 0.4401999999972759
+          }
+        }
+      },
+      {
+        "request_id": "11",
+        "name": "dev_pi_execute_intent",
+        "ms": 476.9556999999986,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.024099999995087273,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004700000004959293,
+            "exclusive_ms": 0.004700000004959293
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 3.65219999999681,
+            "exclusive_ms": 3.65219999999681
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 16,
+            "inclusive_ms": 51.466800000023795,
+            "exclusive_ms": 51.466800000023795
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 8,
+            "inclusive_ms": 148.5645000000004,
+            "exclusive_ms": 97.09769999997661
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 2,
+            "inclusive_ms": 35.8269000000073,
+            "exclusive_ms": 0.8329000000012456
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 3,
+            "inclusive_ms": 56.55589999999211,
+            "exclusive_ms": 1.2635999999911292
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 41.98760000000766,
+            "exclusive_ms": 0.7714000000123633
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 190.43220000000292,
+            "exclusive_ms": 132.11129999999685
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 1,
+            "inclusive_ms": 96.45210000000225,
+            "exclusive_ms": 60.568599999998696
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 246.41169999999693,
+            "exclusive_ms": 109.73700000000099
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 437.61759999999776,
+            "exclusive_ms": 0.7736999999979162
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 474.7779999999984,
+            "exclusive_ms": 16.502800000002026
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 475.1186000000016,
+            "exclusive_ms": 0.34060000000317814
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 475.64860000000044,
+            "exclusive_ms": 0.5252999999938766
+          }
+        }
+      },
+      {
+        "request_id": "12",
+        "name": "powershell_run",
+        "ms": 21.64190000000235,
+        "ok": false,
+        "error": "MCP error -32602: PI_EXECUTION_INTENT_REQUIRED",
+        "expected_error": true,
+        "queue_wait_ms": 0.024300000004586764,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004300000000512227,
+            "exclusive_ms": 0.004300000000512227
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 5.9535999999934575,
+            "exclusive_ms": 5.9535999999934575
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 16.968999999997322,
+            "exclusive_ms": 11.015400000003865
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 1,
+            "inclusive_ms": 17.397500000006403,
+            "exclusive_ms": 0.4285000000090804
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 18.486699999994016,
+            "exclusive_ms": 1.0848999999871012
+          }
+        }
+      },
+      {
+        "request_id": "13",
+        "name": "dev_pi_execute_intent",
+        "ms": 37.58759999999893,
+        "ok": false,
+        "error": "PERMISSION_DENIED",
+        "expected_error": true,
+        "queue_wait_ms": 0.026499999999941792,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.005299999997077975,
+            "exclusive_ms": 0.005299999997077975
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 2.5213999999978114,
+            "exclusive_ms": 2.5213999999978114
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 6.373099999997066,
+            "exclusive_ms": 6.373099999997066
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 16.925100000000384,
+            "exclusive_ms": 10.552000000003318
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 1,
+            "inclusive_ms": 17.274100000002363,
+            "exclusive_ms": 0.34900000000197906
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 0.33800000000337604,
+            "exclusive_ms": 0.33800000000337604
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 0.6917000000030384,
+            "exclusive_ms": 0.3536999999996624
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 35.61450000000332,
+            "exclusive_ms": 15.127300000000105
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 35.92430000000604,
+            "exclusive_ms": 0.3098000000027241
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 36.357499999998254,
+            "exclusive_ms": 0.42789999999513384
+          }
+        }
+      },
+      {
+        "request_id": "14",
+        "name": "dev_pi_execute_intent",
+        "ms": 5230.256600000001,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.021800000002258457,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.005900000003748573,
+            "exclusive_ms": 0.005900000003748573
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 6.340600000003178,
+            "exclusive_ms": 6.340600000003178
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 312.9990999999718,
+            "exclusive_ms": 312.9990999999718
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 948.5771999999852,
+            "exclusive_ms": 635.5781000000134
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 264.6336999999985,
+            "exclusive_ms": 5.316099999996368
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 397.02039999999397,
+            "exclusive_ms": 8.140400000018417
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 35.74059999999736,
+            "exclusive_ms": 0.674299999998766
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 147.8382000000056,
+            "exclusive_ms": 110.73250000000553
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1711.087099999997,
+            "exclusive_ms": 1342.7649999999921
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 322.1229000000021,
+            "exclusive_ms": 118.02030000000377
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 2946.807400000005,
+            "exclusive_ms": 1061.430400000012
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 321.6828999999998,
+            "exclusive_ms": 321.6828999999998
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 676.4749000000011,
+            "exclusive_ms": 318.8761999999988
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5939.7005999999965,
+            "exclusive_ms": 29.931699999993725
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6622.885900000001,
+            "exclusive_ms": 594.5431000000026
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1767.9768999999942,
+            "exclusive_ms": 356.18099999999686
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5189.8865000000005,
+            "exclusive_ms": 5.1410999999934575
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5228.753499999999,
+            "exclusive_ms": 0.39479999999457505
+          }
+        }
+      },
+      {
+        "request_id": "15",
+        "name": "dev_pi_execute_intent",
+        "ms": 10749.205000000002,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 5228.359799999998,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.0038000000058673322,
+            "exclusive_ms": 0.0038000000058673322
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 5.237800000002608,
+            "exclusive_ms": 5.237800000002608
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 307.3183000000063,
+            "exclusive_ms": 307.3183000000063
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 965.6468000000095,
+            "exclusive_ms": 658.3285000000033
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 267.4481999999989,
+            "exclusive_ms": 5.017799999994168
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 400.0763999999908,
+            "exclusive_ms": 7.568199999986973
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 36.56739999999263,
+            "exclusive_ms": 0.7110999999931664
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 155.76310000000376,
+            "exclusive_ms": 119.54070000000502
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1822.7681999999768,
+            "exclusive_ms": 1452.0124999999753
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 335.28830000000016,
+            "exclusive_ms": 120.69030000000203
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3151.3814999999813,
+            "exclusive_ms": 1161.3047000000151
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 327.2272000000012,
+            "exclusive_ms": 327.2272000000012
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 712.0511000000042,
+            "exclusive_ms": 344.84490000001097
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6268.358899999999,
+            "exclusive_ms": 31.392599999991944
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6974.793899999997,
+            "exclusive_ms": 613.24549999999
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1833.7564999999959,
+            "exclusive_ms": 358.62720000000263
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5481.301500000001,
+            "exclusive_ms": 5.112100000020291
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5518.527200000004,
+            "exclusive_ms": 0.34399999999732245
+          }
+        }
+      },
+      {
+        "request_id": "16",
+        "name": "dev_pi_execute_intent",
+        "ms": 16518.4044,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 10747.545100000003,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.0037999999985913746,
+            "exclusive_ms": 0.0037999999985913746
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 4.690699999991921,
+            "exclusive_ms": 4.690699999991921
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 320.54219999998895,
+            "exclusive_ms": 320.54219999998895
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1027.8668999999863,
+            "exclusive_ms": 707.3246999999974
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 278.80389999997715,
+            "exclusive_ms": 4.678199999994831
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 431.0616999999984,
+            "exclusive_ms": 8.026199999985693
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 42.58049999999639,
+            "exclusive_ms": 0.7885999999998603
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 170.4455999999991,
+            "exclusive_ms": 129.1270000000004
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 1933.3979000000181,
+            "exclusive_ms": 1539.7995000000374
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 372.77670000000217,
+            "exclusive_ms": 142.6270000000004
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3384.202799999999,
+            "exclusive_ms": 1268.0097999999853
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 317.9850000000006,
+            "exclusive_ms": 317.9850000000006
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 667.2252999999982,
+            "exclusive_ms": 309.5792999999976
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6472.0697,
+            "exclusive_ms": 28.950500000006286
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7197.239900000008,
+            "exclusive_ms": 629.57150000002
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1799.3300999999992,
+            "exclusive_ms": 350.67609999999695
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5732.3436,
+            "exclusive_ms": 5.588400000000547
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5768.474200000004,
+            "exclusive_ms": 0.505700000001525
+          }
+        }
+      },
+      {
+        "request_id": "17",
+        "name": "dev_pi_execute_intent",
+        "ms": 22641.435399999995,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 16516.8482,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.0044999999954598024,
+            "exclusive_ms": 0.0044999999954598024
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 4.6899000000048545,
+            "exclusive_ms": 4.6899000000048545
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 320.89660000008007,
+            "exclusive_ms": 320.89660000008007
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1078.3825000000506,
+            "exclusive_ms": 757.4858999999706
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 287.73609999998007,
+            "exclusive_ms": 4.779399999970337
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 447.15329999999085,
+            "exclusive_ms": 7.855999999956111
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 53.242700000002515,
+            "exclusive_ms": 0.7039999999979045
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 200.61770000000251,
+            "exclusive_ms": 146.9386999999988
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2057.0584000000017,
+            "exclusive_ms": 1651.1333000000159
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 386.03800000000047,
+            "exclusive_ms": 144.43099999999686
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3600.7126000000208,
+            "exclusive_ms": 1358.4287000000331
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 354.57540000000154,
+            "exclusive_ms": 354.57540000000154
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 712.0734000000011,
+            "exclusive_ms": 314.43309999999474
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 6870.576299999993,
+            "exclusive_ms": 28.560099999995145
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 7637.4461999999985,
+            "exclusive_ms": 665.4459000000134
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1891.4445999999953,
+            "exclusive_ms": 355.99649999999383
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 6084.340999999993,
+            "exclusive_ms": 5.528099999974074
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 6122.339199999995,
+            "exclusive_ms": 0.4521000000022468
+          }
+        }
+      },
+      {
+        "request_id": "19",
+        "name": "dev_capability_get_schema",
+        "ms": 3.0722999999998137,
+        "ok": true,
+        "request_result": null,
+        "queue_wait_ms": 0.025500000003376044,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003400000001420267,
+            "exclusive_ms": 0.003400000001420267
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.2323000000033062,
+            "exclusive_ms": 0.2323000000033062
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.5472000000008848,
+            "exclusive_ms": 0.31489999999757856
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 0.9624999999941792,
+            "exclusive_ms": 0.4118999999918742
+          }
+        }
+      },
+      {
+        "request_id": "20",
+        "name": "dev_capability_get_schema",
+        "ms": 4.630399999994552,
+        "ok": true,
+        "request_result": null,
+        "queue_wait_ms": 1.841999999989639,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003400000001420267,
+            "exclusive_ms": 0.003400000001420267
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.11680000000342261,
+            "exclusive_ms": 0.11680000000342261
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.44100000000617,
+            "exclusive_ms": 0.3242000000027474
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 0.8142999999981839,
+            "exclusive_ms": 0.36989999999059364
+          }
+        }
+      },
+      {
+        "request_id": "21",
+        "name": "dev_capability_get_schema",
+        "ms": 6.3968000000022585,
+        "ok": true,
+        "request_result": null,
+        "queue_wait_ms": 3.329299999997602,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.0030999999871710315,
+            "exclusive_ms": 0.0030999999871710315
+          },
+          "capability.dev_capability_get_schema": {
+            "calls": 1,
+            "inclusive_ms": 0.13060000000405125,
+            "exclusive_ms": 0.13060000000405125
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 0.37840000000142027,
+            "exclusive_ms": 0.247799999997369
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 0.911999999996624,
+            "exclusive_ms": 0.5305000000080327
+          }
+        }
+      },
+      {
+        "request_id": "18",
+        "name": "dev_pi_execute_intent",
+        "ms": 8402.285599999988,
+        "ok": true,
+        "request_result": "COMPLETED",
+        "queue_wait_ms": 0.024600000004284084,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003899999996065162,
+            "exclusive_ms": 0.003899999996065162
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 11.126199999984237,
+            "exclusive_ms": 11.126199999984237
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 104,
+            "inclusive_ms": 312.1968999999226,
+            "exclusive_ms": 312.1968999999226
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 52,
+            "inclusive_ms": 1116.412400000103,
+            "exclusive_ms": 804.2155000001803
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 14,
+            "inclusive_ms": 303.8527000000322,
+            "exclusive_ms": 4.999900000024354
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 21,
+            "inclusive_ms": 468.11790000002657,
+            "exclusive_ms": 7.67709999998624
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 43.32739999999467,
+            "exclusive_ms": 0.7815999999875203
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 200.29829999999492,
+            "exclusive_ms": 157.57540000000154
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 10,
+            "inclusive_ms": 2187.246299999999,
+            "exclusive_ms": 1759.549899999969
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 410.77660000001197,
+            "exclusive_ms": 157.86770000000251
+          },
+          "pi.state_command": {
+            "calls": 9,
+            "inclusive_ms": 3821.2531000000163,
+            "exclusive_ms": 1439.5886000000028
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 2343.3736000000063,
+            "exclusive_ms": 2343.3736000000063
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 2702.0323999999964,
+            "exclusive_ms": 315.665199999974
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 11143.438900000008,
+            "exclusive_ms": 29.327800000013667
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 11927.961699999985,
+            "exclusive_ms": 679.7085999999545
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 3919.9751000000106,
+            "exclusive_ms": 371.2557000000088
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 8358.031000000003,
+            "exclusive_ms": 5.72789999996894
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 8401.039900000003,
+            "exclusive_ms": 0.3984000000200467
+          }
+        }
+      },
+      {
+        "request_id": "22",
+        "name": "dev_pi_execute_intent",
+        "ms": 5229.675000000003,
+        "ok": true,
+        "request_result": "DECISION_REQUIRED",
+        "queue_wait_ms": 0.021899999992456287,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004300000000512227,
+            "exclusive_ms": 0.004300000000512227
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 4.758799999995972,
+            "exclusive_ms": 4.758799999995972
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 80,
+            "inclusive_ms": 248.40389999999024,
+            "exclusive_ms": 248.40389999999024
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 40,
+            "inclusive_ms": 889.6618000000017,
+            "exclusive_ms": 641.2579000000114
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 11,
+            "inclusive_ms": 251.87080000000424,
+            "exclusive_ms": 3.7766999999730615
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 15,
+            "inclusive_ms": 340.2094999999972,
+            "exclusive_ms": 5.586100000014994
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 44.203599999978906,
+            "exclusive_ms": 0.7207999999809545
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 211.59470000000147,
+            "exclusive_ms": 168.4365000000107
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 7,
+            "inclusive_ms": 1620.9433999999892,
+            "exclusive_ms": 1308.4845999999961
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 437.8868000000075,
+            "exclusive_ms": 168.131200000018
+          },
+          "pi.state_command": {
+            "calls": 6,
+            "inclusive_ms": 2697.2229999999836,
+            "exclusive_ms": 1027.2209999999905
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 229.19620000000577,
+            "exclusive_ms": 229.19620000000577
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 585.8461000000098,
+            "exclusive_ms": 310.9137000000046
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 5854.714800000002,
+            "exclusive_ms": 29.089100000011967
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 6691.198799999998,
+            "exclusive_ms": 724.5597999999882
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 1839.092399999994,
+            "exclusive_ms": 353.4374000000098
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 5189.80769999999,
+            "exclusive_ms": 4.010800000003655
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 5228.419500000004,
+            "exclusive_ms": 0.43069999999715947
+          }
+        }
+      },
+      {
+        "request_id": "23",
+        "name": "dev_pi_execute_intent",
+        "ms": 6359.183900000004,
+        "ok": false,
+        "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+        "expected_error": true,
+        "queue_wait_ms": 0.027699999991455115,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.004799999995157123,
+            "exclusive_ms": 0.004799999995157123
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 4,
+            "inclusive_ms": 4.685799999977462,
+            "exclusive_ms": 4.685799999977462
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 76,
+            "inclusive_ms": 257.25640000004205,
+            "exclusive_ms": 257.25640000004205
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 38,
+            "inclusive_ms": 935.4935999999434,
+            "exclusive_ms": 678.2371999999013
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 11,
+            "inclusive_ms": 266.69740000000456,
+            "exclusive_ms": 4.01950000000943
+          },
+          "mcp-development-journal-tools.readExecutionProjections": {
+            "calls": 14,
+            "inclusive_ms": 361.0498999999836,
+            "exclusive_ms": 5.684699999997974
+          },
+          "mcp-development-journal-tools.readProductionRoutes": {
+            "calls": 2,
+            "inclusive_ms": 55.93439999999828,
+            "exclusive_ms": 1.1353000000235625
+          },
+          "pi-production-execution-controller.prepare": {
+            "calls": 1,
+            "inclusive_ms": 215.7850000000035,
+            "exclusive_ms": 170.86620000000403
+          },
+          "mcp-development-journal-tools.appendExecutionProjection": {
+            "calls": 7,
+            "inclusive_ms": 1500.8641999999818,
+            "exclusive_ms": 1197.1867999999813
+          },
+          "pi.admission": {
+            "calls": 1,
+            "inclusive_ms": 467.107600000003,
+            "exclusive_ms": 176.5638000000181
+          },
+          "pi.state_command": {
+            "calls": 6,
+            "inclusive_ms": 2570.693800000008,
+            "exclusive_ms": 1020.6499000000331
+          },
+          "mcp-powershell-maintenance-tools.runPowerShellProcess": {
+            "calls": 1,
+            "inclusive_ms": 1310.1040000000066,
+            "exclusive_ms": 1310.1040000000066
+          },
+          "capability.powershell_run": {
+            "calls": 1,
+            "inclusive_ms": 1683.0589999999938,
+            "exclusive_ms": 323.13610000000335
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 2,
+            "inclusive_ms": 8086.445300000021,
+            "exclusive_ms": 30.786900000050082
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 2,
+            "inclusive_ms": 8992.595499999996,
+            "exclusive_ms": 779.629799999966
+          },
+          "pi.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 3061.2387000000017,
+            "exclusive_ms": 393.69830000000366
+          },
+          "capability.dev_pi_execute_intent": {
+            "calls": 1,
+            "inclusive_ms": 6318.5815,
+            "exclusive_ms": 3.7563999999838416
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 6357.830999999991,
+            "exclusive_ms": 0.4290999999939231
+          }
+        }
+      },
+      {
+        "request_id": "24",
+        "name": "dev_pi_execute_intent",
+        "ms": 40.572200000009616,
+        "ok": false,
+        "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+        "expected_error": true,
+        "queue_wait_ms": 0.01959999999962747,
+        "stages": {
+          "runtime.readiness": {
+            "calls": 1,
+            "inclusive_ms": 0.003400000001420267,
+            "exclusive_ms": 0.003400000001420267
+          },
+          "mcp-server.auditSnapshotMap": {
+            "calls": 2,
+            "inclusive_ms": 2.141200000012759,
+            "exclusive_ms": 2.141200000012759
+          },
+          "mcp-development-journal-tools.captureSnapshot": {
+            "calls": 2,
+            "inclusive_ms": 6.142300000006799,
+            "exclusive_ms": 6.142300000006799
+          },
+          "mcp-development-journal-tools.verify": {
+            "calls": 1,
+            "inclusive_ms": 22.39289999999164,
+            "exclusive_ms": 16.250599999984843
+          },
+          "mcp-development-journal-tools.assertMutationAllowed": {
+            "calls": 1,
+            "inclusive_ms": 22.792600000000675,
+            "exclusive_ms": 0.39970000000903383
+          },
+          "mcp-server.auditedToolCall": {
+            "calls": 1,
+            "inclusive_ms": 38.875399999989895,
+            "exclusive_ms": 13.94159999997646
+          },
+          "mcp-server.callToolDirect": {
+            "calls": 1,
+            "inclusive_ms": 39.20660000000498,
+            "exclusive_ms": 0.3312000000150874
+          },
+          "mcp.dispatch": {
+            "calls": 1,
+            "inclusive_ms": 39.58980000000156,
+            "exclusive_ms": 0.3797999999951571
+          }
+        }
+      }
+    ],
+    "runs": [
+      {
+        "intent_id": "phase2-normal-0-0001",
+        "operation_id": "pi_operation_4b2f928bdc9e4e5fa1e3cdba21b19614",
+        "child_operation_id": "dev_operation_54c80852abe84eedab3f73a9295d2ea5",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 335
+      },
+      {
+        "intent_id": "phase2-normal-1-0001",
+        "operation_id": "pi_operation_0e3c995811bc4c348e9a98ffd3e916eb",
+        "child_operation_id": "dev_operation_7ef48ed38ba2433697bb6aa27b59e378",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 327
+      },
+      {
+        "intent_id": "phase2-normal-2-0001",
+        "operation_id": "pi_operation_280f221e08c74d0188818c13eeb1fc42",
+        "child_operation_id": "dev_operation_b321e8cae0b34daeaffdeb6d4324b711",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 330
+      },
+      {
+        "intent_id": "phase2-normal-3-0001",
+        "operation_id": "pi_operation_9941b2cb09aa43718b20f5f42e75b085",
+        "child_operation_id": "dev_operation_9b3d46257b5e4b82b7d7f7435c3eb70b",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 354
+      },
+      {
+        "intent_id": "phase2-normal-4-0001",
+        "operation_id": "pi_operation_d3e3c7199c1e4c42a2e828fafa6d1069",
+        "child_operation_id": "dev_operation_092166fb63bc46d5a07d1cd8967f3c3b",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 359
+      },
+      {
+        "intent_id": "phase2-normal-5-0001",
+        "operation_id": "pi_operation_ca4b8ca1ad654291962e5edd5d04302c",
+        "child_operation_id": "dev_operation_f337db1a75624208b487ba556bd0f787",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 362
+      },
+      {
+        "intent_id": "phase2-normal-6-0001",
+        "operation_id": "pi_operation_4ffe6ae8c5d7497c89b36a15bd0eefe7",
+        "child_operation_id": "dev_operation_d7573ac2c0d947f7844e87989e138ac6",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 343
+      },
+      {
+        "intent_id": "phase2-normal-7-0001",
+        "operation_id": "pi_operation_4ae7670a90394fd8a577d3eee3c0440d",
+        "child_operation_id": "dev_operation_259085ae5e0f40e899f67dd7fb33f0ec",
+        "command_sha256": "db9e8f9f8d5c3fc3e14877599b3bc30edb7f3f6c35e875d7095d0beef03f8669",
+        "exit_code": 0,
+        "stdout": "PI_PHASE2_OK",
+        "duration_ms": 310
+      }
+    ],
+    "context": {
+      "project_id": "writer_workbench",
+      "workspace_id": "dev_workspace_7e363e2b17ce4d2a9f948ae9",
+      "workstream_id": "dev_workstream_20261008-133100_3c2e8669de8b"
+    },
+    "duplicate_same_operation": true,
+    "unauthorized_no_dispatch": true,
+    "nonzero": {
+      "status": "DECISION_REQUIRED",
+      "exit_code": 7,
+      "ok": false,
+      "error": {
+        "schema_version": 2,
+        "phase": "F",
+        "mode": "production_default",
+        "operation_id": "pi_operation_f2eec4e348a642c6a6c592d1945f2861",
+        "intent_id": "phase2-nonzero-0001",
+        "revision": 7,
+        "status": "DECISION_REQUIRED",
+        "completed": [],
+        "remaining": [
+          "ps"
+        ],
+        "verification": {
+          "affected": "not_requested",
+          "focused": "not_requested",
+          "full": "not_requested"
+        },
+        "checkpoint": {
+          "at_revision": 6,
+          "intent_hash": "f4acb926ec6673b607ab453c9060bcd7a4cd6f0dc910a5a9a8b63a9956ea9ec3",
+          "operation_id": "pi_operation_f2eec4e348a642c6a6c592d1945f2861",
+          "phase": "EXECUTING",
+          "schema_version": 2,
+          "step_id": "ps",
+          "workspace_id": "dev_workspace_7e363e2b17ce4d2a9f948ae9"
+        },
+        "resume_point": {
+          "phase": "EXECUTING",
+          "step_id": "ps"
+        },
+        "decision_required": true,
+        "retry_at": null,
+        "persistence_enabled": true,
+        "execution_enabled": true,
+        "resume_dispatch_enabled": true,
+        "engineering_review_required": true,
+        "production_default_changed": true,
+        "model_requests": 0,
+        "decision_owner": "GPT",
+        "execution_owner": "Pi",
+        "tool_owner": "MCP",
+        "legacy_migration": false
+      }
+    },
+    "timeout": {
+      "error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+      "retry_error": "JOURNAL_DEGRADED: development mutation is blocked until journal reconciliation succeeds.",
+      "timed_out": true,
+      "exit_code": 1,
+      "ok": false,
+      "reconciliation": "required; automatic restoration deliberately not asserted"
+    },
+    "physical_dispatches": 15,
+    "journal": {
+      "schema_version": 1,
+      "health": "degraded",
+      "chain_verified": true,
+      "latest_sequence": 376,
+      "latest_event_id": "dev_journal_event_98ab83be6d894b16be79755c4cf1b8be",
+      "latest_event_hash": "aec8692cd2244635a43990370b1ae05b79d01849f8adc1308ac66f658de43de3",
+      "dangling_operation_count": 0,
+      "dangling_operations": [],
+      "active_operation_count": 0,
+      "active_operations": [],
+      "reconciliation_required": true,
+      "last_health_error": "ambiguous_terminal_operation_requires_reconciliation",
+      "storage": "server_owned_per_event_files"
+    },
+    "uncorrelated_response_spans": [
+      {
+        "kind": "span",
+        "id": 2,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.8531000000000404,
+        "exclusive_ms": 0.8531000000000404,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 17,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.16660000000001673,
+        "exclusive_ms": 0.16660000000001673,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 302,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.20229999999992287,
+        "exclusive_ms": 0.20229999999992287,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 531,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.21150000000034197,
+        "exclusive_ms": 0.21150000000034197,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 760,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.1860000000015134,
+        "exclusive_ms": 0.1860000000015134,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 989,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.33590000000003783,
+        "exclusive_ms": 0.33590000000003783,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 1218,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.3199000000022352,
+        "exclusive_ms": 0.3199000000022352,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 1447,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.3055999999996857,
+        "exclusive_ms": 0.3055999999996857,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 1676,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.33840000000054715,
+        "exclusive_ms": 0.33840000000054715,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 1905,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.189700000002631,
+        "exclusive_ms": 0.189700000002631,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2134,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.160200000005716,
+        "exclusive_ms": 0.160200000005716,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2176,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.125,
+        "exclusive_ms": 0.125,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2183,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07949999999982538,
+        "exclusive_ms": 0.07949999999982538,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2196,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07690000000002328,
+        "exclusive_ms": 0.07690000000002328,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2425,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.16380000000208383,
+        "exclusive_ms": 0.16380000000208383,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2654,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.14029999999911524,
+        "exclusive_ms": 0.14029999999911524,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 2883,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.1368000000002212,
+        "exclusive_ms": 0.1368000000002212,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3112,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.12390000000596046,
+        "exclusive_ms": 0.12390000000596046,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3122,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.08439999999245629,
+        "exclusive_ms": 0.08439999999245629,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3127,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.07140000000072177,
+        "exclusive_ms": 0.07140000000072177,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3132,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.08959999999206048,
+        "exclusive_ms": 0.08959999999206048,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3356,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.12080000000423752,
+        "exclusive_ms": 0.12080000000423752,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3534,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.1269999999931315,
+        "exclusive_ms": 0.1269999999931315,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3705,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.0727000000042608,
+        "exclusive_ms": 0.0727000000042608,
+        "ok": true,
+        "pid": 20340
+      },
+      {
+        "kind": "span",
+        "id": 3716,
+        "parent": null,
+        "request": null,
+        "label": "mcp.serialize_and_write",
+        "children": 0,
+        "ms": 0.06990000000223517,
+        "exclusive_ms": 0.06990000000223517,
+        "ok": true,
+        "pid": 20340
+      }
+    ],
+    "caveat": "Inclusive stages nest; do not add them. Response spans are aggregate only. SDK ingress is not ChatGPT/HTTP ingress."
+  },
+  "live_metadata": {
+    "scope": "live filesystem metadata only; no chain verification/admission/queue measurement",
+    "event_count": 51354,
+    "directory_ms": 49.08560000000001,
+    "samples": [
+      {
+        "pass": 0,
+        "ms": 956.3558,
+        "files": 51354,
+        "bytes": 171619827
+      },
+      {
+        "pass": 1,
+        "ms": 875.6200000000001,
+        "files": 51354,
+        "bytes": 171619827
+      },
+      {
+        "pass": 2,
+        "ms": 885.3827000000001,
+        "files": 51354,
+        "bytes": 171619827
+      },
+      {
+        "pass": 3,
+        "ms": 1322.8006999999998,
+        "files": 51354,
+        "bytes": 171619827
+      },
+      {
+        "pass": 4,
+        "ms": 1302.5319999999992,
+        "files": 51354,
+        "bytes": 171619827
+      }
+    ],
+    "snapshot_unchanged": true,
+    "prohibited_inference": "Do not treat these lstat-only measurements as actual Journal verify() duration or infer missing stages."
+  },
+  "phase1_preserved": {
+    "status_p50_ms": [
+      1120,
+      141
+    ],
+    "status_p95_ms": [
+      1332,
+      191
+    ],
+    "concurrent8_successes": [
+      "6/24",
+      "24/24"
+    ]
+  },
+  "online_e2e": "UNVERIFIED: no connector ingress/transport correlation or owned live ExecutionIntent operation",
+  "tests": {
+    "pre_change_focused": {
+      "passed": 71,
+      "failed": 0
+    },
+    "final_affected": {
+      "passed": 39,
+      "failed": 0
+    },
+    "final_completion_order_rerun": {
+      "passed": 1,
+      "failed": 0,
+      "duration_ms": 43416.1649
+    }
+  },
+  "remaining": [
+    "Correlate ChatGPT/HTTP transport and live readiness spans",
+    "Repeat online E2E in owned registered workspace",
+    "Authoritative timeout reconciliation without replay",
+    "Quantify full Journal history growth with its active owner"
+  ],
+  "raw_artifacts": [
+    "PI-RUNTIME-PRESSURE-PHASE2.baseline.json.gz",
+    "PI-RUNTIME-PRESSURE-PHASE2.candidate.json.gz"
+  ],
+  "git_diff_check": "passed"
+}

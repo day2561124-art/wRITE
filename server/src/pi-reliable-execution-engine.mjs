@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import { hostname } from "node:os";
-import { reliableTerminal, reliableFailure } from "./pi-reliable-execution-state.mjs";
+import { reliableTerminal, reliableFailure, stableJson, reduceReliableProjection } from "./pi-reliable-execution-state.mjs";
 import { reliableErrorCode } from "./pi-mcp-reliable-adapter.mjs";
 const phases=["EXECUTING","VERIFYING","COMMITTING"];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -8,14 +9,14 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
   sleep=delay,clock=()=>new Date().toISOString(),executionHook}={}) {
   if(!store||!adapter||typeof sleep!=="function"||typeof clock!=="function")reliableFailure("HOST_ENGINE_UNBOUND");
   async function execute(source) {
-    let record=await store.admit(source,{retry_policy:retryPolicy});
-    const stopped=()=>reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
+    let record=await traceSpan("pi.admission",()=>store.admit(source,{retry_policy:retryPolicy}));
+    const stopped=()=>record.runtime.isolation||reliableTerminal(record.state.status)||["DECISION_REQUIRED","BLOCKED"].includes(record.state.status);
     if(stopped())return record;
     const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
     const binding=()=>({binding:record.runtime.lifecycle_binding??null});
     const args=()=>({operation_id:record.state.operation_id,context:record.intent.context,expected_revision:record.revision});
     const inspect=()=>store.inspect({operation_id:record.state.operation_id,context:record.intent.context});
-    async function send(command) {record=await store.command({...args(),command});return record;}
+    async function send(command) {record=await traceSpan("pi.state_transition",()=>store.command({...args(),command}));return record;}
     const own=command=>send({...command,worker_id:worker.worker_id});
     async function stop(code,status="DECISION_REQUIRED",receipt=null) {
       return own({type:"decision_requested",code,status,receipt});
@@ -43,7 +44,7 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       if(call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)return stop("RECONCILIATION_RETRY_EXHAUSTED");
       await own({type:"reconciliation_started",call_id:call.call_id});
       let observed;
-      try {observed=await adapter.reconcile(record.intent,call.step_id,binding());}
+      try {observed=await traceSpan("pi.reconciliation",()=>adapter.reconcile(record.intent,call.step_id,binding()));}
       catch(error) {
         const code=reliableErrorCode(error);
         if(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT"].includes(code)
@@ -104,9 +105,13 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
       let response;
       try {
         await executionHook?.("before_dispatch",record);
-        response=await adapter.execute(record.intent,stepId,binding());
+        const fence={...args(),expected_projection_hash:record.projection_hash,worker_id:worker.worker_id,call_id:callId};
+        const authorizeDispatch=()=>store.assertDispatchAuthorized(fence);
+        await authorizeDispatch();
+        response=await traceSpan("pi.capability_dispatch",()=>adapter.execute(record.intent,stepId,{...binding(),authorizeDispatch}));
         await executionHook?.("after_dispatch",record);
       } catch(error) {
+        if(["OPERATION_ISOLATED","STATE_REVISION_CONFLICT","STATE_PROJECTION_CONFLICT","OWNER_CONFLICT","STALE_TOOL_RESPONSE"].includes(error.code))return inspect();
         const code=reliableErrorCode(error);
         const classification=adapter.classify({code,mutation:step.effect,execution_state:"unknown"});
         if(["TRANSPORT_ERROR","TEMPORARY_UNAVAILABLE","TIMEOUT"].includes(code)&&adapter.reconnect) {
@@ -128,5 +133,36 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
     }
     return record;
   }
-  return Object.freeze({execute});
+  // Reconcile one existing claim only. No admission, dispatch, retry or next step.
+  async function reconcileOnly(args) {
+    if(!args||Object.keys(args).sort().join(",")!=="context,expected_owner,expected_revision,operation_id"
+      ||!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("INVALID_RECONCILIATION_REQUEST");
+    let record=await store.inspect(args);
+    if(!record.runtime.owner||stableJson(record.runtime.owner)!==stableJson(args.expected_owner))reliableFailure("OWNER_CONFLICT");
+    const paused=code=>({...record,result:{...record.result,reconciliation_only:true,dispatch_paused:true,pause_reason:code}});
+    if(record.runtime.isolation)return paused("OPERATION_ISOLATED");
+    const call=record.runtime.active_call;
+    if(!call?.mutation||!["EXECUTING","VERIFYING","COMMITTING","RECONCILING"].includes(record.state.status)
+      ||record.runtime.retry_at!==null||call.reconciliation_attempt>=record.runtime.retry_policy.max_attempts)
+      return paused("RECONCILIATION_NOT_READY");
+    const alive=await store.isOwnerAlive(record.runtime.owner);
+    if(alive!==false)return paused(alive===true?"OWNER_ACTIVE":"OWNER_LIVENESS_UNCERTAIN");
+    let observed;
+    try {observed=await adapter.reconcile(record.intent,call.step_id,{binding:record.runtime.lifecycle_binding??null});}
+    catch {return paused("RECONCILIATION_UNAVAILABLE");}
+    // Even a proven not-admitted call stays fenced: this entry never schedules replay.
+    if(observed.verdict!=="completed")return paused(observed.code??"COMPLETED_RECEIPT_REQUIRED");
+    const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
+    const commands=[{type:"owner_acquired",owner:worker,replaced_worker_id:record.runtime.owner.worker_id},
+      {type:"reconciliation_started",worker_id:worker.worker_id,call_id:call.call_id},
+      {type:"reconciliation_completed",worker_id:worker.worker_id,call_id:call.call_id,receipt:observed.receipt},
+      {type:"owner_released",worker_id:worker.worker_id}];
+    // Validate the full receipt/binding before changing ownership. Actual writes
+    // still use fresh store reads, append-lock revision CAS and liveness fencing.
+    commands.reduce((prior,command)=>reduceReliableProjection(prior,command,prior.state.updated_at),record);
+    for(const command of commands)record=await store.command({operation_id:args.operation_id,context:args.context,
+      expected_revision:record.revision,command});
+    return {...record,result:{...record.result,reconciliation_only:true,dispatch_paused:true,pause_reason:"GPT_CONTINUATION_REQUIRED"}};
+  }
+  return Object.freeze({execute,reconcileOnly});
 }

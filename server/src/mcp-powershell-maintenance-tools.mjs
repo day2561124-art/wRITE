@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import {traceSpan} from "./mcp-request-tracing.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -152,7 +153,10 @@ function processResultBase({ elevated, command, cwd, timeoutMs, startedAt }) {
   };
 }
 
-export async function runPowerShellProcess({
+export async function runPowerShellProcess(args={}) {
+  return traceSpan("powershell.process",()=>runPowerShellProcessObserved(args));
+}
+async function runPowerShellProcessObserved({
   command,
   cwd,
   timeoutMs,

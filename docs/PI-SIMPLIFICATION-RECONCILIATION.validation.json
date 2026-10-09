@@ -1,0 +1,39 @@
+{
+  "archive_sha256": "41d1f0afe54ef645b592a82167f56479d3d44c7b510cd61d7824b142ed168b55",
+  "logs": {
+    "reconcile-focused.tap": {
+      "sha256": "fe5e8e7533cf195eb6d717bd7ce727aea4356a39d255033dcf370e2751411c20",
+      "tail": "t: history reducer rejects a failure relabeled as success and phase bypass of backoff\r\nok 42 - history reducer rejects a failure relabeled as success and phase bypass of backoff\r\n  ---\r\n  duration_ms: 690.7747\r\n  type: 'test'\r\n  ...\r\n1..42\r\n# tests 42\r\n# suites 0\r\n# pass 42\r\n# fail 0\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 20951.3701\r\n"
+    },
+    "reconcile-regression.tap": {
+      "sha256": "8652548dce5f2a700c3f72b192ae5fb3fa99e83371700d7b3246cb30ac5ebb80",
+      "tail": "\n  type: 'test'\r\n  ...\r\n# Subtest: a subsequent corrupt history still fails closed; no cached success\r\nok 53 - a subsequent corrupt history still fails closed; no cached success\r\n  ---\r\n  duration_ms: 108.2593\r\n  type: 'test'\r\n  ...\r\n1..53\r\n# tests 53\r\n# suites 0\r\n# pass 52\r\n# fail 1\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 31916.0596\r\n"
+    },
+    "reconcile-regression-final.tap": {
+      "sha256": "c715b495bd607259f274706693f4cb65cd66fcb1bc8030786dc3e5511c767b45",
+      "tail": "\n  type: 'test'\r\n  ...\r\n# Subtest: a subsequent corrupt history still fails closed; no cached success\r\nok 53 - a subsequent corrupt history still fails closed; no cached success\r\n  ---\r\n  duration_ms: 100.0215\r\n  type: 'test'\r\n  ...\r\n1..53\r\n# tests 53\r\n# suites 0\r\n# pass 52\r\n# fail 1\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 31094.7933\r\n"
+    },
+    "reconcile-bootstrap-final.tap": {
+      "sha256": "96bad348172943a674ec816950b58a546b979e34511184631b8f0486092f4436",
+      "tail": "rkstream action is revision-bound and its completed duplicate never reopens it\r\nok 8 - GPT terminal workstream action is revision-bound and its completed duplicate never reopens it\r\n  ---\r\n  duration_ms: 1088.0319\r\n  type: 'test'\r\n  ...\r\n1..8\r\n# tests 8\r\n# suites 0\r\n# pass 8\r\n# fail 0\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 4631.2498\r\n"
+    },
+    "reconcile-ingress-final.tap": {
+      "sha256": "f35307b87b76b8713d43543509dd2091a9ee8bd57cc36fab91642c3b39a0299e",
+      "tail": "production engineering cutover preserves public product reads and profile authority\r\nok 41 - production engineering cutover preserves public product reads and profile authority\r\n  ---\r\n  duration_ms: 1573.3495\r\n  type: 'test'\r\n  ...\r\n1..41\r\n# tests 41\r\n# suites 0\r\n# pass 41\r\n# fail 0\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 25711.2364\r\n"
+    },
+    "stage2b-focused.tap": {
+      "sha256": "3de2611550b577990d9d0a97bf8f82aa61a992617c6952533b91ad052b2a045b",
+      "tail": "t: history reducer rejects a failure relabeled as success and phase bypass of backoff\r\nok 31 - history reducer rejects a failure relabeled as success and phase bypass of backoff\r\n  ---\r\n  duration_ms: 720.2858\r\n  type: 'test'\r\n  ...\r\n1..31\r\n# tests 31\r\n# suites 0\r\n# pass 31\r\n# fail 0\r\n# cancelled 0\r\n# skipped 0\r\n# todo 0\r\n# duration_ms 23925.8175\r\n"
+    }
+  },
+  "source_sha256": {
+    "server/src/mcp-server.mjs": "9a1deecd89889ac7d1614793e839925bba83ee01137830e0931e7cc745e311aa",
+    "server/src/pi-reliable-execution-engine.mjs": "987f2d55918ccb37e0a3cc97056f7cdacfc6fee063a1b5c2162a20d4ce0eb9cb",
+    "server/src/pi-production-execution-controller.mjs": "f4b45bda7d4af2a252184fd777bcdca607fb23118cda6c4b6fc5e97bbad279c4",
+    "tests/mcp/pi-reliable-execution.test.mjs": "3307c72070b4d0ad3129426498e3df2d8ed9dade1485abb61830332cf14b9fd9",
+    "tests/mcp/pi-production-execution.test.mjs": "39b641eb4b44b1a0cfe4264b52761b0afe065f4be51fec54f3ebcaa7e2cf431f",
+    "tests/mcp/pi-bootstrap-binding.test.mjs": "b924f112ec24c5c480c1a910b8868db8d0b92bb823e3a47567c497d4ef68eb5b"
+  },
+  "formal_gate": "BLOCKED",
+  "checkpoint": "exact Git commit containing these artifacts; original production operations untouched"
+}
