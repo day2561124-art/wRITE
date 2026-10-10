@@ -335,8 +335,9 @@ async function removeLockFile(lockPath, attempts = 80) {
   return false;
 }
 
-async function acquireStoreLock(lockPath) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+async function acquireStoreLock(lockPath, timeoutMs = 2000) {
+  const deadline = performance.now() + timeoutMs;
+  do {
     try {
       const handle = await open(lockPath, "wx");
       try {
@@ -355,10 +356,11 @@ async function acquireStoreLock(lockPath) {
         const record = JSON.parse(await readFile(lockPath, "utf8"));
         if (record.hostname === os.hostname() && !isProcessRunning(record.pid) && await removeLockFile(lockPath)) continue;
       } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      const remainingMs = deadline - performance.now();
+      if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(25, remainingMs)));
     }
-  }
-  throw checkpointError("CHECKPOINT_STORE_BUSY", "Could not acquire checkpoint-store maintenance lock within 2 seconds.");
+  } while (performance.now() < deadline);
+  throw checkpointError("CHECKPOINT_STORE_BUSY", `Could not acquire checkpoint-store maintenance lock within ${timeoutMs / 1000} seconds.`);
 }
 
 async function releaseStoreLock(handle, lockPath) {
@@ -585,9 +587,9 @@ export function createDevCheckpointService({
     return realpath(storageRoot);
   }
 
-  async function withLock(operation) {
+  async function withLock(operation, timeoutMs = 2000) {
     await ensureStore();
-    const handle = await traceSpan("checkpoint.lock_wait",()=>acquireStoreLock(paths.lock));
+    const handle = await traceSpan("checkpoint.lock_wait",()=>acquireStoreLock(paths.lock, timeoutMs));
     try { return await operation(); } finally { await releaseStoreLock(handle, paths.lock); }
   }
 
@@ -1420,7 +1422,10 @@ export function createDevCheckpointService({
   }
 
   async function initialize() {
-    await withLock(async () => { await reconcileRegistryUnlocked(); });
+    // A ready peer may legitimately hold the shared lock longer than an ordinary
+    // tool's two-second wait. Wait before recovery starts; never rerun a failed
+    // recovery or revoke a live owner to make a new stdio child ready.
+    await withLock(async () => { await reconcileRegistryUnlocked(); }, 30_000);
     const recoveries = await listRecoveryWorkspaces();
     let resumed = 0;
     let reconciliationRequired = 0;
