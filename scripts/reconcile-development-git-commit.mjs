@@ -8,12 +8,27 @@ export async function reconcileDevelopmentGitCommit(input, {apply=false, journal
   return apply ? journal.resolveCompletedGitCommitMutation(input) : journal.inspectCompletedGitCommitMutation(input);
 }
 
+// Same trusted-host maintenance boundary; no caller-selected path/command/force.
+export async function reconcileDevelopmentWorkstreamStale(input, {apply=false, journal=createDevOperationJournalService()}={}) {
+  return apply ? journal.resolveWorkstreamStaleMutation(input) : journal.inspectWorkstreamStaleMutation(input);
+}
+
+// Existing host boundary, with an explicit independently bound capability.
+// JSON input cannot issue admission or select an authority/transaction backend.
+export async function bootstrapDevelopmentProofReader(input, {maintenance, apply=false}={}) {
+  if(!maintenance) throw new Error('INDEPENDENT_MAINTENANCE_AUTHORITY_REQUIRED');
+  return apply ? maintenance.install(input) : maintenance.inspect(input);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3 || !['--inspect','--apply'].includes(process.argv[2])) throw new Error('INVALID_RECONCILIATION_ACTION');
     process.stdin.setEncoding('utf8');let source='';
     for await (const chunk of process.stdin) {source+=chunk;if(Buffer.byteLength(source)>64*1024)throw new Error('RESOLUTION_RECORD_LIMIT');}
-    const result=await reconcileDevelopmentGitCommit(JSON.parse(source), {apply:process.argv[2]==='--apply'});
+    const input=JSON.parse(source);
+    const reconcile=input.resolution_kind==='workstream_stale_before_write'
+      ?reconcileDevelopmentWorkstreamStale:reconcileDevelopmentGitCommit;
+    const result=await reconcile(input, {apply:process.argv[2]==='--apply'});
     process.stdout.write(JSON.stringify(result)+'\n');
   } catch (error) {
     process.stderr.write(String(error.message)+'\n');process.exitCode=1;
