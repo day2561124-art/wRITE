@@ -224,6 +224,21 @@ export function createStdioSession(options = {}) {
   }
 
   function bindChild(nextChild, childGeneration) {
+    // A failed write invokes its callback and also emits an error on the pipe.
+    // ChildProcess's error event does not consume that Socket error. Keep this
+    // listener for late errors from retired children as well as the active one.
+    nextChild.stdin?.on?.('error', (error) => {
+      if (child !== nextChild || generation !== childGeneration || closed) return;
+      console.error(`[mcp-server] child stdin error pid=${nextChild.pid ?? 'unknown'} generation=${childGeneration}`, error);
+      notifyPendingListeners(reliabilityError(
+        'CHILD_DEAD',
+        `MCP child stdin failed: ${error?.message ?? String(error)}`,
+        { child_pid: nextChild.pid ?? null, generation: childGeneration },
+      ));
+      if (!restarting && !recovering && initializedNotification) {
+        void scheduleRecovery('stdin_error');
+      }
+    });
     const detachPreparedTurnBrokerIpc = options.preparedTurnBroker
       ? attachWorldSimulationPreparedTurnBrokerIpc(
         nextChild,
@@ -291,7 +306,7 @@ export function createStdioSession(options = {}) {
     };
 
     nextChild.stdout.on('data', (chunk) => {
-      if (protocolOverflowed) return;
+      if (protocolOverflowed || child !== nextChild || generation !== childGeneration || closed) return;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       if (stdoutBuffer.length + bytes.length > maxBufferedBytes) {
         failProtocolOverflow('aggregate_buffer_limit', {
@@ -502,6 +517,33 @@ export function createStdioSession(options = {}) {
     });
   }
 
+  function writeLifecycleNotification(nextChild, message) {
+    const childGeneration = generation;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(reliabilityError(
+        'CHILD_HUNG', 'MCP child lifecycle notification write timed out.',
+        { child_pid: nextChild?.pid ?? null, generation: childGeneration, timeout_ms: callTimeoutMs },
+      )), callTimeoutMs);
+      const finish = (error) => {
+        clearTimeout(timer);
+        if (closed) {
+          reject(reliabilityError('SESSION_CLOSED', 'MCP stdio session closed.'));
+        } else if (error || child !== nextChild || generation !== childGeneration
+          || nextChild?.exitCode !== null || nextChild?.signalCode !== null
+          || !nextChild?.stdin?.writable) {
+          reject(reliabilityError(
+            'CHILD_DEAD', `Failed to write MCP child lifecycle notification: ${error?.message ?? 'child unavailable'}`,
+            { child_pid: nextChild?.pid ?? null, generation: childGeneration },
+          ));
+        } else {
+          resolve();
+        }
+      };
+      try { nextChild.stdin.write(encodeMessage(message, 'line'), finish); }
+      catch (error) { finish(error); }
+    });
+  }
+
   async function replayLifecycleAfterSpawn() {
     if (!initializeRequest || !initializedNotification) {
       throw reliabilityError(
@@ -521,8 +563,7 @@ export function createStdioSession(options = {}) {
         `Recovered MCP child initialize failed: ${initializeResponse.error.message ?? 'unknown error'}`,
       );
     }
-    const frame = encodeMessage(structuredClone(initializedNotification), 'line');
-    child.stdin.write(frame);
+    await writeLifecycleNotification(child, structuredClone(initializedNotification));
     // Code may have changed between generations. Re-establish server-owned retry eligibility.
     const catalog = await internalCall({ jsonrpc: '2.0', id: 'recovery-catalog-' + randomUUID(), method: 'tools/list' },
       { timeoutMs: callTimeoutMs, recoverOnTimeout: false });
@@ -633,6 +674,7 @@ export function createStdioSession(options = {}) {
     captureLifecycleMessage(message);
     const frame = encodeMessage(message, 'line');
     const activeChild = child;
+    const activeGeneration = generation;
     if (
       !activeChild
       || activeChild.exitCode !== null
@@ -651,7 +693,7 @@ export function createStdioSession(options = {}) {
     }
     try {
       activeChild.stdin.write(frame, (error) => {
-        if (!error) return;
+        if (!error || closed || child !== activeChild || generation !== activeGeneration) return;
         console.error('failed to write to child.stdin', error);
         const id = message.id ?? null;
         if (id !== null) settleListener(id, reliabilityError(
@@ -764,12 +806,13 @@ export function createStdioSession(options = {}) {
       });
       const frame = encodeMessage(message, 'line');
       const activeChild = child;
+      const activeGeneration = generation;
       try {
         if (!activeChild?.stdin?.writable) {
           throw reliabilityError('CHILD_DEAD', 'MCP child is not writable.');
         }
         activeChild.stdin.write(frame, (error) => {
-          if (!error) return;
+          if (!error || closed || child !== activeChild || generation !== activeGeneration) return;
           settleListener(id, reliabilityError(
             'CHILD_DEAD',
             `Failed to write internal MCP child request: ${error.message ?? String(error)}`,
@@ -805,8 +848,7 @@ export function createStdioSession(options = {}) {
         throw new Error(`Reloaded MCP child initialize failed: ${initializeResponse.error.message ?? 'unknown error'}`);
       }
       if (initializedNotification) {
-        const frame = encodeMessage(structuredClone(initializedNotification), 'line');
-        nextChild.stdin.write(frame);
+        await writeLifecycleNotification(nextChild, structuredClone(initializedNotification));
       }
       recoveryAttemptTimestamps.length = 0;
       recoveryBlockedReason = null;

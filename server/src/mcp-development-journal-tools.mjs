@@ -16,6 +16,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { controlledProcessEnvironment } from "./process-control.mjs";
+import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspectWorkstreamStaleResolution } from "./mcp-workstream-stale-resolution.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
@@ -1770,7 +1771,10 @@ export function createDevOperationJournalService({
         const verification = await verify();
         const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
           event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
-        await fail(admission.operation_id, { result: { outcome: beforeChild ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !beforeChild } });
+        const registryPrewrite = isWorkstreamPrewriteFailure(error, {tool_name: context.tool_name, operation_id: admission.operation_id})
+          && !verification.events.some(event => event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
+        const noEffect = beforeChild || registryPrewrite;
+        await fail(admission.operation_id, { result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect } });
         throw error;
       }
       let payload;
@@ -1782,6 +1786,7 @@ export function createDevOperationJournalService({
         const children = verification.events.filter((event) => event.parent_operation_id === admission.operation_id
           && event.stage === "operation_started");
         const noEffect = (children.length === 0 && ["dev_create_file", "dev_apply_patch"].includes(context.tool_name))
+          || (children.length === 0 && isWorkstreamPrewriteFailure(value, {tool_name: context.tool_name, operation_id: admission.operation_id}))
           || children.length > 0 && children.every((child) => verification.events.some((event) =>
           event.operation_id === child.operation_id && terminalStageSet.has(event.stage)
           && ["failed_no_effect", "no_effect_observed"].includes(event.result?.outcome)));

@@ -4,6 +4,7 @@ import {performance} from "node:perf_hooks";
 import {REQUEST_TRACE_META_KEY,attachTraceIpc,publishTrace,runRequestTrace,traceId,traceSpan} from "./mcp-request-tracing.mjs";
 if(process.env.MCP_REQUEST_TRACING==='1')attachTraceIpc();
 import { createRuntimeReadiness } from "./mcp-runtime-readiness.mjs";
+import { preserveWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { chatgpt_bridge_save_settlement_report } from "./mcp-direct-pasted-chapter-settlement-wrapper.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1204,6 +1205,7 @@ async function auditedToolCall(tool, args, actor) {
         },
       ],
     };
+    preserveWorkstreamPrewriteFailure(error, result);
   }
 
   const after = await auditSnapshotMap();

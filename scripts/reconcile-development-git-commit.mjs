@@ -13,13 +13,6 @@ export async function reconcileDevelopmentWorkstreamStale(input, {apply=false, j
   return apply ? journal.resolveWorkstreamStaleMutation(input) : journal.inspectWorkstreamStaleMutation(input);
 }
 
-// Existing host boundary, with an explicit independently bound capability.
-// JSON input cannot issue admission or select an authority/transaction backend.
-export async function bootstrapDevelopmentProofReader(input, {maintenance, apply=false}={}) {
-  if(!maintenance) throw new Error('INDEPENDENT_MAINTENANCE_AUTHORITY_REQUIRED');
-  return apply ? maintenance.install(input) : maintenance.inspect(input);
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3 || !['--inspect','--apply'].includes(process.argv[2])) throw new Error('INVALID_RECONCILIATION_ACTION');

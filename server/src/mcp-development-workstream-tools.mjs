@@ -4,6 +4,7 @@ import { access, lstat, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { commitFileTransaction } from "./file-transactions.mjs";
+import { markWorkstreamStaleBeforeWrite } from "./mcp-workstream-prewrite-failure.mjs";
 import { controlledProcessEnvironment } from "./process-control.mjs";
 import { findWindowsPathLockOwners } from "./mcp-windows-lock-owner-diagnostics.mjs";
 import { projectPaths, projectRoot, resolveProjectPath } from "./project-paths.mjs";
@@ -1626,7 +1627,7 @@ export function createDevWorkstreamRegistryService({
       if (expectedRevision !== undefined && record.revision !== expectedRevision) {
         const error = new Error(`stale workstream revision: expected ${expectedRevision}, current ${record.revision}.`);
         error.code = "WORKSTREAM_STALE_REVISION";
-        throw error;
+        throw markWorkstreamStaleBeforeWrite(error, {expected_revision: expectedRevision, current_revision: record.revision});
       }
       if (Object.hasOwn(input, "label")) {
         record.label = assertBoundedString(input.label, "label", {
