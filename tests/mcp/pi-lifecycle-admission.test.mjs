@@ -51,6 +51,51 @@ for (const [capability, input, tool, args] of cases) test(`${capability} maps to
   assert.equal(step.tool, tool); assert.equal(step.effect, false); assert.equal(step.permission, "read");
   assert.deepEqual(step.arguments, args); assert.equal(step.input_hash, hashExecutionInput(input));
 });
+test("workspace PowerShell is a Pi-managed ordinary write bound to the isolated workspace", async () => {
+  const {verifyPiWorkspaceShellScope} = await import("../../server/src/pi-execution-contract.mjs");
+  const input = { command: "Write-Output 'workspace-engineering'", cwd: ".", timeoutMs: 30000 };
+  const source = intent("workspace.powershell", input, true);
+  const step = createMcpCapabilityAdapter().describe(source, "lifecycle");
+  assert.equal(step.tool, "powershell_run");
+  assert.equal(step.effect, true);
+  assert.equal(step.permission, "write");
+  assert.equal(step.scope, "workspace_shell");
+  assert.deepEqual(step.arguments, { ...input, workspace_id: context.workspace_id });
+  assert.throws(() => createExecutionIntent({ ...source, permissions: { ...source.permissions, write: false } }), /PERMISSION_DENIED/);
+  assert.throws(() => createExecutionIntent(intent("workspace.powershell", { ...input, workspace_id: "dev_workspace_shared_repository_v1" }, true)), /INVALID_CONTRACT_FIELDS/);
+
+  const eligible = {
+    ...workstream,
+    workspace: {
+      workspace_id: context.workspace_id, workstream_id: context.workstream_id,
+      workspace_type: "isolated_worktree", state: "active", locked: true,
+    },
+  };
+  const verify = (changes = {}) => verifyPiWorkspaceShellScope({context, step, workstream: eligible, ...changes});
+  assert.equal(verify(), true);
+  const badContexts = [
+    {...context, workspace_id: "dev_workspace_shared_repository_v1"},
+    {...context, workspace_id: "dev_workspace_" + "f".repeat(24)},
+    {...context, workstream_id: "dev_workstream_20261004-031724_" + "f".repeat(12)},
+  ];
+  for (const badContext of badContexts) assert.equal(verify({context: badContext}), false);
+  for (const badStep of [
+    {...step, capability: "host.powershell"},
+    {...step, tool: "powershell_admin_run"},
+    {...step, effect: false},
+    {...step, permission: "read"},
+    {...step, arguments: {...step.arguments, workspace_id: "dev_workspace_shared_repository_v1"}},
+  ]) assert.equal(verify({step: badStep}), false);
+  for (const badWorkstream of [
+    {...eligible, mode: "shared"},
+    {...eligible, state: "blocked"},
+    {...eligible, workspace_id: "dev_workspace_" + "f".repeat(24)},
+    {...eligible, workspace: {...eligible.workspace, locked: false}},
+    {...eligible, workspace: {...eligible.workspace, state: "paused"}},
+    {...eligible, workspace: {...eligible.workspace, workspace_type: "shared_repository"}},
+    {...eligible, workspace: {...eligible.workspace, workstream_id: "wrong"}},
+  ]) assert.equal(verify({workstream: badWorkstream}), false);
+});
 test("host PowerShell is a Pi-managed write bound to the canonical shared repository", () => {
   const input = { command: "Write-Output 'pi-managed-powershell'", cwd: ".", timeoutMs: 30000 };
   const source = intent("host.powershell", input, true);

@@ -1798,7 +1798,7 @@ const devWorkspaceExecutionProperties = Object.freeze({
   }),
 });
 
-import {CAPABILITY_DEFINITIONS} from "./pi-execution-contract.mjs";
+import {CAPABILITY_DEFINITIONS, verifyPiWorkspaceShellScope} from "./pi-execution-contract.mjs";
 import {beginPiWorkstreamBootstrap} from "./mcp-development-workstream-tools.mjs";
 import {isPiManagedMcpCall,assertPiManagedMcpCall} from "./pi-production-execution-controller.mjs";
 import {getMcpOperationReconciliationContext as getPiBootstrapReconciliation} from "./mcp-operation-reconciliation-context.mjs";
@@ -2019,7 +2019,7 @@ const toolDefinitions = [
   },
   {
     name: "powershell_run",
-    description: "Run bounded non-elevated Windows PowerShell for host/MCP maintenance only. cwd is restricted to the selected Writer Workbench workspace; timeout/output are capped and obvious destructive system operations are rejected.",
+    description: "Run bounded non-elevated Windows PowerShell for Pi-approved host maintenance or isolated-workspace engineering. cwd stays within the selected workspace, but command file access is not an OS sandbox. Timeout/output are capped and destructive system commands are rejected.",
     risk: "low-risk-write",
     annotations: { readOnlyHint: false },
     inputSchema: baseSchema({
@@ -5782,6 +5782,9 @@ const piProductionController = createPiProductionExecutionController({ route: pi
       return candidate.workstream_id === workstream.workstream_id
         && candidate.revision === step.arguments.expected_revision
         && integrationStateAllowed;
+    }
+    if (step.scope === "workspace_shell") {
+      return verifyPiWorkspaceShellScope({context, step, workstream});
     }
     if (step.scope === "host_maintenance") {
       if (step.tool !== "powershell_run" || step.arguments.workspace_id !== "dev_workspace_shared_repository_v1") return false;

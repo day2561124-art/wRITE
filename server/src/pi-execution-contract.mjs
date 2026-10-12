@@ -46,6 +46,7 @@ export const CAPABILITY_DEFINITIONS = Object.freeze([
   descriptor("verification.full", "dev_run_tests", "tests", true, ["suite"]),
   descriptor("git.status", "dev_git_status", "read", false, [], ["includeUntracked"]),
   descriptor("host.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "host_maintenance"),
+  descriptor("workspace.powershell", "powershell_run", "write", true, ["command"], ["cwd", "timeoutMs"], "workspace_shell"),
   descriptor("git.commit", "dev_git_commit", "commit", true, ["message", "paths", "expectedHead"]),
   descriptor("git.integrate", "dev_workspace_integrate", "integrate", true,
     ["integration_candidate_id", "expected_revision"], [], "candidate"),
@@ -120,6 +121,27 @@ export function capabilityDefinition(capability) {
   if (!result) fail("UNKNOWN_CAPABILITY");
   return result;
 }
+export function verifyPiWorkspaceShellScope({context, step, workstream} = {}) {
+  const workspace = workstream?.workspace;
+  return step?.scope === "workspace_shell"
+    && step.capability === "workspace.powershell"
+    && step.tool === "powershell_run"
+    && step.effect === true
+    && step.permission === "write"
+    && /^dev_workspace_[a-f0-9]{24}$/u.test(context?.workspace_id ?? "")
+    && /^dev_workstream_[0-9]{8}-[0-9]{6}_[a-f0-9]{12}$/u.test(context?.workstream_id ?? "")
+    && step.arguments?.workspace_id === context.workspace_id
+    && workstream?.workspace_id === context.workspace_id
+    && workstream?.workstream_id === context.workstream_id
+    && workstream.mode === "isolated"
+    && workstream.state === "active"
+    && workspace?.workspace_id === context.workspace_id
+    && workspace?.workstream_id === context.workstream_id
+    && workspace?.workspace_type === "isolated_worktree"
+    && workspace?.state === "active"
+    && workspace?.locked === true;
+}
+
 export function assertCapabilityPermission(permissions, capability) {
   const definition = capabilityDefinition(capability);
   if (permissions[definition.permission] !== true) fail("PERMISSION_DENIED");
