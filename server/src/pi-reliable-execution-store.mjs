@@ -37,12 +37,14 @@ function output(event,events) {
 export function createPiReliableExecutionStore({journal={
   readExecutionProjections:readDevExecutionProjections,appendExecutionProjection:appendDevExecutionProjection,
   recoverExecutionPublication:recoverDevExecutionPublication},
-  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,productionBinding,admissionGuard,isolationAuthority}={}) {
+  clock=()=>new Date().toISOString(),isOwnerAlive=localOwnerAlive,admissionBinding,productionBinding,admissionGuard,isolationAuthority,recoverOnReadFailure=true}={}) {
   if(typeof journal.readExecutionProjections!=="function"||typeof journal.appendExecutionProjection!=="function"
-    ||typeof clock!=="function"||typeof isOwnerAlive!=="function")reliableFailure("INVALID_STATE_STORE_BINDING");
+    ||typeof clock!=="function"||typeof isOwnerAlive!=="function"||typeof recoverOnReadFailure!=="boolean")reliableFailure("INVALID_STATE_STORE_BINDING");
   async function history() {
     let events;
     try {events=await journal.readExecutionProjections();} catch(e) {
+      // Observational readers must not turn a read failure into publication.
+      if(!recoverOnReadFailure)throw e;
       if(["JOURNAL_APPEND_BUSY","JOURNAL_LOCK_CONTENDED","JOURNAL_LOCK_RELEASE_FAILED","JOURNAL_SNAPSHOT_UNSTABLE"].includes(e.code))throw e;
       if(typeof journal.recoverExecutionPublication!=="function")reliableFailure("CORRUPT_STATE");
       try {
