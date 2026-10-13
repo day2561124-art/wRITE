@@ -1220,8 +1220,17 @@ export function createDevIntegrationService({
       const recovering = candidate.state === "failed"
         && candidate.failure_reason?.code === "INTEGRATION_VALIDATION_INTERRUPTED"
         && candidate.failure_reason.operation_id === input.operation_id;
-      if ((!recovering && !["materialized", "testing"].includes(candidate.state))
-        || (!recovering && candidate.validation_report !== null)) throw new Error("VALIDATION_RECOVERY_STATE_MISMATCH");
+      // A completed failed validation can lose a test/boundary terminal after
+      // its report and cleanup are durable. Settle only the missing provenance;
+      // its failed gate, report, revision, and valid sibling terminals stay intact.
+      const finalizingFailed = candidate.state === "failed"
+        && candidate.failure_reason?.code === "INTEGRATION_VALIDATION_FAILED"
+        && candidate.validation_report?.status === "failed"
+        && candidate.validation_report.passed === false
+        && candidate.integration_workspace.state === "removed"
+        && candidate.integration_workspace.cleanup_pending === false;
+      if ((!recovering && !finalizingFailed && !["materialized", "testing"].includes(candidate.state))
+        || (!recovering && !finalizingFailed && candidate.validation_report !== null)) throw new Error("VALIDATION_RECOVERY_STATE_MISMATCH");
       const verification = await journal.verify();
       const events = verification.events;
       const start = events.find(e => e.operation_id === input.operation_id && e.stage === "operation_started");
@@ -1248,10 +1257,57 @@ export function createDevIntegrationService({
         ids.add(e.operation_id);
       }
       const starts = events.filter(e => ids.has(e.operation_id) && e.stage === "operation_started");
+      const report = candidate.validation_report;
+      const manifest = finalizingFailed ? report.verification_manifest : null;
+      if (finalizingFailed) {
+        const done = events.find(e => e.operation_id === start.operation_id && e.stage === "operation_completed");
+        if (!manifest || !done || manifest.gate_result !== "failed" || manifest.passed !== false
+          || createHash("sha256").update(JSON.stringify(manifest), "utf8").digest("hex") !== report.verification_manifest_sha256
+          || done.result.verification_manifest_sha256 !== report.verification_manifest_sha256
+          || done.result.verification_manifest_gate_result !== "failed" || done.result.passed !== false
+          || done.result.execution_ok !== report.execution_ok || done.result.cleanup_completed !== true
+          || done.result.integration_candidate_id !== candidateId
+          || manifest.integration_candidate_id !== candidateId || manifest.workspace !== start.workspace_id
+          || manifest.workstream !== start.workstream_id || !Array.isArray(manifest.suite_results)
+          || [report, done.result, manifest].some(value => value.source_head !== candidate.source_head
+            || value.target_head !== candidate.target_head)
+          || report.integration_commit !== candidate.integration_commit
+          || done.result.integration_commit !== candidate.integration_commit || manifest.commit !== candidate.integration_commit) {
+          throw new Error("VALIDATION_RECOVERY_COMPLETED_REPORT_MISMATCH");
+        }
+        const tests = starts.filter(e => e.operation_type === "test_evidence");
+        if (tests.length === 0 || manifest.suite_results.length !== tests.length
+          || new Set(manifest.suite_results.map(result => result.operation_id)).size !== tests.length
+          || tests.some(e => !manifest.suite_results.some(result => result.operation_id === e.operation_id
+            && result.suite === e.result.suite && result.head === candidate.integration_commit
+            && /^[a-f0-9]{64}$/u.test(result.workspace_snapshot_id ?? "")
+            && result.workspace_snapshot_id === e.result.workspace_snapshot_id))
+          || done.links.filter(link => link.relation === "validated_by").length !== tests.length
+          || tests.some(e => !done.links.some(link => link.relation === "validated_by" && link.operation_id === e.operation_id))) {
+          throw new Error("VALIDATION_RECOVERY_TEST_BINDING_MISMATCH");
+        }
+      }
       for (const e of starts) {
         if (e.diagnostic?.hostname !== os.hostname() || !Number.isInteger(e.diagnostic.owner_pid)
           || isProcessRunning(e.diagnostic.owner_pid)) throw new Error("VALIDATION_RECOVERY_OWNER_ACTIVE_OR_UNKNOWN");
         const terminal = events.find(t => t.operation_id === e.operation_id && t.stage !== "operation_started");
+        if (finalizingFailed) {
+          if (e.diagnostic.owner_pid !== start.diagnostic.owner_pid) throw new Error("VALIDATION_RECOVERY_OWNER_MISMATCH");
+          const result = manifest.suite_results.find(result => result.operation_id === e.operation_id);
+          const completed = terminal?.stage === "operation_completed"
+            && (e.operation_id === start.operation_id || (e.operation_type === "test_evidence" && result
+              && terminal.result.suite === result.suite && terminal.result.head === result.head
+              && terminal.result.workspace_snapshot_id === result.workspace_snapshot_id
+              && ["passed", "execution_ok", "timed_out"].every(key => terminal.result[key] === result[key])));
+          const finalized = terminal?.stage === "operation_recovered"
+            && terminal.reconciles_event_id === e.journal_event_id
+            && terminal.result.provenance_finalization === true && terminal.result.passed === false
+            && terminal.result.recovery_candidate_id === candidateId
+            && terminal.result.recovery_start_hash === start.event_hash
+            && terminal.result.verification_manifest_sha256 === report.verification_manifest_sha256;
+          if (terminal && !completed && !finalized) throw new Error("VALIDATION_RECOVERY_TERMINAL_CONFLICT");
+          continue;
+        }
         if (terminal && !(recovering && terminal.stage === "operation_recovered"
           && terminal.result.recovery_candidate_id === candidateId && terminal.result.interrupted === true)) {
           throw new Error("VALIDATION_RECOVERY_TERMINAL_CONFLICT");
@@ -1276,6 +1332,13 @@ export function createDevIntegrationService({
       try { const info = await lstat(integrationPath); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("UNSAFE_WORKTREE"); }
       catch (error) { if (error?.code !== "ENOENT") throw error; exists = false; }
       let unregisteredResidue = false;
+      if (finalizingFailed && exists) throw new Error("VALIDATION_RECOVERY_COMPLETED_WORKTREE_PRESENT");
+      if (finalizingFailed) {
+        const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
+        if (list.split(/\r?\n/u).includes(`worktree ${integrationPath.replaceAll("\\", "/")}`)) {
+          throw new Error("VALIDATION_RECOVERY_COMPLETED_WORKTREE_REGISTERED");
+        }
+      }
       if (exists) {
         const list = (await gitRunner(["worktree", "list", "--porcelain"], { cwd: repoRoot })).stdout;
         const block = list.split(/\r?\n\r?\n/u).find(b => b.split(/\r?\n/u)[0] === `worktree ${integrationPath.replaceAll("\\", "/")}`);
@@ -1291,8 +1354,8 @@ export function createDevIntegrationService({
           throw new Error("VALIDATION_RECOVERY_DIRTY_WORKTREE");
         }
         }
-      } else if (!recovering) throw new Error("VALIDATION_RECOVERY_WORKTREE_MISSING");
-      if (!recovering) candidate = await updateCandidate(candidateId, candidate.revision, record => {
+      } else if (!recovering && !finalizingFailed) throw new Error("VALIDATION_RECOVERY_WORKTREE_MISSING");
+      if (!recovering && !finalizingFailed) candidate = await updateCandidate(candidateId, candidate.revision, record => {
         transitionCandidate(record, "failed");
         record.failure_reason = { code: "INTEGRATION_VALIDATION_INTERRUPTED", operation_id: start.operation_id };
         record.validation_report = { status: "interrupted", passed: false, execution_ok: false,
@@ -1315,7 +1378,10 @@ export function createDevIntegrationService({
       for (const e of starts.sort((a, b) => b.sequence - a.sequence)) {
         if (events.some(t => t.operation_id === e.operation_id && t.stage !== "operation_started")) continue;
         await journal.recover(e.operation_id, { reconciles_event_id: e.journal_event_id,
-          result: { outcome: "intended_effect_observed", interrupted: true, passed: false,
+          result: { outcome: "intended_effect_observed", passed: false,
+            ...(finalizingFailed ? { provenance_finalization: true, validation_completed: true,
+              failed_gate_preserved: true, verification_manifest_sha256: report.verification_manifest_sha256 }
+              : { interrupted: true }),
             reconciliation_required: false, recovery_candidate_id: candidateId,
             recovery_start_hash: start.event_hash, cleanup_completed: true } });
       }

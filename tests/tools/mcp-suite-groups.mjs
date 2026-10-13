@@ -61,7 +61,8 @@ export const mcpPiPostSealScripts=Object.freeze([
   "tests/mcp/pi-workstream-stale-resolution.test.mjs",
   "tests/mcp/pi-bootstrap-binding.test.mjs",
   "tests/mcp/pi-bootstrap-physical.test.mjs",
-  "tests/mcp/pi-bootstrap-cold.test.mjs"
+  "tests/mcp/pi-bootstrap-cold.test.mjs",
+  "tests/mcp/journal-append-cas.test.mjs"
 ]);
 export const mcpSuiteScripts = Object.freeze({
   mcp_pi_postseal:mcpPiPostSealScripts,

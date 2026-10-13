@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -829,6 +829,138 @@ test("hard interruption recovers only bound dead validation, including interrupt
     assert.equal(successor.state, "preflight_passed");
     assert.notEqual(successor.integration_candidate_id, current.integration_candidate_id);
     assert.equal(successor.integration_commit, current.integration_commit);
+  } finally { await harness.cleanup(); }
+});
+
+test("completed failed validation recovers missing provenance without rewriting results or replaying suites", async () => {
+  const harness = await createHarness("failed-provenance");
+  try {
+    const source = await harness.createSource({ changes: { "server/src/fixture.mjs": "export const fixture = true;\n" } });
+    const runtime = path.join(harness.root, "runtime");
+    const journalRoot = path.join(runtime, "journal");
+    const lockPath = path.join(runtime, "test.lock");
+    const journal = createDevOperationJournalService({ storageRoot: journalRoot });
+    const service = harness.createService({ journal, testLockPath: lockPath,
+      validationRunner: async () => { throw new Error("Recovery must not dispatch tests"); } });
+    const candidate = await service.preflight({ workstream_id: source.workstream_id });
+    const workstream = harness.workstreams.get(source.workstream_id);
+    const workspace = await harness.createService().getCandidate({ integration_candidate_id: candidate.integration_candidate_id });
+    assert.equal(workspace.source_head, source.sourceHead);
+    const worker = `
+      import {createDevIntegrationService} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-integration-tools.mjs")).href)};
+      import {createDevOperationJournalService,computeWorkspaceSnapshot} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-development-journal-tools.mjs")).href)};
+      import {fingerprintMcpMutationRequest} from ${JSON.stringify(pathToFileURL(path.resolve("server/src/mcp-operation-reconciliation-context.mjs")).href)};
+      const journal=createDevOperationJournalService({storageRoot:${JSON.stringify(journalRoot)}});
+      const service=createDevIntegrationService({
+        repositoryRoot:${JSON.stringify(harness.repositoryRoot)},
+        registryPath:${JSON.stringify(path.join(runtime, "integration_registry.json"))},
+        registryLockPath:${JSON.stringify(path.join(runtime, "integration_registry.lock"))},
+        applyLockPath:${JSON.stringify(path.join(runtime, "integration_apply.lock"))},
+        integrationRootPath:${JSON.stringify(path.join(harness.root, ".writer-workbench-integrations"))},
+        journal,testLockPath:${JSON.stringify(lockPath)},
+        workstreamReader:async()=>(${JSON.stringify(workstream)}),
+        workspaceReader:async()=>(${JSON.stringify({ ...harness.workspaces.get(source.workspace_id), healthy: true, registered_branch_matches: true, registry_mapping_consistent: true, git_worktree_head: source.sourceHead })}),
+        validationRunner:async(integrationPath,candidate)=>{
+          const snapshot=await computeWorkspaceSnapshot({root:integrationPath,workspace_id:candidate.workspace_id,
+            workspace_type:'integration_worktree',current_head:candidate.integration_commit});
+          const results=[];
+          for(const suite of ['mcp','mcp_tunnel']) {
+            const identity={suite,head:snapshot.head,workspace_snapshot_id:snapshot.workspace_snapshot_id};
+            const op=await journal.begin({operation_type:'test_evidence',tool_name:'dev_run_tests',
+              workspace_id:candidate.workspace_id,workstream_id:candidate.workstream_id,result:identity});
+            const result={...identity,operation_id:op.operation_id,passed:suite==='mcp',execution_ok:suite==='mcp',
+              timed_out:false,exit_code:0,duration_ms:1};
+            if(suite==='mcp') await journal.complete(op.operation_id,{result});
+            // Model an actual test effect followed by failed terminal publication.
+            results.push(result);
+          }
+          return results;
+        }
+      });
+      const input=${JSON.stringify({ integration_candidate_id: candidate.integration_candidate_id, expected_revision: candidate.revision })};
+      await journal.executeReconciled({reconciliation_key:'failed-validation-boundary',tool_name:'dev_workspace_validate_integration',
+        request_fingerprint_sha256:fingerprintMcpMutationRequest('dev_workspace_validate_integration',input)},async()=>{
+          const result=await service.validateIntegration(input);
+          if(result.state!=='failed') throw new Error('Expected failed gate');
+          process.exit(77); // Boundary terminal delivery was interrupted, not the tests.
+        });
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", worker], { cwd: path.resolve("."), windowsHide: true, stdio: "pipe" });
+    let stderr = "";
+    child.stderr.on("data", data => { stderr += data; });
+    const exit = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", code => resolve(code)); });
+    assert.equal(exit, 77, stderr);
+    const failed = await service.getCandidate({ integration_candidate_id: candidate.integration_candidate_id });
+    assert.equal(failed.state, "failed");
+    assert.equal(failed.failure_reason.code, "INTEGRATION_VALIDATION_FAILED");
+    assert.equal(failed.integration_workspace.state, "removed");
+    let proof = await journal.verify();
+    assert.equal(proof.dangling_operations.length, 2);
+    const start = proof.events.find(e => e.stage === "operation_started" && e.operation_type === "integration_validation");
+    const input = { integration_candidate_id: failed.integration_candidate_id, expected_revision: failed.revision,
+      operation_id: start.operation_id, expected_start_hash: start.event_hash };
+    const terminalsBefore = proof.events.filter(e => e.stage !== "operation_started");
+    const registryPath = path.join(runtime, "integration_registry.json");
+    const registryBefore = await readFile(registryPath);
+    await assert.rejects(service.recoverInterruptedValidation({ ...input, expected_revision: failed.revision - 1 }), /STALE_REVISION/);
+    await assert.rejects(service.recoverInterruptedValidation({ ...input, expected_start_hash: "0".repeat(64) }), /BINDING_MISMATCH/);
+    const rejectProof = async (change, pattern) => {
+      const guarded = harness.createService({ journal: { ...journal, verify: async () => {
+        const actual = await journal.verify();
+        return { ...actual, events: change(structuredClone(actual.events)) };
+      } }, testLockPath: lockPath });
+      const before = (await journal.verify()).head.latest_event_hash;
+      await assert.rejects(guarded.recoverInterruptedValidation(input), pattern);
+      assert.equal((await journal.verify()).head.latest_event_hash, before, "Rejected proof never appends");
+    };
+    await rejectProof(events => events.filter(e => !(e.operation_id === start.operation_id && e.stage === "operation_completed")), /COMPLETED_REPORT_MISMATCH/);
+    await rejectProof(events => events.map(e => {
+      if (e.operation_id === start.operation_id && e.stage === "operation_completed") e.result.verification_manifest_sha256 = "0".repeat(64);
+      return e;
+    }), /COMPLETED_REPORT_MISMATCH/);
+    await rejectProof(events => events.map(e => {
+      if (e.stage === "operation_started") e.diagnostic.owner_pid = process.pid;
+      return e;
+    }), /OWNER_ACTIVE_OR_UNKNOWN/);
+    await rejectProof(events => events.map(e => {
+      if (e.operation_type === "test_evidence" && e.stage === "operation_completed") e.result.passed = false;
+      return e;
+    }), /TERMINAL_CONFLICT/);
+    await rejectProof(events => events.map(e => {
+      if (e.operation_type === "test_evidence" && e.stage === "operation_started") e.result.workspace_snapshot_id = "0".repeat(64);
+      return e;
+    }), /TEST_BINDING_MISMATCH/);
+    await writeFile(lockPath, JSON.stringify({ owner_pid: process.pid, hostname: os.hostname(), suite: "mcp" }));
+    await assert.rejects(service.recoverInterruptedValidation(input), /RUNNER_CONFLICT/);
+    await rm(lockPath);
+    const residue = path.join(harness.root, ".writer-workbench-integrations", failed.integration_candidate_id);
+    await mkdir(residue);
+    await writeFile(path.join(residue, "preserve.txt"), "unknown residue\n");
+    await assert.rejects(service.recoverInterruptedValidation(input), /COMPLETED_WORKTREE_PRESENT/);
+    assert.equal(await readFile(path.join(residue, "preserve.txt"), "utf8"), "unknown residue\n");
+    await rm(path.join(residue, "preserve.txt"));
+    await rmdir(residue);
+    let appended = 0;
+    const interrupted = harness.createService({ journal: { ...journal, recover: async (...args) => {
+      if (++appended === 2) throw new Error("fixture boundary publication interrupted");
+      return journal.recover(...args);
+    } }, testLockPath: lockPath });
+    await assert.rejects(interrupted.recoverInterruptedValidation(input), /fixture boundary publication interrupted/);
+    assert.equal((await journal.verify()).dangling_operations.length, 1);
+    const result = await service.recoverInterruptedValidation(input);
+    assert.deepEqual(result, failed, "Failed candidate and its manifest stay unchanged");
+    assert.deepEqual(await readFile(registryPath), registryBefore, "No candidate result or revision is rewritten");
+    proof = await journal.verify();
+    assert.equal(proof.dangling_operations.length, 0);
+    assert.equal(proof.active_operations.length, 0);
+    assert.deepEqual(proof.events.filter(e => terminalsBefore.some(old => old.journal_event_id === e.journal_event_id)), terminalsBefore);
+    const recovered = proof.events.filter(e => e.stage === "operation_recovered");
+    assert.equal(recovered.length, 2);
+    assert(recovered.every(e => e.result.passed === false && e.result.provenance_finalization === true));
+    const head = proof.head.latest_event_hash;
+    await service.recoverInterruptedValidation(input);
+    assert.equal((await journal.verify()).head.latest_event_hash, head, "Finalization is idempotent");
+    assert.equal((await journal.status()).health, "healthy");
   } finally { await harness.cleanup(); }
 });
 

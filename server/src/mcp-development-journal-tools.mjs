@@ -578,20 +578,6 @@ async function listEventFiles(eventsPath) {
   return entries.map((entry) => entry.name).sort();
 }
 
-async function findStartedEventByReconciliationKey(eventsPath, reconciliationKey) {
-  const files = await listEventFiles(eventsPath);
-  if (files.length > DEV_JOURNAL_MAX_RECOVERY_SCAN) throw new Error(`Journal scan exceeds ${DEV_JOURNAL_MAX_RECOVERY_SCAN} events.`);
-  for (let index = files.length - 1; index >= 0; index -= 1) {
-    const fileName = files[index];
-    const filePath = path.join(eventsPath, fileName);
-    const info = await lstat(filePath);
-    if (info.isSymbolicLink() || !info.isFile() || info.size > DEV_JOURNAL_MAX_EXECUTION_EVENT_BYTES) throw new Error(`Unsafe journal event file: ${fileName}.`);
-    const event = parseEvent(await readFile(filePath, "utf8"));
-    if (event.stage === "operation_started" && event.reconciliation_key === reconciliationKey) return event;
-  }
-  return null;
-}
-
 // Keep both in-flight I/O and worker promises bounded. Drain workers even on failure;
 // the caller consumes outcomes in filename order, preserving deterministic errors.
 async function mapJournalFilesBounded(files, callback) {
@@ -1016,55 +1002,70 @@ export function createDevOperationJournalService({
   async function append(input) {
     if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
     const { eventsPath } = await ensureStorageRoot(storageRoot);
-    const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
-    try {
-      const head = await readHead(headPath);
-      // The durable lookup and STARTED append share the cross-process append lock.
-      const key = normalizeMcpReconciliationKey(input.reconciliation_key);
-      if (input.stage === "operation_started" && key) {
-        const existing = await findStartedEventByReconciliationKey(eventsPath, key);
-        if (existing) {
-          const same = existing.request_fingerprint_sha256 === input.request_fingerprint_sha256
-            && existing.tool_name === input.tool_name;
-          const error = new Error(same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT");
-          error.code = same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT";
-          error.operation_id = existing.operation_id;
+    // Reuse the verified immutable snapshot and the same head-CAS contract as
+    // Pi projection publication. No event-body I/O runs under the append lock.
+    for (let pass = 0; pass < DEV_JOURNAL_VERIFY_MAX_CATCHUP_PASSES; pass += 1) {
+      const verification = await verify();
+      const lockHandle = await acquireJournalLock(lockPath, { timeoutMs: lockAcquireTimeoutMs });
+      try {
+        const head = await readHead(headPath);
+        if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
+        // Ordinary admissions must honor a newly observed degraded Gate too.
+        // The existing explicit terminal-resolution contract remains available.
+        if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution"
+          && runtimeHealth !== "healthy") {
+          const error = new Error(`JOURNAL_${runtimeHealth.toUpperCase()}: development mutation is blocked until journal reconciliation succeeds.`);
+          error.code = `JOURNAL_${runtimeHealth.toUpperCase()}`;
           throw error;
         }
-      }
-      if (terminalStageSet.has(input.stage)) {
-        for (const file of (await listEventFiles(eventsPath)).reverse()) {
-          const event = parseEvent(await readFile(path.join(eventsPath, file), "utf8"));
-          if (event.operation_id === input.operation_id && event.stage === "operation_started") break;
-          if (event.operation_id === input.operation_id && terminalStageSet.has(event.stage)) {
-            throw new Error("Operation already has a terminal event: " + input.operation_id);
+        // The durable lookup and STARTED append share the cross-process append lock.
+        const key = normalizeMcpReconciliationKey(input.reconciliation_key);
+        if (input.stage === "operation_started" && key) {
+          const existing = verification.events.find((event) => event.stage === "operation_started" && event.reconciliation_key === key);
+          if (existing) {
+            const same = existing.request_fingerprint_sha256 === input.request_fingerprint_sha256
+              && existing.tool_name === input.tool_name;
+            const error = new Error(same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT");
+            error.code = same ? "RECONCILIATION_EXISTING_OPERATION" : "RECONCILIATION_KEY_CONFLICT";
+            error.operation_id = existing.operation_id;
+            throw error;
           }
         }
+        if (terminalStageSet.has(input.stage)) {
+          for (let index = verification.events.length - 1; index >= 0; index -= 1) {
+            const event = verification.events[index];
+            if (event.operation_id === input.operation_id && event.stage === "operation_started") break;
+            if (event.operation_id === input.operation_id && terminalStageSet.has(event.stage)) {
+              throw new Error("Operation already has a terminal event: " + input.operation_id);
+            }
+          }
+        }
+        const sequence = head.latest_sequence + 1;
+        const eventId = eventIdGenerator();
+        if (!eventIdPattern.test(eventId)) throw new Error("Journal event ID generator returned an invalid ID.");
+        const timestamp = clock().toISOString();
+        const event = normalizeBaseEvent(input, {
+          sequence,
+          previousEventHash: head.latest_event_hash,
+          eventId,
+          timestamp,
+        });
+        const encoded = `${canonicalJson(event)}\n`;
+        if (Buffer.byteLength(encoded, "utf8") > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Journal event exceeds ${DEV_JOURNAL_MAX_EVENT_BYTES} bytes.`);
+        const eventPath = path.join(eventsPath, eventFilename(sequence, eventId));
+        await writeExclusiveDurableFile(eventPath, encoded);
+        await atomicWriteJson(headPath, {
+          schema_version: DEV_JOURNAL_SCHEMA_VERSION,
+          latest_sequence: sequence,
+          latest_event_id: eventId,
+          latest_event_hash: event.event_hash,
+        });
+        return event;
+      } finally {
+        await releaseJournalLock(lockHandle, lockPath);
       }
-      const sequence = head.latest_sequence + 1;
-      const eventId = eventIdGenerator();
-      if (!eventIdPattern.test(eventId)) throw new Error("Journal event ID generator returned an invalid ID.");
-      const timestamp = clock().toISOString();
-      const event = normalizeBaseEvent(input, {
-        sequence,
-        previousEventHash: head.latest_event_hash,
-        eventId,
-        timestamp,
-      });
-      const encoded = `${canonicalJson(event)}\n`;
-      if (Buffer.byteLength(encoded, "utf8") > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Journal event exceeds ${DEV_JOURNAL_MAX_EVENT_BYTES} bytes.`);
-      const eventPath = path.join(eventsPath, eventFilename(sequence, eventId));
-      await writeExclusiveDurableFile(eventPath, encoded);
-      await atomicWriteJson(headPath, {
-        schema_version: DEV_JOURNAL_SCHEMA_VERSION,
-        latest_sequence: sequence,
-        latest_event_id: eventId,
-        latest_event_hash: event.event_hash,
-      });
-      return event;
-    } finally {
-      await releaseJournalLock(lockHandle, lockPath);
     }
+    throw journalSnapshotUnstableError();
   }
 
   function executionProjectionEvents(events) {
