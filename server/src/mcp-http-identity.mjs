@@ -6,6 +6,7 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 export function getMcpIdentity() {
   const hash = createHash('sha256');
   for (const file of ['server/src/mcp-http-server.mjs', 'server/src/mcp-http-identity.mjs',
+    'server/src/mcp-http-sse-keepalive.mjs',
     'server/src/mcp-http-stdio-adapter.mjs', 'server/src/mcp-server.mjs',
     'server/src/mcp-runtime-readiness.mjs', 'package-lock.json']) {
     hash.update(file).update(fs.readFileSync(path.join(repositoryRoot, file)));

@@ -1,4 +1,5 @@
 import http from 'http';
+import { attachBoundedSseKeepalive } from './mcp-http-sse-keepalive.mjs';
 import { getMcpIdentity } from './mcp-http-identity.mjs';
 import { randomUUID } from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -1118,6 +1119,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    attachBoundedSseKeepalive(res);
     try {
       await entry.transport.handleRequest(
         req,
@@ -1176,6 +1178,7 @@ const server = http.createServer(async (req, res) => {
     // session from ever becoming idle. GET/SSE also does not refresh session
     // liveness: client-to-server POST activity is what extends the idle TTL.
     if (req.method === 'GET') {
+      attachBoundedSseKeepalive(res);
       try {
         await entry.transport.handleRequest(
           req,

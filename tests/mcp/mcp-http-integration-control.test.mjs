@@ -165,7 +165,7 @@ async function fixture() {
   await mkdir(scripts, { recursive: true });
   await mkdir(runtime);
   for (const file of [
-    'mcp-http-server.mjs', 'mcp-http-identity.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
+    'mcp-http-server.mjs', 'mcp-http-sse-keepalive.mjs', 'mcp-http-identity.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
     'mcp-runtime-diagnostics.mjs', 'mcp-runtime-readiness.mjs', 'mcp-request-tracing.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
     'mcp-workspace-change-clock-provider.mjs',
