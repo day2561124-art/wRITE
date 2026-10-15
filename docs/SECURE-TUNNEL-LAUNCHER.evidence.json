@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "scope": "independent Launcher engineering",
+  "base_head": "97eb92da268e0ab48ba16fd1bb5c7eedcb156841",
+  "native_cli": "0.0.15+a390c168ff1b2d14e73a95991c186c6aba3ff5a0",
+  "live_acceptance": {
+    "startedAt": "2026-10-15T11:02:24.794Z",
+    "checks": {
+      "launcherExit": {
+        "pass": true,
+        "runtimePid": 31692
+      },
+      "powerShellExit": {
+        "pass": true,
+        "runtimePid": 31692
+      },
+      "reopenAndDuplicateStart": {
+        "pass": true
+      },
+      "stopDisablesRecovery": {
+        "pass": true
+      },
+      "restartAfterStop": {
+        "pass": true
+      },
+      "scheduledCrashRecovery": {
+        "pass": true,
+        "oldPid": 25084,
+        "newPid": 14276
+      },
+      "otherTransportsUnchanged": {
+        "pass": true
+      },
+      "loginRecoveryConfiguration": {
+        "pass": true,
+        "hidden": true,
+        "runLevel": "Limited",
+        "logonType": "Interactive",
+        "multipleInstances": "IgnoreNew",
+        "triggerCount": 2,
+        "actualLogin": "UNVERIFIED"
+      },
+      "scheduledMcpListenerSurvival": {
+        "pass": true,
+        "taskResult": 0
+      }
+    },
+    "failures": [],
+    "manualLogin": "UNVERIFIED",
+    "chatgptUi": "UNVERIFIED",
+    "finishedAt": "2026-10-15T11:04:46.283Z"
+  },
+  "credential_security": {
+    "credentialLeakScan": "PASS",
+    "checkedFiles": 256,
+    "dpapi": "CurrentUser",
+    "privateAcl": "PASS",
+    "taskArguments": "NO_SECRET",
+    "persistentKeyEnvironment": false
+  },
+  "focused": "PASS",
+  "launcher_windows_regression": "PASS",
+  "cloudflare_isolated_regression": "PASS",
+  "full_gate": "PENDING",
+  "formal_integration": "PENDING",
+  "push": "PENDING",
+  "actual_windows_login": "UNVERIFIED",
+  "chatgpt_ui": "UNVERIFIED",
+  "openai_connector_read": "PASS: dev_capability_list(git.status)",
+  "journal_gate": "controlled MCP/Pi scope; independent pre-commit path applies",
+  "journal_independent_issue": "dev_operation_a12dfc0e1a97496aa3b9f41451202510",
+  "source_sha256": {
+    "launcher.ps1": "a330106dedde5d6d8f60d93a1d7c407ad6fc724c18765a52cfddbdc5e9f6d53a",
+    "scripts/start-mcp-tailscale.ps1": "64cd32c1ad19b5a6d98621f862895af62d47eb77475da641ede18a647be0e468",
+    "tests/mcp-tunnel-launcher.test.mjs": "9fa01db4ba02476bd46bb2bff7b304ca3eca5a2f39d7c482b01c91c84e41f1b6",
+    "tests/secure-tunnel-live.test.mjs": "86249f740335ff2bb2e3528a31154eb371b6bbeabc682dd9b5d74d3ac81a0e37",
+    "scripts/manage-secure-tunnel.ps1": "19d43a9baa053331c1459afd7be7a9393e36c42cdc9c5d9570b6bc4786ff0e0a",
+    "docs/SECURE-TUNNEL-LAUNCHER.md": "ea889a202f5cfe4e08b9101ef71f3bffa399d543827af623703cfba856b3664c",
+    "tests/secure-tunnel-launcher.test.mjs": "398158a481ec10e44ed488b8e1f36d3a8831399946cb5a4b1af96d90f46151cf",
+    "scripts/set-secure-tunnel-credential.ps1": "2d3fb24bf55a6a09d7e6e7961cd08abe6a0d00565ca5bef4715308498c073bdd"
+  },
+  "raw_evidence_sha256": {
+    "outputs/secure-tunnel-security-evidence.json": "63e9b867189a7c17d8df92295025a0f3149ec9477a45809127eee06560ba9058",
+    "outputs/secure-tunnel-launcher-regression.log": "002e4ffc230ff65d7f44b560c7e17549725ab30112f4a451d8eadbe5bbf3f67e",
+    "outputs/secure-tunnel-cloudflare-isolated-regression.log": "b8adcd08be16e7adcb508e96deb35f1668e5d24bfc738778c8dc3ed3e3a77ca2",
+    "outputs/secure-tunnel-live-evidence.json": "bc286a230137dc47beac170fdd48644b7d0b37a8bfe7e8c1588af93be577530c"
+  }
+}

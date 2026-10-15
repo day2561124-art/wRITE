@@ -8,6 +8,12 @@
   [switch]$Status,
   [switch]$StartMcpTunnel,
   [switch]$McpTunnelStatus,
+  [switch]$StartMcpTailscale,
+  [switch]$McpTailscaleStatus,
+  [switch]$StartSecureTunnel,
+  [switch]$RestartSecureTunnel,
+  [switch]$SecureTunnelStatus,
+  [switch]$StopSecureTunnel,
   [switch]$NoOpen,
   [ValidateRange(1, 65535)]
   [int]$Port = 4173
@@ -310,13 +316,14 @@ function New-DesktopShortcut {
 
 
 function Invoke-McpTunnelLauncher {
-  param([string]$ScriptPath, [switch]$QueryStatus)
+  param([string]$ScriptPath, [switch]$QueryStatus, [string[]]$ExtraArguments = @())
   New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
   $stamp = [Guid]::NewGuid().ToString("N")
   $out = Join-Path $LogDir "mcp-launcher.$stamp.stdout.log"
   $err = Join-Path $LogDir "mcp-launcher.$stamp.stderr.log"
   $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$ScriptPath`"")
   if ($QueryStatus) { $arguments += "-Status" }
+  $arguments += $ExtraArguments
   $runner = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments `
     -WorkingDirectory $Root -WindowStyle Hidden `
     -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
@@ -352,11 +359,75 @@ function Show-McpTunnelStatus {
   return (Invoke-McpTunnelLauncher $script -QueryStatus)
 }
 
+function Start-McpTailscale {
+  $script = Join-Path $Root "scripts\start-mcp-tailscale.ps1"
+  if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    Write-Host "MCP Tailscale script was not found: $script" -ForegroundColor Red
+    return $false
+  }
+
+  return (Invoke-McpTunnelLauncher $script)
+}
+
+function Show-McpTailscaleStatus {
+  $script = Join-Path $Root "scripts\start-mcp-tailscale.ps1"
+  if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    Write-Host "MCP Tailscale script was not found: $script" -ForegroundColor Red
+    return $false
+  }
+
+  return (Invoke-McpTunnelLauncher $script -QueryStatus)
+}
+
+function Show-CloudflareBackupQuickStatus {
+  $statePath = Join-Path $LogDir "cloudflared-tunnel.state.json"
+  $state = $null
+  if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+    try { $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } catch { $state = $null }
+  }
+
+  $process = $null
+  if ($state -and $state.pid) {
+    $candidate = Get-Process -Id ([int]$state.pid) -ErrorAction SilentlyContinue
+    if ($candidate -and $candidate.ProcessName -eq "cloudflared") { $process = $candidate }
+  }
+  if (-not $process) {
+    $process = Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object -First 1
+  }
+
+  Write-Host "Cloudflare process: $(if ($process) { "running (PID $($process.Id))" } else { "stopped" })"
+  if ($state -and $state.mode) { Write-Host "Tunnel mode: $($state.mode)" }
+  if ($state -and $state.mcpUrl) {
+    Write-Host "Backup MCP URL:"
+    Write-Host ([string]$state.mcpUrl) -ForegroundColor DarkCyan
+  }
+  Write-Host "Backup validation: on demand (option 8)" -ForegroundColor DarkGray
+  return [bool]$process
+}
+
+function Invoke-SecureTunnelLauncher {
+  param([string]$Action = "Status", [switch]$ProbeSession)
+  $script = Join-Path $Root "scripts\manage-secure-tunnel.ps1"
+  if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    Write-Host "Secure Tunnel manager was not found." -ForegroundColor Yellow
+    return $false
+  }
+  $extra = @("-Action", $Action)
+  if ($ProbeSession) { $extra += "-ProbeSession" }
+  return (Invoke-McpTunnelLauncher $script -ExtraArguments $extra)
+}
+
 function Show-AllStatus {
   $uiRunning = Show-Status
   Write-Host ""
-  Write-Host "MCP / Cloudflare tunnel:"
-  Show-McpTunnelStatus | Out-Null
+  Write-Host "MCP / Tailscale Funnel (primary):"
+  Show-McpTailscaleStatus | Out-Null
+  Write-Host ""
+  Write-Host "Cloudflare Quick Tunnel (backup):"
+  Show-CloudflareBackupQuickStatus | Out-Null
+  Write-Host ""
+  Write-Host "Writer Workbench Secure Tunnel:"
+  Invoke-SecureTunnelLauncher | Out-Null
   return $uiRunning
 }
 
@@ -371,7 +442,11 @@ function Show-Menu {
     Write-Host "  4. Run full validation"
     Write-Host "  5. Create desktop shortcut"
     Write-Host "  6. Stop UI"
-    Write-Host "  7. Start MCP + Cloudflare tunnel"
+    Write-Host "  7. Start MCP + Tailscale Funnel (primary)"
+    Write-Host "  8. Start / restart Cloudflare Quick Tunnel (backup)"
+    Write-Host "  9. Start / Restart Writer Workbench Secure Tunnel"
+    Write-Host "  10. Show Writer Workbench Secure Tunnel Status"
+    Write-Host "  11. Stop Writer Workbench Secure Tunnel"
     Write-Host "  0. Exit"
     Write-Host ""
     $choice = Read-Host "Choose"
@@ -384,7 +459,11 @@ function Show-Menu {
       "4" { Run-Validation | Out-Null }
       "5" { New-DesktopShortcut | Out-Null }
       "6" { Stop-Workbench | Out-Null }
-      "7" { Start-McpTunnel }
+      "7" { Start-McpTailscale }
+      "8" { Start-McpTunnel }
+      "9" { Invoke-SecureTunnelLauncher -Action "Restart" | Out-Null }
+      "10" { Invoke-SecureTunnelLauncher -ProbeSession | Out-Null }
+      "11" { Invoke-SecureTunnelLauncher -Action "Stop" | Out-Null }
       "0" { return }
       default { Write-Host "Unknown option." -ForegroundColor Yellow }
     }
@@ -403,6 +482,12 @@ try {
   if ($CreateShortcut) { if (New-DesktopShortcut) { exit 0 } else { exit 1 } }
   if ($StartMcpTunnel) { if (Start-McpTunnel) { exit 0 } else { exit 1 } }
   if ($McpTunnelStatus) { if (Show-McpTunnelStatus) { exit 0 } else { exit 1 } }
+  if ($StartMcpTailscale) { if (Start-McpTailscale) { exit 0 } else { exit 1 } }
+  if ($McpTailscaleStatus) { if (Show-McpTailscaleStatus) { exit 0 } else { exit 1 } }
+  if ($StartSecureTunnel) { if (Invoke-SecureTunnelLauncher -Action "Start") { exit 0 } else { exit 1 } }
+  if ($RestartSecureTunnel) { if (Invoke-SecureTunnelLauncher -Action "Restart") { exit 0 } else { exit 1 } }
+  if ($SecureTunnelStatus) { if (Invoke-SecureTunnelLauncher -ProbeSession) { exit 0 } else { exit 1 } }
+  if ($StopSecureTunnel) { if (Invoke-SecureTunnelLauncher -Action "Stop") { exit 0 } else { exit 1 } }
   if ($Status) { if (Show-AllStatus) { exit 0 } else { exit 1 } }
 
   Show-Menu

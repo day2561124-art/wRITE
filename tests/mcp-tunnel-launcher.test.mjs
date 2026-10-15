@@ -16,6 +16,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { terminateProcessTree } from "../server/src/process-control.mjs";
 
+// Keep Secure Tunnel coverage in the existing focused tunnel/full gate entry.
+await import('./secure-tunnel-launcher.test.mjs');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
