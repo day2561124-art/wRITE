@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "scope": "Launcher Windows login recovery only",
+  "acceptance_state": "AWAITING_ACTUAL_WINDOWS_LOGIN; NOT SEALED",
+  "focused": {
+    "result": "PASS",
+    "coverage": [
+      "GUI subsystem and console absence",
+      "Listener no-console and parent-exit survival",
+      "DPAPI roundtrip and duplicate prevention",
+      "Inherited pipes and exit-code propagation"
+    ],
+    "command": "node tests/mcp-tunnel-launcher.test.mjs"
+  },
+  "formal_gate": {
+    "result": "PASS",
+    "duration": "46m 34.8s",
+    "completed_steps": 684,
+    "raw_sha256": "6f7defc3646235c9b8726a2763d865c1c8d00ceef485e6a1218afcededda05c2",
+    "command": "scripts/pre-commit-check.ps1"
+  },
+  "windows_scheduler": {
+    "observer_self_test": "PASS",
+    "visible_console_events": 0,
+    "listener_survival_and_pid_reuse": "PASS",
+    "credentials_and_identity_preserved": "PASS",
+    "runtime_recovery": "PASS"
+  },
+  "security": {
+    "private_acl": "PASS",
+    "persistent_key_environment": false,
+    "credential_leak_scan": "PASS"
+  },
+  "remote_mcp": {
+    "read": "PASS",
+    "native_relay_activity": "CONFIRMED"
+  },
+  "actual_login_negative_test": "PASS: current session rejected; acceptance task disabled itself",
+  "actual_windows_login": "UNVERIFIED: operator will sign out/sign in later",
+  "production_recovery": "DISABLED; validation hold retained",
+  "pi_canon_scope": "No Pi/Canon source changes; shared Listener and worker retained",
+  "raw_evidence": "Retained locally under ignored outputs/; not published",
+  "source_sha256": {
+    "docs/SECURE-TUNNEL-LAUNCHER.md": "efbe7e9e7238470cf2243ab8fc11fbfa97af3d18f68a8b148e1728fc553e36ec",
+    "scripts/manage-secure-tunnel.ps1": "61abe0064785260599c21a63d4698309ccbad9f1f9f3c0197a5d7be488c846ac",
+    "scripts/secure-tunnel-recovery-host.cs": "ac2262555967253ae1a019d04ae1fcad00c1196a83ee2c7e1a54acf2e636683f",
+    "scripts/start-headless-mcp.mjs": "bec8aa5d663edceefe78cf731241241112bce7a2714bbdb76822f4bf4689d6f6",
+    "scripts/start-mcp-tailscale.ps1": "d8d3e97afaf83046887a5f1cab5464bbd8891ae0e5709289dcae98b57917efd2",
+    "tests/secure-tunnel-headless.test.mjs": "8617657ee4ed9e3c3977e8457e2e7ac35acdc5b5b4eaac16a8bcbddae19c1252",
+    "tests/secure-tunnel-launcher.test.mjs": "738362ad046ab34f81a2e68e3c546e1133b5a69ba5621a272985384d2ef2eb6c",
+    "tests/secure-tunnel-live.test.mjs": "db5225d5c7b0b48f988a96e5dc359c528416df63e9d22adccaf75dcfeea373ac",
+    "tests/secure-tunnel-recovery-windows.ps1": "437371aecfef09ef0abc6a7785895508b6057fe6819fcdf8971e394fd2c6ec6e",
+    "tests/secure-tunnel-window-observer.cs": "d3ded0cc01fd5e3898404fae504663d2aa245c1ba9e8f7463aab9a59e775b919",
+    "launcher.ps1": "a330106dedde5d6d8f60d93a1d7c407ad6fc724c18765a52cfddbdc5e9f6d53a",
+    "scripts/set-secure-tunnel-credential.ps1": "52be0aba2e8d97e133f7e7f4f376a1f22c3d9e0f917bb88593c43910001afcef"
+  }
+}

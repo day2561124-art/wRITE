@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Start','Restart','Status','Stop','Reconcile','Uninstall')]
+  [ValidateSet('Start','Restart','Status','Stop','Reconcile','Uninstall','RepairRecovery')]
   [string]$Action = 'Status',
   [switch]$Json,
   [switch]$ProbeSession,
@@ -14,6 +14,7 @@ $TaskName = 'ArmedAcademy.WriterWorkbench.SecureTunnel'
 $ConfigPath = Join-Path $DataDirectory 'launcher.json'
 $DesiredPath = Join-Path $DataDirectory 'enabled'
 $CredentialPath = Join-Path $DataDirectory 'runtime-key.dpapi'
+$RecoveryHoldPath = Join-Path $DataDirectory 'recovery-validation-pending'
 $KeyVariable = 'WRITER_WORKBENCH_TUNNEL_API_KEY'
 
 function Invoke-Native {
@@ -197,14 +198,33 @@ function Get-Diagnostics {
   }
 }
 
+function Ensure-RecoveryHost {
+  Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+  $source = Join-Path $Root 'scripts\secure-tunnel-recovery-host.cs'
+  $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+  $hostPath = Join-Path $DataDirectory ("recovery-host-$hash.exe")
+  if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
+    # Windows PowerShell's inbox .NET Framework compiler; no SDK/service/WSH.
+    Add-Type -Path $source -OutputAssembly $hostPath -OutputType WindowsApplication -ErrorAction Stop
+  }
+  return $hostPath
+}
+
 function Register-RecoveryTask {
+  param([switch]$KeepDisabled)
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ManagerPath + '" -Action Reconcile -DataDirectory "' + $DataDirectory + '"'
-  $taskAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments -WorkingDirectory $Root
+  $hostPath = Ensure-RecoveryHost
+  foreach ($value in @($ManagerPath,$DataDirectory)) {
+    if ($value -match '["\r\n\x00]' -or $value.EndsWith('\')) { throw 'UNSAFE_RECOVERY_ARGUMENT' }
+  }
+  $arguments = '"' + $ManagerPath + '" "' + $DataDirectory + '"'
+  $taskAction = New-ScheduledTaskAction -Execute $hostPath -Argument $arguments -WorkingDirectory $Root
   $login = New-ScheduledTaskTrigger -AtLogOn -User $sid
   $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
   $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet -Hidden -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+  # Disabled at registration, never an enable-then-disable race during migration.
+  if ($KeepDisabled -or (Test-Path -LiteralPath $RecoveryHoldPath)) { $settings.Enabled = $false }
   $null = Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger @($login,$periodic) -Principal $principal -Settings $settings -Description 'Restore only the existing Writer Workbench Secure Tunnel; native tunnel-client owns Runtime processes.' -Force
 }
 
@@ -266,6 +286,11 @@ function Invoke-ManagedAction {
     try { $held = $mutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $held = $true }
     if (-not $held) { throw 'SECURE_TUNNEL_OPERATION_BUSY' }
     if ($Action -eq 'Reconcile' -and -not (Test-Path -LiteralPath $DesiredPath)) { return [pscustomobject]@{ skipped = $true; ready = $false } }
+    if ($Action -eq 'RepairRecovery') {
+      [IO.File]::WriteAllText($RecoveryHoldPath, 'Awaiting verified Windows login recovery; keep task disabled.')
+      Register-RecoveryTask -KeepDisabled
+      return [pscustomobject]@{ repaired = $true; loginRecovery = 'DISABLED'; ready = $false }
+    }
     $runtime = Get-Runtime
     if ($Action -in @('Stop','Uninstall')) {
       # Disable intent before stop, so a periodic invocation cannot resurrect it.
@@ -323,7 +348,7 @@ try {
   $diagnostics = Invoke-ManagedAction
   if ($Json) { $diagnostics | ConvertTo-Json -Compress }
   else { $diagnostics | Format-List | Out-Host }
-  if ($Action -in @('Stop','Uninstall','Reconcile')) { exit 0 }
+  if ($Action -in @('Stop','Uninstall','Reconcile','RepairRecovery')) { exit 0 }
   if ($diagnostics.ready) { exit 0 } else { exit 1 }
 } catch {
   # Fixed error classes only. No raw exception, native log, key or HTTP body.

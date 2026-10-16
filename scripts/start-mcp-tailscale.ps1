@@ -252,10 +252,33 @@ function Ensure-McpServer {
 
   try {
     $env:MCP_TOOL_PROFILE = $effectiveMcpToolProfile
+    if ($ListenerOnly) {
+      $start = New-Object Diagnostics.ProcessStartInfo
+      $start.FileName = $node.Source
+      $start.Arguments = '"' + (Join-Path $Root 'scripts\start-headless-mcp.mjs') + '" "' + $mcpScript + '" "' + (Join-Path $Root 'config\mcp-http.example.json') + '" ' + $McpPort + ' "' + $mcpOut + '" "' + $mcpErr + '"'
+      $start.WorkingDirectory = $Root
+      $start.UseShellExecute = $false
+      $start.CreateNoWindow = $true
+      $start.RedirectStandardOutput = $true
+      $start.RedirectStandardError = $true
+      $helper = New-Object Diagnostics.Process
+      $helper.StartInfo = $start
+      try {
+        $null = $helper.Start()
+        $output = $helper.StandardOutput.ReadToEndAsync()
+        $errors = $helper.StandardError.ReadToEndAsync()
+        if (-not $helper.WaitForExit(10000)) { $helper.Kill(); throw 'HEADLESS_MCP_START_TIMEOUT' }
+        $listenerPid = $output.GetAwaiter().GetResult()
+        $null = $errors.GetAwaiter().GetResult()
+        if ($helper.ExitCode -ne 0 -or $listenerPid -notmatch '^\d+$') { throw 'HEADLESS_MCP_START_FAILED' }
+        $mcpProcess = Get-Process -Id ([int]$listenerPid) -ErrorAction Stop
+      } finally { $helper.Dispose() }
+    } else {
     $mcpProcess = Start-Process -FilePath $node.Source `
       -ArgumentList @("`"$mcpScript`"", "--config", "`"$(Join-Path $Root 'config\mcp-http.example.json')`"", "--port", [string]$McpPort) `
       -WorkingDirectory $Root -WindowStyle Hidden `
       -RedirectStandardOutput $mcpOut -RedirectStandardError $mcpErr -PassThru
+    }
   } finally {
     if ($null -eq $originalMcpToolProfile) { Remove-Item Env:\MCP_TOOL_PROFILE -ErrorAction SilentlyContinue }
     else { $env:MCP_TOOL_PROFILE = $originalMcpToolProfile }

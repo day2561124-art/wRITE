@@ -48,6 +48,7 @@ $TaskName='fixture-task'
 $ConfigPath=Join-Path $DataDirectory 'launcher.json'
 $DesiredPath=Join-Path $DataDirectory 'enabled'
 $CredentialPath=Join-Path $DataDirectory 'fixture.dpapi'
+$RecoveryHoldPath=Join-Path $DataDirectory 'recovery-validation-pending'
 $KeyVariable='SECURE_TUNNEL_FIXTURE_KEY'
 $script:Config=[pscustomobject]@{root=$Root;alias=$Alias;client='fixture.exe';tunnelId='tunnel_00000000000000000000000000000000';mcpUrl='http://127.0.0.1:1/mcp';profileDirectory=$DataDirectory}
 
@@ -66,6 +67,7 @@ Assert ([Environment]::GetEnvironmentVariable($KeyVariable,'Process') -eq 'prior
 # Recovery registration uses the current interactive user and limited privilege.
 $script:registered=$null
 function New-ScheduledTaskAction {param($Execute,$Argument,$WorkingDirectory) return @{arguments=$Argument}}
+function Ensure-RecoveryHost {return 'fixture-headless.exe'}
 function New-ScheduledTaskTrigger {param([switch]$AtLogOn,$User,[switch]$Once,$At,$RepetitionInterval) return @{login=[bool]$AtLogOn;interval=$RepetitionInterval}}
 function New-ScheduledTaskPrincipal {param($UserId,$LogonType,$RunLevel) return @{logon=$LogonType;level=$RunLevel}}
 function New-ScheduledTaskSettingsSet {param([switch]$Hidden,$MultipleInstances,[switch]$StartWhenAvailable,[switch]$AllowStartIfOnBatteries,[switch]$DontStopIfGoingOnBatteries,$ExecutionTimeLimit,$RestartCount,$RestartInterval) return @{hidden=[bool]$Hidden;instances=$MultipleInstances;restart=$RestartCount}}
@@ -74,7 +76,13 @@ Register-RecoveryTask
 Assert ($script:registered.principal.level -eq 'Limited' -and $script:registered.principal.logon -eq 'Interactive') 'No elevation or password storage'
 Assert ($script:registered.settings.hidden -and $script:registered.settings.instances -eq 'IgnoreNew') 'Hidden single task instance'
 Assert ($script:registered.triggers[0].login -and $script:registered.triggers[1].interval.TotalMinutes -eq 1) 'Login plus periodic recovery'
-Assert ($script:registered.action.arguments.Contains('-Action Reconcile') -and -not $script:registered.action.arguments.Contains('fixture-only')) 'Task arguments contain no credential'
+Assert ($script:registered.action.arguments.Contains($ManagerPath) -and -not $script:registered.action.arguments.Contains('fixture-only')) 'Task arguments contain paths only'
+Register-RecoveryTask -KeepDisabled
+Assert ($script:registered.settings.Enabled -eq $false) 'Repair registers disabled without enabling briefly'
+Set-Content $RecoveryHoldPath 'pending acceptance'
+Register-RecoveryTask
+Assert ($script:registered.settings.Enabled -eq $false) 'Launcher cannot bypass the patch acceptance hold'
+Remove-Item $RecoveryHoldPath
 
 # Native connect gets the existing ID and an environment REFERENCE only.
 function Get-CimInstance {param($ClassName,$Filter,$ErrorAction) return @()}
@@ -163,3 +171,4 @@ Write-Output 'Secure Tunnel behavioral tests passed (status, identity, start, du
     console.log(result.stdout.trim());
   } finally { await rm(temp, { recursive: true, force: true }); }
 }
+await import('./secure-tunnel-headless.test.mjs');

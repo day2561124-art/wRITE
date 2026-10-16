@@ -29,6 +29,92 @@ and `RestartSecureTunnel` explicitly restart the exact verified alias.
 
 ## Native lifecycle and recovery
 
+### Windows console-free recovery patch (2026-10-16)
+
+The scheduler action now runs a .NET Framework **WindowsApplication** executable
+instead of `powershell.exe`. `Ensure-RecoveryHost` builds the small, source-hashed
+`secure-tunnel-recovery-host.cs` into the existing private LocalAppData directory
+using Windows PowerShell's inbox compiler. No SDK, Windows password, new service,
+or script-host dependency is required. Both this GUI entry point and its child
+manager use console-free process creation (`UseShellExecute=false`,
+`CreateNoWindow=true`); `-WindowStyle Hidden` is not the scheduler boundary.
+The entry point waits for the manager's exit code, drains/discards output, and
+does not wait indefinitely for pipes inherited by a detached Runtime.
+
+The MCP-only starter also uses console-free process creation. Its short Node
+helper launches a detached Listener with `windowsHide=true` and independent
+log file descriptors, then exits. The existing port/owner/repository identity
+checks and no-restart rule still apply. Existing menu options and native Tunnel,
+Profile, API key, DPAPI CurrentUser, private ACLs, and mutex ownership are retained.
+
+Mechanisms evaluated against Microsoft documentation:
+
+| Mechanism | Decision |
+| --- | --- |
+| Existing interactive Task Scheduler + GUI entry point | Selected: retains current user DPAPI/network access and existing retry/overlap policy |
+| S4U task | Rejected: documented network/encrypted-file restrictions |
+| Password-backed task or Windows service | Requires account/password or service lifecycle management for this per-user logon requirement |
+| WScript/VBScript wrapper | Avoids a console but adds a deprecated VBScript dependency |
+| Startup folder / Run key | Does not retain the existing periodic recovery and task exit diagnostics |
+
+Sources: [Task logon types](https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_logon_type),
+[CreateNoWindow](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.createnowindow),
+[compiler output type](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/output),
+[Windows deprecated features](https://learn.microsoft.com/en-us/windows/whats-new/deprecated-features).
+
+Safe migration of the currently disabled task:
+
+```powershell
+.\scripts\manage-secure-tunnel.ps1 -Action RepairRecovery -Json
+.\tests\secure-tunnel-recovery-windows.ps1 -Mode Scheduled
+```
+
+Repair registers the task **disabled** atomically and creates the private
+`recovery-validation-pending` hold. Even Start/Restart from the existing menu
+retains disabled recovery while this hold exists. Repair does not change intent,
+credentials, configuration, or stop the shared Listener/Pi worker.
+
+The explicit Windows test uses temporary real scheduler tasks, stops/reconnects
+only the verified native alias, checks unchanged Runtime PID on repeated
+reconciliation, starts a fresh Listener on a free isolated port, verifies its
+survival/PID reuse, and records WinEvent console SHOW events. The observer first
+proves actual event delivery using a hidden control and synthetic notification;
+this self-test displays no window. It checks unchanged
+configuration and encrypted credential bytes and leaves production disabled.
+Its fresh Listener uses isolated Journal/checkpoint/transaction stores.
+
+After focused checks and the formal Gate, arm actual logon acceptance:
+
+```powershell
+.\tests\secure-tunnel-recovery-windows.ps1 -Mode ArmLogin
+# Sign out/sign in, or reboot/sign in when ongoing work can be interrupted.
+# Only after reviewing the actual-login receipt and completed Git/remote checks:
+.\tests\secure-tunnel-recovery-windows.ps1 -Mode Complete
+```
+
+Arming creates a separate temporary acceptance task; production remains disabled.
+The acceptance verifies the process token's actual interactive logon session began
+after arming, matches source hashes, performs the same real recovery/window tests,
+saves `%LOCALAPPDATA%\ArmedAcademy\SecureTunnel\login-recovery-acceptance.json`,
+and disables itself. Manually running a task in the current session cannot pass
+the fresh-logon condition. Complete refuses a missing/failed/stale/source-mismatched
+receipt, checks current health and the accepted host, then removes the hold,
+enables production recovery, and removes the temporary acceptance task.
+No code forces sign-out/reboot or claims actual login from manual task invocation.
+
+Default regression coverage includes a real GUI-subsystem PE check,
+`GetConsoleWindow()==0` in the launched PowerShell, argument fidelity, exit-code
+propagation, flooded stdout/stderr, and detached descendants retaining pipe
+handles. The actual detached Listener helper is also checked with Win32
+`AttachConsole`: after releasing the probe's own console association, the
+Listener returns `ERROR_INVALID_HANDLE` (no console), and survives helper exit.
+The old live test refuses to run while production recovery is disabled.
+
+Local full MCP session readiness can independently fail (for example a timed-out
+readiness resource on a running developer Listener). Launcher acceptance records
+Runtime health and Listener identity and does not repair or restart that shared
+Pi/Journal state. A local task test cannot certify a remote connector call.
+
 The installed and acceptance-tested CLI is `tunnel-client 0.0.15`, build
 `a390c168ff1b2d14e73a95991c186c6aba3ff5a0`. Its own `runtimes connect`,
 `runtimes status`, and `runtimes stop` commands manage the detached Runtime.

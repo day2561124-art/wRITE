@@ -18,6 +18,8 @@ const ps = command => {
   return r.stdout.trim();
 };
 const native = () => JSON.parse(ps('tunnel-client runtimes status writer-workbench --json 2>$null'));
+assert.notEqual(ps("[string](Get-ScheduledTask -TaskName ArmedAcademy.WriterWorkbench.SecureTunnel).State"), 'Disabled',
+  'Production recovery is disabled. Use secure-tunnel-recovery-windows.ps1 for patch acceptance; this legacy test enables production recovery.');
 const quote = value => `'${value.replaceAll("'", "''")}'`;
 const launcher = path.join(root, 'launcher.ps1');
 const invoke = flag => ps(`& ${quote(launcher)} -${flag}; exit $LASTEXITCODE`);
