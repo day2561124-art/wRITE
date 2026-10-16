@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "state": "IN_PROGRESS; NOT SEALED",
+  "workstream_id": "dev_workstream_20261016-165713_c58421d08e4e",
+  "workspace_id": "dev_workspace_d4a9a94e07dd4aacbf1df415",
+  "branch": "dev-ws/d4a9a94e07dd4aacbf1df415",
+  "admission_main_and_authoritative_remote": "691afed1768b0f65161c1cf1b8fe9802a510ef56",
+  "preserved_login_commit": "137fbe1e791db98257d01e78e32593ed58b63d5f",
+  "bootstrap_operation": "pi_operation_7256c7aa6675493ea28a43fd787fc9a0",
+  "bootstrap_result": "COMPLETED",
+  "production_before": {
+    "listener_pid": 17012,
+    "worker_pid": 17324,
+    "sessions": 2,
+    "tools_per_session": 107,
+    "new_visible_terminal_events": 2,
+    "listener_identity_preserved": true
+  },
+  "regression_before": "FAIL: windowsHide undefined",
+  "regression_after": "PASS",
+  "patched_windows_acceptance": {
+    "result": "PASS",
+    "observer_self_test": "PASS",
+    "new_visible_terminal_events": 0,
+    "public_tools_per_session": 40,
+    "concurrent_readonly_calls": 4,
+    "reload": "PASS",
+    "child_exit_recovery_generation": 3,
+    "stdout_stderr_ipc": "PASS",
+    "other_session_pid_preserved": true,
+    "owned_processes_drained": true
+  },
+  "unpatched_independent_parent": "0 events; not sufficient as causal proof",
+  "formal_gate": {
+    "suite": "all",
+    "physical_result": "PASS_STABLE",
+    "duration_ms": 2054659,
+    "exit_code": 0,
+    "workspace_snapshot_id": "1ba568273b696de6938b532a5482d690d77c213868350d3422d78de40bcf4bcd",
+    "manifest_sha256": "3deb1fcd35a25cf42e864d738bc4689ad25b2296d92232451df1b1d6d2434a0a",
+    "pi_operation": "pi_operation_c0d4e35872fe4beda3aad47e94376dae",
+    "pi_status": "DECISION_REQUIRED",
+    "pi_reason": "VALIDATION_EVIDENCE_REQUIRED",
+    "engineering_review": "Actual test_evidence completed with passed=true, matching last-run manifest; no retry or mutation of old Pi record; next actions require separate exact candidate gate"
+  },
+  "production_activation": "PENDING",
+  "integration_push_remote_verification": "PENDING",
+  "actual_windows_login": "UNVERIFIED",
+  "production_recovery_task": "DISABLED",
+  "acceptance_recovery_task": "DISABLED",
+  "raw_evidence": "outputs/mcp-console-repair-20261017/ (ignored, local)",
+  "next_action": "Finish focused suites; checkpoint; one final formal gate; exact candidate integration and remote verification; controlled listener acceptance; then actual-login acceptance",
+  "causal_detached_parent_ab": {
+    "baseline_file": "detached-before.windows.json",
+    "both_functional_pass": true,
+    "before_events": 4,
+    "patched_file": "detached-after.windows.json",
+    "after_events": 0
+  },
+  "latest_operator_report": "Persistent Node terminal windows; more than ten simultaneously; primary production blocker",
+  "native_window_attribution": {
+    "current_openconsole_owned": 3,
+    "live_mcp_session_nodes": 7,
+    "raw": "visible-window-attribution.json",
+    "node_title_hwnds": 10,
+    "historical_dead_client_ids": "UNRESOLVED; no invented attribution",
+    "live_node_parent": 17012
+  },
+  "immutable_checkpoint_id": "dev_checkpoint_a4a584e6d60c499299c931067feb50e5"
+}

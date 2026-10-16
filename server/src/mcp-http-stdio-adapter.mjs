@@ -443,6 +443,8 @@ export function createStdioSession(options = {}) {
     const nextChild = spawnProcess(process.execPath, ['server/src/mcp-server.mjs'], {
       // fd 3 is Node's internal IPC channel for the world-simulation prepared-turn
       // broker. stdout remains exclusively MCP JSON-RPC framing.
+      // Session startup, reload and recovery are background operations on Windows.
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
         ...process.env,

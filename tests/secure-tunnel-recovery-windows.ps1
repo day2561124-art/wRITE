@@ -36,10 +36,43 @@ function Invoke-HiddenPowerShell([string]$arguments) {
 }
 function Get-RecoveryHashes {
   $hashes = [ordered]@{}
-  foreach ($name in @('scripts/manage-secure-tunnel.ps1','scripts/secure-tunnel-recovery-host.cs','scripts/start-headless-mcp.mjs','scripts/start-mcp-tailscale.ps1','tests/secure-tunnel-recovery-windows.ps1','tests/secure-tunnel-window-observer.cs')) {
+  foreach ($name in @('scripts/manage-secure-tunnel.ps1','scripts/secure-tunnel-recovery-host.cs','scripts/start-headless-mcp.mjs','scripts/start-mcp-tailscale.ps1','tests/secure-tunnel-recovery-windows.ps1','tests/secure-tunnel-window-observer.cs','server/src/mcp-http-server.mjs','server/src/mcp-http-identity.mjs','server/src/mcp-http-sse-keepalive.mjs','server/src/mcp-http-stdio-adapter.mjs','server/src/mcp-server.mjs','server/src/mcp-runtime-readiness.mjs','package-lock.json')) {
     $hashes[$name] = (Get-FileHash -LiteralPath (Join-Path $Root $name)).Hash
   }
   return $hashes
+}
+
+function Get-LoginIdentity {
+  return [pscustomobject]@{
+    launcherSha256=(Get-FileHash -LiteralPath (Join-Path $private 'launcher.json') -Algorithm SHA256).Hash
+    credentialSha256=(Get-FileHash -LiteralPath (Join-Path $private 'runtime-key.dpapi') -Algorithm SHA256).Hash
+  }
+}
+function Assert-LoginIdentity($expected) {
+  Assert ($expected -and $expected.launcherSha256 -match '^[A-Fa-f0-9]{64}$' -and $expected.credentialSha256 -match '^[A-Fa-f0-9]{64}$') 'ARMED_IDENTITY_REQUIRED'
+  $current=Get-LoginIdentity
+  Assert ($current.launcherSha256 -eq $expected.launcherSha256) 'ARMED_CONFIGURATION_CHANGED'
+  Assert ($current.credentialSha256 -eq $expected.credentialSha256) 'ARMED_CREDENTIAL_CHANGED'
+}
+function Invoke-McpSessionProbe([int]$probePort) {
+  $start=New-Object Diagnostics.ProcessStartInfo
+  $start.FileName=(Get-Command node.exe -ErrorAction Stop).Source
+  $start.Arguments='"'+(Join-Path $Root 'scripts\probe-mcp.mjs')+'" "http://127.0.0.1:'+$probePort+'/mcp" probe'
+  $start.WorkingDirectory=$Root
+  $start.UseShellExecute=$false; $start.CreateNoWindow=$true
+  $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+  $child=New-Object Diagnostics.Process
+  $child.StartInfo=$start
+  try {
+    $null=$child.Start()
+    $out=$child.StandardOutput.ReadToEndAsync(); $err=$child.StandardError.ReadToEndAsync()
+    if(-not $child.WaitForExit(65000)){ $child.Kill(); throw 'MCP_LOGIN_PROBE_TIMEOUT' }
+    $raw=$out.GetAwaiter().GetResult(); $null=$err.GetAwaiter().GetResult()
+    Assert ($child.ExitCode -eq 0) 'MCP_LOGIN_PROBE_FAILED'
+    $result=$raw | ConvertFrom-Json
+    Assert ($result.current -and $result.ok -and $result.ready -and $result.runtimeReadiness -eq 'ready' -and $result.toolCount -gt 0) 'MCP_LOGIN_SESSION_NOT_READY'
+    return $result
+  } finally { $child.Dispose() }
 }
 if ($Mode -eq 'Complete') {
   $receipt = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
@@ -49,6 +82,8 @@ if ($Mode -eq 'Complete') {
   foreach ($name in (Get-RecoveryHashes).Keys) {
     Assert ((Get-RecoveryHashes)[$name] -eq $receipt.hashes.$name -and $receipt.hashes.$name -eq $armed.hashes.$name) 'ACCEPTED_SOURCE_CHANGED'
   }
+  Assert-LoginIdentity $armed.identity
+  Assert ($receipt.identity.launcherSha256 -eq $armed.identity.launcherSha256 -and $receipt.identity.credentialSha256 -eq $armed.identity.credentialSha256) 'LOGIN_IDENTITY_RECEIPT_MISMATCH'
   $task = Get-ScheduledTask -TaskName $productionName
   $expectedHost = 'recovery-host-' + ((Get-RecoveryHashes)['scripts/secure-tunnel-recovery-host.cs']).ToLowerInvariant() + '.exe'
   Assert ((Split-Path -Leaf $task.Actions.Execute) -eq $expectedHost) 'ACCEPTED_TASK_HOST_CHANGED'
@@ -76,7 +111,7 @@ if ($Mode -eq 'ArmLogin') {
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $sid
   $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet -Hidden -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 3)
-  @{armedAt=[DateTime]::UtcNow.ToString('o');hashes=Get-RecoveryHashes} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $armPath -Encoding UTF8
+  @{armedAt=[DateTime]::UtcNow.ToString('o');hashes=Get-RecoveryHashes;identity=Get-LoginIdentity} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $armPath -Encoding UTF8
   $null = Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings -Force
   Write-Output 'ARMED: next actual Windows login; production task remains DISABLED.'
   exit 0
@@ -104,6 +139,7 @@ public class AcceptanceLogon {
     $session = Get-CimInstance Win32_LogonSession -Filter ("LogonId='$logonId'")
     Assert ($session -and $session.LogonType -in @(2,10,11) -and $session.StartTime.ToUniversalTime() -gt [DateTime]::Parse($armed.armedAt).ToUniversalTime()) 'FRESH_INTERACTIVE_LOGIN_REQUIRED'
     foreach ($name in $evidence.hashes.Keys) { Assert ($evidence.hashes[$name] -eq $armed.hashes.$name) 'ARMED_SOURCE_CHANGED' }
+    Assert-LoginIdentity $armed.identity
     $evidence.actualLogin = 'PASS'
     $evidence.logonStartedAt = $session.StartTime.ToUniversalTime().ToString('o')
   }
@@ -111,6 +147,7 @@ public class AcceptanceLogon {
   [SecureTunnelWindowObserver]::VerifyHook()
   $evidence.windowObserverSelfTest = 'PASS'
   $observer = New-Object SecureTunnelWindowObserver
+  $evidence.identity=Get-LoginIdentity
   $before = Get-Content -LiteralPath (Join-Path $private 'launcher.json') -Raw
   $credentialBefore = (Get-FileHash -LiteralPath (Join-Path $private 'runtime-key.dpapi')).Hash
   # Exercise the registered GUI action through the real scheduler, while keeping
@@ -178,6 +215,11 @@ exit `$LASTEXITCODE
   if (-not $listenerPid) { $listenerPid = (Get-NetTCPConnection -State Listen -LocalPort $port).OwningProcess }
   Run-FixtureTask
   Assert ((Get-NetTCPConnection -State Listen -LocalPort $port).OwningProcess -eq $listenerPid) 'DUPLICATE_LISTENER'
+  $sessionProbe=Invoke-McpSessionProbe $port
+  Assert ($sessionProbe.pid -eq $listenerPid -and $sessionProbe.toolCount -eq 40) 'FRESH_LISTENER_SESSION_IDENTITY_CHANGED'
+  $secondProbe=Invoke-McpSessionProbe $port
+  Assert ($secondProbe.pid -eq $listenerPid -and $secondProbe.toolCount -eq 40) 'FRESH_LISTENER_SESSION_DUPLICATE'
+  $evidence.freshMcpSessions='PASS: initialize, tools/list, resources/list, ready and ping twice'
   $evidence.freshListenerSurvivesScheduler = 'PASS'
   $evidence.duplicateListener = 'PASS'
   Start-Sleep -Milliseconds 500
@@ -186,6 +228,8 @@ exit `$LASTEXITCODE
   Assert ((Get-Content -LiteralPath (Join-Path $private 'launcher.json') -Raw) -eq $before) 'CONFIG_CHANGED'
   Assert ((Get-FileHash -LiteralPath (Join-Path $private 'runtime-key.dpapi')).Hash -eq $credentialBefore) 'CREDENTIAL_CHANGED'
   Assert ((Get-ScheduledTask -TaskName $productionName).State -eq 'Disabled') 'PRODUCTION_WAS_ENABLED'
+  Assert-LoginIdentity $evidence.identity
+  if($Mode -eq 'Logon'){Assert-LoginIdentity $armed.identity}
   $evidence.credentialsAndIdentityPreserved = 'PASS'
   $evidence.productionRemainsDisabled = $true
   $evidence.pass = $true

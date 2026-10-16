@@ -24,7 +24,14 @@ function createFakeSpawn(scenario) {
   const children = [];
   let nextPid = 90_000;
 
-  const spawnProcess = () => {
+  const spawnProcess = (executable, argv, options) => {
+    assert.equal(executable, process.execPath);
+    assert.deepEqual(argv, ['server/src/mcp-server.mjs']);
+    assert.equal(options.windowsHide, true, 'Every MCP child generation must suppress Windows console windows.');
+    assert.deepEqual(options.stdio, ['pipe', 'pipe', 'pipe', 'ipc']);
+    assert.equal(options.env.MCP_REQUEST_TRACING, '1');
+    assert.equal(options.detached, undefined, 'Session ownership must remain with the HTTP parent.');
+    assert.equal(options.shell, undefined, 'The MCP child must run directly without a shell.');
     const generation = children.length + 1;
     const child = new EventEmitter();
     child.pid = nextPid++;
@@ -500,3 +507,6 @@ console.log('R5 bounded read retry, deterministic jitter, shared storm budget an
     assert.equal(fixture.fake.children[1].messages.some((m) => m.params?.name === 'safe_read'), false);
   } finally { fixture.close(); }
 }
+
+// Preserve real stdout/stderr/IPC and owned-child recovery alongside spawn policy.
+await import('./mcp-windows-console.test.mjs');
