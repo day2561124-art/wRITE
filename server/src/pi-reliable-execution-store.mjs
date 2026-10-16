@@ -54,10 +54,13 @@ export function createPiReliableExecutionStore({journal={
     }
     return {events,latest:validatePiExecutionHistory(events)};
   }
-  async function publish(record,revision) {
+  async function publish(record,revision,verifiedEvents) {
     const event=await journal.appendExecutionProjection(record,{expected_revision:revision,validateHistory:validatePiExecutionHistory,
       ...(revision===0?{admissionGuard}:{})});
-    return output(event,(await history()).events);
+    if(event.execution_projection?.projection_hash===record.projection_hash)
+      return output(event,[...verifiedEvents,event]);
+    const fresh=await history();
+    return output(fresh.latest.get(event.execution_projection.state.operation_id),fresh.events);
   }
   async function admit(source,{retry_policy={max_attempts:3,base_delay_ms:250,max_delay_ms:5000},...options}={}) {
     const intent=createExecutionIntent(source),policy=validateRetryPolicy(retry_policy);
@@ -71,7 +74,7 @@ export function createPiReliableExecutionStore({journal={
     const state=initialReliableState(intent,{...options,timestamp:clock()});
     return publish(makeReliableProjection({schema_version:2,revision:1,previous_projection_hash:null,
       action_type:"operation_created",intent,state,runtime:{retry_policy:policy,owner:null,active_call:null,retry_at:null,...(intent.bootstrap?{lifecycle_binding:null}:{})},
-      command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{}),...(productionBinding?{production_binding:productionBinding}:{})}}),0);
+      command:{type:"operation_created",...(admissionBinding?{canary_binding:admissionBinding}:{}),...(productionBinding?{production_binding:productionBinding}:{})}}),0,events);
   }
   async function current(args) {
     const h=await history(),event=h.latest.get(args.operation_id);
@@ -95,7 +98,7 @@ export function createPiReliableExecutionStore({journal={
       const alive=await isOwnerAlive(prior.runtime.owner);
       if(alive!==false)reliableFailure(alive===true?"OWNER_ACTIVE":"OWNER_LIVENESS_UNCERTAIN");
     }
-    return publish(reduceReliableProjection(prior,args.command,clock()),prior.revision);
+    return publish(reduceReliableProjection(prior,args.command,clock()),prior.revision,events);
   }
   // Host-only authority: not an intent action, worker command or MCP metadata.
   // The caller must independently authorize revocation and prove quiescence.
@@ -104,7 +107,7 @@ export function createPiReliableExecutionStore({journal={
     if(typeof isolationAuthority!=="function")reliableFailure("ISOLATION_AUTHORITY_REQUIRED");
     if(!args||Object.keys(args).sort().join(",")!=="context,decision_id,expected_owner,expected_projection_hash,expected_revision,operation_id,reason"
       ||!Number.isSafeInteger(args.expected_revision)||args.expected_revision<1)reliableFailure("INVALID_ISOLATION_REQUEST");
-    const {event}=await current(args),prior=event.execution_projection;
+    const {event,events}=await current(args),prior=event.execution_projection;
     if(prior.projection_hash!==args.expected_projection_hash)reliableFailure("STATE_PROJECTION_CONFLICT");
     if(stableJson(prior.runtime.owner)!==stableJson(args.expected_owner))reliableFailure("OWNER_CONFLICT");
     const command={type:"execution_isolated",decision_id:args.decision_id,reason:args.reason,
@@ -114,7 +117,7 @@ export function createPiReliableExecutionStore({journal={
     if(alive!==false)reliableFailure(alive===true?"OWNER_ACTIVE":"OWNER_LIVENESS_UNCERTAIN");
     if(await isolationAuthority({record:freeze(reliableJson(prior)),request:freeze(reliableJson(args))})!==true)
       reliableFailure("ISOLATION_AUTHORITY_REQUIRED");
-    return publish(next,prior.revision);
+    return publish(next,prior.revision,events);
   }
   async function assertDispatchAuthorized(args) {
     const {event}=await current(args),record=event.execution_projection;

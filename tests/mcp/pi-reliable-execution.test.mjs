@@ -14,6 +14,28 @@ import { REQUIRED_DECISION_BOUNDARIES, hashExecutionInput } from "../../server/s
 import { reduceReliableProjection, receiptOf } from "../../server/src/pi-reliable-execution-state.mjs";
 const context = { project_id:"writer_workbench", workstream_id:"dev_workstream_20261003-100124_6f779341a426",
   workspace_id:"dev_workspace_86a7ddd3980944b0902ac022" };
+
+test('reconcile-only records adjudicated no_effect as DECISION_REQUIRED with causal receipt and no replay',async t=>{
+ const f=await interruptedClaim(t,{query:async p=>({...p,reconciliation_state:'no_effect',operation_id:'dev_operation_'+'b'.repeat(32),
+  terminal:true,safe_to_reinitiate:true,reinitiate_requires_new_key:true,automatic_replay_allowed:false,
+  resolution_event_id:'dev_journal_event_'+'c'.repeat(32),original_result:{outcome:'no_effect_observed',reconciliation_required:false}})});
+ const r=await engine(f.store,f.a).reconcileOnly(f.args);
+ assert.equal(r.state.status,'DECISION_REQUIRED');assert.equal(r.state.last_error.code,'NEW_IDEMPOTENCY_KEY_REQUIRED');
+ assert.equal(r.runtime.owner,null);assert.equal(r.runtime.active_call,null);assert.equal(f.sends(),0);
+ assert.deepEqual(r.state.pending_steps,['write']);assert.deepEqual(r.state.idempotency_keys,f.claim.state.idempotency_keys);
+ const decision=(await f.store.readHistory()).at(-1).execution_projection.command;
+ assert.equal(decision.type,'decision_requested');assert.equal(decision.receipt.evidence.resolution_event_id,'dev_journal_event_'+'c'.repeat(32));
+ assert.equal(decision.receipt.evidence.operation_id,'dev_operation_'+'b'.repeat(32));
+ const restarted=createPiReliableExecutionStore({journal:f.journal,isOwnerAlive:async()=>false});
+ const duplicate=await engine(restarted,f.a).execute(intent([write]));assert.equal(duplicate.state.status,'DECISION_REQUIRED');assert.equal(f.sends(),0);
+});
+test('reconcile-only cannot move an unadjudicated or mismatched no_effect claim into a decision',async t=>{
+ for(const edit of [{resolution_event_id:null},{request_fingerprint_sha256:'f'.repeat(64)}]){
+  const f=await interruptedClaim(t,{query:async p=>({...p,reconciliation_state:'no_effect',safe_to_reinitiate:true,reinitiate_requires_new_key:true,
+   resolution_event_id:'dev_journal_event_'+'c'.repeat(32),...edit})});
+  const r=await engine(f.store,f.a).reconcileOnly(f.args);assert.equal(r.revision,f.claim.revision);assert.equal(f.sends(),0);
+ }
+});
 function intent(actions = [{step_id:"read",capability:"filesystem.read",input:{path:"package.json"},depends_on:[]}], overrides={}) {
   return {schema_version:1,intent_id:"reliable-intent-001",goal:"Execute GPT supplied actions",context,
     constraints:["Keep production routing unchanged"],requested_actions:actions,

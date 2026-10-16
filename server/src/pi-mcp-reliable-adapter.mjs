@@ -22,8 +22,9 @@ function timedRequest(callback,timeoutMs) {
   return Promise.race([Promise.resolve().then(callback),timeout]).finally(()=>clearTimeout(timer));
 }
 export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorkspace,verifyScope,reconnect,
-  requestTimeoutMs=120000,queryTimeoutMs=30000,validateCapabilityExpectation}={}) {
+  requestTimeoutMs=120000,longRequestTimeoutMs=requestTimeoutMs,queryTimeoutMs=30000,validateCapabilityExpectation}={}) {
   if(!Number.isSafeInteger(requestTimeoutMs)||requestTimeoutMs<1||requestTimeoutMs>1800000
+    ||!Number.isSafeInteger(longRequestTimeoutMs)||longRequestTimeoutMs<requestTimeoutMs||longRequestTimeoutMs>8*60*60*1000
     ||!Number.isSafeInteger(queryTimeoutMs)||queryTimeoutMs<1||queryTimeoutMs>300000
     ||(reconnect!==undefined&&typeof reconnect!=="function"))reliableFailure("INVALID_TRANSPORT_BINDING");
   if(typeof callTool!=="function"||typeof queryOperation!=="function"||typeof resolveWorkspace!=="function")
@@ -64,7 +65,7 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
       return callTool({name:step.tool,arguments:step.arguments,
         ...(step.effect?{_meta:{reconciliation_key:step.idempotency_key}}:{})},
         {authorizeDispatch:options.authorizeDispatch});
-    },requestTimeoutMs));
+    },step.tool==='dev_run_tests'?longRequestTimeoutMs:requestTimeoutMs));
     const action=intent.requested_actions.find(x=>x.step_id===stepId);
     const facts=observations(evidence);
     const deduped=facts.find(x=>x?.reconciled===true);
@@ -102,6 +103,10 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};
       return {verdict:"completed",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
     }
+    if(raw.reconciliation_state==='no_effect'&&raw.safe_to_reinitiate===true&&raw.reinitiate_requires_new_key===true
+      &&raw.terminal===true&&raw.original_result?.outcome==='no_effect_observed'&&raw.original_result?.reconciliation_required===false
+      &&/^dev_operation_[a-f0-9]{32}$/.test(raw.operation_id??'')&&/^dev_journal_event_[a-f0-9]{32}$/.test(raw.resolution_event_id??''))
+      return {verdict:'unknown',code:'NEW_IDEMPOTENCY_KEY_REQUIRED',receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,'reconciled_facts')};
     return {verdict:"unknown",code:raw.reinitiate_requires_new_key===true?"NEW_IDEMPOTENCY_KEY_REQUIRED":"UNSAFE_AMBIGUOUS_MUTATION"};
   }
   return Object.freeze({describe,execute,reconcile,classify:classifyExecutionFailure,

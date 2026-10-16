@@ -1,8 +1,22 @@
+import {hostname} from 'node:os';
 import {getMcpOperationReconciliationContext} from './mcp-operation-reconciliation-context.mjs';
 
 // Process-local execution facts only. JSON, error strings/codes and caller
 // metadata cannot mint this proof. It expires at serialization/process exit.
 const proofs=new WeakMap();
+const isolationProofs=new WeakMap();
+export function markIsolationBeforeDispatch(error){
+ const c=getMcpOperationReconciliationContext();
+ if(error instanceof Error&&c?.tool_name==='dev_workspace_create_isolated'&&c.operation_id)
+  isolationProofs.set(error,Object.freeze({protocol:'writer-workbench/isolation-before-handler/v1',operation_id:c.operation_id,
+   reconciliation_key:c.reconciliation_key,request_fingerprint_sha256:c.request_fingerprint_sha256,pid:process.pid,hostname:hostname()}));
+ return error;
+}
+export function readIsolationBeforeDispatchProof(error){
+ const proof=error&&typeof error==='object'?isolationProofs.get(error):null,c=getMcpOperationReconciliationContext();
+ return proof&&c?.operation_id===proof.operation_id&&c.reconciliation_key===proof.reconciliation_key
+  &&c.request_fingerprint_sha256===proof.request_fingerprint_sha256?proof:null;
+}
 const tool='dev_workspace_update_workstream';
 export function markWorkstreamStaleBeforeWrite(error,{expected_revision,current_revision}) {
   const context=getMcpOperationReconciliationContext();

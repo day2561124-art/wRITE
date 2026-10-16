@@ -109,6 +109,13 @@ async function git(cwd, argv, input) {
 function childCode(bootstrap) {
   return [
     "import readline from 'node:readline';",
+    "import {PI_DURABLE_WORKER_PROTOCOL} from './pi-durable-worker-protocol.mjs';",
+    "if (process.argv.includes('--pi-worker')) {",
+    "process.on('message', message => { if (message?.protocol === PI_DURABLE_WORKER_PROTOCOL && message.kind === 'drain') process.exit(0); });",
+    "process.once('disconnect', () => process.exit(0));",
+    "process.send({protocol:PI_DURABLE_WORKER_PROTOCOL,kind:'ready',pid:process.pid});",
+    "await new Promise(() => {});",
+    "}",
     bootstrap ? "import { service } from './mcp-development-integration-tools.mjs';" : '',
     bootstrap ? 'const routes = { dev_workspace_integration_preflight: service.preflight, dev_workspace_validate_integration: service.validateIntegration, dev_workspace_get_integration_candidate: service.getCandidate };' : 'const routes = {};',
     "for await (const line of readline.createInterface({ input: process.stdin })) {",
@@ -147,6 +154,7 @@ async function startParent(repo, profile) {
   await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + port + '/mcp')));
   return {
     client,
+    port,
     async stop() {
       await client.close();
       if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited; }
@@ -167,6 +175,7 @@ async function fixture() {
   for (const file of [
     'mcp-http-server.mjs', 'mcp-http-sse-keepalive.mjs', 'mcp-http-identity.mjs', 'mcp-http-integration-control.mjs', 'mcp-http-stdio-adapter.mjs',
     'mcp-runtime-diagnostics.mjs', 'mcp-runtime-readiness.mjs', 'mcp-request-tracing.mjs',
+    'pi-durable-worker-supervisor.mjs', 'pi-durable-worker-protocol.mjs',
     'mcp-workspace-snapshot-authority.mjs', 'mcp-workspace-snapshot-authority-ipc.mjs', 'mcp-workspace-change-clock.mjs',
     'mcp-workspace-change-clock-provider.mjs',
     'world-simulation-prepared-turn-ephemeral-broker.mjs', 'world-simulation-prepared-turn-broker-ipc.mjs',
@@ -362,5 +371,28 @@ test('real HTTP reload and bootstrap cleanup retain exact guarded Phase 2D integ
         assert.ok(audit.some(record => record.tool_name === name && record.risk === 'high-risk-write' && record.ownership === 'mcp_http_parent'));
       } finally { await f.cleanup(); }
     });
+  }
+});
+
+
+test('real public HTTP profile never starts a privileged durable worker', {
+  skip: runtimeAvailable ? false : 'Phase 2D fixture runtime is unavailable.',
+  timeout: 120000,
+}, async () => {
+  const f = await fixture();
+  let publicParent;
+  try {
+    publicParent = await startParent(f.repo, 'chatgpt_public');
+    const publicHealth = await fetch('http://127.0.0.1:' + publicParent.port + '/health').then(r => r.json());
+    assert.equal(publicHealth.profile, 'chatgpt_public');
+    assert.equal(publicHealth.pi_durable_worker.state, 'disabled');
+    assert.equal(publicHealth.pi_durable_worker.pid, null);
+    const developerHealth = await fetch('http://127.0.0.1:' + f.parent.port + '/health').then(r => r.json());
+    assert.equal(developerHealth.pi_durable_worker.state, 'ready');
+    assert.ok(Number.isInteger(developerHealth.pi_durable_worker.pid) && developerHealth.pi_durable_worker.pid > 0);
+    assert.equal((await publicParent.client.listTools()).tools.some(t => t.name === 'dev_workspace_integrate'), false);
+  } finally {
+    await publicParent?.stop();
+    await f.cleanup();
   }
 });

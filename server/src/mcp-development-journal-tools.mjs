@@ -16,8 +16,11 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { controlledProcessEnvironment } from "./process-control.mjs";
+import {ISOLATION_RESOLUTION,ISOLATION_RESOLUTION_TOOL,inspectIsolationEvidence,validateIsolationResolution,isolationTarget,assertIsolationOwnerDead,isolationJson} from './mcp-workspace-isolation-resolution.mjs';
+import { readIsolationBeforeDispatchProof } from './mcp-workstream-prewrite-failure.mjs';
 import { isWorkstreamPrewriteFailure } from "./mcp-workstream-prewrite-failure.mjs";
 import { WORKSTREAM_STALE_RESOLUTION, validateWorkstreamStaleResolution, inspectWorkstreamStaleResolution } from "./mcp-workstream-stale-resolution.mjs";
+import { WORKSTREAM_COMMITTED_RESOLUTION, validateWorkstreamCommittedResolution, inspectWorkstreamCommittedResolution } from "./mcp-workstream-committed-resolution.mjs";
 import { projectPaths, projectRoot } from "./project-paths.mjs";
 import { createWorkspaceSnapshotAuthorityIpcClient } from "./mcp-workspace-snapshot-authority-ipc.mjs";
 import { normalizeExactWorkspaceSnapshot } from "./mcp-workspace-snapshot-authority.mjs";
@@ -294,10 +297,20 @@ function boundedResultMetadata(value) {
   const output = {};
   for (const [key, raw] of Object.entries(value).slice(0, 64)) {
     if (!/^[A-Za-z0-9_.-]{1,80}$/u.test(key)) continue;
+    if(key==='pre_dispatch_record'&&typeof raw==='string'&&raw.length<=2048){
+      let proof;try{proof=JSON.parse(raw);}catch{throw new Error('INVALID_ISOLATION_BARRIER');}
+      if(proof.protocol!=='writer-workbench/isolation-before-handler/v1'
+        ||Object.keys(proof).sort().join(',')!=='hostname,operation_id,pid,protocol,reconciliation_key,request_fingerprint_sha256'
+        ||!operationIdPattern.test(proof.operation_id)||!sha256Pattern.test(proof.request_fingerprint_sha256)
+        ||!Number.isSafeInteger(proof.pid)||proof.pid<1||typeof proof.hostname!=='string'||!proof.hostname||proof.hostname.length>255
+        ||!normalizeMcpReconciliationKey(proof.reconciliation_key,{optional:false}))
+        throw new Error('INVALID_ISOLATION_BARRIER');
+      output[key]=raw;continue;
+    }
     if (key === "resolution_record" && typeof raw === "string" && Array.from(raw).length <= 32 * 1024) {
       let proof;
       try { proof = JSON.parse(raw); } catch { /* Keep legacy metadata handling for non-JSON values. */ }
-      if (["completed_git_commit", WORKSTREAM_STALE_RESOLUTION].includes(proof?.resolution_kind)) { output[key] = raw; continue; }
+      if (["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, ISOLATION_RESOLUTION].includes(proof?.resolution_kind)) { output[key] = raw; continue; }
     }
     if (raw === null || typeof raw === "boolean") output[key] = raw;
     else if (typeof raw === "number" && Number.isFinite(raw)) output[key] = raw;
@@ -608,6 +621,8 @@ export function createDevOperationJournalService({
   lifecycleEffectInspector,
   resolutionContextResolver,
   resolutionEvidenceRoot = projectRoot,
+  isolationRecoveryAuthority,
+  isolationResolutionPublicationHook,
 } = {}) {
   if (!Number.isSafeInteger(lockAcquireTimeoutMs) || lockAcquireTimeoutMs < 1) {
     throw new Error("lockAcquireTimeoutMs must be a positive safe integer.");
@@ -876,7 +891,11 @@ export function createDevOperationJournalService({
     await checkHead();
   }
 
-  const validateResolution=(events,input)=>input?.resolution_kind===WORKSTREAM_STALE_RESOLUTION
+  const validateResolution=(events,input)=>input?.resolution_kind===ISOLATION_RESOLUTION
+    ?validateIsolationResolution(events,input)
+    :input?.resolution_kind===WORKSTREAM_COMMITTED_RESOLUTION
+    ?validateWorkstreamCommittedResolution(events,input)
+    :input?.resolution_kind===WORKSTREAM_STALE_RESOLUTION
     ?validateWorkstreamStaleResolution(events,input)
     :input?.resolution_kind==="completed_git_commit"
     ?validateCompletedGitCommitResolution(events,input)
@@ -893,10 +912,11 @@ export function createDevOperationJournalService({
       const proof=JSON.parse(event.result?.resolution_record??"null");
       const {started,terminal}=validateResolution(events,proof??{});
       const admission=events.find(e=>e.operation_id===event.operation_id&&e.stage==="operation_started");
-      if(["completed_git_commit", WORKSTREAM_STALE_RESOLUTION].includes(proof.resolution_kind) && (
+      if(["completed_git_commit", WORKSTREAM_STALE_RESOLUTION, WORKSTREAM_COMMITTED_RESOLUTION, ISOLATION_RESOLUTION].includes(proof.resolution_kind) && (
         admission?.reconciliation_key !== "resolution:" + started.operation_id
         || admission?.request_fingerprint_sha256 !== sha256Text(canonicalJson(proof))
-        || admission?.tool_name !== (proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
+        || admission?.tool_name !== (proof.resolution_kind === ISOLATION_RESOLUTION ? ISOLATION_RESOLUTION_TOOL : proof.resolution_kind === WORKSTREAM_COMMITTED_RESOLUTION
+          ? "pi.journal.resolve_workstream_committed" : proof.resolution_kind === WORKSTREAM_STALE_RESOLUTION
           ? "pi.journal.resolve_workstream_stale" : "pi.journal.resolve_completed_git_commit")
         || event.tool_name !== admission.tool_name || admission.sequence <= terminal.sequence || event.sequence <= admission.sequence
         || event.result.reconciliation_required !== false
@@ -908,7 +928,7 @@ export function createDevOperationJournalService({
         || event.workspace_id!==started.workspace_id || admission.workspace_id!==started.workspace_id
         || event.workstream_id!==started.workstream_id || admission.workstream_id!==started.workstream_id
         || event.reconciles_event_id!==terminal.journal_event_id || event.result.outcome!==(
-          ["completed_child_create","completed_powershell_observation","completed_git_commit"].includes(proof.resolution_kind)
+          (["completed_child_create","completed_powershell_observation","completed_git_commit",WORKSTREAM_COMMITTED_RESOLUTION].includes(proof.resolution_kind) || proof.resolution_kind===ISOLATION_RESOLUTION&&proof.observation.classification==="completed")
             ?"intended_effect_observed":"no_effect_observed")
         || resolved.has(started.operation_id))throw new Error("INVALID_TERMINAL_RESOLUTION");
       resolved.set(started.operation_id,event);
@@ -999,7 +1019,7 @@ export function createDevOperationJournalService({
     }
   }
 
-  async function append(input) {
+  async function append(input, {beforeAppend} = {}) {
     if (runtimeHealth === "corrupt") throw new Error(`JOURNAL_CORRUPT: ${lastHealthError ?? "journal integrity failure"}`);
     const { eventsPath } = await ensureStorageRoot(storageRoot);
     // Reuse the verified immutable snapshot and the same head-CAS contract as
@@ -1010,6 +1030,7 @@ export function createDevOperationJournalService({
       try {
         const head = await readHead(headPath);
         if (canonicalJson(head) !== canonicalJson(verification.head)) continue;
+        await beforeAppend?.(verification);
         // Ordinary admissions must honor a newly observed degraded Gate too.
         // The existing explicit terminal-resolution contract remains available.
         if (input.stage === "operation_started" && input.operation_type !== "pi_terminal_resolution"
@@ -1054,6 +1075,7 @@ export function createDevOperationJournalService({
         if (Buffer.byteLength(encoded, "utf8") > DEV_JOURNAL_MAX_EVENT_BYTES) throw new Error(`Journal event exceeds ${DEV_JOURNAL_MAX_EVENT_BYTES} bytes.`);
         const eventPath = path.join(eventsPath, eventFilename(sequence, eventId));
         await writeExclusiveDurableFile(eventPath, encoded);
+        if(input.tool_name===ISOLATION_RESOLUTION_TOOL)await isolationResolutionPublicationHook?.('after_event_before_head',{stage:input.stage});
         await atomicWriteJson(headPath, {
           schema_version: DEV_JOURNAL_SCHEMA_VERSION,
           latest_sequence: sequence,
@@ -1330,6 +1352,7 @@ export function createDevOperationJournalService({
     for (const operationId of [...verification.dangling_operations].reverse()) {
       const started = verification.events.find((event) => event.operation_id === operationId && event.stage === "operation_started");
       if (!started) continue;
+      if(started.operation_type==="pi_terminal_resolution"&&started.tool_name===ISOLATION_RESOLUTION_TOOL)continue;
       const transactionOperation = started.operation_type === "checkpoint_restore_transaction_create"
         || started.operation_type.startsWith("transaction_");
       const requiresWorkspaceContext = !started.operation_type.startsWith("checkpoint_")
@@ -1516,7 +1539,7 @@ export function createDevOperationJournalService({
       targets: input.targets ?? started.targets,
       links: input.links ?? started.links,
       result: input.result ?? {},
-    });
+    }, {beforeAppend:input.beforeAppend});
     noteMutationTerminal(event);
     if (!explicitDegraded) {
       runtimeHealth = "healthy";
@@ -1539,14 +1562,18 @@ export function createDevOperationJournalService({
   }
 
 
-  async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false}={}) {
+  async function resolveTerminalMutation(input={}, resolutionKind=null, {dryRun=false,isolationLease=null}={}) {
+    const isolation=resolutionKind===ISOLATION_RESOLUTION;
     const completedChild=resolutionKind==="completed_child_create";
     const completedPowershell=resolutionKind==="completed_powershell_observation";
     const completedGit=resolutionKind==="completed_git_commit";
     const workstreamStale=resolutionKind===WORKSTREAM_STALE_RESOLUTION;
-    const resolutionFields=completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
+    const workstreamCommitted=resolutionKind===WORKSTREAM_COMMITTED_RESOLUTION;
+    const resolutionFields=isolation?["resolution_kind","original_request","observation","observation_sha256","authority_receipt"]:completedChild?["resolution_kind","expected_child_terminal_hash","observed_sha256"]
       :completedPowershell?["resolution_kind","expected_child_terminal_hash","expected_command_sha256","observed_exit_code"]
         :completedGit?["resolution_kind","observed_commit","precommit_manifest"]
+          :workstreamCommitted?["resolution_kind","original_request","transaction_id","transaction_sha256",
+            "audit_transaction_id","audit_transaction_sha256","audit_line_sha256","registry_sha256","pi_claim_event_hash"]
           :workstreamStale?["resolution_kind","original_request","transaction_id","transaction_sha256",
             "registry_sha256","observed_workstream_revision","source_contract_sha256"]:[];
     const allowed=new Set(["operation_id","expected_terminal_hash","request_fingerprint_sha256","decision_owner","decision_id","reason",...resolutionFields]);
@@ -1554,14 +1581,30 @@ export function createDevOperationJournalService({
     if(!isObject(input)||Object.keys(input).some(k=>!allowed.has(k)))throw new Error("INVALID_TERMINAL_RESOLUTION");
     let verification=await verify();
     const {started,terminal,done:childDone}=validateResolution(verification.events,input);
+    const checkIsolation=async snapshot=>{
+      if(!isolation)return;
+      if(!isolationLease||typeof isolationLease.assertExclusive!=='function'||await isolationLease.assertExclusive()!==true)
+        throw new Error('HOST_RECOVERY_AUTHORITY_REQUIRED');
+      validateIsolationResolution(snapshot.events,input);assertIsolationOwnerDead(started,terminal);
+      if([...snapshot.active_operations,...snapshot.dangling_operations].some(id=>{
+        const e=snapshot.events.find(e=>e.operation_id===id&&e.stage==='operation_started');
+        return e?.operation_type!=='pi_terminal_resolution'||e.parent_operation_id!==started.operation_id
+          ||e.tool_name!==ISOLATION_RESOLUTION_TOOL||e.result?.resolution_record!==canonicalJson(input)
+          ||e.diagnostic.hostname!==os.hostname()||e.diagnostic.owner_pid!==process.pid&&isProcessRunning(e.diagnostic.owner_pid);
+      }))throw new Error('ISOLATION_COMPETING_OPERATION');
+      const observed=await inspectIsolationEvidence(resolutionEvidenceRoot,snapshot.events,input);
+      if(observed.observation_sha256!==input.observation_sha256||isolationJson(observed.observation)!==isolationJson(input.observation))
+        throw new Error('ISOLATION_PHYSICAL_STATE_CHANGED');
+    };
     const existing=resolvedTerminals(verification.events).get(started.operation_id);
     if(existing) {
       if(existing.result.resolution_record!==canonicalJson(input))throw new Error("RESOLUTION_DECISION_CONFLICT");
       return {reconciled:true,event:existing};
     }
+    await checkIsolation(verification);
     if(terminal.diagnostic.hostname!==os.hostname()||isProcessRunning(terminal.diagnostic.owner_pid))
       throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-    if(completedGit || workstreamStale) {
+    if(completedGit || workstreamStale || workstreamCommitted) {
       const unrelatedPending = [...verification.active_operations, ...verification.dangling_operations].some(id => {
         const event = verification.events.find(e => e.operation_id === id && e.stage === "operation_started");
         return event?.operation_type !== "pi_terminal_resolution" || event.parent_operation_id !== started.operation_id
@@ -1571,6 +1614,7 @@ export function createDevOperationJournalService({
         ||unrelatedPending)
         throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
       if(completedGit) await inspectCompletedGitCommit(started,terminal,input);
+      else if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
       else await inspectWorkstreamStaleResolution(resolutionEvidenceRoot,started,terminal,input);
     }
     if(completedChild) {
@@ -1585,19 +1629,21 @@ export function createDevOperationJournalService({
       if(canonicalJson(actual)!==canonicalJson(childDone.targets[0].after))throw new Error("RESOLUTION_PHYSICAL_STATE_CHANGED");
     }
     if(dryRun)return {verified:true,operation_id:started.operation_id,
-      ...(workstreamStale?{transaction_id:input.transaction_id}:{observed_commit:input.observed_commit})};
+      ...((workstreamStale||workstreamCommitted)?{transaction_id:input.transaction_id}:{observed_commit:input.observed_commit})};
     const key="resolution:"+started.operation_id;
     const fingerprint=sha256Text(canonicalJson(input));
-    if(Array.from(canonicalJson(input)).length>((completedGit||workstreamStale)?32*1024:2048))throw new Error("RESOLUTION_RECORD_LIMIT");
+    if(Array.from(canonicalJson(input)).length>((completedGit||workstreamStale||workstreamCommitted||isolation)?32*1024:2048))throw new Error("RESOLUTION_RECORD_LIMIT");
     let admission=verification.events.find(e=>e.reconciliation_key===key&&e.stage==="operation_started");
     if(!admission)try {
       admission=await append({operation_id:operationIdGenerator(),stage:"operation_started",
-        operation_type:"pi_terminal_resolution",tool_name:completedChild?"pi.journal.resolve_completed_child_create"
+        operation_type:"pi_terminal_resolution",tool_name:isolation?ISOLATION_RESOLUTION_TOOL:completedChild?"pi.journal.resolve_completed_child_create"
           :completedPowershell?"pi.journal.resolve_completed_powershell"
             :completedGit?"pi.journal.resolve_completed_git_commit"
+              :workstreamCommitted?"pi.journal.resolve_workstream_committed"
               :workstreamStale?"pi.journal.resolve_workstream_stale":"pi.journal.resolve_no_child_create",
         workspace_id:started.workspace_id,workstream_id:started.workstream_id,parent_operation_id:started.operation_id,
-        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}});
+        reconciliation_key:key,request_fingerprint_sha256:fingerprint,result:{resolution_record:canonicalJson(input)}}, {beforeAppend:checkIsolation});
+      if(isolation)await isolationResolutionPublicationHook?.("after_admission");
     }catch(error){if(error.code!=="RECONCILIATION_EXISTING_OPERATION")throw error;
       verification=await verify();admission=verification.events.find(e=>e.operation_id===error.operation_id&&e.stage==="operation_started");}
     if(admission.request_fingerprint_sha256!==fingerprint)throw new Error("RESOLUTION_DECISION_CONFLICT");
@@ -1605,21 +1651,26 @@ export function createDevOperationJournalService({
     const done=resolvedTerminals(verification.events).get(started.operation_id);
     if(done)return {reconciled:true,event:done};
     validateResolution(verification.events,input);
+    await checkIsolation(verification);
     if(completedGit)await inspectCompletedGitCommit(started,terminal,input);
-    if(workstreamStale) {
+    if(workstreamStale || workstreamCommitted) {
       if(isProcessRunning(started.diagnostic.owner_pid) || isProcessRunning(terminal.diagnostic.owner_pid)
         || [...verification.active_operations,...verification.dangling_operations].some(id => {
           const event=verification.events.find(e=>e.operation_id===id&&e.stage==="operation_started");
           return event?.operation_type!=="pi_terminal_resolution" || event.parent_operation_id!==started.operation_id
             || event.result?.resolution_record!==canonicalJson(input);
         })) throw new Error("RESOLUTION_OWNER_STILL_ACTIVE");
-      await inspectWorkstreamStaleResolution(resolutionEvidenceRoot,started,terminal,input);
+      if(workstreamCommitted) await inspectWorkstreamCommittedResolution(resolutionEvidenceRoot,started,terminal,input,verification.events);
+      else await inspectWorkstreamStaleResolution(resolutionEvidenceRoot,started,terminal,input);
     }
     let event;
     try{event=await complete(admission.operation_id,{reconciles_event_id:terminal.journal_event_id,
-      result:{outcome:(completedChild||completedPowershell||completedGit)?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input)},
+      result:{outcome:(completedChild||completedPowershell||completedGit||workstreamCommitted||isolation&&input.observation.classification==='completed')?"intended_effect_observed":"no_effect_observed",reconciliation_required:false,resolution_record:canonicalJson(input),
+        ...(isolation&&input.observation.classification==='completed'?input.observation.witness.binding:{})},
+      ...(isolation?{beforeAppend:checkIsolation}:{}),
       ...(completedGit?{links:[{relation:"committed_by",commit:input.observed_commit}]}:{})});}
     catch(error){verification=await verify();event=resolvedTerminals(verification.events).get(started.operation_id);if(!event)throw error;}
+    if(isolation)await isolationResolutionPublicationHook?.("after_completed");
     await verify();return {reconciled:false,event};
   }
 
@@ -1630,6 +1681,65 @@ export function createDevOperationJournalService({
   const inspectCompletedGitCommitMutation=input=>resolveTerminalMutation(input,"completed_git_commit",{dryRun:true});
   const resolveWorkstreamStaleMutation=input=>resolveTerminalMutation(input,WORKSTREAM_STALE_RESOLUTION);
   const inspectWorkstreamStaleMutation=input=>resolveTerminalMutation(input,WORKSTREAM_STALE_RESOLUTION,{dryRun:true});
+  const resolveWorkstreamCommittedMutation=input=>resolveTerminalMutation(input,WORKSTREAM_COMMITTED_RESOLUTION);
+  const inspectWorkstreamCommittedMutation=input=>resolveTerminalMutation(input,WORKSTREAM_COMMITTED_RESOLUTION,{dryRun:true});
+
+  // Recover only an exact unpublished resolver event. Never delete a tail,
+  // change its payload, reinterpret a foreign event or infer a tool outcome.
+  async function recoverIsolationResolutionTail(proof,lease){
+    const {eventsPath}=await ensureStorageRoot(storageRoot);
+    const handle=await acquireJournalLock(lockPath,{timeoutMs:lockAcquireTimeoutMs});
+    try{
+      const head=await readHead(headPath),files=await listEventFiles(eventsPath);
+      if(files.length!==head.latest_sequence+1)throw new Error('UNSAFE_ISOLATION_PUBLICATION_TAIL');
+      const last=parseEvent(await eventReader(path.join(eventsPath,files.at(-1)),'utf8'));
+      const physicalHead={schema_version:DEV_JOURNAL_SCHEMA_VERSION,latest_sequence:last.sequence,latest_event_id:last.journal_event_id,latest_event_hash:last.event_hash};
+      const snapshot=await verifySnapshotExtension({eventsPath,base:{head:emptyHead(),files:[],events:[],versions:[]},snapshot:{head:physicalHead,files}});
+      const prefix=snapshot.events.slice(0,head.latest_sequence),prefixLast=prefix.at(-1);
+      if(head.latest_event_hash!==(prefixLast?.event_hash??null)||head.latest_event_id!==(prefixLast?.journal_event_id??null)
+        ||last.operation_type!=='pi_terminal_resolution'||last.tool_name!==ISOLATION_RESOLUTION_TOOL
+        ||last.result?.resolution_record!==canonicalJson(proof)||last.parent_operation_id!==proof.operation_id
+        ||last.diagnostic.hostname!==os.hostname()||isProcessRunning(last.diagnostic.owner_pid)
+        ||!['operation_started','operation_completed'].includes(last.stage))throw new Error('UNSAFE_ISOLATION_PUBLICATION_TAIL');
+      const {started,terminal}=validateIsolationResolution(snapshot.events,proof);assertIsolationOwnerDead(started,terminal);
+      if(await lease.assertExclusive()!==true)throw new Error('HOST_RECOVERY_AUTHORITY_REQUIRED');
+      const classified=classifyVerifiedSnapshot({head,events:prefix});
+      if([...classified.active_operations,...classified.dangling_operations].some(id=>{
+        const e=prefix.find(e=>e.operation_id===id&&e.stage==='operation_started');
+        return e?.tool_name!==ISOLATION_RESOLUTION_TOOL||e.result?.resolution_record!==canonicalJson(proof)
+          ||e.diagnostic.hostname!==os.hostname()||isProcessRunning(e.diagnostic.owner_pid);
+      }))throw new Error('ISOLATION_COMPETING_OPERATION');
+      const observed=await inspectIsolationEvidence(resolutionEvidenceRoot,snapshot.events,proof);
+      if(observed.observation_sha256!==proof.observation_sha256)throw new Error('ISOLATION_PHYSICAL_STATE_CHANGED');
+      classifyVerifiedSnapshot({head:physicalHead,events:snapshot.events});
+      await verifySnapshotExtension({eventsPath,base:snapshot,snapshot:{head:physicalHead,files}});
+      if(await lease.assertExclusive()!==true)throw new Error('HOST_RECOVERY_AUTHORITY_REQUIRED');
+      await atomicWriteJson(headPath,physicalHead);verifiedSnapshot=null;
+    }finally{await releaseJournalLock(handle,lockPath);}
+  }
+
+  async function inspectWorkspaceIsolationMutation(input){
+    const verified=await verify();
+    return inspectIsolationEvidence(resolutionEvidenceRoot,verified.events,input);
+  }
+  async function resolveWorkspaceIsolationMutation(input){
+    const fields=['resolution_kind','operation_id','expected_terminal_hash','request_fingerprint_sha256','original_request',
+      'decision_owner','decision_id','reason','observation','observation_sha256'];
+    if(!isObject(input)||Object.keys(input).sort().join(',')!==fields.sort().join(','))throw new Error('INVALID_ISOLATION_RESOLUTION_INPUT');
+    input=JSON.parse(canonicalJson(input));
+    const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
+    freeze(input);
+    if(typeof isolationRecoveryAuthority!=='function')throw new Error('HOST_RECOVERY_AUTHORITY_REQUIRED');
+    return isolationRecoveryAuthority(input,async lease=>{
+      if(!lease||typeof lease.assertExclusive!=='function'||await lease.assertExclusive()!==true)throw new Error('HOST_RECOVERY_AUTHORITY_REQUIRED');
+      const proof=freeze(JSON.parse(canonicalJson({...input,authority_receipt:lease.authorityReceipt})));
+      try{await verify();}catch(error){
+        if(isTransientJournalVerificationError(error))throw error;
+        await recoverIsolationResolutionTail(proof,lease);
+      }
+      return resolveTerminalMutation(proof,ISOLATION_RESOLUTION,{isolationLease:lease});
+    });
+  }
 
   async function markDegraded(reason = "terminal_journal_append_failed") {
     explicitDegraded = true;
@@ -1769,12 +1879,18 @@ export function createDevOperationJournalService({
       try {
         value = await callback();
       } catch (error) {
+        const barrier=readIsolationBeforeDispatchProof(error);
+        if(barrier){
+          const child=await begin({operation_type:'workspace_isolation_dispatch_barrier',tool_name:'mcp.isolation.before_dispatch',
+            result:{pre_dispatch_record:canonicalJson(barrier)}});
+          await complete(child.operation_id,{result:{pre_dispatch_record:canonicalJson(barrier),outcome:'no_effect_observed'}});
+        }
         const verification = await verify();
         const beforeChild = ["dev_create_file", "dev_apply_patch"].includes(context.tool_name) && !verification.events.some(event =>
           event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
         const registryPrewrite = isWorkstreamPrewriteFailure(error, {tool_name: context.tool_name, operation_id: admission.operation_id})
           && !verification.events.some(event => event.parent_operation_id === admission.operation_id && event.stage === "operation_started");
-        const noEffect = beforeChild || registryPrewrite;
+        const noEffect = beforeChild || registryPrewrite || !!barrier;
         await fail(admission.operation_id, { result: { outcome: noEffect ? "failed_no_effect" : "ambiguous_effect", reconciliation_required: !noEffect } });
         throw error;
       }
@@ -2000,6 +2116,10 @@ export function createDevOperationJournalService({
     inspectCompletedGitCommitMutation,
     resolveWorkstreamStaleMutation,
     inspectWorkstreamStaleMutation,
+    resolveWorkstreamCommittedMutation,
+    inspectWorkstreamCommittedMutation,
+    inspectWorkspaceIsolationMutation,
+    resolveWorkspaceIsolationMutation,
     markDegraded,
     getOperation,
     executeReconciled,

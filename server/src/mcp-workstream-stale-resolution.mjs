@@ -12,6 +12,7 @@ const digest = /^[a-f0-9]{64}$/u;
 const reviewedSources = new Set([
   '48acec9d232a35a10cdfb8aa0a950f21524281fef76d4836baf30a57103aa000',
   '1a1a5a0e6bf9ec9a1bbfd505c3b4189a79153a87b964965fba5e33ba0c189bc3',
+  'e492e273eb53c5f5d9535521eea1bda209d2d58eb8de43b8be2ffd0e7509f5a1', // Exact reviewed decoder-export-only revision; historical pins retained.
 ]);
 const fail = () => { throw new Error('UNSAFE_WORKSTREAM_STALE_RESOLUTION'); };
 

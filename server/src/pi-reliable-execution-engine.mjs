@@ -151,12 +151,15 @@ export function createPiReliableExecutionEngine({store,adapter,retryPolicy={max_
     try {observed=await adapter.reconcile(record.intent,call.step_id,{binding:record.runtime.lifecycle_binding??null});}
     catch {return paused("RECONCILIATION_UNAVAILABLE");}
     // Even a proven not-admitted call stays fenced: this entry never schedules replay.
-    if(observed.verdict!=="completed")return paused(observed.code??"COMPLETED_RECEIPT_REQUIRED");
+    const noEffect=observed.code==='NEW_IDEMPOTENCY_KEY_REQUIRED'&&observed.receipt?.evidence?.reconciliation_state==='no_effect'
+      &&observed.receipt.evidence.reinitiate_requires_new_key===true&&observed.receipt.evidence.resolution_event_id;
+    if(observed.verdict!=="completed"&&!noEffect)return paused(observed.code??"COMPLETED_RECEIPT_REQUIRED");
     const worker={worker_id:"pi_worker_"+randomUUID().replaceAll("-",""),pid:process.pid,hostname:hostname()};
     const commands=[{type:"owner_acquired",owner:worker,replaced_worker_id:record.runtime.owner.worker_id},
       {type:"reconciliation_started",worker_id:worker.worker_id,call_id:call.call_id},
+      ...(noEffect?[{type:'decision_requested',worker_id:worker.worker_id,code:'NEW_IDEMPOTENCY_KEY_REQUIRED',status:'DECISION_REQUIRED',receipt:observed.receipt}]:[
       {type:"reconciliation_completed",worker_id:worker.worker_id,call_id:call.call_id,receipt:observed.receipt},
-      {type:"owner_released",worker_id:worker.worker_id}];
+      {type:"owner_released",worker_id:worker.worker_id}])];
     // Validate the full receipt/binding before changing ownership. Actual writes
     // still use fresh store reads, append-lock revision CAS and liveness fencing.
     commands.reduce((prior,command)=>reduceReliableProjection(prior,command,prior.state.updated_at),record);

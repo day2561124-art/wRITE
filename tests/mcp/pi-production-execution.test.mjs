@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // Keep policy regressions in the existing Pi production test entrypoint.
 import "./pi-execution-policy.test.mjs";
+import "./pi-production-async-dispatch.test.mjs";
 import {mkdtemp,rm,readFile} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -174,7 +175,7 @@ test("submission host rejects a completed result for a different Intent",async t
  await assert.rejects(submitPiExecutionIntent(intent("requested-result"),{sessionFactory:fakeSessionFactory((m,done)=>done(null,{result:{structuredContent:r}}))}),{code:"INVALID_PI_RESPONSE"});});
 test("submission host polls pending state and preserves completion semantics on deadline",async t=>{const f=await fixture(t);await enable(f);const i=intent("submission-poll"),host=controller(f);
  const pending=await host.admit(i),complete=await host.execute(i);let n=0,tick=0;
- const result=await submitPiExecutionIntent(i,{clock:()=>tick,deadlineMs:3000,sleep:async()=>{tick+=1000;},sessionFactory:fakeSessionFactory((m,done)=>done(null,{result:{structuredContent:++n===1?pending:complete}}))});
+ const result=await submitPiExecutionIntent(i,{clock:()=>tick,deadlineMs:3000,sleep:async()=>{tick+=1000;},sessionFactory:fakeSessionFactory((m,done)=>done(null,{result:{structuredContent:++n===1?pending:{operation:complete}}}))});
  assert.equal(result.state.status,"COMPLETED");assert.equal(n,2);tick=0;
  const stopped=await submitPiExecutionIntent(i,{clock:()=>tick,deadlineMs:500,sleep:async()=>{tick+=1000;},sessionFactory:fakeSessionFactory((m,done)=>done(null,{result:{structuredContent:pending}}))});
  assert.equal(stopped.submission_pending,true);assert.equal(stopped.operation.projection_hash,pending.projection_hash);assert.equal(stopped.operation.state.status,"CREATED");});
