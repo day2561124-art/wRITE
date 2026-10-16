@@ -364,6 +364,7 @@ function encodeRegistry(registry) {
   return `${JSON.stringify(next, null, 2)}\n`;
 }
 
+export {parseRegistryBuffer as decodeWorkstreamRegistryBytes};
 function parseRegistryBuffer(content) {
   let parsed;
   try {

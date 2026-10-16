@@ -2,6 +2,17 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {createDevOperationJournalService} from '../../server/src/mcp-development-journal-tools.mjs';
 import {projectRoot} from '../../server/src/project-paths.mjs';
 import {markWorkstreamStaleBeforeWrite,preserveWorkstreamPrewriteFailure} from '../../server/src/mcp-workstream-prewrite-failure.mjs';
+
+test('isolation audit failure persists genuine pre-handler evidence and duplicate never dispatches',async t=>{
+ const {markIsolationBeforeDispatch}=await import('../../server/src/mcp-workstream-prewrite-failure.mjs');
+ const j=await harness(t);let sends=0;const c=context('isolation-preaudit-fixture-0001','dev_workspace_create_isolated');
+ await assert.rejects(j.executeReconciled(c,async()=>{sends++;throw markIsolationBeforeDispatch(new Error('audit preparation failed'));}),/audit preparation/);
+ const history=await j.verify();const barriers=history.events.filter(e=>e.operation_type==='workspace_isolation_dispatch_barrier'&&e.stage==='operation_completed');
+ assert.equal(barriers.length,1);assert.equal(JSON.parse(barriers[0].result.pre_dispatch_record).protocol,'writer-workbench/isolation-before-handler/v1');
+ assert.equal((await j.status()).health,'healthy');
+ const duplicate=await j.executeReconciled(c,async()=>{sends++;throw Error('must never replay');});
+ assert.equal(duplicate.operation.reconciliation_state,'no_effect');assert.equal(duplicate.operation.reinitiate_requires_new_key,true);assert.equal(sends,1);
+});
 const tool='dev_workspace_update_workstream';
 async function harness(t){const root=path.join(projectRoot,'tests/.tmp','prewrite-'+randomUUID());await fs.mkdir(root,{recursive:true});t.after(async()=>{assert(root.startsWith(path.join(projectRoot,'tests/.tmp')+path.sep));await fs.rm(root,{recursive:true,force:true});});return createDevOperationJournalService({storageRoot:root});}
 const context=(key,tool_name=tool)=>({tool_name,reconciliation_key:key,request_fingerprint_sha256:'a'.repeat(64)});

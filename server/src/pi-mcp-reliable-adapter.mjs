@@ -102,6 +102,10 @@ export function createPiReliableMcpAdapter({callTool,queryOperation,resolveWorks
         return {verdict:"unknown",code:"VALIDATION_EVIDENCE_REQUIRED"};
       return {verdict:"completed",receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,"reconciled_facts")};
     }
+    if(raw.reconciliation_state==='no_effect'&&raw.safe_to_reinitiate===true&&raw.reinitiate_requires_new_key===true
+      &&raw.terminal===true&&raw.original_result?.outcome==='no_effect_observed'&&raw.original_result?.reconciliation_required===false
+      &&/^dev_operation_[a-f0-9]{32}$/.test(raw.operation_id??'')&&/^dev_journal_event_[a-f0-9]{32}$/.test(raw.resolution_event_id??''))
+      return {verdict:'unknown',code:'NEW_IDEMPOTENCY_KEY_REQUIRED',receipt:receiptOf(intent.requested_actions.find(x=>x.step_id===stepId),raw,'reconciled_facts')};
     return {verdict:"unknown",code:raw.reinitiate_requires_new_key===true?"NEW_IDEMPOTENCY_KEY_REQUIRED":"UNSAFE_AMBIGUOUS_MUTATION"};
   }
   return Object.freeze({describe,execute,reconcile,classify:classifyExecutionFailure,

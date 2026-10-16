@@ -1164,14 +1164,15 @@ function devAdditionalFilesystemAuditChanges(tool, result) {
 }
 
 async function auditedToolCall(tool, args, actor) {
-  const before = await auditSnapshotMap();
+  const {markIsolationBeforeDispatch}=await import('./mcp-workstream-prewrite-failure.mjs');
+  let before;try{before=await auditSnapshotMap();}catch(error){throw markIsolationBeforeDispatch(error);}
   const calledAt = new Date();
   const auditId = `MCP-AUDIT-${calledAt.toISOString().replace(/[-:.]/g, "").replace("T", "-").replace("Z", "")}-${hashText(`${tool.name}:${JSON.stringify(args)}:${calledAt.toISOString()}`).slice(0, 8).toUpperCase()}`;
   const auditIntentPath = path.join(mcpAuditIntentDir, `${auditId}.json`);
   let result;
   let effectiveArgs = args;
 
-  await atomicWriteFile(auditIntentPath, `${JSON.stringify({
+  try{await atomicWriteFile(auditIntentPath, `${JSON.stringify({
     audit_id: auditId,
     created_at: calledAt.toISOString(),
     status: "started",
@@ -1182,7 +1183,7 @@ async function auditedToolCall(tool, args, actor) {
   }, null, 2)}\n`, {
     tool: "mcp-audit-intent",
     audit_id: auditId,
-  });
+  });}catch(error){throw markIsolationBeforeDispatch(error);}
 
   try {
     effectiveArgs = prepareToolArguments(tool, args);
